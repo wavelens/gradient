@@ -439,8 +439,6 @@ impl<'a> InputPrefetcher<'a> {
     /// A safety cap bounds worst-case iterations so a pathological cycle or
     /// misbehaving upstream cannot loop forever.
     async fn run(&mut self) -> Result<()> {
-        const MAX_ITERATIONS: usize = 1024;
-
         self.ensure_self_drv_present().await?;
 
         let wanted = self.enumerate_inputs().await?;
@@ -456,11 +454,21 @@ impl<'a> InputPrefetcher<'a> {
             );
             return Ok(());
         }
+        self.fetch_closure(initial_missing).await
+    }
+
+    /// Fetch a seed set of paths plus their transitive closure into the
+    /// local nix store. Used both by `run` (for build inputs) and by
+    /// `execute_external_cached_task` (for the build outputs of
+    /// upstream-substituted derivations the worker needs to repack into the
+    /// gradient cache).
+    async fn fetch_closure(&mut self, initial_missing: Vec<String>) -> Result<()> {
+        const MAX_ITERATIONS: usize = 1024;
 
         info!(
             build_id = %self.build_id,
             missing = initial_missing.len(),
-            "prefetching missing inputs from server cache (closure-expanding)"
+            "prefetching missing paths from server cache (closure-expanding)"
         );
 
         let mut all_results: Vec<(String, Vec<u8>, CachedPath)> = Vec::new();
@@ -612,6 +620,58 @@ pub async fn prefetch_inputs(
         }
     }
     result
+}
+
+/// Worker side of an `external_cached` build: the build's outputs are
+/// known to be available in an upstream cache (cache.nixos.org and friends)
+/// but are not yet in the gradient cache. Skip the daemon build entirely;
+/// instead:
+///
+/// 1. Ensure the build's `.drv` is present locally (fetch via cache if not),
+///    so we can read its declared output paths.
+/// 2. Fetch every declared output path into the local nix store. Closure
+///    expansion runs as in [`prefetch_inputs`], so any transitive runtime
+///    references the outputs need also land locally.
+/// 3. Return the output paths so the caller can re-emit them via
+///    `compress_and_push_paths` — those uploads put the bytes into our
+///    cache and write the `cached_path` rows.
+///
+/// This bridges the "upstream-only → gradient cache" gap that forced
+/// downstream builds to fail with `dependency does not exist` previously.
+pub async fn fetch_external_cached_outputs(
+    store: &LocalNixStore,
+    task: &BuildTask,
+    updater: &mut JobUpdater,
+) -> Result<Vec<String>> {
+    let mut prefetcher = InputPrefetcher::new(store, task, updater);
+
+    // Step 1 — ensure the .drv is local so we can read its outputs.
+    prefetcher.ensure_self_drv_present().await?;
+
+    // Step 2 — parse the .drv to discover outputs.
+    let full_drv_path = nix_store_path(&task.drv_path);
+    let drv_bytes = tokio::fs::read(&full_drv_path)
+        .await
+        .with_context(|| format!("read .drv {} for external_cached fetch", full_drv_path))?;
+    let drv = parse_drv(&drv_bytes)
+        .with_context(|| format!("parse .drv {} for external_cached fetch", full_drv_path))?;
+
+    let output_paths: Vec<String> = drv
+        .outputs
+        .into_iter()
+        .filter_map(|o| (!o.path.is_empty()).then_some(o.path))
+        .collect();
+    if output_paths.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Step 3 — fetch any output not already in the local store, plus its
+    // transitive runtime closure (so the daemon will accept the imports).
+    let missing = prefetcher.filter_missing(output_paths.iter().cloned().collect()).await?;
+    if !missing.is_empty() {
+        prefetcher.fetch_closure(missing).await?;
+    }
+    Ok(output_paths)
 }
 
 // ── NarImporter ───────────────────────────────────────────────────────────────

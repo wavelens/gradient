@@ -559,6 +559,7 @@ impl BuildDispatchMaps {
             builds: vec![BuildTask {
                 build_id: build.id.to_string(),
                 drv_path: derivation.derivation_path.clone(),
+                external_cached: build.external_cached,
             }],
         };
         let pending = PendingBuildJob {

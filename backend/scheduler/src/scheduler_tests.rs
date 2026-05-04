@@ -311,6 +311,7 @@ async fn record_eval_message_inserts_for_active_build_job() {
                     builds: vec![BuildTask {
                         build_id: build_id.to_string(),
                         drv_path: "aaaa-hello.drv".into(),
+                        external_cached: false,
                     }],
                 },
                 required_paths: vec![],

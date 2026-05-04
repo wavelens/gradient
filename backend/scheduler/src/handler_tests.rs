@@ -172,6 +172,7 @@ fn make_build_job(build_id: Uuid, eval_id: Uuid, org_id: Uuid) -> PendingBuildJo
             builds: vec![BuildTask {
                 build_id: build_id.to_string(),
                 drv_path: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello.drv".into(),
+                external_cached: false,
             }],
         },
         required_paths: vec![],

@@ -91,6 +91,14 @@ pub struct BuildJob {
 pub struct BuildTask {
     pub build_id: String,
     pub drv_path: String,
+    /// When `true` the build's outputs are known to be available from an
+    /// upstream cache (cache.nixos.org etc.) but are not yet in the
+    /// gradient cache. Worker behavior changes: instead of running
+    /// `nix build`, the worker re-queries the cache (`CacheQuery Pull`)
+    /// to get the upstream URL for each output, downloads the NAR,
+    /// recompresses to zstd, and pushes via `NarUploaded`. No daemon
+    /// build invocation, no input prefetch.
+    pub external_cached: bool,
 }
 
 /// Severity of a worker-reported evaluation message. Mirrors

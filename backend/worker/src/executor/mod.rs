@@ -240,6 +240,43 @@ impl JobExecutor {
             // would show the build hanging in `Queued` forever.
             updater.report_building(build_task.build_id.clone())?;
 
+            if build_task.external_cached {
+                // The outputs are already realisable from an upstream
+                // cache — skip the daemon build entirely, just pull them
+                // through and report them so they land in our cache via
+                // the unified `compress_and_push_paths` step below.
+                let outputs = crate::proto::nar_import::fetch_external_cached_outputs(
+                    &self.store,
+                    build_task,
+                    updater,
+                )
+                .await
+                .map_err(|e| {
+                    tracing::error!(
+                        build_id = %build_task.build_id,
+                        error = %e,
+                        "external_cached output fetch failed; aborting build"
+                    );
+                    e
+                })?;
+                updater.report_build_output(
+                    build_task.build_id.clone(),
+                    outputs
+                        .iter()
+                        .map(|p| proto::messages::BuildOutput {
+                            name: String::new(),
+                            store_path: p.clone(),
+                            hash: String::new(),
+                            nar_size: None,
+                            nar_hash: None,
+                            products: Vec::new(),
+                        })
+                        .collect(),
+                )?;
+                all_output_paths.extend(outputs);
+                continue;
+            }
+
             // Import cache-resident inputs the daemon will need. A hard
             // local-store error (e.g. `store.has_path` failing) aborts the
             // build — we can't safely proceed without knowing what's already
