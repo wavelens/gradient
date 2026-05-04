@@ -90,6 +90,7 @@ export class BuildArtefactsComponent implements OnInit {
 
   fileTypeLabel(fileType: string): string {
     const labels: Record<string, string> = {
+      'html': 'HTML',
       'iso': 'ISO',
       'tar': 'TAR',
       'rpm': 'RPM',
