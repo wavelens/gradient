@@ -195,9 +195,11 @@ async fn get_nar_by_hash_inner(
         let deriver = cached_path_row.deriver.clone();
         let ca = cached_path_row.ca.clone();
 
-        let sig_url = gradient_core::sources::cache_key_host(&state.config.server.serve_url);
-
-        let sig = format!("{}-{}:{}", sig_url, cache.name, signature);
+        let sig = gradient_core::sources::full_signature_token(
+            &signature,
+            &state.config.server.serve_url,
+            &cache.name,
+        );
 
         // file_hash / file_size live on `cached_path` (written by the worker
         // during NarUploaded). The legacy mirror on `derivation_output` is
@@ -266,8 +268,11 @@ async fn get_nar_by_cached_path(
             .signature
             .or_not_found("Signature not yet computed")?;
 
-        let sig_url = gradient_core::sources::cache_key_host(&state.config.server.serve_url);
-        let sig = format!("{}-{}:{}", sig_url, cache.name, signature);
+        let sig = gradient_core::sources::full_signature_token(
+            &signature,
+            &state.config.server.serve_url,
+            &cache.name,
+        );
 
         let file_hash = cached_path_row
             .file_hash

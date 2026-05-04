@@ -130,7 +130,8 @@ impl CacheSigner {
         })
     }
 
-    /// Sign a narinfo fingerprint with the pre-decoded key.
+    /// Sign a narinfo fingerprint and return the full narinfo signature
+    /// token (`{key_name}:{base64_sig}`).
     pub fn sign_narinfo(
         &self,
         store_path: &str,
@@ -138,6 +139,21 @@ impl CacheSigner {
         nar_size: u64,
         references: &[String],
     ) -> String {
+        let raw = self.sign_narinfo_raw(store_path, nar_hash, nar_size, references);
+        let sig_b64 = general_purpose::STANDARD.encode(raw);
+        format!("{}-{}:{}", self.base_url, self.cache_name, sig_b64)
+    }
+
+    /// Sign a narinfo fingerprint and return the raw 64-byte Ed25519
+    /// signature. Used when the caller stores the signature in `bytea` form
+    /// and reconstructs the narinfo wire format on read.
+    pub fn sign_narinfo_raw(
+        &self,
+        store_path: &str,
+        nar_hash: &str,
+        nar_size: u64,
+        references: &[String],
+    ) -> Vec<u8> {
         let mut full_refs: Vec<String> = references
             .iter()
             .map(|r| {
@@ -153,9 +169,7 @@ impl CacheSigner {
 
         let fingerprint = format!("1;{};{};{};{}", store_path, nar_hash, nar_size, refs_str);
         let sig = self.secret_key.sign(fingerprint.as_bytes(), None);
-        let sig_b64 = general_purpose::STANDARD.encode(*sig);
-
-        format!("{}-{}:{}", self.base_url, self.cache_name, sig_b64)
+        (*sig).to_vec()
     }
 }
 

@@ -6,18 +6,21 @@
 
 //! Job scoring — determines how suitable this worker is for each job candidate.
 //!
-//! For build candidates the scorer reads the `.drv` file, extracts every input
-//! store path (`inputDrvs` outputs + `inputSrcs`), and checks each against the
-//! local Nix store.  A lower `missing` count means fewer paths need
-//! downloading, so the worker is a better fit for the job.
+//! For each candidate the scheduler ships the set of direct input store
+//! paths in `required_paths`. The worker checks each path against its local
+//! Nix store and reports `(missing_count, missing_nar_size)`. A lower
+//! `missing` count means fewer paths need downloading, so the worker is a
+//! better fit for the job.
+//!
+//! Source paths (`inputSrcs`) are not included in `required_paths` — they
+//! live only in the `.drv` file and are not stored server-side. They tend
+//! to be roughly equivalent across workers in the same org so their absence
+//! does not skew scoring meaningfully.
 
 use anyhow::Result;
-use gradient_core::db::parse_drv;
-use gradient_core::executer::path_utils::nix_store_path;
-use proto::messages::{CandidateScore, JobCandidate, RequiredPath};
-use tracing::{debug, warn};
-
-use crate::nix::store::LocalNixStore;
+use proto::messages::{CandidateScore, JobCandidate};
+use proto::traits::WorkerStore;
+use tracing::debug;
 
 /// Computes scores for job candidates against the local Nix store.
 #[derive(Clone, Copy, Default, Debug)]
@@ -30,29 +33,28 @@ impl JobScorer {
 
     /// Score a batch of job candidates.
     ///
-    /// For build jobs (`drv_paths` non-empty), reads each `.drv` file to
-    /// discover the full set of input store paths and checks each against
-    /// the local store.  For eval jobs, always returns `missing_count: 0`.
-    ///
-    /// `missing_nar_size` is computed from `CacheInfo.nar_size` for any
-    /// required path not present locally; paths without cache info contribute 0.
-    pub async fn score_candidates(
+    /// For each candidate, count how many of `required_paths` are absent
+    /// from the worker's local store and sum the uncompressed NAR size of
+    /// the missing entries (zero when `cache_info` is unavailable).
+    pub async fn score_candidates<S: WorkerStore + ?Sized>(
         &self,
-        store: &LocalNixStore,
+        store: &S,
         candidates: &[JobCandidate],
     ) -> Result<Vec<CandidateScore>> {
         let mut scores = Vec::with_capacity(candidates.len());
         for c in candidates {
-            let (missing_count, missing_nar_size) = if c.drv_paths.is_empty() {
-                // Eval job — no store check needed.
-                (0, 0)
-            } else {
-                Self::count_missing_inputs(store, &c.drv_paths, &c.required_paths).await
-            };
-            if missing_count > 0 || !c.drv_paths.is_empty() {
+            let mut missing_count = 0u32;
+            let mut missing_nar_size = 0u64;
+            for rp in &c.required_paths {
+                if !store.has_path(&rp.path).await.unwrap_or(false) {
+                    missing_count += 1;
+                    missing_nar_size += rp.cache_info.as_ref().map(|ci| ci.nar_size).unwrap_or(0);
+                }
+            }
+            if missing_count > 0 || !c.required_paths.is_empty() {
                 debug!(
                     job_id = %c.job_id,
-                    drv_count = c.drv_paths.len(),
+                    required_count = c.required_paths.len(),
                     missing_count,
                     missing_nar_size,
                     "scored candidate"
@@ -66,115 +68,31 @@ impl JobScorer {
         }
         Ok(scores)
     }
-
-    /// Read `.drv` files, collect all input store paths, and count how
-    /// many are absent from the local Nix store. Also sums up the NAR size
-    /// of missing paths using `CacheInfo` when available.
-    async fn count_missing_inputs(
-        store: &LocalNixStore,
-        drv_paths: &[String],
-        required_paths: &[RequiredPath],
-    ) -> (u32, u64) {
-        let mut missing_count = 0u32;
-        let mut missing_nar_size = 0u64;
-
-        // Build a lookup map from store path → nar_size for fast access.
-        let path_nar_size: std::collections::HashMap<&str, u64> = required_paths
-            .iter()
-            .filter_map(|rp| {
-                rp.cache_info
-                    .as_ref()
-                    .map(|ci| (rp.path.as_str(), ci.nar_size))
-            })
-            .collect();
-
-        for drv_path in drv_paths {
-            let full_path = nix_store_path(drv_path);
-            let drv_bytes = match tokio::fs::read(&full_path).await {
-                Ok(b) => b,
-                Err(e) => {
-                    // Can't read the .drv → count as 1 missing (the drv itself).
-                    warn!(drv = %full_path, error = %e, "cannot read .drv for scoring");
-                    missing_count += 1;
-                    continue;
-                }
-            };
-            let drv = match parse_drv(&drv_bytes) {
-                Ok(d) => d,
-                Err(e) => {
-                    warn!(drv = %full_path, error = %e, "cannot parse .drv for scoring");
-                    missing_count += 1;
-                    continue;
-                }
-            };
-
-            // Check inputDrvs output paths.
-            for (input_drv, _outputs) in &drv.input_derivations {
-                let input_full = nix_store_path(input_drv);
-                // Read the input .drv to get its output paths.
-                if let Ok(input_bytes) = tokio::fs::read(&input_full).await
-                    && let Ok(input_parsed) = parse_drv(&input_bytes)
-                {
-                    for o in &input_parsed.outputs {
-                        if o.path.is_empty() {
-                            continue;
-                        }
-                        match store.has_path(&o.path).await {
-                            Ok(true) => {}
-                            _ => {
-                                missing_count += 1;
-                                missing_nar_size +=
-                                    path_nar_size.get(o.path.as_str()).copied().unwrap_or(0);
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Check inputSrcs.
-            for src_path in &drv.input_sources {
-                match store.has_path(src_path).await {
-                    Ok(true) => {}
-                    _ => {
-                        missing_count += 1;
-                        missing_nar_size +=
-                            path_nar_size.get(src_path.as_str()).copied().unwrap_or(0);
-                    }
-                }
-            }
-        }
-        (missing_count, missing_nar_size)
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use proto::traits::WorkerStore;
+    use proto::messages::{CacheInfo, RequiredPath};
     use test_support::prelude::*;
 
     #[tokio::test]
     async fn score_empty_candidates() {
         let store = FakeWorkerStore::new();
-        let scorer = JobScorer::new();
-        let scores = scorer
-            .score_candidates_with_store(&store, &[])
-            .await
-            .unwrap();
+        let scores = JobScorer::new().score_candidates(&store, &[]).await.unwrap();
         assert!(scores.is_empty());
     }
 
     #[tokio::test]
     async fn score_eval_job_always_zero() {
         let store = FakeWorkerStore::new();
-        let scorer = JobScorer::new();
         let candidates = vec![JobCandidate {
             job_id: "eval:1".to_owned(),
             required_paths: vec![],
-            drv_paths: vec![], // eval job — no drv_paths
+            drv_paths: vec![],
         }];
-        let scores = scorer
-            .score_candidates_with_store(&store, &candidates)
+        let scores = JobScorer::new()
+            .score_candidates(&store, &candidates)
             .await
             .unwrap();
         assert_eq!(scores[0].missing_count, 0);
@@ -182,57 +100,31 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn score_build_with_missing_drv_file() {
-        let store = FakeWorkerStore::new();
-        let scorer = JobScorer::new();
+    async fn score_counts_missing_required_paths() {
+        let store = FakeWorkerStore::new().with_present_path("/nix/store/aaaa-have");
         let candidates = vec![JobCandidate {
             job_id: "build:1".to_owned(),
-            required_paths: vec![],
-            drv_paths: vec!["/nix/store/nonexistent.drv".to_owned()],
+            required_paths: vec![
+                RequiredPath {
+                    path: "/nix/store/aaaa-have".to_owned(),
+                    cache_info: Some(CacheInfo { file_size: 10, nar_size: 100 }),
+                },
+                RequiredPath {
+                    path: "/nix/store/bbbb-missing".to_owned(),
+                    cache_info: Some(CacheInfo { file_size: 20, nar_size: 200 }),
+                },
+                RequiredPath {
+                    path: "/nix/store/cccc-missing-no-info".to_owned(),
+                    cache_info: None,
+                },
+            ],
+            drv_paths: vec!["/nix/store/zzzz-target.drv".to_owned()],
         }];
-        let scores = scorer
-            .score_candidates_with_store(&store, &candidates)
+        let scores = JobScorer::new()
+            .score_candidates(&store, &candidates)
             .await
             .unwrap();
-        // Can't read the drv → at least 1 missing.
-        assert!(scores[0].missing_count >= 1);
-    }
-
-    impl JobScorer {
-        /// Test helper using FakeWorkerStore for required_paths checking.
-        async fn score_candidates_with_store(
-            &self,
-            store: &FakeWorkerStore,
-            candidates: &[JobCandidate],
-        ) -> Result<Vec<CandidateScore>> {
-            let mut scores = Vec::with_capacity(candidates.len());
-            for c in candidates {
-                let mut missing_count = 0u32;
-                let mut missing_nar_size = 0u64;
-                // For tests without .drv files, fall back to required_paths check.
-                for rp in &c.required_paths {
-                    match store.has_path(&rp.path).await {
-                        Ok(true) => {}
-                        _ => {
-                            missing_count += 1;
-                            missing_nar_size +=
-                                rp.cache_info.as_ref().map(|ci| ci.nar_size).unwrap_or(0);
-                        }
-                    }
-                }
-                // Count each unreadable drv as missing.
-                for drv_path in &c.drv_paths {
-                    if tokio::fs::metadata(nix_store_path(drv_path)).await.is_err() {
-                        missing_count += 1;
-                    }
-                }
-                scores.push(CandidateScore {
-                    job_id: c.job_id.clone(),
-                    missing_count,
-                    missing_nar_size,
-                });
-            }
-            Ok(scores)
-        }
+        assert_eq!(scores[0].missing_count, 2);
+        assert_eq!(scores[0].missing_nar_size, 200);
     }
 }

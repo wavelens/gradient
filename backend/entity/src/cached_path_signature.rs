@@ -16,7 +16,9 @@ use uuid::Uuid;
 /// with its own signature. Rows are created when NARs are pushed; the
 /// `signature` starts as `None` and is filled by a signing job.
 ///
-/// Signature format (when set): `<key-name>:<base64>` (standard Nix narinfo).
+/// `signature` stores the raw 64-byte Ed25519 signature. The narinfo wire
+/// form (`<key-name>:<base64>`) is reconstructed at read time from
+/// `cache.name` + the deployment's `serve_url`.
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "cached_path_signature")]
 pub struct Model {
@@ -24,7 +26,7 @@ pub struct Model {
     pub id: Uuid,
     pub cached_path: Uuid,
     pub cache: Uuid,
-    pub signature: Option<String>,
+    pub signature: Option<Vec<u8>>,
     pub created_at: NaiveDateTime,
 }
 

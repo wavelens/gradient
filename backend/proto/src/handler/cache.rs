@@ -116,20 +116,44 @@ async fn load_cached_path_signatures(
         cached_path_id: Uuid,
         hash: &str,
     ) -> Option<Vec<String>> {
-        match ECachedPathSignature::find()
+        let rows = match ECachedPathSignature::find()
             .filter(CCachedPathSignature::CachedPath.eq(cached_path_id))
             .all(&state.worker_db)
             .await
         {
-            Ok(rows) => {
-                let sigs: Vec<String> = rows.into_iter().filter_map(|r| r.signature).collect();
-                if sigs.is_empty() { None } else { Some(sigs) }
-            }
+            Ok(rows) => rows,
             Err(e) => {
                 warn!(%hash, error = %e, "failed to load cached_path signatures");
-                None
+                return None;
             }
-        }
+        };
+
+        let cache_ids: Vec<Uuid> = rows.iter().map(|r| r.cache).collect();
+        let cache_names: HashMap<Uuid, String> = if cache_ids.is_empty() {
+            HashMap::new()
+        } else {
+            ECache::find()
+                .filter(CCache::Id.is_in(cache_ids))
+                .all(&state.worker_db)
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .map(|c| (c.id, c.name))
+                .collect()
+        };
+
+        let serve_url = &state.config.server.serve_url;
+        let sigs: Vec<String> = rows
+            .into_iter()
+            .filter_map(|r| {
+                let stored = r.signature?;
+                let cache_name = cache_names.get(&r.cache)?;
+                Some(gradient_core::sources::full_signature_token(
+                    &stored, serve_url, cache_name,
+                ))
+            })
+            .collect();
+        if sigs.is_empty() { None } else { Some(sigs) }
     }
 
     /// Resolve the import metadata a worker needs to construct a `ValidPathInfo`

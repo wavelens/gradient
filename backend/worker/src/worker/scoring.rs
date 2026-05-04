@@ -37,7 +37,7 @@ pub(super) fn spawn_scoring_task(
     tokio::spawn(async move {
         let started = std::time::Instant::now();
         let count = candidates.len();
-        let scores = match scorer.score_candidates(&store, &candidates).await {
+        let scores = match scorer.score_candidates(&*store, &candidates).await {
             Ok(s) => s,
             Err(e) => {
                 warn!(error = %e, count, "score_candidates failed in spawned task");

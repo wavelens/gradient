@@ -79,6 +79,7 @@ mod m20260501_000001_add_repo_check_id;
 mod m20260502_000000_hash_api_keys;
 mod m20260502_000001_drop_file_columns_from_derivation_output;
 mod m20260502_000002_add_oidc_identity_to_user;
+mod m20260504_000000_cached_path_signature_to_bytea;
 
 pub struct Migrator;
 
@@ -159,6 +160,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260502_000000_hash_api_keys::Migration),
             Box::new(m20260502_000001_drop_file_columns_from_derivation_output::Migration),
             Box::new(m20260502_000002_add_oidc_identity_to_user::Migration),
+            Box::new(m20260504_000000_cached_path_signature_to_bytea::Migration),
         ]
     }
 }

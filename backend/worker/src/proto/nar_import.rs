@@ -389,7 +389,7 @@ impl<'a> InputPrefetcher<'a> {
 
             completed += 1;
             if let Err(e) = result {
-                error!(path = %path, error = %e, "dep NAR import failed; aborting prefetch");
+                error!(path = %path, error = ?e, "dep NAR import failed; aborting prefetch");
                 return Err(e.context(format!("prefetch import failed for {}", path)));
             }
 

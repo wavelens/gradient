@@ -117,16 +117,11 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
 
         let nar_hash_nix32 = hex_hash_to_nix32(nar_hash);
 
-        let sig_token =
-            signer.sign_narinfo(&cp.store_path, &nar_hash_nix32, nar_size as u64, &refs);
-
-        let sig_b64 = sig_token
-            .split_once(':')
-            .map(|(_, s)| s.to_owned())
-            .unwrap_or(sig_token);
+        let sig_bytes =
+            signer.sign_narinfo_raw(&cp.store_path, &nar_hash_nix32, nar_size as u64, &refs);
 
         let mut am = row.into_active_model();
-        am.signature = Set(Some(sig_b64));
+        am.signature = Set(Some(sig_bytes));
         if let Err(e) = am.update(&state.worker_db).await {
             warn!(store_path = %cp.store_path, cache = %cache.id, error = %e, "sign sweep: failed to persist signature");
             continue;

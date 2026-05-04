@@ -146,8 +146,8 @@ async fn narinfo_served_from_db_inner() {
         id: cached_path_sig_id(),
         cached_path: cached_path_id(),
         cache: cache_id(),
-        // base64("test-signature") — any non-empty value works.
-        signature: Some("dGVzdC1zaWduYXR1cmU=".into()),
+        // 64 raw bytes — any non-empty Ed25519-shaped buffer works.
+        signature: Some(vec![0x42; 64]),
         created_at: test_date(),
     };
 

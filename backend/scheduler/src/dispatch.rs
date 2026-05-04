@@ -14,7 +14,7 @@
 //! The eval/build loops are idempotent: re-enqueueing the same job_id overwrites
 //! the existing entry in the `JobTracker` without harm.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -36,7 +36,9 @@ use uuid::Uuid;
 
 use super::Scheduler;
 use super::jobs::{PendingBuildJob, PendingEvalJob};
-use gradient_core::types::proto::{BuildJob, BuildTask, FlakeJob, FlakeTask};
+use gradient_core::types::proto::{
+    BuildJob, BuildTask, CacheInfo, FlakeJob, FlakeTask, RequiredPath,
+};
 
 /// Spawns all dispatch loops on the shared shutdown tracker so they drain on SIGTERM.
 pub fn start_dispatch_loops(scheduler: Arc<Scheduler>) {
@@ -317,6 +319,11 @@ struct BuildDispatchMaps {
     feature_names: HashMap<Uuid, String>,
     /// derivation_id → number of direct dependencies
     dep_counts: HashMap<Uuid, u32>,
+    /// derivation_id → direct input store paths (outputs of every input
+    /// derivation). Used by workers to score how much they would have to
+    /// download to start this build. `inputSrcs` are not included — they
+    /// live in the `.drv` file and are not stored in the scheduler DB.
+    direct_inputs: HashMap<Uuid, Vec<RequiredPath>>,
 }
 
 impl BuildDispatchMaps {
@@ -411,19 +418,89 @@ impl BuildDispatchMaps {
                 .collect()
         };
 
-        // Count direct dependencies per derivation for the scoring policy.
-        let dep_counts: HashMap<Uuid, u32> = {
-            let edges = EDerivationDependency::find()
-                .filter(CDerivationDependency::Derivation.is_in(drv_ids))
+        // Direct dependency edges per derivation. Used both for the scoring
+        // policy's `dep_counts` and to build `direct_inputs` below.
+        let dep_edges = EDerivationDependency::find()
+            .filter(CDerivationDependency::Derivation.is_in(drv_ids.clone()))
+            .all(&state.worker_db)
+            .await
+            .unwrap_or_default();
+
+        let mut deps_by_drv: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
+        for e in &dep_edges {
+            deps_by_drv.entry(e.derivation).or_default().push(e.dependency);
+        }
+        let dep_counts: HashMap<Uuid, u32> = deps_by_drv
+            .iter()
+            .map(|(k, v)| (*k, v.len() as u32))
+            .collect();
+
+        // Direct input store paths per build derivation: for each input drv,
+        // gather its `derivation_output` rows; for each output, attach
+        // cache info from `cached_path` when available.
+        let dep_drv_ids: Vec<Uuid> = dep_edges
+            .iter()
+            .map(|e| e.dependency)
+            .collect::<HashSet<Uuid>>()
+            .into_iter()
+            .collect();
+
+        let outputs_by_drv: HashMap<Uuid, Vec<MDerivationOutput>> = if dep_drv_ids.is_empty() {
+            HashMap::new()
+        } else {
+            let outs = EDerivationOutput::find()
+                .filter(CDerivationOutput::Derivation.is_in(dep_drv_ids))
                 .all(&state.worker_db)
                 .await
                 .unwrap_or_default();
-            let mut counts: HashMap<Uuid, u32> = HashMap::new();
-            for e in edges {
-                *counts.entry(e.derivation).or_insert(0) += 1;
+            let mut map: HashMap<Uuid, Vec<MDerivationOutput>> = HashMap::new();
+            for o in outs {
+                map.entry(o.derivation).or_default().push(o);
             }
-            counts
+            map
         };
+
+        let output_hashes: Vec<String> = outputs_by_drv
+            .values()
+            .flat_map(|v| v.iter().map(|o| o.hash.clone()))
+            .collect::<HashSet<String>>()
+            .into_iter()
+            .collect();
+
+        let cache_info_by_hash: HashMap<String, CacheInfo> = if output_hashes.is_empty() {
+            HashMap::new()
+        } else {
+            ECachedPath::find()
+                .filter(CCachedPath::Hash.is_in(output_hashes))
+                .all(&state.worker_db)
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|cp| {
+                    let nar_size = cp.nar_size? as u64;
+                    let file_size = cp.file_size.unwrap_or(0) as u64;
+                    Some((cp.hash, CacheInfo { file_size, nar_size }))
+                })
+                .collect()
+        };
+
+        let mut direct_inputs: HashMap<Uuid, Vec<RequiredPath>> = HashMap::new();
+        for (drv_id, dep_drvs) in &deps_by_drv {
+            let mut paths: Vec<RequiredPath> = Vec::new();
+            for dep_id in dep_drvs {
+                let Some(outputs) = outputs_by_drv.get(dep_id) else {
+                    continue;
+                };
+                for o in outputs {
+                    let cache_info = cache_info_by_hash.get(&o.hash).cloned();
+                    paths.push(RequiredPath {
+                        path: o.output.clone(),
+                        cache_info,
+                    });
+                }
+            }
+            direct_inputs.insert(*drv_id, paths);
+        }
 
         Ok(Self {
             derivations,
@@ -433,6 +510,7 @@ impl BuildDispatchMaps {
             features_by_drv,
             feature_names,
             dep_counts,
+            direct_inputs,
         })
     }
 
@@ -488,7 +566,11 @@ impl BuildDispatchMaps {
             evaluation_id: build.evaluation,
             peer_id,
             job: build_job,
-            required_paths: vec![],
+            required_paths: self
+                .direct_inputs
+                .get(&build.derivation)
+                .cloned()
+                .unwrap_or_default(),
             architecture: derivation.architecture.clone(),
             required_features: self.required_features(build.derivation),
             dependency_count: self.dep_counts.get(&build.derivation).copied().unwrap_or(0),
