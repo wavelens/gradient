@@ -365,6 +365,52 @@ in {
           type = lib.types.ints.unsigned;
           default = 336;
         };
+
+        narStorageOpenTimeoutSecs = lib.mkOption {
+          description = ''
+            Maximum time the server will wait to open a NAR object stream
+            from `nar_storage` (e.g. an S3 GET request) before giving up
+            and emitting `NarUnavailable` to the worker. Caps how long a
+            stalled storage backend can block a NarRequest before failing
+            cleanly instead of hitting the worker's 600 s receive ceiling.
+          '';
+          type = lib.types.ints.positive;
+          default = 60;
+        };
+
+        narSendChunkTimeoutSecs = lib.mkOption {
+          description = ''
+            Maximum time a single outbound `NarPush` chunk may sit in the
+            per-connection writer queue waiting for the WebSocket sink to
+            drain. Hitting this timeout indicates a stalled peer / TCP
+            back-pressure and aborts the in-flight transfer with
+            `NarAbort` rather than queuing unbounded data in memory.
+          '';
+          type = lib.types.ints.positive;
+          default = 30;
+        };
+
+        maxConcurrentNarServes = lib.mkOption {
+          description = ''
+            Maximum number of NAR-serving tasks that may run concurrently
+            per worker connection. Bounds memory and storage-backend
+            fan-out when a worker requests many paths in a single batch.
+          '';
+          type = lib.types.ints.positive;
+          default = 8;
+        };
+
+        maxNarBufferBytes = lib.mkOption {
+          description = ''
+            Maximum bytes a single proto session may hold in its inbound
+            NAR upload buffers (open `NarPush` streams that haven't been
+            finalised). Without this cap a rogue worker could open many
+            streams without finalising them and pin unbounded RAM on the
+            server (issue #109).
+          '';
+          type = lib.types.ints.positive;
+          default = 256 * 1024 * 1024;
+        };
       };
     };
   };
@@ -458,6 +504,10 @@ in {
         GRADIENT_FEDERATE_PROTO = lib.boolToString cfg.proto.federate;
         GRADIENT_DELETE_STATE = lib.boolToString cfg.settings.deleteState;
         GRADIENT_NAR_TTL_HOURS = toString cfg.settings.cacheTtlHours;
+        GRADIENT_NAR_STORAGE_OPEN_TIMEOUT_SECS = toString cfg.settings.narStorageOpenTimeoutSecs;
+        GRADIENT_NAR_SEND_CHUNK_TIMEOUT_SECS = toString cfg.settings.narSendChunkTimeoutSecs;
+        GRADIENT_MAX_CONCURRENT_NAR_SERVES = toString cfg.settings.maxConcurrentNarServes;
+        GRADIENT_MAX_NAR_BUFFER_BYTES = toString cfg.settings.maxNarBufferBytes;
         GRADIENT_STATE_FILE = "%d/gradient_state";
         GRADIENT_CREDENTIALS_DIR = "%d";
         RUST_LOG = cfg.settings.logLevel.default;

@@ -5,7 +5,9 @@
  */
 
 use anyhow::{Context, Result};
+use bytes::Bytes;
 use futures::StreamExt as _;
+use futures::stream::BoxStream;
 pub use object_store::{MultipartUpload, WriteMultipart};
 use object_store::{ObjectStore, ObjectStoreExt as _, PutPayload, path::Path};
 use std::sync::Arc;
@@ -159,6 +161,30 @@ impl NarStore {
         }
     }
 
+    /// Streaming counterpart to [`Self::get`].
+    ///
+    /// Returns the object's `(size, byte_stream)` pair without buffering the
+    /// whole NAR in memory. Used by the WebSocket NAR-serving path so a 200 MB
+    /// `gcc-lib` doesn't pin the entire file in RAM before the first
+    /// `NarPush` chunk goes out.
+    pub async fn get_stream(
+        &self,
+        hash: &str,
+    ) -> Result<Option<(u64, BoxStream<'static, Result<Bytes>>)>> {
+        match self.inner.get(&self.object_path(hash)).await {
+            Ok(result) => {
+                let size = result.meta.size;
+                let stream = result
+                    .into_stream()
+                    .map(|chunk| chunk.context("NAR stream chunk read failed"))
+                    .boxed();
+                Ok(Some((size, stream)))
+            }
+            Err(object_store::Error::NotFound { .. }) => Ok(None),
+            Err(e) => Err(e).context("Failed to open NAR stream"),
+        }
+    }
+
     pub async fn delete(&self, hash: &str) -> Result<()> {
         match self.inner.delete(&self.object_path(hash)).await {
             Ok(_) | Err(object_store::Error::NotFound { .. }) => Ok(()),
@@ -261,5 +287,49 @@ impl std::fmt::Debug for NarStore {
         f.debug_struct("NarStore")
             .field("backend", &backend)
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn local_store() -> (TempDir, NarStore) {
+        let dir = TempDir::new().expect("tempdir");
+        let store = NarStore::local(dir.path().to_str().unwrap()).expect("local store");
+        (dir, store)
+    }
+
+    #[tokio::test]
+    async fn get_stream_returns_full_payload_in_order() {
+        let (_d, store) = local_store();
+        // Use a 9 MiB payload so it crosses the local-FS read boundary and
+        // typically arrives in multiple chunks.
+        let mut payload = Vec::with_capacity(9 * 1024 * 1024);
+        for i in 0..(9 * 1024 * 1024 / 4) {
+            payload.extend_from_slice(&(i as u32).to_le_bytes());
+        }
+        store.put("abc123", payload.clone()).await.expect("put");
+
+        let (size, mut stream) = store
+            .get_stream("abc123")
+            .await
+            .expect("get_stream")
+            .expect("Some");
+        assert_eq!(size as usize, payload.len());
+
+        let mut assembled = Vec::with_capacity(payload.len());
+        while let Some(chunk) = stream.next().await {
+            assembled.extend_from_slice(&chunk.expect("chunk"));
+        }
+        assert_eq!(assembled, payload);
+    }
+
+    #[tokio::test]
+    async fn get_stream_returns_none_for_missing() {
+        let (_d, store) = local_store();
+        let r = store.get_stream("does-not-exist").await.expect("Ok");
+        assert!(r.is_none());
     }
 }

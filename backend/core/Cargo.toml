@@ -24,6 +24,7 @@ migration = { workspace = true }
 anyhow                = { workspace = true }
 async-trait           = { workspace = true }
 base64                = { workspace = true }
+bytes                 = { workspace = true }
 chrono                = { workspace = true }
 clap                  = { workspace = true }
 futures               = { workspace = true }
@@ -71,7 +72,6 @@ ssh-key           = { version = "0.6", features = ["ed25519"] }
 tar               = { version = "0.4", default-features = false }
 
 [dev-dependencies]
-bytes        = { workspace = true }
 harmonia-nar = { workspace = true, features = ["test"] }
 mockall      = { workspace = true }
 test-support = { workspace = true }

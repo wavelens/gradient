@@ -8,9 +8,11 @@
 
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::time::Duration;
 
 use gradient_core::types::*;
 use gradient_core::types::ids::OrganizationId;
+use tokio::sync::Semaphore;
 use tracing::{debug, info, instrument, warn};
 
 use crate::messages::{
@@ -22,10 +24,10 @@ use super::auth::{
     aggregate_enabled_caps, filter_org_peers_without_cache, has_any_registrations,
     lookup_registered_peers, negotiate_capabilities, validate_tokens,
 };
-use super::dispatch::DispatchContext;
+use super::dispatch::{DispatchContext, NarBuffers};
 use super::socket::{
-    HANDSHAKE_TIMEOUT, JOB_OFFER_CHUNK_SIZE, ProtoSocket, recv_client_msg, send_error,
-    send_reject, send_server_msg,
+    HANDSHAKE_TIMEOUT, JOB_OFFER_CHUNK_SIZE, ProtoSocket, ProtoWriter, recv_client_msg,
+    send_server_msg,
 };
 
 // ── Session state markers ─────────────────────────────────────────────────────
@@ -72,12 +74,9 @@ impl ProtoSession<Opening> {
         server_initiated: bool,
     ) -> Option<ProtoSession<Authenticated>> {
         if !server_initiated && !self.state.config.proto.discoverable {
-            send_reject(
-                &mut self.socket,
-                403,
-                "server is not accepting connections".into(),
-            )
-            .await;
+            self.socket
+                .send_reject(403, "server is not accepting connections".into())
+                .await;
             return None;
         }
         let (peer_id, client_capabilities) = self.recv_init_connection().await?;
@@ -101,7 +100,7 @@ impl ProtoSession<Opening> {
     }
 
     async fn recv_init_connection(&mut self) -> Option<(String, GradientCapabilities)> {
-        let msg = recv_client_msg(&mut self.socket).await?;
+        let msg = self.socket.recv_msg().await?;
         match msg {
             ClientMessage::InitConnection {
                 version,
@@ -110,18 +109,17 @@ impl ProtoSession<Opening> {
             } => {
                 debug!(version, ?capabilities, %id, "InitConnection received");
                 if version != PROTO_VERSION {
-                    send_reject(
-                        &mut self.socket,
-                        400,
-                        format!("unsupported protocol version {version}"),
-                    )
-                    .await;
+                    self.socket
+                        .send_reject(400, format!("unsupported protocol version {version}"))
+                        .await;
                     return None;
                 }
                 Some((id, capabilities))
             }
             _ => {
-                send_error(&mut self.socket, 400, "expected InitConnection".into()).await;
+                self.socket
+                    .send_error(400, "expected InitConnection".into())
+                    .await;
                 None
             }
         }
@@ -133,19 +131,19 @@ impl ProtoSession<Opening> {
         server_initiated: bool,
     ) -> Option<(Vec<String>, Vec<FailedPeer>)> {
         let registered_peers = lookup_registered_peers(&self.state, peer_id).await;
-        send_server_msg(
-            &mut self.socket,
-            &ServerMessage::AuthChallenge {
+        self.socket
+            .send_msg(&ServerMessage::AuthChallenge {
                 peers: registered_peers.iter().map(|(id, _)| id.clone()).collect(),
-            },
-        )
-        .await
-        .ok()?;
+            })
+            .await
+            .ok()?;
 
-        let tokens = match recv_client_msg(&mut self.socket).await {
+        let tokens = match self.socket.recv_msg().await {
             Some(ClientMessage::AuthResponse { tokens }) => tokens,
             Some(_) => {
-                send_error(&mut self.socket, 400, "expected AuthResponse".into()).await;
+                self.socket
+                    .send_error(400, "expected AuthResponse".into())
+                    .await;
                 return None;
             }
             None => return None,
@@ -173,7 +171,7 @@ impl ProtoSession<Opening> {
                 }
             }
             AuthDecision::Reject { code, reason } => {
-                send_reject(&mut self.socket, code, reason.into()).await;
+                self.socket.send_reject(code, reason.into()).await;
                 return None;
             }
         }
@@ -187,16 +185,14 @@ impl ProtoSession<Opening> {
         authorized_peers: &[String],
         failed_peers: &[FailedPeer],
     ) -> Result<(), ()> {
-        send_server_msg(
-            &mut self.socket,
-            &ServerMessage::InitAck {
+        self.socket
+            .send_msg(&ServerMessage::InitAck {
                 version: PROTO_VERSION,
                 capabilities: negotiated.clone(),
                 authorized_peers: authorized_peers.to_vec(),
                 failed_peers: failed_peers.to_vec(),
-            },
-        )
-        .await
+            })
+            .await
     }
 }
 
@@ -213,7 +209,9 @@ impl ProtoSession<Authenticated> {
 
         if self.scheduler.is_worker_connected(&peer_id).await {
             warn!(%peer_id, "duplicate connection rejected (worker already connected)");
-            send_reject(&mut self.socket, 496, "worker already connected".into()).await;
+            self.socket
+                .send_reject(496, "worker already connected".into())
+                .await;
             return None;
         }
 
@@ -247,7 +245,7 @@ impl ProtoSession<Authenticated> {
 impl ProtoSession<Registered> {
     pub async fn run(self) {
         let ProtoSession {
-            mut socket,
+            socket,
             state,
             scheduler,
             session_state:
@@ -259,28 +257,32 @@ impl ProtoSession<Registered> {
                 },
         } = self;
 
-        let mut nar_buffers: std::collections::HashMap<String, Vec<u8>> =
-            std::collections::HashMap::new();
+        let proto_cfg = &state.config.proto;
+        let send_chunk_timeout = Duration::from_secs(proto_cfg.nar_send_chunk_timeout_secs);
+        let (mut reader, writer) = socket.split(send_chunk_timeout);
+
+        let mut nar_buffers = NarBuffers::new(proto_cfg.max_nar_buffer_bytes);
+        let nar_serve_semaphore = Arc::new(Semaphore::new(proto_cfg.max_concurrent_nar_serves));
 
         loop {
             let msg = tokio::select! {
-                msg = recv_client_msg(&mut socket) => match msg {
+                msg = recv_client_msg(&mut reader) => match msg {
                     Some(m) => m,
                     None => break,
                 },
                 _ = reauth_notify.notified() => {
-                    if !on_reauth_notify(&mut socket, &state, &peer_id).await { break; }
+                    if !on_reauth_notify(&writer, &state, &peer_id).await { break; }
                     continue;
                 }
                 _ = job_notify.notified() => {
-                    if !on_job_notify(&mut socket, &scheduler, &peer_id).await { break; }
+                    if !on_job_notify(&writer, &scheduler, &peer_id).await { break; }
                     continue;
                 }
                 abort_msg = abort_rx.recv() => match abort_msg {
                     Some((job_id, reason)) => {
                         info!(%peer_id, %job_id, %reason, "sending AbortJob to worker");
                         if send_server_msg(
-                            &mut socket,
+                            &writer,
                             &ServerMessage::AbortJob { job_id, reason },
                         )
                         .await
@@ -295,10 +297,11 @@ impl ProtoSession<Registered> {
             };
 
             let mut ctx = DispatchContext {
-                socket: &mut socket,
+                writer: &writer,
                 state: &state,
                 scheduler: &scheduler,
                 peer_id: &peer_id,
+                nar_serve_semaphore: &nar_serve_semaphore,
             };
             if !ctx.dispatch(msg, &mut nar_buffers).await {
                 break;
@@ -312,16 +315,23 @@ impl ProtoSession<Registered> {
 
 // ── Select arm helpers ────────────────────────────────────────────────────────
 
-async fn on_reauth_notify(socket: &mut ProtoSocket, state: &ServerState, peer_id: &str) -> bool {
+async fn on_reauth_notify(writer: &ProtoWriter, state: &ServerState, peer_id: &str) -> bool {
     debug!(%peer_id, "server-initiated reauth");
     let registered_peers = lookup_registered_peers(state, peer_id).await;
     if registered_peers.is_empty() && has_any_registrations(state, peer_id).await {
         info!(%peer_id, "all registrations deactivated — disconnecting worker");
-        send_reject(socket, 403, "worker is deactivated".into()).await;
+        let _ = send_server_msg(
+            writer,
+            &ServerMessage::Reject {
+                code: 403,
+                reason: "worker is deactivated".into(),
+            },
+        )
+        .await;
         return false;
     }
     send_server_msg(
-        socket,
+        writer,
         &ServerMessage::AuthChallenge {
             peers: registered_peers.iter().map(|(id, _)| id.clone()).collect(),
         },
@@ -330,7 +340,7 @@ async fn on_reauth_notify(socket: &mut ProtoSocket, state: &ServerState, peer_id
     .is_ok()
 }
 
-async fn on_job_notify(socket: &mut ProtoSocket, scheduler: &Scheduler, peer_id: &str) -> bool {
+async fn on_job_notify(writer: &ProtoWriter, scheduler: &Scheduler, peer_id: &str) -> bool {
     let candidates = scheduler.get_new_job_candidates(peer_id).await;
     if candidates.is_empty() {
         return true;
@@ -338,7 +348,7 @@ async fn on_job_notify(socket: &mut ProtoSocket, scheduler: &Scheduler, peer_id:
     debug!(%peer_id, count = candidates.len(), "pushing job offer (delta)");
     for chunk in candidates.chunks(JOB_OFFER_CHUNK_SIZE) {
         if send_server_msg(
-            socket,
+            writer,
             &ServerMessage::JobOffer {
                 candidates: chunk.to_vec(),
             },

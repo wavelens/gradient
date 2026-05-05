@@ -1024,3 +1024,63 @@ argument at compile time. Regenerate the captured rustc diagnostic
 after a deliberate API change with:
 
     TRYBUILD=overwrite cargo test -p entity --test compile_fail
+
+## NAR streaming — bounded backend reads
+
+`core/src/storage/nar.rs::tests`:
+
+- `get_stream_returns_full_payload_in_order` writes a 9 MiB payload through
+  `NarStore::put`, re-reads it via the new `get_stream` API, and verifies
+  the concatenated chunks match the original bytes. This is the contract
+  relied on by the WebSocket NAR-serving path: the server must *never*
+  load the full file into RAM, but the bytes on the wire still have to
+  round-trip exactly.
+- `get_stream_returns_none_for_missing` confirms that absent objects
+  surface as `Ok(None)` so the caller can emit `NarUnavailable` instead
+  of hanging.
+
+## Proto writer — peer-stall detection
+
+`proto/src/handler/socket.rs::writer_tests`:
+
+- `send_msg_times_out_when_queue_is_full` constructs a `ProtoWriter`
+  whose drain task is intentionally absent, fills the bounded queue, and
+  asserts the next `send_msg` returns `Err(())` after
+  `send_chunk_timeout` instead of blocking forever. This is the
+  producer-observable signal that a peer's TCP receive side has stalled
+  — the failure unblocks the dispatch loop instead of letting the
+  worker's 600 s receive ceiling fire.
+- `send_msg_succeeds_when_queue_has_room` covers the fast path: a
+  serialised message lands in the channel without delay when there's
+  capacity.
+
+## Proto NAR serving — streaming, chunking, and missing paths
+
+`proto/src/handler/socket.rs::serve_nar_tests`:
+
+- `serve_streams_full_payload_in_chunks` puts a 9 MiB NAR into a local
+  `nar_storage`, calls `serve_nar_request`, and asserts the spy writer
+  observed ≥ 3 `NarPush` frames whose concatenated `data` equals the
+  source. The last frame must have `is_final = true`. Locks the
+  invariant that streaming serving preserves wire semantics.
+- `serve_emits_nar_unavailable_when_missing` confirms a missing hash
+  surfaces as exactly one `NarUnavailable` frame plus an `Err` return —
+  no `NarAbort`, no orphan `NarPush`.
+
+## Per-session NAR upload buffer — bounded memory (issue #109)
+
+`proto/src/handler/dispatch.rs::nar_buffers_tests`:
+
+- `append_below_budget_succeeds_and_tracks_total` exercises the happy
+  path and the running byte counter.
+- `append_overflow_returns_err_and_does_not_mutate` makes the rejection
+  guarantee explicit: a push that would breach the cap returns `Err` and
+  leaves the buffer state unchanged. The dispatcher uses this to abort
+  the offending job with `AbortJob` instead of accepting the bytes.
+- `take_releases_budget` asserts that finalising a path frees the byte
+  budget so subsequent uploads on the same session aren't blocked.
+- `take_missing_returns_none` covers the presigned-S3 path where no
+  `NarPush` chunks were ever buffered.
+- `append_overflow_across_keys_is_caught` proves the cap is a *session*
+  budget, not a per-path one — many small open uploads cannot collude
+  to exceed the limit.

@@ -6,10 +6,11 @@
 
 //! Per-connection message dispatch context and all `ClientMessage` handlers.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use gradient_core::types::*;
+use tokio::sync::Semaphore;
 use tracing::{debug, error, info, warn};
 use gradient_core::types::ids::{DerivationId, OrganizationId};
 
@@ -20,18 +21,73 @@ use super::auth::{lookup_registered_peers, validate_tokens};
 use super::cache::handle_cache_query;
 use super::nar::{NarUploadRecord, mark_nar_stored, record_nar_push_metric};
 use super::socket::{
-    JOB_OFFER_CHUNK_SIZE, ProtoSocket, push_pending_candidates, send_credentials_for_job,
+    JOB_OFFER_CHUNK_SIZE, ProtoWriter, push_pending_candidates, send_credentials_for_job,
     send_error, send_server_msg, serve_nar_request,
 };
+
+// ── Per-session inbound NAR buffer (issue #109) ──────────────────────────────
+
+/// Bounded buffer pool for inbound `NarPush` chunks. Tracks total queued bytes
+/// and rejects pushes that would exceed `max_bytes` so a rogue worker cannot
+/// pin unbounded RAM by opening many concurrent uploads with no `is_final`.
+pub(super) struct NarBuffers {
+    inner: HashMap<String, Vec<u8>>,
+    total_bytes: usize,
+    max_bytes: usize,
+}
+
+impl NarBuffers {
+    pub(super) fn new(max_bytes: usize) -> Self {
+        Self {
+            inner: HashMap::new(),
+            total_bytes: 0,
+            max_bytes,
+        }
+    }
+
+    /// Append `data` to the buffer for `store_path`. Returns `Err(())` when
+    /// the cumulative session budget would be exceeded — the caller should
+    /// abort the job and stop accepting further chunks for this path.
+    pub(super) fn append(&mut self, store_path: &str, data: &[u8]) -> Result<(), ()> {
+        if self.total_bytes.saturating_add(data.len()) > self.max_bytes {
+            return Err(());
+        }
+        self.inner
+            .entry(store_path.to_owned())
+            .or_default()
+            .extend_from_slice(data);
+        self.total_bytes += data.len();
+        Ok(())
+    }
+
+    /// Pop the assembled buffer for `store_path`. Returns `None` if no chunks
+    /// were ever buffered (e.g. presigned-S3 path that bypassed `NarPush`).
+    pub(super) fn take(&mut self, store_path: &str) -> Option<Vec<u8>> {
+        let buf = self.inner.remove(store_path)?;
+        self.total_bytes = self.total_bytes.saturating_sub(buf.len());
+        Some(buf)
+    }
+
+    pub(super) fn total_bytes(&self) -> usize {
+        self.total_bytes
+    }
+
+    pub(super) fn max_bytes(&self) -> usize {
+        self.max_bytes
+    }
+}
 
 // ── Dispatch context ──────────────────────────────────────────────────────────
 
 /// Holds the per-connection references needed to handle a single client message.
 pub(super) struct DispatchContext<'a> {
-    pub socket: &'a mut ProtoSocket,
+    pub writer: &'a ProtoWriter,
     pub state: &'a Arc<ServerState>,
     pub scheduler: &'a Arc<Scheduler>,
     pub peer_id: &'a str,
+    /// Bounds the number of NAR-serving tasks running concurrently per
+    /// connection. Cloned into each spawned `serve_nar_request` task.
+    pub nar_serve_semaphore: &'a Arc<Semaphore>,
 }
 
 impl<'a> DispatchContext<'a> {
@@ -41,7 +97,7 @@ impl<'a> DispatchContext<'a> {
     pub async fn dispatch(
         &mut self,
         msg: ClientMessage,
-        nar_buffers: &mut std::collections::HashMap<String, Vec<u8>>,
+        nar_buffers: &mut NarBuffers,
     ) -> bool {
         // Avoid Debug-printing the entire `msg` here: variants like `NarPush`
         // carry up to 64 KiB of binary chunk data which would flood the log
@@ -50,7 +106,7 @@ impl<'a> DispatchContext<'a> {
         debug!(variant = msg.variant_name(), "received client message");
         match msg {
             ClientMessage::InitConnection { .. } => {
-                send_error(self.socket, 400, "unexpected InitConnection".into()).await;
+                send_error(self.writer, 400, "unexpected InitConnection".into()).await;
                 false
             }
             ClientMessage::Reject { code, reason } => {
@@ -189,7 +245,7 @@ impl<'a> DispatchContext<'a> {
         debug!(peer_id = %self.peer_id, "ReauthRequest");
         let registered_peers = lookup_registered_peers(self.state, self.peer_id).await;
         send_server_msg(
-            self.socket,
+            self.writer,
             &ServerMessage::AuthChallenge {
                 peers: registered_peers.iter().map(|(id, _)| id.clone()).collect(),
             },
@@ -209,7 +265,7 @@ impl<'a> DispatchContext<'a> {
             .update_authorized_peers(self.peer_id, updated_uuids)
             .await;
         send_server_msg(
-            self.socket,
+            self.writer,
             &ServerMessage::AuthUpdate {
                 authorized_peers,
                 failed_peers,
@@ -261,7 +317,7 @@ impl<'a> DispatchContext<'a> {
         let total = chunks.len();
         for (i, chunk) in chunks.into_iter().enumerate() {
             if send_server_msg(
-                self.socket,
+                self.writer,
                 &ServerMessage::JobListChunk {
                     candidates: chunk.to_vec(),
                     is_final: i + 1 == total,
@@ -275,7 +331,7 @@ impl<'a> DispatchContext<'a> {
         }
         if total == 0 {
             return send_server_msg(
-                self.socket,
+                self.writer,
                 &ServerMessage::JobListChunk {
                     candidates: vec![],
                     is_final: true,
@@ -293,7 +349,7 @@ impl<'a> DispatchContext<'a> {
         debug!(peer_id = %self.peer_id, ?kind, "RequestJob");
         if let Some(assignment) = self.scheduler.request_job(self.peer_id, kind).await {
             send_credentials_for_job(
-                self.socket,
+                self.writer,
                 self.state,
                 self.scheduler,
                 self.peer_id,
@@ -302,7 +358,7 @@ impl<'a> DispatchContext<'a> {
             )
             .await;
             if send_server_msg(
-                self.socket,
+                self.writer,
                 &ServerMessage::AssignJob {
                     job_id: assignment.job_id,
                     job: assignment.job,
@@ -388,7 +444,7 @@ impl<'a> DispatchContext<'a> {
                 {
                     error!(peer_id = %self.peer_id, %job_id, error = %e, "handle_eval_result failed");
                 }
-                push_pending_candidates(self.socket, self.scheduler, self.peer_id).await;
+                push_pending_candidates(self.writer, self.scheduler, self.peer_id).await;
             }
             JobUpdateKind::Building { build_id } => {
                 self.scheduler
@@ -419,7 +475,7 @@ impl<'a> DispatchContext<'a> {
         {
             error!(peer_id = %self.peer_id, %job_id, error = %e, "handle_job_completed failed");
         }
-        push_pending_candidates(self.socket, self.scheduler, self.peer_id).await;
+        push_pending_candidates(self.writer, self.scheduler, self.peer_id).await;
     }
 
     async fn on_job_failed(&mut self, job_id: String, error: String) {
@@ -431,7 +487,7 @@ impl<'a> DispatchContext<'a> {
         {
             error!(peer_id = %self.peer_id, %job_id, error = %e, "handle_job_failed failed");
         }
-        push_pending_candidates(self.socket, self.scheduler, self.peer_id).await;
+        push_pending_candidates(self.writer, self.scheduler, self.peer_id).await;
     }
 
     // ── Worker draining ───────────────────────────────────────────────────────
@@ -454,10 +510,27 @@ impl<'a> DispatchContext<'a> {
 
     async fn on_nar_request(&mut self, job_id: String, paths: Vec<String>) {
         debug!(peer_id = %self.peer_id, %job_id, count = paths.len(), "NarRequest");
+        // Spawn one task per path so a slow storage read for path[0] does not
+        // serialise paths[1..]. The shared `nar_serve_semaphore` caps fan-out
+        // per connection, and the cloneable `ProtoWriter` interleaves chunks
+        // safely on the wire (the worker keys NarPush by store_path).
         for store_path in paths {
-            if let Err(e) = serve_nar_request(self.state, self.socket, &job_id, &store_path).await {
-                warn!(peer_id = %self.peer_id, %job_id, %store_path, error = %e, "NarRequest serve failed");
-            }
+            let state = Arc::clone(self.state);
+            let writer = self.writer.clone();
+            let permit = Arc::clone(self.nar_serve_semaphore);
+            let peer_id = self.peer_id.to_owned();
+            let job_id = job_id.clone();
+            tokio::spawn(async move {
+                let _guard = match permit.acquire_owned().await {
+                    Ok(g) => g,
+                    Err(_) => return, // semaphore closed (shutdown)
+                };
+                if let Err(e) =
+                    serve_nar_request(&state, &writer, &job_id, &store_path).await
+                {
+                    warn!(%peer_id, %job_id, %store_path, error = %e, "NarRequest serve failed");
+                }
+            });
         }
     }
 
@@ -468,14 +541,22 @@ impl<'a> DispatchContext<'a> {
         data: Vec<u8>,
         offset: u64,
         is_final: bool,
-        nar_buffers: &mut std::collections::HashMap<String, Vec<u8>>,
+        nar_buffers: &mut NarBuffers,
     ) {
         debug!(peer_id = %self.peer_id, %job_id, %store_path, offset, is_final, bytes = data.len(), "NarPush");
         if !data.is_empty() {
-            nar_buffers
-                .entry(store_path.clone())
-                .or_default()
-                .extend_from_slice(&data);
+            if nar_buffers.append(&store_path, &data).is_err() {
+                let reason = format!(
+                    "session NAR upload buffer would exceed {} bytes (current {} + {} = {})",
+                    nar_buffers.max_bytes(),
+                    nar_buffers.total_bytes(),
+                    data.len(),
+                    nar_buffers.total_bytes().saturating_add(data.len()),
+                );
+                warn!(peer_id = %self.peer_id, %job_id, %store_path, "{reason}");
+                self.abort_job(&job_id, reason).await;
+                return;
+            }
         }
         // The buffer is held until `on_nar_uploaded` arrives; that handler
         // commits it to `nar_storage` and records the metadata atomically so
@@ -506,13 +587,13 @@ impl<'a> DispatchContext<'a> {
         nar_hash: String,
         references: Vec<String>,
         deriver: Option<String>,
-        nar_buffers: &mut std::collections::HashMap<String, Vec<u8>>,
+        nar_buffers: &mut NarBuffers,
     ) {
         debug!(peer_id = %self.peer_id, %job_id, %store_path, %file_hash, file_size, nar_size, %nar_hash, ?deriver, "NarUploaded");
 
         // Local-mode commit: if we buffered NarPush chunks for this path,
         // validate + write them to nar_storage atomically with the metadata.
-        if let Some(buf) = nar_buffers.remove(&store_path) {
+        if let Some(buf) = nar_buffers.take(&store_path) {
             if buf.len() as u64 != file_size {
                 let reason = format!(
                     "NarPush buffer size {} does not match reported file_size {}",
@@ -577,7 +658,7 @@ impl<'a> DispatchContext<'a> {
     /// `JobFailed`, which the scheduler turns into a failed build.
     async fn abort_job(&mut self, job_id: &str, reason: String) {
         let _ = send_server_msg(
-            self.socket,
+            self.writer,
             &ServerMessage::AbortJob {
                 job_id: job_id.to_owned(),
                 reason,
@@ -598,7 +679,7 @@ impl<'a> DispatchContext<'a> {
         let org_id = self.scheduler.peer_id_for_job(&job_id).await;
         let cached = handle_cache_query(self.state, org_id, &paths, mode).await;
         debug!(peer_id = %self.peer_id, %job_id, entries = cached.len(), "CacheStatus");
-        send_server_msg(self.socket, &ServerMessage::CacheStatus { job_id, cached })
+        send_server_msg(self.writer, &ServerMessage::CacheStatus { job_id, cached })
             .await
             .is_ok()
     }
@@ -652,10 +733,64 @@ impl<'a> DispatchContext<'a> {
         };
         debug!(peer_id = %self.peer_id, %job_id, known = known.len(), "KnownDerivations");
         send_server_msg(
-            self.socket,
+            self.writer,
             &ServerMessage::KnownDerivations { job_id, known },
         )
         .await
         .is_ok()
     }
 }
+
+#[cfg(test)]
+mod nar_buffers_tests {
+    use super::NarBuffers;
+
+    #[test]
+    fn append_below_budget_succeeds_and_tracks_total() {
+        let mut nb = NarBuffers::new(1024);
+        nb.append("/nix/store/a", &vec![0u8; 256]).unwrap();
+        nb.append("/nix/store/a", &vec![1u8; 256]).unwrap();
+        nb.append("/nix/store/b", &vec![2u8; 256]).unwrap();
+        assert_eq!(nb.total_bytes(), 768);
+    }
+
+    #[test]
+    fn append_overflow_returns_err_and_does_not_mutate() {
+        let mut nb = NarBuffers::new(1024);
+        nb.append("/nix/store/a", &vec![0u8; 1000]).unwrap();
+        let res = nb.append("/nix/store/a", &vec![0u8; 100]);
+        assert!(res.is_err(), "must reject pushes that exceed the budget");
+        assert_eq!(
+            nb.total_bytes(),
+            1000,
+            "rejected append must not have appended any bytes"
+        );
+    }
+
+    #[test]
+    fn take_releases_budget() {
+        let mut nb = NarBuffers::new(1024);
+        nb.append("/nix/store/a", &vec![0u8; 500]).unwrap();
+        nb.append("/nix/store/b", &vec![1u8; 500]).unwrap();
+        let buf_a = nb.take("/nix/store/a").expect("a was buffered");
+        assert_eq!(buf_a.len(), 500);
+        assert_eq!(nb.total_bytes(), 500);
+        nb.append("/nix/store/c", &vec![2u8; 400]).unwrap();
+    }
+
+    #[test]
+    fn take_missing_returns_none() {
+        let mut nb = NarBuffers::new(1024);
+        assert!(nb.take("/nix/store/missing").is_none());
+    }
+
+    #[test]
+    fn append_overflow_across_keys_is_caught() {
+        let mut nb = NarBuffers::new(800);
+        nb.append("/nix/store/a", &vec![0u8; 400]).unwrap();
+        nb.append("/nix/store/b", &vec![0u8; 400]).unwrap();
+        let res = nb.append("/nix/store/c", &[42u8]);
+        assert!(res.is_err());
+    }
+}
+

@@ -57,6 +57,10 @@ openssl rand -base64 48 > /run/secrets/gradient-crypt
 | `settings.enableRegistration` | `true` | Allow new user self-registration |
 | `settings.deleteState` | `true` | Remove entities no longer in `state` (see below) |
 | `settings.cacheTtlHours` | `336` | TTL in hours for cached NARs not fetched recently (0 = disabled) |
+| `settings.narStorageOpenTimeoutSecs` | `60` | Max seconds the server will wait to open a NAR object stream (e.g. an S3 GET) before emitting `NarUnavailable`. Caps how long a stalled storage backend can block a `NarRequest`. |
+| `settings.narSendChunkTimeoutSecs` | `30` | Max seconds a single outbound `NarPush` chunk may sit in the per-connection writer queue waiting for the WebSocket sink to drain before the transfer is aborted with `NarAbort`. |
+| `settings.maxConcurrentNarServes` | `8` | Max NAR-serving tasks running concurrently per worker connection. Bounds memory and storage-backend fan-out when a worker requests many paths in a single batch. |
+| `settings.maxNarBufferBytes` | `268435456` (256 MiB) | Max bytes a single proto session may hold in inbound `NarPush` upload buffers. Prevents a rogue worker from pinning unbounded RAM by opening many uploads without finalising them (issue #109). |
 
 ## Reverse Proxies
 
