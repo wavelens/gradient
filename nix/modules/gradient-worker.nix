@@ -48,6 +48,7 @@ in {
           type = lib.types.nullOr lib.types.str;
           default = null;
         };
+
         extraConfig = lib.mkOption {
           description = ''
             Additional lines of configuration passed to
@@ -59,6 +60,7 @@ in {
         };
       };
     };
+
     useTls = lib.mkEnableOption "TLS" // { default = true; };
     discoverable = lib.mkEnableOption "accept incoming connections on /proto";
     domain = lib.mkOption {
@@ -364,7 +366,7 @@ in {
       caddy = lib.mkIf cfg.reverseProxy.caddy.enable {
         enable = true;
         virtualHosts."${if cfg.useTls then "" else "http://"}${cfg.domain}" = {
-          useACMEHost = cfg.reverseProxy.caddy.useACMEHost;
+          inherit (cfg.reverseProxy.caddy) useACMEHost;
           extraConfig = ''
             reverse_proxy http://${cfg.listenAddr}:${toString cfg.port}
           '';

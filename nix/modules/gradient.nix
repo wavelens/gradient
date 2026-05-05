@@ -49,7 +49,11 @@ in {
     services.gradient = {
       enable = lib.mkEnableOption "Gradient";
       reverseProxy = {
-        nginx.enable = lib.mkEnableOption "Nginx configuration" // { default = true; };
+        nginx.enable = lib.mkEnableOption "Nginx configuration" // {
+          default = !cfg.reverseProxy.caddy.enable;
+          defaultText = lib.literalExpression "!config.services.gradient.reverseProxy.caddy.enable";
+        };
+
         caddy = {
           enable = lib.mkEnableOption "Caddy configuration";
           useACMEHost = lib.mkOption {
@@ -536,7 +540,7 @@ in {
       caddy = lib.mkIf cfg.reverseProxy.caddy.enable {
         enable = true;
         virtualHosts."${if cfg.useTls then "" else "http://"}${cfg.domain}" = {
-          useACMEHost = cfg.reverseProxy.caddy.useACMEHost;
+          inherit (cfg.reverseProxy.caddy) useACMEHost;
           extraConfig = ''
             @backend {
               path_regexp api ^/(api|proto|cache)(/.*)?$
@@ -546,7 +550,7 @@ in {
             ${
               if cfg.frontend.enable then
                 ''
-                  root ${cfg.frontend.package}/share/gradient-frontend
+                  root ${cfg.packages.frontend}/share/gradient-frontend
                   file_server
                 ''
               else
