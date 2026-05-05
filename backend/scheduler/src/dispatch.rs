@@ -32,7 +32,6 @@ use sea_orm::{ActiveModelTrait as _, ColumnTrait, EntityTrait, QueryFilter};
 /// Webhooks are the primary trigger; this catches any that fail to arrive.
 const WEBHOOK_BACKUP_POLL_SECS: i64 = 1800; // 30 minutes
 use tracing::{debug, error, info, warn};
-use uuid::Uuid;
 
 use super::Scheduler;
 use super::jobs::{PendingBuildJob, PendingEvalJob};
@@ -309,35 +308,35 @@ async fn build_dispatch_loop(scheduler: Arc<Scheduler>) {
 /// This avoids O(n) serial round-trips when hundreds of builds become ready
 /// at once.
 struct BuildDispatchMaps {
-    derivations: HashMap<Uuid, MDerivation>,
-    evaluations: HashMap<Uuid, MEvaluation>,
+    derivations: HashMap<DerivationId, MDerivation>,
+    evaluations: HashMap<EvaluationId, MEvaluation>,
     /// project_id → organization_id
-    projects: HashMap<Uuid, Uuid>,
+    projects: HashMap<ProjectId, OrganizationId>,
     /// eval_id → organization_id (used when the eval has no project)
-    direct_builds: HashMap<Uuid, Uuid>,
-    features_by_drv: HashMap<Uuid, Vec<Uuid>>,
-    feature_names: HashMap<Uuid, String>,
+    direct_builds: HashMap<EvaluationId, OrganizationId>,
+    features_by_drv: HashMap<DerivationId, Vec<FeatureId>>,
+    feature_names: HashMap<FeatureId, String>,
     /// derivation_id → number of direct dependencies
-    dep_counts: HashMap<Uuid, u32>,
+    dep_counts: HashMap<DerivationId, u32>,
     /// derivation_id → direct input store paths (outputs of every input
     /// derivation). Used by workers to score how much they would have to
     /// download to start this build. `inputSrcs` are not included — they
     /// live in the `.drv` file and are not stored in the scheduler DB.
-    direct_inputs: HashMap<Uuid, Vec<RequiredPath>>,
+    direct_inputs: HashMap<DerivationId, Vec<RequiredPath>>,
 }
 
 impl BuildDispatchMaps {
     /// Issue one IN-list query per table and build all lookup maps.
     async fn load(state: &Arc<ServerState>, builds: &[MBuild]) -> anyhow::Result<Self> {
-        let drv_ids: Vec<Uuid> = builds.iter().map(|b| b.derivation).collect();
-        let eval_ids: Vec<Uuid> = builds
+        let drv_ids: Vec<DerivationId> = builds.iter().map(|b| b.derivation).collect();
+        let eval_ids: Vec<EvaluationId> = builds
             .iter()
             .map(|b| b.evaluation)
             .collect::<std::collections::HashSet<_>>()
             .into_iter()
             .collect();
 
-        let derivations: HashMap<Uuid, MDerivation> = EDerivation::find()
+        let derivations: HashMap<DerivationId, MDerivation> = EDerivation::find()
             .filter(CDerivation::Id.is_in(drv_ids.clone()))
             .all(&state.worker_db)
             .await?
@@ -345,7 +344,7 @@ impl BuildDispatchMaps {
             .map(|d| (d.id, d))
             .collect();
 
-        let evaluations: HashMap<Uuid, MEvaluation> = EEvaluation::find()
+        let evaluations: HashMap<EvaluationId, MEvaluation> = EEvaluation::find()
             .filter(CEvaluation::Id.is_in(eval_ids))
             .all(&state.worker_db)
             .await?
@@ -354,13 +353,13 @@ impl BuildDispatchMaps {
             .collect();
 
         // peer_id resolution: project (preferred) or direct_build (fallback).
-        let project_ids: Vec<Uuid> = evaluations
+        let project_ids: Vec<ProjectId> = evaluations
             .values()
             .filter_map(|e| e.project)
             .collect::<std::collections::HashSet<_>>()
             .into_iter()
             .collect();
-        let projects: HashMap<Uuid, Uuid> = if project_ids.is_empty() {
+        let projects: HashMap<ProjectId, OrganizationId> = if project_ids.is_empty() {
             HashMap::new()
         } else {
             EProject::find()
@@ -371,8 +370,8 @@ impl BuildDispatchMaps {
                 .map(|p| (p.id, p.organization))
                 .collect()
         };
-        let direct_builds: HashMap<Uuid, Uuid> = {
-            let evals_without_project: Vec<Uuid> = evaluations
+        let direct_builds: HashMap<EvaluationId, OrganizationId> = {
+            let evals_without_project: Vec<EvaluationId> = evaluations
                 .values()
                 .filter(|e| e.project.is_none())
                 .map(|e| e.id)
@@ -396,17 +395,17 @@ impl BuildDispatchMaps {
             .all(&state.worker_db)
             .await
             .unwrap_or_default();
-        let mut features_by_drv: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
+        let mut features_by_drv: HashMap<DerivationId, Vec<FeatureId>> = HashMap::new();
         for e in &feature_edges {
             features_by_drv
                 .entry(e.derivation)
                 .or_default()
                 .push(e.feature);
         }
-        let feature_names: HashMap<Uuid, String> = if feature_edges.is_empty() {
+        let feature_names: HashMap<FeatureId, String> = if feature_edges.is_empty() {
             HashMap::new()
         } else {
-            let feature_ids: Vec<Uuid> = feature_edges.iter().map(|e| e.feature).collect();
+            let feature_ids: Vec<FeatureId> = feature_edges.iter().map(|e| e.feature).collect();
             EFeature::find()
                 .filter(CFeature::Id.is_in(feature_ids))
                 .filter(CFeature::Kind.eq(entity::feature::FeatureKind::Feature))
@@ -426,11 +425,11 @@ impl BuildDispatchMaps {
             .await
             .unwrap_or_default();
 
-        let mut deps_by_drv: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
+        let mut deps_by_drv: HashMap<DerivationId, Vec<DerivationId>> = HashMap::new();
         for e in &dep_edges {
             deps_by_drv.entry(e.derivation).or_default().push(e.dependency);
         }
-        let dep_counts: HashMap<Uuid, u32> = deps_by_drv
+        let dep_counts: HashMap<DerivationId, u32> = deps_by_drv
             .iter()
             .map(|(k, v)| (*k, v.len() as u32))
             .collect();
@@ -438,14 +437,14 @@ impl BuildDispatchMaps {
         // Direct input store paths per build derivation: for each input drv,
         // gather its `derivation_output` rows; for each output, attach
         // cache info from `cached_path` when available.
-        let dep_drv_ids: Vec<Uuid> = dep_edges
+        let dep_drv_ids: Vec<DerivationId> = dep_edges
             .iter()
             .map(|e| e.dependency)
-            .collect::<HashSet<Uuid>>()
+            .collect::<HashSet<DerivationId>>()
             .into_iter()
             .collect();
 
-        let outputs_by_drv: HashMap<Uuid, Vec<MDerivationOutput>> = if dep_drv_ids.is_empty() {
+        let outputs_by_drv: HashMap<DerivationId, Vec<MDerivationOutput>> = if dep_drv_ids.is_empty() {
             HashMap::new()
         } else {
             let outs = EDerivationOutput::find()
@@ -453,7 +452,7 @@ impl BuildDispatchMaps {
                 .all(&state.worker_db)
                 .await
                 .unwrap_or_default();
-            let mut map: HashMap<Uuid, Vec<MDerivationOutput>> = HashMap::new();
+            let mut map: HashMap<DerivationId, Vec<MDerivationOutput>> = HashMap::new();
             for o in outs {
                 map.entry(o.derivation).or_default().push(o);
             }
@@ -484,7 +483,7 @@ impl BuildDispatchMaps {
                 .collect()
         };
 
-        let mut direct_inputs: HashMap<Uuid, Vec<RequiredPath>> = HashMap::new();
+        let mut direct_inputs: HashMap<DerivationId, Vec<RequiredPath>> = HashMap::new();
         for (drv_id, dep_drvs) in &deps_by_drv {
             let mut paths: Vec<RequiredPath> = Vec::new();
             for dep_id in dep_drvs {
@@ -516,7 +515,7 @@ impl BuildDispatchMaps {
 
     /// Resolve the organization that owns this evaluation (used as `peer_id`
     /// to route the job only to workers registered by that org).
-    fn resolve_peer_id(&self, eval: &MEvaluation) -> Option<Uuid> {
+    fn resolve_peer_id(&self, eval: &MEvaluation) -> Option<OrganizationId> {
         match eval.project {
             Some(pid) => self.projects.get(&pid).copied(),
             None => self.direct_builds.get(&eval.id).copied(),
@@ -524,7 +523,7 @@ impl BuildDispatchMaps {
     }
 
     /// Return the required Nix system features for `derivation_id`.
-    fn required_features(&self, derivation_id: Uuid) -> Vec<String> {
+    fn required_features(&self, derivation_id: DerivationId) -> Vec<String> {
         self.features_by_drv
             .get(&derivation_id)
             .map(|ids| {
@@ -666,7 +665,7 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-async fn organization_id_for_eval(state: &Arc<ServerState>, eval: &MEvaluation) -> Option<Uuid> {
+async fn organization_id_for_eval(state: &Arc<ServerState>, eval: &MEvaluation) -> Option<OrganizationId> {
     if let Some(project_id) = eval.project {
         match EProject::find_by_id(project_id).one(&state.worker_db).await {
             Ok(Some(p)) => return Some(p.organization),

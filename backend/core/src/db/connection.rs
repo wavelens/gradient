@@ -16,7 +16,6 @@ use sea_orm_migration::prelude::*;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::log::LevelFilter;
-use uuid::Uuid;
 
 use crate::types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID};
 use crate::types::*;
@@ -156,7 +155,7 @@ pub async fn add_features(
     state: Arc<ServerState>,
     features: Vec<String>,
     kind: entity::feature::FeatureKind,
-    derivation_id: Option<Uuid>,
+    derivation_id: Option<DerivationId>,
 ) -> Result<()> {
     for f in features {
         let feature = EFeature::find()
@@ -170,7 +169,7 @@ pub async fn add_features(
             f
         } else {
             let afeature = AFeature {
-                id: Set(Uuid::now_v7()),
+                id: Set(FeatureId::now_v7()),
                 name: Set(f),
                 kind: Set(kind.clone()),
             };
@@ -183,7 +182,7 @@ pub async fn add_features(
 
         if let Some(d_id) = derivation_id {
             let aderivation_feature = ADerivationFeature {
-                id: Set(Uuid::now_v7()),
+                id: Set(DerivationFeatureId::now_v7()),
                 derivation: Set(d_id),
                 feature: Set(feature.id),
             };
@@ -213,7 +212,7 @@ pub async fn add_features(
 
 pub async fn get_organization_by_name(
     state: Arc<ServerState>,
-    user_id: Uuid,
+    user_id: UserId,
     name: String,
 ) -> Result<Option<MOrganization>> {
     EOrganization::find()
@@ -247,7 +246,7 @@ pub async fn get_any_organization_by_name(
 
 pub async fn get_project_by_name(
     state: Arc<ServerState>,
-    user_id: Uuid,
+    user_id: UserId,
     organization_name: String,
     project_name: String,
 ) -> Result<Option<(MOrganization, MProject)>> {
@@ -282,7 +281,7 @@ pub async fn get_any_project_by_name(
 
 pub async fn get_cache_by_name(
     state: Arc<ServerState>,
-    user_id: Uuid,
+    user_id: UserId,
     name: String,
 ) -> Result<Option<MCache>> {
     ECache::find()

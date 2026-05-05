@@ -13,7 +13,6 @@ use std::sync::Arc;
 use anyhow::Result;
 use sea_orm::EntityTrait;
 use tracing::{debug, error, info, warn};
-use uuid::Uuid;
 use entity::build::BuildStatus;
 use sea_orm::{ActiveModelTrait, IntoActiveModel, Set};
 
@@ -256,7 +255,7 @@ impl Scheduler {
     }
 
     pub async fn handle_build_status_update(&self, build_id_str: &str, worker_id: &str) {
-        let build_id = match build_id_str.parse::<Uuid>() {
+        let build_id = match build_id_str.parse::<BuildId>() {
             Ok(id) => id,
             Err(_) => {
                 warn!(%build_id_str, "invalid build_id in Building update");
@@ -337,8 +336,8 @@ impl Scheduler {
         build_id_str: &str,
         outputs: Vec<BuildOutput>,
     ) -> Result<()> {
-        let build_id = build_id_str
-            .parse::<Uuid>()
+        let build_id: BuildId = build_id_str
+            .parse()
             .map_err(|_| anyhow::anyhow!("invalid build_id: {}", build_id_str))?;
 
         let job = {
@@ -442,7 +441,7 @@ impl Scheduler {
             }
         };
 
-        let build_id = match build_id_str.and_then(|s| s.parse::<Uuid>().ok()) {
+        let build_id: BuildId = match build_id_str.and_then(|s| s.parse::<BuildId>().ok()) {
             Some(id) => id,
             None => {
                 warn!(%job_id, task_index, bytes = bytes_len, "log chunk dropped: build_task index out of range or build_id unparseable");
@@ -544,7 +543,7 @@ impl Scheduler {
     }
 
     /// Return the peer (org) UUID that owns the active job, if found.
-    pub async fn peer_id_for_job(&self, job_id: &str) -> Option<Uuid> {
+    pub async fn peer_id_for_job(&self, job_id: &str) -> Option<OrganizationId> {
         self.job_tracker
             .read()
             .await
@@ -581,7 +580,7 @@ impl Scheduler {
     async fn worker_auth_and_caps(
         &self,
         worker_id: &str,
-    ) -> (Option<HashSet<Uuid>>, Option<WorkerBuildCaps>) {
+    ) -> (Option<HashSet<OrganizationId>>, Option<WorkerBuildCaps>) {
         let pool = self.worker_pool.read().await;
         let authorized = pool
             .peer_auth_for(worker_id)
@@ -601,7 +600,7 @@ impl Scheduler {
     async fn try_assign(
         &self,
         peer_id: &str,
-        authorized: Option<&HashSet<Uuid>>,
+        authorized: Option<&HashSet<OrganizationId>>,
         caps: Option<&WorkerBuildCaps>,
         kind: &JobKind,
     ) -> Option<Assignment> {

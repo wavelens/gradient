@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_core::types::ServerState;
+use gradient_core::types::{ServerState, ids::OrganizationId};
 use std::collections::HashSet;
 use tracing::warn;
 use uuid::Uuid;
@@ -23,10 +23,10 @@ pub(super) async fn filter_org_peers_without_cache(
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
     let mut authorized_out: Vec<String> = Vec::new();
-    let mut uuid_peers: Vec<(String, Uuid)> = Vec::new();
+    let mut uuid_peers: Vec<(String, OrganizationId)> = Vec::new();
     for s in authorized {
         match Uuid::parse_str(&s) {
-            Ok(u) => uuid_peers.push((s, u)),
+            Ok(u) => uuid_peers.push((s, OrganizationId::new(u))),
             Err(_) => authorized_out.push(s),
         }
     }
@@ -35,9 +35,9 @@ pub(super) async fn filter_org_peers_without_cache(
         return (authorized_out, Vec::new());
     }
 
-    let uuid_set: Vec<Uuid> = uuid_peers.iter().map(|(_, u)| *u).collect();
+    let uuid_set: Vec<OrganizationId> = uuid_peers.iter().map(|(_, u)| *u).collect();
 
-    let org_ids: HashSet<Uuid> = match EOrg::find()
+    let org_ids: HashSet<OrganizationId> = match EOrg::find()
         .filter(OCol::Id.is_in(uuid_set.clone()))
         .all(&state.worker_db)
         .await
@@ -52,7 +52,7 @@ pub(super) async fn filter_org_peers_without_cache(
         }
     };
 
-    let orgs_with_cache: HashSet<Uuid> = if org_ids.is_empty() {
+    let orgs_with_cache: HashSet<OrganizationId> = if org_ids.is_empty() {
         HashSet::new()
     } else {
         match EOrgCache::find()
@@ -478,7 +478,7 @@ mod tests {
     use sea_orm::{DatabaseBackend, MockDatabase};
     use uuid::Uuid;
 
-    fn org_row(id: Uuid) -> OrgModel {
+    fn org_row(id: OrganizationId) -> OrgModel {
         OrgModel {
             id,
             name: format!("o-{}", id),
@@ -487,16 +487,16 @@ mod tests {
             public_key: String::new(),
             private_key: String::new(),
             public: false,
-            created_by: Uuid::nil(),
+            created_by: gradient_core::types::ids::UserId::nil(),
             created_at: gradient_core::types::now(),
             managed: false,
             github_installation_id: None,
         }
     }
 
-    fn org_cache_row(org: Uuid, cache: Uuid) -> OrgCacheModel {
+    fn org_cache_row(org: OrganizationId, cache: gradient_core::types::ids::CacheId) -> OrgCacheModel {
         OrgCacheModel {
-            id: Uuid::now_v7(),
+            id: gradient_core::types::ids::OrganizationCacheId::now_v7(),
             organization: org,
             cache,
             mode: CacheSubscriptionMode::ReadWrite,
@@ -509,8 +509,8 @@ mod tests {
 
     #[tokio::test]
     async fn filter_org_peers_passes_through_org_with_cache() {
-        let org = Uuid::now_v7();
-        let cache = Uuid::now_v7();
+        let org = OrganizationId::now_v7();
+        let cache = gradient_core::types::ids::CacheId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![org_row(org)]])
             .append_query_results([vec![org_cache_row(org, cache)]])
@@ -524,7 +524,7 @@ mod tests {
 
     #[tokio::test]
     async fn filter_org_peers_demotes_org_without_cache() {
-        let org = Uuid::now_v7();
+        let org = OrganizationId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![org_row(org)]])
             .append_query_results([Vec::<OrgCacheModel>::new()])
@@ -542,7 +542,7 @@ mod tests {
 
     #[tokio::test]
     async fn filter_org_peers_passes_through_non_org_uuids() {
-        let cache_peer = Uuid::now_v7();
+        let cache_peer = OrganizationId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([Vec::<OrgModel>::new()])
             .into_connection();
@@ -555,10 +555,10 @@ mod tests {
 
     #[tokio::test]
     async fn filter_org_peers_mixed() {
-        let org_with = Uuid::now_v7();
-        let org_without = Uuid::now_v7();
-        let cache = Uuid::now_v7();
-        let cache_peer = Uuid::now_v7();
+        let org_with = OrganizationId::now_v7();
+        let org_without = OrganizationId::now_v7();
+        let cache = gradient_core::types::ids::CacheId::now_v7();
+        let cache_peer = OrganizationId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![org_row(org_with), org_row(org_without)]])
             .append_query_results([vec![org_cache_row(org_with, cache)]])
@@ -582,8 +582,8 @@ mod tests {
     #[tokio::test]
     async fn validate_then_filter_demotes_org_without_cache() {
         let token = "token-x";
-        let org_with = Uuid::now_v7();
-        let org_without = Uuid::now_v7();
+        let org_with = OrganizationId::now_v7();
+        let org_without = OrganizationId::now_v7();
         let registered = vec![
             (org_with.to_string(), sha256_hex(token)),
             (org_without.to_string(), sha256_hex(token)),
@@ -596,7 +596,7 @@ mod tests {
         assert_eq!(authorized.len(), 2);
         assert!(failed.is_empty());
 
-        let cache = Uuid::now_v7();
+        let cache = gradient_core::types::ids::CacheId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![org_row(org_with), org_row(org_without)]])
             .append_query_results([vec![org_cache_row(org_with, cache)]])

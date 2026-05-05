@@ -21,7 +21,6 @@ use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
 };
 use tracing::{error, info, warn};
-use uuid::Uuid;
 
 use super::jobs::PendingBuildJob;
 use gradient_core::types::BuildOutputMetadata;
@@ -40,7 +39,7 @@ impl<'a> BuildStateHandler<'a> {
     pub async fn handle_build_output(
         &self,
         _job: &PendingBuildJob,
-        build_id: Uuid,
+        build_id: BuildId,
         outputs: Vec<BuildOutput>,
     ) -> Result<()> {
         let build = EBuild::find_by_id(build_id)
@@ -83,7 +82,7 @@ impl<'a> BuildStateHandler<'a> {
                 // Insert new product rows.
                 for product in &output.products {
                     let am = ABuildProduct {
-                        id: Set(Uuid::now_v7()),
+                        id: Set(BuildProductId::now_v7()),
                         derivation_output: Set(row_id),
                         file_type: Set(product.file_type.clone()),
                         name: Set(product.name.clone()),
@@ -104,7 +103,7 @@ impl<'a> BuildStateHandler<'a> {
         Ok(())
     }
 
-    pub async fn handle_build_job_completed(&self, build_id: Uuid) -> Result<()> {
+    pub async fn handle_build_job_completed(&self, build_id: BuildId) -> Result<()> {
         let build = match EBuild::find_by_id(build_id).one(&self.state.worker_db).await? {
             Some(b) => b,
             None => {
@@ -119,7 +118,7 @@ impl<'a> BuildStateHandler<'a> {
         self.check_evaluation_done(evaluation_id).await
     }
 
-    pub async fn handle_build_job_failed(&self, build_id: Uuid, _error: &str) -> Result<()> {
+    pub async fn handle_build_job_failed(&self, build_id: BuildId, _error: &str) -> Result<()> {
         let build = match EBuild::find_by_id(build_id).one(&self.state.worker_db).await? {
             Some(b) => b,
             None => {
@@ -203,8 +202,8 @@ impl<'a> BuildStateHandler<'a> {
 
     async fn cascade_dependency_failed(
         &self,
-        evaluation_id: Uuid,
-        failed_derivation_id: Uuid,
+        evaluation_id: EvaluationId,
+        failed_derivation_id: DerivationId,
     ) -> Result<()> {
         let mut closure =
             collect_transitive_dependents(&self.state.worker_db, failed_derivation_id).await?;
@@ -235,7 +234,7 @@ impl<'a> BuildStateHandler<'a> {
     /// Returns early if any build is still active (Created/Queued/Building) or if
     /// the evaluation is not in `Building` state. Otherwise sets `Failed` when at
     /// least one build failed (Failed or DependencyFailed), else `Completed`.
-    pub(crate) async fn check_evaluation_done(&self, evaluation_id: Uuid) -> Result<()> {
+    pub(crate) async fn check_evaluation_done(&self, evaluation_id: EvaluationId) -> Result<()> {
         let active = EBuild::find()
             .filter(CBuild::Evaluation.eq(evaluation_id))
             .filter(CBuild::Status.is_in(vec![
@@ -344,7 +343,7 @@ impl<'a> BuildStateHandler<'a> {
                 continue;
             }
 
-            let drv_ids: Vec<Uuid> = pending_builds.iter().map(|b| b.derivation).collect();
+            let drv_ids: Vec<DerivationId> = pending_builds.iter().map(|b| b.derivation).collect();
             let checker = BuildabilityChecker::load(self.state, &drv_ids).await?;
             let target = if checker.any_buildable(&pending_builds, worker_caps) {
                 EvaluationStatus::Building
@@ -376,7 +375,7 @@ impl<'a> BuildStateHandler<'a> {
 pub async fn handle_build_output(
     state: &Arc<ServerState>,
     job: &PendingBuildJob,
-    build_id: Uuid,
+    build_id: BuildId,
     outputs: Vec<BuildOutput>,
 ) -> Result<()> {
     BuildStateHandler::new(state)
@@ -384,7 +383,7 @@ pub async fn handle_build_output(
         .await
 }
 
-pub async fn handle_build_job_completed(state: &Arc<ServerState>, build_id: Uuid) -> Result<()> {
+pub async fn handle_build_job_completed(state: &Arc<ServerState>, build_id: BuildId) -> Result<()> {
     BuildStateHandler::new(state)
         .handle_build_job_completed(build_id)
         .await
@@ -392,7 +391,7 @@ pub async fn handle_build_job_completed(state: &Arc<ServerState>, build_id: Uuid
 
 pub async fn handle_build_job_failed(
     state: &Arc<ServerState>,
-    build_id: Uuid,
+    build_id: BuildId,
     error: &str,
 ) -> Result<()> {
     BuildStateHandler::new(state)
@@ -402,7 +401,7 @@ pub async fn handle_build_job_failed(
 
 pub(crate) async fn check_evaluation_done(
     state: &Arc<ServerState>,
-    evaluation_id: Uuid,
+    evaluation_id: EvaluationId,
 ) -> Result<()> {
     BuildStateHandler::new(state)
         .check_evaluation_done(evaluation_id)
@@ -428,10 +427,10 @@ pub async fn reconcile_waiting_state(
 /// any pending build can be satisfied by the current worker pool without
 /// re-querying the DB per evaluation.
 struct BuildabilityChecker {
-    drv_by_id: HashMap<Uuid, MDerivation>,
+    drv_by_id: HashMap<DerivationId, MDerivation>,
     /// Maps derivation ID → list of required feature IDs.
-    features_by_drv: HashMap<Uuid, Vec<Uuid>>,
-    feature_name: HashMap<Uuid, String>,
+    features_by_drv: HashMap<DerivationId, Vec<FeatureId>>,
+    feature_name: HashMap<FeatureId, String>,
 }
 
 impl BuildabilityChecker {
@@ -439,20 +438,20 @@ impl BuildabilityChecker {
     /// `drv_ids`, returning a checker ready to call [`any_buildable`].
     ///
     /// [`any_buildable`]: BuildabilityChecker::any_buildable
-    async fn load(state: &Arc<ServerState>, drv_ids: &[Uuid]) -> Result<Self> {
+    async fn load(state: &Arc<ServerState>, drv_ids: &[DerivationId]) -> Result<Self> {
         let drvs = EDerivation::find()
             .filter(CDerivation::Id.is_in(drv_ids.to_vec()))
             .all(&state.worker_db)
             .await
             .context("fetch derivations for pending builds")?;
-        let drv_by_id: HashMap<Uuid, MDerivation> = drvs.into_iter().map(|d| (d.id, d)).collect();
+        let drv_by_id: HashMap<DerivationId, MDerivation> = drvs.into_iter().map(|d| (d.id, d)).collect();
 
         let edges = EDerivationFeature::find()
             .filter(CDerivationFeature::Derivation.is_in(drv_ids.to_vec()))
             .all(&state.worker_db)
             .await
             .context("fetch derivation_feature edges")?;
-        let mut features_by_drv: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
+        let mut features_by_drv: HashMap<DerivationId, Vec<FeatureId>> = HashMap::new();
         for e in &edges {
             features_by_drv
                 .entry(e.derivation)
@@ -460,7 +459,7 @@ impl BuildabilityChecker {
                 .push(e.feature);
         }
 
-        let feature_ids: Vec<Uuid> = edges.iter().map(|e| e.feature).collect();
+        let feature_ids: Vec<FeatureId> = edges.iter().map(|e| e.feature).collect();
         let feature_rows = if feature_ids.is_empty() {
             vec![]
         } else {
@@ -470,7 +469,7 @@ impl BuildabilityChecker {
                 .await
                 .context("fetch feature names")?
         };
-        let feature_name: HashMap<Uuid, String> =
+        let feature_name: HashMap<FeatureId, String> =
             feature_rows.into_iter().map(|f| (f.id, f.name)).collect();
 
         Ok(Self {

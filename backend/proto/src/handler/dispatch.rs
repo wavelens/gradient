@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use gradient_core::types::*;
 use tracing::{debug, error, info, warn};
-use uuid::Uuid;
+use gradient_core::types::ids::{DerivationId, OrganizationId};
 
 use crate::messages::{CandidateScore, ClientMessage, JobKind, JobUpdateKind, ServerMessage};
 use scheduler::Scheduler;
@@ -201,7 +201,7 @@ impl<'a> DispatchContext<'a> {
     async fn on_auth_response(&mut self, tokens: Vec<(String, String)>) -> bool {
         let registered_peers = lookup_registered_peers(self.state, self.peer_id).await;
         let (authorized_peers, failed_peers) = validate_tokens(&registered_peers, &tokens);
-        let updated_uuids: HashSet<Uuid> = authorized_peers
+        let updated_uuids: HashSet<OrganizationId> = authorized_peers
             .iter()
             .filter_map(|s| s.parse().ok())
             .collect();
@@ -624,8 +624,8 @@ impl<'a> DispatchContext<'a> {
                     // Second: keep only those that have a Completed or Substituted build.
                     // A derivation exists in the DB but has only Failed builds should
                     // NOT be pruned — the worker must retry it.
-                    let drv_ids: Vec<Uuid> = candidates.iter().map(|d| d.id).collect();
-                    let built: std::collections::HashSet<Uuid> = EBuild::find()
+                    let drv_ids: Vec<DerivationId> = candidates.iter().map(|d| d.id).collect();
+                    let built: std::collections::HashSet<DerivationId> = EBuild::find()
                         .filter(CBuild::Derivation.is_in(drv_ids))
                         .filter(
                             CBuild::Status

@@ -77,7 +77,7 @@ fn read_credential(
     Ok((contents, path))
 }
 
-fn lookup_id(map: &HashMap<String, Uuid>, name: &str, kind: &str) -> Result<Uuid, DynError> {
+fn lookup_id<T: Copy>(map: &HashMap<String, T>, name: &str, kind: &str) -> Result<T, DynError> {
     map.get(name)
         .copied()
         .ok_or_else(|| format!("{} '{}' not found", kind, name).into())
@@ -85,12 +85,12 @@ fn lookup_id(map: &HashMap<String, Uuid>, name: &str, kind: &str) -> Result<Uuid
 
 async fn resolve_integration_id(
     db: &DatabaseConnection,
-    org_id: Uuid,
+    org_id: OrganizationId,
     name: &str,
     kind: IntegrationKind,
     state_integrations: &HashMap<String, StateIntegration>,
     project_name: &str,
-) -> Result<Uuid, DynError> {
+) -> Result<IntegrationId, DynError> {
     if !state_integrations.contains_key(name) {
         return Err(format!(
             "Project '{}' references unknown integration '{}'",
@@ -157,12 +157,12 @@ struct StateApplicator<'a> {
 impl<'a> StateApplicator<'a> {
     // ── Lookup helpers ────────────────────────────────────────────────────────
 
-    async fn user_lookup(&self) -> Result<HashMap<String, Uuid>, DynError> {
+    async fn user_lookup(&self) -> Result<HashMap<String, UserId>, DynError> {
         let users = user::Entity::find().all(self.db).await?;
         Ok(users.into_iter().map(|u| (u.username, u.id)).collect())
     }
 
-    async fn org_lookup(&self) -> Result<HashMap<String, Uuid>, DynError> {
+    async fn org_lookup(&self) -> Result<HashMap<String, OrganizationId>, DynError> {
         let orgs = organization::Entity::find().all(self.db).await?;
         Ok(orgs.into_iter().map(|o| (o.name, o.id)).collect())
     }
@@ -213,7 +213,7 @@ impl<'a> StateApplicator<'a> {
                 tracing::info!("Updated managed user: {}", state_user.username);
             } else {
                 let user = user::ActiveModel {
-                    id: Set(Uuid::now_v7()),
+                    id: Set(UserId::now_v7()),
                     username: Set(state_user.username.clone()),
                     name: Set(state_user.name.clone()),
                     email: Set(state_user.email.clone()),
@@ -281,7 +281,7 @@ impl<'a> StateApplicator<'a> {
                 tracing::info!("Updated managed organization: {}", state_org.name);
                 org_id
             } else {
-                let org_id = Uuid::now_v7();
+                let org_id = OrganizationId::now_v7();
                 let org = organization::ActiveModel {
                     id: Set(org_id),
                     name: Set(state_org.name.clone()),
@@ -308,7 +308,7 @@ impl<'a> StateApplicator<'a> {
 
             if existing_membership.is_none() {
                 let membership = organization_user::ActiveModel {
-                    id: Set(Uuid::now_v7()),
+                    id: Set(OrganizationUserId::now_v7()),
                     organization: Set(org_id),
                     user: Set(created_by_id),
                     role: Set(BASE_ROLE_ADMIN_ID),
@@ -360,7 +360,7 @@ impl<'a> StateApplicator<'a> {
                 tracing::info!("Updated managed project: {}", state_project.name);
             } else {
                 let proj = project::ActiveModel {
-                    id: Set(Uuid::now_v7()),
+                    id: Set(ProjectId::now_v7()),
                     organization: Set(org_id),
                     name: Set(state_project.name.clone()),
                     active: Set(state_project.active),
@@ -444,7 +444,7 @@ impl<'a> StateApplicator<'a> {
                 tracing::info!("Updated managed cache: {}", state_cache.name);
                 existing.id
             } else {
-                let cache_id = Uuid::now_v7();
+                let cache_id = CacheId::now_v7();
                 let cache_model = cache::ActiveModel {
                     id: Set(cache_id),
                     name: Set(state_cache.name.clone()),
@@ -483,7 +483,7 @@ impl<'a> StateApplicator<'a> {
 
                 if existing_association.is_none() {
                     let org_cache_model = organization_cache::ActiveModel {
-                        id: Set(Uuid::now_v7()),
+                        id: Set(OrganizationCacheId::now_v7()),
                         organization: Set(org_id),
                         cache: Set(cache_id),
                         mode: Set(organization_cache::CacheSubscriptionMode::ReadWrite),
@@ -503,7 +503,7 @@ impl<'a> StateApplicator<'a> {
 
     async fn apply_cache_upstreams(
         &self,
-        cache_id: Uuid,
+        cache_id: CacheId,
         cache_name: &str,
         upstreams: &[StateUpstream],
     ) -> Result<(), DynError> {
@@ -516,7 +516,7 @@ impl<'a> StateApplicator<'a> {
             return Ok(());
         }
 
-        let cache_lookup: HashMap<String, Uuid> = ECache::find()
+        let cache_lookup: HashMap<String, CacheId> = ECache::find()
             .all(self.db)
             .await?
             .into_iter()
@@ -540,7 +540,7 @@ impl<'a> StateApplicator<'a> {
                         .clone()
                         .unwrap_or_else(|| upstream_cache_name.clone());
                     ACacheUpstream {
-                        id: Set(Uuid::now_v7()),
+                        id: Set(CacheUpstreamId::now_v7()),
                         cache: Set(cache_id),
                         display_name: Set(name),
                         mode: Set(mode.clone()),
@@ -554,7 +554,7 @@ impl<'a> StateApplicator<'a> {
                     url,
                     public_key,
                 } => ACacheUpstream {
-                    id: Set(Uuid::now_v7()),
+                    id: Set(CacheUpstreamId::now_v7()),
                     cache: Set(cache_id),
                     display_name: Set(display_name.clone()),
                     mode: Set(CacheSubscriptionMode::ReadOnly),
@@ -609,7 +609,7 @@ impl<'a> StateApplicator<'a> {
                 tracing::info!("Updated managed API key: {}", state_api_key.name);
             } else {
                 let api_key_model = api::ActiveModel {
-                    id: Set(Uuid::now_v7()),
+                    id: Set(ApiId::now_v7()),
                     owned_by: Set(owned_by_id),
                     name: Set(state_api_key.name.clone()),
                     key: Set(key_hash),
@@ -673,7 +673,7 @@ impl<'a> StateApplicator<'a> {
                 tracing::info!("Updated worker registration: {}", state_worker.worker_id);
             } else {
                 let reg = worker_registration::ActiveModel {
-                    id: Set(Uuid::now_v7()),
+                    id: Set(WorkerRegistrationId::now_v7()),
                     peer_id: Set(peer_id),
                     worker_id: Set(state_worker.worker_id.clone()),
                     token_hash: Set(token_hash),
@@ -787,7 +787,7 @@ impl<'a> StateApplicator<'a> {
                 tracing::info!("Updated managed integration: {}", state_int.name);
             } else {
                 let row = integration::ActiveModel {
-                    id: Set(Uuid::now_v7()),
+                    id: Set(IntegrationId::now_v7()),
                     organization: Set(org_id),
                     name: Set(state_int.name.clone()),
                     display_name: Set(display_name),

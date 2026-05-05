@@ -17,7 +17,6 @@ use sha2::Sha256;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 use tracing::{error, warn};
-use uuid::Uuid;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -320,7 +319,10 @@ pub async fn fire_build_webhook(state: Arc<ServerState>, build: MBuild, status: 
     fire_webhooks(state, org_id, event.to_string(), payload).await;
 }
 
-async fn get_build_org_id(state: &Arc<ServerState>, evaluation_id: Uuid) -> Option<Uuid> {
+async fn get_build_org_id(
+    state: &Arc<ServerState>,
+    evaluation_id: EvaluationId,
+) -> Option<OrganizationId> {
     let evaluation = match EEvaluation::find_by_id(evaluation_id).one(&state.worker_db).await {
         Ok(Some(e)) => e,
         Ok(None) => {
@@ -350,7 +352,7 @@ async fn get_build_org_id(state: &Arc<ServerState>, evaluation_id: Uuid) -> Opti
 
 async fn fire_webhooks(
     state: Arc<ServerState>,
-    org_id: Uuid,
+    org_id: OrganizationId,
     event: String,
     payload: serde_json::Value,
 ) {

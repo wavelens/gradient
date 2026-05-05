@@ -18,7 +18,6 @@ use sea_orm::{
 };
 use std::collections::HashSet;
 use std::time::Duration;
-use uuid::Uuid;
 
 use crate::types::*;
 
@@ -32,7 +31,7 @@ impl<'db> BuildRepo<'db> {
     }
 
     /// Fetch a build by ID.
-    pub async fn find(&self, id: Uuid) -> Result<Option<MBuild>> {
+    pub async fn find(&self, id: BuildId) -> Result<Option<MBuild>> {
         Ok(EBuild::find_by_id(id).one(self.db).await?)
     }
 
@@ -66,7 +65,7 @@ impl<'db> BuildRepo<'db> {
     /// Find all builds for an evaluation in a given status.
     pub async fn find_by_evaluation_and_status(
         &self,
-        evaluation_id: Uuid,
+        evaluation_id: EvaluationId,
         status: BuildStatus,
     ) -> Result<Vec<MBuild>> {
         let builds = EBuild::find()
@@ -78,7 +77,7 @@ impl<'db> BuildRepo<'db> {
     }
 
     /// Find all builds for an evaluation regardless of status.
-    pub async fn find_by_evaluation(&self, evaluation_id: Uuid) -> Result<Vec<MBuild>> {
+    pub async fn find_by_evaluation(&self, evaluation_id: EvaluationId) -> Result<Vec<MBuild>> {
         let builds = EBuild::find()
             .filter(CBuild::Evaluation.eq(evaluation_id))
             .all(self.db)
@@ -90,8 +89,8 @@ impl<'db> BuildRepo<'db> {
     /// Used for cascading `DependencyFailed`.
     pub async fn find_dependents_in_evaluation(
         &self,
-        evaluation_id: Uuid,
-        derivation_id: Uuid,
+        evaluation_id: EvaluationId,
+        derivation_id: DerivationId,
     ) -> Result<Vec<MBuild>> {
         let dep_derivations = EDerivationDependency::find()
             .filter(CDerivationDependency::Dependency.eq(derivation_id))
@@ -102,7 +101,7 @@ impl<'db> BuildRepo<'db> {
             return Ok(vec![]);
         }
 
-        let dependent_derivation_ids: Vec<Uuid> =
+        let dependent_derivation_ids: Vec<DerivationId> =
             dep_derivations.into_iter().map(|d| d.derivation).collect();
 
         let builds = EBuild::find()
@@ -117,7 +116,7 @@ impl<'db> BuildRepo<'db> {
     /// (already assigned or skipped this tick).
     pub async fn find_queued_with_satisfied_deps(
         &self,
-        skip: &HashSet<Uuid>,
+        skip: &HashSet<BuildId>,
     ) -> Result<Option<(MBuild, MDerivation)>> {
         // Raw SQL for the dependency satisfaction check is handled in
         // builder/src/build/queue.rs. This stub exists for the repo boundary.

@@ -10,7 +10,7 @@ use gradient_core::types::*;
 use scheduler::Scheduler;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
 use tracing::{info, warn};
-use uuid::Uuid;
+use gradient_core::types::ids::{CacheId, CacheMetricId, CachedPathId, CachedPathSignatureId};
 
 /// Metadata produced by a worker after compressing and uploading a NAR.
 pub(super) struct NarUploadRecord<'a> {
@@ -56,7 +56,7 @@ pub(super) async fn record_nar_push_metric(
 
 async fn upsert_cache_metric(
     state: &ServerState,
-    cache_id: Uuid,
+    cache_id: CacheId,
     bucket: chrono::NaiveDateTime,
     bytes: i64,
 ) -> anyhow::Result<()> {
@@ -74,7 +74,7 @@ async fn upsert_cache_metric(
         }
         None => {
             let am = ACacheMetric {
-                id: Set(Uuid::now_v7()),
+                id: Set(CacheMetricId::now_v7()),
                 cache: Set(cache_id),
                 bucket_time: Set(bucket),
                 bytes_sent: Set(bytes),
@@ -139,7 +139,7 @@ pub(super) async fn mark_nar_stored(
         }
         None => {
             let am = ACachedPath {
-                id: Set(Uuid::now_v7()),
+                id: Set(CachedPathId::now_v7()),
                 store_path: Set(store_path.to_owned()),
                 hash: Set(hash.to_owned()),
                 package: Set(package.to_owned()),
@@ -247,7 +247,7 @@ async fn ensure_signature_placeholders(
         }
 
         let am = ACachedPathSignature {
-            id: Set(Uuid::now_v7()),
+            id: Set(CachedPathSignatureId::now_v7()),
             cached_path: Set(cached_path_row.id),
             cache: Set(oc.cache),
             signature: Set(None),

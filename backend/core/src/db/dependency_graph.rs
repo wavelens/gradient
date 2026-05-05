@@ -18,7 +18,6 @@
 use anyhow::{Context, Result};
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use std::collections::HashSet;
-use uuid::Uuid;
 
 use crate::types::*;
 
@@ -29,11 +28,11 @@ use crate::types::*;
 /// Empty input (caller passes `start` only) ⇒ result contains exactly `{start}`.
 pub async fn collect_transitive_dependents<C: ConnectionTrait>(
     db: &C,
-    start: Uuid,
-) -> Result<HashSet<Uuid>> {
-    let mut visited: HashSet<Uuid> = HashSet::new();
+    start: DerivationId,
+) -> Result<HashSet<DerivationId>> {
+    let mut visited: HashSet<DerivationId> = HashSet::new();
     visited.insert(start);
-    let mut frontier: Vec<Uuid> = vec![start];
+    let mut frontier: Vec<DerivationId> = vec![start];
 
     while !frontier.is_empty() {
         let edges = EDerivationDependency::find()
@@ -57,9 +56,9 @@ mod tests {
     use super::*;
     use sea_orm::{DatabaseBackend, MockDatabase};
 
-    fn dep_edge(derivation: Uuid, dependency: Uuid) -> MDerivationDependency {
+    fn dep_edge(derivation: DerivationId, dependency: DerivationId) -> MDerivationDependency {
         entity::derivation_dependency::Model {
-            id: Uuid::now_v7(),
+            id: DerivationDependencyId::now_v7(),
             derivation,
             dependency,
         }
@@ -67,7 +66,7 @@ mod tests {
 
     #[tokio::test]
     async fn no_dependents_returns_only_start() {
-        let start = Uuid::now_v7();
+        let start = DerivationId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([Vec::<MDerivationDependency>::new()])
             .into_connection();
@@ -79,10 +78,10 @@ mod tests {
 
     #[tokio::test]
     async fn walks_multiple_layers_breadth_first() {
-        let a = Uuid::now_v7(); // start
-        let b = Uuid::now_v7(); // depends on a
-        let c = Uuid::now_v7(); // depends on b
-        let d = Uuid::now_v7(); // depends on a (sibling of b)
+        let a = DerivationId::now_v7(); // start
+        let b = DerivationId::now_v7(); // depends on a
+        let c = DerivationId::now_v7(); // depends on b
+        let d = DerivationId::now_v7(); // depends on a (sibling of b)
 
         // Layer 1: dependents of {a}        → b, d
         // Layer 2: dependents of {b, d}     → c

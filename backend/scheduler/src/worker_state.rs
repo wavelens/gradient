@@ -22,7 +22,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use tokio::sync::{Notify, mpsc};
-use uuid::Uuid;
+use gradient_core::types::ids::OrganizationId;
 
 use gradient_core::types::proto::GradientCapabilities;
 
@@ -106,7 +106,7 @@ impl TypedWorker<Active> {
     /// Construct a new active worker.
     pub fn new(
         capabilities: GradientCapabilities,
-        authorized_peers: HashSet<Uuid>,
+        authorized_peers: HashSet<OrganizationId>,
         reauth_notify: Arc<Notify>,
         abort_tx: mpsc::UnboundedSender<(String, String)>,
     ) -> Self {

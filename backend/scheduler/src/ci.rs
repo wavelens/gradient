@@ -14,7 +14,6 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, Query
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{error, warn};
-use uuid::Uuid;
 
 /// Fetches the project and commit for the evaluation, then fires one CI status
 /// report per entry point using the project's configured reporter.
@@ -22,11 +21,11 @@ use uuid::Uuid;
 /// Failures are logged and swallowed — CI reporting is best-effort.
 pub async fn report_ci_for_entry_points(
     state: Arc<ServerState>,
-    project_id: Uuid,
-    commit_id: Uuid,
+    project_id: ProjectId,
+    commit_id: CommitId,
     repository_url: &str,
-    evaluation_id: Uuid,
-    entry_points: &[(Uuid, String)],
+    evaluation_id: EvaluationId,
+    entry_points: &[(BuildId, String)],
     status: CiStatus,
 ) {
     if entry_points.is_empty() {
@@ -108,8 +107,8 @@ pub async fn report_ci_for_entry_points(
     // already in a terminal state (notably `Substituted` — set at insert-time
     // and never routed through `update_build_status`) report a terminal CI
     // status on first POST instead of getting stuck at the initial `Pending`.
-    let build_ids: Vec<Uuid> = ep_rows.iter().map(|ep| ep.build).collect();
-    let build_statuses: HashMap<Uuid, entity::build::BuildStatus> = match EBuild::find()
+    let build_ids: Vec<BuildId> = ep_rows.iter().map(|ep| ep.build).collect();
+    let build_statuses: HashMap<BuildId, entity::build::BuildStatus> = match EBuild::find()
         .filter(CBuild::Id.is_in(build_ids))
         .all(&state.worker_db)
         .await
@@ -163,10 +162,10 @@ pub async fn report_ci_for_entry_points(
 /// Links always point to the evaluation log page.
 pub async fn report_ci_for_evaluation(
     state: Arc<ServerState>,
-    project_id: Uuid,
-    commit_id: Uuid,
+    project_id: ProjectId,
+    commit_id: CommitId,
     repository_url: &str,
-    evaluation_id: Uuid,
+    evaluation_id: EvaluationId,
     status: CiStatus,
 ) {
     let project = match EProject::find_by_id(project_id).one(&state.worker_db).await {

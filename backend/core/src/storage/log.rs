@@ -12,7 +12,7 @@ use std::sync::Arc;
 use tokio::fs::{self, OpenOptions};
 use tokio::io::AsyncWriteExt;
 use tracing::warn;
-use uuid::Uuid;
+use crate::types::ids::BuildId;
 
 /// Abstraction for build log storage.
 ///
@@ -21,19 +21,19 @@ use uuid::Uuid;
 /// (e.g. S3) do that work in `finalize`.
 pub trait LogStorage: Send + Sync + std::fmt::Debug {
     /// Append `text` to the log for `build_id`.
-    fn append<'a>(&'a self, build_id: Uuid, text: &'a str) -> BoxFuture<'a, Result<()>>;
+    fn append<'a>(&'a self, build_id: BuildId, text: &'a str) -> BoxFuture<'a, Result<()>>;
 
     /// Read the full log for `build_id`. Returns an empty string when no log exists yet.
-    fn read<'a>(&'a self, build_id: Uuid) -> BoxFuture<'a, Result<String>>;
+    fn read<'a>(&'a self, build_id: BuildId) -> BoxFuture<'a, Result<String>>;
 
     /// Called once after the build reaches a terminal state. Default impl is a no-op;
     /// remote backends use this hook to upload the local file to object storage.
-    fn finalize<'a>(&'a self, _build_id: Uuid) -> BoxFuture<'a, Result<()>> {
+    fn finalize<'a>(&'a self, _build_id: BuildId) -> BoxFuture<'a, Result<()>> {
         Box::pin(async { Ok(()) })
     }
 
     /// Permanently delete the log for `build_id` from all backing stores.
-    fn delete<'a>(&'a self, build_id: Uuid) -> BoxFuture<'a, Result<()>>;
+    fn delete<'a>(&'a self, build_id: BuildId) -> BoxFuture<'a, Result<()>>;
 }
 
 #[derive(Debug)]
@@ -48,13 +48,13 @@ impl FileLogStorage {
         Ok(Self { logs_dir })
     }
 
-    pub fn log_path(&self, build_id: Uuid) -> PathBuf {
+    pub fn log_path(&self, build_id: BuildId) -> PathBuf {
         self.logs_dir.join(format!("{}.log", build_id))
     }
 }
 
 impl LogStorage for FileLogStorage {
-    fn append<'a>(&'a self, build_id: Uuid, text: &'a str) -> BoxFuture<'a, Result<()>> {
+    fn append<'a>(&'a self, build_id: BuildId, text: &'a str) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             let path = self.log_path(build_id);
             let mut file = OpenOptions::new()
@@ -67,7 +67,7 @@ impl LogStorage for FileLogStorage {
         })
     }
 
-    fn read<'a>(&'a self, build_id: Uuid) -> BoxFuture<'a, Result<String>> {
+    fn read<'a>(&'a self, build_id: BuildId) -> BoxFuture<'a, Result<String>> {
         Box::pin(async move {
             let path = self.log_path(build_id);
             match fs::read_to_string(&path).await {
@@ -78,7 +78,7 @@ impl LogStorage for FileLogStorage {
         })
     }
 
-    fn delete<'a>(&'a self, build_id: Uuid) -> BoxFuture<'a, Result<()>> {
+    fn delete<'a>(&'a self, build_id: BuildId) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             let path = self.log_path(build_id);
             match fs::remove_file(&path).await {
@@ -123,17 +123,17 @@ impl S3LogStorage {
         }
     }
 
-    fn object_path(&self, build_id: Uuid) -> ObjectPath {
+    fn object_path(&self, build_id: BuildId) -> ObjectPath {
         ObjectPath::from(format!("{}logs/{}.log", self.prefix, build_id))
     }
 }
 
 impl LogStorage for S3LogStorage {
-    fn append<'a>(&'a self, build_id: Uuid, text: &'a str) -> BoxFuture<'a, Result<()>> {
+    fn append<'a>(&'a self, build_id: BuildId, text: &'a str) -> BoxFuture<'a, Result<()>> {
         self.local.append(build_id, text)
     }
 
-    fn read<'a>(&'a self, build_id: Uuid) -> BoxFuture<'a, Result<String>> {
+    fn read<'a>(&'a self, build_id: BuildId) -> BoxFuture<'a, Result<String>> {
         Box::pin(async move {
             let local = self.local.read(build_id).await?;
             if !local.is_empty() {
@@ -150,7 +150,7 @@ impl LogStorage for S3LogStorage {
         })
     }
 
-    fn finalize<'a>(&'a self, build_id: Uuid) -> BoxFuture<'a, Result<()>> {
+    fn finalize<'a>(&'a self, build_id: BuildId) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             let path = self.local.log_path(build_id);
             let data = match fs::read(&path).await {
@@ -167,7 +167,7 @@ impl LogStorage for S3LogStorage {
         })
     }
 
-    fn delete<'a>(&'a self, build_id: Uuid) -> BoxFuture<'a, Result<()>> {
+    fn delete<'a>(&'a self, build_id: BuildId) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             if let Err(e) = self.local.delete(build_id).await {
                 warn!(error = %e, build_id = %build_id, "Failed to delete local build log");

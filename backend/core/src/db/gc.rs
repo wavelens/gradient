@@ -23,7 +23,7 @@ use crate::types::*;
 /// Never deletes evaluations that are still Queued/Evaluating/Building.
 pub async fn gc_project_evaluations(
     state: Arc<ServerState>,
-    project_id: Uuid,
+    project_id: ProjectId,
     keep: usize,
 ) -> Result<()> {
     if keep == 0 {
@@ -159,9 +159,9 @@ pub async fn gc_orphan_derivations(state: Arc<ServerState>, grace_hours: i64) ->
         .await
         .context("Failed to query orphan derivations")?;
 
-    let drv_ids: Vec<Uuid> = rows
+    let drv_ids: Vec<DerivationId> = rows
         .iter()
-        .filter_map(|r| r.try_get::<Uuid>("", "id").ok())
+        .filter_map(|r| r.try_get::<Uuid>("", "id").ok().map(DerivationId::new))
         .collect();
 
     if drv_ids.is_empty() {

@@ -10,8 +10,8 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use gradient_core::types::*;
+use gradient_core::types::ids::OrganizationId;
 use tracing::{debug, info, instrument, warn};
-use uuid::Uuid;
 
 use crate::messages::{
     ClientMessage, FailedPeer, GradientCapabilities, PROTO_VERSION, ServerMessage,
@@ -217,7 +217,7 @@ impl ProtoSession<Authenticated> {
             return None;
         }
 
-        let authorized_peer_uuids: HashSet<Uuid> = authorized_peers
+        let authorized_peer_uuids: HashSet<OrganizationId> = authorized_peers
             .iter()
             .filter_map(|s| s.parse().ok())
             .collect();
