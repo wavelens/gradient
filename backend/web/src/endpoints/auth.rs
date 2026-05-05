@@ -212,6 +212,17 @@ fn read_cookie(headers: &axum::http::HeaderMap, name: &str) -> Option<String> {
         .find_map(|p| p.strip_prefix(&format!("{}=", name)).map(str::to_owned))
 }
 
+/// Logs the full anyhow chain at warn level and converts the error into a
+/// generic 401 — the upstream IdP / transport detail stays in the operator's
+/// log instead of being echoed into the response body where the client (or an
+/// attacker probing the endpoint) can read it.
+fn oidc_failure(stage: &'static str) -> impl FnOnce(anyhow::Error) -> WebError {
+    move |e| {
+        tracing::warn!(stage, error = format!("{:#}", e), "OIDC flow failed");
+        WebError::unauthorized("OIDC login failed")
+    }
+}
+
 pub async fn get_oauth_authorize(
     state: State<Arc<ServerState>>,
     headers: axum::http::HeaderMap,
@@ -236,7 +247,7 @@ pub async fn get_oauth_authorize(
         csrf,
     )
     .await
-    .map_err(|e| WebError::unauthorized(e.to_string()))?;
+    .map_err(oidc_failure("oauth_authorize_callback"))?;
 
     let token =
         encode_jwt(state, user.id, false).map_err(|_| WebError::failed_to_generate_token())?;
@@ -265,7 +276,7 @@ pub async fn post_oauth_authorize(
     let use_tls = state.config.server.use_tls;
     let req = oidc_login_create(state)
         .await
-        .map_err(|e| WebError::unauthorized(e.to_string()))?;
+        .map_err(oidc_failure("oauth_authorize_start"))?;
 
     let res = BaseResponse {
         error: false,
@@ -291,7 +302,7 @@ pub async fn get_oidc_login(
     let use_tls = state.config.server.use_tls;
     let req = oidc_login_create(state)
         .await
-        .map_err(|e| WebError::unauthorized(e.to_string()))?;
+        .map_err(oidc_failure("oidc_login_start"))?;
 
     Response::builder()
         .status(StatusCode::FOUND)
@@ -324,7 +335,7 @@ pub async fn get_oidc_callback(
         csrf,
     )
     .await
-    .map_err(|e| WebError::unauthorized(e.to_string()))?;
+    .map_err(oidc_failure("oidc_callback"))?;
 
     let token =
         encode_jwt(state, user.id, false).map_err(|_| WebError::failed_to_generate_token())?;
