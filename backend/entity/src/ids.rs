@@ -107,6 +107,7 @@ id_newtype!(OrganizationId);
 id_newtype!(OrganizationCacheId);
 id_newtype!(OrganizationUserId);
 id_newtype!(ProjectId);
+id_newtype!(ProjectTriggerId);
 id_newtype!(RoleId);
 id_newtype!(UserId);
 id_newtype!(WebhookId);
