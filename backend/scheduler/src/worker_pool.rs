@@ -15,8 +15,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use tokio::sync::{Notify, mpsc};
-use uuid::Uuid;
 
+use gradient_core::types::ids::OrganizationId;
 use gradient_core::types::proto::{GradientCapabilities, JobKind};
 
 use crate::peer_auth::PeerAuth;
@@ -88,7 +88,7 @@ impl WorkerPool {
         &mut self,
         id: String,
         capabilities: GradientCapabilities,
-        authorized_peers: HashSet<Uuid>,
+        authorized_peers: HashSet<OrganizationId>,
     ) -> (Arc<Notify>, mpsc::UnboundedReceiver<(String, String)>) {
         let notify = Arc::new(Notify::new());
         let (abort_tx, abort_rx) = mpsc::unbounded_channel();
@@ -120,7 +120,7 @@ impl WorkerPool {
         }
     }
 
-    pub fn update_authorized_peers(&mut self, id: &str, authorized_peers: HashSet<Uuid>) {
+    pub fn update_authorized_peers(&mut self, id: &str, authorized_peers: HashSet<OrganizationId>) {
         if let Some(slot) = self.workers.get_mut(id) {
             slot.shared_mut().peer_auth = PeerAuth::from_peers(authorized_peers);
         }
@@ -279,7 +279,7 @@ pub struct WorkerInfo {
     /// means the worker is in open mode (no registrations) and is implicitly
     /// authorized for all peers; this should not happen in normal operation
     /// because workers must register with at least one org.
-    pub authorized_peers: Option<HashSet<Uuid>>,
+    pub authorized_peers: Option<HashSet<OrganizationId>>,
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -367,8 +367,8 @@ mod tests {
     #[test]
     fn test_authorized_peers_for() {
         let mut pool = WorkerPool::new();
-        let peer_a = Uuid::now_v7();
-        let peer_b = Uuid::now_v7();
+        let peer_a = OrganizationId::now_v7();
+        let peer_b = OrganizationId::now_v7();
 
         pool.register("w1".into(), caps(), HashSet::from([peer_a, peer_b]));
         let auth = pool.peer_auth_for("w1").unwrap();
@@ -382,8 +382,8 @@ mod tests {
     #[test]
     fn test_update_authorized_peers() {
         let mut pool = WorkerPool::new();
-        let peer_a = Uuid::now_v7();
-        let peer_b = Uuid::now_v7();
+        let peer_a = OrganizationId::now_v7();
+        let peer_b = OrganizationId::now_v7();
 
         pool.register("w1".into(), caps(), HashSet::from([peer_a]));
         assert!(matches!(
@@ -468,8 +468,8 @@ mod tests {
     #[test]
     fn test_all_workers_info_exposes_authorized_peers() {
         let mut pool = WorkerPool::new();
-        let org_a = Uuid::now_v7();
-        let org_b = Uuid::now_v7();
+        let org_a = OrganizationId::now_v7();
+        let org_b = OrganizationId::now_v7();
 
         // Restricted: worker authorized for org_a only.
         pool.register("w1".into(), caps(), HashSet::from([org_a]));

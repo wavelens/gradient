@@ -29,8 +29,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use tokio::sync::RwLock;
-use uuid::Uuid;
-
 use gradient_core::types::*;
 
 use jobs::JobTracker;
@@ -39,7 +37,7 @@ use worker_pool::WorkerPool;
 
 /// Per-evaluation deferred dependency edges accumulated during eval result
 /// processing and flushed once all derivation rows are in the DB.
-type DeferredDeps = Arc<RwLock<HashMap<Uuid, Vec<(String, Vec<String>)>>>>;
+type DeferredDeps = Arc<RwLock<HashMap<EvaluationId, Vec<(String, Vec<String>)>>>>;
 
 pub use worker_pool::WorkerInfo;
 

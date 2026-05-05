@@ -21,7 +21,6 @@ use gradient_core::sources::get_hash_from_path;
 use gradient_core::types::*;
 use sea_orm::{ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
 use tracing::{debug, error, info};
-use uuid::Uuid;
 
 use super::build::check_evaluation_done;
 use super::ci::report_ci_for_entry_points;
@@ -36,7 +35,7 @@ const BATCH_SIZE: usize = 1000;
 /// New derivation rows and their outputs, ready for bulk DB insert.
 struct DerivationInsertBatch {
     /// Mapping from drv_path → assigned UUID for all derivations (new + pre-existing).
-    drv_path_to_id: HashMap<String, Uuid>,
+    drv_path_to_id: HashMap<String, DerivationId>,
     new_derivations: Vec<ADerivation>,
     new_outputs: Vec<ADerivationOutput>,
 }
@@ -44,11 +43,11 @@ struct DerivationInsertBatch {
 impl DerivationInsertBatch {
     /// Build insert rows for derivations not yet in `existing`.
     fn prepare(
-        organization_id: Uuid,
+        organization_id: OrganizationId,
         derivations: &[DiscoveredDerivation],
         existing: &[MDerivation],
     ) -> Self {
-        let mut drv_path_to_id: HashMap<String, Uuid> = existing
+        let mut drv_path_to_id: HashMap<String, DerivationId> = existing
             .iter()
             .map(|d| (d.derivation_path.clone(), d.id))
             .collect();
@@ -61,7 +60,7 @@ impl DerivationInsertBatch {
             if drv_path_to_id.contains_key(&d.drv_path) {
                 continue;
             }
-            let id = Uuid::now_v7();
+            let id = DerivationId::now_v7();
             drv_path_to_id.insert(d.drv_path.clone(), id);
             new_derivations.push(ADerivation {
                 id: Set(id),
@@ -74,7 +73,7 @@ impl DerivationInsertBatch {
                 let (hash, package) = get_hash_from_path(output.path.clone())
                     .unwrap_or_else(|_| ("unknown".to_owned(), output.name.clone()));
                 new_outputs.push(ADerivationOutput {
-                    id: Set(Uuid::now_v7()),
+                    id: Set(DerivationOutputId::now_v7()),
                     derivation: Set(id),
                     name: Set(output.name.clone()),
                     output: Set(output.path.clone()),
@@ -103,7 +102,7 @@ impl DerivationInsertBatch {
         self,
         state: &Arc<ServerState>,
         evaluation: &MEvaluation,
-    ) -> Result<HashMap<String, Uuid>> {
+    ) -> Result<HashMap<String, DerivationId>> {
         if !self.new_derivations.is_empty() {
             for chunk in self.new_derivations.chunks(BATCH_SIZE) {
                 if let Err(e) = EDerivation::insert_many(chunk.to_vec())
@@ -146,16 +145,16 @@ impl DerivationInsertBatch {
 /// passed through each pipeline stage.
 struct EvalResultProcessor<'a> {
     state: &'a Arc<ServerState>,
-    evaluation_id: Uuid,
-    organization_id: Uuid,
+    evaluation_id: EvaluationId,
+    organization_id: OrganizationId,
     evaluation: MEvaluation,
 }
 
 impl<'a> EvalResultProcessor<'a> {
     fn new(
         state: &'a Arc<ServerState>,
-        evaluation_id: Uuid,
-        organization_id: Uuid,
+        evaluation_id: EvaluationId,
+        organization_id: OrganizationId,
         evaluation: MEvaluation,
     ) -> Self {
         Self {
@@ -195,12 +194,12 @@ impl<'a> EvalResultProcessor<'a> {
     async fn insert_build_rows(
         &self,
         derivations: &[DiscoveredDerivation],
-        drv_path_to_id: &HashMap<String, Uuid>,
+        drv_path_to_id: &HashMap<String, DerivationId>,
     ) -> Result<()> {
         let now = gradient_core::types::now();
         let mut builds: Vec<ABuild> = Vec::new();
 
-        let all_drv_ids: Vec<Uuid> = derivations
+        let all_drv_ids: Vec<DerivationId> = derivations
             .iter()
             .filter_map(|d| drv_path_to_id.get(&d.drv_path).copied())
             .collect::<std::collections::HashSet<_>>()
@@ -209,7 +208,7 @@ impl<'a> EvalResultProcessor<'a> {
 
         let truly_substituted = self.compute_truly_substituted(&all_drv_ids).await?;
 
-        let buildable_drv_ids: Vec<Uuid> = all_drv_ids
+        let buildable_drv_ids: Vec<DerivationId> = all_drv_ids
             .iter()
             .copied()
             .filter(|id| !truly_substituted.contains(id))
@@ -246,7 +245,7 @@ impl<'a> EvalResultProcessor<'a> {
             };
 
             builds.push(ABuild {
-                id: Set(Uuid::now_v7()),
+                id: Set(BuildId::now_v7()),
                 evaluation: Set(self.evaluation_id),
                 derivation: Set(drv_id),
                 status: Set(status),
@@ -289,8 +288,8 @@ impl<'a> EvalResultProcessor<'a> {
     /// must be built (or substituted later when the bytes show up).
     async fn compute_truly_substituted(
         &self,
-        drv_ids: &[Uuid],
-    ) -> Result<std::collections::HashSet<Uuid>> {
+        drv_ids: &[DerivationId],
+    ) -> Result<std::collections::HashSet<DerivationId>> {
         if drv_ids.is_empty() {
             return Ok(std::collections::HashSet::new());
         }
@@ -305,14 +304,14 @@ impl<'a> EvalResultProcessor<'a> {
             return Ok(std::collections::HashSet::new());
         }
 
-        let cached_path_ids: Vec<Uuid> = outputs
+        let cached_path_ids: Vec<CachedPathId> = outputs
             .iter()
             .filter_map(|o| o.cached_path)
             .collect::<std::collections::HashSet<_>>()
             .into_iter()
             .collect();
 
-        let fully_cached_ids: std::collections::HashSet<Uuid> = if cached_path_ids.is_empty() {
+        let fully_cached_ids: std::collections::HashSet<CachedPathId> = if cached_path_ids.is_empty() {
             std::collections::HashSet::new()
         } else {
             ECachedPath::find()
@@ -330,7 +329,7 @@ impl<'a> EvalResultProcessor<'a> {
         // least one output AND every output is linked to a fully-cached
         // cached_path. Drvs without any derivation_output rows yet (eval
         // racing with another worker) fall through as not-substituted.
-        let mut outputs_by_drv: HashMap<Uuid, Vec<&MDerivationOutput>> = HashMap::new();
+        let mut outputs_by_drv: HashMap<DerivationId, Vec<&MDerivationOutput>> = HashMap::new();
         for o in &outputs {
             outputs_by_drv.entry(o.derivation).or_default().push(o);
         }
@@ -355,7 +354,7 @@ impl<'a> EvalResultProcessor<'a> {
     async fn add_system_features(
         &self,
         derivations: &[DiscoveredDerivation],
-        drv_path_to_id: &HashMap<String, Uuid>,
+        drv_path_to_id: &HashMap<String, DerivationId>,
     ) {
         for d in derivations {
             if d.required_features.is_empty() {
@@ -407,9 +406,9 @@ impl<'a> EvalResultProcessor<'a> {
     /// one-shot eval).
     async fn process_entry_points(
         &self,
-        project_id: Uuid,
+        project_id: ProjectId,
         derivations: &[DiscoveredDerivation],
-        drv_path_to_id: &HashMap<String, Uuid>,
+        drv_path_to_id: &HashMap<String, DerivationId>,
     ) {
         let now = gradient_core::types::now();
 
@@ -419,10 +418,10 @@ impl<'a> EvalResultProcessor<'a> {
             .all(&self.state.worker_db)
             .await
             .unwrap_or_default();
-        let drv_id_to_build: HashMap<Uuid, Uuid> =
+        let drv_id_to_build: HashMap<DerivationId, BuildId> =
             eval_builds.iter().map(|b| (b.derivation, b.id)).collect();
 
-        let mut entry_points: Vec<(Uuid, String)> = Vec::new();
+        let mut entry_points: Vec<(BuildId, String)> = Vec::new();
         let mut active_entry_points: Vec<AEntryPoint> = Vec::new();
 
         for d in derivations {
@@ -435,7 +434,7 @@ impl<'a> EvalResultProcessor<'a> {
             {
                 entry_points.push((build_id, d.attr.clone()));
                 active_entry_points.push(AEntryPoint {
-                    id: Set(Uuid::now_v7()),
+                    id: Set(EntryPointId::now_v7()),
                     project: Set(project_id),
                     evaluation: Set(self.evaluation_id),
                     build: Set(build_id),
@@ -505,7 +504,7 @@ impl<'a> EvalResultProcessor<'a> {
 ///   every dep of every queued build, even when large subtrees were pruned by
 ///   the BFS known-derivation optimisation.
 /// * The evaluation's build list in the UI reflects the complete dep tree.
-async fn expand_substituted_closure(state: &Arc<ServerState>, evaluation_id: Uuid) -> Result<()> {
+async fn expand_substituted_closure(state: &Arc<ServerState>, evaluation_id: EvaluationId) -> Result<()> {
     use sea_orm::ConnectionTrait;
 
     // Recursive CTE: seed = direct deps of substituted builds in this eval;
@@ -543,7 +542,7 @@ async fn expand_substituted_closure(state: &Arc<ServerState>, evaluation_id: Uui
         )
         GROUP BY sc.drv_id
         "#,
-        [evaluation_id.into()],
+        [evaluation_id.into_inner().into()],
     );
 
     let rows = state
@@ -559,7 +558,7 @@ async fn expand_substituted_closure(state: &Arc<ServerState>, evaluation_id: Uui
     let builds: Vec<ABuild> = rows
         .iter()
         .filter_map(|row| {
-            let drv_id = row.try_get::<Uuid>("", "drv_id").ok()?;
+            let drv_id: DerivationId = row.try_get::<uuid::Uuid>("", "drv_id").ok()?.into();
             let kind = row.try_get::<String>("", "kind").ok()?;
             let (status, external_cached) = if kind == "sub" {
                 (BuildStatus::Substituted, false)
@@ -567,7 +566,7 @@ async fn expand_substituted_closure(state: &Arc<ServerState>, evaluation_id: Uui
                 (BuildStatus::Created, true)
             };
             Some(ABuild {
-                id: Set(Uuid::now_v7()),
+                id: Set(BuildId::now_v7()),
                 evaluation: Set(evaluation_id),
                 derivation: Set(drv_id),
                 status: Set(status),
@@ -667,7 +666,7 @@ pub async fn handle_eval_result(
 
 pub async fn handle_eval_job_completed(
     state: &Arc<ServerState>,
-    evaluation_id: Uuid,
+    evaluation_id: EvaluationId,
 ) -> Result<()> {
     // Expand the transitive dependency closure of all Substituted builds so
     // the full dep tree has build rows. This runs before Created→Queued
@@ -718,8 +717,8 @@ pub async fn handle_eval_job_completed(
 /// to `(derivation_uuid, dep_uuid)` edges and inserts them in bulk.
 pub async fn flush_deferred_deps(
     state: &Arc<ServerState>,
-    evaluation_id: Uuid,
-    organization_id: Uuid,
+    evaluation_id: EvaluationId,
+    organization_id: OrganizationId,
     deferred: Vec<(String, Vec<String>)>,
 ) -> Result<()> {
     if deferred.is_empty() {
@@ -739,7 +738,7 @@ pub async fn flush_deferred_deps(
     };
 
     // Single query to map drv_path → UUID.
-    let drv_path_to_id: std::collections::HashMap<String, Uuid> = EDerivation::find()
+    let drv_path_to_id: std::collections::HashMap<String, DerivationId> = EDerivation::find()
         .filter(CDerivation::Organization.eq(organization_id))
         .filter(CDerivation::DerivationPath.is_in(all_paths))
         .all(&state.worker_db)
@@ -759,7 +758,7 @@ pub async fn flush_deferred_deps(
         for dep in deps {
             if let Some(&dep_id) = drv_path_to_id.get(dep) {
                 edges.push(ADerivationDependency {
-                    id: Set(Uuid::now_v7()),
+                    id: Set(DerivationDependencyId::now_v7()),
                     derivation: Set(src_id),
                     dependency: Set(dep_id),
                 });
@@ -800,7 +799,7 @@ pub async fn flush_deferred_deps(
 
 pub async fn handle_eval_job_failed(
     state: &Arc<ServerState>,
-    evaluation_id: Uuid,
+    evaluation_id: EvaluationId,
     error: &str,
 ) -> Result<()> {
     if let Some(eval) = EEvaluation::find_by_id(evaluation_id)
@@ -832,8 +831,8 @@ pub async fn handle_eval_job_failed(
 /// (no chains).
 async fn find_active_leaders(
     state: &Arc<ServerState>,
-    drv_ids: &[Uuid],
-) -> HashMap<Uuid, Uuid> {
+    drv_ids: &[DerivationId],
+) -> HashMap<DerivationId, BuildId> {
     let rows = match EBuild::find()
         .filter(CBuild::Derivation.is_in(drv_ids.to_vec()))
         .filter(CBuild::Status.is_in(vec![
@@ -851,7 +850,7 @@ async fn find_active_leaders(
         }
     };
 
-    let mut out: HashMap<Uuid, Uuid> = HashMap::new();
+    let mut out: HashMap<DerivationId, BuildId> = HashMap::new();
     for b in rows {
         let head = b.via.unwrap_or(b.id);
         out.entry(b.derivation)

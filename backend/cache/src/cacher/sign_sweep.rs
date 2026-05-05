@@ -21,7 +21,6 @@ use sea_orm::{
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tracing::{debug, warn};
-use uuid::Uuid;
 
 /// Max pending rows processed per sweep pass. Bounds memory + time per
 /// invocation; remaining rows are picked up by the next scheduled pass.
@@ -41,15 +40,15 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
         return Ok(());
     }
 
-    let cache_ids: Vec<Uuid> = pending.iter().map(|r| r.cache).collect::<HashSet<_>>().into_iter().collect();
-    let cached_path_ids: Vec<Uuid> = pending
+    let cache_ids: Vec<CacheId> = pending.iter().map(|r| r.cache).collect::<HashSet<_>>().into_iter().collect();
+    let cached_path_ids: Vec<CachedPathId> = pending
         .iter()
         .map(|r| r.cached_path)
         .collect::<HashSet<_>>()
         .into_iter()
         .collect();
 
-    let caches: HashMap<Uuid, MCache> = ECache::find()
+    let caches: HashMap<CacheId, MCache> = ECache::find()
         .filter(CCache::Id.is_in(cache_ids))
         .all(&state.worker_db)
         .await?
@@ -57,7 +56,7 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
         .map(|c| (c.id, c))
         .collect();
 
-    let cached_paths: HashMap<Uuid, MCachedPath> = ECachedPath::find()
+    let cached_paths: HashMap<CachedPathId, MCachedPath> = ECachedPath::find()
         .filter(CCachedPath::Id.is_in(cached_path_ids))
         .all(&state.worker_db)
         .await?
@@ -68,7 +67,7 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
     // Build a per-cache signer once (one crypt-secret read + one private-key
     // decryption per cache, not per row). `None` marks caches whose key
     // failed to decode — we skip their rows for this pass.
-    let mut signers: HashMap<Uuid, Option<CacheSigner>> = HashMap::new();
+    let mut signers: HashMap<CacheId, Option<CacheSigner>> = HashMap::new();
     for (cache_id, cache) in &caches {
         if cache.private_key.is_empty() {
             signers.insert(*cache_id, None);
@@ -88,7 +87,7 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
         signers.insert(*cache_id, signer);
     }
 
-    let mut touched_caches: HashSet<Uuid> = HashSet::new();
+    let mut touched_caches: HashSet<CacheId> = HashSet::new();
     let mut signed = 0usize;
 
     for row in pending {
@@ -153,9 +152,9 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
 /// recorded, insert a `cache_derivation` row. Idempotent.
 async fn record_newly_completed_derivations(
     state: &ServerState,
-    cache_id: Uuid,
+    cache_id: CacheId,
 ) -> anyhow::Result<()> {
-    let org_ids: Vec<Uuid> = EOrganizationCache::find()
+    let org_ids: Vec<OrganizationId> = EOrganizationCache::find()
         .filter(COrganizationCache::Cache.eq(cache_id))
         .all(&state.worker_db)
         .await?
@@ -183,8 +182,8 @@ async fn record_newly_completed_derivations(
 
 async fn try_record_cache_derivation(
     state: &ServerState,
-    cache_id: Uuid,
-    derivation_id: Uuid,
+    cache_id: CacheId,
+    derivation_id: DerivationId,
     now: chrono::NaiveDateTime,
 ) -> anyhow::Result<()> {
     let any_uncached = EDerivationOutput::find()
@@ -224,7 +223,7 @@ async fn try_record_cache_derivation(
     }
 
     let row = ACacheDerivation {
-        id: Set(Uuid::now_v7()),
+        id: Set(CacheDerivationId::now_v7()),
         cache: Set(cache_id),
         derivation: Set(derivation_id),
         cached_at: Set(now),

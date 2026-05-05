@@ -116,14 +116,14 @@ mod tests {
 
     fn make_org(name: &str, public_key: &str) -> MOrganization {
         MOrganization {
-            id: Uuid::nil(),
+            id: crate::types::ids::OrganizationId::nil(),
             name: name.to_string(),
             display_name: name.to_string(),
             description: String::new(),
             public_key: public_key.to_string(),
             private_key: String::new(),
             public: false,
-            created_by: Uuid::nil(),
+            created_by: crate::types::ids::UserId::nil(),
             created_at: NaiveDateTime::default(),
             managed: false,
             github_installation_id: None,

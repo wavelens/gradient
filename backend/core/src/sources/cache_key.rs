@@ -301,7 +301,7 @@ mod tests {
 
     fn make_cache(name: &str, public_key: &str, private_key: &str) -> MCache {
         MCache {
-            id: Uuid::nil(),
+            id: crate::types::ids::CacheId::nil(),
             name: name.to_string(),
             display_name: name.to_string(),
             description: String::new(),
@@ -310,7 +310,7 @@ mod tests {
             public_key: public_key.to_string(),
             private_key: private_key.to_string(),
             public: false,
-            created_by: Uuid::nil(),
+            created_by: crate::types::ids::UserId::nil(),
             created_at: NaiveDateTime::default(),
             managed: false,
         }

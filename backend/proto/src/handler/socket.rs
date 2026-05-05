@@ -18,7 +18,7 @@ use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream, tungstenite::Message as TungsteniteMessage,
 };
 use tracing::{debug, trace, warn};
-use uuid::Uuid;
+use gradient_core::types::ids::OrganizationId;
 
 use crate::messages::{ClientMessage, ServerMessage};
 use scheduler::Scheduler;
@@ -277,7 +277,7 @@ pub(super) async fn send_credentials_for_job(
     scheduler: &scheduler::Scheduler,
     worker_id: &str,
     job: &gradient_core::types::proto::Job,
-    org_id: Uuid,
+    org_id: OrganizationId,
 ) {
     use gradient_core::types::proto::{FlakeTask, Job};
 
@@ -294,7 +294,7 @@ pub(super) async fn send_credentials_for_job(
     }
 }
 
-async fn send_ssh_key_credential(socket: &mut ProtoSocket, state: &ServerState, org_id: Uuid) {
+async fn send_ssh_key_credential(socket: &mut ProtoSocket, state: &ServerState, org_id: OrganizationId) {
     use gradient_core::types::proto::CredentialKind;
 
     match EOrganization::find_by_id(org_id).one(&state.worker_db).await {

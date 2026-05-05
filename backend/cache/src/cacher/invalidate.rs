@@ -14,7 +14,6 @@ use sea_orm::{
 };
 use std::sync::Arc;
 use tracing::{info, warn};
-use uuid::Uuid;
 
 /// Invalidates a path's cached state across all caches:
 ///   - removes its NAR file from storage
@@ -95,10 +94,10 @@ pub async fn invalidate_cache_for_path(state: Arc<ServerState>, path: String) ->
 /// transitive dependents across every cache.
 async fn revoke_cache_derivation_closure(
     state: &Arc<ServerState>,
-    derivation_id: Uuid,
+    derivation_id: DerivationId,
 ) -> Result<()> {
     let visited = collect_transitive_dependents(&state.worker_db, derivation_id).await?;
-    let drv_ids: Vec<Uuid> = visited.into_iter().collect();
+    let drv_ids: Vec<DerivationId> = visited.into_iter().collect();
     let cache_rows = ECacheDerivation::find()
         .filter(CCacheDerivation::Derivation.is_in(drv_ids))
         .all(&state.worker_db)

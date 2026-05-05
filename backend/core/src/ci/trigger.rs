@@ -66,7 +66,7 @@ pub async fn trigger_evaluation<C: ConnectionTrait>(
     let now = crate::types::now();
 
     let acommit = ACommit {
-        id: Set(Uuid::now_v7()),
+        id: Set(CommitId::now_v7()),
         message: Set(commit_message.unwrap_or_default()),
         hash: Set(commit_hash),
         author: Set(None),
@@ -75,7 +75,7 @@ pub async fn trigger_evaluation<C: ConnectionTrait>(
     let commit = acommit.insert(db).await?;
 
     let aevaluation = AEvaluation {
-        id: Set(Uuid::now_v7()),
+        id: Set(EvaluationId::now_v7()),
         project: Set(Some(project.id)),
         repository: Set(project.repository.clone()),
         commit: Set(commit.id),
@@ -153,7 +153,7 @@ pub async fn trigger_restart_builds<C: ConnectionTrait>(
     let now = crate::types::now();
 
     // Create a new evaluation that starts directly in `Building` state.
-    let new_eval_id = Uuid::now_v7();
+    let new_eval_id = EvaluationId::now_v7();
     let aevaluation = AEvaluation {
         id: Set(new_eval_id),
         project: Set(Some(project.id)),
@@ -177,12 +177,12 @@ pub async fn trigger_restart_builds<C: ConnectionTrait>(
         .await?;
 
     // Create new builds for the new evaluation and track old→new build ID mapping.
-    let mut build_id_map: std::collections::HashMap<Uuid, Uuid> =
+    let mut build_id_map: std::collections::HashMap<BuildId, BuildId> =
         std::collections::HashMap::with_capacity(prev_builds.len());
 
     for prev_build in &prev_builds {
         let new_status = restart_build_status(prev_build.status.clone());
-        let new_build_id = Uuid::now_v7();
+        let new_build_id = BuildId::now_v7();
         let abuild = ABuild {
             id: Set(new_build_id),
             evaluation: Set(new_eval_id),
@@ -209,7 +209,7 @@ pub async fn trigger_restart_builds<C: ConnectionTrait>(
     for prev_ep in prev_entry_points {
         if let Some(&new_build_id) = build_id_map.get(&prev_ep.build) {
             let aep = AEntryPoint {
-                id: Set(Uuid::now_v7()),
+                id: Set(EntryPointId::now_v7()),
                 project: Set(prev_ep.project),
                 evaluation: Set(new_eval_id),
                 build: Set(new_build_id),
@@ -238,8 +238,8 @@ mod tests {
 
     fn make_project() -> MProject {
         MProject {
-            id: Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap(),
-            organization: Uuid::nil(),
+            id: ProjectId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap()),
+            organization: OrganizationId::nil(),
             name: "test-project".into(),
             active: true,
             display_name: "Test Project".into(),
@@ -249,19 +249,21 @@ mod tests {
             last_evaluation: None,
             last_check_at: NaiveDateTime::default(),
             force_evaluation: false,
-            created_by: Uuid::nil(),
+            created_by: UserId::nil(),
             created_at: NaiveDateTime::default(),
             managed: false,
             keep_evaluations: 10,
         }
     }
 
-    fn make_eval(id: Uuid, status: EvaluationStatus) -> evaluation::Model {
+    fn make_eval(id: EvaluationId, status: EvaluationStatus) -> evaluation::Model {
         evaluation::Model {
             id,
-            project: Some(Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap()),
+            project: Some(ProjectId::new(
+                Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap(),
+            )),
             repository: "https://github.com/test/repo".into(),
-            commit: Uuid::nil(),
+            commit: CommitId::nil(),
             wildcard: "*".into(),
             status,
             previous: None,
@@ -276,8 +278,8 @@ mod tests {
     #[tokio::test]
     async fn trigger_creates_queued_eval() {
         let project = make_project();
-        let eval_id = Uuid::now_v7();
-        let commit_id = Uuid::now_v7();
+        let eval_id = EvaluationId::now_v7();
+        let commit_id = CommitId::now_v7();
 
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             // 1st SELECT: no in-progress evaluations
@@ -309,7 +311,7 @@ mod tests {
     #[tokio::test]
     async fn trigger_already_in_progress() {
         let project = make_project();
-        let existing_eval = make_eval(Uuid::now_v7(), EvaluationStatus::Queued);
+        let existing_eval = make_eval(EvaluationId::now_v7(),EvaluationStatus::Queued);
 
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             // 1st SELECT: returns in-progress evaluation
@@ -333,7 +335,7 @@ mod tests {
         for status in active_statuses {
             let project = make_project();
             let db = MockDatabase::new(DatabaseBackend::Postgres)
-                .append_query_results([vec![make_eval(Uuid::now_v7(), status.clone())]])
+                .append_query_results([vec![make_eval(EvaluationId::now_v7(),status.clone())]])
                 .into_connection();
             let result = trigger_evaluation(&db, &project, vec![0u8; 20], None, None).await;
             assert!(
@@ -378,8 +380,8 @@ mod tests {
     #[tokio::test]
     async fn trigger_terminal_does_not_block() {
         let project = make_project();
-        let eval_id = Uuid::now_v7();
-        let commit_id = Uuid::now_v7();
+        let eval_id = EvaluationId::now_v7();
+        let commit_id = CommitId::now_v7();
 
         // Terminal status in DB should not block a new trigger
         let db = MockDatabase::new(DatabaseBackend::Postgres)

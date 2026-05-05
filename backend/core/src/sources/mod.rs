@@ -111,7 +111,7 @@ pub enum SourceError {
     #[error("Unable to extract hash from Git URL")]
     GitHashExtraction,
     #[error("Organization not found with ID: {id}")]
-    OrganizationNotFound { id: uuid::Uuid },
+    OrganizationNotFound { id: crate::types::ids::OrganizationId },
 }
 
 /// Result of a successful prefetch. Owns the temporary clone directory so the

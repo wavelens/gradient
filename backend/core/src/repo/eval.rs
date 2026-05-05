@@ -29,13 +29,13 @@ impl<'db> EvalRepo<'db> {
     }
 
     /// Fetch the current DB row for this evaluation.
-    pub async fn find(&self, id: Uuid) -> Result<Option<MEvaluation>> {
+    pub async fn find(&self, id: EvaluationId) -> Result<Option<MEvaluation>> {
         Ok(EEvaluation::find_by_id(id).one(self.db).await?)
     }
 
     /// Atomically update the evaluation status, guarding against overwriting
     /// a terminal state. Returns the number of rows affected (0 = already terminal).
-    pub async fn update_status_guarded(&self, id: Uuid, status: EvaluationStatus) -> Result<u64> {
+    pub async fn update_status_guarded(&self, id: EvaluationId, status: EvaluationStatus) -> Result<u64> {
         let now = crate::types::now();
         let res = EEvaluation::update_many()
             .col_expr(CEvaluation::Status, sea_orm::sea_query::Expr::value(status))
@@ -55,13 +55,13 @@ impl<'db> EvalRepo<'db> {
     /// Insert a single evaluation message row (error, warning, or info).
     pub async fn insert_message(
         &self,
-        evaluation_id: Uuid,
+        evaluation_id: EvaluationId,
         level: MessageLevel,
         message: String,
         source: Option<String>,
     ) -> Result<()> {
         let msg = AEvaluationMessage {
-            id: Set(Uuid::now_v7()),
+            id: Set(EvaluationMessageId::now_v7()),
             evaluation: Set(evaluation_id),
             level: Set(level),
             message: Set(message),
@@ -75,7 +75,7 @@ impl<'db> EvalRepo<'db> {
     /// Insert multiple evaluation message rows in one batch.
     pub async fn insert_messages(
         &self,
-        evaluation_id: Uuid,
+        evaluation_id: EvaluationId,
         messages: Vec<(MessageLevel, String, Option<String>)>,
     ) -> Result<()> {
         if messages.is_empty() {
@@ -85,7 +85,7 @@ impl<'db> EvalRepo<'db> {
         let rows: Vec<AEvaluationMessage> = messages
             .into_iter()
             .map(|(level, message, source)| AEvaluationMessage {
-                id: Set(Uuid::now_v7()),
+                id: Set(EvaluationMessageId::now_v7()),
                 evaluation: Set(evaluation_id),
                 level: Set(level),
                 message: Set(message),
@@ -100,7 +100,7 @@ impl<'db> EvalRepo<'db> {
     /// Mark an evaluation as aborted, returning its in-progress builds.
     pub async fn find_active_builds_for_evaluation(
         &self,
-        evaluation_id: Uuid,
+        evaluation_id: EvaluationId,
     ) -> Result<Vec<MBuild>> {
         use entity::build::BuildStatus;
         let builds = EBuild::find()
@@ -120,7 +120,7 @@ impl<'db> EvalRepo<'db> {
     /// Returns the count of builds transitioned.
     pub async fn transition_created_builds_to_queued(
         &self,
-        evaluation_id: Uuid,
+        evaluation_id: EvaluationId,
     ) -> Result<Vec<MBuild>> {
         use entity::build::BuildStatus;
         let builds = EBuild::find()

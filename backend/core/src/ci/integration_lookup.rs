@@ -17,7 +17,6 @@ use sea_orm::EntityTrait;
 use std::fs;
 use std::sync::Arc;
 use tracing::warn;
-use uuid::Uuid;
 
 /// Numeric encoding of `integration.kind`.
 #[repr(i16)]
@@ -78,7 +77,7 @@ impl ForgeType {
 /// - the integration is missing required fields (endpoint URL or access token).
 pub async fn resolve_outbound_reporter_for_project(
     state: &Arc<ServerState>,
-    project_id: Uuid,
+    project_id: ProjectId,
 ) -> Arc<dyn CiReporter> {
     use sea_orm::ColumnTrait;
     use sea_orm::QueryFilter;
@@ -207,7 +206,7 @@ pub async fn resolve_outbound_reporter_for_project(
 /// from URLs (which would require parsing Enterprise hosts, etc.).
 async fn build_github_app_reporter_for_project(
     state: &Arc<ServerState>,
-    project_id: Uuid,
+    project_id: ProjectId,
 ) -> Option<Arc<dyn CiReporter>> {
     let github_app = state.config.github_app.clone()?;
 

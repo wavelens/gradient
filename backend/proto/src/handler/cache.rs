@@ -10,7 +10,7 @@ use std::sync::Arc;
 use gradient_core::types::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter};
 use tracing::{error, warn};
-use uuid::Uuid;
+use gradient_core::types::ids::{CacheId, CachedPathId, CachedPathSignatureId, OrganizationId};
 
 async fn build_local_cache_map(
     state: &ServerState,
@@ -83,7 +83,7 @@ async fn load_cached_path_rows(state: &ServerState, hashes: &[&str]) -> Vec<enti
     /// paths that were already cached before this worker connected.
 async fn ensure_push_signatures(
     state: &ServerState,
-        org_id: Uuid,
+        org_id: OrganizationId,
         cached_path_rows: &[entity::cached_path::Model],
     ) {
         let org_caches = EOrganizationCache::find()
@@ -104,7 +104,7 @@ async fn ensure_push_signatures(
 
                 if !exists {
                     let sig_row = ACachedPathSignature {
-                        id: sea_orm::ActiveValue::Set(Uuid::now_v7()),
+                        id: sea_orm::ActiveValue::Set(CachedPathSignatureId::now_v7()),
                         cached_path: sea_orm::ActiveValue::Set(cp.id),
                         cache: sea_orm::ActiveValue::Set(oc.cache),
                         signature: sea_orm::ActiveValue::Set(None),
@@ -118,7 +118,7 @@ async fn ensure_push_signatures(
 
 async fn load_cached_path_signatures(
     state: &ServerState,
-        cached_path_id: Uuid,
+        cached_path_id: CachedPathId,
         hash: &str,
     ) -> Option<Vec<String>> {
         let rows = match ECachedPathSignature::find()
@@ -133,8 +133,8 @@ async fn load_cached_path_signatures(
             }
         };
 
-        let cache_ids: Vec<Uuid> = rows.iter().map(|r| r.cache).collect();
-        let cache_names: HashMap<Uuid, String> = if cache_ids.is_empty() {
+        let cache_ids: Vec<CacheId> = rows.iter().map(|r| r.cache).collect();
+        let cache_names: HashMap<CacheId, String> = if cache_ids.is_empty() {
             HashMap::new()
         } else {
             ECache::find()
@@ -303,7 +303,7 @@ async fn build_uncached_push_entry(
     /// has no upstream URLs configured.
 async fn extend_with_upstream_results(
     state: &ServerState,
-        org_id: Uuid,
+        org_id: OrganizationId,
         uncached_pairs: Vec<(String, String)>,
         result: &mut Vec<gradient_core::types::proto::CachedPath>,
     ) {
@@ -328,7 +328,7 @@ async fn extend_with_upstream_results(
             }
         };
 
-        let cache_ids: Vec<Uuid> = org_cache_rows.iter().map(|r| r.cache).collect();
+        let cache_ids: Vec<CacheId> = org_cache_rows.iter().map(|r| r.cache).collect();
         if cache_ids.is_empty() {
             return;
         }
@@ -395,7 +395,7 @@ async fn extend_with_upstream_results(
     ///   Uncached paths include a presigned S3 PUT URL when S3-backed.
 async fn query(
     state: &ServerState,
-        org_id: Option<Uuid>,
+        org_id: Option<OrganizationId>,
         paths: &[String],
         mode: gradient_core::types::proto::QueryMode,
     ) -> Vec<gradient_core::types::proto::CachedPath> {
@@ -477,7 +477,7 @@ async fn query(
 
 pub(super) async fn handle_cache_query(
     state: &ServerState,
-    org_id: Option<Uuid>,
+    org_id: Option<OrganizationId>,
     paths: &[String],
     mode: gradient_core::types::proto::QueryMode,
 ) -> Vec<gradient_core::types::proto::CachedPath> {
