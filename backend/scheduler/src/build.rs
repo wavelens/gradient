@@ -6,7 +6,7 @@
 
 //! Handles `BuildOutput` messages from workers and build job lifecycle.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -360,6 +360,12 @@ impl<'a> BuildStateHandler<'a> {
                 EvaluationStatus::Waiting
             };
 
+            let new_reason = if matches!(target, EvaluationStatus::Waiting) {
+                Some(checker.compute_waiting_reason(&pending_builds, worker_caps))
+            } else {
+                None
+            };
+
             if eval.status != target {
                 info!(
                     evaluation_id = %eval.id,
@@ -369,11 +375,55 @@ impl<'a> BuildStateHandler<'a> {
                     workers = worker_caps.len(),
                     "reconciling evaluation waiting state"
                 );
+            }
+
+            // Persist the structured reason whenever the eval is (or stays in)
+            // Waiting so the API surface refreshes as the worker pool changes,
+            // and clear it on transitions back to Building.
+            persist_waiting_reason(self.state, eval.id, &eval.waiting_reason, new_reason.as_ref())
+                .await;
+
+            if eval.status != target {
                 update_evaluation_status(Arc::clone(self.state), eval, target).await;
             }
         }
 
         Ok(())
+    }
+}
+
+/// Update `evaluation.waiting_reason` only when the value actually changes.
+///
+/// Avoids a row-level UPDATE every reconcile cycle when the unmet capabilities
+/// haven't shifted, which keeps `updated_at` from churning on the row.
+async fn persist_waiting_reason(
+    state: &Arc<ServerState>,
+    evaluation_id: EvaluationId,
+    current: &Option<serde_json::Value>,
+    new_reason: Option<&WaitingReason>,
+) {
+    let new_value = new_reason.map(|r| r.to_json());
+
+    let unchanged = match (current, &new_value) {
+        (None, None) => true,
+        (Some(a), Some(b)) => a == b,
+        _ => false,
+    };
+    if unchanged {
+        return;
+    }
+
+    let res = EEvaluation::update_many()
+        .col_expr(
+            CEvaluation::WaitingReason,
+            sea_orm::sea_query::Expr::value(new_value),
+        )
+        .filter(CEvaluation::Id.eq(evaluation_id))
+        .exec(&state.worker_db)
+        .await;
+
+    if let Err(e) = res {
+        warn!(error = %e, %evaluation_id, "failed to persist waiting_reason");
     }
 }
 
@@ -497,15 +547,7 @@ impl BuildabilityChecker {
             let Some(drv) = self.drv_by_id.get(&b.derivation) else {
                 return false;
             };
-            let required: Vec<&str> = self
-                .features_by_drv
-                .get(&b.derivation)
-                .map(|ids| {
-                    ids.iter()
-                        .filter_map(|i| self.feature_name.get(i).map(String::as_str))
-                        .collect()
-                })
-                .unwrap_or_default();
+            let required: Vec<&str> = self.required_features_for(&b.derivation);
             worker_caps.iter().any(|(arch, feats)| {
                 let arch_ok =
                     drv.architecture == "builtin" || arch.iter().any(|a| a == &drv.architecture);
@@ -513,5 +555,228 @@ impl BuildabilityChecker {
                 arch_ok && feats_ok
             })
         })
+    }
+
+    fn required_features_for(&self, drv_id: &DerivationId) -> Vec<&str> {
+        self.features_by_drv
+            .get(drv_id)
+            .map(|ids| {
+                let mut names: Vec<&str> = ids
+                    .iter()
+                    .filter_map(|i| self.feature_name.get(i).map(String::as_str))
+                    .collect();
+                names.sort_unstable();
+                names.dedup();
+                names
+            })
+            .unwrap_or_default()
+    }
+
+    /// Group every unsatisfiable `(architecture, required_features)` combo and
+    /// the number of pending builds it covers. Used for the API
+    /// `waiting_reason` payload so the UI can explain *why* nothing is
+    /// dispatching.
+    fn compute_waiting_reason(
+        &self,
+        builds: &[MBuild],
+        worker_caps: &[(Vec<String>, Vec<String>)],
+    ) -> WaitingReason {
+        let mut grouped: BTreeMap<(String, Vec<String>), u32> = BTreeMap::new();
+        for b in builds {
+            let Some(drv) = self.drv_by_id.get(&b.derivation) else {
+                continue;
+            };
+            let required_owned: Vec<String> = self
+                .required_features_for(&b.derivation)
+                .into_iter()
+                .map(str::to_owned)
+                .collect();
+            let satisfied = worker_caps.iter().any(|(arch, feats)| {
+                let arch_ok =
+                    drv.architecture == "builtin" || arch.iter().any(|a| a == &drv.architecture);
+                let feats_ok = required_owned
+                    .iter()
+                    .all(|f| feats.iter().any(|sf| sf == f));
+                arch_ok && feats_ok
+            });
+            if satisfied {
+                continue;
+            }
+            *grouped
+                .entry((drv.architecture.clone(), required_owned))
+                .or_default() += 1;
+        }
+
+        let unmet: Vec<UnmetRequirement> = grouped
+            .into_iter()
+            .map(
+                |((architecture, required_features), build_count)| UnmetRequirement {
+                    architecture,
+                    required_features,
+                    build_count,
+                },
+            )
+            .collect();
+
+        let mut available_architectures: Vec<String> = worker_caps
+            .iter()
+            .flat_map(|(archs, _)| archs.iter().cloned())
+            .collect();
+        available_architectures.sort_unstable();
+        available_architectures.dedup();
+
+        WaitingReason {
+            unmet,
+            connected_workers: worker_caps.len() as u32,
+            available_architectures,
+        }
+    }
+}
+
+#[cfg(test)]
+mod waiting_reason_tests {
+    use super::*;
+
+    fn drv(id: DerivationId, arch: &str) -> MDerivation {
+        entity::derivation::Model {
+            id,
+            organization: OrganizationId::nil(),
+            derivation_path: "/nix/store/x.drv".into(),
+            architecture: arch.into(),
+            created_at: chrono::NaiveDateTime::default(),
+        }
+    }
+
+    fn build_for(drv_id: DerivationId, eval_id: EvaluationId) -> MBuild {
+        entity::build::Model {
+            id: BuildId::now_v7(),
+            evaluation: eval_id,
+            derivation: drv_id,
+            status: BuildStatus::Queued,
+            log_id: None,
+            build_time_ms: None,
+            worker: None,
+            via: None,
+            external_cached: false,
+            created_at: chrono::NaiveDateTime::default(),
+            updated_at: chrono::NaiveDateTime::default(),
+        }
+    }
+
+    fn checker_with(
+        drvs: Vec<MDerivation>,
+        feature_edges: Vec<(DerivationId, FeatureId, &'static str)>,
+    ) -> BuildabilityChecker {
+        let drv_by_id = drvs.into_iter().map(|d| (d.id, d)).collect();
+        let mut features_by_drv: HashMap<DerivationId, Vec<FeatureId>> = HashMap::new();
+        let mut feature_name: HashMap<FeatureId, String> = HashMap::new();
+        for (drv_id, feat_id, name) in feature_edges {
+            features_by_drv.entry(drv_id).or_default().push(feat_id);
+            feature_name.insert(feat_id, name.to_string());
+        }
+        BuildabilityChecker {
+            drv_by_id,
+            features_by_drv,
+            feature_name,
+        }
+    }
+
+    #[test]
+    fn no_workers_lists_every_unique_arch() {
+        let eval_id = EvaluationId::now_v7();
+        let d1 = drv(DerivationId::now_v7(), "aarch64-linux");
+        let d2 = drv(DerivationId::now_v7(), "x86_64-linux");
+        let builds = vec![build_for(d1.id, eval_id), build_for(d2.id, eval_id)];
+        let checker = checker_with(vec![d1, d2], vec![]);
+
+        let reason = checker.compute_waiting_reason(&builds, &[]);
+
+        assert_eq!(reason.connected_workers, 0);
+        assert!(reason.available_architectures.is_empty());
+        assert_eq!(reason.unmet.len(), 2);
+        assert!(
+            reason
+                .unmet
+                .iter()
+                .any(|u| u.architecture == "aarch64-linux" && u.build_count == 1)
+        );
+        assert!(
+            reason
+                .unmet
+                .iter()
+                .any(|u| u.architecture == "x86_64-linux" && u.build_count == 1)
+        );
+    }
+
+    #[test]
+    fn satisfied_builds_are_excluded_from_unmet() {
+        let eval_id = EvaluationId::now_v7();
+        let d_x86 = drv(DerivationId::now_v7(), "x86_64-linux");
+        let d_arm = drv(DerivationId::now_v7(), "aarch64-linux");
+        let builds = vec![build_for(d_x86.id, eval_id), build_for(d_arm.id, eval_id)];
+        let checker = checker_with(vec![d_x86, d_arm], vec![]);
+
+        let caps: Vec<(Vec<String>, Vec<String>)> =
+            vec![(vec!["x86_64-linux".into()], vec![])];
+        let reason = checker.compute_waiting_reason(&builds, &caps);
+
+        assert_eq!(reason.connected_workers, 1);
+        assert_eq!(reason.available_architectures, vec!["x86_64-linux"]);
+        assert_eq!(reason.unmet.len(), 1);
+        assert_eq!(reason.unmet[0].architecture, "aarch64-linux");
+        assert_eq!(reason.unmet[0].build_count, 1);
+    }
+
+    #[test]
+    fn missing_feature_is_reported_alongside_arch() {
+        let eval_id = EvaluationId::now_v7();
+        let drv_id = DerivationId::now_v7();
+        let feat_id = FeatureId::now_v7();
+        let d = drv(drv_id, "x86_64-linux");
+        let builds = vec![build_for(drv_id, eval_id)];
+        let checker = checker_with(vec![d], vec![(drv_id, feat_id, "kvm")]);
+
+        let caps: Vec<(Vec<String>, Vec<String>)> =
+            vec![(vec!["x86_64-linux".into()], vec![])];
+        let reason = checker.compute_waiting_reason(&builds, &caps);
+
+        assert_eq!(reason.unmet.len(), 1);
+        assert_eq!(reason.unmet[0].architecture, "x86_64-linux");
+        assert_eq!(reason.unmet[0].required_features, vec!["kvm".to_string()]);
+        assert_eq!(reason.unmet[0].build_count, 1);
+    }
+
+    #[test]
+    fn identical_requirements_are_grouped_with_count() {
+        let eval_id = EvaluationId::now_v7();
+        let d1 = drv(DerivationId::now_v7(), "aarch64-linux");
+        let d2 = drv(DerivationId::now_v7(), "aarch64-linux");
+        let d3 = drv(DerivationId::now_v7(), "aarch64-linux");
+        let builds = vec![
+            build_for(d1.id, eval_id),
+            build_for(d2.id, eval_id),
+            build_for(d3.id, eval_id),
+        ];
+        let checker = checker_with(vec![d1, d2, d3], vec![]);
+
+        let reason = checker.compute_waiting_reason(&builds, &[]);
+
+        assert_eq!(reason.unmet.len(), 1);
+        assert_eq!(reason.unmet[0].architecture, "aarch64-linux");
+        assert_eq!(reason.unmet[0].build_count, 3);
+    }
+
+    #[test]
+    fn builtin_arch_satisfied_by_any_worker() {
+        let eval_id = EvaluationId::now_v7();
+        let d = drv(DerivationId::now_v7(), "builtin");
+        let builds = vec![build_for(d.id, eval_id)];
+        let checker = checker_with(vec![d], vec![]);
+
+        let caps: Vec<(Vec<String>, Vec<String>)> =
+            vec![(vec!["x86_64-linux".into()], vec![])];
+        let reason = checker.compute_waiting_reason(&builds, &caps);
+
+        assert!(reason.unmet.is_empty());
     }
 }

@@ -81,6 +81,18 @@ pub async fn get_evaluation(
             .collect()
     };
 
+    let waiting_reason = if matches!(
+        evaluation.status,
+        entity::evaluation::EvaluationStatus::Waiting
+    ) {
+        evaluation
+            .waiting_reason
+            .as_ref()
+            .and_then(gradient_core::types::WaitingReason::from_json)
+    } else {
+        None
+    };
+
     let res = BaseResponse {
         error: false,
         message: EvaluationResponse {
@@ -98,6 +110,7 @@ pub async fn get_evaluation(
             error_count,
             warning_count,
             entry_points,
+            waiting_reason,
         },
     };
 

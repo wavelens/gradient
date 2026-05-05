@@ -54,7 +54,8 @@ impl MigrationTrait for Migration {
                         ForeignKey::create()
                             .name("fk-integration-created_by")
                             .from(Integration::Table, Integration::CreatedBy)
-                            .to(User::Table, User::Id),
+                            .to(User::Table, User::Id)
+                            .on_delete(ForeignKeyAction::Cascade),
                     )
                     .to_owned(),
             )

@@ -87,6 +87,8 @@ mod m20260505_000001_api_key_lifecycle;
 mod m20260505_000002_create_table_session;
 mod m20260505_000003_create_table_audit_log;
 mod m20260505_000004_create_table_webhook_delivery;
+mod m20260506_000000_add_waiting_reason_to_evaluation;
+mod m20260506_000001_index_derivation_output_cache_lookup;
 
 pub struct Migrator;
 
@@ -175,6 +177,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20260505_000002_create_table_session::Migration),
             Box::new(m20260505_000003_create_table_audit_log::Migration),
             Box::new(m20260505_000004_create_table_webhook_delivery::Migration),
+            Box::new(m20260506_000000_add_waiting_reason_to_evaluation::Migration),
+            Box::new(m20260506_000001_index_derivation_output_cache_lookup::Migration),
         ]
     }
 }

@@ -58,6 +58,7 @@ fn make_eval_queued(
         updated_at: test_date(),
         flake_source: None,
         repo_check_id: None,
+        waiting_reason: None,
     }
 }
 

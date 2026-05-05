@@ -86,6 +86,7 @@ pub struct Model {
     pub updated_at: NaiveDateTime,
     pub flake_source: Option<String>,
     pub repo_check_id: Option<i64>,
+    pub waiting_reason: Option<serde_json::Value>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

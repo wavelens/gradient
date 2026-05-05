@@ -409,6 +409,23 @@ cdk-virtual-scroll-viewport.builds-list {
     font-size: $font-size-sm;
     color: $text-light;
   }
+
+  .waiting-unmet {
+    margin: $spacing-xs 0 0;
+    padding: 0;
+    list-style: none;
+    font-size: $font-size-sm;
+    color: $text-secondary;
+    text-align: left;
+
+    li {
+      padding: 2px 0;
+    }
+
+    code {
+      font-size: 0.85em;
+    }
+  }
 }
 
 .evaluating-hint {
