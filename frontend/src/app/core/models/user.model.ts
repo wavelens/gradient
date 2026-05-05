@@ -27,4 +27,35 @@ export interface ApiKey {
   id: string;
   name: string;
   managed: boolean;
+  created_at: string;
+  last_used_at: string | null;
+  expires_at: string | null;
+  revoked_at: string | null;
+}
+
+export interface Session {
+  id: string;
+  user_agent: string | null;
+  ip: string | null;
+  created_at: string;
+  last_used_at: string;
+  expires_at: string;
+  remember_me: boolean;
+  current: boolean;
+}
+
+export interface AuditLogEntry {
+  id: string;
+  event: string;
+  ip: string | null;
+  user_agent: string | null;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface PaginatedResponse<T> {
+  items: T;
+  total: number;
+  page: number;
+  per_page: number;
 }

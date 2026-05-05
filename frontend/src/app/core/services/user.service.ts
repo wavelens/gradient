@@ -7,7 +7,13 @@
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { ApiService } from './api.service';
-import { UserSettings, ApiKey } from '@core/models';
+import {
+  ApiKey,
+  AuditLogEntry,
+  PaginatedResponse,
+  Session,
+  UserSettings,
+} from '@core/models';
 
 @Injectable({ providedIn: 'root' })
 export class UserService {
@@ -21,20 +27,42 @@ export class UserService {
     return this.api.patch<string>('user/settings', data);
   }
 
-  deleteUser(): Observable<string> {
-    return this.api.delete<string>('user');
+  deleteUser(confirmation: { password?: string; confirm_username?: string }): Observable<string> {
+    return this.api.delete<string>('user', confirmation);
   }
 
   getApiKeys(): Observable<ApiKey[]> {
     return this.api.get<ApiKey[]>('user/keys');
   }
 
-  createApiKey(name: string): Observable<string> {
-    return this.api.post<string>('user/keys', { name });
+  createApiKey(name: string, expiresInDays?: number | null): Observable<string> {
+    const body: { name: string; expires_in_days?: number } = { name };
+    if (expiresInDays !== null && expiresInDays !== undefined) {
+      body.expires_in_days = expiresInDays;
+    }
+    return this.api.post<string>('user/keys', body);
   }
 
   deleteApiKey(name: string): Observable<string> {
     return this.api.delete<string>('user/keys', { name });
+  }
+
+  revokeApiKey(id: string): Observable<string> {
+    return this.api.post<string>(`user/keys/${id}/revoke`, {});
+  }
+
+  getSessions(): Observable<Session[]> {
+    return this.api.get<Session[]>('user/sessions');
+  }
+
+  revokeSession(id: string): Observable<string> {
+    return this.api.delete<string>(`user/sessions/${id}`);
+  }
+
+  getAuditLog(page = 1, perPage = 50): Observable<PaginatedResponse<AuditLogEntry[]>> {
+    return this.api.get<PaginatedResponse<AuditLogEntry[]>>(
+      `user/audit-log?page=${page}&per_page=${perPage}`,
+    );
   }
 
   searchUsers(query: string): Observable<{ id: string; username: string; name: string }[]> {

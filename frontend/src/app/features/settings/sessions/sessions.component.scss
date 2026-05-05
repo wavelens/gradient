@@ -1,0 +1,60 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+.session-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.session-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--surface-border, #e5e5e5);
+  border-radius: 8px;
+  background: var(--surface-card, #fff);
+
+  &.current {
+    border-color: var(--primary-color, #4a8aff);
+  }
+}
+
+.session-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.session-ua {
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.session-details {
+  font-size: 0.85rem;
+  margin-top: 0.25rem;
+}
+
+.badge {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  border-radius: 999px;
+  background: var(--primary-color, #4a8aff);
+  color: white;
+}
+
+.session-actions {
+  flex-shrink: 0;
+}

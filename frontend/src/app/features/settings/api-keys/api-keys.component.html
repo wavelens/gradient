@@ -31,7 +31,7 @@
     } @else {
       <div class="keys-list">
         @for (key of keys(); track key.id) {
-          <div class="key-row">
+          <div class="key-row" [class.revoked]="key.revoked_at">
             <div class="key-info">
               <span class="material-symbols-outlined">key</span>
               <div>
@@ -40,19 +40,40 @@
                   @if (key.managed) {
                     <span class="badge badge-managed">Managed</span>
                   }
+                  @if (key.revoked_at) {
+                    <span class="badge badge-revoked">Revoked</span>
+                  }
                 </div>
-                <div class="key-id text-secondary">{{ key.id }}</div>
+                <div class="key-id text-secondary">
+                  Last used: {{ key.last_used_at ? (key.last_used_at | date: 'medium') : 'never' }}
+                  @if (key.expires_at) {
+                    · Expires: {{ key.expires_at | date: 'medium' }}
+                  }
+                </div>
               </div>
             </div>
-            <button
-              pButton
-              label="Delete"
-              icon="pi pi-trash"
-              severity="danger"
-              (click)="deleteKey(key)"
-              [loading]="deletingId() === key.id"
-              [disabled]="deletingId() !== null || key.managed"
-            ></button>
+            <div class="key-actions">
+              @if (!key.revoked_at) {
+                <button
+                  pButton
+                  label="Revoke"
+                  icon="pi pi-ban"
+                  severity="warn"
+                  (click)="revokeKey(key)"
+                  [loading]="revokingId() === key.id"
+                  [disabled]="revokingId() !== null || key.managed"
+                ></button>
+              }
+              <button
+                pButton
+                label="Delete"
+                icon="pi pi-trash"
+                severity="danger"
+                (click)="deleteKey(key)"
+                [loading]="deletingId() === key.id"
+                [disabled]="deletingId() !== null || key.managed"
+              ></button>
+            </div>
           </div>
         }
       </div>
@@ -78,6 +99,10 @@
   <div class="form-group">
     <label for="key-name">Key Name</label>
     <input pInputText id="key-name" [(ngModel)]="newKeyName" placeholder="e.g. CI/CD Pipeline" class="w-full" />
+  </div>
+  <div class="form-group">
+    <label for="key-expires">Expires in (days)</label>
+    <input pInputText id="key-expires" type="number" min="1" [(ngModel)]="newKeyExpiresInDays" placeholder="Leave blank for no expiry" class="w-full" />
   </div>
   <ng-template pTemplate="footer">
     <button pButton label="Cancel" severity="secondary" (click)="showCreateDialog.set(false)" [disabled]="creating()"></button>

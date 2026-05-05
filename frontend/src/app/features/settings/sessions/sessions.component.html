@@ -1,0 +1,60 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<div class="container">
+  <div class="page-header">
+    <h1>Active Sessions</h1>
+    <p class="text-secondary">Devices currently signed in to your account</p>
+  </div>
+
+  @if (loading()) {
+    <app-loading-spinner message="Loading sessions..." />
+  } @else {
+    @if (errorMessage()) {
+      <div class="message-banner error">
+        <span class="material-symbols-outlined">error</span>
+        {{ errorMessage() }}
+      </div>
+    }
+
+    <div class="settings-section">
+      @if (sessions().length === 0) {
+        <p class="text-secondary">No active sessions.</p>
+      } @else {
+        <ul class="session-list">
+          @for (s of sessions(); track s.id) {
+            <li class="session-item" [class.current]="s.current">
+              <div class="session-meta">
+                <div class="session-ua">
+                  {{ s.user_agent || 'Unknown device' }}
+                  @if (s.current) {
+                    <span class="badge">This device</span>
+                  }
+                </div>
+                <div class="text-secondary session-details">
+                  IP: {{ s.ip || 'unknown' }} ·
+                  Last used {{ s.last_used_at | date: 'medium' }} ·
+                  Expires {{ s.expires_at | date: 'medium' }}
+                </div>
+              </div>
+              <div class="session-actions">
+                <button
+                  pButton
+                  label="Revoke"
+                  icon="pi pi-sign-out"
+                  severity="danger"
+                  [disabled]="s.current || revokingId() === s.id"
+                  [loading]="revokingId() === s.id"
+                  (click)="revoke(s)"
+                ></button>
+              </div>
+            </li>
+          }
+        </ul>
+      }
+    </div>
+  }
+</div>

@@ -36,11 +36,13 @@ export class ApiKeysComponent implements OnInit {
   loading = signal(true);
   creating = signal(false);
   deletingId = signal<string | null>(null);
+  revokingId = signal<string | null>(null);
 
   keys = signal<ApiKey[]>([]);
   showCreateDialog = signal(false);
   showKeyDialog = signal(false);
   newKeyName = '';
+  newKeyExpiresInDays: number | null = null;
   createdKeyValue = signal('');
   errorMessage = signal<string | null>(null);
 
@@ -64,6 +66,7 @@ export class ApiKeysComponent implements OnInit {
 
   openCreateDialog(): void {
     this.newKeyName = '';
+    this.newKeyExpiresInDays = null;
     this.errorMessage.set(null);
     this.showCreateDialog.set(true);
   }
@@ -74,7 +77,7 @@ export class ApiKeysComponent implements OnInit {
 
     this.creating.set(true);
     this.errorMessage.set(null);
-    this.userService.createApiKey(name).subscribe({
+    this.userService.createApiKey(name, this.newKeyExpiresInDays).subscribe({
       next: (keyValue) => {
         this.creating.set(false);
         this.showCreateDialog.set(false);
@@ -85,6 +88,19 @@ export class ApiKeysComponent implements OnInit {
       error: (error) => {
         this.errorMessage.set(error.message || 'Failed to create API key.');
         this.creating.set(false);
+      },
+    });
+  }
+
+  revokeKey(key: ApiKey): void {
+    this.revokingId.set(key.id);
+    this.userService.revokeApiKey(key.id).subscribe({
+      next: () => {
+        this.revokingId.set(null);
+        this.loadKeys();
+      },
+      error: () => {
+        this.revokingId.set(null);
       },
     });
   }
