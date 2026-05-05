@@ -8,8 +8,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use uuid::Uuid;
-
+use gradient_core::types::ids::{BuildId, CommitId, EvaluationId, OrganizationId, ProjectId};
 use gradient_core::types::proto::{
     BuildJob, CandidateScore, FlakeJob, Job, JobCandidate, JobKind, RequiredPath,
 };
@@ -18,12 +17,12 @@ use crate::policy::{JobContext, Policy, WorkerContext};
 
 #[derive(Debug, Clone)]
 pub struct PendingEvalJob {
-    pub evaluation_id: Uuid,
-    pub project_id: Option<Uuid>,
+    pub evaluation_id: EvaluationId,
+    pub project_id: Option<ProjectId>,
     /// Peer (org/cache/proxy) that owns this job. Workers must be authorized
     /// for this peer to receive the job offer.
-    pub peer_id: Uuid,
-    pub commit_id: Uuid,
+    pub peer_id: OrganizationId,
+    pub commit_id: CommitId,
     pub repository: String,
     pub job: FlakeJob,
     pub required_paths: Vec<RequiredPath>,
@@ -34,10 +33,10 @@ pub struct PendingEvalJob {
 
 #[derive(Debug, Clone)]
 pub struct PendingBuildJob {
-    pub build_id: Uuid,
-    pub evaluation_id: Uuid,
+    pub build_id: BuildId,
+    pub evaluation_id: EvaluationId,
     /// Peer (org/cache/proxy) that owns this job.
-    pub peer_id: Uuid,
+    pub peer_id: OrganizationId,
     pub job: BuildJob,
     pub required_paths: Vec<RequiredPath>,
     /// Nix system string the build's target derivation must run on
@@ -89,7 +88,7 @@ impl PendingJob {
         }
     }
 
-    pub fn peer_id(&self) -> Uuid {
+    pub fn peer_id(&self) -> OrganizationId {
         match self {
             PendingJob::Eval(j) => j.peer_id,
             PendingJob::Build(j) => j.peer_id,
@@ -115,7 +114,7 @@ impl PendingJob {
         }
     }
 
-    pub fn evaluation_id(&self) -> Uuid {
+    pub fn evaluation_id(&self) -> EvaluationId {
         match self {
             PendingJob::Eval(j) => j.evaluation_id,
             PendingJob::Build(j) => j.evaluation_id,
@@ -141,7 +140,7 @@ pub struct Assignment {
     pub job_id: String,
     pub job: Job,
     /// Organization UUID that owns this job — used for credential lookup.
-    pub peer_id: Uuid,
+    pub peer_id: OrganizationId,
 }
 
 /// Returns true when `job` is either an eval job (no arch constraint) or a
@@ -193,7 +192,7 @@ impl JobTracker {
     /// Pass `None` for `caps` to disable capability filtering (e.g. eval-only worker).
     pub fn candidates_for_worker(
         &self,
-        authorized: Option<&HashSet<Uuid>>,
+        authorized: Option<&HashSet<OrganizationId>>,
         caps: Option<&WorkerBuildCaps>,
     ) -> Vec<JobCandidate> {
         self.pending
@@ -233,7 +232,7 @@ impl JobTracker {
     pub fn take_best_of_kind(
         &mut self,
         peer_id: &str,
-        authorized: Option<&HashSet<Uuid>>,
+        authorized: Option<&HashSet<OrganizationId>>,
         caps: Option<&WorkerBuildCaps>,
         kind: &JobKind,
         policy: &Policy,
@@ -332,7 +331,7 @@ impl JobTracker {
     pub fn drain_peer_jobs_on_worker(
         &mut self,
         worker_id: &str,
-        revoked_peers: &HashSet<Uuid>,
+        revoked_peers: &HashSet<OrganizationId>,
     ) -> Vec<String> {
         let to_requeue: Vec<String> = self
             .active
@@ -376,7 +375,7 @@ impl JobTracker {
     }
 
     /// Remove all pending (unassigned) jobs belonging to a given evaluation.
-    pub fn remove_pending_for_evaluation(&mut self, evaluation_id: Uuid) {
+    pub fn remove_pending_for_evaluation(&mut self, evaluation_id: EvaluationId) {
         self.pending
             .retain(|_, job| job.evaluation_id() != evaluation_id);
     }
@@ -395,13 +394,14 @@ mod tests {
     use super::*;
     use crate::policy::Policy;
     use gradient_core::types::proto::{BuildJob, BuildTask, FlakeJob, FlakeSource, FlakeTask};
+    use uuid::Uuid;
 
-    fn eval_job(peer: Uuid) -> PendingJob {
+    fn eval_job(peer: OrganizationId) -> PendingJob {
         PendingJob::Eval(PendingEvalJob {
-            evaluation_id: Uuid::now_v7(),
+            evaluation_id: EvaluationId::now_v7(),
             project_id: None,
             peer_id: peer,
-            commit_id: Uuid::now_v7(),
+            commit_id: CommitId::now_v7(),
             repository: "https://example.com/repo".into(),
             job: FlakeJob {
                 tasks: vec![FlakeTask::EvaluateDerivations],
@@ -417,19 +417,19 @@ mod tests {
         })
     }
 
-    fn build_job(peer: Uuid, required: Vec<RequiredPath>) -> PendingJob {
+    fn build_job(peer: OrganizationId, required: Vec<RequiredPath>) -> PendingJob {
         build_job_arch(peer, required, "x86_64-linux", vec![])
     }
 
     fn build_job_arch(
-        peer: Uuid,
+        peer: OrganizationId,
         required: Vec<RequiredPath>,
         architecture: &str,
         required_features: Vec<String>,
     ) -> PendingJob {
         PendingJob::Build(PendingBuildJob {
-            build_id: Uuid::now_v7(),
-            evaluation_id: Uuid::now_v7(),
+            build_id: BuildId::now_v7(),
+            evaluation_id: EvaluationId::now_v7(),
             peer_id: peer,
             job: BuildJob {
                 builds: vec![BuildTask {
@@ -476,7 +476,7 @@ mod tests {
     #[test]
     fn test_add_pending_and_candidates() {
         let mut tracker = JobTracker::new();
-        let peer = Uuid::now_v7();
+        let peer = OrganizationId::now_v7();
         tracker.add_pending("j1".into(), eval_job(peer));
         tracker.add_pending("j2".into(), eval_job(peer));
         tracker.add_pending("j3".into(), build_job(peer, vec![]));
@@ -489,8 +489,8 @@ mod tests {
     #[test]
     fn test_candidates_filtered_by_peer() {
         let mut tracker = JobTracker::new();
-        let peer_a = Uuid::now_v7();
-        let peer_b = Uuid::now_v7();
+        let peer_a = OrganizationId::now_v7();
+        let peer_b = OrganizationId::now_v7();
         tracker.add_pending("ja".into(), eval_job(peer_a));
         tracker.add_pending("jb".into(), eval_job(peer_b));
 
@@ -505,7 +505,7 @@ mod tests {
     #[test]
     fn test_candidates_filtered_by_architecture() {
         let mut tracker = JobTracker::new();
-        let peer = Uuid::now_v7();
+        let peer = OrganizationId::now_v7();
         // x86_64 build
         tracker.add_pending(
             "x86".into(),
@@ -535,7 +535,7 @@ mod tests {
     #[test]
     fn test_take_best_of_kind_skips_wrong_arch() {
         let mut tracker = JobTracker::new();
-        let peer = Uuid::now_v7();
+        let peer = OrganizationId::now_v7();
         tracker.add_pending(
             "arm".into(),
             build_job_arch(peer, vec![], "aarch64-linux", vec![]),
@@ -555,7 +555,7 @@ mod tests {
     #[test]
     fn test_take_best_of_kind_requires_features() {
         let mut tracker = JobTracker::new();
-        let peer = Uuid::now_v7();
+        let peer = OrganizationId::now_v7();
         tracker.add_pending(
             "kvm".into(),
             build_job_arch(peer, vec![], "x86_64-linux", vec!["kvm".into()]),
@@ -586,7 +586,7 @@ mod tests {
     #[test]
     fn test_record_scores_then_request_assigns_best() {
         let mut tracker = JobTracker::new();
-        let peer = Uuid::now_v7();
+        let peer = OrganizationId::now_v7();
         tracker.add_pending(
             "j1".into(),
             build_job(
@@ -618,7 +618,7 @@ mod tests {
     #[test]
     fn test_request_without_scores_still_assigns() {
         let mut tracker = JobTracker::new();
-        let peer = Uuid::now_v7();
+        let peer = OrganizationId::now_v7();
         tracker.add_pending(
             "j1".into(),
             build_job(
@@ -642,7 +642,7 @@ mod tests {
     #[test]
     fn test_release_to_pending_after_rejection() {
         let mut tracker = JobTracker::new();
-        let peer = Uuid::now_v7();
+        let peer = OrganizationId::now_v7();
         tracker.add_pending("j1".into(), eval_job(peer));
 
         // Assign it.
@@ -665,7 +665,7 @@ mod tests {
     #[test]
     fn test_worker_disconnected_requeues() {
         let mut tracker = JobTracker::new();
-        let peer = Uuid::now_v7();
+        let peer = OrganizationId::now_v7();
         tracker.add_pending("j1".into(), eval_job(peer));
         tracker.add_pending("j2".into(), eval_job(peer));
 
@@ -695,7 +695,7 @@ mod tests {
     #[test]
     fn test_take_empty_required() {
         let mut tracker = JobTracker::new();
-        let peer = Uuid::now_v7();
+        let peer = OrganizationId::now_v7();
         // Job with required paths — should NOT be taken.
         tracker.add_pending(
             "j1".into(),
@@ -719,8 +719,8 @@ mod tests {
     #[test]
     fn test_drain_peer_jobs_on_worker_aborts_only_revoked_org() {
         let mut tracker = JobTracker::new();
-        let org_a = Uuid::now_v7();
-        let org_b = Uuid::now_v7();
+        let org_a = OrganizationId::now_v7();
+        let org_b = OrganizationId::now_v7();
         tracker.add_pending("ja1".into(), eval_job(org_a));
         tracker.add_pending("ja2".into(), eval_job(org_a));
         tracker.add_pending("jb1".into(), eval_job(org_b));
@@ -763,7 +763,7 @@ mod tests {
     #[test]
     fn test_drain_peer_jobs_on_worker_empty_revoked() {
         let mut tracker = JobTracker::new();
-        let org_a = Uuid::now_v7();
+        let org_a = OrganizationId::now_v7();
         tracker.add_pending("j1".into(), eval_job(org_a));
         tracker.take_best_of_kind(
             "w1",
@@ -781,7 +781,7 @@ mod tests {
     #[test]
     fn test_contains_job_both_maps() {
         let mut tracker = JobTracker::new();
-        let peer = Uuid::now_v7();
+        let peer = OrganizationId::now_v7();
         tracker.add_pending("j1".into(), eval_job(peer));
         assert!(tracker.contains_job("j1"));
         assert!(!tracker.contains_job("j2"));
