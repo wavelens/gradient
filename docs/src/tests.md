@@ -1005,3 +1005,22 @@ Tests:
   `handle_build_job_failed` mock-DB suite was extended to mock the
   `propagate_to_followers` followers query, exercising the new code path
   on every terminal transition.
+
+## Typed entity IDs (`entity::ids`)
+
+`backend/entity/src/ids.rs` defines one newtype per entity (`UserId`,
+`OrganizationId`, `ProjectId`, …) so the compiler rejects argument
+swaps. Unit tests (`cargo test -p entity --tests`) cover:
+
+- Round-trip with `Uuid` (no information loss).
+- `serde` transparency (wire format identical to bare `Uuid`).
+- `FromStr` parsing (lets axum `Path<UserId>` extract from URL segments).
+- `TryFromU64` returns `DbErr` (UUID PKs are never `u64`-derivable).
+
+A `trybuild` compile-fail test
+(`cargo test -p entity --test compile_fail`) locks the swap-prevention
+property: a function expecting `OrganizationId` MUST reject a `UserId`
+argument at compile time. Regenerate the captured rustc diagnostic
+after a deliberate API change with:
+
+    TRYBUILD=overwrite cargo test -p entity --test compile_fail
