@@ -44,6 +44,9 @@ export class ProfileComponent implements OnInit {
   showDeleteDialog = signal(false);
   errorMessage = signal<string | null>(null);
   successMessage = signal<string | null>(null);
+  deleteError = signal<string | null>(null);
+  deletePassword = '';
+  deleteUsernameConfirm = '';
 
   formData = {
     username: '',
@@ -92,16 +95,26 @@ export class ProfileComponent implements OnInit {
     });
   }
 
+  openDeleteDialog(): void {
+    this.deletePassword = '';
+    this.deleteUsernameConfirm = '';
+    this.deleteError.set(null);
+    this.showDeleteDialog.set(true);
+  }
+
   deleteAccount(): void {
     this.deleting.set(true);
-    this.userService.deleteUser().subscribe({
+    this.deleteError.set(null);
+    const body = this.isOidc()
+      ? { confirm_username: this.deleteUsernameConfirm }
+      : { password: this.deletePassword };
+    this.userService.deleteUser(body).subscribe({
       next: () => {
         this.authService.logout().subscribe();
       },
       error: (error) => {
-        console.error('Failed to delete account:', error);
         this.deleting.set(false);
-        this.showDeleteDialog.set(false);
+        this.deleteError.set(error?.message || 'Failed to delete account.');
       },
     });
   }

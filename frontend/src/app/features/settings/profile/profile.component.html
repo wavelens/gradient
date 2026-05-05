@@ -76,6 +76,13 @@
           </div>
           <button pButton label="Manage API Keys" icon="pi pi-key" severity="secondary" routerLink="/settings/keys"></button>
         </div>
+        <div class="nav-row">
+          <div>
+            <h3>Active Sessions</h3>
+            <p class="text-secondary">View and revoke devices currently signed in to your account</p>
+          </div>
+          <button pButton label="Manage Sessions" icon="pi pi-desktop" severity="secondary" routerLink="/settings/sessions"></button>
+        </div>
       </div>
     </div>
 
@@ -88,7 +95,7 @@
             <h3>Delete Account</h3>
             <p class="text-secondary">Permanently delete your account and all associated data.</p>
           </div>
-          <button pButton label="Delete Account" icon="pi pi-trash" severity="danger" (click)="showDeleteDialog.set(true)" [disabled]="isManaged()"></button>
+          <button pButton label="Delete Account" icon="pi pi-trash" severity="danger" (click)="openDeleteDialog()" [disabled]="isManaged()"></button>
         </div>
       </div>
     </div>
@@ -105,8 +112,32 @@
   [resizable]="false"
 >
   <p>Are you sure you want to permanently delete your account? This action cannot be undone.</p>
+  @if (deleteError()) {
+    <div class="message-banner error">
+      <span class="material-symbols-outlined">error</span>
+      {{ deleteError() }}
+    </div>
+  }
+  @if (isOidc()) {
+    <div class="form-group">
+      <label for="confirm-username">Type your username (<code>{{ formData.username }}</code>) to confirm</label>
+      <input pInputText id="confirm-username" [(ngModel)]="deleteUsernameConfirm" class="w-full" />
+    </div>
+  } @else {
+    <div class="form-group">
+      <label for="confirm-password">Confirm with your password</label>
+      <input pInputText id="confirm-password" type="password" [(ngModel)]="deletePassword" class="w-full" />
+    </div>
+  }
   <ng-template pTemplate="footer">
     <button pButton label="Cancel" severity="secondary" (click)="showDeleteDialog.set(false)" [disabled]="deleting()"></button>
-    <button pButton label="Delete Account" severity="danger" (click)="deleteAccount()" [loading]="deleting()" [disabled]="deleting()"></button>
+    <button
+      pButton
+      label="Delete Account"
+      severity="danger"
+      (click)="deleteAccount()"
+      [loading]="deleting()"
+      [disabled]="deleting() || (isOidc() ? deleteUsernameConfirm !== formData.username : deletePassword.length === 0)"
+    ></button>
   </ng-template>
 </p-dialog>

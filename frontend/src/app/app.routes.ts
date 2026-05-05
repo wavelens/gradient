@@ -229,6 +229,14 @@ export const routes: Routes = [
             (m) => m.ApiKeysComponent
           ),
       },
+      {
+        path: 'settings/sessions',
+        title: 'Sessions',
+        loadComponent: () =>
+          import('./features/settings/sessions/sessions.component').then(
+            (m) => m.SessionsComponent
+          ),
+      },
     ],
   },
 
