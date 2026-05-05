@@ -10,6 +10,7 @@ pub mod cli;
 pub mod config;
 pub mod consts;
 pub mod db;
+pub mod ids;
 pub mod input;
 pub mod proto;
 pub mod secret;
@@ -29,6 +30,7 @@ pub use self::config::{EmailConfig, GitHubAppConfig, OidcConfig, RuntimeConfig, 
 pub use self::consts::*;
 pub use self::db::{WebDb, WorkerDb};
 pub use self::entity_aliases::*;
+pub use self::ids::*;
 pub use self::input::*;
 pub use self::io::*;
 pub use self::nix_cache::*;
