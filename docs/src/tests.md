@@ -1107,3 +1107,27 @@ status so a regression cannot quietly weaken the surface:
   password-auth account on its own (issue #43).
 
 Run with `cargo test -p web --test auth_hardening`.
+
+## Evaluation `waiting_reason` — surfaces the reconciler verdict (issue #98)
+
+`backend/scheduler/src/build.rs::waiting_reason_tests` exercises
+`BuildabilityChecker::compute_waiting_reason` directly so the API payload
+returned by `GET /evals/{evaluation}` is locked in:
+
+- `no_workers_lists_every_unique_arch` — when no worker is connected, every
+  pending build's `(architecture, required_features)` combo lands in
+  `unmet`, with `connected_workers == 0`.
+- `satisfied_builds_are_excluded_from_unmet` — pending builds whose arch
+  matches some connected worker are filtered out; only the genuinely
+  blocked combos remain.
+- `missing_feature_is_reported_alongside_arch` — a build whose arch is
+  available but whose `requiredSystemFeatures` aren't satisfied is
+  reported with the missing feature names attached.
+- `identical_requirements_are_grouped_with_count` — N pending builds with
+  the same blocking requirement collapse to one `UnmetRequirement` with
+  `build_count == N`, so the UI doesn't repeat itself.
+- `builtin_arch_satisfied_by_any_worker` — `architecture == "builtin"`
+  derivations are never counted as unmet so long as any worker is
+  connected.
+
+Run with `cargo test -p scheduler --tests waiting_reason_tests`.

@@ -23,7 +23,7 @@ import { switchMap } from 'rxjs/operators';
 import { CdkVirtualScrollViewport, ScrollingModule } from '@angular/cdk/scrolling';
 import { EvaluationsService, BuildItem } from '@core/services/evaluations.service';
 import { OrganizationsService } from '@core/services/organizations.service';
-import { Evaluation, EvaluationMessage } from '@core/models';
+import { Evaluation, EvaluationMessage, WaitingReason } from '@core/models';
 import { AuthService } from '@core/services/auth.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { ButtonModule } from 'primeng/button';
@@ -786,6 +786,16 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   isRunning(): boolean {
     const s = this.evaluation()?.status;
     return s === 'Queued' || s === 'Fetching' || s === 'EvaluatingFlake' || s === 'EvaluatingDerivation' || s === 'Building' || s === 'Waiting';
+  }
+
+  formatWaitingReason(reason: WaitingReason): string {
+    const archs = reason.available_architectures;
+    if (reason.connected_workers === 0) {
+      return 'No workers are connected. The evaluation requires:';
+    }
+    const archList = archs.length > 0 ? archs.join(', ') : 'none';
+    const workerWord = reason.connected_workers === 1 ? 'worker' : 'workers';
+    return `${reason.connected_workers} connected ${workerWord} (${archList}) cannot satisfy:`;
   }
 
   getStatusLabel(status: string): string {

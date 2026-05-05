@@ -4713,6 +4713,57 @@ components:
         updated_at:
           type: string
           format: date-time
+        waiting_reason:
+          $ref: '#/components/schemas/WaitingReason'
+
+    WaitingReason:
+      type: object
+      description: |
+        Populated only when `status == "Waiting"`. Explains which
+        `(architecture, required_features)` combinations no connected worker
+        can satisfy, alongside the architectures the connected pool *does*
+        offer. Refreshed whenever the scheduler reconciles the evaluation
+        against the live worker pool (worker connect/disconnect, capability
+        update, dispatch tick).
+      required: [unmet, connected_workers, available_architectures]
+      properties:
+        unmet:
+          type: array
+          description: |
+            Distinct unsatisfiable requirements across this evaluation's
+            pending builds. Each entry's `build_count` is the number of
+            pending builds blocked on that exact `(architecture,
+            required_features)` combo.
+          items:
+            $ref: '#/components/schemas/UnmetRequirement'
+        connected_workers:
+          type: integer
+          minimum: 0
+          description: Total number of workers currently connected to the scheduler.
+        available_architectures:
+          type: array
+          description: |
+            Distinct architectures advertised by the connected pool. Empty if no
+            workers are connected.
+          items:
+            type: string
+
+    UnmetRequirement:
+      type: object
+      required: [architecture, required_features, build_count]
+      properties:
+        architecture:
+          type: string
+          description: System tuple (e.g. `aarch64-linux`) or `builtin`.
+        required_features:
+          type: array
+          description: Sorted, deduplicated list of `requiredSystemFeatures` for the build.
+          items:
+            type: string
+        build_count:
+          type: integer
+          minimum: 1
+          description: Number of pending builds blocked on this combination.
 
     EvaluationMessage:
       type: object

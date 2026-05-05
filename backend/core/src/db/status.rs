@@ -135,12 +135,21 @@ pub async fn update_evaluation_status(
     let webhook_status = status.clone();
     let now = crate::types::now();
 
-    let update_result = EEvaluation::update_many()
+    let mut update = EEvaluation::update_many()
         .col_expr(
             CEvaluation::Status,
             sea_orm::sea_query::Expr::value(status.clone()),
         )
-        .col_expr(CEvaluation::UpdatedAt, sea_orm::sea_query::Expr::value(now))
+        .col_expr(CEvaluation::UpdatedAt, sea_orm::sea_query::Expr::value(now));
+
+    if !matches!(status, EvaluationStatus::Waiting) {
+        update = update.col_expr(
+            CEvaluation::WaitingReason,
+            sea_orm::sea_query::Expr::value(Option::<serde_json::Value>::None),
+        );
+    }
+
+    let update_result = update
         .filter(CEvaluation::Id.eq(evaluation.id))
         .filter(
             Condition::all()

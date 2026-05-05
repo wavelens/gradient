@@ -206,6 +206,7 @@ fn eval_row(status: EvaluationStatus) -> entity::evaluation::Model {
         updated_at: fixture_date(),
         flake_source: None,
         repo_check_id: None,
+        waiting_reason: None,
     }
 }
 

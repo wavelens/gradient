@@ -89,6 +89,19 @@ export interface Evaluation {
   created_at: string;
   error_count: number;
   warning_count: number;
+  waiting_reason?: WaitingReason;
+}
+
+export interface WaitingReason {
+  unmet: UnmetRequirement[];
+  connected_workers: number;
+  available_architectures: string[];
+}
+
+export interface UnmetRequirement {
+  architecture: string;
+  required_features: string[];
+  build_count: number;
 }
 
 export type EvaluationStatus =

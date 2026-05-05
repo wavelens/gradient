@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_core::types::WaitingReason;
 use gradient_core::types::ids::*;
 use serde::{Deserialize, Serialize};
 
@@ -54,6 +55,11 @@ pub struct EvaluationResponse {
     pub error_count: u64,
     pub warning_count: u64,
     pub entry_points: Vec<EntryPointBrief>,
+    /// Populated only when `status == Waiting`. Explains which
+    /// `(architecture, required_features)` combos no connected worker can
+    /// satisfy, alongside the architectures the connected pool *does* offer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub waiting_reason: Option<WaitingReason>,
 }
 
 /// Compact entry-point representation returned inline on the evaluation.

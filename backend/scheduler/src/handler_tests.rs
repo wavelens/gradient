@@ -63,6 +63,7 @@ fn make_eval(id: EvaluationId, status: EvaluationStatus) -> MEvaluation {
         updated_at: test_date(),
         flake_source: None,
         repo_check_id: None,
+        waiting_reason: None,
     }
 }
 
@@ -244,6 +245,7 @@ fn make_eval_with_project(
         updated_at: test_date(),
         flake_source: None,
         repo_check_id: None,
+        waiting_reason: None,
     }
 }
 
