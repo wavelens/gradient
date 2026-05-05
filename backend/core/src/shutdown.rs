@@ -115,8 +115,8 @@ impl Shutdown {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     #[tokio::test]
     async fn cancel_interrupts_select_loop() {

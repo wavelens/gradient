@@ -5,7 +5,7 @@
  */
 
 use anyhow::{Context, Result};
-use chrono::{Duration as ChronoDuration};
+use chrono::Duration as ChronoDuration;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, IntoActiveModel,

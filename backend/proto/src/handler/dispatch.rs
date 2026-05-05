@@ -9,10 +9,10 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use gradient_core::types::ids::{DerivationId, OrganizationId};
 use gradient_core::types::*;
 use tokio::sync::Semaphore;
 use tracing::{debug, error, info, warn};
-use gradient_core::types::ids::{DerivationId, OrganizationId};
 
 use crate::messages::{CandidateScore, ClientMessage, JobKind, JobUpdateKind, ServerMessage};
 use scheduler::Scheduler;
@@ -94,11 +94,7 @@ impl<'a> DispatchContext<'a> {
     /// Route a single `ClientMessage` to the appropriate handler.
     ///
     /// Returns `true` to continue the loop, `false` to break.
-    pub async fn dispatch(
-        &mut self,
-        msg: ClientMessage,
-        nar_buffers: &mut NarBuffers,
-    ) -> bool {
+    pub async fn dispatch(&mut self, msg: ClientMessage, nar_buffers: &mut NarBuffers) -> bool {
         // Avoid Debug-printing the entire `msg` here: variants like `NarPush`
         // carry up to 64 KiB of binary chunk data which would flood the log
         // (and the test VM's serial console). Each match arm logs the
@@ -525,9 +521,7 @@ impl<'a> DispatchContext<'a> {
                     Ok(g) => g,
                     Err(_) => return, // semaphore closed (shutdown)
                 };
-                if let Err(e) =
-                    serve_nar_request(&state, &writer, &job_id, &store_path).await
-                {
+                if let Err(e) = serve_nar_request(&state, &writer, &job_id, &store_path).await {
                     warn!(%peer_id, %job_id, %store_path, error = %e, "NarRequest serve failed");
                 }
             });
@@ -544,18 +538,17 @@ impl<'a> DispatchContext<'a> {
         nar_buffers: &mut NarBuffers,
     ) {
         debug!(peer_id = %self.peer_id, %job_id, %store_path, offset, is_final, bytes = data.len(), "NarPush");
-        if !data.is_empty()
-            && nar_buffers.append(&store_path, &data).is_err() {
-                let reason = format!(
-                    "session NAR upload buffer would exceed {} bytes (current {} + {} = {})",
-                    nar_buffers.max_bytes(),
-                    nar_buffers.total_bytes(),
-                    data.len(),
-                    nar_buffers.total_bytes().saturating_add(data.len()),
-                );
-                warn!(peer_id = %self.peer_id, %job_id, %store_path, "{reason}");
-                self.abort_job(&job_id, reason).await;
-            }
+        if !data.is_empty() && nar_buffers.append(&store_path, &data).is_err() {
+            let reason = format!(
+                "session NAR upload buffer would exceed {} bytes (current {} + {} = {})",
+                nar_buffers.max_bytes(),
+                nar_buffers.total_bytes(),
+                data.len(),
+                nar_buffers.total_bytes().saturating_add(data.len()),
+            );
+            warn!(peer_id = %self.peer_id, %job_id, %store_path, "{reason}");
+            self.abort_job(&job_id, reason).await;
+        }
         // The buffer is held until `on_nar_uploaded` arrives; that handler
         // commits it to `nar_storage` and records the metadata atomically so
         // we never end up with a `cached_path` row claiming bytes that
@@ -791,4 +784,3 @@ mod nar_buffers_tests {
         assert!(res.is_err());
     }
 }
-

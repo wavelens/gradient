@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::types::ids::BuildId;
 use anyhow::Result;
 use futures::future::BoxFuture;
 use object_store::{ObjectStore, ObjectStoreExt as _, PutPayload, path::Path as ObjectPath};
@@ -12,7 +13,6 @@ use std::sync::Arc;
 use tokio::fs::{self, OpenOptions};
 use tokio::io::AsyncWriteExt;
 use tracing::warn;
-use crate::types::ids::BuildId;
 
 /// Abstraction for build log storage.
 ///

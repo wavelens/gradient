@@ -8,12 +8,13 @@ use crate::access::{Caller, OrgAccess, load_org};
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use base64::Engine as _;
-use chrono::{NaiveDateTime};
-use gradient_core::types::proto::GradientCapabilities;
-use gradient_core::types::{BaseResponse, MUser, ServerState};
+use chrono::NaiveDateTime;
 use entity::worker_registration::{
     self, ActiveModel as AWorkerRegistration, Entity as EWorkerRegistration,
 };
+use gradient_core::types::ids::*;
+use gradient_core::types::proto::GradientCapabilities;
+use gradient_core::types::{BaseResponse, MUser, ServerState};
 use rand::RngExt as _;
 use scheduler::{Scheduler, WorkerInfo};
 use sea_orm::ActiveValue::Set;
@@ -21,10 +22,9 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
-use gradient_core::types::ids::*;
 
-use crate::helpers::{OptionExt, ok_json};
 use crate::error::{WebError, WebResult};
+use crate::helpers::{OptionExt, ok_json};
 
 fn default_true() -> bool {
     true
@@ -114,7 +114,15 @@ pub async fn post_org_worker(
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Json(body): Json<RegisterWorkerRequest>,
 ) -> WebResult<Json<BaseResponse<RegisterWorkerResponse>>> {
-    let org = load_org(&state, Caller::User(&user), organization, OrgAccess::Member { reject_managed: false }).await?;
+    let org = load_org(
+        &state,
+        Caller::User(&user),
+        organization,
+        OrgAccess::Member {
+            reject_managed: false,
+        },
+    )
+    .await?;
 
     let worker_uuid = Uuid::parse_str(&body.worker_id)
         .ok()
@@ -167,9 +175,9 @@ pub async fn post_org_worker(
     scheduler.request_reauth(&worker_id_str).await;
 
     Ok(ok_json(RegisterWorkerResponse {
-            peer_id: org.id,
-            token: if return_token { Some(token) } else { None },
-        }))
+        peer_id: org.id,
+        token: if return_token { Some(token) } else { None },
+    }))
 }
 
 pub async fn get_org_workers(
@@ -178,7 +186,15 @@ pub async fn get_org_workers(
     Extension(user): Extension<MUser>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
 ) -> WebResult<Json<BaseResponse<Vec<OrgWorkerEntry>>>> {
-    let org = load_org(&state, Caller::User(&user), organization, OrgAccess::Member { reject_managed: false }).await?;
+    let org = load_org(
+        &state,
+        Caller::User(&user),
+        organization,
+        OrgAccess::Member {
+            reject_managed: false,
+        },
+    )
+    .await?;
 
     let registrations = EWorkerRegistration::find()
         .filter(worker_registration::Column::PeerId.eq(org.id))
@@ -241,7 +257,15 @@ pub async fn patch_org_worker(
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Json(body): Json<PatchWorkerRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let org = load_org(&state, Caller::User(&user), organization, OrgAccess::Member { reject_managed: false }).await?;
+    let org = load_org(
+        &state,
+        Caller::User(&user),
+        organization,
+        OrgAccess::Member {
+            reject_managed: false,
+        },
+    )
+    .await?;
 
     let reg = EWorkerRegistration::find()
         .filter(worker_registration::Column::PeerId.eq(org.id))
@@ -258,9 +282,8 @@ pub async fn patch_org_worker(
     if let Some(ref name) = body.display_name {
         active_model.display_name = Set(name.trim().to_string());
     }
-    let caps_changed = body.enable_fetch.is_some()
-        || body.enable_eval.is_some()
-        || body.enable_build.is_some();
+    let caps_changed =
+        body.enable_fetch.is_some() || body.enable_eval.is_some() || body.enable_build.is_some();
     if let Some(v) = body.enable_fetch {
         active_model.enable_fetch = Set(v);
     }
@@ -297,7 +320,15 @@ pub async fn delete_org_worker(
     Extension(user): Extension<MUser>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let org = load_org(&state, Caller::User(&user), organization, OrgAccess::Member { reject_managed: false }).await?;
+    let org = load_org(
+        &state,
+        Caller::User(&user),
+        organization,
+        OrgAccess::Member {
+            reject_managed: false,
+        },
+    )
+    .await?;
 
     let result = EWorkerRegistration::delete_many()
         .filter(worker_registration::Column::PeerId.eq(org.id))

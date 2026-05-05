@@ -65,9 +65,7 @@ impl EvalWorker {
             });
         }
 
-        let mut child = command
-            .spawn()
-            .context("spawning eval worker subprocess")?;
+        let mut child = command.spawn().context("spawning eval worker subprocess")?;
 
         let stdin = child.stdin.take().context("worker stdin missing")?;
         let stdout = BufReader::new(child.stdout.take().context("worker stdout missing")?);
@@ -118,38 +116,46 @@ impl EvalWorker {
 
         if n == 0 {
             let pid = self.child.id();
-            let status = match tokio::time::timeout(
-                std::time::Duration::from_secs(2),
-                self.child.wait(),
-            )
-            .await
-            {
-                Ok(Ok(s)) => format!("{s}"),
-                Ok(Err(e)) => format!("wait error: {e}"),
-                Err(_) => {
-                    let mut diag = String::from("still alive after 2s");
-                    if let Some(p) = pid {
-                        if let Ok(target) = std::fs::read_link(format!("/proc/{p}/fd/1")) {
-                            diag.push_str(&format!("; /proc/{p}/fd/1 -> {}", target.display()));
-                        }
-                        if let Ok(state) = std::fs::read_to_string(format!("/proc/{p}/status"))
-                            && let Some(line) = state.lines().find(|l| l.starts_with("State:")) {
+            let status =
+                match tokio::time::timeout(std::time::Duration::from_secs(2), self.child.wait())
+                    .await
+                {
+                    Ok(Ok(s)) => format!("{s}"),
+                    Ok(Err(e)) => format!("wait error: {e}"),
+                    Err(_) => {
+                        let mut diag = String::from("still alive after 2s");
+                        if let Some(p) = pid {
+                            if let Ok(target) = std::fs::read_link(format!("/proc/{p}/fd/1")) {
+                                diag.push_str(&format!("; /proc/{p}/fd/1 -> {}", target.display()));
+                            }
+                            if let Ok(state) = std::fs::read_to_string(format!("/proc/{p}/status"))
+                                && let Some(line) = state.lines().find(|l| l.starts_with("State:"))
+                            {
                                 diag.push_str(&format!("; {line}"));
                             }
-                        if let Ok(wchan) = std::fs::read_to_string(format!("/proc/{p}/wchan")) {
-                            diag.push_str(&format!("; wchan={}", wchan.trim()));
+                            if let Ok(wchan) = std::fs::read_to_string(format!("/proc/{p}/wchan")) {
+                                diag.push_str(&format!("; wchan={}", wchan.trim()));
+                            }
                         }
+                        diag
                     }
-                    diag
-                }
-            };
+                };
             anyhow::bail!("eval worker closed pipe (pid={pid:?}, exit={status})");
         }
 
-        trace!(pid = self.child.id(), bytes = n, "received eval worker response");
-        serde_json::from_str(self.line.trim_end()).inspect_err(|_| {
-            error!("Failed to parse JSON. Raw input: |{}|", self.line.trim_end());
-        }).context("parsing eval worker response")
+        trace!(
+            pid = self.child.id(),
+            bytes = n,
+            "received eval worker response"
+        );
+        serde_json::from_str(self.line.trim_end())
+            .inspect_err(|_| {
+                error!(
+                    "Failed to parse JSON. Raw input: |{}|",
+                    self.line.trim_end()
+                );
+            })
+            .context("parsing eval worker response")
     }
 
     pub(super) async fn list(
@@ -194,15 +200,13 @@ impl EvalWorker {
         let _ = self.stdin.flush().await;
         drop(self.stdin);
         trace!(pid, "Shutdown sent; waiting for eval worker to exit");
-        match tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            self.child.wait(),
-        )
-        .await
-        {
+        match tokio::time::timeout(std::time::Duration::from_secs(5), self.child.wait()).await {
             Ok(Ok(status)) => trace!(pid, ?status, "eval worker exited cleanly"),
             Ok(Err(e)) => debug!(pid, "waiting on eval worker exit: {e}"),
-            Err(_) => warn!(pid, "eval worker did not exit within 5s of Shutdown; will be killed"),
+            Err(_) => warn!(
+                pid,
+                "eval worker did not exit within 5s of Shutdown; will be killed"
+            ),
         }
     }
 

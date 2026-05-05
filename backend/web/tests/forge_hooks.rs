@@ -15,10 +15,11 @@
 //! which clashes with the local `core` crate name in this workspace.
 
 use axum_test::TestServer;
+use entity::evaluation::EvaluationStatus;
 use gradient_core::ci::{WebhookClient, encrypt_webhook_secret};
 use gradient_core::storage::{EmailSender, NarStore};
+use gradient_core::types::ids::*;
 use gradient_core::types::{ServerState, WebDb, WorkerDb};
-use entity::evaluation::EvaluationStatus;
 use hmac::{Hmac, KeyInit, Mac};
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 use serde_json::Value;
@@ -29,7 +30,6 @@ use test_support::fakes::email::InMemoryEmailSender;
 use test_support::fakes::webhooks::RecordingWebhookClient;
 use test_support::log_storage::NoopLogStorage;
 use test_support::prelude::test_cli;
-use gradient_core::types::ids::*;
 use uuid::Uuid;
 use web::create_router;
 
@@ -88,7 +88,7 @@ fn make_state(
         pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         http: gradient_core::http::build_client().expect("http client"),
         shutdown: gradient_core::shutdown::Shutdown::new(),
-            jwt_secret: gradient_core::types::SecretString::new("test-jwt-secret".to_string()),
+        jwt_secret: gradient_core::types::SecretString::new("test-jwt-secret".to_string()),
     })
 }
 
@@ -162,7 +162,7 @@ fn integration_row(secret_ciphertext: &str) -> entity::integration::Model {
         organization: org_id(),
         name: "my-hook".into(),
         display_name: "my-hook".into(),
-        kind: 0, // Inbound
+        kind: 0,       // Inbound
         forge_type: 0, // Gitea
         secret: Some(secret_ciphertext.to_string()),
         endpoint_url: None,
@@ -233,8 +233,7 @@ fn forge_webhook_no_matching_project() {
 async fn forge_webhook_no_matching_project_inner() {
     let plaintext_secret = "test-secret-plaintext";
     let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!"); // 32 bytes for AES-256
-    let ciphertext =
-        encrypt_webhook_secret(&crypt_path, plaintext_secret).expect("encrypt failed");
+    let ciphertext = encrypt_webhook_secret(&crypt_path, plaintext_secret).expect("encrypt failed");
 
     // Mock chain:
     // 1. SELECT org by name → org row
@@ -264,10 +263,7 @@ async fn forge_webhook_no_matching_project_inner() {
     assert_eq!(json["error"], false, "expected error=false");
     let msg = &json["message"];
     assert_eq!(msg["event"], "push", "expected event=push");
-    assert_eq!(
-        msg["projects_scanned"], 0,
-        "expected 0 projects_scanned"
-    );
+    assert_eq!(msg["projects_scanned"], 0, "expected 0 projects_scanned");
     assert!(
         msg["queued"].as_array().unwrap().is_empty(),
         "expected empty queued"
@@ -292,8 +288,7 @@ fn forge_webhook_matching_project_queues() {
 async fn forge_webhook_matching_project_queues_inner() {
     let plaintext_secret = "test-secret-plaintext";
     let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!"); // 32 bytes
-    let ciphertext =
-        encrypt_webhook_secret(&crypt_path, plaintext_secret).expect("encrypt failed");
+    let ciphertext = encrypt_webhook_secret(&crypt_path, plaintext_secret).expect("encrypt failed");
 
     // Mock chain:
     // 1. SELECT org by name → org row
@@ -308,9 +303,7 @@ async fn forge_webhook_matching_project_queues_inner() {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![org_row("test-org")]])
         .append_query_results([vec![integration_row(&ciphertext)]])
-        .append_query_results([vec![project_row(
-            "https://gitea.example.com/test-org/repo",
-        )]])
+        .append_query_results([vec![project_row("https://gitea.example.com/test-org/repo")]])
         .append_query_results([vec![org_row("test-org")]]) // per-project org lookup
         .append_query_results([Vec::<entity::evaluation::Model>::new()]) // no in-progress eval
         .append_query_results([vec![commit_row()]]) // INSERT commit
@@ -417,7 +410,11 @@ async fn forge_webhook_integration_not_found_inner() {
         .into_connection();
 
     // crypt_path doesn't matter here — we never reach decryption
-    let state = make_state(db, Some(temp_secret_file("any-32-byte-secret-here!!!!!!!!")), None);
+    let state = make_state(
+        db,
+        Some(temp_secret_file("any-32-byte-secret-here!!!!!!!!")),
+        None,
+    );
     let router = create_router(state);
     let server = TestServer::new(router);
 
@@ -457,9 +454,7 @@ async fn github_app_webhook_push_queues_inner() {
     // 6. SELECT project for update
     // 7. UPDATE project (exec)
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        .append_query_results([vec![project_row(
-            "https://github.com/gh-org/repo",
-        )]])
+        .append_query_results([vec![project_row("https://github.com/gh-org/repo")]])
         .append_query_results([vec![org_row("gh-org")]]) // per-project org lookup
         .append_query_results([Vec::<entity::evaluation::Model>::new()])
         .append_query_results([vec![commit_row()]])

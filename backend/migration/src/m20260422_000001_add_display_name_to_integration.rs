@@ -28,10 +28,8 @@ impl MigrationTrait for Migration {
 
         // Backfill display_name with the existing name so it isn't blank.
         let db = manager.get_connection();
-        db.execute_unprepared(
-            "UPDATE integration SET display_name = name WHERE display_name = ''",
-        )
-        .await?;
+        db.execute_unprepared("UPDATE integration SET display_name = name WHERE display_name = ''")
+            .await?;
 
         Ok(())
     }

@@ -224,7 +224,10 @@ pub async fn report_ci_for_evaluation(
         )
     });
 
-    let evaluation = match EEvaluation::find_by_id(evaluation_id).one(&state.worker_db).await {
+    let evaluation = match EEvaluation::find_by_id(evaluation_id)
+        .one(&state.worker_db)
+        .await
+    {
         Ok(Some(e)) => e,
         Ok(None) => {
             warn!(%evaluation_id, "Evaluation not found for CI evaluation report");
@@ -256,6 +259,9 @@ pub async fn report_ci_for_evaluation(
             }
         }
         Ok(None) => {}
-        Err(e) => warn!(error = format!("{e:#}"), "CI evaluation status report failed"),
+        Err(e) => warn!(
+            error = format!("{e:#}"),
+            "CI evaluation status report failed"
+        ),
     }
 }

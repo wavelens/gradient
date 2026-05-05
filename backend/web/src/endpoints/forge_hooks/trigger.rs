@@ -6,9 +6,9 @@
 
 //! Evaluation triggering from forge webhooks.
 
+use super::response::{QueuedEvaluation, SkippedProject, WebhookTriggerOutcome};
 use gradient_core::ci::{TriggerError, trigger_evaluation};
 use gradient_core::types::*;
-use super::response::{QueuedEvaluation, SkippedProject, WebhookTriggerOutcome};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
 use serde::Deserialize;
@@ -239,8 +239,8 @@ pub(super) async fn trigger_for_repo_urls(
 
 #[cfg(test)]
 mod tests {
-    use super::canonicalise_repo_url;
     use super::super::WebhookTriggerOutcome;
+    use super::canonicalise_repo_url;
 
     #[test]
     fn canonicalise_strips_dot_git_and_trailing_slash() {

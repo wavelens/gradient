@@ -5,8 +5,8 @@
  */
 
 use anyhow::{Context, Result};
-use gradient_core::types::*;
 use entity::build::BuildStatus;
+use gradient_core::types::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, IntoActiveModel,
     QueryFilter, Statement,
@@ -27,7 +27,8 @@ pub async fn cleanup_old_evaluations(state: Arc<ServerState>) -> Result<()> {
         if keep == 0 {
             continue;
         }
-        if let Err(e) = gradient_core::db::gc_project_evaluations(Arc::clone(&state), project.id, keep).await
+        if let Err(e) =
+            gradient_core::db::gc_project_evaluations(Arc::clone(&state), project.id, keep).await
         {
             warn!(error = %e, project_id = %project.id, "Evaluation GC failed for project");
         }
@@ -321,8 +322,14 @@ mod tests {
         let state = make_state(tmp.path(), vec![active]);
         cleanup_orphaned_cache_files(state).await.unwrap();
 
-        assert!(nar_file_exists(tmp.path(), active), "active NAR must survive");
-        assert!(!nar_file_exists(tmp.path(), orphan), "orphan NAR must be removed");
+        assert!(
+            nar_file_exists(tmp.path(), active),
+            "active NAR must survive"
+        );
+        assert!(
+            !nar_file_exists(tmp.path(), orphan),
+            "orphan NAR must be removed"
+        );
     }
 
     /// A NAR referenced only by a `cached_path` row (e.g. a `.drv` file) must
@@ -350,7 +357,9 @@ mod tests {
 
         let mut state = make_state(tmp.path(), vec![]);
         // SAFETY: only this test holds a clone; mutate before any await.
-        Arc::make_mut(&mut Arc::get_mut(&mut state).unwrap().config).storage.nar_ttl_hours = 0;
+        Arc::make_mut(&mut Arc::get_mut(&mut state).unwrap().config)
+            .storage
+            .nar_ttl_hours = 0;
 
         cleanup_stale_cached_nars(state).await.unwrap();
         assert!(nar_file_exists(tmp.path(), h));

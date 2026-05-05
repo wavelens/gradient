@@ -138,7 +138,10 @@ pub async fn decode_jwt(
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
     let now = gradient_core::types::now();
-    if session.revoked_at.is_some() || session.expires_at < now || session.user_id != token_data.claims.id {
+    if session.revoked_at.is_some()
+        || session.expires_at < now
+        || session.user_id != token_data.claims.id
+    {
         return Err(StatusCode::UNAUTHORIZED);
     }
 

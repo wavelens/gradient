@@ -8,8 +8,8 @@
 //! you can write `assert_eq!(body["name"], "test-org")` instead of chasing
 //! a random `Uuid`.
 
-use entity::*;
 use entity::ids::{CommitId, EvaluationId, OrganizationId, ProjectId, UserId};
+use entity::*;
 use uuid::Uuid;
 
 pub fn org_id() -> OrganizationId {

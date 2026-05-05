@@ -18,7 +18,6 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
-
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use gradient_core::ci::TriggerError;
@@ -119,7 +118,10 @@ pub(crate) async fn poll_projects_for_evaluations(scheduler: &Scheduler) -> anyh
         ),
     );
 
-    let projects = EProject::find().from_raw_sql(sql).all(&state.worker_db).await?;
+    let projects = EProject::find()
+        .from_raw_sql(sql)
+        .all(&state.worker_db)
+        .await?;
 
     for project in &projects {
         let (has_update, commit_hash) = match check_project_updates(Arc::clone(state), project)
@@ -219,7 +221,10 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
             continue;
         }
 
-        let commit = match ECommit::find_by_id(eval.commit).one(&state.worker_db).await? {
+        let commit = match ECommit::find_by_id(eval.commit)
+            .one(&state.worker_db)
+            .await?
+        {
             Some(c) => c,
             None => {
                 error!(evaluation_id = %eval.id, "commit not found for evaluation");
@@ -427,7 +432,10 @@ impl BuildDispatchMaps {
 
         let mut deps_by_drv: HashMap<DerivationId, Vec<DerivationId>> = HashMap::new();
         for e in &dep_edges {
-            deps_by_drv.entry(e.derivation).or_default().push(e.dependency);
+            deps_by_drv
+                .entry(e.derivation)
+                .or_default()
+                .push(e.dependency);
         }
         let dep_counts: HashMap<DerivationId, u32> = deps_by_drv
             .iter()
@@ -444,20 +452,21 @@ impl BuildDispatchMaps {
             .into_iter()
             .collect();
 
-        let outputs_by_drv: HashMap<DerivationId, Vec<MDerivationOutput>> = if dep_drv_ids.is_empty() {
-            HashMap::new()
-        } else {
-            let outs = EDerivationOutput::find()
-                .filter(CDerivationOutput::Derivation.is_in(dep_drv_ids))
-                .all(&state.worker_db)
-                .await
-                .unwrap_or_default();
-            let mut map: HashMap<DerivationId, Vec<MDerivationOutput>> = HashMap::new();
-            for o in outs {
-                map.entry(o.derivation).or_default().push(o);
-            }
-            map
-        };
+        let outputs_by_drv: HashMap<DerivationId, Vec<MDerivationOutput>> =
+            if dep_drv_ids.is_empty() {
+                HashMap::new()
+            } else {
+                let outs = EDerivationOutput::find()
+                    .filter(CDerivationOutput::Derivation.is_in(dep_drv_ids))
+                    .all(&state.worker_db)
+                    .await
+                    .unwrap_or_default();
+                let mut map: HashMap<DerivationId, Vec<MDerivationOutput>> = HashMap::new();
+                for o in outs {
+                    map.entry(o.derivation).or_default().push(o);
+                }
+                map
+            };
 
         let output_hashes: Vec<String> = outputs_by_drv
             .values()
@@ -478,7 +487,13 @@ impl BuildDispatchMaps {
                 .filter_map(|cp| {
                     let nar_size = cp.nar_size? as u64;
                     let file_size = cp.file_size.unwrap_or(0) as u64;
-                    Some((cp.hash, CacheInfo { file_size, nar_size }))
+                    Some((
+                        cp.hash,
+                        CacheInfo {
+                            file_size,
+                            nar_size,
+                        },
+                    ))
                 })
                 .collect()
         };
@@ -665,7 +680,10 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-async fn organization_id_for_eval(state: &Arc<ServerState>, eval: &MEvaluation) -> Option<OrganizationId> {
+async fn organization_id_for_eval(
+    state: &Arc<ServerState>,
+    eval: &MEvaluation,
+) -> Option<OrganizationId> {
     if let Some(project_id) = eval.project {
         match EProject::find_by_id(project_id).one(&state.worker_db).await {
             Ok(Some(p)) => return Some(p.organization),

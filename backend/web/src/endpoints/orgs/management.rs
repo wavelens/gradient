@@ -5,9 +5,9 @@
  */
 
 use crate::access::{Caller, OrgAccess, load_org};
-use crate::helpers::ok_json;
 use crate::authorization::MaybeUser;
 use crate::error::{WebError, WebResult};
+use crate::helpers::ok_json;
 use crate::permissions::Permission;
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
@@ -18,8 +18,8 @@ use gradient_core::types::input::{check_index_name, validate_display_name};
 use gradient_core::types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, JoinType, PaginatorTrait, QueryFilter,
-    QueryOrder, QuerySelect,
+    ActiveModelTrait, ColumnTrait, EntityTrait, JoinType, PaginatorTrait, QueryFilter, QueryOrder,
+    QuerySelect,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -174,7 +174,8 @@ pub async fn get(
         .filter(CRole::Id.is_in(role_ids))
         .all(&state.web_db)
         .await?;
-    let role_name_map: HashMap<RoleId, String> = roles.into_iter().map(|r| (r.id, r.name)).collect();
+    let role_name_map: HashMap<RoleId, String> =
+        roles.into_iter().map(|r| (r.id, r.name)).collect();
     let org_role_map: HashMap<OrganizationId, String> = org_users
         .into_iter()
         .filter_map(|ou| {
@@ -202,11 +203,11 @@ pub async fn get(
         .collect();
 
     Ok(ok_json(Paginated {
-            items,
-            total,
-            page,
-            per_page,
-        }))
+        items,
+        total,
+        page,
+        per_page,
+    }))
 }
 
 pub async fn put(
@@ -219,7 +220,10 @@ pub async fn put(
     }
 
     if let Err(e) = validate_display_name(&body.display_name) {
-        return Err(WebError::bad_request(format!("Invalid display name: {}", e)));
+        return Err(WebError::bad_request(format!(
+            "Invalid display name: {}",
+            e
+        )));
     }
 
     let existing_organization = EOrganization::find()
@@ -231,8 +235,8 @@ pub async fn put(
         return Err(WebError::already_exists("Organization Name"));
     }
 
-    let (private_key, public_key) =
-        generate_ssh_key(&state.config.secrets.crypt_secret_file).map_err(|e| {
+    let (private_key, public_key) = generate_ssh_key(&state.config.secrets.crypt_secret_file)
+        .map_err(|e| {
             tracing::error!("Failed to generate SSH key: {}", e);
             WebError::failed_ssh_key_generation()
         })?;
@@ -286,11 +290,11 @@ pub async fn get_public_organizations(
     let items = paginator.fetch_page(page - 1).await?;
 
     Ok(ok_json(Paginated {
-            items,
-            total,
-            page,
-            per_page,
-        }))
+        items,
+        total,
+        page,
+        per_page,
+    }))
 }
 
 pub async fn get_organization(
@@ -302,7 +306,9 @@ pub async fn get_organization(
         &state.0,
         Caller::from_option(&maybe_user),
         organization,
-        OrgAccess::Readable { label: "Organization" },
+        OrgAccess::Readable {
+            label: "Organization",
+        },
     )
     .await?;
 
@@ -325,19 +331,19 @@ pub async fn get_organization(
     };
 
     Ok(ok_json(OrgResponse {
-            id: org.id,
-            name: org.name,
-            display_name: org.display_name,
-            description: org.description,
-            public_key: Some(org.public_key),
-            public: org.public,
-            managed: org.managed,
-            created_by: org.created_by,
-            created_at: org.created_at,
-            github_installation_id: org.github_installation_id,
-            github_app_available: state.config.github_app.clone().is_some(),
-            role,
-        }))
+        id: org.id,
+        name: org.name,
+        display_name: org.display_name,
+        description: org.description,
+        public_key: Some(org.public_key),
+        public: org.public,
+        managed: org.managed,
+        created_by: org.created_by,
+        created_at: org.created_at,
+        github_installation_id: org.github_installation_id,
+        github_app_available: state.config.github_app.clone().is_some(),
+        role,
+    }))
 }
 
 pub async fn patch_organization(
@@ -378,7 +384,10 @@ pub async fn patch_organization(
     if let Some(display_name) = body.display_name {
         let display_name = display_name.trim().to_string();
         if let Err(e) = validate_display_name(&display_name) {
-            return Err(WebError::bad_request(format!("Invalid display name: {}", e)));
+            return Err(WebError::bad_request(format!(
+                "Invalid display name: {}",
+                e
+            )));
         }
         aorganization.display_name = Set(display_name);
     }

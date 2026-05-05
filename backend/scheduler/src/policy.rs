@@ -276,7 +276,6 @@ mod tests {
     use crate::jobs::{PendingBuildJob, PendingJob};
     use gradient_core::types::ids::*;
     use gradient_core::types::proto::{BuildJob, BuildTask};
-    
 
     fn worker_ctx<'a>(archs: &'a [String], features: &'a [String]) -> WorkerContext<'a> {
         WorkerContext {

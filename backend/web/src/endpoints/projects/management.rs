@@ -6,9 +6,9 @@
 
 use super::ProjectResponse;
 use crate::access::{Caller, OrgAccess, ProjectAccess, has_permission, load_org, load_project};
-use crate::helpers::{OptionExt, ok_json};
 use crate::authorization::MaybeUser;
 use crate::error::{WebError, WebResult};
+use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::Permission;
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
@@ -83,14 +83,18 @@ pub async fn get(
         &state.0,
         Caller::from_option(&maybe_user),
         organization,
-        OrgAccess::Readable { label: "Organization" },
+        OrgAccess::Readable {
+            label: "Organization",
+        },
     )
     .await?;
 
     let page = params.page();
     let per_page = params.per_page();
     let can_edit = match &maybe_user {
-        Some(user) => has_permission(&state, user.id, organization.id, Permission::EditProject).await?,
+        Some(user) => {
+            has_permission(&state, user.id, organization.id, Permission::EditProject).await?
+        }
         None => false,
     };
 
@@ -145,11 +149,11 @@ pub async fn get(
         .collect();
 
     Ok(ok_json(Paginated {
-            items,
-            total,
-            page,
-            per_page,
-        }))
+        items,
+        total,
+        page,
+        per_page,
+    }))
 }
 
 pub async fn put(
@@ -163,7 +167,10 @@ pub async fn put(
     }
 
     if let Err(e) = validate_display_name(&body.display_name) {
-        return Err(WebError::bad_request(format!("Invalid display name: {}", e)));
+        return Err(WebError::bad_request(format!(
+            "Invalid display name: {}",
+            e
+        )));
     }
 
     body.repository
@@ -244,7 +251,9 @@ pub async fn get_project(
     .await?;
 
     let can_edit = match &maybe_user {
-        Some(user) => has_permission(&state, user.id, organization.id, Permission::EditProject).await?,
+        Some(user) => {
+            has_permission(&state, user.id, organization.id, Permission::EditProject).await?
+        }
         None => false,
     };
 
@@ -258,23 +267,23 @@ pub async fn get_project(
     };
 
     Ok(ok_json(ProjectResponse {
-            id: project.id,
-            organization: project.organization,
-            name: project.name,
-            active: project.active,
-            display_name: project.display_name,
-            description: project.description,
-            repository: project.repository,
-            evaluation_wildcard: project.evaluation_wildcard,
-            last_evaluation: project.last_evaluation,
-            last_evaluation_status,
-            force_evaluation: project.force_evaluation,
-            created_by: project.created_by,
-            created_at: project.created_at,
-            managed: project.managed,
-            keep_evaluations: project.keep_evaluations,
-            can_edit,
-        }))
+        id: project.id,
+        organization: project.organization,
+        name: project.name,
+        active: project.active,
+        display_name: project.display_name,
+        description: project.description,
+        repository: project.repository,
+        evaluation_wildcard: project.evaluation_wildcard,
+        last_evaluation: project.last_evaluation,
+        last_evaluation_status,
+        force_evaluation: project.force_evaluation,
+        created_by: project.created_by,
+        created_at: project.created_at,
+        managed: project.managed,
+        keep_evaluations: project.keep_evaluations,
+        can_edit,
+    }))
 }
 
 pub async fn patch_project(
@@ -283,8 +292,17 @@ pub async fn patch_project(
     Path((organization, project)): Path<(String, String)>,
     Json(body): Json<PatchProjectRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let (organization, project) =
-        load_project(&state, Caller::User(&user), organization, project, ProjectAccess::Require { permission: Permission::EditProject, reject_managed: true }).await?;
+    let (organization, project) = load_project(
+        &state,
+        Caller::User(&user),
+        organization,
+        project,
+        ProjectAccess::Require {
+            permission: Permission::EditProject,
+            reject_managed: true,
+        },
+    )
+    .await?;
     let mut aproject: AProject = project.into();
     let mut patcher = ProjectPatcher::new(&state, &mut aproject);
 
@@ -347,7 +365,10 @@ impl<'a> ProjectPatcher<'a> {
     fn apply_display_name(&mut self, display_name: String) -> WebResult<()> {
         let display_name = display_name.trim().to_string();
         if let Err(e) = validate_display_name(&display_name) {
-            return Err(WebError::bad_request(format!("Invalid display name: {}", e)));
+            return Err(WebError::bad_request(format!(
+                "Invalid display name: {}",
+                e
+            )));
         }
         self.aproject.display_name = Set(display_name);
         Ok(())
@@ -394,8 +415,17 @@ pub async fn delete_project(
     Extension(user): Extension<MUser>,
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let (_organization, project) =
-        load_project(&state, Caller::User(&user), organization, project, ProjectAccess::Require { permission: Permission::EditProject, reject_managed: true }).await?;
+    let (_organization, project) = load_project(
+        &state,
+        Caller::User(&user),
+        organization,
+        project,
+        ProjectAccess::Require {
+            permission: Permission::EditProject,
+            reject_managed: true,
+        },
+    )
+    .await?;
     let aproject: AProject = project.into();
     aproject.delete(&state.web_db).await?;
 
@@ -412,8 +442,17 @@ pub async fn post_project_active(
     Extension(user): Extension<MUser>,
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let (_organization, project) =
-        load_project(&state, Caller::User(&user), organization, project, ProjectAccess::Require { permission: Permission::EditProject, reject_managed: true }).await?;
+    let (_organization, project) = load_project(
+        &state,
+        Caller::User(&user),
+        organization,
+        project,
+        ProjectAccess::Require {
+            permission: Permission::EditProject,
+            reject_managed: true,
+        },
+    )
+    .await?;
     let mut aproject: AProject = project.into();
     aproject.active = Set(true);
     aproject.update(&state.web_db).await?;
@@ -431,8 +470,17 @@ pub async fn delete_project_active(
     Extension(user): Extension<MUser>,
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let (_organization, project) =
-        load_project(&state, Caller::User(&user), organization, project, ProjectAccess::Require { permission: Permission::EditProject, reject_managed: true }).await?;
+    let (_organization, project) = load_project(
+        &state,
+        Caller::User(&user),
+        organization,
+        project,
+        ProjectAccess::Require {
+            permission: Permission::EditProject,
+            reject_managed: true,
+        },
+    )
+    .await?;
     let mut aproject: AProject = project.into();
     aproject.active = Set(false);
     aproject.update(&state.web_db).await?;
@@ -450,8 +498,17 @@ pub async fn post_project_check_repository(
     Extension(user): Extension<MUser>,
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let (_organization, project) =
-        load_project(&state, Caller::User(&user), organization, project, ProjectAccess::Require { permission: Permission::EditProject, reject_managed: true }).await?;
+    let (_organization, project) = load_project(
+        &state,
+        Caller::User(&user),
+        organization,
+        project,
+        ProjectAccess::Require {
+            permission: Permission::EditProject,
+            reject_managed: true,
+        },
+    )
+    .await?;
 
     let (_has_updates, remote_hash) = check_project_updates(Arc::clone(&state), &project)
         .await
@@ -465,9 +522,7 @@ pub async fn post_project_check_repository(
 
         Ok(Json(res))
     } else {
-        Err(WebError::internal(
-            "Failed to check repository".to_string(),
-        ))
+        Err(WebError::internal("Failed to check repository".to_string()))
     }
 }
 
@@ -488,7 +543,8 @@ pub async fn post_project_transfer(
 
     // Only an org member with EditProject permission, or the current owner,
     // may transfer ownership.
-    let is_admin = has_permission(&state, user.id, organization.id, Permission::EditProject).await?;
+    let is_admin =
+        has_permission(&state, user.id, organization.id, Permission::EditProject).await?;
     let is_owner = project.created_by == user.id;
     if !is_admin && !is_owner {
         return Err(WebError::forbidden(

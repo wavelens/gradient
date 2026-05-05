@@ -5,14 +5,14 @@
  */
 
 use crate::access::{Caller, OrgAccess, load_org};
-use crate::helpers::{OptionExt, ok_json};
 use crate::error::{WebError, WebResult};
+use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::Permission;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
+use entity::organization_cache::CacheSubscriptionMode;
 use gradient_core::db::get_any_cache_by_name;
 use gradient_core::types::*;
-use entity::organization_cache::CacheSubscriptionMode;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
@@ -106,7 +106,9 @@ pub async fn get_organization_subscribe(
         &state,
         Caller::User(&user),
         organization,
-        OrgAccess::Member { reject_managed: false },
+        OrgAccess::Member {
+            reject_managed: false,
+        },
     )
     .await?;
 
@@ -188,7 +190,11 @@ pub async fn post_organization_subscribe_cache(
 /// from a derivation owned by `org_id`, for `cache_id`. Idempotent —
 /// existing rows are skipped. Best-effort: errors are logged, not
 /// propagated.
-async fn enqueue_backfill_signatures(state: &ServerState, org_id: OrganizationId, cache_id: CacheId) {
+async fn enqueue_backfill_signatures(
+    state: &ServerState,
+    org_id: OrganizationId,
+    cache_id: CacheId,
+) {
     let drv_ids: Vec<DerivationId> = match EDerivation::find()
         .filter(CDerivation::Organization.eq(org_id))
         .all(&state.web_db)

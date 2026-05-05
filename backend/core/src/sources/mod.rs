@@ -12,9 +12,7 @@ pub mod ssh_key;
 pub use self::cache_key::*;
 pub use self::git::{Libgit2Prefetcher, accept_cert, check_project_updates, get_commit_info};
 pub use self::nar_path::*;
-pub use self::ssh_key::{
-    decrypt_ssh_private_key, format_public_key, generate_ssh_key,
-};
+pub use self::ssh_key::{decrypt_ssh_private_key, format_public_key, generate_ssh_key};
 
 use crate::types::*;
 use anyhow::Result;
@@ -111,7 +109,9 @@ pub enum SourceError {
     #[error("Unable to extract hash from Git URL")]
     GitHashExtraction,
     #[error("Organization not found with ID: {id}")]
-    OrganizationNotFound { id: crate::types::ids::OrganizationId },
+    OrganizationNotFound {
+        id: crate::types::ids::OrganizationId,
+    },
 }
 
 /// Result of a successful prefetch. Owns the temporary clone directory so the

@@ -28,8 +28,8 @@ mod worker_lifecycle;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use tokio::sync::RwLock;
 use gradient_core::types::*;
+use tokio::sync::RwLock;
 
 use jobs::JobTracker;
 use policy::Policy;

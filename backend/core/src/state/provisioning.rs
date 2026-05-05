@@ -70,7 +70,13 @@ fn read_credential(
     suffix: &str,
     label: &str,
 ) -> Result<(String, String), DynError> {
-    let path = format!("{}/gradient_{}_{}_{}", credentials_dir(), kind, name, suffix);
+    let path = format!(
+        "{}/gradient_{}_{}_{}",
+        credentials_dir(),
+        kind,
+        name,
+        suffix
+    );
     let contents = fs::read_to_string(&path)
         .map_err(|e| format!("Failed to read {} {}: {}", label, path, e))?;
     Ok((contents, path))
@@ -394,8 +400,12 @@ impl<'a> StateApplicator<'a> {
         let org_map = self.org_lookup().await?;
 
         for state_cache in state_caches.values() {
-            let (signing_key, _) =
-                read_credential("cache", &state_cache.name, "signing_key", "signing key file")?;
+            let (signing_key, _) = read_credential(
+                "cache",
+                &state_cache.name,
+                "signing_key",
+                "signing key file",
+            )?;
             let signing_key = signing_key.trim();
 
             let key_bytes = general_purpose::STANDARD.decode(signing_key).map_err(|e| {
@@ -584,12 +594,15 @@ impl<'a> StateApplicator<'a> {
         let now = now();
 
         for state_api_key in state_api_keys.values() {
-            let owned_by_id = user_lookup.get(&state_api_key.owned_by).copied().ok_or_else(|| {
-                format!(
-                    "User '{}' not found for API key '{}'",
-                    state_api_key.owned_by, state_api_key.name
-                )
-            })?;
+            let owned_by_id = user_lookup
+                .get(&state_api_key.owned_by)
+                .copied()
+                .ok_or_else(|| {
+                    format!(
+                        "User '{}' not found for API key '{}'",
+                        state_api_key.owned_by, state_api_key.name
+                    )
+                })?;
 
             let (key_value, key_path) =
                 read_credential("api", &state_api_key.name, "key", "API key file")?;
@@ -711,12 +724,15 @@ impl<'a> StateApplicator<'a> {
         let user_map = self.user_lookup().await?;
 
         for state_int in state_integrations.values() {
-            let org_id = org_map.get(&state_int.organization).copied().ok_or_else(|| {
-                format!(
-                    "Integration '{}' references unknown organization '{}'",
-                    state_int.name, state_int.organization
-                )
-            })?;
+            let org_id = org_map
+                .get(&state_int.organization)
+                .copied()
+                .ok_or_else(|| {
+                    format!(
+                        "Integration '{}' references unknown organization '{}'",
+                        state_int.name, state_int.organization
+                    )
+                })?;
 
             let created_by_id = lookup_id(&user_map, &state_int.created_by, "User")?;
 
@@ -823,9 +839,13 @@ impl<'a> StateApplicator<'a> {
         }
         let label = format!("integration {} file", suffix);
         let (plain, _) = read_credential("integration", int_name, suffix, &label)?;
-        let encrypted = encrypt_webhook_secret(self.crypt_secret_file, plain.trim()).map_err(
-            |e| format!("Failed to encrypt {} for integration '{}': {}", suffix, int_name, e),
-        )?;
+        let encrypted =
+            encrypt_webhook_secret(self.crypt_secret_file, plain.trim()).map_err(|e| {
+                format!(
+                    "Failed to encrypt {} for integration '{}': {}",
+                    suffix, int_name, e
+                )
+            })?;
         Ok(Some(encrypted))
     }
 
@@ -928,7 +948,14 @@ impl<'a> StateApplicator<'a> {
         let db = self.db;
 
         unmark_managed!(db, user, usernames, username, delete_state, "user");
-        unmark_managed!(db, organization, org_names, name, delete_state, "organization");
+        unmark_managed!(
+            db,
+            organization,
+            org_names,
+            name,
+            delete_state,
+            "organization"
+        );
         unmark_managed!(db, project, project_names, name, delete_state, "project");
         unmark_managed!(db, cache, cache_names, name, delete_state, "cache");
         unmark_managed!(db, api, api_key_names, name, delete_state, "API key");
@@ -1039,8 +1066,7 @@ mod password_phc_tests {
 mod api_key_hash_tests {
     use super::parse_api_key_hash;
 
-    const VALID: &str =
-        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+    const VALID: &str = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
 
     #[test]
     fn accepts_64_char_hex() {

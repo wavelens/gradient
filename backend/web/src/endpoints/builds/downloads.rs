@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::helpers::ok_json;
 use crate::authorization::{MaybeUser, decode_download_token, encode_download_token};
 use crate::error::{WebError, WebResult};
+use crate::helpers::ok_json;
 use axum::extract::{Path, Query, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
@@ -137,9 +137,7 @@ async fn find_and_serve_file(
             }
             Err(e) => {
                 tracing::error!(%build_id, %filename, hash, error = %e, "Failed to fetch NAR");
-                return Err(WebError::internal(
-                    "Failed to fetch NAR".to_string(),
-                ));
+                return Err(WebError::internal("Failed to fetch NAR".to_string()));
             }
         };
 

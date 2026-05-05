@@ -30,7 +30,11 @@ fn db_url(cli: &Cli) -> Result<String> {
     }
 }
 
-fn make_connect_options(cli: &Cli, max_connections: u32, min_connections: u32) -> Result<ConnectOptions> {
+fn make_connect_options(
+    cli: &Cli,
+    max_connections: u32,
+    min_connections: u32,
+) -> Result<ConnectOptions> {
     let mut opt = ConnectOptions::new(db_url(cli)?);
 
     // Only enable SQL logging at trace level

@@ -15,9 +15,7 @@ use jsonwebtoken::{
     jwk::JwkSet,
 };
 use rand::RngExt as _;
-use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter,
-};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use subtle::ConstantTimeEq;
@@ -102,12 +100,11 @@ async fn fetch_jwks(http_client: &reqwest::Client, jwks_uri: &str) -> Result<Jwk
     Ok(jwks)
 }
 
-pub async fn oidc_login_create(
-    state: State<Arc<ServerState>>,
-) -> Result<OidcAuthRequest> {
+pub async fn oidc_login_create(state: State<Arc<ServerState>>) -> Result<OidcAuthRequest> {
     let oidc = state
         .config
-        .oidc.clone()
+        .oidc
+        .clone()
         .context("OIDC is not enabled or not fully configured")?;
 
     let metadata = get_oidc_metadata(&state.http, &oidc.discovery_url).await?;
@@ -116,7 +113,10 @@ pub async fn oidc_login_create(
         .as_str()
         .context("No authorization_endpoint in OIDC metadata")?;
 
-    let redirect_uri = format!("{}/api/v1/auth/oidc/callback", state.config.server.serve_url);
+    let redirect_uri = format!(
+        "{}/api/v1/auth/oidc/callback",
+        state.config.server.serve_url
+    );
     let scope = oidc
         .scopes
         .as_deref()
@@ -166,7 +166,8 @@ pub async fn oidc_login_verify(
 ) -> Result<MUser> {
     let oidc = state
         .config
-        .oidc.clone()
+        .oidc
+        .clone()
         .context("OIDC is not enabled or not fully configured")?;
 
     let csrf_data = decode::<CsrfClaims>(
@@ -204,9 +205,12 @@ pub async fn oidc_login_verify(
 
     let http_client = &state.http;
 
-    let redirect_uri = format!("{}/api/v1/auth/oidc/callback", state.config.server.serve_url);
-    let client_secret = load_secret(&oidc.client_secret_file)
-        .context("Failed to read OIDC client secret")?;
+    let redirect_uri = format!(
+        "{}/api/v1/auth/oidc/callback",
+        state.config.server.serve_url
+    );
+    let client_secret =
+        load_secret(&oidc.client_secret_file).context("Failed to read OIDC client secret")?;
 
     let token_response = http_client
         .post(token_endpoint)
@@ -222,7 +226,10 @@ pub async fn oidc_login_verify(
         .context("Token exchange request failed")?;
 
     if !token_response.status().is_success() {
-        bail!("Token exchange failed with status {}", token_response.status());
+        bail!(
+            "Token exchange failed with status {}",
+            token_response.status()
+        );
     }
 
     let token_data: serde_json::Value = token_response
@@ -252,15 +259,10 @@ async fn verify_id_token(
     expected_aud: &str,
 ) -> Result<IdTokenClaims> {
     let header = decode_header(id_token).context("Failed to decode id_token header")?;
-    let kid = header
-        .kid
-        .clone()
-        .context("id_token header has no kid")?;
+    let kid = header.kid.clone().context("id_token header has no kid")?;
 
     let jwks = fetch_jwks(http, jwks_uri).await?;
-    let jwk = jwks
-        .find(&kid)
-        .context("No JWK matches id_token kid")?;
+    let jwk = jwks.find(&kid).context("No JWK matches id_token kid")?;
 
     let decoding_key =
         DecodingKey::from_jwk(jwk).context("Failed to construct decoding key from JWK")?;
@@ -295,10 +297,7 @@ async fn create_or_update_user(
         .context("Database error while finding OIDC user")?;
 
     if let Some(user) = existing {
-        let email_changed = claims
-            .email
-            .as_ref()
-            .is_some_and(|e| e != &user.email);
+        let email_changed = claims.email.as_ref().is_some_and(|e| e != &user.email);
         let name_changed = claims.name.as_ref().is_some_and(|n| n != &user.name);
 
         let user = if email_changed || name_changed {

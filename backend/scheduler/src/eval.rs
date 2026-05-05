@@ -311,19 +311,20 @@ impl<'a> EvalResultProcessor<'a> {
             .into_iter()
             .collect();
 
-        let fully_cached_ids: std::collections::HashSet<CachedPathId> = if cached_path_ids.is_empty() {
-            std::collections::HashSet::new()
-        } else {
-            ECachedPath::find()
-                .filter(CCachedPath::Id.is_in(cached_path_ids))
-                .all(&self.state.worker_db)
-                .await
-                .context("compute_truly_substituted: load cached_path")?
-                .into_iter()
-                .filter(|cp| cp.is_fully_cached())
-                .map(|cp| cp.id)
-                .collect()
-        };
+        let fully_cached_ids: std::collections::HashSet<CachedPathId> =
+            if cached_path_ids.is_empty() {
+                std::collections::HashSet::new()
+            } else {
+                ECachedPath::find()
+                    .filter(CCachedPath::Id.is_in(cached_path_ids))
+                    .all(&self.state.worker_db)
+                    .await
+                    .context("compute_truly_substituted: load cached_path")?
+                    .into_iter()
+                    .filter(|cp| cp.is_fully_cached())
+                    .map(|cp| cp.id)
+                    .collect()
+            };
 
         // Group outputs by drv. A drv is truly substituted iff it has at
         // least one output AND every output is linked to a fully-cached
@@ -477,7 +478,10 @@ impl<'a> EvalResultProcessor<'a> {
         }
 
         // GC: remove old evaluations beyond keep_evaluations for this project.
-        if let Ok(Some(project)) = EProject::find_by_id(project_id).one(&self.state.worker_db).await {
+        if let Ok(Some(project)) = EProject::find_by_id(project_id)
+            .one(&self.state.worker_db)
+            .await
+        {
             let gc_state = Arc::clone(self.state);
             let gc_keep = project.keep_evaluations as usize;
             self.state.shutdown.spawn(async move {
@@ -504,7 +508,10 @@ impl<'a> EvalResultProcessor<'a> {
 ///   every dep of every queued build, even when large subtrees were pruned by
 ///   the BFS known-derivation optimisation.
 /// * The evaluation's build list in the UI reflects the complete dep tree.
-async fn expand_substituted_closure(state: &Arc<ServerState>, evaluation_id: EvaluationId) -> Result<()> {
+async fn expand_substituted_closure(
+    state: &Arc<ServerState>,
+    evaluation_id: EvaluationId,
+) -> Result<()> {
     use sea_orm::ConnectionTrait;
 
     // Recursive CTE: seed = direct deps of substituted builds in this eval;
@@ -583,7 +590,10 @@ async fn expand_substituted_closure(state: &Arc<ServerState>, evaluation_id: Eva
 
     let count = builds.len();
     for chunk in builds.chunks(BATCH_SIZE) {
-        if let Err(e) = EBuild::insert_many(chunk.to_vec()).exec(&state.worker_db).await {
+        if let Err(e) = EBuild::insert_many(chunk.to_vec())
+            .exec(&state.worker_db)
+            .await
+        {
             error!(error = %e, %evaluation_id, "expand_substituted_closure: failed to insert builds");
         }
     }

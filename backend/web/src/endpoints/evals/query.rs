@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::helpers::ok_json;
 use crate::authorization::MaybeUser;
 use crate::error::WebResult;
+use crate::helpers::ok_json;
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
 use gradient_core::types::input::vec_to_hex;
@@ -250,7 +250,8 @@ pub async fn get_evaluation_messages(
     };
 
     // Build a map: message_id → [entry_point_id]
-    let mut ep_map: std::collections::HashMap<EvaluationMessageId, Vec<EntryPointId>> = std::collections::HashMap::new();
+    let mut ep_map: std::collections::HashMap<EvaluationMessageId, Vec<EntryPointId>> =
+        std::collections::HashMap::new();
     for row in ep_rows {
         ep_map.entry(row.message).or_default().push(row.entry_point);
     }

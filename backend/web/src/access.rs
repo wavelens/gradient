@@ -135,9 +135,7 @@ pub async fn load_org(
             }
         }
         OrgAccess::Member { reject_managed } => {
-            let uid = caller
-                .user_id()
-                .ok_or_else(|| WebError::not_found(label))?;
+            let uid = caller.user_id().ok_or_else(|| WebError::not_found(label))?;
             if !is_org_member(state, uid, org.id).await? {
                 return Err(WebError::not_found(label));
             }
@@ -149,9 +147,7 @@ pub async fn load_org(
             permission,
             reject_managed,
         } => {
-            let uid = caller
-                .user_id()
-                .ok_or_else(|| WebError::not_found(label))?;
+            let uid = caller.user_id().ok_or_else(|| WebError::not_found(label))?;
             require_org_permission(state, uid, org.id, permission, label).await?;
             if reject_managed {
                 reject_managed_org(&org)?;
@@ -191,9 +187,7 @@ pub async fn load_project(
             }
         }
         ProjectAccess::Member => {
-            let uid = caller
-                .user_id()
-                .ok_or_else(|| WebError::not_found(label))?;
+            let uid = caller.user_id().ok_or_else(|| WebError::not_found(label))?;
             if !is_org_member(state, uid, org.id).await? {
                 return Err(WebError::not_found(label));
             }
@@ -202,9 +196,7 @@ pub async fn load_project(
             permission,
             reject_managed,
         } => {
-            let uid = caller
-                .user_id()
-                .ok_or_else(|| WebError::not_found(label))?;
+            let uid = caller.user_id().ok_or_else(|| WebError::not_found(label))?;
             require_org_permission(state, uid, org.id, permission, label).await?;
             if reject_managed && project.managed {
                 return Err(WebError::forbidden(
@@ -289,10 +281,12 @@ pub async fn has_permission(
     organization_id: OrganizationId,
     permission: Permission,
 ) -> WebResult<bool> {
-    Ok(match load_org_membership(state, user_id, organization_id).await? {
-        Some(m) => role_grants(m.role, permission),
-        None => false,
-    })
+    Ok(
+        match load_org_membership(state, user_id, organization_id).await? {
+            Some(m) => role_grants(m.role, permission),
+            None => false,
+        },
+    )
 }
 
 pub async fn load_org_membership(
@@ -434,7 +428,9 @@ mod tests {
         let nar_storage = NarStore::local(&config.storage.base_path).expect("nar store");
         Arc::new(ServerState {
             web_db: WebDb::new(db),
-            worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
+            worker_db: WorkerDb::new(
+                MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
+            ),
             config,
             log_storage: Arc::new(NoopLogStorage),
             webhooks: Arc::new(RecordingWebhookClient::new()) as Arc<dyn WebhookClient>,
@@ -472,7 +468,13 @@ mod tests {
                 .append_query_results([vec![membership_fixture(BASE_ROLE_ADMIN_ID)]])
                 .into_connection();
             let state = make_state(db);
-            let r = load_org(&state, Caller::User(&user), "test-org".into(), admin_required()).await;
+            let r = load_org(
+                &state,
+                Caller::User(&user),
+                "test-org".into(),
+                admin_required(),
+            )
+            .await;
             assert!(r.is_ok(), "{:?}", r.err());
         });
     }
@@ -486,9 +488,14 @@ mod tests {
                 .append_query_results([vec![membership_fixture(BASE_ROLE_VIEW_ID)]])
                 .into_connection();
             let state = make_state(db);
-            let err = load_org(&state, Caller::User(&user), "test-org".into(), admin_required())
-                .await
-                .expect_err("view-only must be rejected");
+            let err = load_org(
+                &state,
+                Caller::User(&user),
+                "test-org".into(),
+                admin_required(),
+            )
+            .await
+            .expect_err("view-only must be rejected");
             assert!(matches!(err, WebError::Forbidden(..)));
         });
     }
@@ -502,9 +509,14 @@ mod tests {
                 .append_query_results([vec![membership_fixture(BASE_ROLE_ADMIN_ID)]])
                 .into_connection();
             let state = make_state(db);
-            let err = load_org(&state, Caller::User(&user), "test-org".into(), admin_required())
-                .await
-                .expect_err("managed must be rejected");
+            let err = load_org(
+                &state,
+                Caller::User(&user),
+                "test-org".into(),
+                admin_required(),
+            )
+            .await
+            .expect_err("managed must be rejected");
             assert!(matches!(err, WebError::Forbidden(..)));
         });
     }
@@ -518,9 +530,14 @@ mod tests {
                 .append_query_results([Vec::<entity::organization_user::Model>::new()])
                 .into_connection();
             let state = make_state(db);
-            let err = load_org(&state, Caller::User(&user), "test-org".into(), admin_required())
-                .await
-                .expect_err("non-member must be rejected");
+            let err = load_org(
+                &state,
+                Caller::User(&user),
+                "test-org".into(),
+                admin_required(),
+            )
+            .await
+            .expect_err("non-member must be rejected");
             assert!(matches!(err, WebError::NotFound(..)));
         });
     }
@@ -567,7 +584,9 @@ mod tests {
     fn org_member_view_role_passes() {
         run(async {
             let user = user_fixture();
-            let access = OrgAccess::Member { reject_managed: false };
+            let access = OrgAccess::Member {
+                reject_managed: false,
+            };
             let db = MockDatabase::new(DatabaseBackend::Postgres)
                 .append_query_results([vec![org_fixture(false, false)]])
                 .append_query_results([vec![membership_fixture(BASE_ROLE_VIEW_ID)]])
@@ -589,7 +608,9 @@ mod tests {
                 &state,
                 Caller::Anon,
                 "test-org".into(),
-                OrgAccess::Readable { label: "Organization" },
+                OrgAccess::Readable {
+                    label: "Organization",
+                },
             )
             .await;
             assert!(r.is_ok());
@@ -607,7 +628,9 @@ mod tests {
                 &state,
                 Caller::Anon,
                 "test-org".into(),
-                OrgAccess::Readable { label: "Organization" },
+                OrgAccess::Readable {
+                    label: "Organization",
+                },
             )
             .await
             .expect_err("anon must not see private org");

@@ -5,8 +5,8 @@
  */
 
 use super::helpers::CacheContext;
-use crate::helpers::OptionExt;
 use crate::error::{WebError, WebResult};
+use crate::helpers::OptionExt;
 use axum::body::Body;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, HeaderValue, header};
@@ -162,9 +162,9 @@ async fn fetch_upstream_nar(
         return Err(WebError::not_found("NAR in upstream"));
     }
 
-    resp.bytes().await.map_err(|e| {
-        WebError::internal(format!("Failed to read upstream response: {}", e))
-    })
+    resp.bytes()
+        .await
+        .map_err(|e| WebError::internal(format!("Failed to read upstream response: {}", e)))
 }
 
 #[cfg(test)]

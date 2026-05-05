@@ -16,11 +16,12 @@
 
 use axum_test::TestServer;
 use bytes::Bytes;
-use gradient_core::ci::WebhookClient;
-use gradient_core::storage::{EmailSender, NarStore};
-use gradient_core::types::{ServerState, WebDb, WorkerDb};
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
+use gradient_core::ci::WebhookClient;
+use gradient_core::storage::{EmailSender, NarStore};
+use gradient_core::types::ids::*;
+use gradient_core::types::{ServerState, WebDb, WorkerDb};
 use harmonia_nar::archive::test_data::{TestNarEvent, TestNarEvents};
 use harmonia_nar::archive::write_nar;
 use sea_orm::{DatabaseBackend, MockDatabase};
@@ -29,7 +30,6 @@ use test_support::fakes::email::InMemoryEmailSender;
 use test_support::fakes::webhooks::RecordingWebhookClient;
 use test_support::log_storage::NoopLogStorage;
 use test_support::prelude::test_cli;
-use gradient_core::types::ids::*;
 use uuid::Uuid;
 use web::create_router;
 
@@ -248,7 +248,9 @@ fn listing_returns_products_from_db() {
         let db = mock_db_for_downloads();
         let state = Arc::new(ServerState {
             web_db: WebDb::new(db),
-            worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
+            worker_db: WorkerDb::new(
+                MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
+            ),
             config: std::sync::Arc::new(gradient_core::types::RuntimeConfig::from_cli(&cli)),
             log_storage: Arc::new(NoopLogStorage),
             webhooks: Arc::new(RecordingWebhookClient::new()) as Arc<dyn WebhookClient>,
@@ -322,7 +324,9 @@ fn download_streams_file_from_nar() {
 
         let state = Arc::new(ServerState {
             web_db: WebDb::new(db),
-            worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
+            worker_db: WorkerDb::new(
+                MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
+            ),
             config: std::sync::Arc::new(gradient_core::types::RuntimeConfig::from_cli(&cli)),
             log_storage: Arc::new(NoopLogStorage),
             webhooks: Arc::new(RecordingWebhookClient::new()) as Arc<dyn WebhookClient>,

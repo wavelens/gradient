@@ -149,8 +149,7 @@ async fn main() {
     // happened to send (JobOffer etc.) and look for an explicit Error.
     tokio::time::sleep(Duration::from_millis(300)).await;
     let mut got_error = false;
-    while let Ok(Some(msg)) =
-        tokio::time::timeout(Duration::from_millis(200), recv(&mut ws)).await
+    while let Ok(Some(msg)) = tokio::time::timeout(Duration::from_millis(200), recv(&mut ws)).await
     {
         match msg {
             ServerMessage::Error { code, message } => {

@@ -101,13 +101,19 @@ mod tests {
     fn normalize_from_sri() {
         let b64 = base64::engine::general_purpose::STANDARD.encode(EMPTY_SHA256);
         let sri = format!("sha256-{b64}");
-        assert_eq!(normalize_nar_hash(&sri), format!("sha256:{EMPTY_SHA256_NIX32}"));
+        assert_eq!(
+            normalize_nar_hash(&sri),
+            format!("sha256:{EMPTY_SHA256_NIX32}")
+        );
     }
 
     #[test]
     fn normalize_from_prefixed_hex() {
         let input = format!("sha256:{EMPTY_SHA256_HEX}");
-        assert_eq!(normalize_nar_hash(&input), format!("sha256:{EMPTY_SHA256_NIX32}"));
+        assert_eq!(
+            normalize_nar_hash(&input),
+            format!("sha256:{EMPTY_SHA256_NIX32}")
+        );
     }
 
     #[test]

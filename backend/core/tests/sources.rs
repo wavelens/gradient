@@ -144,8 +144,7 @@ fn generate_ssh_key_produces_valid_ed25519_keypair() {
         base64::engine::general_purpose::STANDARD.encode(b"this_is_a_test_secret_key_32chars");
     secret_file.write_all(encoded.as_bytes()).unwrap();
 
-    let (private_key, public_key) =
-        generate_ssh_key(secret_file.path().to_str().unwrap()).unwrap();
+    let (private_key, public_key) = generate_ssh_key(secret_file.path().to_str().unwrap()).unwrap();
 
     assert!(!private_key.is_empty());
     assert!(

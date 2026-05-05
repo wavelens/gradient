@@ -41,7 +41,11 @@ impl Scheduler {
         (notify, abort_rx)
     }
 
-    pub async fn update_authorized_peers(&self, peer_id: &str, authorized_peers: HashSet<OrganizationId>) {
+    pub async fn update_authorized_peers(
+        &self,
+        peer_id: &str,
+        authorized_peers: HashSet<OrganizationId>,
+    ) {
         self.worker_pool
             .write()
             .await
@@ -51,7 +55,11 @@ impl Scheduler {
 
     /// Abort all active jobs on `worker_id` that belong to any of `revoked_peers`.
     /// Jobs are moved back to pending so they can be re-assigned to another worker.
-    pub async fn abort_org_jobs_on_worker(&self, worker_id: &str, revoked_peers: &HashSet<OrganizationId>) {
+    pub async fn abort_org_jobs_on_worker(
+        &self,
+        worker_id: &str,
+        revoked_peers: &HashSet<OrganizationId>,
+    ) {
         if revoked_peers.is_empty() {
             return;
         }

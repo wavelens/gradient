@@ -21,9 +21,7 @@ pub use self::management::{
     delete_project_active, get, get_project, get_project_name_available, patch_project,
     post_project_active, post_project_check_repository, post_project_transfer, put,
 };
-pub use self::metrics::{
-    EntryPointMetricsQuery, get_entry_point_metrics, get_project_metrics,
-};
+pub use self::metrics::{EntryPointMetricsQuery, get_entry_point_metrics, get_project_metrics};
 
 use gradient_core::types::ids::*;
 
@@ -94,4 +92,3 @@ pub struct ProjectDetailsResponse {
     pub last_evaluations: Vec<EvaluationSummary>,
     pub can_edit: bool,
 }
-

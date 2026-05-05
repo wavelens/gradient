@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::helpers::OptionExt;
 use crate::error::WebResult;
+use crate::helpers::OptionExt;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::types::*;

@@ -4,10 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::helpers::{OptionExt, ok_json};
-use crate::authorization::MaybeUser;
 use crate::access::{Caller, OrgAccess, load_org};
+use crate::authorization::MaybeUser;
 use crate::error::WebResult;
+use crate::helpers::{OptionExt, ok_json};
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
 use gradient_core::types::*;
@@ -90,7 +90,13 @@ pub async fn get_project_metrics(
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<ProjectMetricsResponse>>> {
-    let organization = load_org(&state.0, Caller::from_option(&maybe_user), organization, OrgAccess::Readable { label: "Project" }).await?;
+    let organization = load_org(
+        &state.0,
+        Caller::from_option(&maybe_user),
+        organization,
+        OrgAccess::Readable { label: "Project" },
+    )
+    .await?;
 
     let project = EProject::find()
         .filter(CProject::Organization.eq(organization.id))
@@ -145,7 +151,8 @@ pub async fn get_project_metrics(
         let dependencies_count = (closure.len() as i64) - entry_point_count;
 
         let output_size_bytes = sum_output_sizes(&state.web_db, ep_drv_ids).await?;
-        let closure_size_bytes = sum_output_sizes(&state.web_db, closure.into_iter().collect()).await?;
+        let closure_size_bytes =
+            sum_output_sizes(&state.web_db, closure.into_iter().collect()).await?;
 
         points.push(ProjectMetricPoint {
             evaluation_id: evaluation.id,
@@ -162,9 +169,9 @@ pub async fn get_project_metrics(
     points.reverse();
 
     Ok(ok_json(ProjectMetricsResponse {
-            keep_evaluations: project.keep_evaluations,
-            points,
-        }))
+        keep_evaluations: project.keep_evaluations,
+        points,
+    }))
 }
 
 // ── Per-entry-point metrics ──────────────────────────────────────────────────
@@ -200,7 +207,13 @@ pub async fn get_entry_point_metrics(
     Path((organization, project)): Path<(String, String)>,
     Query(params): Query<EntryPointMetricsQuery>,
 ) -> WebResult<Json<BaseResponse<EntryPointMetricsResponse>>> {
-    let organization = load_org(&state.0, Caller::from_option(&maybe_user), organization, OrgAccess::Readable { label: "Project" }).await?;
+    let organization = load_org(
+        &state.0,
+        Caller::from_option(&maybe_user),
+        organization,
+        OrgAccess::Readable { label: "Project" },
+    )
+    .await?;
 
     let project = EProject::find()
         .filter(CProject::Organization.eq(organization.id))
@@ -239,7 +252,8 @@ pub async fn get_entry_point_metrics(
         let dependencies_count = (closure.len() as i64).saturating_sub(1);
 
         let output_size_bytes = sum_output_sizes(&state.web_db, vec![build.derivation]).await?;
-        let closure_size_bytes = sum_output_sizes(&state.web_db, closure.into_iter().collect()).await?;
+        let closure_size_bytes =
+            sum_output_sizes(&state.web_db, closure.into_iter().collect()).await?;
 
         points.push(EntryPointMetricPoint {
             evaluation_id: evaluation.id,
@@ -255,8 +269,8 @@ pub async fn get_entry_point_metrics(
     points.reverse();
 
     Ok(ok_json(EntryPointMetricsResponse {
-            eval: params.eval,
-            keep_evaluations: project.keep_evaluations,
-            points,
-        }))
+        eval: params.eval,
+        keep_evaluations: project.keep_evaluations,
+        points,
+    }))
 }

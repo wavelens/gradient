@@ -180,19 +180,20 @@ impl WebhookClient for ReqwestWebhookClient {
         // reqwest, which performs its own resolution — so this is a guard,
         // not a substitute for proper SSRF-aware connection wiring.
         if let Some(host) = parsed.host_str()
-            && matches!(parsed.host(), Some(url::Host::Domain(_))) {
-                let port = parsed.port_or_known_default().unwrap_or(0);
-                let lookup = tokio::net::lookup_host((host, port)).await?;
-                for sa in lookup {
-                    if is_unsafe_ip(&sa.ip()) {
-                        anyhow::bail!(
-                            "Webhook host '{}' resolved to a disallowed address ({})",
-                            host,
-                            sa.ip()
-                        );
-                    }
+            && matches!(parsed.host(), Some(url::Host::Domain(_)))
+        {
+            let port = parsed.port_or_known_default().unwrap_or(0);
+            let lookup = tokio::net::lookup_host((host, port)).await?;
+            for sa in lookup {
+                if is_unsafe_ip(&sa.ip()) {
+                    anyhow::bail!(
+                        "Webhook host '{}' resolved to a disallowed address ({})",
+                        host,
+                        sa.ip()
+                    );
                 }
             }
+        }
 
         let resp = self
             .client
@@ -322,7 +323,10 @@ async fn get_build_org_id(
     state: &Arc<ServerState>,
     evaluation_id: EvaluationId,
 ) -> Option<OrganizationId> {
-    let evaluation = match EEvaluation::find_by_id(evaluation_id).one(&state.worker_db).await {
+    let evaluation = match EEvaluation::find_by_id(evaluation_id)
+        .one(&state.worker_db)
+        .await
+    {
         Ok(Some(e)) => e,
         Ok(None) => {
             warn!(evaluation_id = %evaluation_id, "Evaluation not found for webhook delivery");
@@ -446,10 +450,9 @@ async fn fire_webhooks(
             duration_ms: sea_orm::ActiveValue::Set(duration_ms),
             delivered_at: sea_orm::ActiveValue::Set(crate::types::now()),
         };
-        if let Err(e) =
-            <crate::types::EWebhookDelivery as sea_orm::EntityTrait>::insert(row)
-                .exec(&state.worker_db)
-                .await
+        if let Err(e) = <crate::types::EWebhookDelivery as sea_orm::EntityTrait>::insert(row)
+            .exec(&state.worker_db)
+            .await
         {
             warn!(error = %e, webhook_id = %webhook.id, "failed to record webhook delivery");
         }

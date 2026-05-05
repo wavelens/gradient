@@ -422,9 +422,30 @@ mod tests {
 
     #[test]
     fn negotiate_capabilities_federate_requires_both() {
-        assert!(!negotiate_capabilities(&make_state(false), all_caps(true), EnabledCapsAggregate::all()).federate);
-        assert!(!negotiate_capabilities(&make_state(true), all_caps(false), EnabledCapsAggregate::all()).federate);
-        assert!(negotiate_capabilities(&make_state(true), all_caps(true), EnabledCapsAggregate::all()).federate);
+        assert!(
+            !negotiate_capabilities(
+                &make_state(false),
+                all_caps(true),
+                EnabledCapsAggregate::all()
+            )
+            .federate
+        );
+        assert!(
+            !negotiate_capabilities(
+                &make_state(true),
+                all_caps(false),
+                EnabledCapsAggregate::all()
+            )
+            .federate
+        );
+        assert!(
+            negotiate_capabilities(
+                &make_state(true),
+                all_caps(true),
+                EnabledCapsAggregate::all()
+            )
+            .federate
+        );
     }
 
     #[test]
@@ -476,7 +497,6 @@ mod tests {
     use entity::organization::Model as OrgModel;
     use entity::organization_cache::{CacheSubscriptionMode, Model as OrgCacheModel};
     use sea_orm::{DatabaseBackend, MockDatabase};
-    
 
     fn org_row(id: OrganizationId) -> OrgModel {
         OrgModel {
@@ -494,7 +514,10 @@ mod tests {
         }
     }
 
-    fn org_cache_row(org: OrganizationId, cache: gradient_core::types::ids::CacheId) -> OrgCacheModel {
+    fn org_cache_row(
+        org: OrganizationId,
+        cache: gradient_core::types::ids::CacheId,
+    ) -> OrgCacheModel {
         OrgCacheModel {
             id: gradient_core::types::ids::OrganizationCacheId::now_v7(),
             organization: org,
@@ -535,9 +558,11 @@ mod tests {
         assert!(authorized.is_empty());
         assert_eq!(demoted.len(), 1);
         assert_eq!(demoted[0].peer_id, org.to_string());
-        assert!(demoted[0]
-            .reason
-            .contains("organization has no cache subscribed"));
+        assert!(
+            demoted[0]
+                .reason
+                .contains("organization has no cache subscribed")
+        );
     }
 
     #[tokio::test]
@@ -610,8 +635,10 @@ mod tests {
         assert_eq!(authorized, vec![org_with.to_string()]);
         assert_eq!(failed.len(), 1);
         assert_eq!(failed[0].peer_id, org_without.to_string());
-        assert!(failed[0]
-            .reason
-            .contains("organization has no cache subscribed"));
+        assert!(
+            failed[0]
+                .reason
+                .contains("organization has no cache subscribed")
+        );
     }
 }

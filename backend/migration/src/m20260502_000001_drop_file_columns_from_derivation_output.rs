@@ -36,7 +36,11 @@ impl MigrationTrait for Migration {
                 Table::alter()
                     .table(DerivationOutput::Table)
                     .add_column(ColumnDef::new(DerivationOutput::FileHash).text().null())
-                    .add_column(ColumnDef::new(DerivationOutput::FileSize).big_integer().null())
+                    .add_column(
+                        ColumnDef::new(DerivationOutput::FileSize)
+                            .big_integer()
+                            .null(),
+                    )
                     .to_owned(),
             )
             .await?;

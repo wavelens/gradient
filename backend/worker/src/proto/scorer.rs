@@ -79,7 +79,10 @@ mod tests {
     #[tokio::test]
     async fn score_empty_candidates() {
         let store = FakeWorkerStore::new();
-        let scores = JobScorer::new().score_candidates(&store, &[]).await.unwrap();
+        let scores = JobScorer::new()
+            .score_candidates(&store, &[])
+            .await
+            .unwrap();
         assert!(scores.is_empty());
     }
 
@@ -107,11 +110,17 @@ mod tests {
             required_paths: vec![
                 RequiredPath {
                     path: "/nix/store/aaaa-have".to_owned(),
-                    cache_info: Some(CacheInfo { file_size: 10, nar_size: 100 }),
+                    cache_info: Some(CacheInfo {
+                        file_size: 10,
+                        nar_size: 100,
+                    }),
                 },
                 RequiredPath {
                     path: "/nix/store/bbbb-missing".to_owned(),
-                    cache_info: Some(CacheInfo { file_size: 20, nar_size: 200 }),
+                    cache_info: Some(CacheInfo {
+                        file_size: 20,
+                        nar_size: 200,
+                    }),
                 },
                 RequiredPath {
                     path: "/nix/store/cccc-missing-no-info".to_owned(),

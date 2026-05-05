@@ -20,11 +20,11 @@ use axum::extract::DefaultBodyLimit;
 use axum::routing::{get, patch, post, put};
 use axum::{Router, middleware};
 use bytes::Bytes;
+use governor::middleware::NoOpMiddleware;
 use http::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
 use http::{HeaderMap, Request, Response};
-use std::time::Duration;
-use governor::middleware::NoOpMiddleware;
 use std::net::{IpAddr, Ipv4Addr};
+use std::time::Duration;
 use tower_governor::GovernorLayer;
 use tower_governor::errors::GovernorError;
 use tower_governor::governor::{GovernorConfig, GovernorConfigBuilder};
@@ -34,8 +34,8 @@ use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing::Span;
 
-use gradient_core::types::ServerState;
 use endpoints::{admin, *};
+use gradient_core::types::ServerState;
 use proto::proto_router;
 use scheduler::Scheduler;
 use std::sync::Arc;
@@ -230,8 +230,9 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         )
         .route(
             "/builds",
-            post(builds::post_direct_build)
-                .layer(DefaultBodyLimit::max(state.config.limits.max_direct_build_size)),
+            post(builds::post_direct_build).layer(DefaultBodyLimit::max(
+                state.config.limits.max_direct_build_size,
+            )),
         )
         .route(
             "/builds/direct/recent",
@@ -270,7 +271,10 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         )
         .route("/user/keys/{api_id}/revoke", post(user::post_key_revoke))
         .route("/user/sessions", get(user::get_sessions))
-        .route("/user/sessions/{session_id}", axum::routing::delete(user::delete_session))
+        .route(
+            "/user/sessions/{session_id}",
+            axum::routing::delete(user::delete_session),
+        )
         .route("/user/audit-log", get(user::get_audit_log))
         .route(
             "/user/settings",
@@ -463,7 +467,11 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
 }
 
 pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
-    let server_url = format!("{}:{}", state.config.server.ip.clone(), state.config.server.port.clone());
+    let server_url = format!(
+        "{}:{}",
+        state.config.server.ip.clone(),
+        state.config.server.port.clone()
+    );
     let app = create_router(Arc::clone(&state));
 
     let listener = tokio::net::TcpListener::bind(&server_url)

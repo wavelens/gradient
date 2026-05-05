@@ -124,7 +124,10 @@ pub async fn report_build_ci(state: Arc<ServerState>, build: MBuild, status: CiS
         }
     };
 
-    let commit = match ECommit::find_by_id(evaluation.commit).one(&state.worker_db).await {
+    let commit = match ECommit::find_by_id(evaluation.commit)
+        .one(&state.worker_db)
+        .await
+    {
         Ok(Some(c)) => c,
         Ok(None) => {
             warn!(commit_id = %evaluation.commit, "Commit missing for build CI report");
@@ -221,7 +224,10 @@ pub async fn report_evaluation_ci(
 
     let reporter = resolve_outbound_reporter_for_project(&state, project_id).await;
 
-    let commit = match ECommit::find_by_id(evaluation.commit).one(&state.worker_db).await {
+    let commit = match ECommit::find_by_id(evaluation.commit)
+        .one(&state.worker_db)
+        .await
+    {
         Ok(Some(c)) => c,
         Ok(None) => {
             warn!(commit_id = %evaluation.commit, "Commit not found for evaluation CI report");
@@ -283,7 +289,9 @@ pub async fn report_evaluation_ci(
             }
         }
         Ok(None) => {}
-        Err(e) => warn!(error = format!("{e:#}"), evaluation_id = %evaluation.id, "Evaluation CI status report failed"),
+        Err(e) => {
+            warn!(error = format!("{e:#}"), evaluation_id = %evaluation.id, "Evaluation CI status report failed")
+        }
     }
 }
 

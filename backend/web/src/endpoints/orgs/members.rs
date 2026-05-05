@@ -5,9 +5,9 @@
  */
 
 use crate::access::{Caller, OrgAccess, load_org};
-use crate::helpers::{OptionExt, ok_json};
 use crate::authorization::MaybeUser;
 use crate::error::{WebError, WebResult};
+use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::Permission;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
@@ -73,12 +73,17 @@ pub async fn get_organization_users(
         &state.0,
         Caller::from_option(&maybe_user),
         organization,
-        OrgAccess::Readable { label: "Organization" },
+        OrgAccess::Readable {
+            label: "Organization",
+        },
     )
     .await?;
 
     let organization_users = EOrganizationUser::find()
-        .join(JoinType::InnerJoin, entity::organization_user::Relation::User.def())
+        .join(
+            JoinType::InnerJoin,
+            entity::organization_user::Relation::User.def(),
+        )
         .select_also(entity::user::Entity)
         .filter(COrganizationUser::Organization.eq(organization.id))
         .all(&state.web_db)

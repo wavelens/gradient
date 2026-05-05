@@ -76,11 +76,9 @@ fn parse_rsa_key(pem: &str) -> Result<RsaKeyPair> {
     let der = pem_to_der(pem).context("failed to decode GitHub App private key PEM")?;
     let is_pkcs1 = pem.contains("BEGIN RSA PRIVATE KEY");
     if is_pkcs1 {
-        RsaKeyPair::from_der(&der)
-            .map_err(|e| anyhow!("invalid PKCS#1 RSA private key: {e:?}"))
+        RsaKeyPair::from_der(&der).map_err(|e| anyhow!("invalid PKCS#1 RSA private key: {e:?}"))
     } else {
-        RsaKeyPair::from_pkcs8(&der)
-            .map_err(|e| anyhow!("invalid PKCS#8 RSA private key: {e:?}"))
+        RsaKeyPair::from_pkcs8(&der).map_err(|e| anyhow!("invalid PKCS#8 RSA private key: {e:?}"))
     }
 }
 

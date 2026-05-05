@@ -189,11 +189,7 @@ impl<'a> InputPrefetcher<'a> {
                 Ok(false) => missing.push(p),
                 Err(e) => {
                     error!(path = %p, error = %e, "store.has_path failed during prefetch; aborting build");
-                    return Err(anyhow::anyhow!(
-                        "store.has_path failed for {}: {}",
-                        p,
-                        e
-                    ));
+                    return Err(anyhow::anyhow!("store.has_path failed for {}: {}", p, e));
                 }
             }
         }
@@ -286,24 +282,22 @@ impl<'a> InputPrefetcher<'a> {
 
         let mut futs = by_url
             .into_iter()
-            .map(|cp| {
-                async move {
-                    let url = cp.url.clone().expect("by_url entries have a URL");
-                    let resp = http
-                        .get(&url)
-                        .timeout(HTTP_DOWNLOAD_TIMEOUT)
-                        .send()
-                        .await
-                        .with_context(|| format!("HTTP GET {} (path {})", url, cp.path))?
-                        .error_for_status()
-                        .with_context(|| format!("HTTP {} returned non-2xx", url))?;
-                    let bytes = resp
-                        .bytes()
-                        .await
-                        .with_context(|| format!("read body of {}", url))?
-                        .to_vec();
-                    Ok::<_, anyhow::Error>((cp.path.clone(), bytes, cp))
-                }
+            .map(|cp| async move {
+                let url = cp.url.clone().expect("by_url entries have a URL");
+                let resp = http
+                    .get(&url)
+                    .timeout(HTTP_DOWNLOAD_TIMEOUT)
+                    .send()
+                    .await
+                    .with_context(|| format!("HTTP GET {} (path {})", url, cp.path))?
+                    .error_for_status()
+                    .with_context(|| format!("HTTP {} returned non-2xx", url))?;
+                let bytes = resp
+                    .bytes()
+                    .await
+                    .with_context(|| format!("read body of {}", url))?
+                    .to_vec();
+                Ok::<_, anyhow::Error>((cp.path.clone(), bytes, cp))
             })
             .collect::<FuturesUnordered<_>>();
 
@@ -340,13 +334,10 @@ impl<'a> InputPrefetcher<'a> {
             return Ok(0);
         }
 
-        let download_paths: HashSet<String> =
-            results.iter().map(|(p, _, _)| p.clone()).collect();
+        let download_paths: HashSet<String> = results.iter().map(|(p, _, _)| p.clone()).collect();
 
-        let mut payload: HashMap<String, (Vec<u8>, CachedPath)> = results
-            .into_iter()
-            .map(|(p, b, m)| (p, (b, m)))
-            .collect();
+        let mut payload: HashMap<String, (Vec<u8>, CachedPath)> =
+            results.into_iter().map(|(p, b, m)| (p, (b, m))).collect();
 
         // For each path, the subset of its references that are also in the
         // download set — i.e. the deps we must wait for. Refs already in the
@@ -380,7 +371,9 @@ impl<'a> InputPrefetcher<'a> {
         loop {
             while !ready.is_empty() && imports.len() < PREFETCH_CONCURRENCY {
                 let path = ready.pop().expect("ready is non-empty");
-                let (bytes, meta) = payload.remove(&path).expect("payload present for ready path");
+                let (bytes, meta) = payload
+                    .remove(&path)
+                    .expect("payload present for ready path");
                 pending_deps.remove(&path);
                 imports.push(async move {
                     let result = import_received_nar(store, &path, bytes, &meta)
@@ -523,9 +516,7 @@ impl<'a> InputPrefetcher<'a> {
                     .as_deref()
                     .map(detect_compression)
                     .unwrap_or(Compression::Zstd);
-                for out_path in
-                    drv_outputs_from_compressed_nar(bytes, compression, path).await
-                {
+                for out_path in drv_outputs_from_compressed_nar(bytes, compression, path).await {
                     if !queried.contains(&out_path) {
                         tracing::trace!(
                             drv = %path,
@@ -559,11 +550,7 @@ impl<'a> InputPrefetcher<'a> {
                             error = %e,
                             "store.has_path failed during closure expansion; aborting build"
                         );
-                        return Err(anyhow::anyhow!(
-                            "store.has_path failed for {}: {}",
-                            r,
-                            e
-                        ));
+                        return Err(anyhow::anyhow!("store.has_path failed for {}: {}", r, e));
                     }
                 }
             }
@@ -667,7 +654,9 @@ pub async fn fetch_external_cached_outputs(
 
     // Step 3 — fetch any output not already in the local store, plus its
     // transitive runtime closure (so the daemon will accept the imports).
-    let missing = prefetcher.filter_missing(output_paths.iter().cloned().collect()).await?;
+    let missing = prefetcher
+        .filter_missing(output_paths.iter().cloned().collect())
+        .await?;
     if !missing.is_empty() {
         prefetcher.fetch_closure(missing).await?;
     }
@@ -785,11 +774,8 @@ impl<'a> NarImporter<'a> {
             Ok(()) => Ok(()),
             Err(e) => {
                 let corrupt = is_connection_corrupt(&e);
-                let err = anyhow::anyhow!(
-                    "daemon add_to_store_nar({}) failed: {}",
-                    self.store_path,
-                    e
-                );
+                let err =
+                    anyhow::anyhow!("daemon add_to_store_nar({}) failed: {}", self.store_path, e);
                 if corrupt {
                     guard.mark_broken();
                 }
@@ -919,7 +905,10 @@ async fn extract_single_file_from_nar(nar_bytes: &[u8]) -> Result<Vec<u8>> {
     match event {
         NarEvent::File { mut reader, .. } => {
             let mut buf = Vec::new();
-            reader.read_to_end(&mut buf).await.context("read NAR file body")?;
+            reader
+                .read_to_end(&mut buf)
+                .await
+                .context("read NAR file body")?;
             Ok(buf)
         }
         _ => Err(anyhow::anyhow!("expected single regular file in NAR")),
@@ -981,9 +970,7 @@ fn decompress_xz(compressed: &[u8]) -> Result<Vec<u8>> {
 fn decompress_bzip2(compressed: &[u8]) -> Result<Vec<u8>> {
     let mut decoder = bzip2::read::BzDecoder::new(std::io::Cursor::new(compressed));
     let mut out = Vec::with_capacity(compressed.len() * 4);
-    decoder
-        .read_to_end(&mut out)
-        .context("read bzip2 stream")?;
+    decoder.read_to_end(&mut out).context("read bzip2 stream")?;
     Ok(out)
 }
 

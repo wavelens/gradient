@@ -140,8 +140,8 @@ where
                 mut reader,
             } => {
                 let in_collector = collector.is_some();
-                let matches_file = !in_collector
-                    && path_matches_file(&stack, name.as_ref(), &target);
+                let matches_file =
+                    !in_collector && path_matches_file(&stack, name.as_ref(), &target);
                 if matches_file {
                     let cap = std::cmp::min(size, MAX_PREALLOC as u64) as usize;
                     let mut buf = Vec::with_capacity(cap);

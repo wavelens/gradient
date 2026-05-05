@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::helpers::{OptionExt, ok_json};
 use crate::authorization::MaybeUser;
 use crate::error::{WebError, WebResult};
+use crate::helpers::{OptionExt, ok_json};
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use chrono::{NaiveDateTime, Timelike};
@@ -78,7 +78,11 @@ pub async fn record_nar_traffic(state: Arc<ServerState>, cache_id: CacheId, byte
 /// `(cache, bucket_time)` row. Concurrent calls into the same bucket are
 /// serialised by Postgres on the unique `(cache, bucket_time)` index, so each
 /// caller's `bytes_sent`/`nar_count` increment is preserved (no lost updates).
-fn build_record_nar_traffic_stmt(cache_id: CacheId, bucket: NaiveDateTime, bytes: i64) -> Statement {
+fn build_record_nar_traffic_stmt(
+    cache_id: CacheId,
+    bucket: NaiveDateTime,
+    bytes: i64,
+) -> Statement {
     Statement::from_sql_and_values(
         DatabaseBackend::Postgres,
         r#"INSERT INTO cache_metric (id, cache, bucket_time, bytes_sent, nar_count)
@@ -258,18 +262,18 @@ pub async fn get_cache_stats(
         )?;
 
     Ok(ok_json(CacheStatsResponse {
-            total_bytes,
-            total_nar_bytes,
-            total_packages,
-            storage_minutes,
-            storage_hours,
-            storage_days,
-            storage_weeks,
-            minutes,
-            hours,
-            days,
-            weeks,
-        }))
+        total_bytes,
+        total_nar_bytes,
+        total_packages,
+        storage_minutes,
+        storage_hours,
+        storage_days,
+        storage_weeks,
+        minutes,
+        hours,
+        days,
+        weeks,
+    }))
 }
 
 #[cfg(test)]

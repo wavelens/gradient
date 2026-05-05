@@ -61,7 +61,10 @@ impl<'a> BuildStateHandler<'a> {
             if let Some(row) = existing {
                 let row_id = row.id;
                 let mut active = row.into_active_model();
-                if let BuildOutputMetadata::Available { nar_size, nar_hash: _ } = output.nar_metadata()
+                if let BuildOutputMetadata::Available {
+                    nar_size,
+                    nar_hash: _,
+                } = output.nar_metadata()
                 {
                     active.nar_size = Set(Some(nar_size));
                 }
@@ -104,7 +107,10 @@ impl<'a> BuildStateHandler<'a> {
     }
 
     pub async fn handle_build_job_completed(&self, build_id: BuildId) -> Result<()> {
-        let build = match EBuild::find_by_id(build_id).one(&self.state.worker_db).await? {
+        let build = match EBuild::find_by_id(build_id)
+            .one(&self.state.worker_db)
+            .await?
+        {
             Some(b) => b,
             None => {
                 warn!(%build_id, "build not found on job_completed");
@@ -119,7 +125,10 @@ impl<'a> BuildStateHandler<'a> {
     }
 
     pub async fn handle_build_job_failed(&self, build_id: BuildId, _error: &str) -> Result<()> {
-        let build = match EBuild::find_by_id(build_id).one(&self.state.worker_db).await? {
+        let build = match EBuild::find_by_id(build_id)
+            .one(&self.state.worker_db)
+            .await?
+        {
             Some(b) => b,
             None => {
                 warn!(%build_id, "build not found on job_failed");
@@ -180,8 +189,9 @@ impl<'a> BuildStateHandler<'a> {
                 continue;
             }
 
-            let Some(reloaded) =
-                EBuild::find_by_id(follower.id).one(&self.state.worker_db).await?
+            let Some(reloaded) = EBuild::find_by_id(follower.id)
+                .one(&self.state.worker_db)
+                .await?
             else {
                 continue;
             };
@@ -223,8 +233,7 @@ impl<'a> BuildStateHandler<'a> {
             .context("fetch builds for cascade")?;
 
         for build in cascaded_builds {
-            update_build_status(Arc::clone(self.state), build, BuildStatus::DependencyFailed)
-                .await;
+            update_build_status(Arc::clone(self.state), build, BuildStatus::DependencyFailed).await;
         }
         Ok(())
     }
@@ -444,7 +453,8 @@ impl BuildabilityChecker {
             .all(&state.worker_db)
             .await
             .context("fetch derivations for pending builds")?;
-        let drv_by_id: HashMap<DerivationId, MDerivation> = drvs.into_iter().map(|d| (d.id, d)).collect();
+        let drv_by_id: HashMap<DerivationId, MDerivation> =
+            drvs.into_iter().map(|d| (d.id, d)).collect();
 
         let edges = EDerivationFeature::find()
             .filter(CDerivationFeature::Derivation.is_in(drv_ids.to_vec()))

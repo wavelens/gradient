@@ -6,18 +6,18 @@
 
 use super::helpers::cleanup_nars_for_orgs;
 use crate::access::{CacheAccess, load_cache};
-use crate::helpers::{OptionExt, ok_json};
 use crate::authorization::MaybeUser;
 use crate::error::{WebError, WebResult};
+use crate::helpers::{OptionExt, ok_json};
 use axum::Extension;
 use axum::Json;
 use axum::extract::{Path, Query, State};
-use chrono::{NaiveDateTime};
+use chrono::NaiveDateTime;
+use entity::organization_cache::CacheSubscriptionMode;
 use gradient_core::db::get_any_cache_by_name;
 use gradient_core::sources::{format_cache_public_key, generate_signing_key};
 use gradient_core::types::input::{check_index_name, validate_display_name};
 use gradient_core::types::*;
-use entity::organization_cache::CacheSubscriptionMode;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
@@ -126,7 +126,10 @@ pub async fn put(
     }
 
     if let Err(e) = validate_display_name(&body.display_name) {
-        return Err(WebError::bad_request(format!("Invalid display name: {}", e)));
+        return Err(WebError::bad_request(format!(
+            "Invalid display name: {}",
+            e
+        )));
     }
 
     let existing_cache = ECache::find()
@@ -140,9 +143,9 @@ pub async fn put(
 
     let (private_key, public_key) = generate_signing_key(&state.config.secrets.crypt_secret_file)
         .map_err(|e| {
-            tracing::error!("Failed to generate signing key: {}", e);
-            WebError::internal("Failed to generate signing key")
-        })?;
+        tracing::error!("Failed to generate signing key: {}", e);
+        WebError::internal("Failed to generate signing key")
+    })?;
 
     let cache = ACache {
         id: Set(CacheId::now_v7()),
@@ -218,19 +221,19 @@ pub async fn get_cache(
     let can_edit = matches!(&maybe_user, Some(u) if u.id == cache.created_by);
 
     Ok(ok_json(CacheResponse {
-            id: cache.id,
-            name: cache.name,
-            display_name: cache.display_name,
-            description: cache.description,
-            active: cache.active,
-            priority: cache.priority,
-            public_key,
-            public: cache.public,
-            created_by: cache.created_by,
-            created_at: cache.created_at,
-            managed: cache.managed,
-            can_edit,
-        }))
+        id: cache.id,
+        name: cache.name,
+        display_name: cache.display_name,
+        description: cache.description,
+        active: cache.active,
+        priority: cache.priority,
+        public_key,
+        public: cache.public,
+        created_by: cache.created_by,
+        created_at: cache.created_at,
+        managed: cache.managed,
+        can_edit,
+    }))
 }
 
 pub async fn patch_cache(
@@ -260,7 +263,10 @@ pub async fn patch_cache(
     if let Some(display_name) = body.display_name {
         let display_name = display_name.trim().to_string();
         if let Err(e) = validate_display_name(&display_name) {
-            return Err(WebError::bad_request(format!("Invalid display name: {}", e)));
+            return Err(WebError::bad_request(format!(
+                "Invalid display name: {}",
+                e
+            )));
         }
         acache.display_name = Set(display_name);
     }

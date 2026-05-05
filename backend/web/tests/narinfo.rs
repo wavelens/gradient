@@ -9,6 +9,7 @@
 use axum_test::TestServer;
 use gradient_core::ci::WebhookClient;
 use gradient_core::storage::{EmailSender, NarStore};
+use gradient_core::types::ids::*;
 use gradient_core::types::{ServerState, WebDb, WorkerDb};
 use sea_orm::{DatabaseBackend, MockDatabase};
 use std::sync::Arc;
@@ -16,7 +17,6 @@ use test_support::fakes::email::InMemoryEmailSender;
 use test_support::fakes::webhooks::RecordingWebhookClient;
 use test_support::log_storage::NoopLogStorage;
 use test_support::prelude::test_cli;
-use gradient_core::types::ids::*;
 use uuid::Uuid;
 use web::create_router;
 
@@ -182,7 +182,7 @@ async fn narinfo_served_from_db_inner() {
         pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         http: gradient_core::http::build_client().expect("http client"),
         shutdown: gradient_core::shutdown::Shutdown::new(),
-            jwt_secret: gradient_core::types::SecretString::new("test-jwt-secret".to_string()),
+        jwt_secret: gradient_core::types::SecretString::new("test-jwt-secret".to_string()),
     });
 
     let router = create_router(state);

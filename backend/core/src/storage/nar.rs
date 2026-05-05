@@ -110,10 +110,7 @@ impl NarStore {
         } else {
             ("__", hash)
         };
-        Path::from(format!(
-            "{}nars/{}/{}.nar.zst",
-            self.prefix, shard, stem,
-        ))
+        Path::from(format!("{}nars/{}/{}.nar.zst", self.prefix, shard, stem,))
     }
 
     /// Verify the storage backend is reachable. Returns `Ok(())` when the

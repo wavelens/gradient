@@ -40,7 +40,11 @@ fn test_date() -> NaiveDateTime {
     NaiveDateTime::default()
 }
 
-fn make_eval_queued(id: EvaluationId, commit_id: CommitId, project_id: Option<ProjectId>) -> MEvaluation {
+fn make_eval_queued(
+    id: EvaluationId,
+    commit_id: CommitId,
+    project_id: Option<ProjectId>,
+) -> MEvaluation {
     entity::evaluation::Model {
         id,
         project: project_id,
@@ -87,7 +91,11 @@ fn make_project(id: ProjectId, org_id: OrganizationId) -> entity::project::Model
     }
 }
 
-fn make_direct_build(id: DirectBuildId, org_id: OrganizationId, eval_id: EvaluationId) -> entity::direct_build::Model {
+fn make_direct_build(
+    id: DirectBuildId,
+    org_id: OrganizationId,
+    eval_id: EvaluationId,
+) -> entity::direct_build::Model {
     entity::direct_build::Model {
         id,
         organization: org_id,

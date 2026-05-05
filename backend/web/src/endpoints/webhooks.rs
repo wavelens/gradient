@@ -5,8 +5,8 @@
  */
 
 use crate::access::{Caller, OrgAccess, load_org, load_webhook_in_org};
-use crate::helpers::ok_json;
 use crate::error::{WebError, WebResult};
+use crate::helpers::ok_json;
 use crate::permissions::Permission;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
@@ -79,14 +79,22 @@ pub async fn get(
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
 ) -> WebResult<Json<BaseResponse<Vec<WebhookResponse>>>> {
-    let organization = load_org(&state, Caller::User(&user), organization, webhook_org_access()).await?;
+    let organization = load_org(
+        &state,
+        Caller::User(&user),
+        organization,
+        webhook_org_access(),
+    )
+    .await?;
 
     let webhooks = EWebhook::find()
         .filter(CWebhook::Organization.eq(organization.id))
         .all(&state.web_db)
         .await?;
 
-    Ok(ok_json(webhooks.into_iter().map(WebhookResponse::from).collect()))
+    Ok(ok_json(
+        webhooks.into_iter().map(WebhookResponse::from).collect(),
+    ))
 }
 
 /// `PUT /webhook/{organization}` — create a new webhook.
@@ -96,7 +104,13 @@ pub async fn put(
     Path(organization): Path<String>,
     Json(body): Json<CreateWebhookRequest>,
 ) -> WebResult<Json<BaseResponse<WebhookResponse>>> {
-    let organization = load_org(&state, Caller::User(&user), organization, webhook_org_access()).await?;
+    let organization = load_org(
+        &state,
+        Caller::User(&user),
+        organization,
+        webhook_org_access(),
+    )
+    .await?;
 
     if body.name.is_empty() {
         return Err(WebError::bad_request(
@@ -115,8 +129,9 @@ pub async fn put(
         ));
     }
 
-    let encrypted_secret = encrypt_webhook_secret(&state.config.secrets.crypt_secret_file, &body.secret)
-        .map_err(|e| WebError::internal(format!("Failed to encrypt secret: {}", e)))?;
+    let encrypted_secret =
+        encrypt_webhook_secret(&state.config.secrets.crypt_secret_file, &body.secret)
+            .map_err(|e| WebError::internal(format!("Failed to encrypt secret: {}", e)))?;
 
     let webhook = AWebhook {
         id: Set(WebhookId::now_v7()),
@@ -146,7 +161,13 @@ pub async fn get_webhook(
     Extension(user): Extension<MUser>,
     Path((organization, webhook_id)): Path<(String, WebhookId)>,
 ) -> WebResult<Json<BaseResponse<WebhookResponse>>> {
-    let organization = load_org(&state, Caller::User(&user), organization, webhook_org_access()).await?;
+    let organization = load_org(
+        &state,
+        Caller::User(&user),
+        organization,
+        webhook_org_access(),
+    )
+    .await?;
     let webhook = load_webhook_in_org(&state, organization.id, webhook_id).await?;
 
     Ok(ok_json(WebhookResponse::from(webhook)))
@@ -159,7 +180,13 @@ pub async fn patch_webhook(
     Path((organization, webhook_id)): Path<(String, WebhookId)>,
     Json(body): Json<UpdateWebhookRequest>,
 ) -> WebResult<Json<BaseResponse<WebhookResponse>>> {
-    let organization = load_org(&state, Caller::User(&user), organization, webhook_org_access()).await?;
+    let organization = load_org(
+        &state,
+        Caller::User(&user),
+        organization,
+        webhook_org_access(),
+    )
+    .await?;
     let webhook = load_webhook_in_org(&state, organization.id, webhook_id).await?;
 
     let mut active_webhook: AWebhook = webhook.into_active_model();
@@ -172,10 +199,8 @@ pub async fn patch_webhook(
         active_webhook.url = Set(url);
     }
     if let Some(secret) = body.secret {
-        let encrypted =
-            encrypt_webhook_secret(&state.config.secrets.crypt_secret_file, &secret).map_err(|e| {
-                WebError::internal(format!("Failed to encrypt secret: {}", e))
-            })?;
+        let encrypted = encrypt_webhook_secret(&state.config.secrets.crypt_secret_file, &secret)
+            .map_err(|e| WebError::internal(format!("Failed to encrypt secret: {}", e)))?;
         active_webhook.secret = Set(encrypted);
     }
     if let Some(events) = body.events {
@@ -198,7 +223,13 @@ pub async fn delete_webhook(
     Extension(user): Extension<MUser>,
     Path((organization, webhook_id)): Path<(String, WebhookId)>,
 ) -> WebResult<Json<BaseResponse<bool>>> {
-    let organization = load_org(&state, Caller::User(&user), organization, webhook_org_access()).await?;
+    let organization = load_org(
+        &state,
+        Caller::User(&user),
+        organization,
+        webhook_org_access(),
+    )
+    .await?;
     let webhook = load_webhook_in_org(&state, organization.id, webhook_id).await?;
 
     webhook.into_active_model().delete(&state.web_db).await?;
@@ -225,7 +256,13 @@ pub async fn get_webhook_deliveries(
     Path((organization, webhook_id)): Path<(String, WebhookId)>,
     axum::extract::Query(params): axum::extract::Query<PaginationParams>,
 ) -> WebResult<Json<BaseResponse<Paginated<Vec<WebhookDeliveryResponse>>>>> {
-    let organization = load_org(&state, Caller::User(&user), organization, webhook_org_access()).await?;
+    let organization = load_org(
+        &state,
+        Caller::User(&user),
+        organization,
+        webhook_org_access(),
+    )
+    .await?;
     let webhook = load_webhook_in_org(&state, organization.id, webhook_id).await?;
 
     let page = params.page();
@@ -272,7 +309,13 @@ pub async fn post_webhook_test(
     Extension(user): Extension<MUser>,
     Path((organization, webhook_id)): Path<(String, WebhookId)>,
 ) -> WebResult<Json<BaseResponse<bool>>> {
-    let organization = load_org(&state, Caller::User(&user), organization, webhook_org_access()).await?;
+    let organization = load_org(
+        &state,
+        Caller::User(&user),
+        organization,
+        webhook_org_access(),
+    )
+    .await?;
     let webhook = load_webhook_in_org(&state, organization.id, webhook_id).await?;
 
     let payload = serde_json::json!({
@@ -285,10 +328,9 @@ pub async fn post_webhook_test(
     });
 
     let body_str = serde_json::to_string(&payload).unwrap_or_default();
-    let plaintext_secret = decrypt_webhook_secret(&state.config.secrets.crypt_secret_file, &webhook.secret)
-        .map_err(|e| {
-            WebError::internal(format!("Failed to decrypt webhook secret: {}", e))
-        })?;
+    let plaintext_secret =
+        decrypt_webhook_secret(&state.config.secrets.crypt_secret_file, &webhook.secret)
+            .map_err(|e| WebError::internal(format!("Failed to decrypt webhook secret: {}", e)))?;
     let signature = gradient_core::ci::sign_webhook_payload(plaintext_secret.expose(), &body_str);
 
     let status = state

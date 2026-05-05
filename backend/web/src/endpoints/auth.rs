@@ -16,14 +16,16 @@ use axum::extract::{Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 
+use email_address::EmailAddress;
 use gradient_core::storage::generate_verification_token;
 use gradient_core::types::consts::*;
 use gradient_core::types::input::{validate_display_name, validate_password, validate_username};
 use gradient_core::types::*;
-use email_address::EmailAddress;
 use password_auth::{generate_hash, verify_password};
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -54,7 +56,9 @@ pub async fn post_basic_register(
     headers: HeaderMap,
     Json(body): Json<MakeUserRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    if !state.config.registration.enable_registration || state.config.oidc.as_ref().is_some_and(|o| o.required) {
+    if !state.config.registration.enable_registration
+        || state.config.oidc.as_ref().is_some_and(|o| o.required)
+    {
         return Err(WebError::registration_disabled());
     }
 
@@ -87,14 +91,18 @@ pub async fn post_basic_register(
         return Err(WebError::already_exists("User"));
     }
 
-    let (email_verified, verification_token, verification_expires) =
-        if state.config.email.as_ref().is_some_and(|e| e.require_verification) {
-            let token = generate_verification_token();
-            let expires = gradient_core::types::now() + chrono::Duration::hours(24);
-            (false, Some(token), Some(expires))
-        } else {
-            (true, None, None)
-        };
+    let (email_verified, verification_token, verification_expires) = if state
+        .config
+        .email
+        .as_ref()
+        .is_some_and(|e| e.require_verification)
+    {
+        let token = generate_verification_token();
+        let expires = gradient_core::types::now() + chrono::Duration::hours(24);
+        (false, Some(token), Some(expires))
+    } else {
+        (true, None, None)
+    };
 
     let user = AUser {
         id: Set(UserId::now_v7()),
@@ -125,17 +133,31 @@ pub async fn post_basic_register(
     )
     .await;
 
-    if state.config.email.as_ref().is_some_and(|e| e.require_verification)
+    if state
+        .config
+        .email
+        .as_ref()
+        .is_some_and(|e| e.require_verification)
         && let Some(ref token) = verification_token
         && let Err(e) = state
             .email
-            .send_verification_email(&body.email, &body.name, token, &state.config.server.serve_url)
+            .send_verification_email(
+                &body.email,
+                &body.name,
+                token,
+                &state.config.server.serve_url,
+            )
             .await
     {
         tracing::warn!("Failed to send verification email: {}", e);
     }
 
-    let message = if state.config.email.as_ref().is_some_and(|e| e.require_verification) {
+    let message = if state
+        .config
+        .email
+        .as_ref()
+        .is_some_and(|e| e.require_verification)
+    {
         format!(
             "User {} created. Please check your email to verify your account.",
             user.id
@@ -200,8 +222,16 @@ pub async fn post_basic_login(
         return Err(WebError::invalid_credentials());
     }
 
-    if state.config.email.as_ref().is_some_and(|e| e.require_verification) && !user.email_verified {
-        return Err(WebError::bad_request("Email not verified. Please check your email and verify your account before logging in."));
+    if state
+        .config
+        .email
+        .as_ref()
+        .is_some_and(|e| e.require_verification)
+        && !user.email_verified
+    {
+        return Err(WebError::bad_request(
+            "Email not verified. Please check your email and verify your account before logging in.",
+        ));
     }
 
     let use_tls = state.config.server.use_tls;
@@ -237,8 +267,7 @@ pub async fn post_basic_login(
     let mut response = Json(res).into_response();
     response.headers_mut().insert(
         axum::http::header::SET_COOKIE,
-        HeaderValue::from_str(&cookie)
-            .map_err(|_| WebError::internal("Bad cookie"))?,
+        HeaderValue::from_str(&cookie).map_err(|_| WebError::internal("Bad cookie"))?,
     );
     Ok(response)
 }
@@ -340,9 +369,7 @@ pub async fn get_oauth_authorize(
     Ok(response)
 }
 
-pub async fn post_oauth_authorize(
-    state: State<Arc<ServerState>>,
-) -> WebResult<Response> {
+pub async fn post_oauth_authorize(state: State<Arc<ServerState>>) -> WebResult<Response> {
     if state.config.oidc.is_none() {
         return Err(WebError::oauth_disabled());
     }
@@ -381,7 +408,10 @@ pub async fn get_oidc_login(
     Response::builder()
         .status(StatusCode::FOUND)
         .header("Location", req.auth_url.to_string())
-        .header("Set-Cookie", oidc_csrf_set_cookie(&req.cookie_value, use_tls))
+        .header(
+            "Set-Cookie",
+            oidc_csrf_set_cookie(&req.cookie_value, use_tls),
+        )
         .body(Body::empty())
         .map_err(|e| {
             tracing::error!("Failed to build HTTP response: {}", e);
@@ -450,7 +480,11 @@ pub async fn post_logout(
     state: State<Arc<ServerState>>,
     headers: HeaderMap,
 ) -> WebResult<Response> {
-    let secure = if state.config.server.use_tls { "; Secure" } else { "" };
+    let secure = if state.config.server.use_tls {
+        "; Secure"
+    } else {
+        ""
+    };
     let clear_cookie = format!(
         "jwt_token=; HttpOnly{}; SameSite=Strict; Path=/; Max-Age=0",
         secure
@@ -490,8 +524,7 @@ pub async fn post_logout(
     let mut response = Json(res).into_response();
     response.headers_mut().insert(
         axum::http::header::SET_COOKIE,
-        HeaderValue::from_str(&clear_cookie)
-            .map_err(|_| WebError::internal("Bad cookie"))?,
+        HeaderValue::from_str(&clear_cookie).map_err(|_| WebError::internal("Bad cookie"))?,
     );
     Ok(response)
 }
@@ -547,7 +580,12 @@ pub async fn get_verify_email(
     state: State<Arc<ServerState>>,
     Query(query): Query<HashMap<String, String>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    if !state.config.email.as_ref().is_some_and(|e| e.require_verification) {
+    if !state
+        .config
+        .email
+        .as_ref()
+        .is_some_and(|e| e.require_verification)
+    {
         return Err(WebError::bad_request(
             "Email verification is not enabled".to_string(),
         ));
@@ -589,7 +627,12 @@ pub async fn post_resend_verification(
     state: State<Arc<ServerState>>,
     Json(body): Json<CheckUsernameRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    if !state.config.email.as_ref().is_some_and(|e| e.require_verification) {
+    if !state
+        .config
+        .email
+        .as_ref()
+        .is_some_and(|e| e.require_verification)
+    {
         return Err(WebError::bad_request(
             "Email verification is not enabled".to_string(),
         ));

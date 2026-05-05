@@ -251,7 +251,10 @@ impl WebError {
     }
 
     pub fn already_exists(resource: &str) -> Self {
-        Self::Conflict(ErrorCode::ALREADY_EXISTS, format!("{} already exists", resource))
+        Self::Conflict(
+            ErrorCode::ALREADY_EXISTS,
+            format!("{} already exists", resource),
+        )
     }
 
     pub fn not_found(resource: &str) -> Self {
@@ -276,15 +279,24 @@ impl WebError {
     }
 
     pub fn invalid_credentials() -> Self {
-        Self::Unauthorized(ErrorCode::INVALID_CREDENTIALS, "Invalid credentials".to_string())
+        Self::Unauthorized(
+            ErrorCode::INVALID_CREDENTIALS,
+            "Invalid credentials".to_string(),
+        )
     }
 
     pub fn oauth_disabled() -> Self {
-        Self::BadRequest(ErrorCode::OAUTH_DISABLED, "OAuth login is disabled".to_string())
+        Self::BadRequest(
+            ErrorCode::OAUTH_DISABLED,
+            "OAuth login is disabled".to_string(),
+        )
     }
 
     pub fn oauth_required() -> Self {
-        Self::Unauthorized(ErrorCode::OAUTH_REQUIRED, "Please login via OAuth".to_string())
+        Self::Unauthorized(
+            ErrorCode::OAUTH_REQUIRED,
+            "Please login via OAuth".to_string(),
+        )
     }
 
     pub fn registration_disabled() -> Self {
@@ -313,7 +325,10 @@ impl WebError {
     }
 
     pub fn invalid_oauth_code() -> Self {
-        Self::BadRequest(ErrorCode::INVALID_OAUTH_CODE, "Invalid OAuth Code".to_string())
+        Self::BadRequest(
+            ErrorCode::INVALID_OAUTH_CODE,
+            "Invalid OAuth Code".to_string(),
+        )
     }
 
     pub fn failed_ssh_key_generation() -> Self {

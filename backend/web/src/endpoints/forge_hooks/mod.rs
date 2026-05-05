@@ -35,8 +35,8 @@ use std::sync::Arc;
 use subtle::ConstantTimeEq;
 use tracing::{debug, warn};
 
-use crate::helpers::ok_json;
 use crate::error::{WebError, WebResult};
+use crate::helpers::ok_json;
 
 use events::ParsedPushEvent;
 use trigger::handle_github_installation;
@@ -160,11 +160,14 @@ pub async fn forge_webhook(
         WebError::not_found_msg("integration not found")
     })?;
 
-    let plaintext_secret =
-        decrypt_webhook_secret(&state.config.secrets.crypt_secret_file, encrypted_secret).map_err(|e| {
-            warn!(error = %e, integration_id = %integration.id, "Failed to decrypt integration secret");
-            WebError::internal("internal error")
-        })?;
+    let plaintext_secret = decrypt_webhook_secret(
+        &state.config.secrets.crypt_secret_file,
+        encrypted_secret,
+    )
+    .map_err(|e| {
+        warn!(error = %e, integration_id = %integration.id, "Failed to decrypt integration secret");
+        WebError::internal("internal error")
+    })?;
 
     if !verify_forge_signature(forge_type, plaintext_secret.expose(), &headers, &body) {
         warn!(org = %org_name, forge = %forge, integration = %integration_name, "Forge webhook: invalid signature");
@@ -184,12 +187,12 @@ pub async fn forge_webhook(
     let outcome = parsed.trigger(&state).await;
 
     Ok(ok_json(WebhookResponse {
-            event: "push".to_string(),
-            repository_urls: urls,
-            projects_scanned: outcome.projects_scanned,
-            queued: outcome.queued,
-            skipped: outcome.skipped,
-        }))
+        event: "push".to_string(),
+        repository_urls: urls,
+        projects_scanned: outcome.projects_scanned,
+        queued: outcome.queued,
+        skipped: outcome.skipped,
+    }))
 }
 
 fn verify_forge_signature(

@@ -167,10 +167,7 @@ mod tests {
         assert_eq!(m["default_permissions"]["statuses"], "write");
         assert_eq!(m["default_permissions"]["checks"], "write");
         assert_eq!(m["default_permissions"]["pull_requests"], "read");
-        assert_eq!(
-            m["default_events"],
-            json!(["push", "pull_request"])
-        );
+        assert_eq!(m["default_events"], json!(["push", "pull_request"]));
     }
 
     #[test]
@@ -207,15 +204,17 @@ mod tests {
         let server = wiremock::MockServer::start().await;
         wiremock::Mock::given(wiremock::matchers::method("POST"))
             .and(wiremock::matchers::path("/app-manifests/abc/conversions"))
-            .respond_with(wiremock::ResponseTemplate::new(201).set_body_json(serde_json::json!({
-                "id": 42,
-                "slug": "my-app",
-                "html_url": "https://github.com/apps/my-app",
-                "pem": "----- PEM -----",
-                "webhook_secret": "whsec",
-                "client_id": "cid",
-                "client_secret": "csec",
-            })))
+            .respond_with(
+                wiremock::ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                    "id": 42,
+                    "slug": "my-app",
+                    "html_url": "https://github.com/apps/my-app",
+                    "pem": "----- PEM -----",
+                    "webhook_secret": "whsec",
+                    "client_id": "cid",
+                    "client_secret": "csec",
+                })),
+            )
             .mount(&server)
             .await;
 

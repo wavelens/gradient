@@ -6,11 +6,11 @@
 
 use chrono::Timelike;
 use gradient_core::nix_hash::normalize_nar_hash;
+use gradient_core::types::ids::{CacheId, CacheMetricId, CachedPathId, CachedPathSignatureId};
 use gradient_core::types::*;
 use scheduler::Scheduler;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
 use tracing::{info, warn};
-use gradient_core::types::ids::{CacheId, CacheMetricId, CachedPathId, CachedPathSignatureId};
 
 /// Metadata produced by a worker after compressing and uploading a NAR.
 pub(super) struct NarUploadRecord<'a> {

@@ -5,8 +5,8 @@
  */
 
 use crate::access::{Caller, OrgAccess, load_org};
-use crate::helpers::ok_json;
 use crate::error::{WebError, WebResult};
+use crate::helpers::ok_json;
 use crate::permissions::Permission;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
@@ -25,11 +25,16 @@ pub async fn get_organization_ssh(
         &state,
         Caller::User(&user),
         organization,
-        OrgAccess::Member { reject_managed: false },
+        OrgAccess::Member {
+            reject_managed: false,
+        },
     )
     .await?;
 
-    Ok(ok_json(format_public_key(organization, &state.config.server.serve_url)))
+    Ok(ok_json(format_public_key(
+        organization,
+        &state.config.server.serve_url,
+    )))
 }
 
 pub async fn post_organization_ssh(
@@ -48,8 +53,8 @@ pub async fn post_organization_ssh(
     )
     .await?;
 
-    let (private_key, public_key) =
-        generate_ssh_key(&state.config.secrets.crypt_secret_file).map_err(|e| {
+    let (private_key, public_key) = generate_ssh_key(&state.config.secrets.crypt_secret_file)
+        .map_err(|e| {
             tracing::error!("Failed to generate SSH key: {}", e);
             WebError::failed_ssh_key_generation()
         })?;

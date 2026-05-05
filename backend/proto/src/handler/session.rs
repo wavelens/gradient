@@ -10,8 +10,8 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
-use gradient_core::types::*;
 use gradient_core::types::ids::OrganizationId;
+use gradient_core::types::*;
 use tokio::sync::Semaphore;
 use tracing::{debug, info, instrument, warn};
 
@@ -80,7 +80,8 @@ impl ProtoSession<Opening> {
             return None;
         }
         let (peer_id, client_capabilities) = self.recv_init_connection().await?;
-        let (authorized_peers, failed_peers) = self.perform_auth(&peer_id, server_initiated).await?;
+        let (authorized_peers, failed_peers) =
+            self.perform_auth(&peer_id, server_initiated).await?;
         let enabled_caps = aggregate_enabled_caps(&self.state, &peer_id).await;
         let negotiated = negotiate_capabilities(&self.state, client_capabilities, enabled_caps);
         self.send_init_ack(&negotiated, &authorized_peers, &failed_peers)
@@ -154,8 +155,8 @@ impl ProtoSession<Opening> {
             filter_org_peers_without_cache(&self.state, authorized_peers).await;
         failed_peers.extend(demoted);
 
-        let has_any = registered_peers.is_empty()
-            && has_any_registrations(&self.state, peer_id).await;
+        let has_any =
+            registered_peers.is_empty() && has_any_registrations(&self.state, peer_id).await;
         match decide_auth(
             server_initiated,
             registered_peers.is_empty(),
@@ -373,23 +374,18 @@ pub(crate) async fn handle_socket(
 ) {
     info!(server_initiated, "WebSocket connection opened");
     let session = ProtoSession::new(socket, state, scheduler);
-    let session = match tokio::time::timeout(
-        HANDSHAKE_TIMEOUT,
-        session.handshake(server_initiated),
-    )
-    .await
-    {
-        Ok(Some(s)) => s,
-        Ok(None) => return,
-        Err(_) => {
-            warn!(
-                timeout_secs = HANDSHAKE_TIMEOUT.as_secs(),
-                server_initiated,
-                "WebSocket handshake timed out; dropping connection"
-            );
-            return;
-        }
-    };
+    let session =
+        match tokio::time::timeout(HANDSHAKE_TIMEOUT, session.handshake(server_initiated)).await {
+            Ok(Some(s)) => s,
+            Ok(None) => return,
+            Err(_) => {
+                warn!(
+                    timeout_secs = HANDSHAKE_TIMEOUT.as_secs(),
+                    server_initiated, "WebSocket handshake timed out; dropping connection"
+                );
+                return;
+            }
+        };
     let Some(session) = session.register().await else {
         return;
     };
@@ -509,6 +505,9 @@ mod auth_decision_tests {
     /// Registered + at least one valid token → accept.
     #[test]
     fn registered_with_valid_token_accepted() {
-        assert_eq!(decide_auth(false, false, false, false), AuthDecision::Accept);
+        assert_eq!(
+            decide_auth(false, false, false, false),
+            AuthDecision::Accept
+        );
     }
 }

@@ -18,8 +18,8 @@ use std::time::Duration;
 use axum::extract::ws::{Message as AxumMessage, WebSocket};
 use futures::stream::SplitStream;
 use futures::{SinkExt, StreamExt};
-use gradient_core::types::*;
 use gradient_core::types::ids::OrganizationId;
+use gradient_core::types::*;
 use rkyv::rancor::Error as RkyvError;
 use sea_orm::EntityTrait;
 use tokio::net::TcpStream;
@@ -307,15 +307,14 @@ pub(super) async fn recv_client_msg(reader: &mut ProtoReader) -> Option<ClientMe
     reader.recv_msg().await
 }
 
-pub(super) async fn send_server_msg(
-    writer: &ProtoWriter,
-    msg: &ServerMessage,
-) -> Result<(), ()> {
+pub(super) async fn send_server_msg(writer: &ProtoWriter, msg: &ServerMessage) -> Result<(), ()> {
     writer.send_msg(msg).await
 }
 
 pub(super) async fn send_error(writer: &ProtoWriter, code: u16, message: String) {
-    let _ = writer.send_msg(&ServerMessage::Error { code, message }).await;
+    let _ = writer
+        .send_msg(&ServerMessage::Error { code, message })
+        .await;
 }
 
 /// Push any pending job candidates to the worker (delta).
@@ -376,7 +375,8 @@ pub(super) async fn serve_nar_request(
         return Err(anyhow::anyhow!(reason));
     };
 
-    let opened = tokio::time::timeout(storage_open_timeout, state.nar_storage.get_stream(hash)).await;
+    let opened =
+        tokio::time::timeout(storage_open_timeout, state.nar_storage.get_stream(hash)).await;
     let mut stream = match opened {
         Ok(Ok(Some((_size, s)))) => s,
         Ok(Ok(None)) => {
@@ -574,7 +574,10 @@ async fn send_ssh_key_credential(
 ) {
     use gradient_core::types::proto::CredentialKind;
 
-    match EOrganization::find_by_id(org_id).one(&state.worker_db).await {
+    match EOrganization::find_by_id(org_id)
+        .one(&state.worker_db)
+        .await
+    {
         Ok(Some(org)) => {
             match gradient_core::sources::ssh_key::decrypt_ssh_private_key(
                 &state.config.secrets.crypt_secret_file,
@@ -610,7 +613,10 @@ mod writer_tests {
 
     /// Construct a writer that's not backed by a draining task, so we can
     /// observe queue-full back-pressure deterministically.
-    fn unwired_writer(capacity: usize, timeout: Duration) -> (ProtoWriter, mpsc::Receiver<Vec<u8>>) {
+    fn unwired_writer(
+        capacity: usize,
+        timeout: Duration,
+    ) -> (ProtoWriter, mpsc::Receiver<Vec<u8>>) {
         let (tx, rx) = mpsc::channel::<Vec<u8>>(capacity);
         (
             ProtoWriter {
@@ -722,10 +728,7 @@ mod serve_nar_tests {
         while let Ok(bytes) = rx.try_recv() {
             let msg = decode(&bytes);
             assert_eq!(variant_of(&msg), "NarPush", "only NarPush frames expected");
-            if let ServerMessage::NarPush {
-                data, is_final, ..
-            } = msg
-            {
+            if let ServerMessage::NarPush { data, is_final, .. } = msg {
                 assembled.extend_from_slice(&data);
                 if is_final {
                     saw_final = true;
@@ -733,9 +736,15 @@ mod serve_nar_tests {
             }
             frames += 1;
         }
-        assert!(frames >= 3, "9 MiB / 4 MiB chunks → at least 3 frames, got {frames}");
+        assert!(
+            frames >= 3,
+            "9 MiB / 4 MiB chunks → at least 3 frames, got {frames}"
+        );
         assert!(saw_final, "the last frame must be is_final=true");
-        assert_eq!(assembled, payload, "concatenated NarPush data must equal source");
+        assert_eq!(
+            assembled, payload,
+            "concatenated NarPush data must equal source"
+        );
     }
 
     /// Missing object → `NarUnavailable` (not `NarAbort`, no NarPush) and an
@@ -758,6 +767,9 @@ mod serve_nar_tests {
         let bytes = rx.try_recv().expect("expect one frame");
         let msg = decode(&bytes);
         assert_eq!(variant_of(&msg), "NarUnavailable");
-        assert!(rx.try_recv().is_err(), "no further frames after NarUnavailable");
+        assert!(
+            rx.try_recv().is_err(),
+            "no further frames after NarUnavailable"
+        );
     }
 }

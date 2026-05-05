@@ -34,7 +34,11 @@ impl<'db> EvalRepo<'db> {
 
     /// Atomically update the evaluation status, guarding against overwriting
     /// a terminal state. Returns the number of rows affected (0 = already terminal).
-    pub async fn update_status_guarded(&self, id: EvaluationId, status: EvaluationStatus) -> Result<u64> {
+    pub async fn update_status_guarded(
+        &self,
+        id: EvaluationId,
+        status: EvaluationStatus,
+    ) -> Result<u64> {
         let now = crate::types::now();
         let res = EEvaluation::update_many()
             .col_expr(CEvaluation::Status, sea_orm::sea_query::Expr::value(status))

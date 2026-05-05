@@ -6,8 +6,8 @@
 
 //! Response body types for inbound forge webhooks.
 
-use serde::{Deserialize, Serialize};
 use gradient_core::types::ids::*;
+use serde::{Deserialize, Serialize};
 
 /// Body returned by both webhook endpoints, wrapped in the standard
 /// `BaseResponse<T>` envelope.

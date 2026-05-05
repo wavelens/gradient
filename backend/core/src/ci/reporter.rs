@@ -827,10 +827,7 @@ mod tests {
 
     #[test]
     fn gitlab_project_id_nested_groups() {
-        assert_eq!(
-            gitlab_project_id("group", "sub/repo"),
-            "group%2Fsub%2Frepo"
-        );
+        assert_eq!(gitlab_project_id("group", "sub/repo"), "group%2Fsub%2Frepo");
     }
 
     #[test]
@@ -933,13 +930,15 @@ mod tests {
 
     #[test]
     fn github_reporter_custom_url_kept() {
-        let r = GithubReporter::new(test_client(), "https://github.example.com/api/v3", "tok").unwrap();
+        let r =
+            GithubReporter::new(test_client(), "https://github.example.com/api/v3", "tok").unwrap();
         assert_eq!(r.base_url, "https://github.example.com/api/v3");
     }
 
     #[test]
     fn github_reporter_trims_trailing_slash() {
-        let r = GithubReporter::new(test_client(), "https://github.example.com/api/v3/", "tok").unwrap();
+        let r = GithubReporter::new(test_client(), "https://github.example.com/api/v3/", "tok")
+            .unwrap();
         assert_eq!(r.base_url, "https://github.example.com/api/v3");
     }
 
@@ -975,7 +974,8 @@ mod tests {
 
     #[test]
     fn github_reporter_rejects_aws_metadata_ip() {
-        let err = GithubReporter::new(test_client(), "http://169.254.169.254/api/v3", "tok").unwrap_err();
+        let err =
+            GithubReporter::new(test_client(), "http://169.254.169.254/api/v3", "tok").unwrap_err();
         assert!(format!("{err}").contains("Rejected GitHub base_url"));
     }
 
@@ -991,7 +991,8 @@ mod tests {
 
     #[test]
     fn github_app_reporter_rejects_aws_metadata_ip() {
-        let err = GithubAppReporter::new(test_client(), "http://169.254.169.254/", 1, "pem", 1).unwrap_err();
+        let err = GithubAppReporter::new(test_client(), "http://169.254.169.254/", 1, "pem", 1)
+            .unwrap_err();
         assert!(format!("{err}").contains("Rejected GitHub App api_base_url"));
     }
 

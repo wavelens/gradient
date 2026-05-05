@@ -23,8 +23,8 @@ mod nix_cache;
 pub use self::build_output_metadata::BuildOutputMetadata;
 pub use self::cached_path_info::CachedPathInfo;
 pub use self::cli::{
-    DatabaseArgs, EmailArgs, EvalArgs, GitHubAppArgs, LimitsArgs, LoggingArgs, OidcArgs,
-    ProtoArgs, RegistrationArgs, S3Args, SecretsArgs, ServerArgs, StorageArgs,
+    DatabaseArgs, EmailArgs, EvalArgs, GitHubAppArgs, LimitsArgs, LoggingArgs, OidcArgs, ProtoArgs,
+    RegistrationArgs, S3Args, SecretsArgs, ServerArgs, StorageArgs,
 };
 pub use self::config::{EmailConfig, GitHubAppConfig, OidcConfig, RuntimeConfig, S3Config};
 pub use self::consts::*;
@@ -85,7 +85,6 @@ pub struct Cli {
     #[command(flatten)]
     pub github_app: GitHubAppArgs,
 }
-
 
 #[derive(Debug)]
 pub struct ServerState {

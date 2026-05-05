@@ -40,7 +40,12 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
         return Ok(());
     }
 
-    let cache_ids: Vec<CacheId> = pending.iter().map(|r| r.cache).collect::<HashSet<_>>().into_iter().collect();
+    let cache_ids: Vec<CacheId> = pending
+        .iter()
+        .map(|r| r.cache)
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
     let cached_path_ids: Vec<CachedPathId> = pending
         .iter()
         .map(|r| r.cached_path)

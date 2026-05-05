@@ -211,7 +211,11 @@ fn fmt_opt_dt(dt: Option<chrono::NaiveDateTime>) -> Option<String> {
 }
 
 fn last_used_or_none(dt: chrono::NaiveDateTime) -> Option<String> {
-    if dt == *NULL_TIME { None } else { Some(fmt_dt(dt)) }
+    if dt == *NULL_TIME {
+        None
+    } else {
+        Some(fmt_dt(dt))
+    }
 }
 
 pub async fn get_keys(
@@ -539,12 +543,16 @@ pub async fn patch_settings(
 ) -> WebResult<Json<BaseResponse<String>>> {
     // Prevent modification of state-managed users
     if user.managed {
-        return Err(WebError::forbidden("Cannot modify state-managed user. This user is managed by configuration and cannot be edited through the API."));
+        return Err(WebError::forbidden(
+            "Cannot modify state-managed user. This user is managed by configuration and cannot be edited through the API.",
+        ));
     }
 
     // OIDC users cannot edit their profile — identity is managed by the provider
     if user.password.is_none() {
-        return Err(WebError::forbidden("Cannot modify profile of an OIDC user. Your profile is managed by your identity provider."));
+        return Err(WebError::forbidden(
+            "Cannot modify profile of an OIDC user. Your profile is managed by your identity provider.",
+        ));
     }
 
     let mut auser: AUser = user.into();

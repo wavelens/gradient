@@ -311,7 +311,7 @@ mod tests {
     #[tokio::test]
     async fn trigger_already_in_progress() {
         let project = make_project();
-        let existing_eval = make_eval(EvaluationId::now_v7(),EvaluationStatus::Queued);
+        let existing_eval = make_eval(EvaluationId::now_v7(), EvaluationStatus::Queued);
 
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             // 1st SELECT: returns in-progress evaluation
@@ -335,7 +335,7 @@ mod tests {
         for status in active_statuses {
             let project = make_project();
             let db = MockDatabase::new(DatabaseBackend::Postgres)
-                .append_query_results([vec![make_eval(EvaluationId::now_v7(),status.clone())]])
+                .append_query_results([vec![make_eval(EvaluationId::now_v7(), status.clone())]])
                 .into_connection();
             let result = trigger_evaluation(&db, &project, vec![0u8; 20], None, None).await;
             assert!(

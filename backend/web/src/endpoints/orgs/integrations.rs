@@ -16,8 +16,8 @@
 //! "has_secret" / "has_access_token" flag.
 
 use crate::access::{Caller, OrgAccess, load_integration_in_org, load_org};
-use crate::helpers::ok_json;
 use crate::error::{WebError, WebResult};
+use crate::helpers::ok_json;
 use crate::permissions::Permission;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
@@ -159,7 +159,9 @@ pub async fn get_integrations(
         .all(&state.web_db)
         .await?;
 
-    Ok(ok_json(rows.into_iter().map(IntegrationResponse::from).collect()))
+    Ok(ok_json(
+        rows.into_iter().map(IntegrationResponse::from).collect(),
+    ))
 }
 
 /// `PUT /orgs/{organization}/integrations` — create a new integration.
@@ -206,18 +208,16 @@ pub async fn put_integration(
 
     let encrypted_secret = match body.secret.as_deref() {
         Some(s) if !s.is_empty() => Some(
-            encrypt_webhook_secret(&state.config.secrets.crypt_secret_file, s).map_err(|e| {
-                WebError::internal(format!("Failed to encrypt secret: {}", e))
-            })?,
+            encrypt_webhook_secret(&state.config.secrets.crypt_secret_file, s)
+                .map_err(|e| WebError::internal(format!("Failed to encrypt secret: {}", e)))?,
         ),
         _ => None,
     };
 
     let encrypted_token = match body.access_token.as_deref() {
         Some(t) if !t.is_empty() => Some(
-            encrypt_webhook_secret(&state.config.secrets.crypt_secret_file, t).map_err(|e| {
-                WebError::internal(format!("Failed to encrypt token: {}", e))
-            })?,
+            encrypt_webhook_secret(&state.config.secrets.crypt_secret_file, t)
+                .map_err(|e| WebError::internal(format!("Failed to encrypt token: {}", e)))?,
         ),
         _ => None,
     };
@@ -348,9 +348,8 @@ pub async fn patch_integration(
             None
         } else {
             Some(
-                encrypt_webhook_secret(&state.config.secrets.crypt_secret_file, &secret).map_err(|e| {
-                    WebError::internal(format!("Failed to encrypt secret: {}", e))
-                })?,
+                encrypt_webhook_secret(&state.config.secrets.crypt_secret_file, &secret)
+                    .map_err(|e| WebError::internal(format!("Failed to encrypt secret: {}", e)))?,
             )
         });
     }
@@ -360,9 +359,8 @@ pub async fn patch_integration(
             None
         } else {
             Some(
-                encrypt_webhook_secret(&state.config.secrets.crypt_secret_file, &token).map_err(|e| {
-                    WebError::internal(format!("Failed to encrypt token: {}", e))
-                })?,
+                encrypt_webhook_secret(&state.config.secrets.crypt_secret_file, &token)
+                    .map_err(|e| WebError::internal(format!("Failed to encrypt token: {}", e)))?,
             )
         });
     }
@@ -389,7 +387,9 @@ pub async fn delete_integration(
     )
     .await?;
     let integration = load_integration_in_org(&state, org.id, integration_id).await?;
-    integration.into_active_model().delete(&state.web_db).await?;
+    integration
+        .into_active_model()
+        .delete(&state.web_db)
+        .await?;
     Ok(ok_json(true))
 }
-

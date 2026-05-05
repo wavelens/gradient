@@ -11,10 +11,10 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use anyhow::Result;
-use sea_orm::EntityTrait;
-use tracing::{debug, error, info, warn};
 use entity::build::BuildStatus;
+use sea_orm::EntityTrait;
 use sea_orm::{ActiveModelTrait, IntoActiveModel, Set};
+use tracing::{debug, error, info, warn};
 
 use gradient_core::types::proto::{
     BuildOutput, CandidateScore, DiscoveredDerivation, JobCandidate, JobKind,
@@ -263,7 +263,10 @@ impl Scheduler {
             }
         };
 
-        match EBuild::find_by_id(build_id).one(&self.state.worker_db).await {
+        match EBuild::find_by_id(build_id)
+            .one(&self.state.worker_db)
+            .await
+        {
             Ok(Some(build)) => {
                 // Record which worker is handling this build. Persisting here
                 // (rather than at dispatch time) means the worker that actually
@@ -449,7 +452,10 @@ impl Scheduler {
             }
         };
 
-        let log_id = match EBuild::find_by_id(build_id).one(&self.state.worker_db).await? {
+        let log_id = match EBuild::find_by_id(build_id)
+            .one(&self.state.worker_db)
+            .await?
+        {
             Some(b) => b.log_id.unwrap_or(b.id),
             None => build_id,
         };

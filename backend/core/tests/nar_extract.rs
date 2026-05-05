@@ -207,8 +207,14 @@ fn extracts_directory_as_tar_zst() {
 
     // Tar should contain the matched dir as the root, then nested entries
     // — every path is rooted at "store/" so extraction recreates that name.
-    assert!(paths.iter().any(|p| p == "store/"), "missing root dir entry: {paths:?}");
-    assert!(paths.iter().any(|p| p == "store/bin/"), "missing nested dir entry: {paths:?}");
+    assert!(
+        paths.iter().any(|p| p == "store/"),
+        "missing root dir entry: {paths:?}"
+    );
+    assert!(
+        paths.iter().any(|p| p == "store/bin/"),
+        "missing nested dir entry: {paths:?}"
+    );
     assert!(paths.iter().any(|p| p == "store/bin/hello"));
     assert!(paths.iter().any(|p| p == "store/config"));
 

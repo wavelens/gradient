@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::helpers::{OptionExt, ok_json};
 use crate::authorization::MaybeUser;
 use crate::error::{WebError, WebResult};
+use crate::helpers::{OptionExt, ok_json};
 use axum::Extension;
 use axum::Json;
 use axum::extract::{Path, State};
@@ -93,4 +93,3 @@ pub async fn get_cache_public_key(
 
     Ok(ok_json(public_key))
 }
-

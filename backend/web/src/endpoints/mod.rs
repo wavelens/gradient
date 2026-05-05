@@ -76,9 +76,14 @@ pub async fn get_config(
             version: env!("CARGO_PKG_VERSION").to_string(),
             oidc_enabled: state.config.oidc.is_some(),
             oidc_required: state.config.oidc.as_ref().is_some_and(|o| o.required),
-            registration_enabled: state.config.registration.enable_registration && !state.config.oidc.as_ref().is_some_and(|o| o.required),
+            registration_enabled: state.config.registration.enable_registration
+                && !state.config.oidc.as_ref().is_some_and(|o| o.required),
             email_verification_enabled: state.config.email.is_some()
-                && state.config.email.as_ref().is_some_and(|e| e.require_verification),
+                && state
+                    .config
+                    .email
+                    .as_ref()
+                    .is_some_and(|e| e.require_verification),
             quic: state.config.proto.quic,
         },
     };

@@ -66,7 +66,12 @@ fn make_eval(id: EvaluationId, status: EvaluationStatus) -> MEvaluation {
     }
 }
 
-fn make_build(id: BuildId, eval_id: EvaluationId, drv_id: DerivationId, status: BuildStatus) -> MBuild {
+fn make_build(
+    id: BuildId,
+    eval_id: EvaluationId,
+    drv_id: DerivationId,
+    status: BuildStatus,
+) -> MBuild {
     entity::build::Model {
         id,
         evaluation: eval_id,
@@ -92,7 +97,12 @@ fn make_derivation(id: DerivationId, org_id: OrganizationId, path: &str) -> MDer
     }
 }
 
-fn make_drv_output(id: DerivationOutputId, drv_id: DerivationId, name: &str, path: &str) -> MDerivationOutput {
+fn make_drv_output(
+    id: DerivationOutputId,
+    drv_id: DerivationId,
+    name: &str,
+    path: &str,
+) -> MDerivationOutput {
     entity::derivation_output::Model {
         id,
         derivation: drv_id,
@@ -121,7 +131,9 @@ fn make_fully_cached_path(id: CachedPathId, store_path: &str) -> entity::cached_
             .unwrap_or("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
             .to_string(),
         package: "test".into(),
-        file_hash: Some("sha256:0000000000000000000000000000000000000000000000000000000000000000".into()),
+        file_hash: Some(
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000".into(),
+        ),
         file_size: Some(1),
         nar_size: Some(1),
         nar_hash: Some("sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73".into()),
@@ -132,7 +144,11 @@ fn make_fully_cached_path(id: CachedPathId, store_path: &str) -> entity::cached_
     }
 }
 
-fn make_dep_edge(id: DerivationDependencyId, drv_id: DerivationId, dep_id: DerivationId) -> MDerivationDependency {
+fn make_dep_edge(
+    id: DerivationDependencyId,
+    drv_id: DerivationId,
+    dep_id: DerivationId,
+) -> MDerivationDependency {
     entity::derivation_dependency::Model {
         id,
         derivation: drv_id,
@@ -161,7 +177,11 @@ fn make_eval_job(eval_id: EvaluationId, org_id: OrganizationId) -> PendingEvalJo
     }
 }
 
-fn make_build_job(build_id: BuildId, eval_id: EvaluationId, org_id: OrganizationId) -> PendingBuildJob {
+fn make_build_job(
+    build_id: BuildId,
+    eval_id: EvaluationId,
+    org_id: OrganizationId,
+) -> PendingBuildJob {
     use gradient_core::types::proto::{BuildJob, BuildTask};
     PendingBuildJob {
         build_id,
@@ -206,7 +226,11 @@ fn make_discovered(
 
 /// Evaluation fixture with `project: Some(project_id)`. Used for webhook tests
 /// where the webhook path must not return early at the `project? = None` guard.
-fn make_eval_with_project(id: EvaluationId, project_id: ProjectId, status: EvaluationStatus) -> MEvaluation {
+fn make_eval_with_project(
+    id: EvaluationId,
+    project_id: ProjectId,
+    status: EvaluationStatus,
+) -> MEvaluation {
     entity::evaluation::Model {
         id,
         project: Some(project_id),
@@ -466,8 +490,7 @@ async fn eval_result_substituted_derivation_completes_eval() {
         // (no insert_many derivations / outputs — already exists)
         // 4a. compute_truly_substituted: load derivation_output → cached row
         .append_query_results([vec![{
-            let mut o = make_drv_output(
-            DerivationOutputId::now_v7(), drv_id, "out", out_path);
+            let mut o = make_drv_output(DerivationOutputId::now_v7(), drv_id, "out", out_path);
             o.is_cached = true;
             o.cached_path = Some(cp_id);
             o
@@ -2351,8 +2374,7 @@ async fn eval_result_all_substituted_with_project_completes() {
         // (no insert derivation / outputs — already exists)
         // 4a. compute_truly_substituted: load derivation_output → cached row
         .append_query_results([vec![{
-            let mut o = make_drv_output(
-            DerivationOutputId::now_v7(), drv_id, "out", out_path);
+            let mut o = make_drv_output(DerivationOutputId::now_v7(), drv_id, "out", out_path);
             o.is_cached = true;
             o.cached_path = Some(cp_id);
             o
@@ -2446,9 +2468,17 @@ async fn build_failed_cascades_transitively_through_graph() {
         .append_query_results([Vec::<MBuild>::new()])
         // ── collect_transitive_dependents ──
         // 3. BFS layer 1: dep edges where Dependency=C → [B→C]
-        .append_query_results([vec![make_dep_edge(DerivationDependencyId::now_v7(), drv_b, drv_c)]])
+        .append_query_results([vec![make_dep_edge(
+            DerivationDependencyId::now_v7(),
+            drv_b,
+            drv_c,
+        )]])
         // 4. BFS layer 2: dep edges where Dependency=B → [A→B]
-        .append_query_results([vec![make_dep_edge(DerivationDependencyId::now_v7(), drv_a, drv_b)]])
+        .append_query_results([vec![make_dep_edge(
+            DerivationDependencyId::now_v7(),
+            drv_a,
+            drv_b,
+        )]])
         // 5. BFS layer 3: dep edges where Dependency=A → empty
         .append_query_results([Vec::<MDerivationDependency>::new()])
         // 6. cascade: find Created/Queued with derivation in {A, B} → [build_a, build_b]

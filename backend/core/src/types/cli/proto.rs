@@ -60,11 +60,7 @@ pub struct ProtoArgs {
     /// Maximum number of NAR-serving tasks that may run concurrently per
     /// worker connection. Bounds memory and storage-backend fan-out when a
     /// worker requests many paths in a single batch.
-    #[arg(
-        long,
-        env = "GRADIENT_MAX_CONCURRENT_NAR_SERVES",
-        default_value_t = 8
-    )]
+    #[arg(long, env = "GRADIENT_MAX_CONCURRENT_NAR_SERVES", default_value_t = 8)]
     pub max_concurrent_nar_serves: usize,
 
     /// Maximum bytes a single proto session may hold in its inbound NAR

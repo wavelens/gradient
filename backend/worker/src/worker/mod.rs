@@ -117,9 +117,7 @@ impl Worker<Disconnected> {
     /// On failure, returns the original `Worker<Disconnected>` alongside the
     /// error so the caller can retry with backoff without losing the cached
     /// executor/scorer/credentials state.
-    pub async fn reconnect(
-        self,
-    ) -> std::result::Result<Worker<Connected>, (anyhow::Error, Self)> {
+    pub async fn reconnect(self) -> std::result::Result<Worker<Connected>, (anyhow::Error, Self)> {
         let mut conn = match ProtoConnection::open(&self.config.server_url).await {
             Ok(c) => c,
             Err(e) => return Err((e, self)),

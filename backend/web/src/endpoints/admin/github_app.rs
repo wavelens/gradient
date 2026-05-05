@@ -7,8 +7,8 @@
 //! `POST /admin/github-app/manifest`, `GET /admin/github-app/callback`,
 //! `GET /admin/github-app/credentials`.
 
-use crate::helpers::ok_json;
 use crate::error::{WebError, WebResult, require_superuser};
+use crate::helpers::ok_json;
 use axum::extract::{Query, State};
 use axum::response::Redirect;
 use axum::{Extension, Json};
@@ -66,15 +66,16 @@ pub async fn request_manifest(
     let host = body.host.unwrap_or_else(default_host);
     validate_host(&host)?;
 
-    let manifest = gradient_core::ci::github_app_manifest::build_manifest(&state.config.server.serve_url);
+    let manifest =
+        gradient_core::ci::github_app_manifest::build_manifest(&state.config.server.serve_url);
     let token = gradient_core::ci::manifest_state::issue_state(&state.manifest_state, user.id);
     let post_url = gradient_core::ci::github_app_manifest::manifest_post_url(&host, &token);
 
     Ok(ok_json(ManifestResponse {
-            manifest,
-            post_url,
-            state: token,
-        }))
+        manifest,
+        post_url,
+        state: token,
+    }))
 }
 
 /// Unauthenticated callback target for GitHub's manifest redirect.
@@ -96,9 +97,7 @@ pub async fn callback(
     let Some(user_id) =
         gradient_core::ci::manifest_state::validate_and_consume(&state.manifest_state, &q.state)
     else {
-        return Err(WebError::bad_request(
-            "manifest state invalid or expired",
-        ));
+        return Err(WebError::bad_request("manifest state invalid or expired"));
     };
 
     let creds = gradient_core::ci::github_app_manifest::exchange_code(&state.http, &host, &q.code)
@@ -108,7 +107,11 @@ pub async fn callback(
             WebError::internal(format!("github exchange failed: {e}"))
         })?;
 
-    gradient_core::ci::manifest_state::store_credentials(&state.pending_credentials, user_id, creds);
+    gradient_core::ci::manifest_state::store_credentials(
+        &state.pending_credentials,
+        user_id,
+        creds,
+    );
 
     Ok(Redirect::to("/admin/github-app?ready=1"))
 }
@@ -119,8 +122,9 @@ pub async fn credentials(
 ) -> WebResult<Json<BaseResponse<gradient_core::ci::github_app_manifest::ManifestResult>>> {
     require_superuser(&user)?;
 
-    let creds = gradient_core::ci::manifest_state::take_credentials(&state.pending_credentials, user.id)
-        .ok_or_else(|| WebError::not_found_msg("Pending credentials"))?;
+    let creds =
+        gradient_core::ci::manifest_state::take_credentials(&state.pending_credentials, user.id)
+            .ok_or_else(|| WebError::not_found_msg("Pending credentials"))?;
 
     Ok(ok_json(creds))
 }

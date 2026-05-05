@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::helpers::OptionExt;
 use crate::error::{WebError, WebResult};
+use crate::helpers::OptionExt;
 use axum::extract::State;
 use axum::{Extension, Json};
 use axum_typed_multipart::{FieldData, TryFromMultipart, TypedMultipart};
@@ -84,17 +84,25 @@ pub async fn post_direct_build(
         return Err(WebError::bad_request("No files uploaded"));
     }
 
-    let org = gradient_core::db::get_organization_by_name(Arc::clone(&state), user.id, organization.clone())
-        .await?
-        .or_not_found("Organization")?;
+    let org = gradient_core::db::get_organization_by_name(
+        Arc::clone(&state),
+        user.id,
+        organization.clone(),
+    )
+    .await?
+    .or_not_found("Organization")?;
 
     // We'll create the DirectBuild record after the evaluation
 
     // Create temporary directory for files
-    let temp_dir = format!("{}/uploads/{}", state.config.storage.base_path, Uuid::now_v7());
-    fs::create_dir_all(&temp_dir).await.map_err(|e| {
-        WebError::internal(format!("Failed to create temp directory: {}", e))
-    })?;
+    let temp_dir = format!(
+        "{}/uploads/{}",
+        state.config.storage.base_path,
+        Uuid::now_v7()
+    );
+    fs::create_dir_all(&temp_dir)
+        .await
+        .map_err(|e| WebError::internal(format!("Failed to create temp directory: {}", e)))?;
 
     let temp_root = PathBuf::from(&temp_dir);
     for field in files {
@@ -113,15 +121,15 @@ pub async fn post_direct_build(
         }
 
         if let Some(parent) = file_path.parent() {
-            fs::create_dir_all(parent).await.map_err(|e| {
-                WebError::internal(format!("Failed to create directory: {}", e))
-            })?;
+            fs::create_dir_all(parent)
+                .await
+                .map_err(|e| WebError::internal(format!("Failed to create directory: {}", e)))?;
         }
 
         let temp_path = field.contents.into_temp_path();
-        fs::copy(&temp_path, &file_path).await.map_err(|e| {
-            WebError::internal(format!("Failed to write file {}: {}", filename, e))
-        })?;
+        fs::copy(&temp_path, &file_path)
+            .await
+            .map_err(|e| WebError::internal(format!("Failed to write file {}: {}", filename, e)))?;
     }
 
     // Create commit record
@@ -153,9 +161,10 @@ pub async fn post_direct_build(
         flake_source: Set(None),
         repo_check_id: Set(None),
     };
-    let evaluation = evaluation.insert(&state.web_db).await.map_err(|e| {
-        WebError::internal(format!("Failed to create evaluation: {}", e))
-    })?;
+    let evaluation = evaluation
+        .insert(&state.web_db)
+        .await
+        .map_err(|e| WebError::internal(format!("Failed to create evaluation: {}", e)))?;
 
     // Create DirectBuild record
     let direct_build = ADirectBuild {
@@ -167,9 +176,10 @@ pub async fn post_direct_build(
         created_by: Set(user.id),
         created_at: Set(gradient_core::types::now()),
     };
-    direct_build.insert(&state.web_db).await.map_err(|e| {
-        WebError::internal(format!("Failed to create direct build record: {}", e))
-    })?;
+    direct_build
+        .insert(&state.web_db)
+        .await
+        .map_err(|e| WebError::internal(format!("Failed to create direct build record: {}", e)))?;
 
     // The evaluation is now Queued; the proto scheduler's dispatch loop
     // will pick it up and send it to an available worker within seconds.
@@ -204,8 +214,9 @@ pub async fn get_recent_direct_builds(
 
         for db in direct_builds {
             // Get evaluation info
-            if let Ok(Some(evaluation)) =
-                EEvaluation::find_by_id(db.evaluation).one(&state.web_db).await
+            if let Ok(Some(evaluation)) = EEvaluation::find_by_id(db.evaluation)
+                .one(&state.web_db)
+                .await
             {
                 // Get a build from this evaluation to check status
                 let build_status = if let Ok(Some(build)) = EBuild::find()

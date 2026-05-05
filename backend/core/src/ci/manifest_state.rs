@@ -64,11 +64,7 @@ pub fn validate_and_consume(store: &ManifestStateStore, state: &str) -> Option<U
 
 /// Stores `creds` keyed by `user_id`, overwriting any prior entry. Prunes
 /// expired entries as a side-effect.
-pub fn store_credentials(
-    store: &PendingCredentialsStore,
-    user_id: UserId,
-    creds: ManifestResult,
-) {
+pub fn store_credentials(store: &PendingCredentialsStore, user_id: UserId, creds: ManifestResult) {
     let mut guard = store.lock().expect("pending credentials store poisoned");
     let cutoff = Instant::now() - STATE_TTL;
     guard.retain(|_, (_, ts)| *ts > cutoff);
@@ -127,7 +123,10 @@ mod tests {
         let stale = "stale-token".to_string();
         store.lock().unwrap().insert(
             stale.clone(),
-            (UserId::now_v7(), Instant::now() - Duration::from_secs(11 * 60)),
+            (
+                UserId::now_v7(),
+                Instant::now() - Duration::from_secs(11 * 60),
+            ),
         );
         let _fresh = issue_state(&store, UserId::now_v7());
         assert!(!store.lock().unwrap().contains_key(&stale));

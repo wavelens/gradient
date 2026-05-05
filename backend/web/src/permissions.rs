@@ -139,7 +139,10 @@ mod tests {
     fn write_excludes_admin_only() {
         assert!(!role_grants(BASE_ROLE_WRITE_ID, Permission::ManageMembers));
         assert!(!role_grants(BASE_ROLE_WRITE_ID, Permission::DeleteOrg));
-        assert!(!role_grants(BASE_ROLE_WRITE_ID, Permission::ManageOrgSettings));
+        assert!(!role_grants(
+            BASE_ROLE_WRITE_ID,
+            Permission::ManageOrgSettings
+        ));
         assert!(role_grants(BASE_ROLE_WRITE_ID, Permission::EditProject));
         assert!(role_grants(BASE_ROLE_WRITE_ID, Permission::ManageWebhooks));
     }

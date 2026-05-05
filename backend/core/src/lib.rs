@@ -21,10 +21,10 @@ pub mod types;
 
 use ci::ReqwestWebhookClient;
 use db::{connect_db, connect_web_db};
-use shutdown::Shutdown;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
 };
+use shutdown::Shutdown;
 use state::load_and_apply_state;
 use std::path::Path;
 use std::sync::Arc;
@@ -34,7 +34,10 @@ use storage::{FileLogStorage, S3LogStorage};
 use types::*;
 
 pub async fn init_state(cli: Cli) -> Arc<ServerState> {
-    println!("Starting Gradient Server on {}:{}", cli.server.ip, cli.server.port);
+    println!(
+        "Starting Gradient Server on {}:{}",
+        cli.server.ip, cli.server.port
+    );
     println!("State file configured: {:?}", cli.storage.state_file);
 
     let config = Arc::new(RuntimeConfig::from_cli(&cli));

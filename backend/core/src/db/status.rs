@@ -9,7 +9,6 @@
 //! Extracted here so both the `evaluator` and `builder` crates can call them
 //! without introducing a dependency between the two.
 
-
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use sea_orm::ActiveValue::Set;

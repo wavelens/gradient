@@ -10,7 +10,9 @@
 //! Each project can reference a single inbound and a single outbound
 //! integration via the `project_integration` link table.
 
-use super::reporter::{CiReporter, GiteaReporter, GithubAppReporter, GitlabReporter, NoopCiReporter};
+use super::reporter::{
+    CiReporter, GiteaReporter, GithubAppReporter, GitlabReporter, NoopCiReporter,
+};
 use super::webhook::decrypt_webhook_secret;
 use crate::types::*;
 use sea_orm::EntityTrait;
@@ -150,7 +152,11 @@ pub async fn resolve_outbound_reporter_for_project(
             let Some(token) = token else {
                 return Arc::new(NoopCiReporter);
             };
-            match GiteaReporter::new(state.http.clone(), base_url.to_string(), token.expose().to_string()) {
+            match GiteaReporter::new(
+                state.http.clone(),
+                base_url.to_string(),
+                token.expose().to_string(),
+            ) {
                 Ok(r) => Arc::new(r),
                 Err(e) => {
                     warn!(error = %e, "Failed to build GiteaReporter");
@@ -182,7 +188,11 @@ pub async fn resolve_outbound_reporter_for_project(
                 warn!(integration_id = %integration.id, "GitLab outbound integration missing access token");
                 return Arc::new(NoopCiReporter);
             };
-            match GitlabReporter::new(state.http.clone(), base_url.to_string(), token.expose().to_string()) {
+            match GitlabReporter::new(
+                state.http.clone(),
+                base_url.to_string(),
+                token.expose().to_string(),
+            ) {
                 Ok(r) => Arc::new(r),
                 Err(e) => {
                     warn!(error = %e, "Failed to build GitlabReporter");
@@ -243,7 +253,13 @@ async fn build_github_app_reporter_for_project(
     // GitHub Enterprise support deferred — no production user yet. When
     // adding it, derive `api_base_url` from the installation account host or
     // from a server-config field instead of hardcoding the empty default.
-    match GithubAppReporter::new(state.http.clone(), "", github_app.app_id, pem, installation_id) {
+    match GithubAppReporter::new(
+        state.http.clone(),
+        "",
+        github_app.app_id,
+        pem,
+        installation_id,
+    ) {
         Ok(r) => Some(Arc::new(r)),
         Err(e) => {
             warn!(error = %e, "Failed to build GithubAppReporter");
@@ -275,10 +291,7 @@ fn is_github_repository_url(url: &str) -> bool {
         return false;
     };
 
-    let host = host_and_rest
-        .split(['/', ':'])
-        .next()
-        .unwrap_or("");
+    let host = host_and_rest.split(['/', ':']).next().unwrap_or("");
     let host = host.rsplit('@').next().unwrap_or(host);
 
     host.eq_ignore_ascii_case("github.com") || host.to_ascii_lowercase().ends_with(".github.com")
@@ -290,7 +303,9 @@ mod tests {
 
     #[test]
     fn github_https_is_github() {
-        assert!(is_github_repository_url("https://github.com/acme/widgets.git"));
+        assert!(is_github_repository_url(
+            "https://github.com/acme/widgets.git"
+        ));
         assert!(is_github_repository_url("https://github.com/acme/widgets"));
     }
 

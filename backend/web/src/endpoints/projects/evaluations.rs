@@ -6,22 +6,22 @@
 
 use super::{EntryPointSummary, EvaluationSummary, ProjectDetailsResponse};
 use crate::access::{Caller, ProjectAccess, has_permission, is_org_member, load_project};
-use crate::helpers::{OptionExt, ok_json};
 use crate::authorization::MaybeUser;
 use crate::endpoints::content_type_for_filename;
 use crate::error::{WebError, WebResult};
+use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::Permission;
 use axum::extract::{Path, Query, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
+use entity::build::BuildStatus;
+use entity::evaluation::EvaluationStatus;
 use gradient_core::db::get_any_organization_by_name;
 use gradient_core::sources::check_project_updates;
 use gradient_core::storage::nar_extract::{ExtractError, Extracted, extract_path_from_nar_bytes};
 use gradient_core::types::input::vec_to_hex;
 use gradient_core::types::*;
-use entity::build::BuildStatus;
-use entity::evaluation::EvaluationStatus;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -93,7 +93,10 @@ pub(super) async fn evaluations_to_summaries(
 
     let mut eps_per_eval: HashMap<EvaluationId, Vec<BuildId>> = HashMap::new();
     for ep in &entry_points {
-        eps_per_eval.entry(ep.evaluation).or_default().push(ep.build);
+        eps_per_eval
+            .entry(ep.evaluation)
+            .or_default()
+            .push(ep.build);
     }
 
     let mut out = Vec::with_capacity(evaluations.len());
@@ -212,8 +215,14 @@ pub async fn get_project_evaluations(
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<Vec<EvaluationSummary>>>> {
-    let (_organization, project) =
-        load_project(&state, Caller::from_option(&maybe_user), organization, project, ProjectAccess::Readable).await?;
+    let (_organization, project) = load_project(
+        &state,
+        Caller::from_option(&maybe_user),
+        organization,
+        project,
+        ProjectAccess::Readable,
+    )
+    .await?;
 
     let evaluations = EEvaluation::find()
         .filter(CEvaluation::Project.eq(project.id))
@@ -232,8 +241,14 @@ pub async fn get_project_details(
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<ProjectDetailsResponse>>> {
-    let (organization, project) =
-        load_project(&state, Caller::from_option(&maybe_user), organization, project, ProjectAccess::Readable).await?;
+    let (organization, project) = load_project(
+        &state,
+        Caller::from_option(&maybe_user),
+        organization,
+        project,
+        ProjectAccess::Readable,
+    )
+    .await?;
 
     // Get last 5 evaluations for this project
     let evaluations = EEvaluation::find()
@@ -246,7 +261,9 @@ pub async fn get_project_details(
     let evaluation_summaries = evaluations_to_summaries(&state.0, evaluations).await?;
 
     let can_edit = match &maybe_user {
-        Some(user) => has_permission(&state, user.id, organization.id, Permission::EditProject).await?,
+        Some(user) => {
+            has_permission(&state, user.id, organization.id, Permission::EditProject).await?
+        }
         None => false,
     };
 
@@ -283,8 +300,14 @@ pub async fn get_project_entry_points(
     Path((organization, project)): Path<(String, String)>,
     Query(params): Query<EntryPointsQuery>,
 ) -> WebResult<Json<BaseResponse<Vec<EntryPointSummary>>>> {
-    let (_organization, project) =
-        load_project(&state, Caller::from_option(&maybe_user), organization, project, ProjectAccess::Readable).await?;
+    let (_organization, project) = load_project(
+        &state,
+        Caller::from_option(&maybe_user),
+        organization,
+        project,
+        ProjectAccess::Readable,
+    )
+    .await?;
 
     // Use the requested evaluation ID, or fall back to the project's last evaluation.
     let eval_id = match params.evaluation_id.or(project.last_evaluation) {

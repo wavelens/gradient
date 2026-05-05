@@ -68,9 +68,7 @@ fn hash_api_key(raw: &str) -> String {
     out
 }
 
-fn server_with(
-    web_db_setup: impl FnOnce(MockDatabase) -> MockDatabase,
-) -> TestServer {
+fn server_with(web_db_setup: impl FnOnce(MockDatabase) -> MockDatabase) -> TestServer {
     let cli = test_cli();
     let config = Arc::new(RuntimeConfig::from_cli(&cli));
     let nar_storage = NarStore::local(&config.storage.base_path).expect("create test NarStore");
@@ -130,9 +128,7 @@ fn jwt_with_revoked_session_is_rejected() {
         let session = revoked_session();
         let token = sign_session_jwt(user_id(), session.id, Duration::hours(1));
 
-        let s = server_with(|db| {
-            db.append_query_results([vec![session]])
-        });
+        let s = server_with(|db| db.append_query_results([vec![session]]));
 
         let res = s
             .get("/api/v1/user")
@@ -284,4 +280,3 @@ fn delete_user_with_wrong_password_is_forbidden() {
         res.assert_status_forbidden();
     });
 }
-

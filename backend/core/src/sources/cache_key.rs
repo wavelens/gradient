@@ -14,8 +14,10 @@ use ed25519_compact::{KeyPair, PublicKey, SecretKey, Signature};
 /// The private key is the full 64-byte ed25519 keypair encrypted and base64-encoded.
 /// The public key is the last 32 bytes of the keypair, base64-encoded in plaintext.
 pub fn generate_signing_key(secret_file: &str) -> Result<(String, String), SourceError> {
-    let secret = crate::types::input::load_secret_bytes(secret_file)
-        .map_err(|e| SourceError::FileRead { reason: e.to_string() })?;
+    let secret =
+        crate::types::input::load_secret_bytes(secret_file).map_err(|e| SourceError::FileRead {
+            reason: e.to_string(),
+        })?;
 
     let keypair = KeyPair::generate();
     // Base64-encode the full 64-byte keypair (seed || public key)
@@ -61,8 +63,10 @@ pub fn format_cache_public_key(
 }
 
 pub fn decrypt_signing_key(secret_file: &str, cache: MCache) -> Result<String, SourceError> {
-    let secret = crate::types::input::load_secret_bytes(secret_file)
-        .map_err(|e| SourceError::FileRead { reason: e.to_string() })?;
+    let secret =
+        crate::types::input::load_secret_bytes(secret_file).map_err(|e| SourceError::FileRead {
+            reason: e.to_string(),
+        })?;
 
     let encrypted_private_key = general_purpose::STANDARD
         .decode(cache.clone().private_key)
@@ -320,8 +324,7 @@ mod tests {
     #[test]
     fn generate_decrypt_roundtrip() {
         let (_f, path) = temp_secret_file();
-        let (encrypted_priv, pub_b64) =
-            generate_signing_key(&path).expect("generate failed");
+        let (encrypted_priv, pub_b64) = generate_signing_key(&path).expect("generate failed");
         let cache = make_cache("testcache", &pub_b64, &encrypted_priv);
         let decrypted = decrypt_signing_key(&path, cache).expect("decrypt failed");
         // Decrypted should be base64-encoded 64-byte keypair
@@ -334,8 +337,7 @@ mod tests {
     #[test]
     fn format_cache_public_key_stored() {
         let (_f, path) = temp_secret_file();
-        let (encrypted_priv, pub_b64) =
-            generate_signing_key(&path).expect("generate failed");
+        let (encrypted_priv, pub_b64) = generate_signing_key(&path).expect("generate failed");
         let cache = make_cache("mycache", &pub_b64, &encrypted_priv);
         let result = format_cache_public_key(&path, cache, "https://cache.example.com".to_string())
             .expect("format failed");
@@ -358,8 +360,7 @@ mod tests {
     fn format_cache_public_key_legacy() {
         // Empty public_key → derive from private key
         let (_f, path) = temp_secret_file();
-        let (encrypted_priv, _pub_b64) =
-            generate_signing_key(&path).expect("generate failed");
+        let (encrypted_priv, _pub_b64) = generate_signing_key(&path).expect("generate failed");
         let cache = make_cache("legacy", "", &encrypted_priv);
         let result = format_cache_public_key(&path, cache, "https://cache.example.com".to_string())
             .expect("format failed");
@@ -372,8 +373,7 @@ mod tests {
     #[test]
     fn sign_narinfo_fingerprint_format() {
         let (_f, path) = temp_secret_file();
-        let (encrypted_priv, pub_b64) =
-            generate_signing_key(&path).expect("generate failed");
+        let (encrypted_priv, pub_b64) = generate_signing_key(&path).expect("generate failed");
         let cache = make_cache("sigcache", &pub_b64, &encrypted_priv);
         let result = sign_narinfo_fingerprint(
             &path,
@@ -398,8 +398,7 @@ mod tests {
         // Each output must byte-match the legacy one-shot fingerprint signer
         // so the sign-sweep batching change is provably side-effect-free.
         let (_f, path) = temp_secret_file();
-        let (encrypted_priv, pub_b64) =
-            generate_signing_key(&path).expect("generate failed");
+        let (encrypted_priv, pub_b64) = generate_signing_key(&path).expect("generate failed");
         let cache = make_cache("sigcache", &pub_b64, &encrypted_priv);
         let serve_url = "https://cache.example.com".to_string();
 
@@ -449,8 +448,7 @@ mod tests {
     #[test]
     fn sign_narinfo_sorts_references() {
         let (_f, path) = temp_secret_file();
-        let (encrypted_priv, pub_b64) =
-            generate_signing_key(&path).expect("generate failed");
+        let (encrypted_priv, pub_b64) = generate_signing_key(&path).expect("generate failed");
         let cache = make_cache("sigcache", &pub_b64, &encrypted_priv);
         // Sign once with sorted order, once with reversed order — signatures must match
         let refs_sorted = vec![
@@ -500,8 +498,7 @@ mod tests {
         // the same result as reading cache.public_key — guards against the
         // "last 32 bytes" slice drifting.
         let (_f, path) = temp_secret_file();
-        let (encrypted_priv, pub_b64) =
-            generate_signing_key(&path).expect("generate failed");
+        let (encrypted_priv, pub_b64) = generate_signing_key(&path).expect("generate failed");
         let stored = make_cache("c", &pub_b64, &encrypted_priv);
         let legacy = make_cache("c", "", &encrypted_priv);
         let url = "https://cache.example.com".to_string();
@@ -513,8 +510,7 @@ mod tests {
     #[test]
     fn format_cache_public_key_strips_http_and_port() {
         let (_f, path) = temp_secret_file();
-        let (encrypted_priv, pub_b64) =
-            generate_signing_key(&path).expect("generate failed");
+        let (encrypted_priv, pub_b64) = generate_signing_key(&path).expect("generate failed");
         let cache = make_cache("c", &pub_b64, &encrypted_priv);
         let r = format_cache_public_key(&path, cache, "http://cache.example.com:8080".to_string())
             .expect("format failed");
@@ -529,8 +525,7 @@ mod tests {
         // Signing with bare store-path names should produce the same signature
         // as signing with fully-qualified `/nix/store/...` refs.
         let (_f, path) = temp_secret_file();
-        let (encrypted_priv, pub_b64) =
-            generate_signing_key(&path).expect("generate failed");
+        let (encrypted_priv, pub_b64) = generate_signing_key(&path).expect("generate failed");
         let cache = make_cache("c", &pub_b64, &encrypted_priv);
         let url = "https://cache.example.com".to_string();
         let bare = vec!["aaaa-a".to_string(), "bbbb-b".to_string()];
@@ -548,17 +543,23 @@ mod tests {
             &bare,
         )
         .unwrap();
-        let s2 =
-            sign_narinfo_fingerprint(&path, cache, url, "/nix/store/x-y", "sha256:AAAA", 42, &full)
-                .unwrap();
+        let s2 = sign_narinfo_fingerprint(
+            &path,
+            cache,
+            url,
+            "/nix/store/x-y",
+            "sha256:AAAA",
+            42,
+            &full,
+        )
+        .unwrap();
         assert_eq!(s1, s2);
     }
 
     #[test]
     fn sign_narinfo_nar_size_affects_signature() {
         let (_f, path) = temp_secret_file();
-        let (encrypted_priv, pub_b64) =
-            generate_signing_key(&path).expect("generate failed");
+        let (encrypted_priv, pub_b64) = generate_signing_key(&path).expect("generate failed");
         let cache = make_cache("c", &pub_b64, &encrypted_priv);
         let url = "https://cache.example.com".to_string();
         let s1 = sign_narinfo_fingerprint(
@@ -580,8 +581,7 @@ mod tests {
     #[test]
     fn sign_narinfo_store_path_affects_signature() {
         let (_f, path) = temp_secret_file();
-        let (encrypted_priv, pub_b64) =
-            generate_signing_key(&path).expect("generate failed");
+        let (encrypted_priv, pub_b64) = generate_signing_key(&path).expect("generate failed");
         let cache = make_cache("c", &pub_b64, &encrypted_priv);
         let url = "https://cache.example.com".to_string();
         let s1 = sign_narinfo_fingerprint(
@@ -594,9 +594,16 @@ mod tests {
             &[],
         )
         .unwrap();
-        let s2 =
-            sign_narinfo_fingerprint(&path, cache, url, "/nix/store/bbbb-b", "sha256:AAAA", 1, &[])
-                .unwrap();
+        let s2 = sign_narinfo_fingerprint(
+            &path,
+            cache,
+            url,
+            "/nix/store/bbbb-b",
+            "sha256:AAAA",
+            1,
+            &[],
+        )
+        .unwrap();
         assert_ne!(s1, s2);
     }
 
@@ -627,8 +634,7 @@ mod tests {
     /// `verify_narinfo_signature` consumes.
     fn signed_narinfo_fixture() -> (String, String) {
         let (_f, path) = temp_secret_file();
-        let (encrypted_priv, pub_b64) =
-            generate_signing_key(&path).expect("generate failed");
+        let (encrypted_priv, pub_b64) = generate_signing_key(&path).expect("generate failed");
         let cache = make_cache("upstream", &pub_b64, &encrypted_priv);
         let store_path = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo";
         let nar_hash = "sha256:0000000000000000000000000000000000000000000000000000";

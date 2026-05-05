@@ -10,8 +10,8 @@ use gradient_core::types::{BaseResponse, MUser, ServerState};
 use scheduler::{Scheduler, WorkerInfo};
 use std::sync::Arc;
 
-use crate::helpers::ok_json;
 use crate::error::{WebError, WebResult};
+use crate::helpers::ok_json;
 
 pub async fn get_workers(
     state: State<Arc<ServerState>>,
@@ -19,9 +19,7 @@ pub async fn get_workers(
     Extension(scheduler): Extension<Arc<Scheduler>>,
 ) -> WebResult<Json<BaseResponse<Vec<WorkerInfo>>>> {
     if !state.config.proto.global_stats_public && !user.superuser {
-        return Err(WebError::forbidden(
-            "workers endpoint requires superuser",
-        ));
+        return Err(WebError::forbidden("workers endpoint requires superuser"));
     }
     let workers = scheduler.workers_info().await;
     Ok(ok_json(workers))

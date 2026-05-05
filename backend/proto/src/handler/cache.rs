@@ -7,473 +7,475 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use gradient_core::types::ids::{CacheId, CachedPathId, CachedPathSignatureId, OrganizationId};
 use gradient_core::types::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter};
 use tracing::{error, warn};
-use gradient_core::types::ids::{CacheId, CachedPathId, CachedPathSignatureId, OrganizationId};
 
 async fn build_local_cache_map(
     state: &ServerState,
     hashes: &[&str],
 ) -> HashMap<String, (Option<i64>, Option<i64>)> {
-        // Source the (file_size, nar_size) pair straight from `cached_path` —
-        // the worker writes both columns there during NarUploaded, so it's the
-        // single authoritative copy.  We still scope the result to outputs the
-        // server marks `is_cached`, so an in-flight upload doesn't leak.
-        let derivation_outputs = match EDerivationOutput::find()
-            .filter(
-                sea_orm::Condition::all()
-                    .add(CDerivationOutput::IsCached.eq(true))
-                    .add(CDerivationOutput::Hash.is_in(hashes.to_vec())),
-            )
-            .all(&state.worker_db)
-            .await
-        {
-            Ok(rows) => rows,
-            Err(e) => {
-                warn!(error = %e, "CacheQuery local DB lookup failed");
-                return HashMap::new();
-            }
-        };
+    // Source the (file_size, nar_size) pair straight from `cached_path` —
+    // the worker writes both columns there during NarUploaded, so it's the
+    // single authoritative copy.  We still scope the result to outputs the
+    // server marks `is_cached`, so an in-flight upload doesn't leak.
+    let derivation_outputs = match EDerivationOutput::find()
+        .filter(
+            sea_orm::Condition::all()
+                .add(CDerivationOutput::IsCached.eq(true))
+                .add(CDerivationOutput::Hash.is_in(hashes.to_vec())),
+        )
+        .all(&state.worker_db)
+        .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            warn!(error = %e, "CacheQuery local DB lookup failed");
+            return HashMap::new();
+        }
+    };
 
-        let cached_paths = match ECachedPath::find()
-            .filter(CCachedPath::Hash.is_in(hashes.to_vec()))
-            .all(&state.worker_db)
-            .await
-        {
-            Ok(rows) => rows,
-            Err(e) => {
-                warn!(error = %e, "CacheQuery cached_path lookup failed");
-                return HashMap::new();
-            }
-        };
+    let cached_paths = match ECachedPath::find()
+        .filter(CCachedPath::Hash.is_in(hashes.to_vec()))
+        .all(&state.worker_db)
+        .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            warn!(error = %e, "CacheQuery cached_path lookup failed");
+            return HashMap::new();
+        }
+    };
 
-        // Only paths whose NAR upload actually completed count as cached.
-        // `is_fully_cached()` requires `file_hash IS NOT NULL`; rows without
-        // it are placeholders for an in-flight or failed upload and would
-        // cause the worker to issue a `NarRequest` the server can't satisfy.
-        let sizes: HashMap<String, (Option<i64>, Option<i64>)> = cached_paths
-            .into_iter()
-            .filter(|cp| cp.is_fully_cached())
-            .map(|cp| (cp.hash, (cp.file_size, cp.nar_size)))
-            .collect();
+    // Only paths whose NAR upload actually completed count as cached.
+    // `is_fully_cached()` requires `file_hash IS NOT NULL`; rows without
+    // it are placeholders for an in-flight or failed upload and would
+    // cause the worker to issue a `NarRequest` the server can't satisfy.
+    let sizes: HashMap<String, (Option<i64>, Option<i64>)> = cached_paths
+        .into_iter()
+        .filter(|cp| cp.is_fully_cached())
+        .map(|cp| (cp.hash, (cp.file_size, cp.nar_size)))
+        .collect();
 
-        derivation_outputs
-            .into_iter()
-            .filter_map(|row| sizes.get(&row.hash).map(|sizes| (row.hash, *sizes)))
-            .collect()
-    }
+    derivation_outputs
+        .into_iter()
+        .filter_map(|row| sizes.get(&row.hash).map(|sizes| (row.hash, *sizes)))
+        .collect()
+}
 
-async fn load_cached_path_rows(state: &ServerState, hashes: &[&str]) -> Vec<entity::cached_path::Model> {
-        match ECachedPath::find()
-            .filter(CCachedPath::Hash.is_in(hashes.to_vec()))
-            .all(&state.worker_db)
-            .await
-        {
-            Ok(rows) => rows,
-            Err(e) => {
-                warn!(error = %e, "CacheQuery cached_path lookup failed");
-                vec![]
-            }
+async fn load_cached_path_rows(
+    state: &ServerState,
+    hashes: &[&str],
+) -> Vec<entity::cached_path::Model> {
+    match ECachedPath::find()
+        .filter(CCachedPath::Hash.is_in(hashes.to_vec()))
+        .all(&state.worker_db)
+        .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            warn!(error = %e, "CacheQuery cached_path lookup failed");
+            vec![]
         }
     }
+}
 
-    /// For Push mode: ensure a `cached_path_signature` row exists for each
-    /// (cached_path, org cache) pair so that the signing job is triggered for
-    /// paths that were already cached before this worker connected.
+/// For Push mode: ensure a `cached_path_signature` row exists for each
+/// (cached_path, org cache) pair so that the signing job is triggered for
+/// paths that were already cached before this worker connected.
 async fn ensure_push_signatures(
     state: &ServerState,
-        org_id: OrganizationId,
-        cached_path_rows: &[entity::cached_path::Model],
-    ) {
-        let org_caches = EOrganizationCache::find()
-            .filter(COrganizationCache::Organization.eq(org_id))
-            .all(&state.worker_db)
-            .await
-            .unwrap_or_default();
+    org_id: OrganizationId,
+    cached_path_rows: &[entity::cached_path::Model],
+) {
+    let org_caches = EOrganizationCache::find()
+        .filter(COrganizationCache::Organization.eq(org_id))
+        .all(&state.worker_db)
+        .await
+        .unwrap_or_default();
 
-        for cp in cached_path_rows {
-            for oc in &org_caches {
-                let exists = ECachedPathSignature::find()
-                    .filter(CCachedPathSignature::CachedPath.eq(cp.id))
-                    .filter(CCachedPathSignature::Cache.eq(oc.cache))
-                    .one(&state.worker_db)
-                    .await
-                    .unwrap_or(None)
-                    .is_some();
+    for cp in cached_path_rows {
+        for oc in &org_caches {
+            let exists = ECachedPathSignature::find()
+                .filter(CCachedPathSignature::CachedPath.eq(cp.id))
+                .filter(CCachedPathSignature::Cache.eq(oc.cache))
+                .one(&state.worker_db)
+                .await
+                .unwrap_or(None)
+                .is_some();
 
-                if !exists {
-                    let sig_row = ACachedPathSignature {
-                        id: sea_orm::ActiveValue::Set(CachedPathSignatureId::now_v7()),
-                        cached_path: sea_orm::ActiveValue::Set(cp.id),
-                        cache: sea_orm::ActiveValue::Set(oc.cache),
-                        signature: sea_orm::ActiveValue::Set(None),
-                        created_at: sea_orm::ActiveValue::Set(gradient_core::types::now()),
-                    };
-                    let _ = sig_row.insert(&state.worker_db).await;
-                }
+            if !exists {
+                let sig_row = ACachedPathSignature {
+                    id: sea_orm::ActiveValue::Set(CachedPathSignatureId::now_v7()),
+                    cached_path: sea_orm::ActiveValue::Set(cp.id),
+                    cache: sea_orm::ActiveValue::Set(oc.cache),
+                    signature: sea_orm::ActiveValue::Set(None),
+                    created_at: sea_orm::ActiveValue::Set(gradient_core::types::now()),
+                };
+                let _ = sig_row.insert(&state.worker_db).await;
             }
         }
     }
+}
 
 async fn load_cached_path_signatures(
     state: &ServerState,
-        cached_path_id: CachedPathId,
-        hash: &str,
-    ) -> Option<Vec<String>> {
-        let rows = match ECachedPathSignature::find()
-            .filter(CCachedPathSignature::CachedPath.eq(cached_path_id))
+    cached_path_id: CachedPathId,
+    hash: &str,
+) -> Option<Vec<String>> {
+    let rows = match ECachedPathSignature::find()
+        .filter(CCachedPathSignature::CachedPath.eq(cached_path_id))
+        .all(&state.worker_db)
+        .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            warn!(%hash, error = %e, "failed to load cached_path signatures");
+            return None;
+        }
+    };
+
+    let cache_ids: Vec<CacheId> = rows.iter().map(|r| r.cache).collect();
+    let cache_names: HashMap<CacheId, String> = if cache_ids.is_empty() {
+        HashMap::new()
+    } else {
+        ECache::find()
+            .filter(CCache::Id.is_in(cache_ids))
             .all(&state.worker_db)
             .await
-        {
-            Ok(rows) => rows,
-            Err(e) => {
-                warn!(%hash, error = %e, "failed to load cached_path signatures");
-                return None;
-            }
-        };
-
-        let cache_ids: Vec<CacheId> = rows.iter().map(|r| r.cache).collect();
-        let cache_names: HashMap<CacheId, String> = if cache_ids.is_empty() {
-            HashMap::new()
-        } else {
-            ECache::find()
-                .filter(CCache::Id.is_in(cache_ids))
-                .all(&state.worker_db)
-                .await
-                .unwrap_or_default()
-                .into_iter()
-                .map(|c| (c.id, c.name))
-                .collect()
-        };
-
-        let serve_url = &state.config.server.serve_url;
-        let sigs: Vec<String> = rows
+            .unwrap_or_default()
             .into_iter()
-            .filter_map(|r| {
-                let stored = r.signature?;
-                let cache_name = cache_names.get(&r.cache)?;
-                Some(gradient_core::sources::full_signature_token(
-                    &stored, serve_url, cache_name,
-                ))
-            })
-            .collect();
-        if sigs.is_empty() { None } else { Some(sigs) }
-    }
+            .map(|c| (c.id, c.name))
+            .collect()
+    };
 
-    /// Resolve the import metadata a worker needs to construct a `ValidPathInfo`
-    /// and call `add_to_store_nar` on its local nix-daemon.
-    ///
-    /// Returns `(None, None, None, None, None)` if no `cached_path` row exists.
+    let serve_url = &state.config.server.serve_url;
+    let sigs: Vec<String> = rows
+        .into_iter()
+        .filter_map(|r| {
+            let stored = r.signature?;
+            let cache_name = cache_names.get(&r.cache)?;
+            Some(gradient_core::sources::full_signature_token(
+                &stored, serve_url, cache_name,
+            ))
+        })
+        .collect();
+    if sigs.is_empty() { None } else { Some(sigs) }
+}
+
+/// Resolve the import metadata a worker needs to construct a `ValidPathInfo`
+/// and call `add_to_store_nar` on its local nix-daemon.
+///
+/// Returns `(None, None, None, None, None)` if no `cached_path` row exists.
 async fn fetch_pull_metadata(
     state: &ServerState,
-        hash: &str,
-    ) -> (
-        Option<String>,      // nar_hash
-        Option<Vec<String>>, // references (full /nix/store/... paths)
-        Option<Vec<String>>, // signatures (narinfo wire format)
-        Option<String>,      // deriver
-        Option<String>,      // ca
-    ) {
-        let cached_row = match ECachedPath::find()
-            .filter(CCachedPath::Hash.eq(hash))
-            .one(&state.worker_db)
-            .await
-        {
-            Ok(Some(row)) => row,
-            Ok(None) => return (None, None, None, None, None),
-            Err(e) => {
-                warn!(%hash, error = %e, "failed to load cached_path for Pull metadata");
-                return (None, None, None, None, None);
-            }
-        };
+    hash: &str,
+) -> (
+    Option<String>,      // nar_hash
+    Option<Vec<String>>, // references (full /nix/store/... paths)
+    Option<Vec<String>>, // signatures (narinfo wire format)
+    Option<String>,      // deriver
+    Option<String>,      // ca
+) {
+    let cached_row = match ECachedPath::find()
+        .filter(CCachedPath::Hash.eq(hash))
+        .one(&state.worker_db)
+        .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return (None, None, None, None, None),
+        Err(e) => {
+            warn!(%hash, error = %e, "failed to load cached_path for Pull metadata");
+            return (None, None, None, None, None);
+        }
+    };
 
-        let references = expand_references(cached_row.references.as_deref());
-        let signatures = load_cached_path_signatures(state, cached_row.id, hash).await;
+    let references = expand_references(cached_row.references.as_deref());
+    let signatures = load_cached_path_signatures(state, cached_row.id, hash).await;
 
-        (
-            cached_row.nar_hash,
-            references,
-            signatures,
-            cached_row.deriver,
-            cached_row.ca,
-        )
-    }
+    (
+        cached_row.nar_hash,
+        references,
+        signatures,
+        cached_row.deriver,
+        cached_row.ca,
+    )
+}
 
 async fn build_cached_entry(
     state: &ServerState,
-        hash: &str,
-        path: &str,
-        file_size: &Option<i64>,
-        nar_size: &Option<i64>,
-        mode: gradient_core::types::proto::QueryMode,
-        expire: std::time::Duration,
-    ) -> gradient_core::types::proto::CachedPath {
-        use gradient_core::types::proto::{CachedPath, QueryMode};
+    hash: &str,
+    path: &str,
+    file_size: &Option<i64>,
+    nar_size: &Option<i64>,
+    mode: gradient_core::types::proto::QueryMode,
+    expire: std::time::Duration,
+) -> gradient_core::types::proto::CachedPath {
+    use gradient_core::types::proto::{CachedPath, QueryMode};
 
-        // Push mode carries only `path` + `cached`. No URL, no metadata.
-        if matches!(mode, QueryMode::Push) {
-            return CachedPath {
-                path: path.to_string(),
-                cached: true,
-                file_size: None,
-                nar_size: None,
-                url: None,
-                nar_hash: None,
-                references: None,
-                signatures: None,
-                deriver: None,
-                ca: None,
-            };
-        }
-
-        let (url, nar_hash, references, signatures, deriver, ca) = match mode {
-            QueryMode::Pull => {
-                let url = match state.nar_storage.presigned_get_url(hash, expire).await {
-                    Ok(u) => u,
-                    Err(e) => {
-                        warn!(%hash, error = %e, "failed to generate presigned GET URL");
-                        None
-                    }
-                };
-                let meta = fetch_pull_metadata(state, hash).await;
-                (url, meta.0, meta.1, meta.2, meta.3, meta.4)
-            }
-            _ => (None, None, None, None, None, None),
-        };
-
-        CachedPath {
+    // Push mode carries only `path` + `cached`. No URL, no metadata.
+    if matches!(mode, QueryMode::Push) {
+        return CachedPath {
             path: path.to_string(),
             cached: true,
-            file_size: file_size.map(|v| v as u64),
-            nar_size: nar_size.map(|v| v as u64),
-            url,
-            nar_hash,
-            references,
-            signatures,
-            deriver,
-            ca,
-        }
-    }
-
-    /// Push-mode response for an uncached path: `path` + `cached: false` plus
-    /// a presigned PUT URL when the NAR store supports one (S3). Local stores
-    /// return `url: None` and the worker uploads via `NarPush` over the
-    /// WebSocket. No metadata, no upstream lookup.
-async fn build_uncached_push_entry(
-    state: &ServerState,
-        hash: &str,
-        path: &str,
-        expire: std::time::Duration,
-    ) -> gradient_core::types::proto::CachedPath {
-        use gradient_core::types::proto::CachedPath;
-
-        let url = match state.nar_storage.presigned_put_url(hash, expire).await {
-            Ok(u) => u,
-            Err(e) => {
-                error!(
-                    %hash,
-                    error = %e,
-                    "S3 presigned PUT URL generation failed; worker will fall back to \
-                     direct NarPush (this defeats S3 — check S3 credentials / endpoint / \
-                     region config)"
-                );
-                None
-            }
-        };
-
-        CachedPath {
-            path: path.to_string(),
-            cached: false,
             file_size: None,
             nar_size: None,
-            url,
+            url: None,
             nar_hash: None,
             references: None,
             signatures: None,
             deriver: None,
             ca: None,
-        }
+        };
     }
 
-    /// Probe org-configured upstream caches for any `uncached_pairs` not found
-    /// locally, extending `result` with any hits.
-    ///
-    /// Concurrency-capped at 16 to bound worst-case latency. No-ops if the org
-    /// has no upstream URLs configured.
-async fn extend_with_upstream_results(
-    state: &ServerState,
-        org_id: OrganizationId,
-        uncached_pairs: Vec<(String, String)>,
-        result: &mut Vec<gradient_core::types::proto::CachedPath>,
-    ) {
-        use entity::organization_cache::CacheSubscriptionMode;
-        use futures::stream::{FuturesUnordered, StreamExt as _};
-
-        const UPSTREAM_LOOKUP_CONCURRENCY: usize = 16;
-
-        let org_cache_rows = match EOrganizationCache::find()
-            .filter(
-                sea_orm::Condition::all()
-                    .add(COrganizationCache::Organization.eq(org_id))
-                    .add(COrganizationCache::Mode.ne(CacheSubscriptionMode::WriteOnly)),
-            )
-            .all(&state.worker_db)
-            .await
-        {
-            Ok(rows) => rows,
-            Err(e) => {
-                warn!(%org_id, error = %e, "CacheQuery org_cache lookup failed");
-                return;
-            }
-        };
-
-        let cache_ids: Vec<CacheId> = org_cache_rows.iter().map(|r| r.cache).collect();
-        if cache_ids.is_empty() {
-            return;
-        }
-
-        let upstream_rows = match ECacheUpstream::find()
-            .filter(
-                sea_orm::Condition::all()
-                    .add(CCacheUpstream::Cache.is_in(cache_ids))
-                    .add(CCacheUpstream::Url.is_not_null())
-                    .add(CCacheUpstream::Mode.ne(CacheSubscriptionMode::WriteOnly)),
-            )
-            .all(&state.worker_db)
-            .await
-        {
-            Ok(rows) => rows,
-            Err(e) => {
-                warn!(%org_id, error = %e, "CacheQuery upstream lookup failed");
-                return;
-            }
-        };
-
-        let upstream_urls: Vec<String> = upstream_rows.into_iter().filter_map(|r| r.url).collect();
-        if upstream_urls.is_empty() {
-            return;
-        }
-
-        let http = state.http.clone();
-
-        let upstream_urls = Arc::new(upstream_urls);
-        let mut futs = FuturesUnordered::new();
-        let mut iter = uncached_pairs.into_iter();
-
-        for _ in 0..UPSTREAM_LOOKUP_CONCURRENCY {
-            if let Some((hash, store_path)) = iter.next() {
-                futs.push(lookup_upstream_narinfo(
-                    http.clone(),
-                    Arc::clone(&upstream_urls),
-                    hash,
-                    store_path,
-                ));
-            }
-        }
-        while let Some(found) = futs.next().await {
-            if let Some(cp) = found {
-                result.push(cp);
-            }
-            if let Some((hash, store_path)) = iter.next() {
-                futs.push(lookup_upstream_narinfo(
-                    http.clone(),
-                    Arc::clone(&upstream_urls),
-                    hash,
-                    store_path,
-                ));
-            }
-        }
-    }
-
-    /// Check which store paths are available — in the local Gradient cache or upstream.
-    ///
-    /// Behaviour depends on `mode`:
-    /// - `Normal` — return only locally-cached paths; probe upstream for misses.
-    /// - `Pull`   — same as Normal but cached paths include a presigned S3 GET URL.
-    /// - `Push`   — return **all** queried paths with `cached` set; skip upstream.
-    ///   Uncached paths include a presigned S3 PUT URL when S3-backed.
-async fn query(
-    state: &ServerState,
-        org_id: Option<OrganizationId>,
-        paths: &[String],
-        mode: gradient_core::types::proto::QueryMode,
-    ) -> Vec<gradient_core::types::proto::CachedPath> {
-        use gradient_core::types::proto::QueryMode;
-
-        let hash_path_pairs: Vec<(&str, &str)> = paths
-            .iter()
-            .filter_map(|p| {
-                let base = p.strip_prefix("/nix/store/").unwrap_or(p);
-                let hash = base.split('-').next()?;
-                if hash.len() == 32 {
-                    Some((hash, p.as_str()))
-                } else {
+    let (url, nar_hash, references, signatures, deriver, ca) = match mode {
+        QueryMode::Pull => {
+            let url = match state.nar_storage.presigned_get_url(hash, expire).await {
+                Ok(u) => u,
+                Err(e) => {
+                    warn!(%hash, error = %e, "failed to generate presigned GET URL");
                     None
                 }
-            })
-            .collect();
-
-        if hash_path_pairs.is_empty() {
-            return vec![];
+            };
+            let meta = fetch_pull_metadata(state, hash).await;
+            (url, meta.0, meta.1, meta.2, meta.3, meta.4)
         }
+        _ => (None, None, None, None, None, None),
+    };
 
-        let hashes: Vec<&str> = hash_path_pairs.iter().map(|(h, _)| *h).collect();
-
-        let cached_map = build_local_cache_map(state, &hashes).await;
-        let cached_path_rows = load_cached_path_rows(state, &hashes).await;
-
-        // Merge source-path cache hits into the map (keyed by hash string).
-        let mut cached_map = cached_map;
-        for cp in &cached_path_rows {
-            if cp.is_fully_cached() {
-                cached_map
-                    .entry(cp.hash.clone())
-                    .or_insert((cp.file_size, cp.nar_size));
-            }
-        }
-
-        if matches!(mode, QueryMode::Push)
-            && let Some(oid) = org_id
-        {
-            ensure_push_signatures(state, oid, &cached_path_rows).await;
-        }
-
-        let expire = std::time::Duration::from_secs(3600);
-        let mut result: Vec<gradient_core::types::proto::CachedPath> = Vec::new();
-
-        for (hash, path) in &hash_path_pairs {
-            if let Some((file_size, nar_size)) = cached_map.get(*hash) {
-                result.push(
-                    build_cached_entry(state, hash, path, file_size, nar_size, mode.clone(), expire)
-                        .await,
-                );
-            } else if matches!(mode, QueryMode::Push) {
-                result.push(build_uncached_push_entry(state, hash, path, expire).await);
-            }
-        }
-
-        if matches!(mode, QueryMode::Push) {
-            return result;
-        }
-
-        let locally_cached_hashes: std::collections::HashSet<&str> =
-            cached_map.keys().map(|s| s.as_str()).collect();
-        let uncached_pairs: Vec<(String, String)> = hash_path_pairs
-            .iter()
-            .filter(|(hash, _)| !locally_cached_hashes.contains(hash))
-            .map(|(h, p)| (h.to_string(), p.to_string()))
-            .collect();
-
-        if !uncached_pairs.is_empty()
-            && let Some(oid) = org_id
-        {
-            extend_with_upstream_results(state, oid, uncached_pairs, &mut result)
-                .await;
-        }
-
-        result
+    CachedPath {
+        path: path.to_string(),
+        cached: true,
+        file_size: file_size.map(|v| v as u64),
+        nar_size: nar_size.map(|v| v as u64),
+        url,
+        nar_hash,
+        references,
+        signatures,
+        deriver,
+        ca,
     }
+}
+
+/// Push-mode response for an uncached path: `path` + `cached: false` plus
+/// a presigned PUT URL when the NAR store supports one (S3). Local stores
+/// return `url: None` and the worker uploads via `NarPush` over the
+/// WebSocket. No metadata, no upstream lookup.
+async fn build_uncached_push_entry(
+    state: &ServerState,
+    hash: &str,
+    path: &str,
+    expire: std::time::Duration,
+) -> gradient_core::types::proto::CachedPath {
+    use gradient_core::types::proto::CachedPath;
+
+    let url = match state.nar_storage.presigned_put_url(hash, expire).await {
+        Ok(u) => u,
+        Err(e) => {
+            error!(
+                %hash,
+                error = %e,
+                "S3 presigned PUT URL generation failed; worker will fall back to \
+                 direct NarPush (this defeats S3 — check S3 credentials / endpoint / \
+                 region config)"
+            );
+            None
+        }
+    };
+
+    CachedPath {
+        path: path.to_string(),
+        cached: false,
+        file_size: None,
+        nar_size: None,
+        url,
+        nar_hash: None,
+        references: None,
+        signatures: None,
+        deriver: None,
+        ca: None,
+    }
+}
+
+/// Probe org-configured upstream caches for any `uncached_pairs` not found
+/// locally, extending `result` with any hits.
+///
+/// Concurrency-capped at 16 to bound worst-case latency. No-ops if the org
+/// has no upstream URLs configured.
+async fn extend_with_upstream_results(
+    state: &ServerState,
+    org_id: OrganizationId,
+    uncached_pairs: Vec<(String, String)>,
+    result: &mut Vec<gradient_core::types::proto::CachedPath>,
+) {
+    use entity::organization_cache::CacheSubscriptionMode;
+    use futures::stream::{FuturesUnordered, StreamExt as _};
+
+    const UPSTREAM_LOOKUP_CONCURRENCY: usize = 16;
+
+    let org_cache_rows = match EOrganizationCache::find()
+        .filter(
+            sea_orm::Condition::all()
+                .add(COrganizationCache::Organization.eq(org_id))
+                .add(COrganizationCache::Mode.ne(CacheSubscriptionMode::WriteOnly)),
+        )
+        .all(&state.worker_db)
+        .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            warn!(%org_id, error = %e, "CacheQuery org_cache lookup failed");
+            return;
+        }
+    };
+
+    let cache_ids: Vec<CacheId> = org_cache_rows.iter().map(|r| r.cache).collect();
+    if cache_ids.is_empty() {
+        return;
+    }
+
+    let upstream_rows = match ECacheUpstream::find()
+        .filter(
+            sea_orm::Condition::all()
+                .add(CCacheUpstream::Cache.is_in(cache_ids))
+                .add(CCacheUpstream::Url.is_not_null())
+                .add(CCacheUpstream::Mode.ne(CacheSubscriptionMode::WriteOnly)),
+        )
+        .all(&state.worker_db)
+        .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            warn!(%org_id, error = %e, "CacheQuery upstream lookup failed");
+            return;
+        }
+    };
+
+    let upstream_urls: Vec<String> = upstream_rows.into_iter().filter_map(|r| r.url).collect();
+    if upstream_urls.is_empty() {
+        return;
+    }
+
+    let http = state.http.clone();
+
+    let upstream_urls = Arc::new(upstream_urls);
+    let mut futs = FuturesUnordered::new();
+    let mut iter = uncached_pairs.into_iter();
+
+    for _ in 0..UPSTREAM_LOOKUP_CONCURRENCY {
+        if let Some((hash, store_path)) = iter.next() {
+            futs.push(lookup_upstream_narinfo(
+                http.clone(),
+                Arc::clone(&upstream_urls),
+                hash,
+                store_path,
+            ));
+        }
+    }
+    while let Some(found) = futs.next().await {
+        if let Some(cp) = found {
+            result.push(cp);
+        }
+        if let Some((hash, store_path)) = iter.next() {
+            futs.push(lookup_upstream_narinfo(
+                http.clone(),
+                Arc::clone(&upstream_urls),
+                hash,
+                store_path,
+            ));
+        }
+    }
+}
+
+/// Check which store paths are available — in the local Gradient cache or upstream.
+///
+/// Behaviour depends on `mode`:
+/// - `Normal` — return only locally-cached paths; probe upstream for misses.
+/// - `Pull`   — same as Normal but cached paths include a presigned S3 GET URL.
+/// - `Push`   — return **all** queried paths with `cached` set; skip upstream.
+///   Uncached paths include a presigned S3 PUT URL when S3-backed.
+async fn query(
+    state: &ServerState,
+    org_id: Option<OrganizationId>,
+    paths: &[String],
+    mode: gradient_core::types::proto::QueryMode,
+) -> Vec<gradient_core::types::proto::CachedPath> {
+    use gradient_core::types::proto::QueryMode;
+
+    let hash_path_pairs: Vec<(&str, &str)> = paths
+        .iter()
+        .filter_map(|p| {
+            let base = p.strip_prefix("/nix/store/").unwrap_or(p);
+            let hash = base.split('-').next()?;
+            if hash.len() == 32 {
+                Some((hash, p.as_str()))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if hash_path_pairs.is_empty() {
+        return vec![];
+    }
+
+    let hashes: Vec<&str> = hash_path_pairs.iter().map(|(h, _)| *h).collect();
+
+    let cached_map = build_local_cache_map(state, &hashes).await;
+    let cached_path_rows = load_cached_path_rows(state, &hashes).await;
+
+    // Merge source-path cache hits into the map (keyed by hash string).
+    let mut cached_map = cached_map;
+    for cp in &cached_path_rows {
+        if cp.is_fully_cached() {
+            cached_map
+                .entry(cp.hash.clone())
+                .or_insert((cp.file_size, cp.nar_size));
+        }
+    }
+
+    if matches!(mode, QueryMode::Push)
+        && let Some(oid) = org_id
+    {
+        ensure_push_signatures(state, oid, &cached_path_rows).await;
+    }
+
+    let expire = std::time::Duration::from_secs(3600);
+    let mut result: Vec<gradient_core::types::proto::CachedPath> = Vec::new();
+
+    for (hash, path) in &hash_path_pairs {
+        if let Some((file_size, nar_size)) = cached_map.get(*hash) {
+            result.push(
+                build_cached_entry(state, hash, path, file_size, nar_size, mode.clone(), expire)
+                    .await,
+            );
+        } else if matches!(mode, QueryMode::Push) {
+            result.push(build_uncached_push_entry(state, hash, path, expire).await);
+        }
+    }
+
+    if matches!(mode, QueryMode::Push) {
+        return result;
+    }
+
+    let locally_cached_hashes: std::collections::HashSet<&str> =
+        cached_map.keys().map(|s| s.as_str()).collect();
+    let uncached_pairs: Vec<(String, String)> = hash_path_pairs
+        .iter()
+        .filter(|(hash, _)| !locally_cached_hashes.contains(hash))
+        .map(|(h, p)| (h.to_string(), p.to_string()))
+        .collect();
+
+    if !uncached_pairs.is_empty()
+        && let Some(oid) = org_id
+    {
+        extend_with_upstream_results(state, oid, uncached_pairs, &mut result).await;
+    }
+
+    result
+}
 
 pub(super) async fn handle_cache_query(
     state: &ServerState,
@@ -640,7 +642,10 @@ mod tests {
         )
         .unwrap();
         assert!(cp.cached);
-        assert_eq!(cp.url.as_deref(), Some("https://upstream.example/nar/abc.nar.xz"));
+        assert_eq!(
+            cp.url.as_deref(),
+            Some("https://upstream.example/nar/abc.nar.xz")
+        );
         assert_eq!(cp.nar_size, Some(102760));
         assert_eq!(cp.file_size, Some(35372));
         assert_eq!(
@@ -664,8 +669,7 @@ mod tests {
                     NarHash: sha256:deadbeef\n\
                     NarSize: 1\n\
                     References: \n";
-        let cp =
-            parse_upstream_narinfo("https://up/", "/nix/store/aa-x", body).unwrap();
+        let cp = parse_upstream_narinfo("https://up/", "/nix/store/aa-x", body).unwrap();
         assert_eq!(cp.references.as_deref(), Some(&[][..]));
     }
 
@@ -678,44 +682,54 @@ mod tests {
     #[test]
     fn parse_upstream_narinfo_trims_base_url_trailing_slash() {
         let body = "URL: nar/x.nar\n";
-        let cp =
-            parse_upstream_narinfo("https://up.example/", "/nix/store/aa-x", body).unwrap();
+        let cp = parse_upstream_narinfo("https://up.example/", "/nix/store/aa-x", body).unwrap();
         assert_eq!(cp.url.as_deref(), Some("https://up.example/nar/x.nar"));
     }
 
     #[test]
     fn parse_upstream_narinfo_ignores_unparseable_sizes() {
         let body = "URL: nar/x.nar\nNarSize: not-a-number\nFileSize: also-bad\n";
-        let cp =
-            parse_upstream_narinfo("https://up/", "/nix/store/aa-x", body).unwrap();
+        let cp = parse_upstream_narinfo("https://up/", "/nix/store/aa-x", body).unwrap();
         assert!(cp.nar_size.is_none());
         assert!(cp.file_size.is_none());
     }
 
     #[tokio::test]
-async fn cache_query_empty_paths_returns_empty() {
+    async fn cache_query_empty_paths_returns_empty() {
         let state = make_state();
-        
+
         assert!(query(&state, None, &[], QueryMode::Normal).await.is_empty());
         assert!(query(&state, None, &[], QueryMode::Push).await.is_empty());
         assert!(query(&state, None, &[], QueryMode::Pull).await.is_empty());
     }
 
     #[tokio::test]
-async fn cache_query_invalid_store_paths_skipped() {
+    async fn cache_query_invalid_store_paths_skipped() {
         let state = make_state();
-        
+
         let paths = vec![
             "not-a-store-path".to_string(),
             "/nix/store/short-name".to_string(),
         ];
-        assert!(query(&state, None, &paths, QueryMode::Normal).await.is_empty());
-        assert!(query(&state, None, &paths, QueryMode::Push).await.is_empty());
-        assert!(query(&state, None, &paths, QueryMode::Pull).await.is_empty());
+        assert!(
+            query(&state, None, &paths, QueryMode::Normal)
+                .await
+                .is_empty()
+        );
+        assert!(
+            query(&state, None, &paths, QueryMode::Push)
+                .await
+                .is_empty()
+        );
+        assert!(
+            query(&state, None, &paths, QueryMode::Pull)
+                .await
+                .is_empty()
+        );
     }
 
     #[tokio::test]
-async fn cache_query_normal_uncached_returns_empty() {
+    async fn cache_query_normal_uncached_returns_empty() {
         let state = make_state();
         let paths = vec!["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello".to_string()];
         let result = query(&state, None, &paths, QueryMode::Normal).await;
@@ -726,7 +740,7 @@ async fn cache_query_normal_uncached_returns_empty() {
     }
 
     #[tokio::test]
-async fn cache_query_pull_uncached_returns_empty() {
+    async fn cache_query_pull_uncached_returns_empty() {
         let state = make_state();
         let paths = vec!["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello".to_string()];
         let result = query(&state, None, &paths, QueryMode::Pull).await;
@@ -737,7 +751,7 @@ async fn cache_query_pull_uncached_returns_empty() {
     }
 
     #[tokio::test]
-async fn cache_query_push_uncached_returns_all_with_cached_false() {
+    async fn cache_query_push_uncached_returns_all_with_cached_false() {
         let state = make_state();
         let paths = vec![
             "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string(),
@@ -765,7 +779,7 @@ async fn cache_query_push_uncached_returns_all_with_cached_false() {
     }
 
     #[tokio::test]
-async fn cache_query_rejects_overlong_hash() {
+    async fn cache_query_rejects_overlong_hash() {
         // Hash component of 33 chars must be rejected — nix-base32 hashes are
         // exactly 32 chars. Guards against an `== 32` → `>= 32` length-check
         // relaxation.
@@ -778,7 +792,7 @@ async fn cache_query_rejects_overlong_hash() {
     }
 
     #[tokio::test]
-async fn cache_query_push_deduplicates_by_hash() {
+    async fn cache_query_push_deduplicates_by_hash() {
         let state = make_state();
         let paths = vec![
             "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string(),

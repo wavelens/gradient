@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::helpers::{OptionExt, ok_json};
 use crate::authorization::MaybeUser;
 use crate::error::WebResult;
+use crate::helpers::{OptionExt, ok_json};
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::types::*;
@@ -242,8 +242,8 @@ pub async fn get_build_graph(
     }
 
     Ok(ok_json(BuildGraph {
-            root: build_id,
-            nodes,
-            edges,
-        }))
+        root: build_id,
+        nodes,
+        edges,
+    }))
 }
