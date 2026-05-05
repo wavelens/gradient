@@ -7,7 +7,8 @@
 use chrono::NaiveDateTime;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+
+use crate::ids::{EvaluationId, EvaluationMessageId};
 
 /// Severity level of an evaluation message, matching Nix's verbosity levels.
 #[derive(Debug, Clone, PartialEq, Eq, DeriveActiveEnum, EnumIter, Deserialize, Serialize)]
@@ -37,8 +38,8 @@ pub enum MessageLevel {
 #[sea_orm(table_name = "evaluation_message")]
 pub struct Model {
     #[sea_orm(primary_key)]
-    pub id: Uuid,
-    pub evaluation: Uuid,
+    pub id: EvaluationMessageId,
+    pub evaluation: EvaluationId,
     pub level: MessageLevel,
     pub message: String,
     pub source: Option<String>,

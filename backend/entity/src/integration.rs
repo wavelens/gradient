@@ -7,14 +7,15 @@
 use chrono::NaiveDateTime;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+
+use crate::ids::{IntegrationId, OrganizationId, UserId};
 
 #[derive(Clone, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "integration")]
 pub struct Model {
     #[sea_orm(primary_key)]
-    pub id: Uuid,
-    pub organization: Uuid,
+    pub id: IntegrationId,
+    pub organization: OrganizationId,
     pub name: String,
     /// Human-readable display name for this integration.
     pub display_name: String,
@@ -28,7 +29,7 @@ pub struct Model {
     pub endpoint_url: Option<String>,
     #[sea_orm(column_type = "Text", nullable)]
     pub access_token: Option<String>,
-    pub created_by: Uuid,
+    pub created_by: UserId,
     pub created_at: NaiveDateTime,
 }
 

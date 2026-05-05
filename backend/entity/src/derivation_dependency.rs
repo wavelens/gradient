@@ -6,15 +6,16 @@
 
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+
+use crate::ids::{DerivationDependencyId, DerivationId};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "derivation_dependency")]
 pub struct Model {
     #[sea_orm(primary_key)]
-    pub id: Uuid,
-    pub derivation: Uuid,
-    pub dependency: Uuid,
+    pub id: DerivationDependencyId,
+    pub derivation: DerivationId,
+    pub dependency: DerivationId,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter)]

@@ -7,13 +7,14 @@
 use chrono::NaiveDateTime;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+
+use crate::ids::{CacheId, UserId};
 
 #[derive(Clone, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "cache")]
 pub struct Model {
     #[sea_orm(primary_key)]
-    pub id: Uuid,
+    pub id: CacheId,
     #[sea_orm(unique, indexed)]
     pub name: String,
     pub display_name: String,
@@ -25,7 +26,7 @@ pub struct Model {
     #[serde(skip_serializing)]
     pub private_key: String,
     pub public: bool,
-    pub created_by: Uuid,
+    pub created_by: UserId,
     pub created_at: NaiveDateTime,
     pub managed: bool,
 }

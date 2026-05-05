@@ -7,7 +7,8 @@
 use chrono::NaiveDateTime;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+
+use crate::ids::{CommitId, EvaluationId, ProjectId};
 
 #[derive(Debug, Clone, PartialEq, Eq, DeriveActiveEnum, EnumIter, Deserialize, Serialize)]
 #[sea_orm(rs_type = "i32", db_type = "Integer")]
@@ -73,14 +74,14 @@ impl EvaluationStatus {
 #[sea_orm(table_name = "evaluation")]
 pub struct Model {
     #[sea_orm(primary_key)]
-    pub id: Uuid,
-    pub project: Option<Uuid>,
+    pub id: EvaluationId,
+    pub project: Option<ProjectId>,
     pub repository: String,
-    pub commit: Uuid,
+    pub commit: CommitId,
     pub wildcard: String,
     pub status: EvaluationStatus,
-    pub previous: Option<Uuid>,
-    pub next: Option<Uuid>,
+    pub previous: Option<EvaluationId>,
+    pub next: Option<EvaluationId>,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
     pub flake_source: Option<String>,

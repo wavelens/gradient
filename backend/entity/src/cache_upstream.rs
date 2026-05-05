@@ -5,9 +5,9 @@
  */
 
 use super::organization_cache::CacheSubscriptionMode;
+use crate::ids::{CacheId, CacheUpstreamId};
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 /// An upstream cache entry attached to a Gradient cache.
 ///
@@ -17,13 +17,13 @@ use uuid::Uuid;
 #[sea_orm(table_name = "cache_upstream")]
 pub struct Model {
     #[sea_orm(primary_key)]
-    pub id: Uuid,
+    pub id: CacheUpstreamId,
     /// The owning Gradient cache that has this upstream configured.
-    pub cache: Uuid,
+    pub cache: CacheId,
     pub display_name: String,
     pub mode: CacheSubscriptionMode,
     /// Set when the upstream is another Gradient-managed cache.
-    pub upstream_cache: Option<Uuid>,
+    pub upstream_cache: Option<CacheId>,
     /// Set when the upstream is an external cache.
     pub url: Option<String>,
     /// Trusted public key for the external cache (Nix signing key format).
@@ -58,7 +58,7 @@ impl ActiveModelBehavior for ActiveModel {}
 #[derive(Debug, Clone, PartialEq)]
 pub enum CacheUpstreamSource<'a> {
     /// Points to another Gradient-managed cache (referenced by ID).
-    Internal { cache_id: Uuid },
+    Internal { cache_id: CacheId },
     /// Points to an external Nix binary cache.
     External {
         /// URL of the binary cache (e.g. `https://cache.nixos.org`).

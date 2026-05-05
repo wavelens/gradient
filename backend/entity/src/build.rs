@@ -7,7 +7,8 @@
 use chrono::NaiveDateTime;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+
+use crate::ids::{BuildId, DerivationId, EvaluationId};
 
 #[derive(Debug, Clone, PartialEq, Eq, DeriveActiveEnum, EnumIter, Deserialize, Serialize)]
 #[sea_orm(rs_type = "i32", db_type = "Integer")]
@@ -62,11 +63,11 @@ impl BuildStatus {
 #[sea_orm(table_name = "build")]
 pub struct Model {
     #[sea_orm(primary_key)]
-    pub id: Uuid,
-    pub evaluation: Uuid,
-    pub derivation: Uuid,
+    pub id: BuildId,
+    pub evaluation: EvaluationId,
+    pub derivation: DerivationId,
     pub status: BuildStatus,
-    pub log_id: Option<Uuid>,
+    pub log_id: Option<BuildId>,
     pub build_time_ms: Option<i64>,
     /// Worker identity (the `worker_id` string sent in `InitConnection`) that
     /// executed this build. `None` for builds that never reached a worker
@@ -78,7 +79,7 @@ pub struct Model {
     /// build_time_ms, and worker are copied to followers when the leader
     /// finishes. Same-organization only — followers always share a `derivation`
     /// row with their leader.
-    pub via: Option<Uuid>,
+    pub via: Option<BuildId>,
     /// `true` when the build's outputs are known to be available from an
     /// upstream cache (cache.nixos.org etc.) but are not yet in the gradient
     /// cache. The dispatcher hands these jobs to a worker which downloads

@@ -7,13 +7,14 @@
 use chrono::NaiveDateTime;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+
+use crate::ids::{OrganizationId, UserId};
 
 #[derive(Clone, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "organization")]
 pub struct Model {
     #[sea_orm(primary_key)]
-    pub id: Uuid,
+    pub id: OrganizationId,
     #[sea_orm(unique, indexed)]
     pub name: String,
     pub display_name: String,
@@ -22,7 +23,7 @@ pub struct Model {
     pub public_key: String,
     pub private_key: String,
     pub public: bool,
-    pub created_by: Uuid,
+    pub created_by: UserId,
     pub created_at: NaiveDateTime,
     pub managed: bool,
     /// GitHub App installation ID for this organization. `Some` is the single

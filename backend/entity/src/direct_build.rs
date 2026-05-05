@@ -7,18 +7,19 @@
 use chrono::NaiveDateTime;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+
+use crate::ids::{DirectBuildId, EvaluationId, OrganizationId, UserId};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "direct_build")]
 pub struct Model {
     #[sea_orm(primary_key)]
-    pub id: Uuid,
-    pub organization: Uuid,
-    pub evaluation: Uuid,
+    pub id: DirectBuildId,
+    pub organization: OrganizationId,
+    pub evaluation: EvaluationId,
     pub derivation: String,
     pub repository_path: String,
-    pub created_by: Uuid,
+    pub created_by: UserId,
     pub created_at: NaiveDateTime,
 }
 

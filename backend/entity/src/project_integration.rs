@@ -6,15 +6,16 @@
 
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+
+use crate::ids::{IntegrationId, ProjectId};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "project_integration")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub project: Uuid,
-    pub inbound_integration: Option<Uuid>,
-    pub outbound_integration: Option<Uuid>,
+    pub project: ProjectId,
+    pub inbound_integration: Option<IntegrationId>,
+    pub outbound_integration: Option<IntegrationId>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
