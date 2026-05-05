@@ -1084,3 +1084,26 @@ after a deliberate API change with:
 - `append_overflow_across_keys_is_caught` proves the cap is a *session*
   budget, not a per-path one — many small open uploads cannot collude
   to exceed the limit.
+
+## Auth hardening — sessions, API key lifecycle, account deletion (issue #91)
+
+`backend/web/tests/auth_hardening.rs` drives the production router with a
+`MockDatabase` and signs synthetic JWTs against the same secret the test
+state holds. Each test pins one revocation/expiry rule to a specific HTTP
+status so a regression cannot quietly weaken the surface:
+
+- `jwt_with_revoked_session_is_rejected` and `jwt_with_expired_session_is_rejected`
+  prove that a JWT alone is no longer sufficient — the auth middleware
+  loads the matching `session` row and refuses anything revoked or past
+  `expires_at`. This is what makes logout effective (issue #104).
+- `jwt_with_unknown_session_is_rejected` covers the case where the row was
+  deleted: the token must fail closed.
+- `revoked_api_key_is_rejected` and `expired_api_key_is_rejected` lock in
+  the same checks for `GRAD…` keys (issue #44). A revoked or expired key
+  returns 401 even if the hash still matches.
+- `delete_user_without_password_is_forbidden` and
+  `delete_user_with_wrong_password_is_forbidden` enforce the re-auth
+  requirement on `DELETE /user` — a stolen JWT cannot wipe a
+  password-auth account on its own (issue #43).
+
+Run with `cargo test -p web --test auth_hardening`.
