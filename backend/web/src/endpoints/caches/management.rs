@@ -37,7 +37,7 @@ pub struct MakeCacheRequest {
 
 #[derive(Serialize)]
 pub struct CacheResponse {
-    pub id: Uuid,
+    pub id: CacheId,
     pub name: String,
     pub display_name: String,
     pub description: String,
@@ -94,7 +94,7 @@ pub async fn get(
         .collect();
 
     // Find cache IDs subscribed by those orgs
-    let org_cache_ids: Vec<OrganizationCacheId> = if org_ids.is_empty() {
+    let org_cache_ids: Vec<CacheId> = if org_ids.is_empty() {
         vec![]
     } else {
         EOrganizationCache::find()

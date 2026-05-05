@@ -233,7 +233,7 @@ async fn dispatch_queued_eval_via_direct_build_org() {
     let eval_id = EvaluationId::now_v7();
     let commit_id = CommitId::now_v7();
     let org_id = OrganizationId::now_v7();
-    let direct_build_id = Uuid::now_v7();
+    let direct_build_id = DirectBuildId::now_v7();
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // 1. find Queued evaluations — project: None (direct build)

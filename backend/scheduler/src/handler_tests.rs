@@ -361,7 +361,7 @@ async fn eval_result_single_derivation_creates_build() {
         .append_query_results([vec![make_derivation(drv_id, org_id, drv_path)]])
         // 4. insert_many derivation_outputs
         .append_query_results([vec![make_drv_output(
-            Uuid::now_v7(),
+            DerivationOutputId::now_v7(),
             drv_id,
             "out",
             out_path,
@@ -467,7 +467,8 @@ async fn eval_result_substituted_derivation_completes_eval() {
         // (no insert_many derivations / outputs — already exists)
         // 4a. compute_truly_substituted: load derivation_output → cached row
         .append_query_results([vec![{
-            let mut o = make_drv_output(Uuid::now_v7(), drv_id, "out", out_path);
+            let mut o = make_drv_output(
+            DerivationOutputId::now_v7(), drv_id, "out", out_path);
             o.is_cached = true;
             o.cached_path = Some(cp_id);
             o
@@ -505,10 +506,10 @@ async fn eval_result_substituted_derivation_completes_eval() {
 async fn eval_result_with_dependencies() {
     let eval_id = EvaluationId::now_v7();
     let org_id = OrganizationId::now_v7();
-    let drv_a_id = Uuid::now_v7();
-    let drv_b_id = Uuid::now_v7();
-    let build_a_id = Uuid::now_v7();
-    let build_b_id = Uuid::now_v7();
+    let drv_a_id = DerivationId::now_v7();
+    let drv_b_id = DerivationId::now_v7();
+    let build_a_id = BuildId::now_v7();
+    let build_b_id = BuildId::now_v7();
 
     let path_a = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a.drv";
     let path_b = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-b.drv";
@@ -538,7 +539,7 @@ async fn eval_result_with_dependencies() {
         .append_query_results([vec![make_derivation(drv_a_id, org_id, path_a)]])
         // 4. insert_many outputs
         .append_query_results([vec![make_drv_output(
-            Uuid::now_v7(),
+            DerivationOutputId::now_v7(),
             drv_a_id,
             "out",
             "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a",
@@ -599,7 +600,7 @@ async fn eval_result_with_warnings() {
         .append_query_results([vec![make_derivation(drv_id, org_id, drv_path)]])
         // 4. insert_many outputs
         .append_query_results([vec![make_drv_output(
-            Uuid::now_v7(),
+            DerivationOutputId::now_v7(),
             drv_id,
             "out",
             "/nix/store/hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh-warn",
@@ -688,9 +689,9 @@ async fn build_completed_last_build_completes_eval() {
 async fn build_completed_with_remaining_active() {
     let eval_id = EvaluationId::now_v7();
     let drv_id = DerivationId::now_v7();
-    let other_drv_id = Uuid::now_v7();
+    let other_drv_id = DerivationId::now_v7();
     let build_id = BuildId::now_v7();
-    let other_build_id = Uuid::now_v7();
+    let other_build_id = BuildId::now_v7();
 
     let build = make_build(build_id, eval_id, drv_id, BuildStatus::Building);
     let build_completed = make_build(build_id, eval_id, drv_id, BuildStatus::Completed);
@@ -718,9 +719,9 @@ async fn build_completed_with_remaining_active() {
 async fn build_completed_with_failed_sibling() {
     let eval_id = EvaluationId::now_v7();
     let drv_id = DerivationId::now_v7();
-    let failed_drv_id = Uuid::now_v7();
+    let failed_drv_id = DerivationId::now_v7();
     let build_id = BuildId::now_v7();
-    let failed_build_id = Uuid::now_v7();
+    let failed_build_id = BuildId::now_v7();
 
     let build = make_build(build_id, eval_id, drv_id, BuildStatus::Building);
     let build_completed = make_build(build_id, eval_id, drv_id, BuildStatus::Completed);
@@ -804,9 +805,9 @@ async fn build_completed_unknown_build_noop() {
 async fn build_completed_dep_failed_siblings_cause_eval_failed() {
     let eval_id = EvaluationId::now_v7();
     let drv_id = DerivationId::now_v7();
-    let dep_failed_drv_id = Uuid::now_v7();
+    let dep_failed_drv_id = DerivationId::now_v7();
     let build_id = BuildId::now_v7();
-    let dep_failed_build_id = Uuid::now_v7();
+    let dep_failed_build_id = BuildId::now_v7();
 
     let build = make_build(build_id, eval_id, drv_id, BuildStatus::Building);
     let build_completed = make_build(build_id, eval_id, drv_id, BuildStatus::Completed);
@@ -844,10 +845,10 @@ async fn build_completed_dep_failed_siblings_cause_eval_failed() {
 #[tokio::test]
 async fn build_failed_cascades_to_direct_dependent() {
     let eval_id = EvaluationId::now_v7();
-    let drv_a_id = Uuid::now_v7();
-    let drv_b_id = Uuid::now_v7();
-    let build_a_id = Uuid::now_v7();
-    let build_b_id = Uuid::now_v7();
+    let drv_a_id = DerivationId::now_v7();
+    let drv_b_id = DerivationId::now_v7();
+    let build_a_id = BuildId::now_v7();
+    let build_b_id = BuildId::now_v7();
 
     // Building → Failed is the valid terminal failure transition per the state machine.
     let build_a = make_build(build_a_id, eval_id, drv_a_id, BuildStatus::Building);
@@ -856,7 +857,7 @@ async fn build_failed_cascades_to_direct_dependent() {
     let build_b_dep_failed =
         make_build(build_b_id, eval_id, drv_b_id, BuildStatus::DependencyFailed);
     // Edge: B.drv depends on A.drv
-    let dep_edge = make_dep_edge(Uuid::now_v7(), drv_b_id, drv_a_id);
+    let dep_edge = make_dep_edge(DerivationDependencyId::now_v7(), drv_b_id, drv_a_id);
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // 1. find_by_id(buildA)
@@ -946,12 +947,12 @@ async fn build_failed_no_dependents() {
 #[tokio::test]
 async fn build_failed_cascade_only_direct_dependents() {
     let eval_id = EvaluationId::now_v7();
-    let drv_a_id = Uuid::now_v7();
-    let drv_b_id = Uuid::now_v7();
-    let drv_c_id = Uuid::now_v7();
-    let build_a_id = Uuid::now_v7();
-    let build_b_id = Uuid::now_v7();
-    let build_c_id = Uuid::now_v7();
+    let drv_a_id = DerivationId::now_v7();
+    let drv_b_id = DerivationId::now_v7();
+    let drv_c_id = DerivationId::now_v7();
+    let build_a_id = BuildId::now_v7();
+    let build_b_id = BuildId::now_v7();
+    let build_c_id = BuildId::now_v7();
 
     // Building → Failed is the valid terminal failure transition per the state machine.
     let build_a = make_build(build_a_id, eval_id, drv_a_id, BuildStatus::Building);
@@ -961,7 +962,7 @@ async fn build_failed_cascade_only_direct_dependents() {
         make_build(build_b_id, eval_id, drv_b_id, BuildStatus::DependencyFailed);
     let build_c = make_build(build_c_id, eval_id, drv_c_id, BuildStatus::Queued);
     // B depends on A; C does NOT depend on A
-    let dep_edge_b_a = make_dep_edge(Uuid::now_v7(), drv_b_id, drv_a_id);
+    let dep_edge_b_a = make_dep_edge(DerivationDependencyId::now_v7(), drv_b_id, drv_a_id);
     let _ = drv_c_id; // referenced only for documentation
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -1011,10 +1012,10 @@ async fn build_failed_unknown_build_noop() {
 #[tokio::test]
 async fn build_failed_cascade_skips_building_status() {
     let eval_id = EvaluationId::now_v7();
-    let drv_a_id = Uuid::now_v7();
-    let drv_b_id = Uuid::now_v7();
-    let build_a_id = Uuid::now_v7();
-    let build_b_id = Uuid::now_v7();
+    let drv_a_id = DerivationId::now_v7();
+    let drv_b_id = DerivationId::now_v7();
+    let build_a_id = BuildId::now_v7();
+    let build_b_id = BuildId::now_v7();
 
     // Building → Failed is the valid terminal failure transition per the state machine.
     let build_a = make_build(build_a_id, eval_id, drv_a_id, BuildStatus::Building);
@@ -1050,7 +1051,7 @@ async fn build_output_updates_derivation_output() {
     let eval_id = EvaluationId::now_v7();
     let drv_id = DerivationId::now_v7();
     let build_id = BuildId::now_v7();
-    let drv_out_id = Uuid::now_v7();
+    let drv_out_id = DerivationId::now_v7();
     let org_id = OrganizationId::now_v7();
 
     let build = make_build(build_id, eval_id, drv_id, BuildStatus::Building);
@@ -1138,7 +1139,7 @@ async fn build_output_inserts_build_product_rows() {
     let eval_id = EvaluationId::now_v7();
     let drv_id = DerivationId::now_v7();
     let build_id = BuildId::now_v7();
-    let drv_out_id = Uuid::now_v7();
+    let drv_out_id = DerivationId::now_v7();
     let org_id = OrganizationId::now_v7();
 
     let build = make_build(build_id, eval_id, drv_id, BuildStatus::Building);
@@ -1473,10 +1474,10 @@ async fn eval_job_failed_terminal_eval_noop() {
 #[tokio::test]
 async fn abort_cascades_to_active_builds() {
     let eval_id = EvaluationId::now_v7();
-    let drv_a_id = Uuid::now_v7();
-    let drv_b_id = Uuid::now_v7();
-    let build_a_id = Uuid::now_v7();
-    let build_b_id = Uuid::now_v7();
+    let drv_a_id = DerivationId::now_v7();
+    let drv_b_id = DerivationId::now_v7();
+    let build_a_id = BuildId::now_v7();
+    let build_b_id = BuildId::now_v7();
 
     let build_a = make_build(build_a_id, eval_id, drv_a_id, BuildStatus::Queued);
     let build_b = make_build(build_b_id, eval_id, drv_b_id, BuildStatus::Building);
@@ -1632,7 +1633,7 @@ async fn eval_result_build_insert_fails_transitions_eval_failed() {
         .append_query_results([vec![make_derivation(drv_id, org_id, drv_path)]])
         // 4. insert_many derivation_outputs → success
         .append_query_results([vec![make_drv_output(
-            Uuid::now_v7(),
+            DerivationOutputId::now_v7(),
             drv_id,
             "out",
             out_path,
@@ -1689,10 +1690,10 @@ async fn eval_result_build_insert_fails_transitions_eval_failed() {
 async fn eval_result_existing_drv_still_creates_dep_edge() {
     let eval_id = EvaluationId::now_v7();
     let org_id = OrganizationId::now_v7();
-    let drv_a_id = Uuid::now_v7();
-    let drv_b_id = Uuid::now_v7();
-    let build_a_id = Uuid::now_v7();
-    let build_b_id = Uuid::now_v7();
+    let drv_a_id = DerivationId::now_v7();
+    let drv_b_id = DerivationId::now_v7();
+    let build_a_id = BuildId::now_v7();
+    let build_b_id = BuildId::now_v7();
 
     let path_a = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-existing.drv";
     let path_b = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-new.drv";
@@ -1716,7 +1717,7 @@ async fn eval_result_existing_drv_still_creates_dep_edge() {
         .append_query_results([vec![make_derivation(drv_b_id, org_id, path_b)]])
         // 4. insert_many derivation_outputs (for B)
         .append_query_results([vec![make_drv_output(
-            Uuid::now_v7(),
+            DerivationOutputId::now_v7(),
             drv_b_id,
             "out",
             "/nix/store/bbbb-new",
@@ -1941,10 +1942,10 @@ async fn webhook_not_fired_for_dep_failed() {
     let eval_id = EvaluationId::now_v7();
     let project_id = ProjectId::now_v7();
     let org_id = OrganizationId::now_v7();
-    let drv_a_id = Uuid::now_v7();
-    let drv_b_id = Uuid::now_v7();
-    let build_a_id = Uuid::now_v7();
-    let build_b_id = Uuid::now_v7();
+    let drv_a_id = DerivationId::now_v7();
+    let drv_b_id = DerivationId::now_v7();
+    let build_a_id = BuildId::now_v7();
+    let build_b_id = BuildId::now_v7();
     let webhook_id = WebhookId::now_v7();
 
     let build_a = make_build(build_a_id, eval_id, drv_a_id, BuildStatus::Building);
@@ -1952,7 +1953,7 @@ async fn webhook_not_fired_for_dep_failed() {
     let build_b = make_build(build_b_id, eval_id, drv_b_id, BuildStatus::Queued);
     let build_b_dep_failed =
         make_build(build_b_id, eval_id, drv_b_id, BuildStatus::DependencyFailed);
-    let dep_edge = make_dep_edge(Uuid::now_v7(), drv_b_id, drv_a_id);
+    let dep_edge = make_dep_edge(DerivationDependencyId::now_v7(), drv_b_id, drv_a_id);
     // Eval with project set so webhooks fire.
     let eval_building = make_eval_with_project(eval_id, project_id, EvaluationStatus::Building);
     let eval_failed = make_eval_with_project(eval_id, project_id, EvaluationStatus::Failed);
@@ -2092,7 +2093,7 @@ async fn eval_result_creates_entry_points_for_project() {
         .append_query_results([vec![make_derivation(drv_id, org_id, drv_path)]])
         // 4. insert derivation output
         .append_query_results([vec![make_drv_output(
-            Uuid::now_v7(),
+            DerivationOutputId::now_v7(),
             drv_id,
             "out",
             out_path,
@@ -2202,7 +2203,7 @@ async fn eval_result_no_entry_points_without_project() {
         .append_query_results([vec![make_derivation(drv_id, org_id, drv_path)]])
         // 4. insert derivation output
         .append_query_results([vec![make_drv_output(
-            Uuid::now_v7(),
+            DerivationOutputId::now_v7(),
             drv_id,
             "out",
             out_path,
@@ -2351,7 +2352,8 @@ async fn eval_result_all_substituted_with_project_completes() {
         // (no insert derivation / outputs — already exists)
         // 4a. compute_truly_substituted: load derivation_output → cached row
         .append_query_results([vec![{
-            let mut o = make_drv_output(Uuid::now_v7(), drv_id, "out", out_path);
+            let mut o = make_drv_output(
+            DerivationOutputId::now_v7(), drv_id, "out", out_path);
             o.is_cached = true;
             o.cached_path = Some(cp_id);
             o
@@ -2445,9 +2447,9 @@ async fn build_failed_cascades_transitively_through_graph() {
         .append_query_results([Vec::<MBuild>::new()])
         // ── collect_transitive_dependents ──
         // 3. BFS layer 1: dep edges where Dependency=C → [B→C]
-        .append_query_results([vec![make_dep_edge(Uuid::now_v7(), drv_b, drv_c)]])
+        .append_query_results([vec![make_dep_edge(DerivationDependencyId::now_v7(), drv_b, drv_c)]])
         // 4. BFS layer 2: dep edges where Dependency=B → [A→B]
-        .append_query_results([vec![make_dep_edge(Uuid::now_v7(), drv_a, drv_b)]])
+        .append_query_results([vec![make_dep_edge(DerivationDependencyId::now_v7(), drv_a, drv_b)]])
         // 5. BFS layer 3: dep edges where Dependency=A → empty
         .append_query_results([Vec::<MDerivationDependency>::new()])
         // 6. cascade: find Created/Queued with derivation in {A, B} → [build_a, build_b]

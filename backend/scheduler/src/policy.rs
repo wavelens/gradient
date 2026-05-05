@@ -293,7 +293,7 @@ mod tests {
         let job = PendingJob::Build(PendingBuildJob {
             build_id: BuildId::now_v7(),
             evaluation_id: EvaluationId::now_v7(),
-            peer_id: Uuid::now_v7(),
+            peer_id: OrganizationId::now_v7(),
             job: BuildJob {
                 builds: vec![BuildTask {
                     build_id: BuildId::now_v7().to_string(),
@@ -431,7 +431,7 @@ mod tests {
         PendingJob::Build(PendingBuildJob {
             build_id: BuildId::now_v7(),
             evaluation_id: EvaluationId::now_v7(),
-            peer_id: Uuid::now_v7(),
+            peer_id: OrganizationId::now_v7(),
             job: BuildJob {
                 builds: vec![BuildTask {
                     build_id: BuildId::now_v7().to_string(),
