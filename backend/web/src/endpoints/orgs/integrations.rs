@@ -237,7 +237,7 @@ pub async fn put_integration(
         .unwrap_or_else(|| body.name.clone());
 
     let integration = AIntegration {
-        id: Set(Uuid::now_v7()),
+        id: Set(IntegrationId::now_v7()),
         organization: Set(org.id),
         name: Set(body.name),
         display_name: Set(display_name),

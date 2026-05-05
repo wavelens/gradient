@@ -9,19 +9,20 @@
 //! a random `Uuid`.
 
 use entity::*;
+use entity::ids::{CommitId, EvaluationId, OrganizationId, ProjectId, UserId};
 use uuid::Uuid;
 
-pub fn org_id() -> Uuid {
-    Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap()
+pub fn org_id() -> OrganizationId {
+    OrganizationId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap())
 }
-pub fn user_id() -> Uuid {
-    Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap()
+pub fn user_id() -> UserId {
+    UserId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap())
 }
-pub fn project_id() -> Uuid {
-    Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap()
+pub fn project_id() -> ProjectId {
+    ProjectId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap())
 }
-pub fn commit_id() -> Uuid {
-    Uuid::parse_str("00000000-0000-0000-0000-000000000013").unwrap()
+pub fn commit_id() -> CommitId {
+    CommitId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000013").unwrap())
 }
 
 pub fn test_date() -> chrono::NaiveDateTime {
@@ -66,7 +67,7 @@ pub fn user() -> user::Model {
     }
 }
 
-pub fn eval_at(id: Uuid, offset_secs: i64) -> evaluation::Model {
+pub fn eval_at(id: EvaluationId, offset_secs: i64) -> evaluation::Model {
     let created_at = test_date() + chrono::Duration::seconds(offset_secs);
     evaluation::Model {
         id,

@@ -17,6 +17,7 @@
 
 use gradient_core::types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID};
 use uuid::Uuid;
+use gradient_core::types::ids::*;
 
 /// A capability that a role may grant within an organization.
 ///
@@ -62,7 +63,7 @@ pub enum Permission {
 /// **Custom-roles migration point.** When custom roles land, replace the body
 /// of this function with a DB lookup against `role_permissions`; the call
 /// sites need not change.
-pub fn role_grants(role_id: Uuid, permission: Permission) -> bool {
+pub fn role_grants(role_id: RoleId, permission: Permission) -> bool {
     use Permission::*;
 
     let granted: &[Permission] = if role_id == BASE_ROLE_ADMIN_ID {

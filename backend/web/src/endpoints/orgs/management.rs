@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
+use gradient_core::types::ids::*;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct MakeOrganizationRequest {
@@ -170,7 +171,7 @@ pub async fn get(
         .all(&state.web_db)
         .await?;
 
-    let role_ids: Vec<Uuid> = org_users.iter().map(|ou| ou.role).collect();
+    let role_ids: Vec<RoleId> = org_users.iter().map(|ou| ou.role).collect();
     let roles = ERole::find()
         .filter(CRole::Id.is_in(role_ids))
         .all(&state.web_db)
@@ -239,7 +240,7 @@ pub async fn put(
         })?;
 
     let organization = AOrganization {
-        id: Set(Uuid::now_v7()),
+        id: Set(OrganizationId::now_v7()),
         name: Set(body.name.clone()),
         display_name: Set(body.display_name.trim().to_string()),
         description: Set(body.description.trim().to_string()),
@@ -255,7 +256,7 @@ pub async fn put(
     let organization = organization.insert(&state.web_db).await?;
 
     let organization_user = AOrganizationUser {
-        id: Set(Uuid::now_v7()),
+        id: Set(OrganizationUserId::now_v7()),
         organization: Set(organization.id),
         user: Set(user.id),
         role: Set(BASE_ROLE_ADMIN_ID),

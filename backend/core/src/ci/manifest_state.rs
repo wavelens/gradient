@@ -15,6 +15,8 @@ use std::sync::Mutex;
 use std::time::Instant;
 use uuid::Uuid;
 
+use crate::types::ids::UserId;
+
 use crate::ci::github_app_manifest::ManifestResult;
 
 /// Map of state-token → (initiating superuser id, issuance time). Tokens older
@@ -24,11 +26,11 @@ use crate::ci::github_app_manifest::ManifestResult;
 /// unauthenticated top-level browser redirect from github.com and therefore
 /// carries no `Authorization` header — can recover which superuser initiated
 /// the manifest flow without trusting query-string input.
-pub type ManifestStateStore = Mutex<HashMap<String, (Uuid, Instant)>>;
+pub type ManifestStateStore = Mutex<HashMap<String, (UserId, Instant)>>;
 
 /// Map of superuser id → (pending credentials, deposit time). Entries older
 /// than 10 minutes are pruned on each `store_credentials` call.
-pub type PendingCredentialsStore = Mutex<HashMap<Uuid, (ManifestResult, Instant)>>;
+pub type PendingCredentialsStore = Mutex<HashMap<UserId, (ManifestResult, Instant)>>;
 
 use rand::RngExt as _;
 use std::time::Duration;
@@ -38,7 +40,7 @@ pub const STATE_TTL: Duration = Duration::from_secs(10 * 60);
 
 /// Generates and stores a fresh URL-safe random state token. Prunes any
 /// expired entries as a side-effect.
-pub fn issue_state(store: &ManifestStateStore, user_id: Uuid) -> String {
+pub fn issue_state(store: &ManifestStateStore, user_id: UserId) -> String {
     let mut bytes = [0u8; 24];
     rand::rng().fill(&mut bytes);
     use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -53,7 +55,7 @@ pub fn issue_state(store: &ManifestStateStore, user_id: Uuid) -> String {
 
 /// Removes the state from the store and returns the initiating user id iff
 /// the token existed and is not expired. One-shot consumption.
-pub fn validate_and_consume(store: &ManifestStateStore, state: &str) -> Option<Uuid> {
+pub fn validate_and_consume(store: &ManifestStateStore, state: &str) -> Option<UserId> {
     let mut guard = store.lock().expect("manifest state store poisoned");
     match guard.remove(state) {
         Some((user_id, ts)) if ts > Instant::now() - STATE_TTL => Some(user_id),
@@ -65,7 +67,7 @@ pub fn validate_and_consume(store: &ManifestStateStore, state: &str) -> Option<U
 /// expired entries as a side-effect.
 pub fn store_credentials(
     store: &PendingCredentialsStore,
-    user_id: Uuid,
+    user_id: UserId,
     creds: ManifestResult,
 ) {
     let mut guard = store.lock().expect("pending credentials store poisoned");
@@ -77,7 +79,7 @@ pub fn store_credentials(
 /// Removes and returns the entry for `user_id` if present and not expired.
 pub fn take_credentials(
     store: &PendingCredentialsStore,
-    user_id: Uuid,
+    user_id: UserId,
 ) -> Option<ManifestResult> {
     let mut guard = store.lock().expect("pending credentials store poisoned");
     match guard.remove(&user_id) {
@@ -99,8 +101,8 @@ mod tests {
     #[test]
     fn issue_state_returns_unique_tokens() {
         let store = empty_state_store();
-        let a = issue_state(&store, Uuid::now_v7());
-        let b = issue_state(&store, Uuid::now_v7());
+        let a = issue_state(&store, UserId::now_v7());
+        let b = issue_state(&store, UserId::now_v7());
         assert_ne!(a, b);
         assert!(a.len() >= 32);
     }
@@ -108,7 +110,7 @@ mod tests {
     #[test]
     fn validate_and_consume_returns_user_then_fails_on_replay() {
         let store = empty_state_store();
-        let user = Uuid::now_v7();
+        let user = UserId::now_v7();
         let s = issue_state(&store, user);
         assert_eq!(validate_and_consume(&store, &s), Some(user));
         assert_eq!(validate_and_consume(&store, &s), None);
@@ -126,16 +128,16 @@ mod tests {
         let stale = "stale-token".to_string();
         store.lock().unwrap().insert(
             stale.clone(),
-            (Uuid::now_v7(), Instant::now() - Duration::from_secs(11 * 60)),
+            (UserId::now_v7(), Instant::now() - Duration::from_secs(11 * 60)),
         );
-        let _fresh = issue_state(&store, Uuid::now_v7());
+        let _fresh = issue_state(&store, UserId::now_v7());
         assert!(!store.lock().unwrap().contains_key(&stale));
     }
 
     #[test]
     fn store_and_take_credentials_one_shot() {
         let store: PendingCredentialsStore = Mutex::new(HashMap::new());
-        let user = Uuid::now_v7();
+        let user = UserId::now_v7();
         let creds = ManifestResult {
             id: 1,
             slug: "x".into(),

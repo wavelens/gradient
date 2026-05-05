@@ -117,7 +117,7 @@ pub async fn put(
         .map_err(|e| WebError::internal(format!("Failed to encrypt secret: {}", e)))?;
 
     let webhook = AWebhook {
-        id: Set(Uuid::now_v7()),
+        id: Set(WebhookId::now_v7()),
         organization: Set(organization.id),
         name: Set(body.name),
         url: Set(body.url),

@@ -18,6 +18,7 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, QueryFilter
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
+use gradient_core::types::ids::*;
 
 #[derive(Deserialize)]
 pub struct SubscribeCacheRequest {
@@ -37,7 +38,7 @@ pub struct CacheSubscriptionItem {
 async fn load_subscribable_cache(
     state: &Arc<ServerState>,
     cache_name: String,
-    user_id: Uuid,
+    user_id: UserId,
 ) -> WebResult<MCache> {
     let cache = get_any_cache_by_name(Arc::clone(state), cache_name)
         .await?
@@ -169,7 +170,7 @@ pub async fn post_organization_subscribe_cache(
         .unwrap_or(CacheSubscriptionMode::ReadWrite);
 
     AOrganizationCache {
-        id: Set(Uuid::now_v7()),
+        id: Set(OrganizationCacheId::now_v7()),
         organization: Set(org.id),
         cache: Set(cache.id),
         mode: Set(mode),
@@ -189,7 +190,7 @@ pub async fn post_organization_subscribe_cache(
 /// from a derivation owned by `org_id`, for `cache_id`. Idempotent —
 /// existing rows are skipped. Best-effort: errors are logged, not
 /// propagated.
-async fn enqueue_backfill_signatures(state: &ServerState, org_id: Uuid, cache_id: Uuid) {
+async fn enqueue_backfill_signatures(state: &ServerState, org_id: OrganizationId, cache_id: CacheId) {
     let drv_ids: Vec<Uuid> = match EDerivation::find()
         .filter(CDerivation::Organization.eq(org_id))
         .all(&state.web_db)
@@ -235,7 +236,7 @@ async fn enqueue_backfill_signatures(state: &ServerState, org_id: Uuid, cache_id
             continue;
         }
         let am = ACachedPathSignature {
-            id: Set(Uuid::now_v7()),
+            id: Set(CachedPathSignatureId::now_v7()),
             cached_path: Set(cp_id),
             cache: Set(cache_id),
             signature: Set(None),

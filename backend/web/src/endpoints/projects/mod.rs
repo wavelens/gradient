@@ -26,6 +26,7 @@ pub use self::metrics::{
 };
 
 use uuid::Uuid;
+use gradient_core::types::ids::*;
 
 // ── Shared types ─────────────────────────────────────────────────────────────
 
@@ -55,13 +56,13 @@ pub struct ProjectResponse {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct EntryPointSummary {
     pub id: Uuid,
-    pub build_id: Uuid,
+    pub build_id: BuildId,
     pub derivation_path: String,
     pub eval: String,
     pub build_status: entity::build::BuildStatus,
     pub has_artefacts: bool,
     pub architecture: entity::server::Architecture,
-    pub evaluation_id: Uuid,
+    pub evaluation_id: EvaluationId,
     pub evaluation_status: EvaluationStatus,
     pub created_at: chrono::NaiveDateTime,
 }

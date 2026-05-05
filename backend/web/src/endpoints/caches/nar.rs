@@ -110,7 +110,7 @@ pub(crate) async fn resolve_effective_hash_db<C: ConnectionTrait>(
     Ok(path_hash.to_string())
 }
 
-fn spawn_nar_traffic_metric(state: Arc<ServerState>, cache_id: Uuid, bytes_len: i64) {
+fn spawn_nar_traffic_metric(state: Arc<ServerState>, cache_id: CacheId, bytes_len: i64) {
     let s = Arc::clone(&state);
     state.shutdown.spawn(async move {
         super::super::stats::record_nar_traffic(s, cache_id, bytes_len).await;
@@ -121,7 +121,7 @@ fn spawn_nar_traffic_metric(state: Arc<ServerState>, cache_id: Uuid, bytes_len: 
 /// `worker_db` (not `web_db`) on purpose: under heavy NAR traffic this
 /// fire-and-forget UPDATE would otherwise contend with foreground HTTP
 /// requests on the web pool.
-fn spawn_cache_derivation_fetch_update(state: Arc<ServerState>, cache_id: Uuid, hash: String) {
+fn spawn_cache_derivation_fetch_update(state: Arc<ServerState>, cache_id: CacheId, hash: String) {
     let s = Arc::clone(&state);
     state.shutdown.spawn(async move {
         use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};

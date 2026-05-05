@@ -101,8 +101,8 @@ mod tests {
 
     #[tokio::test]
     async fn cycles_terminate() {
-        let a = Uuid::now_v7();
-        let b = Uuid::now_v7();
+        let a = DerivationId::now_v7();
+        let b = DerivationId::now_v7();
         // Pathological cycle: b depends on a AND a depends on b. The visited
         // set must dedupe so the BFS terminates.
         let db = MockDatabase::new(DatabaseBackend::Postgres)

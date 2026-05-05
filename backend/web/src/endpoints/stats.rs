@@ -61,7 +61,7 @@ pub struct CacheStatsResponse {
 
 /// Record bytes served for a NAR request into the current minute bucket.
 /// Called fire-and-forget from the NAR serving handler.
-pub async fn record_nar_traffic(state: Arc<ServerState>, cache_id: Uuid, bytes: i64) {
+pub async fn record_nar_traffic(state: Arc<ServerState>, cache_id: CacheId, bytes: i64) {
     let now = gradient_core::types::now();
     let bucket = match now.with_second(0).and_then(|t| t.with_nanosecond(0)) {
         Some(t) => t,
@@ -78,7 +78,7 @@ pub async fn record_nar_traffic(state: Arc<ServerState>, cache_id: Uuid, bytes: 
 /// `(cache, bucket_time)` row. Concurrent calls into the same bucket are
 /// serialised by Postgres on the unique `(cache, bucket_time)` index, so each
 /// caller's `bytes_sent`/`nar_count` increment is preserved (no lost updates).
-fn build_record_nar_traffic_stmt(cache_id: Uuid, bucket: NaiveDateTime, bytes: i64) -> Statement {
+fn build_record_nar_traffic_stmt(cache_id: CacheId, bucket: NaiveDateTime, bytes: i64) -> Statement {
     Statement::from_sql_and_values(
         DatabaseBackend::Postgres,
         r#"INSERT INTO cache_metric (id, cache, bucket_time, bytes_sent, nar_count)
@@ -97,7 +97,7 @@ fn build_record_nar_traffic_stmt(cache_id: Uuid, bucket: NaiveDateTime, bytes: i
 
 async fn aggregate_traffic<C: sea_orm::ConnectionTrait>(
     db: &C,
-    cache_id: Uuid,
+    cache_id: CacheId,
     trunc_unit: &str,
     back_interval: &str,
 ) -> Result<Vec<CacheMetricPoint>, WebError> {
@@ -149,7 +149,7 @@ async fn aggregate_traffic<C: sea_orm::ConnectionTrait>(
 
 async fn aggregate_storage<C: sea_orm::ConnectionTrait>(
     db: &C,
-    cache_id: Uuid,
+    cache_id: CacheId,
     trunc_unit: &str,
     back_interval: &str,
 ) -> Result<Vec<StorageMetricPoint>, WebError> {

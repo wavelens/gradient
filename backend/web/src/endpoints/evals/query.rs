@@ -15,6 +15,7 @@ use sea_orm::{ColumnTrait, EntityTrait, Order, QueryFilter, QueryOrder};
 use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
+use gradient_core::types::ids::*;
 
 use super::EvalAccessContext;
 use super::types::{
@@ -57,7 +58,7 @@ pub async fn get_evaluation(
     let entry_points = if ep_rows.is_empty() {
         vec![]
     } else {
-        let build_ids: Vec<Uuid> = ep_rows.iter().map(|ep| ep.build).collect();
+        let build_ids: Vec<BuildId> = ep_rows.iter().map(|ep| ep.build).collect();
         let builds: std::collections::HashMap<Uuid, entity::build::BuildStatus> = EBuild::find()
             .filter(CBuild::Id.is_in(build_ids))
             .all(&state.web_db)
@@ -119,7 +120,7 @@ pub async fn get_evaluation_builds(
         .all(&state.web_db)
         .await?;
 
-    let drv_ids: Vec<Uuid> = builds.iter().map(|b| b.derivation).collect();
+    let drv_ids: Vec<DerivationId> = builds.iter().map(|b| b.derivation).collect();
 
     let derivations: HashMap<Uuid, MDerivation> = if drv_ids.is_empty() {
         HashMap::new()

@@ -59,7 +59,7 @@ pub struct PatchUpstreamRequest {
 
 async fn load_cache_for_user(
     state: &Arc<ServerState>,
-    user_id: Uuid,
+    user_id: UserId,
     cache_name: String,
 ) -> WebResult<MCache> {
     get_cache_by_name(Arc::clone(state), user_id, cache_name)
@@ -69,7 +69,7 @@ async fn load_cache_for_user(
 
 async fn load_upstream(
     state: &Arc<ServerState>,
-    cache_id: Uuid,
+    cache_id: CacheId,
     upstream_id: Uuid,
 ) -> WebResult<MCacheUpstream> {
     ECacheUpstream::find_by_id(upstream_id)
@@ -128,7 +128,7 @@ pub async fn put_cache_upstream(
             }
             let name = display_name.unwrap_or_else(|| upstream.display_name.clone());
             ACacheUpstream {
-                id: Set(Uuid::now_v7()),
+                id: Set(CacheUpstreamId::now_v7()),
                 cache: Set(cache.id),
                 display_name: Set(name),
                 mode: Set(mode.unwrap_or(CacheSubscriptionMode::ReadWrite)),
@@ -142,7 +142,7 @@ pub async fn put_cache_upstream(
             url,
             public_key,
         } => ACacheUpstream {
-            id: Set(Uuid::now_v7()),
+            id: Set(CacheUpstreamId::now_v7()),
             cache: Set(cache.id),
             display_name: Set(display_name),
             mode: Set(CacheSubscriptionMode::ReadOnly),

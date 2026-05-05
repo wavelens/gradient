@@ -94,7 +94,7 @@ pub async fn post_basic_register(
         };
 
     let user = AUser {
-        id: Set(Uuid::now_v7()),
+        id: Set(UserId::now_v7()),
         username: Set(body.username.clone()),
         name: Set(body.name.clone()),
         email: Set(body.email.clone()),

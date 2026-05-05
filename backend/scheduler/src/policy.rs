@@ -274,6 +274,7 @@ impl Policy {
 mod tests {
     use super::*;
     use crate::jobs::{PendingBuildJob, PendingJob};
+    use gradient_core::types::ids::*;
     use gradient_core::types::proto::{BuildJob, BuildTask};
     use uuid::Uuid;
 
@@ -290,12 +291,12 @@ mod tests {
         missing_nar_size: Option<u64>,
     ) -> (PendingJob, u32, u64) {
         let job = PendingJob::Build(PendingBuildJob {
-            build_id: Uuid::now_v7(),
-            evaluation_id: Uuid::now_v7(),
+            build_id: BuildId::now_v7(),
+            evaluation_id: EvaluationId::now_v7(),
             peer_id: Uuid::now_v7(),
             job: BuildJob {
                 builds: vec![BuildTask {
-                    build_id: Uuid::now_v7().to_string(),
+                    build_id: BuildId::now_v7().to_string(),
                     drv_path: "/nix/store/abc.drv".into(),
                     external_cached: false,
                 }],
@@ -428,12 +429,12 @@ mod tests {
 
     fn build_job_with_deps(dep_count: u32) -> PendingJob {
         PendingJob::Build(PendingBuildJob {
-            build_id: Uuid::now_v7(),
-            evaluation_id: Uuid::now_v7(),
+            build_id: BuildId::now_v7(),
+            evaluation_id: EvaluationId::now_v7(),
             peer_id: Uuid::now_v7(),
             job: BuildJob {
                 builds: vec![BuildTask {
-                    build_id: Uuid::now_v7().to_string(),
+                    build_id: BuildId::now_v7().to_string(),
                     drv_path: "/nix/store/abc.drv".into(),
                     external_cached: false,
                 }],

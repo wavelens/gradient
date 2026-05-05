@@ -11,6 +11,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use uuid::Uuid;
+use gradient_core::types::ids::*;
 
 use gradient_core::types::proto::{
     CandidateScore, FlakeJob, FlakeTask, GradientCapabilities, JobKind,
@@ -31,10 +32,10 @@ fn test_scheduler() -> Arc<Scheduler> {
 
 fn eval_job(peer: Uuid) -> PendingEvalJob {
     PendingEvalJob {
-        evaluation_id: Uuid::now_v7(),
+        evaluation_id: EvaluationId::now_v7(),
         project_id: None,
         peer_id: peer,
-        commit_id: Uuid::now_v7(),
+        commit_id: CommitId::now_v7(),
         repository: "https://example.com/repo".into(),
         job: FlakeJob {
             tasks: vec![FlakeTask::EvaluateDerivations],

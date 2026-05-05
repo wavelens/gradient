@@ -83,7 +83,7 @@ fn make_build(id: Uuid, eval_id: Uuid, drv_id: Uuid, status: BuildStatus) -> MBu
     }
 }
 
-fn make_derivation(id: Uuid, org_id: Uuid, path: &str) -> MDerivation {
+fn make_derivation(id: Uuid, org_id: OrganizationId, path: &str) -> MDerivation {
     entity::derivation::Model {
         id,
         organization: org_id,
@@ -141,12 +141,12 @@ fn make_dep_edge(id: Uuid, drv_id: Uuid, dep_id: Uuid) -> MDerivationDependency 
     }
 }
 
-fn make_eval_job(eval_id: Uuid, org_id: Uuid) -> PendingEvalJob {
+fn make_eval_job(eval_id: Uuid, org_id: OrganizationId) -> PendingEvalJob {
     PendingEvalJob {
         evaluation_id: eval_id,
         project_id: None,
         peer_id: org_id,
-        commit_id: Uuid::now_v7(),
+        commit_id: CommitId::now_v7(),
         repository: "https://example.com/repo".into(),
         job: FlakeJob {
             tasks: vec![FlakeTask::EvaluateDerivations],
@@ -162,7 +162,7 @@ fn make_eval_job(eval_id: Uuid, org_id: Uuid) -> PendingEvalJob {
     }
 }
 
-fn make_build_job(build_id: Uuid, eval_id: Uuid, org_id: Uuid) -> PendingBuildJob {
+fn make_build_job(build_id: BuildId, eval_id: Uuid, org_id: OrganizationId) -> PendingBuildJob {
     use gradient_core::types::proto::{BuildJob, BuildTask};
     PendingBuildJob {
         build_id,
@@ -207,7 +207,7 @@ fn make_discovered(
 
 /// Evaluation fixture with `project: Some(project_id)`. Used for webhook tests
 /// where the webhook path must not return early at the `project? = None` guard.
-fn make_eval_with_project(id: Uuid, project_id: Uuid, status: EvaluationStatus) -> MEvaluation {
+fn make_eval_with_project(id: Uuid, project_id: ProjectId, status: EvaluationStatus) -> MEvaluation {
     entity::evaluation::Model {
         id,
         project: Some(project_id),
@@ -225,7 +225,7 @@ fn make_eval_with_project(id: Uuid, project_id: Uuid, status: EvaluationStatus) 
 }
 
 /// Project fixture for webhook tests.
-fn make_project(id: Uuid, org_id: Uuid) -> entity::project::Model {
+fn make_project(id: Uuid, org_id: OrganizationId) -> entity::project::Model {
     entity::project::Model {
         id,
         organization: org_id,
@@ -248,7 +248,7 @@ fn make_project(id: Uuid, org_id: Uuid) -> entity::project::Model {
 /// Webhook fixture. `secret` should be an already-encrypted base64 ciphertext.
 fn make_webhook(
     id: Uuid,
-    org_id: Uuid,
+    org_id: OrganizationId,
     encrypted_secret: &str,
     events: &[&str],
 ) -> entity::webhook::Model {
@@ -2064,7 +2064,7 @@ async fn eval_result_creates_entry_points_for_project() {
         evaluation_id: eval_id,
         project_id: Some(project_id),
         peer_id: org_id,
-        commit_id: Uuid::now_v7(),
+        commit_id: CommitId::now_v7(),
         repository: "https://example.com/repo".into(),
         job: FlakeJob {
             tasks: vec![FlakeTask::EvaluateDerivations],
@@ -2322,7 +2322,7 @@ async fn eval_result_all_substituted_with_project_completes() {
         evaluation_id: eval_id,
         project_id: Some(project_id),
         peer_id: org_id,
-        commit_id: Uuid::now_v7(),
+        commit_id: CommitId::now_v7(),
         repository: "https://example.com/repo".into(),
         job: FlakeJob {
             tasks: vec![FlakeTask::EvaluateDerivations],

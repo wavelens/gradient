@@ -30,7 +30,7 @@ use uuid::Uuid;
 /// distinguish missing from forbidden.
 pub(super) struct EvalAccessContext {
     pub evaluation: MEvaluation,
-    pub organization_id: Uuid,
+    pub organization_id: OrganizationId,
     /// Only set when the eval is linked to a project (not a direct build).
     pub project_name: Option<String>,
     pub project_display_name: Option<String>,
@@ -39,7 +39,7 @@ pub(super) struct EvalAccessContext {
 impl EvalAccessContext {
     pub(super) async fn load(
         state: &Arc<ServerState>,
-        evaluation_id: Uuid,
+        evaluation_id: EvaluationId,
         maybe_user: &Option<MUser>,
     ) -> WebResult<Self> {
         let evaluation = EEvaluation::find_by_id(evaluation_id)

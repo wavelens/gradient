@@ -162,7 +162,7 @@ pub async fn post_keys(
 
     let raw_key = generate_api_key();
     let api_key = AApi {
-        id: Set(Uuid::now_v7()),
+        id: Set(ApiId::now_v7()),
         owned_by: Set(user.id),
         name: Set(body.name.clone()),
         key: Set(hash_api_key(&raw_key)),

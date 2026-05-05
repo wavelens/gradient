@@ -25,13 +25,15 @@ use crate::permissions::{Permission, role_grants};
 use gradient_core::db::{
     get_any_cache_by_name, get_any_organization_by_name, get_any_project_by_name,
 };
+use gradient_core::types::ids::{
+    IntegrationId, OrganizationId, OrganizationUserId, ProjectId, RoleId, UserId, WebhookId,
+};
 use gradient_core::types::{
     CIntegration, COrganizationUser, CWebhook, EIntegration, EOrganizationUser, EWebhook, MCache,
     MIntegration, MOrganization, MOrganizationUser, MProject, MUser, MWebhook, ServerState,
 };
 use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter};
 use std::sync::Arc;
-use uuid::Uuid;
 
 // ── Caller identity ──────────────────────────────────────────────────────────
 
@@ -51,7 +53,7 @@ impl<'a> Caller<'a> {
         }
     }
 
-    pub fn user_id(&self) -> Option<Uuid> {
+    pub fn user_id(&self) -> Option<UserId> {
         match self {
             Caller::User(u) => Some(u.id),
             Caller::Anon => None,
@@ -221,7 +223,7 @@ pub async fn load_project(
 
 pub async fn load_cache(
     state: &Arc<ServerState>,
-    user_id: Uuid,
+    user_id: UserId,
     cache_name: String,
     access: CacheAccess,
 ) -> WebResult<MCache> {
@@ -246,8 +248,8 @@ pub async fn load_cache(
 
 pub async fn load_webhook_in_org(
     state: &Arc<ServerState>,
-    org_id: Uuid,
-    webhook_id: Uuid,
+    org_id: OrganizationId,
+    webhook_id: WebhookId,
 ) -> WebResult<MWebhook> {
     EWebhook::find()
         .filter(CWebhook::Id.eq(webhook_id))
@@ -259,8 +261,8 @@ pub async fn load_webhook_in_org(
 
 pub async fn load_integration_in_org(
     state: &Arc<ServerState>,
-    org_id: Uuid,
-    integration_id: Uuid,
+    org_id: OrganizationId,
+    integration_id: IntegrationId,
 ) -> WebResult<MIntegration> {
     EIntegration::find()
         .filter(CIntegration::Id.eq(integration_id))
@@ -274,8 +276,8 @@ pub async fn load_integration_in_org(
 
 pub async fn is_org_member(
     state: &Arc<ServerState>,
-    user_id: Uuid,
-    organization_id: Uuid,
+    user_id: UserId,
+    organization_id: OrganizationId,
 ) -> WebResult<bool> {
     Ok(load_org_membership(state, user_id, organization_id)
         .await?
@@ -285,8 +287,8 @@ pub async fn is_org_member(
 /// True when the user holds `permission` in `organization_id`.
 pub async fn has_permission(
     state: &Arc<ServerState>,
-    user_id: Uuid,
-    organization_id: Uuid,
+    user_id: UserId,
+    organization_id: OrganizationId,
     permission: Permission,
 ) -> WebResult<bool> {
     Ok(match load_org_membership(state, user_id, organization_id).await? {
@@ -297,8 +299,8 @@ pub async fn has_permission(
 
 pub async fn load_org_membership(
     state: &Arc<ServerState>,
-    user_id: Uuid,
-    organization_id: Uuid,
+    user_id: UserId,
+    organization_id: OrganizationId,
 ) -> WebResult<Option<MOrganizationUser>> {
     Ok(EOrganizationUser::find()
         .filter(
@@ -314,8 +316,8 @@ pub async fn load_org_membership(
 
 async fn require_org_permission(
     state: &Arc<ServerState>,
-    user_id: Uuid,
-    org_id: Uuid,
+    user_id: UserId,
+    org_id: OrganizationId,
     permission: Permission,
     not_found_label: &str,
 ) -> WebResult<()> {
@@ -364,14 +366,14 @@ mod tests {
 
     fn org_fixture(public: bool, managed: bool) -> entity::organization::Model {
         entity::organization::Model {
-            id: uuid!("a0000000-0000-0000-0000-000000000001"),
+            id: OrganizationId::new(uuid!("a0000000-0000-0000-0000-000000000001")),
             name: "test-org".into(),
             display_name: "Test".into(),
             description: String::new(),
             public_key: "ssh".into(),
             private_key: "enc".into(),
             public,
-            created_by: uuid!("a0000000-0000-0000-0000-000000000004"),
+            created_by: UserId::new(uuid!("a0000000-0000-0000-0000-000000000004")),
             created_at: fixture_date(),
             managed,
             github_installation_id: None,
@@ -380,8 +382,8 @@ mod tests {
 
     fn project_fixture(managed: bool) -> entity::project::Model {
         entity::project::Model {
-            id: uuid!("a0000000-0000-0000-0000-000000000002"),
-            organization: uuid!("a0000000-0000-0000-0000-000000000001"),
+            id: ProjectId::new(uuid!("a0000000-0000-0000-0000-000000000002")),
+            organization: OrganizationId::new(uuid!("a0000000-0000-0000-0000-000000000001")),
             name: "test-project".into(),
             display_name: "Test".into(),
             description: String::new(),
@@ -391,25 +393,26 @@ mod tests {
             last_evaluation: None,
             last_check_at: fixture_date(),
             force_evaluation: false,
-            created_by: uuid!("a0000000-0000-0000-0000-000000000004"),
+            created_by: UserId::new(uuid!("a0000000-0000-0000-0000-000000000004")),
             created_at: fixture_date(),
             managed,
             keep_evaluations: 30,
         }
     }
 
-    fn membership_fixture(role: Uuid) -> entity::organization_user::Model {
+    fn membership_fixture(role: RoleId) -> entity::organization_user::Model {
         entity::organization_user::Model {
-            id: uuid!("a0000000-0000-0000-0000-000000000010"),
-            organization: uuid!("a0000000-0000-0000-0000-000000000001"),
-            user: uuid!("a0000000-0000-0000-0000-000000000004"),
+            id: OrganizationUserId::new(uuid!("a0000000-0000-0000-0000-000000000010")),
+            organization: OrganizationId::new(uuid!("a0000000-0000-0000-0000-000000000001")),
+            user: UserId::new(uuid!("a0000000-0000-0000-0000-000000000004")),
             role,
         }
     }
 
     fn user_fixture() -> MUser {
         entity::user::Model {
-            id: uuid!("a0000000-0000-0000-0000-000000000004"),
+            id: UserId::new(uuid!("a0000000-0000-0000-0000-000000000004")),
+
             username: "tester".into(),
             name: "Tester".into(),
             email: "t@example.com".into(),

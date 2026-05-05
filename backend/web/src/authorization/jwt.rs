@@ -21,7 +21,7 @@ use uuid::Uuid;
 pub struct Cliams {
     pub exp: usize,
     pub iat: usize,
-    pub id: Uuid,
+    pub id: UserId,
 }
 
 /// Claims for short-lived (1 h) per-build download tokens.
@@ -29,7 +29,7 @@ pub struct Cliams {
 pub struct DownloadClaims {
     pub exp: usize,
     pub iat: usize,
-    pub build_id: Uuid,
+    pub build_id: BuildId,
 }
 
 pub(super) fn token_from_cookie(req: &axum::extract::Request) -> Option<String> {
@@ -62,7 +62,7 @@ pub fn extract_bearer_or_cookie(headers: &axum::http::HeaderMap) -> Option<Strin
 
 pub fn encode_jwt(
     state: State<Arc<ServerState>>,
-    id: Uuid,
+    id: UserId,
     remember_me: bool,
 ) -> Result<String, StatusCode> {
     let now = Utc::now();
@@ -135,7 +135,7 @@ pub async fn decode_jwt(
 
 pub fn encode_download_token(
     state: State<Arc<ServerState>>,
-    build_id: Uuid,
+    build_id: BuildId,
 ) -> Result<String, StatusCode> {
     let now = Utc::now();
     let exp = (now + Duration::hours(1)).timestamp() as usize;

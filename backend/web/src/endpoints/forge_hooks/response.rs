@@ -8,6 +8,7 @@
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use gradient_core::types::ids::*;
 
 /// Body returned by both webhook endpoints, wrapped in the standard
 /// `BaseResponse<T>` envelope.
@@ -27,15 +28,15 @@ pub struct WebhookResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueuedEvaluation {
-    pub project_id: Uuid,
+    pub project_id: ProjectId,
     pub project_name: String,
     pub organization: String,
-    pub evaluation_id: Uuid,
+    pub evaluation_id: EvaluationId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkippedProject {
-    pub project_id: Uuid,
+    pub project_id: ProjectId,
     pub project_name: String,
     pub organization: String,
     /// One of `already_in_progress`, `no_previous_evaluation`, `db_error`.

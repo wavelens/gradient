@@ -46,7 +46,7 @@ impl BuildAccessContext {
     /// Use this when access is gated by custom logic (e.g. download tokens).
     pub(super) async fn load_unguarded(
         state: &Arc<ServerState>,
-        build_id: Uuid,
+        build_id: BuildId,
     ) -> WebResult<Self> {
         let build = EBuild::find_by_id(build_id)
             .one(&state.web_db)
@@ -110,7 +110,7 @@ impl BuildAccessContext {
     /// organization is private, and `maybe_user` is not a member.
     pub(super) async fn load(
         state: &Arc<ServerState>,
-        build_id: Uuid,
+        build_id: BuildId,
         maybe_user: &Option<MUser>,
     ) -> WebResult<Self> {
         let ctx = Self::load_unguarded(state, build_id).await?;
