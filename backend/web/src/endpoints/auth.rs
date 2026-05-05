@@ -4,13 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::helpers::{OptionExt, ok_json};
-use crate::authorization::{encode_jwt, oidc_login_create, oidc_login_verify, update_last_login};
+use crate::audit::{RequestInfo, events, record as audit_record};
+use crate::authorization::{
+    create_session_and_token, oidc_login_create, oidc_login_verify, update_last_login,
+};
 use crate::error::{WebError, WebResult};
+use crate::helpers::{OptionExt, ok_json};
 use axum::Json;
 use axum::body::Body;
 use axum::extract::{Query, State};
-use axum::http::{HeaderValue, StatusCode};
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 
 use gradient_core::storage::generate_verification_token;
@@ -20,7 +23,7 @@ use gradient_core::types::*;
 use email_address::EmailAddress;
 use password_auth::{generate_hash, verify_password};
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, QueryFilter};
+use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -48,6 +51,7 @@ pub struct CheckUsernameRequest {
 
 pub async fn post_basic_register(
     state: State<Arc<ServerState>>,
+    headers: HeaderMap,
     Json(body): Json<MakeUserRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     if !state.config.registration.enable_registration || state.config.oidc.as_ref().is_some_and(|o| o.required) {
@@ -111,6 +115,16 @@ pub async fn post_basic_register(
 
     let user = user.insert(&state.web_db).await?;
 
+    let info = RequestInfo::from_headers(&headers);
+    audit_record(
+        &state.web_db,
+        Some(user.id),
+        events::REGISTER,
+        &info,
+        Some(serde_json::json!({ "username": user.username })),
+    )
+    .await;
+
     if state.config.email.as_ref().is_some_and(|e| e.require_verification)
         && let Some(ref token) = verification_token
         && let Err(e) = state
@@ -140,13 +154,16 @@ pub async fn post_basic_register(
 
 pub async fn post_basic_login(
     state: State<Arc<ServerState>>,
+    headers: HeaderMap,
     Json(body): Json<MakeLoginRequest>,
 ) -> WebResult<Response> {
     if state.config.oidc.as_ref().is_some_and(|o| o.required) {
         return Err(WebError::oauth_required());
     }
 
-    let user = EUser::find()
+    let info = RequestInfo::from_headers(&headers);
+
+    let user = match EUser::find()
         .filter(
             Condition::any()
                 .add(CUser::Username.eq(body.loginname.clone()))
@@ -154,23 +171,63 @@ pub async fn post_basic_login(
         )
         .one(&state.web_db)
         .await?
-        .ok_or_else(WebError::invalid_credentials)?;
+    {
+        Some(u) => u,
+        None => {
+            audit_record(
+                &state.web_db,
+                None,
+                events::LOGIN_FAILURE,
+                &info,
+                Some(serde_json::json!({ "loginname": body.loginname })),
+            )
+            .await;
+            return Err(WebError::invalid_credentials());
+        }
+    };
 
     let user_password = user.password.clone().ok_or_else(WebError::oauth_required)?;
 
-    verify_password(body.password, &user_password).map_err(|_| WebError::invalid_credentials())?;
+    if verify_password(body.password, &user_password).is_err() {
+        audit_record(
+            &state.web_db,
+            Some(user.id),
+            events::LOGIN_FAILURE,
+            &info,
+            None,
+        )
+        .await;
+        return Err(WebError::invalid_credentials());
+    }
 
     if state.config.email.as_ref().is_some_and(|e| e.require_verification) && !user.email_verified {
         return Err(WebError::bad_request("Email not verified. Please check your email and verify your account before logging in."));
     }
 
     let use_tls = state.config.server.use_tls;
-    let token = encode_jwt(state.clone(), user.id, body.remember_me)
-        .map_err(|_| WebError::failed_to_generate_token())?;
+    let (_session_id, token) = create_session_and_token(
+        state.clone(),
+        user.id,
+        body.remember_me,
+        info.user_agent.clone(),
+        info.ip.clone(),
+    )
+    .await
+    .map_err(|_| WebError::failed_to_generate_token())?;
 
-    update_last_login(state, user)
+    let user_id = user.id;
+    update_last_login(state.clone(), user)
         .await
         .map_err(|_| WebError::failed_to_update_user())?;
+
+    audit_record(
+        &state.web_db,
+        Some(user_id),
+        events::LOGIN_SUCCESS,
+        &info,
+        None,
+    )
+    .await;
 
     let cookie = jwt_cookie(&token, body.remember_me, use_tls);
     let res = BaseResponse {
@@ -249,8 +306,25 @@ pub async fn get_oauth_authorize(
     .await
     .map_err(oidc_failure("oauth_authorize_callback"))?;
 
-    let token =
-        encode_jwt(state, user.id, false).map_err(|_| WebError::failed_to_generate_token())?;
+    let info = RequestInfo::from_headers(&headers);
+    let (_session_id, token) = create_session_and_token(
+        state.clone(),
+        user.id,
+        false,
+        info.user_agent.clone(),
+        info.ip.clone(),
+    )
+    .await
+    .map_err(|_| WebError::failed_to_generate_token())?;
+
+    audit_record(
+        &state.web_db,
+        Some(user.id),
+        events::LOGIN_SUCCESS,
+        &info,
+        Some(serde_json::json!({ "method": "oidc" })),
+    )
+    .await;
 
     let res = BaseResponse {
         error: false,
@@ -337,8 +411,25 @@ pub async fn get_oidc_callback(
     .await
     .map_err(oidc_failure("oidc_callback"))?;
 
-    let token =
-        encode_jwt(state, user.id, false).map_err(|_| WebError::failed_to_generate_token())?;
+    let info = RequestInfo::from_headers(&headers);
+    let (_session_id, token) = create_session_and_token(
+        state.clone(),
+        user.id,
+        false,
+        info.user_agent.clone(),
+        info.ip.clone(),
+    )
+    .await
+    .map_err(|_| WebError::failed_to_generate_token())?;
+
+    audit_record(
+        &state.web_db,
+        Some(user.id),
+        events::LOGIN_SUCCESS,
+        &info,
+        Some(serde_json::json!({ "method": "oidc" })),
+    )
+    .await;
 
     let session_cookie = jwt_cookie(&token, false, use_tls);
     let clear_csrf = oidc_csrf_clear_cookie(use_tls);
@@ -355,12 +446,43 @@ pub async fn get_oidc_callback(
         })
 }
 
-pub async fn post_logout(state: State<Arc<ServerState>>) -> WebResult<Response> {
+pub async fn post_logout(
+    state: State<Arc<ServerState>>,
+    headers: HeaderMap,
+) -> WebResult<Response> {
     let secure = if state.config.server.use_tls { "; Secure" } else { "" };
     let clear_cookie = format!(
         "jwt_token=; HttpOnly{}; SameSite=Strict; Path=/; Max-Age=0",
         secure
     );
+
+    if let Some(token) = crate::authorization::extract_bearer_or_cookie(&headers)
+        && !token.starts_with("GRAD")
+        && let Ok(data) = jsonwebtoken::decode::<crate::authorization::Cliams>(
+            &token,
+            &jsonwebtoken::DecodingKey::from_secret(state.jwt_secret.expose().as_bytes()),
+            &jsonwebtoken::Validation::default(),
+        )
+    {
+        let session_id = data.claims.jti;
+        let user_id = data.claims.id;
+        if let Ok(Some(session)) = ESession::find_by_id(session_id).one(&state.web_db).await {
+            let mut active: ASession = session.into_active_model();
+            active.revoked_at = Set(Some(gradient_core::types::now()));
+            let _ = active.update(&state.web_db).await;
+        }
+
+        let info = RequestInfo::from_headers(&headers);
+        audit_record(
+            &state.web_db,
+            Some(user_id),
+            events::LOGOUT,
+            &info,
+            Some(serde_json::json!({ "session_id": session_id.to_string() })),
+        )
+        .await;
+    }
+
     let res = BaseResponse {
         error: false,
         message: "Logout Successfully".to_string(),

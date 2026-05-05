@@ -14,7 +14,10 @@ use axum::{Extension, Json};
 use gradient_core::ci::{decrypt_webhook_secret, encrypt_webhook_secret, validate_webhook_url};
 use gradient_core::types::*;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter,
+    QueryOrder, QuerySelect,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -201,6 +204,66 @@ pub async fn delete_webhook(
     webhook.into_active_model().delete(&state.web_db).await?;
 
     Ok(ok_json(true))
+}
+
+#[derive(Serialize, Debug)]
+pub struct WebhookDeliveryResponse {
+    pub id: String,
+    pub event: String,
+    pub success: bool,
+    pub response_status: Option<i32>,
+    pub error_message: Option<String>,
+    pub duration_ms: i32,
+    pub delivered_at: String,
+}
+
+/// `GET /webhook/{organization}/{webhook}/deliveries` — paginated history of
+/// past delivery attempts for a webhook.
+pub async fn get_webhook_deliveries(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path((organization, webhook_id)): Path<(String, WebhookId)>,
+    axum::extract::Query(params): axum::extract::Query<PaginationParams>,
+) -> WebResult<Json<BaseResponse<Paginated<Vec<WebhookDeliveryResponse>>>>> {
+    let organization = load_org(&state, Caller::User(&user), organization, webhook_org_access()).await?;
+    let webhook = load_webhook_in_org(&state, organization.id, webhook_id).await?;
+
+    let page = params.page();
+    let per_page = params.per_page();
+    let offset = (page - 1) * per_page;
+
+    let total = EWebhookDelivery::find()
+        .filter(CWebhookDelivery::WebhookId.eq(webhook.id))
+        .count(&state.web_db)
+        .await?;
+
+    let rows = EWebhookDelivery::find()
+        .filter(CWebhookDelivery::WebhookId.eq(webhook.id))
+        .order_by_desc(CWebhookDelivery::DeliveredAt)
+        .limit(per_page)
+        .offset(offset)
+        .all(&state.web_db)
+        .await?;
+
+    let items: Vec<WebhookDeliveryResponse> = rows
+        .into_iter()
+        .map(|r| WebhookDeliveryResponse {
+            id: r.id.to_string(),
+            event: r.event,
+            success: r.success,
+            response_status: r.response_status,
+            error_message: r.error_message,
+            duration_ms: r.duration_ms,
+            delivered_at: r.delivered_at.and_utc().to_rfc3339(),
+        })
+        .collect();
+
+    Ok(ok_json(Paginated {
+        items,
+        total,
+        page,
+        per_page,
+    }))
 }
 
 /// `POST /webhook/{organization}/{webhook}/test` — send a test event.

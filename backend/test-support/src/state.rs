@@ -11,7 +11,7 @@ use crate::log_storage::NoopLogStorage;
 use gradient_core::ci::WebhookClient;
 use gradient_core::storage::EmailSender;
 use gradient_core::storage::NarStore;
-use gradient_core::types::{RuntimeConfig, ServerState, WebDb, WorkerDb};
+use gradient_core::types::{RuntimeConfig, SecretString, ServerState, WebDb, WorkerDb};
 use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase};
 use std::sync::Arc;
 
@@ -36,6 +36,7 @@ pub fn test_state(db: DatabaseConnection) -> Arc<ServerState> {
         pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         http: gradient_core::http::build_client().expect("build test HTTP client"),
         shutdown: gradient_core::shutdown::Shutdown::new(),
+        jwt_secret: SecretString::new("test-jwt-secret".to_string()),
     })
 }
 
@@ -61,6 +62,7 @@ pub fn test_state_recorded(
         pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         http: gradient_core::http::build_client().expect("build test HTTP client"),
         shutdown: gradient_core::shutdown::Shutdown::new(),
+        jwt_secret: SecretString::new("test-jwt-secret".to_string()),
     });
     (state, recorder)
 }

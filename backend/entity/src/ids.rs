@@ -110,6 +110,9 @@ id_newtype!(ProjectId);
 id_newtype!(RoleId);
 id_newtype!(UserId);
 id_newtype!(WebhookId);
+id_newtype!(WebhookDeliveryId);
+id_newtype!(SessionId);
+id_newtype!(AuditLogId);
 id_newtype!(WorkerRegistrationId);
 
 #[cfg(test)]

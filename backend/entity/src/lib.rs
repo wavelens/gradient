@@ -7,6 +7,7 @@
 pub mod ids;
 
 pub mod api;
+pub mod audit_log;
 pub mod build;
 pub mod build_product;
 pub mod cache;
@@ -34,6 +35,8 @@ pub mod project;
 pub mod project_integration;
 pub mod role;
 pub mod server;
+pub mod session;
 pub mod user;
 pub mod webhook;
+pub mod webhook_delivery;
 pub mod worker_registration;

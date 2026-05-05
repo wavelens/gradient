@@ -444,6 +444,7 @@ mod tests {
             pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             http: gradient_core::http::build_client().expect("http client"),
             shutdown: gradient_core::shutdown::Shutdown::new(),
+            jwt_secret: gradient_core::types::SecretString::new("test-jwt-secret".to_string()),
         })
     }
 

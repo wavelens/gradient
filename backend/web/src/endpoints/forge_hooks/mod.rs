@@ -59,7 +59,13 @@ pub async fn github_app_webhook(
             "github app integration not configured",
         ));
     };
-    let secret = load_secret(&github_app.webhook_secret_file);
+    let secret = match load_secret(&github_app.webhook_secret_file) {
+        Ok(s) => s,
+        Err(e) => {
+            warn!("Failed to load GitHub webhook secret: {}", e);
+            return Err(WebError::internal("webhook secret unavailable"));
+        }
+    };
 
     let sig_header = headers
         .get("X-Hub-Signature-256")

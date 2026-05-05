@@ -216,56 +216,49 @@ pub fn check_index_name(s: &str) -> Result<(), InputError> {
     Ok(())
 }
 
-pub fn load_secret(f: &str) -> super::secret::SecretString {
-    let s = std::fs::read_to_string(f).unwrap_or_else(|e| {
-        eprintln!("Failed to read secret file '{}': {}", f, e);
-        std::process::exit(1);
-    });
+/// Read a secret from `f`, returning an error rather than terminating the
+/// process on failure. Callers in startup paths should propagate the error to
+/// `init_state` (which exits); per-request callers should map it to a 5xx so a
+/// transient filesystem hiccup never tears down the running server.
+pub fn load_secret(f: &str) -> anyhow::Result<super::secret::SecretString> {
+    let s = std::fs::read_to_string(f)
+        .map_err(|e| anyhow::anyhow!("Failed to read secret file '{}': {}", f, e))?;
 
     let cleaned = s.trim().replace(char::from(25), "");
 
     if cleaned.is_empty() {
-        eprintln!("Secret file '{}' is empty or contains only whitespace", f);
-        std::process::exit(1);
+        anyhow::bail!("Secret file '{}' is empty or contains only whitespace", f);
     }
 
-    super::secret::SecretString::new(cleaned)
+    Ok(super::secret::SecretString::new(cleaned))
 }
 
 /// Loads a secret from a file as bytes.
 /// Supports both plain text passwords and base64-encoded secrets for backwards compatibility.
 /// - First attempts to use the content as-is (plain text password)
 /// - Falls back to base64 decoding if the plain text is too short (< 16 bytes)
-pub fn load_secret_bytes(f: &str) -> super::secret::SecretBytes {
+pub fn load_secret_bytes(f: &str) -> anyhow::Result<super::secret::SecretBytes> {
     use base64::{Engine, engine::general_purpose};
 
-    let secret_str = load_secret(f);
+    let secret_str = load_secret(f)?;
     let as_bytes = secret_str.expose().as_bytes();
 
-    // If the plain text is long enough (>=16 bytes), use it directly
     if as_bytes.len() >= 16 {
-        return super::secret::SecretBytes::new(as_bytes.to_vec());
+        return Ok(super::secret::SecretBytes::new(as_bytes.to_vec()));
     }
 
-    // Otherwise, try to decode as base64 (for backwards compatibility)
     match general_purpose::STANDARD.decode(secret_str.expose()) {
-        Ok(decoded) if decoded.len() >= 16 => super::secret::SecretBytes::new(decoded),
-        Ok(decoded) => {
-            eprintln!(
-                "Secret file '{}' decoded from base64 but is too short ({} bytes). Secrets should be at least 16 bytes.",
-                f,
-                decoded.len()
-            );
-            std::process::exit(1);
-        }
-        Err(_) => {
-            eprintln!(
-                "Secret file '{}' is too short ({} bytes). Secrets should be at least 16 bytes as plain text, or base64-encoded.",
-                f,
-                as_bytes.len()
-            );
-            std::process::exit(1);
-        }
+        Ok(decoded) if decoded.len() >= 16 => Ok(super::secret::SecretBytes::new(decoded)),
+        Ok(decoded) => anyhow::bail!(
+            "Secret file '{}' decoded from base64 but is too short ({} bytes). Secrets should be at least 16 bytes.",
+            f,
+            decoded.len()
+        ),
+        Err(_) => anyhow::bail!(
+            "Secret file '{}' is too short ({} bytes). Secrets should be at least 16 bytes as plain text, or base64-encoded.",
+            f,
+            as_bytes.len()
+        ),
     }
 }
 

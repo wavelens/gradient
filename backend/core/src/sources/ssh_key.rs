@@ -14,7 +14,8 @@ use ssh_key::{
     private::KeypairData, public::Ed25519PublicKey,
 };
 pub fn generate_ssh_key(secret_file: &str) -> Result<(String, String), SourceError> {
-    let secret = crate::types::input::load_secret_bytes(secret_file);
+    let secret = crate::types::input::load_secret_bytes(secret_file)
+        .map_err(|e| SourceError::FileRead { reason: e.to_string() })?;
 
     let keypair = KeyPair::generate();
 
@@ -70,7 +71,8 @@ pub fn decrypt_ssh_private_key(
     organization: MOrganization,
     serve_url: &str,
 ) -> Result<(String, String), SourceError> {
-    let secret = crate::types::input::load_secret_bytes(secret_file);
+    let secret = crate::types::input::load_secret_bytes(secret_file)
+        .map_err(|e| SourceError::FileRead { reason: e.to_string() })?;
 
     let encrypted_private_key = general_purpose::STANDARD
         .decode(organization.clone().private_key)

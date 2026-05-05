@@ -258,6 +258,7 @@ fn listing_returns_products_from_db() {
             pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             http: gradient_core::http::build_client().expect("http client"),
             shutdown: gradient_core::shutdown::Shutdown::new(),
+            jwt_secret: gradient_core::types::SecretString::new("test-jwt-secret".to_string()),
         });
 
         let router = create_router(state);
@@ -331,6 +332,7 @@ fn download_streams_file_from_nar() {
             pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             http: gradient_core::http::build_client().expect("http client"),
             shutdown: gradient_core::shutdown::Shutdown::new(),
+            jwt_secret: gradient_core::types::SecretString::new("test-jwt-secret".to_string()),
         });
 
         let router = create_router(state);

@@ -133,11 +133,10 @@ pub async fn oidc_login_create(
         state: csrf_state.clone(),
         nonce: nonce.clone(),
     };
-    let secret = load_secret(&state.config.secrets.jwt_secret_file);
     let cookie_value = encode(
         &Header::default(),
         &claims,
-        &EncodingKey::from_secret(secret.expose().as_bytes()),
+        &EncodingKey::from_secret(state.jwt_secret.expose().as_bytes()),
     )
     .context("Failed to sign OIDC CSRF cookie")?;
 
@@ -170,10 +169,9 @@ pub async fn oidc_login_verify(
         .oidc.clone()
         .context("OIDC is not enabled or not fully configured")?;
 
-    let secret = load_secret(&state.config.secrets.jwt_secret_file);
     let csrf_data = decode::<CsrfClaims>(
         &csrf_cookie,
-        &DecodingKey::from_secret(secret.expose().as_bytes()),
+        &DecodingKey::from_secret(state.jwt_secret.expose().as_bytes()),
         &Validation::new(Algorithm::HS256),
     )
     .context("Invalid or expired OIDC CSRF cookie")?;
@@ -207,7 +205,8 @@ pub async fn oidc_login_verify(
     let http_client = &state.http;
 
     let redirect_uri = format!("{}/api/v1/auth/oidc/callback", state.config.server.serve_url);
-    let client_secret = load_secret(&oidc.client_secret_file);
+    let client_secret = load_secret(&oidc.client_secret_file)
+        .context("Failed to read OIDC client secret")?;
 
     let token_response = http_client
         .post(token_endpoint)

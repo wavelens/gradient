@@ -7,7 +7,6 @@
 use axum::extract::State;
 use axum::http::StatusCode;
 use chrono::{Duration, Utc};
-use gradient_core::types::input::load_secret;
 use gradient_core::types::*;
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, TokenData, Validation, decode, encode};
 use rand::distr::{Alphanumeric, SampleString};
@@ -16,11 +15,16 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 
+/// Session-backed JWT claims. `jti` is the `SessionId` of a row in the
+/// `session` table; auth lookups validate the session is non-revoked and
+/// non-expired before trusting the token.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Cliams {
     pub exp: usize,
     pub iat: usize,
     pub id: UserId,
+    /// Session id — must match a non-revoked, non-expired row in `session`.
+    pub jti: SessionId,
 }
 
 /// Claims for short-lived (1 h) per-build download tokens.
@@ -59,77 +63,130 @@ pub fn extract_bearer_or_cookie(headers: &axum::http::HeaderMap) -> Option<Strin
         .find_map(|part| part.strip_prefix("jwt_token=").map(str::to_owned))
 }
 
-pub fn encode_jwt(
+/// Persist a new `session` row for `user_id` and encode a JWT carrying its id
+/// as the `jti` claim. Logout (or any explicit revoke) invalidates the row,
+/// which the auth middleware checks on every request.
+pub async fn create_session_and_token(
     state: State<Arc<ServerState>>,
-    id: UserId,
+    user_id: UserId,
     remember_me: bool,
-) -> Result<String, StatusCode> {
+    user_agent: Option<String>,
+    ip: Option<String>,
+) -> Result<(SessionId, String), StatusCode> {
     let now = Utc::now();
-    let expire: chrono::TimeDelta = if remember_me {
-        Duration::days(30) // 30 days for remember me
+    let lifetime = if remember_me {
+        Duration::days(30)
     } else {
-        Duration::hours(24) // 24 hours for regular login
+        Duration::hours(24)
     };
-    let exp: usize = (now + expire).timestamp() as usize;
-    let iat: usize = now.timestamp() as usize;
+    let expires_at = now + lifetime;
 
-    let claim = Cliams { iat, exp, id };
-    let secret = load_secret(&state.config.secrets.jwt_secret_file);
+    let session_id = SessionId::now_v7();
+    let session = ASession {
+        id: Set(session_id),
+        user_id: Set(user_id),
+        created_at: Set(now.naive_utc()),
+        expires_at: Set(expires_at.naive_utc()),
+        last_used_at: Set(now.naive_utc()),
+        revoked_at: Set(None),
+        user_agent: Set(user_agent),
+        ip: Set(ip),
+        remember_me: Set(remember_me),
+    };
+    session
+        .insert(&state.web_db)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    encode(
+    let claim = Cliams {
+        iat: now.timestamp() as usize,
+        exp: expires_at.timestamp() as usize,
+        id: user_id,
+        jti: session_id,
+    };
+    let token = encode(
         &Header::default(),
         &claim,
-        &EncodingKey::from_secret(secret.expose().as_bytes()),
+        &EncodingKey::from_secret(state.jwt_secret.expose().as_bytes()),
     )
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok((session_id, token))
 }
 
+/// Decode a JWT or API-key token. For session JWTs, validates the matching
+/// session row exists, is not revoked, and is not expired.
 pub async fn decode_jwt(
     state: State<Arc<ServerState>>,
     jwt: String,
 ) -> Result<TokenData<Cliams>, StatusCode> {
-    let result = if jwt.starts_with("GRAD") {
-        let raw = jwt.strip_prefix("GRAD").ok_or(StatusCode::UNAUTHORIZED)?;
-        let key_hash = hash_api_key(raw);
-        let api_key = EApi::find()
-            .filter(CApi::Key.eq(key_hash))
-            .one(&state.web_db)
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if let Some(raw) = jwt.strip_prefix("GRAD") {
+        return decode_api_key(state, raw).await;
+    }
 
-        let api_key = match api_key {
-            Some(api_key) => api_key,
-            None => return Err(StatusCode::UNAUTHORIZED),
-        };
+    let token_data = decode::<Cliams>(
+        &jwt,
+        &DecodingKey::from_secret(state.jwt_secret.expose().as_bytes()),
+        &Validation::default(),
+    )
+    .map_err(|_| StatusCode::UNAUTHORIZED)?;
 
-        let mut aapi_key: AApi = api_key.clone().into();
-
-        aapi_key.last_used_at = Set(gradient_core::types::now());
-        aapi_key
-            .save(&state.web_db)
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-        TokenData {
-            claims: Cliams {
-                exp: 0,
-                iat: api_key.created_at.and_utc().timestamp() as usize,
-                id: api_key.owned_by,
-            },
-            header: Default::default(),
-        }
-    } else {
-        let secret = load_secret(&state.config.secrets.jwt_secret_file);
-
-        decode(
-            &jwt,
-            &DecodingKey::from_secret(secret.expose().as_bytes()),
-            &Validation::default(),
-        )
+    let session = ESession::find_by_id(token_data.claims.jti)
+        .one(&state.web_db)
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-    };
+        .ok_or(StatusCode::UNAUTHORIZED)?;
 
-    Ok(result)
+    let now = gradient_core::types::now();
+    if session.revoked_at.is_some() || session.expires_at < now || session.user_id != token_data.claims.id {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    let mut active: ASession = session.into();
+    active.last_used_at = Set(now);
+    let _ = active.update(&state.web_db).await;
+
+    Ok(token_data)
+}
+
+async fn decode_api_key(
+    state: State<Arc<ServerState>>,
+    raw: &str,
+) -> Result<TokenData<Cliams>, StatusCode> {
+    let key_hash = hash_api_key(raw);
+    let api_key = EApi::find()
+        .filter(CApi::Key.eq(key_hash))
+        .one(&state.web_db)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let now = gradient_core::types::now();
+    if api_key.revoked_at.is_some() {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    if let Some(exp) = api_key.expires_at
+        && exp < now
+    {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    let mut aapi_key: AApi = api_key.clone().into();
+    aapi_key.last_used_at = Set(now);
+    aapi_key
+        .save(&state.web_db)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(TokenData {
+        claims: Cliams {
+            exp: 0,
+            iat: api_key.created_at.and_utc().timestamp() as usize,
+            id: api_key.owned_by,
+            jti: SessionId::nil(),
+        },
+        header: Default::default(),
+    })
 }
 
 pub fn encode_download_token(
@@ -140,11 +197,10 @@ pub fn encode_download_token(
     let exp = (now + Duration::hours(1)).timestamp() as usize;
     let iat = now.timestamp() as usize;
     let claim = DownloadClaims { iat, exp, build_id };
-    let secret = load_secret(&state.config.secrets.jwt_secret_file);
     encode(
         &Header::default(),
         &claim,
-        &EncodingKey::from_secret(secret.expose().as_bytes()),
+        &EncodingKey::from_secret(state.jwt_secret.expose().as_bytes()),
     )
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
@@ -153,10 +209,9 @@ pub async fn decode_download_token(
     state: State<Arc<ServerState>>,
     token: String,
 ) -> Result<DownloadClaims, StatusCode> {
-    let secret = load_secret(&state.config.secrets.jwt_secret_file);
     decode::<DownloadClaims>(
         &token,
-        &DecodingKey::from_secret(secret.expose().as_bytes()),
+        &DecodingKey::from_secret(state.jwt_secret.expose().as_bytes()),
         &Validation::default(),
     )
     .map(|d| d.claims)
@@ -201,8 +256,6 @@ mod tests {
 
     #[test]
     fn extract_bearer_scheme_is_case_sensitive() {
-        // Lowercase "bearer" is not the canonical scheme used by our clients;
-        // matching it would mask mis-configured callers.
         let h = headers_with(header::AUTHORIZATION, "bearer abc");
         assert_eq!(extract_bearer_or_cookie(&h), None);
     }

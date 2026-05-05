@@ -83,6 +83,10 @@ mod m20260504_000000_cached_path_signature_to_bytea;
 mod m20260504_000001_add_via_to_build;
 mod m20260504_000002_add_external_cached_to_build;
 mod m20260505_000000_index_build_dispatch;
+mod m20260505_000001_api_key_lifecycle;
+mod m20260505_000002_create_table_session;
+mod m20260505_000003_create_table_audit_log;
+mod m20260505_000004_create_table_webhook_delivery;
 
 pub struct Migrator;
 
@@ -167,6 +171,10 @@ impl MigratorTrait for Migrator {
             Box::new(m20260504_000001_add_via_to_build::Migration),
             Box::new(m20260504_000002_add_external_cached_to_build::Migration),
             Box::new(m20260505_000000_index_build_dispatch::Migration),
+            Box::new(m20260505_000001_api_key_lifecycle::Migration),
+            Box::new(m20260505_000002_create_table_session::Migration),
+            Box::new(m20260505_000003_create_table_audit_log::Migration),
+            Box::new(m20260505_000004_create_table_webhook_delivery::Migration),
         ]
     }
 }
