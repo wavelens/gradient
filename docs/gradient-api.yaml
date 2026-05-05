@@ -514,8 +514,18 @@ paths:
     delete:
       tags: [user]
       summary: Delete current user
-      description: Permanently deletes the authenticated user and all associated data.
+      description: |-
+        Permanently deletes the authenticated user and all associated data.
+        Requires re-authentication: password-auth users must supply their
+        current password in `password`; OIDC-auth users must echo their
+        username in `confirm_username`.
       operationId: deleteUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteUserRequest'
       responses:
         '200':
           description: User deleted
@@ -525,12 +535,20 @@ paths:
                 $ref: '#/components/schemas/StringResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Password / username confirmation missing or invalid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
 
   /user/keys:
     get:
       tags: [user]
       summary: List API keys
-      description: Returns all API keys belonging to the authenticated user.
+      description: |-
+        Returns all API keys belonging to the authenticated user, including
+        creation, last-used, expiry, and revocation timestamps.
       operationId: getUserKeys
       responses:
         '200':
@@ -543,7 +561,9 @@ paths:
                   - type: object
                     properties:
                       message:
-                        $ref: '#/components/schemas/ListResponse'
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ApiKeyInfo'
         '401':
           $ref: '#/components/responses/Unauthorized'
     post:
@@ -552,13 +572,14 @@ paths:
       description: |-
         Creates a new API key. The full key (prefixed with `GRAD`) is returned once —
         it cannot be retrieved again. Use it as `Authorization: Bearer GRAD<key>`.
+        Pass `expires_in_days` to make the key auto-expire; omit for no expiry.
       operationId: createUserKey
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ApiKeyRequest'
+              $ref: '#/components/schemas/CreateApiKeyRequest'
       responses:
         '200':
           description: New API key
@@ -597,6 +618,129 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+
+  /user/keys/{api_id}/revoke:
+    post:
+      tags: [user]
+      summary: Revoke an API key
+      description: |-
+        Marks the key as revoked without deleting the row, so audit trails are
+        preserved. A revoked key fails authentication immediately.
+      operationId: revokeUserKey
+      parameters:
+        - name: api_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Key revoked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /user/sessions:
+    get:
+      tags: [user]
+      summary: List active sessions
+      description: |-
+        Returns the caller's non-revoked, non-expired sessions. Each entry
+        carries the user-agent and IP captured at login plus a `current` flag
+        identifying the session backing this request.
+      operationId: getUserSessions
+      responses:
+        '200':
+          description: Active sessions
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/SessionInfo'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /user/sessions/{session_id}:
+    delete:
+      tags: [user]
+      summary: Revoke a session
+      description: |-
+        Revokes a single session, immediately invalidating its JWT. Useful for
+        signing out a lost device without changing the password.
+      operationId: deleteUserSession
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Session revoked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /user/audit-log:
+    get:
+      tags: [user]
+      summary: Audit log for the current user
+      description: |-
+        Paginated list of audit events recorded for the caller (login,
+        logout, API-key lifecycle, session revocation, account deletion).
+      operationId: getUserAuditLog
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: per_page
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        '200':
+          description: Audit entries
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: object
+                        properties:
+                          items:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/AuditLogEntry'
+                          total:
+                            type: integer
+                          page:
+                            type: integer
+                          per_page:
+                            type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
   /user/settings:
     get:
@@ -3267,6 +3411,59 @@ paths:
         '500':
           description: Webhook delivery failed
 
+  /webhook/{organization}/{webhook}/deliveries:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationSlug'
+      - name: webhook
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Webhook UUID
+    get:
+      tags: [webhooks]
+      summary: Webhook delivery history
+      description: |-
+        Paginated list of past delivery attempts for this webhook. Each entry
+        records the response status (or error), latency, and event payload.
+      operationId: getWebhookDeliveries
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: per_page
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        '200':
+          description: Delivery history
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: object
+                        properties:
+                          items:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/WebhookDeliveryEntry'
+                          total: { type: integer }
+                          page: { type: integer }
+                          per_page: { type: integer }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   # ── Organization integrations ────────────────────────────────────────────────
 
   /orgs/{organization}/integrations:
@@ -4043,6 +4240,106 @@ components:
           type: string
           description: Human-readable label for the API key
           example: ci-runner
+
+    CreateApiKeyRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          description: Human-readable label for the API key
+          example: ci-runner
+        expires_in_days:
+          type: integer
+          minimum: 1
+          nullable: true
+          description: |-
+            Optional lifetime in days. Omit (or `null`) for a key that never
+            auto-expires. The server stamps `expires_at = now + N days`.
+
+    ApiKeyInfo:
+      type: object
+      required: [id, name, managed, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        managed: { type: boolean }
+        created_at: { type: string, format: date-time }
+        last_used_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Last time this key successfully authenticated, or `null` if never used.
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        revoked_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    SessionInfo:
+      type: object
+      required: [id, created_at, last_used_at, expires_at, remember_me, current]
+      properties:
+        id: { type: string, format: uuid }
+        user_agent: { type: string, nullable: true }
+        ip: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        last_used_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        remember_me: { type: boolean }
+        current:
+          type: boolean
+          description: True for the session backing the current request.
+
+    AuditLogEntry:
+      type: object
+      required: [id, event, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        event:
+          type: string
+          description: |-
+            One of: `login.success`, `login.failure`, `logout`, `register`,
+            `user.delete`, `api_key.create`, `api_key.revoke`,
+            `api_key.delete`, `session.revoke`.
+        ip: { type: string, nullable: true }
+        user_agent: { type: string, nullable: true }
+        metadata:
+          type: object
+          nullable: true
+          additionalProperties: true
+        created_at: { type: string, format: date-time }
+
+    DeleteUserRequest:
+      type: object
+      properties:
+        password:
+          type: string
+          nullable: true
+          description: Required for password-auth users.
+        confirm_username:
+          type: string
+          nullable: true
+          description: Required for OIDC users — must equal the caller's own username.
+
+    WebhookDeliveryEntry:
+      type: object
+      required: [id, event, success, duration_ms, delivered_at]
+      properties:
+        id: { type: string, format: uuid }
+        event: { type: string }
+        success: { type: boolean }
+        response_status:
+          type: integer
+          nullable: true
+        error_message:
+          type: string
+          nullable: true
+        duration_ms: { type: integer }
+        delivered_at: { type: string, format: date-time }
 
     # ── Organizations ─────────────────────────────────────────────────────────
 
