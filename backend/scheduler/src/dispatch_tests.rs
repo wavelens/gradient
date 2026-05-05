@@ -31,7 +31,6 @@ use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use gradient_core::types::*;
 use sea_orm::{DatabaseBackend, MockDatabase};
-use uuid::Uuid;
 
 use crate::{Scheduler, dispatch};
 

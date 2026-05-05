@@ -27,8 +27,6 @@ use sea_orm::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use uuid::Uuid;
-use gradient_core::types::ids::*;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct MakeProjectRequest {

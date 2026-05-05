@@ -15,7 +15,6 @@ use entity::evaluation::EvaluationStatus;
 use entity::evaluation_message::MessageLevel;
 use sea_orm::DatabaseConnection;
 use sea_orm::{ActiveValue::Set, ColumnTrait, Condition, EntityTrait, QueryFilter};
-use uuid::Uuid;
 
 use crate::types::*;
 

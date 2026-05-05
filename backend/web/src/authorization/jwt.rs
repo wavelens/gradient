@@ -15,7 +15,6 @@ use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, Quer
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
-use uuid::Uuid;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Cliams {

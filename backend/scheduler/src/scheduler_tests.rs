@@ -10,7 +10,6 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use uuid::Uuid;
 use gradient_core::types::ids::*;
 
 use gradient_core::types::proto::{

@@ -249,14 +249,16 @@ fn proto_version_is_nonzero() {
 #[test]
 fn max_proto_message_size_is_sane() {
     use crate::handler::{MAX_PROTO_MESSAGE_SIZE, NAR_PUSH_CHUNK_SIZE};
-    assert!(
-        MAX_PROTO_MESSAGE_SIZE >= NAR_PUSH_CHUNK_SIZE * 2,
-        "must fit a NarPush chunk plus framing/metadata"
-    );
-    assert!(
-        MAX_PROTO_MESSAGE_SIZE <= 16 * 1024 * 1024,
-        "guard against accidental relaxation back toward defaults"
-    );
+    const _: () = {
+        assert!(
+            MAX_PROTO_MESSAGE_SIZE >= NAR_PUSH_CHUNK_SIZE * 2,
+            "must fit a NarPush chunk plus framing/metadata",
+        );
+        assert!(
+            MAX_PROTO_MESSAGE_SIZE <= 16 * 1024 * 1024,
+            "guard against accidental relaxation back toward defaults",
+        );
+    };
 }
 
 /// Regression for #110: the handshake deadline must be long enough to cover

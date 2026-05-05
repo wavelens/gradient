@@ -40,6 +40,11 @@ async fn ws_upgrade(
     ws.max_message_size(MAX_PROTO_MESSAGE_SIZE)
         .max_frame_size(MAX_PROTO_MESSAGE_SIZE)
         .on_upgrade(move |sock| {
-            session::handle_socket(socket::ProtoSocket::Axum(sock), state, scheduler, false)
+            session::handle_socket(
+                socket::ProtoSocket::Axum(Box::new(sock)),
+                state,
+                scheduler,
+                false,
+            )
         })
 }

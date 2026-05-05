@@ -25,7 +25,6 @@ pub use self::metrics::{
     EntryPointMetricsQuery, get_entry_point_metrics, get_project_metrics,
 };
 
-use uuid::Uuid;
 use gradient_core::types::ids::*;
 
 // ── Shared types ─────────────────────────────────────────────────────────────

@@ -26,8 +26,6 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
-use uuid::Uuid;
-use gradient_core::types::ids::*;
 
 #[derive(Deserialize, Default)]
 pub struct EvaluateRequest {

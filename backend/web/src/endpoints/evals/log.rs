@@ -15,7 +15,6 @@ use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::error;
-use uuid::Uuid;
 
 use super::EvalAccessContext;
 use super::types::drv_display_name;

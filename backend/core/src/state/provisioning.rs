@@ -20,7 +20,6 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, Qu
 use ssh_key::PrivateKey;
 use std::collections::HashMap;
 use std::fs;
-use uuid::Uuid;
 
 type DynError = Box<dyn std::error::Error>;
 

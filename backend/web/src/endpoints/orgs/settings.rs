@@ -17,8 +17,6 @@ use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use uuid::Uuid;
-use gradient_core::types::ids::*;
 
 #[derive(Deserialize)]
 pub struct SubscribeCacheRequest {

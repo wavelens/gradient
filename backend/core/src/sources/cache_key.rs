@@ -289,7 +289,6 @@ mod tests {
     use super::*;
     use chrono::NaiveDateTime;
     use std::io::Write;
-    use uuid::Uuid;
 
     fn temp_secret_file() -> (tempfile::NamedTempFile, String) {
         let mut f = tempfile::NamedTempFile::new().unwrap();

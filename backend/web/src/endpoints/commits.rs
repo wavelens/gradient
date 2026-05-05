@@ -11,7 +11,6 @@ use axum::{Extension, Json};
 use gradient_core::types::*;
 use sea_orm::EntityTrait;
 use std::sync::Arc;
-use uuid::Uuid;
 
 pub async fn get_commit(
     state: State<Arc<ServerState>>,

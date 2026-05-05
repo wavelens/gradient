@@ -276,7 +276,7 @@ fn is_github_repository_url(url: &str) -> bool {
     };
 
     let host = host_and_rest
-        .split(|c| c == '/' || c == ':')
+        .split(['/', ':'])
         .next()
         .unwrap_or("");
     let host = host.rsplit('@').next().unwrap_or(host);

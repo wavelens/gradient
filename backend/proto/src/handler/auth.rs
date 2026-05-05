@@ -476,7 +476,7 @@ mod tests {
     use entity::organization::Model as OrgModel;
     use entity::organization_cache::{CacheSubscriptionMode, Model as OrgCacheModel};
     use sea_orm::{DatabaseBackend, MockDatabase};
-    use uuid::Uuid;
+    
 
     fn org_row(id: OrganizationId) -> OrgModel {
         OrgModel {

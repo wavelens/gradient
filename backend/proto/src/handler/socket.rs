@@ -66,9 +66,11 @@ const WRITER_QUEUE_DEPTH: usize = 16;
 /// reader + cloneable writer pair for the dispatch phase.
 pub(crate) enum ProtoSocket {
     /// Inbound: worker connected to the server's `/proto` endpoint.
-    Axum(WebSocket),
+    /// Boxed alongside `Tungstenite` so neither variant pads the other.
+    Axum(Box<WebSocket>),
     /// Outbound: server connected to a worker's listener.
-    Tungstenite(WebSocketStream<MaybeTlsStream<TcpStream>>),
+    /// Boxed so the TLS state (≈1.4 KB) doesn't pad every other variant.
+    Tungstenite(Box<WebSocketStream<MaybeTlsStream<TcpStream>>>),
 }
 
 impl ProtoSocket {
@@ -164,12 +166,12 @@ impl ProtoSocket {
         };
         match self {
             Self::Axum(ws) => {
-                let (sink, stream) = ws.split();
+                let (sink, stream) = (*ws).split();
                 tokio::spawn(axum_writer_task(rx, sink));
                 (ProtoReader::Axum(stream), writer)
             }
             Self::Tungstenite(ws) => {
-                let (sink, stream) = ws.split();
+                let (sink, stream) = (*ws).split();
                 tokio::spawn(tungstenite_writer_task(rx, sink));
                 (ProtoReader::Tungstenite(stream), writer)
             }

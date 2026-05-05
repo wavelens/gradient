@@ -18,7 +18,6 @@ use sea_orm::{
 };
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
-use uuid::Uuid;
 
 use crate::state_machine::{BuildStateMachine, EvalStateMachine};
 use crate::types::*;

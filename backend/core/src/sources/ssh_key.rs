@@ -112,7 +112,6 @@ pub fn format_public_key(organization: MOrganization, serve_url: &str) -> String
 mod tests {
     use super::*;
     use chrono::NaiveDateTime;
-    use uuid::Uuid;
 
     fn make_org(name: &str, public_key: &str) -> MOrganization {
         MOrganization {

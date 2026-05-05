@@ -31,9 +31,10 @@ pub struct Model {
     /// reporting, webhook routing, etc. all gate on this being `Some`.
     ///
     /// Populated by:
-    ///   - the `installation` webhook (org-name match against the GitHub login),
-    ///   - the state-driven provisioner (`StateOrganization.github_installation_id`),
-    ///   - direct DB writes during recovery.
+    /// - the `installation` webhook (org-name match against the GitHub login),
+    /// - the state-driven provisioner (`StateOrganization.github_installation_id`),
+    /// - direct DB writes during recovery.
+    ///
     /// Cleared automatically when GitHub sends `installation.deleted`.
     pub github_installation_id: Option<i64>,
 }

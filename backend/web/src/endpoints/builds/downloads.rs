@@ -16,8 +16,6 @@ use gradient_core::types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use uuid::Uuid;
-use gradient_core::types::ids::*;
 
 use super::BuildAccessContext;
 use crate::endpoints::content_type_for_filename;

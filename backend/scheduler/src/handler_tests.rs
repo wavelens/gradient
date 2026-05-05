@@ -33,7 +33,6 @@ use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use gradient_core::types::*;
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
-use uuid::Uuid;
 
 use crate::jobs::{PendingBuildJob, PendingEvalJob};
 use crate::{build as build_handler, eval as eval_handler};

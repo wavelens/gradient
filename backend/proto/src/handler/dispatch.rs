@@ -544,8 +544,8 @@ impl<'a> DispatchContext<'a> {
         nar_buffers: &mut NarBuffers,
     ) {
         debug!(peer_id = %self.peer_id, %job_id, %store_path, offset, is_final, bytes = data.len(), "NarPush");
-        if !data.is_empty() {
-            if nar_buffers.append(&store_path, &data).is_err() {
+        if !data.is_empty()
+            && nar_buffers.append(&store_path, &data).is_err() {
                 let reason = format!(
                     "session NAR upload buffer would exceed {} bytes (current {} + {} = {})",
                     nar_buffers.max_bytes(),
@@ -555,9 +555,7 @@ impl<'a> DispatchContext<'a> {
                 );
                 warn!(peer_id = %self.peer_id, %job_id, %store_path, "{reason}");
                 self.abort_job(&job_id, reason).await;
-                return;
             }
-        }
         // The buffer is held until `on_nar_uploaded` arrives; that handler
         // commits it to `nar_storage` and records the metadata atomically so
         // we never end up with a `cached_path` row claiming bytes that
@@ -758,7 +756,7 @@ mod nar_buffers_tests {
     fn append_overflow_returns_err_and_does_not_mutate() {
         let mut nb = NarBuffers::new(1024);
         nb.append("/nix/store/a", &vec![0u8; 1000]).unwrap();
-        let res = nb.append("/nix/store/a", &vec![0u8; 100]);
+        let res = nb.append("/nix/store/a", &[0u8; 100]);
         assert!(res.is_err(), "must reject pushes that exceed the budget");
         assert_eq!(
             nb.total_bytes(),

@@ -28,7 +28,6 @@ use crate::error::{WebError, WebResult};
 use gradient_core::types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
-use uuid::Uuid;
 
 /// Resolved access context for a build.
 ///

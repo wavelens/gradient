@@ -179,8 +179,8 @@ impl WebhookClient for ReqwestWebhookClient {
         // resolved IP is in a disallowed range. We still hand the URL to
         // reqwest, which performs its own resolution — so this is a guard,
         // not a substitute for proper SSRF-aware connection wiring.
-        if let Some(host) = parsed.host_str() {
-            if matches!(parsed.host(), Some(url::Host::Domain(_))) {
+        if let Some(host) = parsed.host_str()
+            && matches!(parsed.host(), Some(url::Host::Domain(_))) {
                 let port = parsed.port_or_known_default().unwrap_or(0);
                 let lookup = tokio::net::lookup_host((host, port)).await?;
                 for sa in lookup {
@@ -193,7 +193,6 @@ impl WebhookClient for ReqwestWebhookClient {
                     }
                 }
             }
-        }
 
         let resp = self
             .client

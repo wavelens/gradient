@@ -16,7 +16,6 @@
 //! change.
 
 use gradient_core::types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID};
-use uuid::Uuid;
 use gradient_core::types::ids::*;
 
 /// A capability that a role may grant within an organization.

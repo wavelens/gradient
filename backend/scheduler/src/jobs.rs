@@ -394,7 +394,7 @@ mod tests {
     use super::*;
     use crate::policy::Policy;
     use gradient_core::types::proto::{BuildJob, BuildTask, FlakeJob, FlakeSource, FlakeTask};
-    use uuid::Uuid;
+    
 
     fn eval_job(peer: OrganizationId) -> PendingJob {
         PendingJob::Eval(PendingEvalJob {

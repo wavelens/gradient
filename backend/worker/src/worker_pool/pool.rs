@@ -132,11 +132,10 @@ impl EvalWorker {
                         if let Ok(target) = std::fs::read_link(format!("/proc/{p}/fd/1")) {
                             diag.push_str(&format!("; /proc/{p}/fd/1 -> {}", target.display()));
                         }
-                        if let Ok(state) = std::fs::read_to_string(format!("/proc/{p}/status")) {
-                            if let Some(line) = state.lines().find(|l| l.starts_with("State:")) {
+                        if let Ok(state) = std::fs::read_to_string(format!("/proc/{p}/status"))
+                            && let Some(line) = state.lines().find(|l| l.starts_with("State:")) {
                                 diag.push_str(&format!("; {line}"));
                             }
-                        }
                         if let Ok(wchan) = std::fs::read_to_string(format!("/proc/{p}/wchan")) {
                             diag.push_str(&format!("; wchan={}", wchan.trim()));
                         }

@@ -22,7 +22,6 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use subtle::ConstantTimeEq;
 use url::Url;
-use uuid::Uuid;
 
 use super::middleware::update_last_login;
 

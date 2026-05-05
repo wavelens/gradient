@@ -17,7 +17,6 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder,
 };
 use thiserror::Error;
-use uuid::Uuid;
 
 #[derive(Debug, Error)]
 pub enum TriggerError {
@@ -235,6 +234,7 @@ mod tests {
     use chrono::NaiveDateTime;
     use entity::evaluation;
     use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+    use uuid::Uuid;
 
     fn make_project() -> MProject {
         MProject {

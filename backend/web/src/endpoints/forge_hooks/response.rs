@@ -7,7 +7,6 @@
 //! Response body types for inbound forge webhooks.
 
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 use gradient_core::types::ids::*;
 
 /// Body returned by both webhook endpoints, wrapped in the standard

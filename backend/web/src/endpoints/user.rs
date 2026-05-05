@@ -18,7 +18,6 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, QueryFilter
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use uuid::Uuid;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct UserInfoResponse {

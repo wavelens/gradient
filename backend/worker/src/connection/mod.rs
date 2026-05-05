@@ -22,9 +22,11 @@ use tracing::{instrument, trace, warn};
 /// Internal enum to abstract over client-initiated and server-accepted sockets.
 enum ProtoStream {
     /// Outbound: worker connected to a server URL.
-    Client(WebSocketStream<MaybeTlsStream<TcpStream>>),
-    /// Inbound: server connected to our listener.
-    Accepted(WebSocketStream<TcpStream>),
+    /// Boxed so the TLS state (≈1.4 KB) doesn't pad the `Accepted` variant.
+    Client(Box<WebSocketStream<MaybeTlsStream<TcpStream>>>),
+    /// Inbound: server connected to our listener. Boxed for symmetry so the
+    /// enum stays a single pointer regardless of which transport is in play.
+    Accepted(Box<WebSocketStream<TcpStream>>),
 }
 
 /// A live WebSocket connection to the server.
@@ -46,7 +48,7 @@ impl ProtoConnection {
             .with_context(|| format!("failed to connect to {url}"))?;
         Ok(Self {
             server_version: 0,
-            socket: ProtoStream::Client(socket),
+            socket: ProtoStream::Client(Box::new(socket)),
         })
     }
 
@@ -54,7 +56,7 @@ impl ProtoConnection {
     pub fn from_accepted(socket: WebSocketStream<TcpStream>) -> Self {
         Self {
             server_version: 0,
-            socket: ProtoStream::Accepted(socket),
+            socket: ProtoStream::Accepted(Box::new(socket)),
         }
     }
 
@@ -128,11 +130,11 @@ impl ProtoConnection {
 
         let (sink, stream): (BoxSink, BoxStream) = match self.socket {
             ProtoStream::Client(ws) => {
-                let (s, r) = ws.split();
+                let (s, r) = (*ws).split();
                 (Box::pin(s), Box::pin(r))
             }
             ProtoStream::Accepted(ws) => {
-                let (s, r) = ws.split();
+                let (s, r) = (*ws).split();
                 (Box::pin(s), Box::pin(r))
             }
         };

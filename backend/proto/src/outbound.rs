@@ -113,7 +113,7 @@ async fn connect_to_registered_workers(
             match result {
                 Ok(Ok((stream, _response))) => {
                     info!(%worker_id, %url, "outbound connection established");
-                    let socket = ProtoSocket::Tungstenite(stream);
+                    let socket = ProtoSocket::Tungstenite(Box::new(stream));
                     handle_socket(
                         socket,
                         Arc::clone(&scheduler.state),
