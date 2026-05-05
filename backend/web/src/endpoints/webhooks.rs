@@ -46,7 +46,7 @@ pub struct UpdateWebhookRequest {
 /// Public-safe webhook view — secret is never exposed.
 #[derive(Serialize, Debug)]
 pub struct WebhookResponse {
-    pub id: Uuid,
+    pub id: WebhookId,
     pub organization: OrganizationId,
     pub name: String,
     pub url: String,
@@ -142,7 +142,7 @@ pub async fn put(
 pub async fn get_webhook(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
-    Path((organization, webhook_id)): Path<(String, Uuid)>,
+    Path((organization, webhook_id)): Path<(String, WebhookId)>,
 ) -> WebResult<Json<BaseResponse<WebhookResponse>>> {
     let organization = load_org(&state, Caller::User(&user), organization, webhook_org_access()).await?;
     let webhook = load_webhook_in_org(&state, organization.id, webhook_id).await?;
@@ -154,7 +154,7 @@ pub async fn get_webhook(
 pub async fn patch_webhook(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
-    Path((organization, webhook_id)): Path<(String, Uuid)>,
+    Path((organization, webhook_id)): Path<(String, WebhookId)>,
     Json(body): Json<UpdateWebhookRequest>,
 ) -> WebResult<Json<BaseResponse<WebhookResponse>>> {
     let organization = load_org(&state, Caller::User(&user), organization, webhook_org_access()).await?;
@@ -194,7 +194,7 @@ pub async fn patch_webhook(
 pub async fn delete_webhook(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
-    Path((organization, webhook_id)): Path<(String, Uuid)>,
+    Path((organization, webhook_id)): Path<(String, WebhookId)>,
 ) -> WebResult<Json<BaseResponse<bool>>> {
     let organization = load_org(&state, Caller::User(&user), organization, webhook_org_access()).await?;
     let webhook = load_webhook_in_org(&state, organization.id, webhook_id).await?;
@@ -208,7 +208,7 @@ pub async fn delete_webhook(
 pub async fn post_webhook_test(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
-    Path((organization, webhook_id)): Path<(String, Uuid)>,
+    Path((organization, webhook_id)): Path<(String, WebhookId)>,
 ) -> WebResult<Json<BaseResponse<bool>>> {
     let organization = load_org(&state, Caller::User(&user), organization, webhook_org_access()).await?;
     let webhook = load_webhook_in_org(&state, organization.id, webhook_id).await?;

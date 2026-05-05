@@ -62,8 +62,8 @@ pub(super) async fn evaluations_to_summaries(
         .map(|c| (c.id, vec_to_hex(&c.hash)))
         .collect();
 
-    let mut total_per_eval: HashMap<Uuid, i64> = HashMap::new();
-    let mut failed_per_eval: HashMap<Uuid, i64> = HashMap::new();
+    let mut total_per_eval: HashMap<EvaluationId, i64> = HashMap::new();
+    let mut failed_per_eval: HashMap<EvaluationId, i64> = HashMap::new();
     for build in EBuild::find()
         .filter(CBuild::Evaluation.is_in(eval_ids.clone()))
         .all(&state.web_db)
@@ -81,7 +81,7 @@ pub(super) async fn evaluations_to_summaries(
         .await?;
 
     let ep_build_ids: Vec<BuildId> = entry_points.iter().map(|ep| ep.build).collect();
-    let ep_build_status: HashMap<Uuid, BuildStatus> = if ep_build_ids.is_empty() {
+    let ep_build_status: HashMap<BuildId, BuildStatus> = if ep_build_ids.is_empty() {
         HashMap::new()
     } else {
         EBuild::find()
@@ -93,7 +93,7 @@ pub(super) async fn evaluations_to_summaries(
             .collect()
     };
 
-    let mut eps_per_eval: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
+    let mut eps_per_eval: HashMap<EvaluationId, Vec<BuildId>> = HashMap::new();
     for ep in &entry_points {
         eps_per_eval.entry(ep.evaluation).or_default().push(ep.build);
     }
@@ -104,7 +104,7 @@ pub(super) async fn evaluations_to_summaries(
         let total_builds = *total_per_eval.get(&evaluation.id).unwrap_or(&0);
         let failed_builds = *failed_per_eval.get(&evaluation.id).unwrap_or(&0);
 
-        let ep_builds: &[Uuid] = eps_per_eval
+        let ep_builds: &[BuildId] = eps_per_eval
             .get(&evaluation.id)
             .map(Vec::as_slice)
             .unwrap_or(&[]);
@@ -326,10 +326,10 @@ pub async fn get_project_entry_points(
 ///
 /// Loaded in one pass via `load` to avoid per-entry-point round-trips.
 struct EntryPointRelatedData {
-    builds: HashMap<Uuid, MBuild>,
-    derivations: HashMap<Uuid, MDerivation>,
+    builds: HashMap<BuildId, MBuild>,
+    derivations: HashMap<DerivationId, MDerivation>,
     /// Derivation IDs that have at least one `build_product` row.
-    has_products: HashMap<Uuid, bool>,
+    has_products: HashMap<DerivationId, bool>,
 }
 
 impl EntryPointRelatedData {
@@ -364,7 +364,7 @@ impl EntryPointRelatedData {
 
         // Determine which derivations have at least one build_product by looking
         // at their outputs.
-        let has_products: HashMap<Uuid, bool> = if completed_drv_ids.is_empty() {
+        let has_products: HashMap<DerivationId, bool> = if completed_drv_ids.is_empty() {
             HashMap::new()
         } else {
             let outputs = EDerivationOutput::find()
@@ -372,7 +372,7 @@ impl EntryPointRelatedData {
                 .all(&state.web_db)
                 .await?;
             let output_ids: Vec<DerivationOutputId> = outputs.iter().map(|o| o.id).collect();
-            let mut m: HashMap<Uuid, bool> = HashMap::new();
+            let mut m: HashMap<DerivationId, bool> = HashMap::new();
             if !output_ids.is_empty() {
                 for bp in EBuildProduct::find()
                     .filter(CBuildProduct::DerivationOutput.is_in(output_ids))

@@ -1051,7 +1051,7 @@ async fn build_output_updates_derivation_output() {
     let eval_id = EvaluationId::now_v7();
     let drv_id = DerivationId::now_v7();
     let build_id = BuildId::now_v7();
-    let drv_out_id = DerivationId::now_v7();
+    let drv_out_id = DerivationOutputId::now_v7();
     let org_id = OrganizationId::now_v7();
 
     let build = make_build(build_id, eval_id, drv_id, BuildStatus::Building);
@@ -1139,7 +1139,7 @@ async fn build_output_inserts_build_product_rows() {
     let eval_id = EvaluationId::now_v7();
     let drv_id = DerivationId::now_v7();
     let build_id = BuildId::now_v7();
-    let drv_out_id = DerivationId::now_v7();
+    let drv_out_id = DerivationOutputId::now_v7();
     let org_id = OrganizationId::now_v7();
 
     let build = make_build(build_id, eval_id, drv_id, BuildStatus::Building);
@@ -1157,7 +1157,7 @@ async fn build_output_inserts_build_product_rows() {
 
     // A fake build_product row that the insert mock needs to return.
     let fake_bp = entity::build_product::Model {
-        id: Uuid::now_v7(),
+        id: BuildProductId::now_v7(),
         derivation_output: drv_out_id,
         file_type: "iso".into(),
         name: "image.iso".into(),
@@ -1330,7 +1330,7 @@ async fn eval_job_completed_with_eval_errors_marks_eval_failed() {
     let eval_id = EvaluationId::now_v7();
 
     let eval_msg = entity::evaluation_message::Model {
-        id: Uuid::now_v7(),
+        id: EvaluationMessageId::now_v7(),
         evaluation: eval_id,
         level: entity::evaluation_message::MessageLevel::Error,
         message: "packages.x86_64-linux.broken: attribute missing".into(),
@@ -2116,7 +2116,7 @@ async fn eval_result_creates_entry_points_for_project() {
         )]])
         // 7. insert entry_points
         .append_query_results([vec![entity::entry_point::Model {
-            id: Uuid::now_v7(),
+            id: EntryPointId::now_v7(),
             project: project_id,
             evaluation: eval_id,
             build: build_id,
@@ -2376,7 +2376,7 @@ async fn eval_result_all_substituted_with_project_completes() {
         )]])
         // 7. insert entry_points
         .append_query_results([vec![entity::entry_point::Model {
-            id: Uuid::now_v7(),
+            id: EntryPointId::now_v7(),
             project: project_id,
             evaluation: eval_id,
             build: build_id,
@@ -2421,12 +2421,12 @@ async fn build_failed_cascades_transitively_through_graph() {
     // A depends on B, B depends on C. C fails.
     // Expected: B → DependencyFailed, then A → DependencyFailed (transitive).
     let eval_id = EvaluationId::now_v7();
-    let drv_a = Uuid::now_v7();
-    let drv_b = Uuid::now_v7();
-    let drv_c = Uuid::now_v7();
-    let build_a = Uuid::now_v7();
-    let build_b = Uuid::now_v7();
-    let build_c = Uuid::now_v7();
+    let drv_a = DerivationId::now_v7();
+    let drv_b = DerivationId::now_v7();
+    let drv_c = DerivationId::now_v7();
+    let build_a = BuildId::now_v7();
+    let build_b = BuildId::now_v7();
+    let build_c = BuildId::now_v7();
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // 1. find build C

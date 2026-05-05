@@ -138,7 +138,7 @@ fn spawn_cache_derivation_fetch_update(state: Arc<ServerState>, cache_id: CacheI
                     sea_orm::Value::ChronoDateTimeUtc(Some(Box::new(
                         chrono::DateTime::from_naive_utc_and_offset(now, chrono::Utc),
                     ))),
-                    sea_orm::Value::Uuid(Some(Box::new(cache_id))),
+                    sea_orm::Value::Uuid(Some(Box::new(cache_id.into_inner()))),
                     sea_orm::Value::String(Some(Box::new(hash))),
                 ],
             ))
@@ -178,7 +178,7 @@ mod tests {
 
     fn cached_path_row() -> entity::cached_path::Model {
         entity::cached_path::Model {
-            id: uuid::Uuid::now_v7(),
+            id: gradient_core::types::ids::CachedPathId::now_v7(),
             store_path: format!("/nix/store/{STORE_HASH}-hello.drv"),
             hash: STORE_HASH.to_string(),
             package: "hello.drv".to_string(),

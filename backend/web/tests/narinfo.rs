@@ -16,31 +16,32 @@ use test_support::fakes::email::InMemoryEmailSender;
 use test_support::fakes::webhooks::RecordingWebhookClient;
 use test_support::log_storage::NoopLogStorage;
 use test_support::prelude::test_cli;
+use gradient_core::types::ids::*;
 use uuid::Uuid;
 use web::create_router;
 
 // ── Fixture IDs ───────────────────────────────────────────────────────────────
 
-fn cache_id() -> Uuid {
-    Uuid::parse_str("10000000-0000-0000-0000-000000000001").unwrap()
+fn cache_id() -> CacheId {
+    CacheId::new(Uuid::parse_str("10000000-0000-0000-0000-000000000001").unwrap())
 }
-fn org_id() -> Uuid {
-    Uuid::parse_str("10000000-0000-0000-0000-000000000002").unwrap()
+fn org_id() -> OrganizationId {
+    OrganizationId::new(Uuid::parse_str("10000000-0000-0000-0000-000000000002").unwrap())
 }
-fn deriv_id() -> Uuid {
-    Uuid::parse_str("10000000-0000-0000-0000-000000000003").unwrap()
+fn deriv_id() -> DerivationId {
+    DerivationId::new(Uuid::parse_str("10000000-0000-0000-0000-000000000003").unwrap())
 }
-fn drv_output_id() -> Uuid {
-    Uuid::parse_str("10000000-0000-0000-0000-000000000004").unwrap()
+fn drv_output_id() -> DerivationOutputId {
+    DerivationOutputId::new(Uuid::parse_str("10000000-0000-0000-0000-000000000004").unwrap())
 }
-fn cached_path_id() -> Uuid {
-    Uuid::parse_str("10000000-0000-0000-0000-000000000005").unwrap()
+fn cached_path_id() -> CachedPathId {
+    CachedPathId::new(Uuid::parse_str("10000000-0000-0000-0000-000000000005").unwrap())
 }
-fn cached_path_sig_id() -> Uuid {
-    Uuid::parse_str("10000000-0000-0000-0000-000000000006").unwrap()
+fn cached_path_sig_id() -> CachedPathSignatureId {
+    CachedPathSignatureId::new(Uuid::parse_str("10000000-0000-0000-0000-000000000006").unwrap())
 }
-fn org_cache_id() -> Uuid {
-    Uuid::parse_str("10000000-0000-0000-0000-000000000007").unwrap()
+fn org_cache_id() -> OrganizationCacheId {
+    OrganizationCacheId::new(Uuid::parse_str("10000000-0000-0000-0000-000000000007").unwrap())
 }
 
 fn test_date() -> chrono::NaiveDateTime {
@@ -85,7 +86,7 @@ async fn narinfo_served_from_db_inner() {
         public_key: "test-pub-key".into(),
         private_key: "test-priv-key".into(),
         public: true,
-        created_by: org_id(),
+        created_by: UserId::new(org_id().into_inner()),
         created_at: test_date(),
         managed: false,
     };

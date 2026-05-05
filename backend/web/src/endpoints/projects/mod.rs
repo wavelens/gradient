@@ -35,7 +35,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ProjectResponse {
-    pub id: Uuid,
+    pub id: ProjectId,
     pub organization: OrganizationId,
     pub name: String,
     pub active: bool,
@@ -43,7 +43,7 @@ pub struct ProjectResponse {
     pub description: String,
     pub repository: String,
     pub evaluation_wildcard: String,
-    pub last_evaluation: Option<Uuid>,
+    pub last_evaluation: Option<EvaluationId>,
     pub last_evaluation_status: Option<EvaluationStatus>,
     pub force_evaluation: bool,
     pub created_by: UserId,
@@ -55,7 +55,7 @@ pub struct ProjectResponse {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct EntryPointSummary {
-    pub id: Uuid,
+    pub id: EntryPointId,
     pub build_id: BuildId,
     pub derivation_path: String,
     pub eval: String,
@@ -69,7 +69,7 @@ pub struct EntryPointSummary {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct EvaluationSummary {
-    pub id: Uuid,
+    pub id: EvaluationId,
     pub commit: String,
     pub status: EvaluationStatus,
     pub total_builds: i64,
@@ -83,7 +83,7 @@ pub struct EvaluationSummary {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ProjectDetailsResponse {
-    pub id: Uuid,
+    pub id: ProjectId,
     pub name: String,
     pub display_name: String,
     pub description: String,

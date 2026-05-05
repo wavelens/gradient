@@ -27,7 +27,7 @@ pub struct SubscribeCacheRequest {
 
 #[derive(Serialize)]
 pub struct CacheSubscriptionItem {
-    pub id: Uuid,
+    pub id: CacheId,
     pub name: String,
     pub mode: CacheSubscriptionMode,
 }
@@ -220,7 +220,7 @@ async fn enqueue_backfill_signatures(state: &ServerState, org_id: OrganizationId
         }
     };
 
-    let cp_ids: std::collections::HashSet<Uuid> =
+    let cp_ids: std::collections::HashSet<CachedPathId> =
         outputs.into_iter().filter_map(|o| o.cached_path).collect();
 
     let now = gradient_core::types::now();

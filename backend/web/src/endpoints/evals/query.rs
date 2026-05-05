@@ -59,7 +59,7 @@ pub async fn get_evaluation(
         vec![]
     } else {
         let build_ids: Vec<BuildId> = ep_rows.iter().map(|ep| ep.build).collect();
-        let builds: std::collections::HashMap<Uuid, entity::build::BuildStatus> = EBuild::find()
+        let builds: std::collections::HashMap<BuildId, entity::build::BuildStatus> = EBuild::find()
             .filter(CBuild::Id.is_in(build_ids))
             .all(&state.web_db)
             .await?
@@ -135,7 +135,7 @@ pub async fn get_evaluation_builds(
     };
 
     // has_artefacts is per-derivation: any output of the derivation has build_product rows.
-    let has_artefacts_map: HashMap<Uuid, bool> = if drv_ids.is_empty() {
+    let has_artefacts_map: HashMap<DerivationId, bool> = if drv_ids.is_empty() {
         HashMap::new()
     } else {
         let outputs = EDerivationOutput::find()
@@ -143,7 +143,7 @@ pub async fn get_evaluation_builds(
             .all(&state.web_db)
             .await?;
         let output_ids: Vec<DerivationOutputId> = outputs.iter().map(|o| o.id).collect();
-        let mut m: HashMap<Uuid, bool> = HashMap::new();
+        let mut m: HashMap<DerivationId, bool> = HashMap::new();
         if !output_ids.is_empty() {
             for bp in EBuildProduct::find()
                 .filter(CBuildProduct::DerivationOutput.is_in(output_ids))
@@ -252,7 +252,7 @@ pub async fn get_evaluation_messages(
     };
 
     // Build a map: message_id → [entry_point_id]
-    let mut ep_map: std::collections::HashMap<Uuid, Vec<Uuid>> = std::collections::HashMap::new();
+    let mut ep_map: std::collections::HashMap<EvaluationMessageId, Vec<EntryPointId>> = std::collections::HashMap::new();
     for row in ep_rows {
         ep_map.entry(row.message).or_default().push(row.entry_point);
     }

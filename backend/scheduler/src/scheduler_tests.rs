@@ -30,7 +30,7 @@ fn test_scheduler() -> Arc<Scheduler> {
     Arc::new(Scheduler::new(state))
 }
 
-fn eval_job(peer: Uuid) -> PendingEvalJob {
+fn eval_job(peer: OrganizationId) -> PendingEvalJob {
     PendingEvalJob {
         evaluation_id: EvaluationId::now_v7(),
         project_id: None,
@@ -54,7 +54,7 @@ fn eval_job(peer: Uuid) -> PendingEvalJob {
 #[tokio::test]
 async fn test_enqueue_and_get_candidates() {
     let scheduler = test_scheduler();
-    let peer = Uuid::now_v7();
+    let peer = OrganizationId::now_v7();
 
     scheduler
         .register_worker("w1", GradientCapabilities::default(), HashSet::new())
@@ -75,8 +75,8 @@ async fn test_enqueue_and_get_candidates() {
 #[tokio::test]
 async fn test_candidates_filtered_by_authorized_peers() {
     let scheduler = test_scheduler();
-    let peer_a = Uuid::now_v7();
-    let peer_b = Uuid::now_v7();
+    let peer_a = OrganizationId::now_v7();
+    let peer_b = OrganizationId::now_v7();
 
     scheduler
         .register_worker(
@@ -101,7 +101,7 @@ async fn test_candidates_filtered_by_authorized_peers() {
 #[tokio::test]
 async fn test_score_assignment_flow() {
     let scheduler = test_scheduler();
-    let peer = Uuid::now_v7();
+    let peer = OrganizationId::now_v7();
 
     scheduler
         .register_worker("w1", GradientCapabilities::default(), HashSet::new())
@@ -132,7 +132,7 @@ async fn test_score_assignment_flow() {
 #[tokio::test]
 async fn test_job_rejected_requeues() {
     let scheduler = test_scheduler();
-    let peer = Uuid::now_v7();
+    let peer = OrganizationId::now_v7();
 
     scheduler
         .register_worker("w1", GradientCapabilities::default(), HashSet::new())
@@ -154,7 +154,7 @@ async fn test_job_rejected_requeues() {
 #[tokio::test]
 async fn test_worker_disconnect_requeues_jobs() {
     let scheduler = test_scheduler();
-    let peer = Uuid::now_v7();
+    let peer = OrganizationId::now_v7();
 
     scheduler
         .register_worker("w1", GradientCapabilities::default(), HashSet::new())
@@ -189,8 +189,8 @@ async fn test_worker_disconnect_requeues_jobs() {
 #[tokio::test]
 async fn test_update_authorized_peers_expands_access() {
     let scheduler = test_scheduler();
-    let peer_a = Uuid::now_v7();
-    let peer_b = Uuid::now_v7();
+    let peer_a = OrganizationId::now_v7();
+    let peer_b = OrganizationId::now_v7();
 
     // Worker starts authorized for peer_a only.
     scheduler
@@ -221,7 +221,7 @@ async fn test_update_authorized_peers_expands_access() {
 #[tokio::test]
 async fn test_draining_worker_still_has_assigned_jobs() {
     let scheduler = test_scheduler();
-    let peer = Uuid::now_v7();
+    let peer = OrganizationId::now_v7();
 
     scheduler
         .register_worker("w1", GradientCapabilities::default(), HashSet::new())
@@ -289,7 +289,7 @@ async fn record_eval_message_inserts_for_active_build_job() {
     use test_support::prelude::*;
 
     let eval_id = EvaluationId::now_v7();
-    let peer = Uuid::now_v7();
+    let peer = OrganizationId::now_v7();
     let build_id = BuildId::now_v7();
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
