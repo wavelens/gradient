@@ -51,7 +51,7 @@ async fn user_can_access_cache(state: &Arc<ServerState>, cache: &MCache, user: &
         return true;
     }
 
-    let org_ids: Vec<uuid::Uuid> = EOrganizationUser::find()
+    let org_ids: Vec<OrganizationId> = EOrganizationUser::find()
         .filter(COrganizationUser::User.eq(user.id))
         .all(&state.web_db)
         .await
@@ -319,11 +319,11 @@ async fn get_nar_by_cached_path(
         })
     }
 
-pub(super) async fn cleanup_nars_for_orgs(state: Arc<ServerState>, org_ids: Vec<Uuid>) {
+pub(super) async fn cleanup_nars_for_orgs(state: Arc<ServerState>, org_ids: Vec<OrganizationId>) {
     cleanup_nars_for_orgs_inner(&state, org_ids).await
 }
 
-async fn cleanup_nars_for_orgs_inner(state: &Arc<ServerState>, org_ids: Vec<Uuid>) {
+async fn cleanup_nars_for_orgs_inner(state: &Arc<ServerState>, org_ids: Vec<OrganizationId>) {
         for org_id in org_ids {
             let remaining = EOrganizationCache::find()
                 .filter(COrganizationCache::Organization.eq(org_id))

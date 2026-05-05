@@ -176,7 +176,7 @@ pub async fn get(
         .filter(CRole::Id.is_in(role_ids))
         .all(&state.web_db)
         .await?;
-    let role_name_map: HashMap<Uuid, String> = roles.into_iter().map(|r| (r.id, r.name)).collect();
+    let role_name_map: HashMap<RoleId, String> = roles.into_iter().map(|r| (r.id, r.name)).collect();
     let org_role_map: HashMap<Uuid, String> = org_users
         .into_iter()
         .filter_map(|ou| {

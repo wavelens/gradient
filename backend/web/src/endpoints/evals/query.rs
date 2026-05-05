@@ -122,7 +122,7 @@ pub async fn get_evaluation_builds(
 
     let drv_ids: Vec<DerivationId> = builds.iter().map(|b| b.derivation).collect();
 
-    let derivations: HashMap<Uuid, MDerivation> = if drv_ids.is_empty() {
+    let derivations: HashMap<DerivationId, MDerivation> = if drv_ids.is_empty() {
         HashMap::new()
     } else {
         EDerivation::find()
