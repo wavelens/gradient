@@ -33,6 +33,7 @@ pub mod organization_cache;
 pub mod organization_user;
 pub mod project;
 pub mod project_integration;
+pub mod project_trigger;
 pub mod role;
 pub mod server;
 pub mod session;
