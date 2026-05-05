@@ -31,6 +31,7 @@ pub struct ListItem {
 pub type ListResponse = Vec<ListItem>;
 
 pub type EApi = api::Entity;
+pub type EAuditLog = audit_log::Entity;
 pub type EBuild = build::Entity;
 pub type EBuildProduct = build_product::Entity;
 pub type ECache = cache::Entity;
@@ -57,11 +58,14 @@ pub type EOrganizationUser = organization_user::Entity;
 pub type EProject = project::Entity;
 pub type EProjectIntegration = project_integration::Entity;
 pub type ERole = role::Entity;
+pub type ESession = session::Entity;
 pub type EUser = user::Entity;
 pub type EWebhook = webhook::Entity;
+pub type EWebhookDelivery = webhook_delivery::Entity;
 pub type EWorkerRegistration = worker_registration::Entity;
 
 pub type MApi = api::Model;
+pub type MAuditLog = audit_log::Model;
 pub type MBuild = build::Model;
 pub type MBuildProduct = build_product::Model;
 pub type MCache = cache::Model;
@@ -88,11 +92,14 @@ pub type MOrganizationUser = organization_user::Model;
 pub type MProject = project::Model;
 pub type MProjectIntegration = project_integration::Model;
 pub type MRole = role::Model;
+pub type MSession = session::Model;
 pub type MUser = user::Model;
 pub type MWebhook = webhook::Model;
+pub type MWebhookDelivery = webhook_delivery::Model;
 pub type MWorkerRegistration = worker_registration::Model;
 
 pub type AApi = api::ActiveModel;
+pub type AAuditLog = audit_log::ActiveModel;
 pub type ABuild = build::ActiveModel;
 pub type ABuildProduct = build_product::ActiveModel;
 pub type ACache = cache::ActiveModel;
@@ -119,11 +126,14 @@ pub type AOrganizationUser = organization_user::ActiveModel;
 pub type AProject = project::ActiveModel;
 pub type AProjectIntegration = project_integration::ActiveModel;
 pub type ARole = role::ActiveModel;
+pub type ASession = session::ActiveModel;
 pub type AUser = user::ActiveModel;
 pub type AWebhook = webhook::ActiveModel;
+pub type AWebhookDelivery = webhook_delivery::ActiveModel;
 pub type AWorkerRegistration = worker_registration::ActiveModel;
 
 pub type CApi = api::Column;
+pub type CAuditLog = audit_log::Column;
 pub type CBuild = build::Column;
 pub type CBuildProduct = build_product::Column;
 pub type CCache = cache::Column;
@@ -150,8 +160,10 @@ pub type COrganizationUser = organization_user::Column;
 pub type CProject = project::Column;
 pub type CProjectIntegration = project_integration::Column;
 pub type CRole = role::Column;
+pub type CSession = session::Column;
 pub type CUser = user::Column;
 pub type CWebhook = webhook::Column;
+pub type CWebhookDelivery = webhook_delivery::Column;
 pub type CWorkerRegistration = worker_registration::Column;
 
 // `R*` (Relation) aliases removed — sea-orm relations are referenced via the

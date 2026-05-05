@@ -182,6 +182,7 @@ async fn narinfo_served_from_db_inner() {
         pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         http: gradient_core::http::build_client().expect("http client"),
         shutdown: gradient_core::shutdown::Shutdown::new(),
+            jwt_secret: gradient_core::types::SecretString::new("test-jwt-secret".to_string()),
     });
 
     let router = create_router(state);

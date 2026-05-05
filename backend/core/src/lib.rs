@@ -113,6 +113,14 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
     let webhooks: Arc<dyn ci::WebhookClient> =
         Arc::new(ReqwestWebhookClient::with_client(http.clone()));
 
+    let jwt_secret = match types::input::load_secret(&cli.secrets.jwt_secret_file) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("{}", e);
+            std::process::exit(1);
+        }
+    };
+
     let email_service = match EmailService::new(cli.email_config()).await {
         Ok(s) => s,
         Err(e) => {
@@ -199,5 +207,6 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
         pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         http,
         shutdown: Shutdown::new(),
+        jwt_secret,
     })
 }

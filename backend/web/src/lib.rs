@@ -8,6 +8,7 @@
 pub mod patch;
 
 pub mod access;
+pub mod audit;
 pub mod authorization;
 pub mod endpoints;
 pub mod error;
@@ -267,6 +268,10 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
                 .post(user::post_keys)
                 .delete(user::delete_keys),
         )
+        .route("/user/keys/{api_id}/revoke", post(user::post_key_revoke))
+        .route("/user/sessions", get(user::get_sessions))
+        .route("/user/sessions/{session_id}", axum::routing::delete(user::delete_session))
+        .route("/user/audit-log", get(user::get_audit_log))
         .route(
             "/user/settings",
             get(user::get_settings).patch(user::patch_settings),
@@ -285,6 +290,10 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         .route(
             "/webhook/{organization}/{webhook}/test",
             post(webhooks::post_webhook_test),
+        )
+        .route(
+            "/webhook/{organization}/{webhook}/deliveries",
+            get(webhooks::get_webhook_deliveries),
         )
         .nest("/admin", admin::admin_router())
         .route_layer(middleware::from_fn_with_state(

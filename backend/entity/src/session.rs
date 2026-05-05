@@ -8,45 +8,45 @@ use chrono::NaiveDateTime;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{ApiId, UserId};
+use crate::ids::{SessionId, UserId};
 
 #[derive(Clone, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
-#[sea_orm(table_name = "api")]
+#[sea_orm(table_name = "session")]
 pub struct Model {
     #[sea_orm(primary_key)]
-    pub id: ApiId,
-    pub owned_by: UserId,
-    pub name: String,
-    pub key: String,
-    pub last_used_at: NaiveDateTime,
+    pub id: SessionId,
+    pub user_id: UserId,
     pub created_at: NaiveDateTime,
-    pub managed: bool,
-    pub expires_at: Option<NaiveDateTime>,
+    pub expires_at: NaiveDateTime,
+    pub last_used_at: NaiveDateTime,
     pub revoked_at: Option<NaiveDateTime>,
+    pub user_agent: Option<String>,
+    pub ip: Option<String>,
+    pub remember_me: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
     #[sea_orm(
         belongs_to = "super::user::Entity",
-        from = "Column::OwnedBy",
+        from = "Column::UserId",
         to = "super::user::Column::Id"
     )]
-    OwnedBy,
+    User,
 }
 
 impl std::fmt::Debug for Model {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("User")
+        f.debug_struct("Session")
             .field("id", &self.id)
-            .field("owned_by", &self.owned_by)
-            .field("name", &self.name)
-            .field("key", &"[redacted]")
-            .field("last_used_at", &self.last_used_at)
+            .field("user_id", &self.user_id)
             .field("created_at", &self.created_at)
-            .field("managed", &self.managed)
             .field("expires_at", &self.expires_at)
+            .field("last_used_at", &self.last_used_at)
             .field("revoked_at", &self.revoked_at)
+            .field("user_agent", &self.user_agent)
+            .field("ip", &self.ip)
+            .field("remember_me", &self.remember_me)
             .finish()
     }
 }

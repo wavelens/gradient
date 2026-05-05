@@ -209,7 +209,7 @@ impl WebhookClient for ReqwestWebhookClient {
 
 /// Encrypts `plaintext_secret` with the server crypt key and returns a base64-encoded ciphertext.
 pub fn encrypt_webhook_secret(crypt_secret_file: &str, plaintext: &str) -> Result<String, String> {
-    let key = load_secret_bytes(crypt_secret_file);
+    let key = load_secret_bytes(crypt_secret_file).map_err(|e| e.to_string())?;
     let ciphertext = crypter::encrypt_with_password(key.expose(), plaintext.as_bytes())
         .ok_or_else(|| "Encryption failed".to_string())?;
     Ok(general_purpose::STANDARD.encode(ciphertext))
@@ -220,7 +220,7 @@ pub fn decrypt_webhook_secret(
     crypt_secret_file: &str,
     encoded: &str,
 ) -> Result<crate::types::SecretString, String> {
-    let key = load_secret_bytes(crypt_secret_file);
+    let key = load_secret_bytes(crypt_secret_file).map_err(|e| e.to_string())?;
     let ciphertext = general_purpose::STANDARD
         .decode(encoded)
         .map_err(|e| format!("Base64 decode error: {}", e))?;
@@ -408,24 +408,50 @@ async fn fire_webhooks(
         };
         let signature = sign_webhook_payload(plaintext_secret.expose(), &body_str);
 
+        let started_at = std::time::Instant::now();
         let result = state
             .webhooks
             .deliver(&webhook.url, &signature, event.as_str(), body_str.clone())
             .await;
+        let duration_ms = started_at.elapsed().as_millis().min(i32::MAX as u128) as i32;
 
-        match result {
-            Ok(status) if !(200..300).contains(&status) => {
-                warn!(
-                    webhook_id = %webhook.id,
-                    url = %webhook.url,
-                    status = status,
-                    "Webhook delivery returned non-success status"
-                );
+        let (response_status, error_message, success) = match &result {
+            Ok(status) => {
+                let ok = (200..300).contains(status);
+                if !ok {
+                    warn!(
+                        webhook_id = %webhook.id,
+                        url = %webhook.url,
+                        status = status,
+                        "Webhook delivery returned non-success status"
+                    );
+                }
+                (Some(*status as i32), None, ok)
             }
             Err(e) => {
                 warn!(error = %e, webhook_id = %webhook.id, url = %webhook.url, "Webhook delivery failed");
+                (None, Some(format!("{:#}", e)), false)
             }
-            Ok(_) => {}
+        };
+
+        let row = crate::types::AWebhookDelivery {
+            id: sea_orm::ActiveValue::Set(crate::types::WebhookDeliveryId::now_v7()),
+            webhook_id: sea_orm::ActiveValue::Set(webhook.id),
+            event: sea_orm::ActiveValue::Set(event.as_str().to_string()),
+            request_body: sea_orm::ActiveValue::Set(body_str.clone()),
+            response_status: sea_orm::ActiveValue::Set(response_status),
+            response_body: sea_orm::ActiveValue::Set(None),
+            error_message: sea_orm::ActiveValue::Set(error_message),
+            success: sea_orm::ActiveValue::Set(success),
+            duration_ms: sea_orm::ActiveValue::Set(duration_ms),
+            delivered_at: sea_orm::ActiveValue::Set(crate::types::now()),
+        };
+        if let Err(e) =
+            <crate::types::EWebhookDelivery as sea_orm::EntityTrait>::insert(row)
+                .exec(&state.worker_db)
+                .await
+        {
+            warn!(error = %e, webhook_id = %webhook.id, "failed to record webhook delivery");
         }
     }
 }

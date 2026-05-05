@@ -169,7 +169,8 @@ impl<'a> StateApplicator<'a> {
     /// Encrypt `plain` with the configured crypt secret and return its
     /// base64-encoded form. `what` describes the secret for error messages.
     fn encrypt_to_b64(&self, plain: &str, what: &str) -> Result<String, DynError> {
-        let secret = load_secret_bytes(self.crypt_secret_file);
+        let secret = load_secret_bytes(self.crypt_secret_file)
+            .map_err(|e| format!("Failed to load crypt secret: {}", e))?;
         let bytes = crypter::encrypt_with_password(secret.expose(), plain)
             .ok_or_else(|| format!("Failed to encrypt {}", what))?;
         Ok(general_purpose::STANDARD.encode(&bytes))
@@ -615,6 +616,8 @@ impl<'a> StateApplicator<'a> {
                     last_used_at: Set(now),
                     created_at: Set(now),
                     managed: Set(true),
+                    expires_at: Set(None),
+                    revoked_at: Set(None),
                 };
                 api_key_model.insert(self.db).await?;
                 tracing::info!("Created managed API key: {}", state_api_key.name);

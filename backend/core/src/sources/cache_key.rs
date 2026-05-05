@@ -14,7 +14,8 @@ use ed25519_compact::{KeyPair, PublicKey, SecretKey, Signature};
 /// The private key is the full 64-byte ed25519 keypair encrypted and base64-encoded.
 /// The public key is the last 32 bytes of the keypair, base64-encoded in plaintext.
 pub fn generate_signing_key(secret_file: &str) -> Result<(String, String), SourceError> {
-    let secret = crate::types::input::load_secret_bytes(secret_file);
+    let secret = crate::types::input::load_secret_bytes(secret_file)
+        .map_err(|e| SourceError::FileRead { reason: e.to_string() })?;
 
     let keypair = KeyPair::generate();
     // Base64-encode the full 64-byte keypair (seed || public key)
@@ -60,7 +61,8 @@ pub fn format_cache_public_key(
 }
 
 pub fn decrypt_signing_key(secret_file: &str, cache: MCache) -> Result<String, SourceError> {
-    let secret = crate::types::input::load_secret_bytes(secret_file);
+    let secret = crate::types::input::load_secret_bytes(secret_file)
+        .map_err(|e| SourceError::FileRead { reason: e.to_string() })?;
 
     let encrypted_private_key = general_purpose::STANDARD
         .decode(cache.clone().private_key)
@@ -602,7 +604,7 @@ mod tests {
     fn sign_narinfo_short_key_fails() {
         // A decoded key shorter than ed25519 secret size must return KeyPairConversion.
         let (_f, path) = temp_secret_file();
-        let secret = crate::types::input::load_secret_bytes(&path);
+        let secret = crate::types::input::load_secret_bytes(&path).unwrap();
         let short_b64 = general_purpose::STANDARD.encode(b"too short");
         let enc = crypter::encrypt_with_password(secret.expose(), short_b64.as_bytes()).unwrap();
         let enc_b64 = general_purpose::STANDARD.encode(enc);

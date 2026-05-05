@@ -116,6 +116,10 @@ pub struct ServerState {
     /// Graceful-shutdown coordination for all long-lived background tasks
     /// (dispatch loops, outbound, cache loops, webhook deliveries, etc.).
     pub shutdown: Shutdown,
+    /// JWT signing/verification secret loaded once at startup. Holding it in
+    /// memory avoids reading `secrets.jwt_secret_file` on every request and
+    /// makes the auth path resilient to transient filesystem errors.
+    pub jwt_secret: SecretString,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

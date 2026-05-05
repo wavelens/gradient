@@ -24,4 +24,3 @@ uuid       = { workspace = true }
 [dev-dependencies]
 tokio      = { workspace = true, features = ["macros"] }
 tokio-test = { workspace = true }
-trybuild   = { version = "1", features = ["diff"] }
