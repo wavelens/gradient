@@ -54,7 +54,7 @@ pub(super) async fn evaluations_to_summaries(
     combined_eval_ids.extend(prev_ids.iter().copied());
     let commit_ids: Vec<CommitId> = evaluations.iter().map(|e| e.commit).collect();
 
-    let commits: HashMap<Uuid, String> = ECommit::find()
+    let commits: HashMap<CommitId, String> = ECommit::find()
         .filter(CCommit::Id.is_in(commit_ids))
         .all(&state.web_db)
         .await?
@@ -335,7 +335,7 @@ struct EntryPointRelatedData {
 impl EntryPointRelatedData {
     async fn load(state: &Arc<ServerState>, entry_points: &[MEntryPoint]) -> WebResult<Self> {
         let build_ids: Vec<BuildId> = entry_points.iter().map(|ep| ep.build).collect();
-        let builds: HashMap<Uuid, MBuild> = EBuild::find()
+        let builds: HashMap<BuildId, MBuild> = EBuild::find()
             .filter(CBuild::Id.is_in(build_ids))
             .all(&state.web_db)
             .await?
@@ -344,7 +344,7 @@ impl EntryPointRelatedData {
             .collect();
 
         let drv_ids: Vec<DerivationId> = builds.values().map(|b| b.derivation).collect();
-        let derivations: HashMap<Uuid, MDerivation> = if drv_ids.is_empty() {
+        let derivations: HashMap<DerivationId, MDerivation> = if drv_ids.is_empty() {
             HashMap::new()
         } else {
             EDerivation::find()

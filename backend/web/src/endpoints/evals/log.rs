@@ -39,7 +39,7 @@ pub async fn post_evaluation_builds(
         .add(CBuild::Status.eq(entity::build::BuildStatus::Building));
 
     let stream = stream! {
-        let mut last_logs: HashMap<Uuid, usize> = HashMap::new();
+        let mut last_logs: HashMap<BuildId, usize> = HashMap::new();
 
         let past_builds = match EBuild::find()
             .filter(CBuild::Evaluation.eq(evaluation.id))

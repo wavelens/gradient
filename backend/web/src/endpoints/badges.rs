@@ -328,7 +328,7 @@ async fn badge_status_for_latest_eval(
 
     let has_failed = match &eval {
         Some(e) if e.status == EvaluationStatus::Completed => {
-            let ep_build_ids: Vec<uuid::Uuid> = EEntryPoint::find()
+            let ep_build_ids: Vec<Uuid> = EEntryPoint::find()
                 .filter(CEntryPoint::Evaluation.eq(e.id))
                 .all(&state.web_db)
                 .await?
