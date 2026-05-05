@@ -29,6 +29,7 @@ use test_support::fakes::email::InMemoryEmailSender;
 use test_support::fakes::webhooks::RecordingWebhookClient;
 use test_support::log_storage::NoopLogStorage;
 use test_support::prelude::test_cli;
+use gradient_core::types::ids::*;
 use uuid::Uuid;
 use web::create_router;
 
@@ -99,23 +100,23 @@ fn fixture_date() -> chrono::NaiveDateTime {
         .unwrap()
 }
 
-fn org_id() -> Uuid {
-    Uuid::parse_str("a0000000-0000-0000-0000-000000000001").unwrap()
+fn org_id() -> OrganizationId {
+    OrganizationId::new(Uuid::parse_str("a0000000-0000-0000-0000-000000000001").unwrap())
 }
-fn integration_id() -> Uuid {
-    Uuid::parse_str("a0000000-0000-0000-0000-000000000002").unwrap()
+fn integration_id() -> IntegrationId {
+    IntegrationId::new(Uuid::parse_str("a0000000-0000-0000-0000-000000000002").unwrap())
 }
-fn project_id() -> Uuid {
-    Uuid::parse_str("a0000000-0000-0000-0000-000000000003").unwrap()
+fn project_id() -> ProjectId {
+    ProjectId::new(Uuid::parse_str("a0000000-0000-0000-0000-000000000003").unwrap())
 }
-fn user_id() -> Uuid {
-    Uuid::parse_str("a0000000-0000-0000-0000-000000000004").unwrap()
+fn user_id() -> UserId {
+    UserId::new(Uuid::parse_str("a0000000-0000-0000-0000-000000000004").unwrap())
 }
-fn eval_id() -> Uuid {
-    Uuid::parse_str("a0000000-0000-0000-0000-000000000005").unwrap()
+fn eval_id() -> EvaluationId {
+    EvaluationId::new(Uuid::parse_str("a0000000-0000-0000-0000-000000000005").unwrap())
 }
-fn commit_id() -> Uuid {
-    Uuid::parse_str("a0000000-0000-0000-0000-000000000006").unwrap()
+fn commit_id() -> CommitId {
+    CommitId::new(Uuid::parse_str("a0000000-0000-0000-0000-000000000006").unwrap())
 }
 
 /// A Gitea push payload whose `clone_url` matches `https://gitea.example.com/test-org/repo`.

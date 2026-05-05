@@ -155,7 +155,7 @@ mod tests {
 
     #[test]
     fn unknown_role_grants_nothing() {
-        let unknown = uuid::uuid!("99999999-9999-9999-9999-999999999999");
+        let unknown = RoleId::new(uuid::uuid!("99999999-9999-9999-9999-999999999999"));
         assert!(!role_grants(unknown, Permission::ViewOrg));
         assert!(!role_grants(unknown, Permission::EditProject));
     }

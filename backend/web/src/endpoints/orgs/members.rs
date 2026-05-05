@@ -87,7 +87,7 @@ pub async fn get_organization_users(
         .await?;
 
     let role_ids: Vec<RoleId> = organization_users.iter().map(|(ou, _)| ou.role).collect();
-    let role_map: std::collections::HashMap<Uuid, String> = ERole::find()
+    let role_map: std::collections::HashMap<RoleId, String> = ERole::find()
         .filter(CRole::Id.is_in(role_ids))
         .all(&state.web_db)
         .await?

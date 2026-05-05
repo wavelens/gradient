@@ -35,7 +35,7 @@ use uuid::Uuid;
 
 #[derive(Serialize, Debug)]
 pub struct IntegrationResponse {
-    pub id: Uuid,
+    pub id: IntegrationId,
     pub organization: OrganizationId,
     pub name: String,
     pub display_name: String,
@@ -259,7 +259,7 @@ pub async fn put_integration(
 pub async fn get_integration(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
-    Path((organization, integration_id)): Path<(String, Uuid)>,
+    Path((organization, integration_id)): Path<(String, IntegrationId)>,
 ) -> WebResult<Json<BaseResponse<IntegrationResponse>>> {
     let org = load_org(
         &state,
@@ -279,7 +279,7 @@ pub async fn get_integration(
 pub async fn patch_integration(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
-    Path((organization, integration_id)): Path<(String, Uuid)>,
+    Path((organization, integration_id)): Path<(String, IntegrationId)>,
     Json(body): Json<PatchIntegrationRequest>,
 ) -> WebResult<Json<BaseResponse<IntegrationResponse>>> {
     let org = load_org(
@@ -377,7 +377,7 @@ pub async fn patch_integration(
 pub async fn delete_integration(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
-    Path((organization, integration_id)): Path<(String, Uuid)>,
+    Path((organization, integration_id)): Path<(String, IntegrationId)>,
 ) -> WebResult<Json<BaseResponse<bool>>> {
     let org = load_org(
         &state,

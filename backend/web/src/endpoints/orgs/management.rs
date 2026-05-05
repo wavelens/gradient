@@ -44,7 +44,7 @@ pub struct PatchOrganizationRequest {
 
 #[derive(Serialize)]
 pub struct OrganizationSummary {
-    pub id: Uuid,
+    pub id: OrganizationId,
     pub name: String,
     pub display_name: String,
     pub description: String,
@@ -59,7 +59,7 @@ pub struct OrganizationSummary {
 
 #[derive(Serialize)]
 pub struct OrgResponse {
-    pub id: Uuid,
+    pub id: OrganizationId,
     pub name: String,
     pub display_name: String,
     pub description: String,
@@ -100,8 +100,8 @@ pub async fn get_org_name_available(
 /// (Queued, Fetching, EvaluatingFlake, EvaluatingDerivation, Building, Waiting).
 async fn count_running_evaluations(
     state: &Arc<ServerState>,
-    org_ids: &[Uuid],
-) -> WebResult<HashMap<Uuid, i64>> {
+    org_ids: &[OrganizationId],
+) -> WebResult<HashMap<OrganizationId, i64>> {
     use entity::evaluation::EvaluationStatus;
 
     if org_ids.is_empty() {
@@ -114,12 +114,12 @@ async fn count_running_evaluations(
         .await?;
 
     let project_ids: Vec<ProjectId> = projects.iter().map(|p| p.id).collect();
-    let project_to_org: HashMap<Uuid, Uuid> = projects
+    let project_to_org: HashMap<ProjectId, OrganizationId> = projects
         .into_iter()
         .map(|p| (p.id, p.organization))
         .collect();
 
-    let mut running_per_org: HashMap<Uuid, i64> = HashMap::new();
+    let mut running_per_org: HashMap<OrganizationId, i64> = HashMap::new();
     if !project_ids.is_empty() {
         let running = EEvaluation::find()
             .filter(CEvaluation::Project.is_in(project_ids))
@@ -177,7 +177,7 @@ pub async fn get(
         .all(&state.web_db)
         .await?;
     let role_name_map: HashMap<RoleId, String> = roles.into_iter().map(|r| (r.id, r.name)).collect();
-    let org_role_map: HashMap<Uuid, String> = org_users
+    let org_role_map: HashMap<OrganizationId, String> = org_users
         .into_iter()
         .filter_map(|ou| {
             role_name_map

@@ -128,7 +128,7 @@ pub async fn get_keys(
     let api_keys: ListResponse = api_keys
         .iter()
         .map(|k| ListItem {
-            id: k.id,
+            id: k.id.into_inner(),
             name: k.name.clone(),
             managed: k.managed,
         })

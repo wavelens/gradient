@@ -29,31 +29,32 @@ use test_support::fakes::email::InMemoryEmailSender;
 use test_support::fakes::webhooks::RecordingWebhookClient;
 use test_support::log_storage::NoopLogStorage;
 use test_support::prelude::test_cli;
+use gradient_core::types::ids::*;
 use uuid::Uuid;
 use web::create_router;
 
 // ── Fixture IDs ───────────────────────────────────────────────────────────────
 
-fn org_id() -> Uuid {
-    Uuid::parse_str("20000000-0000-0000-0000-000000000001").unwrap()
+fn org_id() -> OrganizationId {
+    OrganizationId::new(Uuid::parse_str("20000000-0000-0000-0000-000000000001").unwrap())
 }
-fn project_id() -> Uuid {
-    Uuid::parse_str("20000000-0000-0000-0000-000000000002").unwrap()
+fn project_id() -> ProjectId {
+    ProjectId::new(Uuid::parse_str("20000000-0000-0000-0000-000000000002").unwrap())
 }
-fn evaluation_id() -> Uuid {
-    Uuid::parse_str("20000000-0000-0000-0000-000000000003").unwrap()
+fn evaluation_id() -> EvaluationId {
+    EvaluationId::new(Uuid::parse_str("20000000-0000-0000-0000-000000000003").unwrap())
 }
-fn derivation_id() -> Uuid {
-    Uuid::parse_str("20000000-0000-0000-0000-000000000004").unwrap()
+fn derivation_id() -> DerivationId {
+    DerivationId::new(Uuid::parse_str("20000000-0000-0000-0000-000000000004").unwrap())
 }
-fn build_id() -> Uuid {
-    Uuid::parse_str("20000000-0000-0000-0000-000000000005").unwrap()
+fn build_id() -> BuildId {
+    BuildId::new(Uuid::parse_str("20000000-0000-0000-0000-000000000005").unwrap())
 }
-fn drv_output_id() -> Uuid {
-    Uuid::parse_str("20000000-0000-0000-0000-000000000006").unwrap()
+fn drv_output_id() -> DerivationOutputId {
+    DerivationOutputId::new(Uuid::parse_str("20000000-0000-0000-0000-000000000006").unwrap())
 }
-fn user_id() -> Uuid {
-    Uuid::parse_str("20000000-0000-0000-0000-000000000007").unwrap()
+fn user_id() -> UserId {
+    UserId::new(Uuid::parse_str("20000000-0000-0000-0000-000000000007").unwrap())
 }
 
 fn test_date() -> chrono::NaiveDateTime {
@@ -148,7 +149,7 @@ fn evaluation_row() -> entity::evaluation::Model {
         id: evaluation_id(),
         project: Some(project_id()),
         repository: "https://example.com/repo".into(),
-        commit: Uuid::now_v7(),
+        commit: CommitId::now_v7(),
         wildcard: "*".into(),
         status: EvaluationStatus::Completed,
         previous: None,
@@ -192,8 +193,8 @@ fn drv_output_row() -> entity::derivation_output::Model {
     }
 }
 
-fn build_product_id() -> Uuid {
-    Uuid::parse_str("20000000-0000-0000-0000-000000000008").unwrap()
+fn build_product_id() -> BuildProductId {
+    BuildProductId::new(Uuid::parse_str("20000000-0000-0000-0000-000000000008").unwrap())
 }
 
 fn build_product_row() -> entity::build_product::Model {

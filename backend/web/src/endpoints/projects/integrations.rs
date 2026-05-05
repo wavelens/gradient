@@ -24,8 +24,8 @@ use uuid::Uuid;
 #[derive(Serialize, Debug)]
 pub struct ProjectIntegrationResponse {
     pub project: ProjectId,
-    pub inbound_integration: Option<Uuid>,
-    pub outbound_integration: Option<Uuid>,
+    pub inbound_integration: Option<IntegrationId>,
+    pub outbound_integration: Option<IntegrationId>,
 }
 
 impl From<MProjectIntegration> for ProjectIntegrationResponse {
@@ -40,8 +40,8 @@ impl From<MProjectIntegration> for ProjectIntegrationResponse {
 
 #[derive(Deserialize, Debug)]
 pub struct PutProjectIntegrationRequest {
-    pub inbound_integration: Option<Uuid>,
-    pub outbound_integration: Option<Uuid>,
+    pub inbound_integration: Option<IntegrationId>,
+    pub outbound_integration: Option<IntegrationId>,
 }
 
 async fn validate_integration(

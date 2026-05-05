@@ -88,7 +88,7 @@ fn build_record_nar_traffic_stmt(cache_id: CacheId, bucket: NaiveDateTime, bytes
                          nar_count  = cache_metric.nar_count  + EXCLUDED.nar_count"#,
         [
             sea_orm::Value::Uuid(Some(Box::new(Uuid::now_v7()))),
-            sea_orm::Value::Uuid(Some(Box::new(cache_id))),
+            sea_orm::Value::Uuid(Some(Box::new(cache_id.into_inner()))),
             sea_orm::Value::ChronoDateTime(Some(Box::new(bucket))),
             sea_orm::Value::BigInt(Some(bytes)),
         ],
@@ -125,7 +125,7 @@ async fn aggregate_traffic<C: sea_orm::ConnectionTrait>(
         .query_all(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             &sql,
-            [sea_orm::Value::Uuid(Some(Box::new(cache_id)))],
+            [sea_orm::Value::Uuid(Some(Box::new(cache_id.into_inner())))],
         ))
         .await
         .map_err(WebError::from)?;
@@ -176,7 +176,7 @@ async fn aggregate_storage<C: sea_orm::ConnectionTrait>(
         .query_all(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             &sql,
-            [sea_orm::Value::Uuid(Some(Box::new(cache_id)))],
+            [sea_orm::Value::Uuid(Some(Box::new(cache_id.into_inner())))],
         ))
         .await
         .map_err(WebError::from)?;
@@ -225,7 +225,7 @@ pub async fn get_cache_stats(
                FROM cached_path_signature cps
                JOIN cached_path cp ON cp.id = cps.cached_path
                WHERE cps.cache = $1"#,
-            [sea_orm::Value::Uuid(Some(Box::new(cache.id)))],
+            [sea_orm::Value::Uuid(Some(Box::new(cache.id.into_inner())))],
         ))
         .await
         .map_err(WebError::from)?;

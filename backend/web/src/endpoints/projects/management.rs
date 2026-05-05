@@ -106,7 +106,7 @@ pub async fn get(
 
     // Batch-fetch the status of the last evaluation for each project.
     let eval_ids: Vec<EvaluationId> = raw.iter().filter_map(|p| p.last_evaluation).collect();
-    let eval_status_map: HashMap<Uuid, entity::evaluation::EvaluationStatus> =
+    let eval_status_map: HashMap<EvaluationId, entity::evaluation::EvaluationStatus> =
         if eval_ids.is_empty() {
             HashMap::new()
         } else {
