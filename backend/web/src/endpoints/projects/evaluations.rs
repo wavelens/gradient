@@ -48,9 +48,9 @@ pub(super) async fn evaluations_to_summaries(
         return Ok(Vec::new());
     }
 
-    let eval_ids: Vec<Uuid> = evaluations.iter().map(|e| e.id).collect();
-    let prev_ids: Vec<Uuid> = evaluations.iter().filter_map(|e| e.previous).collect();
-    let mut combined_eval_ids: Vec<Uuid> = eval_ids.clone();
+    let eval_ids: Vec<EvaluationId> = evaluations.iter().map(|e| e.id).collect();
+    let prev_ids: Vec<EvaluationId> = evaluations.iter().filter_map(|e| e.previous).collect();
+    let mut combined_eval_ids: Vec<EvaluationId> = eval_ids.clone();
     combined_eval_ids.extend(prev_ids.iter().copied());
     let commit_ids: Vec<CommitId> = evaluations.iter().map(|e| e.commit).collect();
 
@@ -276,7 +276,7 @@ pub async fn get_project_details(
 
 #[derive(Deserialize, Debug)]
 pub struct EntryPointsQuery {
-    pub evaluation_id: Option<Uuid>,
+    pub evaluation_id: Option<EvaluationId>,
 }
 
 pub async fn get_project_entry_points(
@@ -343,7 +343,7 @@ impl EntryPointRelatedData {
             .map(|b| (b.id, b))
             .collect();
 
-        let drv_ids: Vec<Uuid> = builds.values().map(|b| b.derivation).collect();
+        let drv_ids: Vec<DerivationId> = builds.values().map(|b| b.derivation).collect();
         let derivations: HashMap<Uuid, MDerivation> = if drv_ids.is_empty() {
             HashMap::new()
         } else {
@@ -356,7 +356,7 @@ impl EntryPointRelatedData {
                 .collect()
         };
 
-        let completed_drv_ids: Vec<Uuid> = builds
+        let completed_drv_ids: Vec<DerivationId> = builds
             .values()
             .filter(|b| b.status == BuildStatus::Completed || b.status == BuildStatus::Substituted)
             .map(|b| b.derivation)
@@ -371,7 +371,7 @@ impl EntryPointRelatedData {
                 .filter(CDerivationOutput::Derivation.is_in(completed_drv_ids))
                 .all(&state.web_db)
                 .await?;
-            let output_ids: Vec<Uuid> = outputs.iter().map(|o| o.id).collect();
+            let output_ids: Vec<DerivationOutputId> = outputs.iter().map(|o| o.id).collect();
             let mut m: HashMap<Uuid, bool> = HashMap::new();
             if !output_ids.is_empty() {
                 for bp in EBuildProduct::find()
@@ -450,7 +450,7 @@ async fn serve_hydra_artifact(
     build_outputs: Vec<MDerivationOutput>,
     filename: &str,
 ) -> WebResult<Option<Response>> {
-    let output_ids: Vec<Uuid> = build_outputs.iter().map(|o| o.id).collect();
+    let output_ids: Vec<DerivationOutputId> = build_outputs.iter().map(|o| o.id).collect();
     if output_ids.is_empty() {
         return Ok(None);
     }

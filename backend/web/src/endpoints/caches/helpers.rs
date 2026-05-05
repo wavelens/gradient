@@ -335,7 +335,7 @@ async fn cleanup_nars_for_orgs_inner(state: &Arc<ServerState>, org_ids: Vec<Uuid
                 continue;
             }
 
-            let derivation_ids: Vec<Uuid> = EDerivation::find()
+            let derivation_ids: Vec<DerivationId> = EDerivation::find()
                 .filter(CDerivation::Organization.eq(org_id))
                 .all(&state.web_db)
                 .await

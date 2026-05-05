@@ -288,9 +288,9 @@ async fn record_eval_message_inserts_for_active_build_job() {
     use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
     use test_support::prelude::*;
 
-    let eval_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
     let peer = Uuid::now_v7();
-    let build_id = Uuid::now_v7();
+    let build_id = BuildId::now_v7();
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_exec_results([MockExecResult {

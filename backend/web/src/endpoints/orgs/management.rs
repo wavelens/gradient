@@ -51,7 +51,7 @@ pub struct OrganizationSummary {
     pub public_key: Option<String>,
     pub public: bool,
     pub managed: bool,
-    pub created_by: Uuid,
+    pub created_by: UserId,
     pub created_at: chrono::NaiveDateTime,
     pub running_evaluations: i64,
     pub role: Option<String>,
@@ -66,7 +66,7 @@ pub struct OrgResponse {
     pub public_key: Option<String>,
     pub public: bool,
     pub managed: bool,
-    pub created_by: Uuid,
+    pub created_by: UserId,
     pub created_at: chrono::NaiveDateTime,
     /// GitHub App installation id for this org. `Some` is the single signal
     /// that the org uses the GitHub App; outbound CI status reporting and
@@ -113,7 +113,7 @@ async fn count_running_evaluations(
         .all(&state.web_db)
         .await?;
 
-    let project_ids: Vec<Uuid> = projects.iter().map(|p| p.id).collect();
+    let project_ids: Vec<ProjectId> = projects.iter().map(|p| p.id).collect();
     let project_to_org: HashMap<Uuid, Uuid> = projects
         .into_iter()
         .map(|p| (p.id, p.organization))
@@ -161,7 +161,7 @@ pub async fn get(
     let total = paginator.num_items().await?;
     let orgs = paginator.fetch_page(page - 1).await?;
 
-    let org_ids: Vec<Uuid> = orgs.iter().map(|o| o.id).collect();
+    let org_ids: Vec<OrganizationId> = orgs.iter().map(|o| o.id).collect();
     let running_per_org = count_running_evaluations(&state, &org_ids).await?;
 
     // Fetch the current user's membership row for each org to get the role.

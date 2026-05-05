@@ -16,7 +16,7 @@ use uuid::Uuid;
 pub async fn get_commit(
     state: State<Arc<ServerState>>,
     Extension(_user): Extension<MUser>,
-    Path(commit_id): Path<Uuid>,
+    Path(commit_id): Path<CommitId>,
 ) -> WebResult<Json<BaseResponse<MCommit>>> {
     let commit = ECommit::find_by_id(commit_id)
         .one(&state.web_db)

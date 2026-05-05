@@ -50,12 +50,12 @@ fn test_date() -> NaiveDateTime {
 
 /// Evaluation fixture. `project: None` prevents `fire_evaluation_webhook`
 /// from doing any DB queries (it returns early when project is None).
-fn make_eval(id: Uuid, status: EvaluationStatus) -> MEvaluation {
+fn make_eval(id: EvaluationId, status: EvaluationStatus) -> MEvaluation {
     entity::evaluation::Model {
         id,
         project: None,
         repository: "https://example.com/repo".into(),
-        commit: Uuid::nil(),
+        commit: CommitId::nil(),
         wildcard: "*".into(),
         status,
         previous: None,
@@ -67,7 +67,7 @@ fn make_eval(id: Uuid, status: EvaluationStatus) -> MEvaluation {
     }
 }
 
-fn make_build(id: Uuid, eval_id: Uuid, drv_id: Uuid, status: BuildStatus) -> MBuild {
+fn make_build(id: BuildId, eval_id: EvaluationId, drv_id: DerivationId, status: BuildStatus) -> MBuild {
     entity::build::Model {
         id,
         evaluation: eval_id,
@@ -83,7 +83,7 @@ fn make_build(id: Uuid, eval_id: Uuid, drv_id: Uuid, status: BuildStatus) -> MBu
     }
 }
 
-fn make_derivation(id: Uuid, org_id: OrganizationId, path: &str) -> MDerivation {
+fn make_derivation(id: DerivationId, org_id: OrganizationId, path: &str) -> MDerivation {
     entity::derivation::Model {
         id,
         organization: org_id,
@@ -93,7 +93,7 @@ fn make_derivation(id: Uuid, org_id: OrganizationId, path: &str) -> MDerivation 
     }
 }
 
-fn make_drv_output(id: Uuid, drv_id: Uuid, name: &str, path: &str) -> MDerivationOutput {
+fn make_drv_output(id: DerivationOutputId, drv_id: DerivationId, name: &str, path: &str) -> MDerivationOutput {
     entity::derivation_output::Model {
         id,
         derivation: drv_id,
@@ -112,7 +112,7 @@ fn make_drv_output(id: Uuid, drv_id: Uuid, name: &str, path: &str) -> MDerivatio
 /// `cached_path` row whose `file_hash` is set — `is_fully_cached()` returns
 /// true. Used by `eval_result_*` tests that exercise the substituted-status
 /// branch of `insert_build_rows`.
-fn make_fully_cached_path(id: Uuid, store_path: &str) -> entity::cached_path::Model {
+fn make_fully_cached_path(id: CachedPathId, store_path: &str) -> entity::cached_path::Model {
     entity::cached_path::Model {
         id,
         store_path: store_path.to_string(),
@@ -133,7 +133,7 @@ fn make_fully_cached_path(id: Uuid, store_path: &str) -> entity::cached_path::Mo
     }
 }
 
-fn make_dep_edge(id: Uuid, drv_id: Uuid, dep_id: Uuid) -> MDerivationDependency {
+fn make_dep_edge(id: DerivationDependencyId, drv_id: DerivationId, dep_id: DerivationId) -> MDerivationDependency {
     entity::derivation_dependency::Model {
         id,
         derivation: drv_id,
@@ -141,7 +141,7 @@ fn make_dep_edge(id: Uuid, drv_id: Uuid, dep_id: Uuid) -> MDerivationDependency 
     }
 }
 
-fn make_eval_job(eval_id: Uuid, org_id: OrganizationId) -> PendingEvalJob {
+fn make_eval_job(eval_id: EvaluationId, org_id: OrganizationId) -> PendingEvalJob {
     PendingEvalJob {
         evaluation_id: eval_id,
         project_id: None,
@@ -162,7 +162,7 @@ fn make_eval_job(eval_id: Uuid, org_id: OrganizationId) -> PendingEvalJob {
     }
 }
 
-fn make_build_job(build_id: BuildId, eval_id: Uuid, org_id: OrganizationId) -> PendingBuildJob {
+fn make_build_job(build_id: BuildId, eval_id: EvaluationId, org_id: OrganizationId) -> PendingBuildJob {
     use gradient_core::types::proto::{BuildJob, BuildTask};
     PendingBuildJob {
         build_id,
@@ -207,12 +207,12 @@ fn make_discovered(
 
 /// Evaluation fixture with `project: Some(project_id)`. Used for webhook tests
 /// where the webhook path must not return early at the `project? = None` guard.
-fn make_eval_with_project(id: Uuid, project_id: ProjectId, status: EvaluationStatus) -> MEvaluation {
+fn make_eval_with_project(id: EvaluationId, project_id: ProjectId, status: EvaluationStatus) -> MEvaluation {
     entity::evaluation::Model {
         id,
         project: Some(project_id),
         repository: "https://example.com/repo".into(),
-        commit: Uuid::nil(),
+        commit: CommitId::nil(),
         wildcard: "*".into(),
         status,
         previous: None,
@@ -225,7 +225,7 @@ fn make_eval_with_project(id: Uuid, project_id: ProjectId, status: EvaluationSta
 }
 
 /// Project fixture for webhook tests.
-fn make_project(id: Uuid, org_id: OrganizationId) -> entity::project::Model {
+fn make_project(id: ProjectId, org_id: OrganizationId) -> entity::project::Model {
     entity::project::Model {
         id,
         organization: org_id,
@@ -238,7 +238,7 @@ fn make_project(id: Uuid, org_id: OrganizationId) -> entity::project::Model {
         last_evaluation: None,
         last_check_at: test_date(),
         force_evaluation: false,
-        created_by: Uuid::nil(),
+        created_by: UserId::nil(),
         created_at: test_date(),
         managed: false,
         keep_evaluations: 30,
@@ -247,7 +247,7 @@ fn make_project(id: Uuid, org_id: OrganizationId) -> entity::project::Model {
 
 /// Webhook fixture. `secret` should be an already-encrypted base64 ciphertext.
 fn make_webhook(
-    id: Uuid,
+    id: WebhookId,
     org_id: OrganizationId,
     encrypted_secret: &str,
     events: &[&str],
@@ -260,7 +260,7 @@ fn make_webhook(
         secret: encrypted_secret.to_string(),
         events: serde_json::json!(events),
         active: true,
-        created_by: Uuid::nil(),
+        created_by: UserId::nil(),
         created_at: test_date(),
     }
 }
@@ -275,8 +275,8 @@ fn make_state(db: sea_orm::DatabaseConnection) -> Arc<ServerState> {
 /// immediately without inserting any rows.
 #[tokio::test]
 async fn eval_result_aborted_eval_discarded() {
-    let eval_id = Uuid::now_v7();
-    let org_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
+    let org_id = OrganizationId::now_v7();
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // find_by_id(eval) → Aborted
@@ -293,8 +293,8 @@ async fn eval_result_aborted_eval_discarded() {
 /// When the evaluation row is missing entirely, the handler returns an error.
 #[tokio::test]
 async fn eval_result_missing_eval_errors() {
-    let eval_id = Uuid::now_v7();
-    let org_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
+    let org_id = OrganizationId::now_v7();
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // find_by_id(eval) → None
@@ -312,8 +312,8 @@ async fn eval_result_missing_eval_errors() {
 /// evaluation transitions directly to Completed.
 #[tokio::test]
 async fn eval_result_empty_derivations_completes() {
-    let eval_id = Uuid::now_v7();
-    let org_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
+    let org_id = OrganizationId::now_v7();
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // 1. find_by_id(eval) → Building
@@ -340,10 +340,10 @@ async fn eval_result_empty_derivations_completes() {
 /// are inserted, the build transitions Created→Queued, and the eval goes Building.
 #[tokio::test]
 async fn eval_result_single_derivation_creates_build() {
-    let eval_id = Uuid::now_v7();
-    let org_id = Uuid::now_v7();
-    let drv_id = Uuid::now_v7();
-    let build_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
+    let org_id = OrganizationId::now_v7();
+    let drv_id = DerivationId::now_v7();
+    let build_id = BuildId::now_v7();
 
     let drv_path = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello.drv";
     let out_path = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-hello";
@@ -394,10 +394,10 @@ async fn eval_result_single_derivation_creates_build() {
 /// but a new build row is still created for this evaluation.
 #[tokio::test]
 async fn eval_result_existing_derivation_reuses_id() {
-    let eval_id = Uuid::now_v7();
-    let org_id = Uuid::now_v7();
-    let drv_id = Uuid::now_v7();
-    let build_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
+    let org_id = OrganizationId::now_v7();
+    let drv_id = DerivationId::now_v7();
+    let build_id = BuildId::now_v7();
 
     let drv_path = "/nix/store/cccccccccccccccccccccccccccccccc-bar.drv";
     let discovered = make_discovered(
@@ -444,11 +444,11 @@ async fn eval_result_existing_derivation_reuses_id() {
 /// immediately (all work was already in the store).
 #[tokio::test]
 async fn eval_result_substituted_derivation_completes_eval() {
-    let eval_id = Uuid::now_v7();
-    let org_id = Uuid::now_v7();
-    let drv_id = Uuid::now_v7();
-    let build_id = Uuid::now_v7();
-    let cp_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
+    let org_id = OrganizationId::now_v7();
+    let drv_id = DerivationId::now_v7();
+    let build_id = BuildId::now_v7();
+    let cp_id = CachedPathId::now_v7();
 
     let drv_path = "/nix/store/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-sub.drv";
     let out_path = "/nix/store/ffffffffffffffffffffffffffffffff-sub";
@@ -503,8 +503,8 @@ async fn eval_result_substituted_derivation_completes_eval() {
 /// Both builds are queued and eval transitions to Building.
 #[tokio::test]
 async fn eval_result_with_dependencies() {
-    let eval_id = Uuid::now_v7();
-    let org_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
+    let org_id = OrganizationId::now_v7();
     let drv_a_id = Uuid::now_v7();
     let drv_b_id = Uuid::now_v7();
     let build_a_id = Uuid::now_v7();
@@ -576,10 +576,10 @@ async fn eval_result_with_dependencies() {
 /// the build queue transition.
 #[tokio::test]
 async fn eval_result_with_warnings() {
-    let eval_id = Uuid::now_v7();
-    let org_id = Uuid::now_v7();
-    let drv_id = Uuid::now_v7();
-    let build_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
+    let org_id = OrganizationId::now_v7();
+    let drv_id = DerivationId::now_v7();
+    let build_id = BuildId::now_v7();
 
     let drv_path = "/nix/store/gggggggggggggggggggggggggggggggg-warn.drv";
     let discovered = make_discovered(
@@ -644,10 +644,10 @@ async fn eval_result_with_warnings() {
 /// The last build completes; no remaining active or failed builds → eval Completed.
 #[tokio::test]
 async fn build_completed_last_build_completes_eval() {
-    let eval_id = Uuid::now_v7();
-    let drv_id = Uuid::now_v7();
-    let build_id = Uuid::now_v7();
-    let org_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
+    let drv_id = DerivationId::now_v7();
+    let build_id = BuildId::now_v7();
+    let org_id = OrganizationId::now_v7();
 
     let build = make_build(build_id, eval_id, drv_id, BuildStatus::Building);
     let build_completed = make_build(build_id, eval_id, drv_id, BuildStatus::Completed);
@@ -686,10 +686,10 @@ async fn build_completed_last_build_completes_eval() {
 /// When active builds remain, check_evaluation_done returns early (eval stays Building).
 #[tokio::test]
 async fn build_completed_with_remaining_active() {
-    let eval_id = Uuid::now_v7();
-    let drv_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
+    let drv_id = DerivationId::now_v7();
     let other_drv_id = Uuid::now_v7();
-    let build_id = Uuid::now_v7();
+    let build_id = BuildId::now_v7();
     let other_build_id = Uuid::now_v7();
 
     let build = make_build(build_id, eval_id, drv_id, BuildStatus::Building);
@@ -716,10 +716,10 @@ async fn build_completed_with_remaining_active() {
 /// All builds done but some are Failed → eval transitions to Failed.
 #[tokio::test]
 async fn build_completed_with_failed_sibling() {
-    let eval_id = Uuid::now_v7();
-    let drv_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
+    let drv_id = DerivationId::now_v7();
     let failed_drv_id = Uuid::now_v7();
-    let build_id = Uuid::now_v7();
+    let build_id = BuildId::now_v7();
     let failed_build_id = Uuid::now_v7();
 
     let build = make_build(build_id, eval_id, drv_id, BuildStatus::Building);
@@ -757,9 +757,9 @@ async fn build_completed_with_failed_sibling() {
 /// Eval is not in Building status — check_evaluation_done returns without updating.
 #[tokio::test]
 async fn build_completed_eval_not_building_noop() {
-    let eval_id = Uuid::now_v7();
-    let drv_id = Uuid::now_v7();
-    let build_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
+    let drv_id = DerivationId::now_v7();
+    let build_id = BuildId::now_v7();
 
     let build = make_build(build_id, eval_id, drv_id, BuildStatus::Building);
     let build_completed = make_build(build_id, eval_id, drv_id, BuildStatus::Completed);
@@ -786,7 +786,7 @@ async fn build_completed_eval_not_building_noop() {
 /// Build ID not found — handler returns Ok(()) without touching eval status.
 #[tokio::test]
 async fn build_completed_unknown_build_noop() {
-    let build_id = Uuid::now_v7();
+    let build_id = BuildId::now_v7();
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // find_by_id(build) → None
@@ -802,10 +802,10 @@ async fn build_completed_unknown_build_noop() {
 /// DependencyFailed/Completed, the eval transitions to Failed.
 #[tokio::test]
 async fn build_completed_dep_failed_siblings_cause_eval_failed() {
-    let eval_id = Uuid::now_v7();
-    let drv_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
+    let drv_id = DerivationId::now_v7();
     let dep_failed_drv_id = Uuid::now_v7();
-    let build_id = Uuid::now_v7();
+    let build_id = BuildId::now_v7();
     let dep_failed_build_id = Uuid::now_v7();
 
     let build = make_build(build_id, eval_id, drv_id, BuildStatus::Building);
@@ -843,7 +843,7 @@ async fn build_completed_dep_failed_siblings_cause_eval_failed() {
 /// After cascade, no active builds → eval transitions to Failed.
 #[tokio::test]
 async fn build_failed_cascades_to_direct_dependent() {
-    let eval_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
     let drv_a_id = Uuid::now_v7();
     let drv_b_id = Uuid::now_v7();
     let build_a_id = Uuid::now_v7();
@@ -903,9 +903,9 @@ async fn build_failed_cascades_to_direct_dependent() {
 /// check_evaluation_done sees only the Failed build → eval → Failed.
 #[tokio::test]
 async fn build_failed_no_dependents() {
-    let eval_id = Uuid::now_v7();
-    let drv_id = Uuid::now_v7();
-    let build_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
+    let drv_id = DerivationId::now_v7();
+    let build_id = BuildId::now_v7();
 
     // Building → Failed is the valid terminal failure transition per the state machine.
     let build = make_build(build_id, eval_id, drv_id, BuildStatus::Building);
@@ -945,7 +945,7 @@ async fn build_failed_no_dependents() {
 /// C is still Queued → active builds remain → eval stays Building.
 #[tokio::test]
 async fn build_failed_cascade_only_direct_dependents() {
-    let eval_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
     let drv_a_id = Uuid::now_v7();
     let drv_b_id = Uuid::now_v7();
     let drv_c_id = Uuid::now_v7();
@@ -995,7 +995,7 @@ async fn build_failed_cascade_only_direct_dependents() {
 /// Build job failed for an unknown build ID — handler returns Ok(()) silently.
 #[tokio::test]
 async fn build_failed_unknown_build_noop() {
-    let build_id = Uuid::now_v7();
+    let build_id = BuildId::now_v7();
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([Vec::<MBuild>::new()])
@@ -1010,7 +1010,7 @@ async fn build_failed_unknown_build_noop() {
 /// The Building build remains active → eval stays Building.
 #[tokio::test]
 async fn build_failed_cascade_skips_building_status() {
-    let eval_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
     let drv_a_id = Uuid::now_v7();
     let drv_b_id = Uuid::now_v7();
     let build_a_id = Uuid::now_v7();
@@ -1047,11 +1047,11 @@ async fn build_failed_cascade_skips_building_status() {
 /// of the corresponding `derivation_output` row, then delete+insert `build_product` rows.
 #[tokio::test]
 async fn build_output_updates_derivation_output() {
-    let eval_id = Uuid::now_v7();
-    let drv_id = Uuid::now_v7();
-    let build_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
+    let drv_id = DerivationId::now_v7();
+    let build_id = BuildId::now_v7();
     let drv_out_id = Uuid::now_v7();
-    let org_id = Uuid::now_v7();
+    let org_id = OrganizationId::now_v7();
 
     let build = make_build(build_id, eval_id, drv_id, BuildStatus::Building);
     let drv_out = make_drv_output(
@@ -1101,10 +1101,10 @@ async fn build_output_updates_derivation_output() {
 /// handler still returns Ok (best-effort update).
 #[tokio::test]
 async fn build_output_missing_row_warns_not_errors() {
-    let eval_id = Uuid::now_v7();
-    let drv_id = Uuid::now_v7();
-    let build_id = Uuid::now_v7();
-    let org_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
+    let drv_id = DerivationId::now_v7();
+    let build_id = BuildId::now_v7();
+    let org_id = OrganizationId::now_v7();
 
     let build = make_build(build_id, eval_id, drv_id, BuildStatus::Building);
     let outputs = vec![BuildOutput {
@@ -1135,11 +1135,11 @@ async fn build_output_missing_row_warns_not_errors() {
 /// after updating the `derivation_output` row.
 #[tokio::test]
 async fn build_output_inserts_build_product_rows() {
-    let eval_id = Uuid::now_v7();
-    let drv_id = Uuid::now_v7();
-    let build_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
+    let drv_id = DerivationId::now_v7();
+    let build_id = BuildId::now_v7();
     let drv_out_id = Uuid::now_v7();
-    let org_id = Uuid::now_v7();
+    let org_id = OrganizationId::now_v7();
 
     let build = make_build(build_id, eval_id, drv_id, BuildStatus::Building);
     let drv_out = make_drv_output(
@@ -1211,9 +1211,9 @@ async fn build_output_inserts_build_product_rows() {
 /// Build not found → handler returns an Err (build context is mandatory).
 #[tokio::test]
 async fn build_output_unknown_build_errors() {
-    let eval_id = Uuid::now_v7();
-    let build_id = Uuid::now_v7();
-    let org_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
+    let build_id = BuildId::now_v7();
+    let org_id = OrganizationId::now_v7();
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([Vec::<MBuild>::new()])
@@ -1234,7 +1234,7 @@ async fn build_output_unknown_build_errors() {
 /// then `check_evaluation_done` immediately closes it as Completed.
 #[tokio::test]
 async fn eval_job_completed_no_active_builds_completes_eval() {
-    let eval_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // 1. find Created builds → empty
@@ -1278,9 +1278,9 @@ async fn eval_job_completed_no_active_builds_completes_eval() {
 /// silently masked into a Completed evaluation.
 #[tokio::test]
 async fn eval_job_completed_with_failed_build_marks_eval_failed() {
-    let eval_id = Uuid::now_v7();
-    let drv_id = Uuid::now_v7();
-    let build_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
+    let drv_id = DerivationId::now_v7();
+    let build_id = BuildId::now_v7();
 
     let failed_build = make_build(build_id, eval_id, drv_id, BuildStatus::Failed);
 
@@ -1326,7 +1326,7 @@ async fn eval_job_completed_with_failed_build_marks_eval_failed() {
 /// must mark the evaluation as `Failed`, not `Completed`.
 #[tokio::test]
 async fn eval_job_completed_with_eval_errors_marks_eval_failed() {
-    let eval_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
 
     let eval_msg = entity::evaluation_message::Model {
         id: Uuid::now_v7(),
@@ -1380,9 +1380,9 @@ async fn eval_job_completed_with_eval_errors_marks_eval_failed() {
 /// returns early because builds are still in flight.
 #[tokio::test]
 async fn eval_job_completed_active_builds_remain_noop() {
-    let eval_id = Uuid::now_v7();
-    let drv_id = Uuid::now_v7();
-    let build_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
+    let drv_id = DerivationId::now_v7();
+    let build_id = BuildId::now_v7();
 
     let active_build = make_build(build_id, eval_id, drv_id, BuildStatus::Building);
 
@@ -1415,7 +1415,7 @@ async fn eval_job_completed_active_builds_remain_noop() {
 /// records an error message.
 #[tokio::test]
 async fn eval_job_failed_transitions_eval_to_failed() {
-    let eval_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // 1. find_by_id(eval) → Building (non-terminal)
@@ -1443,7 +1443,7 @@ async fn eval_job_failed_transitions_eval_to_failed() {
 /// eval job does not overwrite the status.
 #[tokio::test]
 async fn eval_job_failed_terminal_eval_noop() {
-    let eval_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // 1. find_by_id(eval) → already Completed
@@ -1472,7 +1472,7 @@ async fn eval_job_failed_terminal_eval_noop() {
 ///      → spawns fire_evaluation_webhook (eval.project=None → returns early)
 #[tokio::test]
 async fn abort_cascades_to_active_builds() {
-    let eval_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
     let drv_a_id = Uuid::now_v7();
     let drv_b_id = Uuid::now_v7();
     let build_a_id = Uuid::now_v7();
@@ -1509,7 +1509,7 @@ async fn abort_cascades_to_active_builds() {
 /// evaluation is already Completed.
 #[tokio::test]
 async fn abort_skips_completed_eval() {
-    let eval_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
     // Empty MockDatabase — any unexpected DB call would cause an error that,
     // if propagated, would surface as a test failure.
     let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
@@ -1524,7 +1524,7 @@ async fn abort_skips_completed_eval() {
 /// to Aborted (the find-builds query returns empty, but the eval update runs).
 #[tokio::test]
 async fn abort_no_active_builds() {
-    let eval_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
     let eval = make_eval(eval_id, EvaluationStatus::Building);
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -1558,8 +1558,8 @@ async fn abort_no_active_builds() {
 ///   6. Q: find_by_id(eval) → Failed
 #[tokio::test]
 async fn eval_result_error_on_derivation_insert_transitions_eval_failed() {
-    let eval_id = Uuid::now_v7();
-    let org_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
+    let org_id = OrganizationId::now_v7();
 
     let drv_path = "/nix/store/aaaa-fail-insert.drv";
     let discovered = make_discovered(
@@ -1615,9 +1615,9 @@ async fn eval_result_error_on_derivation_insert_transitions_eval_failed() {
 ///   8. Q: find_by_id(eval) → Failed
 #[tokio::test]
 async fn eval_result_build_insert_fails_transitions_eval_failed() {
-    let eval_id = Uuid::now_v7();
-    let org_id = Uuid::now_v7();
-    let drv_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
+    let org_id = OrganizationId::now_v7();
+    let drv_id = DerivationId::now_v7();
 
     let drv_path = "/nix/store/cccc-build-fail.drv";
     let out_path = "/nix/store/dddd-build-fail";
@@ -1687,8 +1687,8 @@ async fn eval_result_build_insert_fails_transitions_eval_failed() {
 ///  11. Q: find_by_id(eval) → Building
 #[tokio::test]
 async fn eval_result_existing_drv_still_creates_dep_edge() {
-    let eval_id = Uuid::now_v7();
-    let org_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
+    let org_id = OrganizationId::now_v7();
     let drv_a_id = Uuid::now_v7();
     let drv_b_id = Uuid::now_v7();
     let build_a_id = Uuid::now_v7();
@@ -1819,12 +1819,12 @@ async fn webhook_fired_on_build_completed() {
         gradient_core::ci::encrypt_webhook_secret(&key_path, "plaintext-hook-secret")
             .expect("encrypt webhook secret");
 
-    let eval_id = Uuid::now_v7();
-    let project_id = Uuid::now_v7();
-    let org_id = Uuid::now_v7();
-    let drv_id = Uuid::now_v7();
-    let build_id = Uuid::now_v7();
-    let webhook_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
+    let project_id = ProjectId::now_v7();
+    let org_id = OrganizationId::now_v7();
+    let drv_id = DerivationId::now_v7();
+    let build_id = BuildId::now_v7();
+    let webhook_id = WebhookId::now_v7();
 
     let build_building = make_build(build_id, eval_id, drv_id, BuildStatus::Building);
     let build_completed = make_build(build_id, eval_id, drv_id, BuildStatus::Completed);
@@ -1938,14 +1938,14 @@ async fn webhook_not_fired_for_dep_failed() {
         gradient_core::ci::encrypt_webhook_secret(&key_path, "plaintext-hook-secret")
             .expect("encrypt webhook secret");
 
-    let eval_id = Uuid::now_v7();
-    let project_id = Uuid::now_v7();
-    let org_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
+    let project_id = ProjectId::now_v7();
+    let org_id = OrganizationId::now_v7();
     let drv_a_id = Uuid::now_v7();
     let drv_b_id = Uuid::now_v7();
     let build_a_id = Uuid::now_v7();
     let build_b_id = Uuid::now_v7();
-    let webhook_id = Uuid::now_v7();
+    let webhook_id = WebhookId::now_v7();
 
     let build_a = make_build(build_a_id, eval_id, drv_a_id, BuildStatus::Building);
     let build_a_failed = make_build(build_a_id, eval_id, drv_a_id, BuildStatus::Failed);
@@ -2038,11 +2038,11 @@ async fn webhook_not_fired_for_dep_failed() {
 /// tested in the new scheduler.
 #[tokio::test]
 async fn eval_result_creates_entry_points_for_project() {
-    let eval_id = Uuid::now_v7();
-    let org_id = Uuid::now_v7();
-    let project_id = Uuid::now_v7();
-    let drv_id = Uuid::now_v7();
-    let build_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
+    let org_id = OrganizationId::now_v7();
+    let project_id = ProjectId::now_v7();
+    let drv_id = DerivationId::now_v7();
+    let build_id = BuildId::now_v7();
 
     let drv_path = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello.drv";
     let out_path = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-hello";
@@ -2166,10 +2166,10 @@ async fn eval_result_creates_entry_points_for_project() {
 /// project is queried for GC. The same MockDB stages as existing tests suffice.
 #[tokio::test]
 async fn eval_result_no_entry_points_without_project() {
-    let eval_id = Uuid::now_v7();
-    let org_id = Uuid::now_v7();
-    let drv_id = Uuid::now_v7();
-    let build_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
+    let org_id = OrganizationId::now_v7();
+    let drv_id = DerivationId::now_v7();
+    let build_id = BuildId::now_v7();
 
     let drv_path = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello.drv";
     let out_path = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-hello";
@@ -2257,7 +2257,7 @@ async fn eval_result_no_entry_points_without_project() {
 /// these at evaluator/src/scheduler/evaluation.rs:252-258.
 #[tokio::test]
 async fn eval_job_failed_detects_prefetch_error_source() {
-    let eval_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
     // Evaluation in Fetching status — prefetch failure
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // 1. find eval
@@ -2295,12 +2295,12 @@ async fn eval_job_failed_detects_prefetch_error_source() {
 /// still be created.
 #[tokio::test]
 async fn eval_result_all_substituted_with_project_completes() {
-    let eval_id = Uuid::now_v7();
-    let org_id = Uuid::now_v7();
-    let project_id = Uuid::now_v7();
-    let drv_id = Uuid::now_v7();
-    let build_id = Uuid::now_v7();
-    let cp_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
+    let org_id = OrganizationId::now_v7();
+    let project_id = ProjectId::now_v7();
+    let drv_id = DerivationId::now_v7();
+    let build_id = BuildId::now_v7();
+    let cp_id = CachedPathId::now_v7();
 
     let drv_path = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello.drv";
     let out_path = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-hello";
@@ -2418,7 +2418,7 @@ async fn eval_result_all_substituted_with_project_completes() {
 async fn build_failed_cascades_transitively_through_graph() {
     // A depends on B, B depends on C. C fails.
     // Expected: B → DependencyFailed, then A → DependencyFailed (transitive).
-    let eval_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
     let drv_a = Uuid::now_v7();
     let drv_b = Uuid::now_v7();
     let drv_c = Uuid::now_v7();

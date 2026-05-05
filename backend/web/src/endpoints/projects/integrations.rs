@@ -23,7 +23,7 @@ use uuid::Uuid;
 
 #[derive(Serialize, Debug)]
 pub struct ProjectIntegrationResponse {
-    pub project: Uuid,
+    pub project: ProjectId,
     pub inbound_integration: Option<Uuid>,
     pub outbound_integration: Option<Uuid>,
 }

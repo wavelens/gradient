@@ -23,7 +23,7 @@ use super::types::drv_display_name;
 pub async fn post_evaluation_builds(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
-    Path(evaluation_id): Path<Uuid>,
+    Path(evaluation_id): Path<EvaluationId>,
 ) -> Result<StreamBodyAs<'static>, WebError> {
     let ctx = EvalAccessContext::load(&state, evaluation_id, &Some(user.clone())).await?;
 

@@ -20,7 +20,7 @@ use std::sync::Arc;
 /// Load a cache visible to `user_id`: owned caches and public caches.
 async fn load_cache_for_owner(
     state: &Arc<ServerState>,
-    user_id: uuid::Uuid,
+    user_id: UserId,
     cache_name: String,
 ) -> WebResult<MCache> {
     let cache = get_any_cache_by_name(Arc::clone(state), cache_name)

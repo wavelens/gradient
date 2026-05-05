@@ -45,7 +45,7 @@ pub struct CacheResponse {
     pub priority: i32,
     pub public_key: String,
     pub public: bool,
-    pub created_by: Uuid,
+    pub created_by: UserId,
     pub created_at: NaiveDateTime,
     pub managed: bool,
     pub can_edit: bool,
@@ -88,13 +88,13 @@ pub async fn get(
         .all(&state.web_db)
         .await?;
 
-    let org_ids: Vec<Uuid> = org_memberships
+    let org_ids: Vec<OrganizationId> = org_memberships
         .into_iter()
         .map(|m| m.organization)
         .collect();
 
     // Find cache IDs subscribed by those orgs
-    let org_cache_ids: Vec<Uuid> = if org_ids.is_empty() {
+    let org_cache_ids: Vec<OrganizationCacheId> = if org_ids.is_empty() {
         vec![]
     } else {
         EOrganizationCache::find()
@@ -289,7 +289,7 @@ pub async fn delete_cache(
 
     // Collect orgs that subscribe to this cache before deleting it, so we can
     // clean up orphaned NAR files in the background afterwards.
-    let subscribing_orgs: Vec<Uuid> = EOrganizationCache::find()
+    let subscribing_orgs: Vec<OrganizationId> = EOrganizationCache::find()
         .filter(COrganizationCache::Cache.eq(cache.id))
         .all(&state.web_db)
         .await

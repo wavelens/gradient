@@ -71,7 +71,7 @@ pub struct OrgWorkerEntry {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
     /// User who registered this worker. NULL for legacy or declarative rows.
-    pub created_by: Option<Uuid>,
+    pub created_by: Option<UserId>,
     pub enable_fetch: bool,
     pub enable_eval: bool,
     pub enable_build: bool,

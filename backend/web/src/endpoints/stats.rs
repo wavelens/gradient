@@ -288,7 +288,7 @@ mod tests {
             .unwrap()
             .and_hms_opt(12, 34, 0)
             .unwrap();
-        let cache_id = Uuid::nil();
+        let cache_id = CacheId::nil();
 
         let stmt = build_record_nar_traffic_stmt(cache_id, bucket, 4096);
         let sql = stmt.to_string();

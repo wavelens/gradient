@@ -21,7 +21,7 @@ use super::BuildAccessContext;
 #[derive(Serialize, Deserialize, Debug)]
 pub struct BuildWithOutputs {
     pub id: Uuid,
-    pub evaluation: Uuid,
+    pub evaluation: EvaluationId,
     pub status: entity::build::BuildStatus,
     pub derivation_path: String,
     pub architecture: entity::server::Architecture,
@@ -40,7 +40,7 @@ pub struct BuildWithOutputs {
 pub async fn get_build(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
-    Path(build_id): Path<Uuid>,
+    Path(build_id): Path<BuildId>,
 ) -> WebResult<Json<BaseResponse<BuildWithOutputs>>> {
     let ctx = BuildAccessContext::load(&state, build_id, &maybe_user).await?;
     let build = ctx.build;

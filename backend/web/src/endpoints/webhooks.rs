@@ -47,12 +47,12 @@ pub struct UpdateWebhookRequest {
 #[derive(Serialize, Debug)]
 pub struct WebhookResponse {
     pub id: Uuid,
-    pub organization: Uuid,
+    pub organization: OrganizationId,
     pub name: String,
     pub url: String,
     pub events: serde_json::Value,
     pub active: bool,
-    pub created_by: Uuid,
+    pub created_by: UserId,
     pub created_at: chrono::NaiveDateTime,
 }
 
