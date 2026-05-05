@@ -27,6 +27,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
+use gradient_core::types::ids::*;
 
 #[derive(Deserialize, Default)]
 pub struct EvaluateRequest {
@@ -51,7 +52,7 @@ pub(super) async fn evaluations_to_summaries(
     let prev_ids: Vec<Uuid> = evaluations.iter().filter_map(|e| e.previous).collect();
     let mut combined_eval_ids: Vec<Uuid> = eval_ids.clone();
     combined_eval_ids.extend(prev_ids.iter().copied());
-    let commit_ids: Vec<Uuid> = evaluations.iter().map(|e| e.commit).collect();
+    let commit_ids: Vec<CommitId> = evaluations.iter().map(|e| e.commit).collect();
 
     let commits: HashMap<Uuid, String> = ECommit::find()
         .filter(CCommit::Id.is_in(commit_ids))
@@ -79,7 +80,7 @@ pub(super) async fn evaluations_to_summaries(
         .all(&state.web_db)
         .await?;
 
-    let ep_build_ids: Vec<Uuid> = entry_points.iter().map(|ep| ep.build).collect();
+    let ep_build_ids: Vec<BuildId> = entry_points.iter().map(|ep| ep.build).collect();
     let ep_build_status: HashMap<Uuid, BuildStatus> = if ep_build_ids.is_empty() {
         HashMap::new()
     } else {
@@ -333,7 +334,7 @@ struct EntryPointRelatedData {
 
 impl EntryPointRelatedData {
     async fn load(state: &Arc<ServerState>, entry_points: &[MEntryPoint]) -> WebResult<Self> {
-        let build_ids: Vec<Uuid> = entry_points.iter().map(|ep| ep.build).collect();
+        let build_ids: Vec<BuildId> = entry_points.iter().map(|ep| ep.build).collect();
         let builds: HashMap<Uuid, MBuild> = EBuild::find()
             .filter(CBuild::Id.is_in(build_ids))
             .all(&state.web_db)

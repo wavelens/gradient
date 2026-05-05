@@ -46,8 +46,8 @@ pub struct PutProjectIntegrationRequest {
 
 async fn validate_integration(
     state: &Arc<ServerState>,
-    org_id: Uuid,
-    integration_id: Uuid,
+    org_id: OrganizationId,
+    integration_id: IntegrationId,
     expected_kind: IntegrationKind,
 ) -> WebResult<()> {
     let row = EIntegration::find()

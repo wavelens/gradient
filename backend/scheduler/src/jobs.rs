@@ -433,7 +433,7 @@ mod tests {
             peer_id: peer,
             job: BuildJob {
                 builds: vec![BuildTask {
-                    build_id: Uuid::now_v7().to_string(),
+                    build_id: BuildId::now_v7().to_string(),
                     drv_path: "/nix/store/abc.drv".into(),
                     external_cached: false,
                 }],

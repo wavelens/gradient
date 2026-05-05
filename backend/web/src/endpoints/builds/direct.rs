@@ -126,7 +126,7 @@ pub async fn post_direct_build(
 
     // Create commit record
     let commit = ACommit {
-        id: Set(Uuid::now_v7()),
+        id: Set(CommitId::now_v7()),
         message: Set("Direct build submission".to_string()),
         hash: Set(vec![0; 20]), // Dummy hash for direct builds
         author: Set(Some(user.id)),
@@ -140,7 +140,7 @@ pub async fn post_direct_build(
     // Create evaluation record (without project for direct builds)
     let now = gradient_core::types::now();
     let evaluation = AEvaluation {
-        id: Set(Uuid::now_v7()),
+        id: Set(EvaluationId::now_v7()),
         project: Set(None), // No project for direct builds
         repository: Set(temp_dir.clone()),
         commit: Set(commit.id),
@@ -159,7 +159,7 @@ pub async fn post_direct_build(
 
     // Create DirectBuild record
     let direct_build = ADirectBuild {
-        id: Set(Uuid::now_v7()),
+        id: Set(DirectBuildId::now_v7()),
         organization: Set(org.id),
         evaluation: Set(evaluation.id),
         derivation: Set(derivation.clone()),

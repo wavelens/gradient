@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use uuid::Uuid;
+use gradient_core::types::ids::*;
 
 use super::BuildAccessContext;
 
@@ -31,7 +32,7 @@ pub(super) fn extract_drv_name(path: &str) -> String {
 pub(super) async fn authorize_build_opt(
     state: &Arc<ServerState>,
     maybe_user: &Option<MUser>,
-    build_id: Uuid,
+    build_id: BuildId,
 ) -> WebResult<()> {
     BuildAccessContext::load(state, build_id, maybe_user)
         .await
@@ -76,7 +77,7 @@ struct GraphWaveResult {
 async fn process_graph_wave(
     state: &Arc<ServerState>,
     batch: &[Uuid],
-    evaluation_id: Uuid,
+    evaluation_id: EvaluationId,
     visited: &mut HashSet<Uuid>,
 ) -> WebResult<GraphWaveResult> {
     let builds = EBuild::find()
@@ -84,7 +85,7 @@ async fn process_graph_wave(
         .all(&state.web_db)
         .await?;
 
-    let drv_ids: Vec<Uuid> = builds.iter().map(|b| b.derivation).collect();
+    let drv_ids: Vec<DerivationId> = builds.iter().map(|b| b.derivation).collect();
     let drv_by_id: HashMap<Uuid, MDerivation> = EDerivation::find()
         .filter(CDerivation::Id.is_in(drv_ids.clone()))
         .all(&state.web_db)
@@ -120,7 +121,7 @@ async fn process_graph_wave(
         });
     }
 
-    let dep_drv_ids: Vec<Uuid> = dep_rows.iter().map(|e| e.dependency).collect();
+    let dep_drv_ids: Vec<DerivationId> = dep_rows.iter().map(|e| e.dependency).collect();
     let build_by_drv: HashMap<Uuid, Uuid> = EBuild::find()
         .filter(CBuild::Evaluation.eq(evaluation_id))
         .filter(CBuild::Derivation.is_in(dep_drv_ids))
@@ -176,7 +177,7 @@ pub async fn get_build_dependencies(
         .all(&state.web_db)
         .await?;
 
-    let dep_drv_ids: Vec<Uuid> = dep_edges.iter().map(|d| d.dependency).collect();
+    let dep_drv_ids: Vec<DerivationId> = dep_edges.iter().map(|d| d.dependency).collect();
 
     let mut nodes: Vec<DependencyNode> = Vec::new();
     if !dep_drv_ids.is_empty() {

@@ -41,7 +41,7 @@ fn test_date() -> NaiveDateTime {
     NaiveDateTime::default()
 }
 
-fn make_eval_queued(id: Uuid, commit_id: Uuid, project_id: Option<Uuid>) -> MEvaluation {
+fn make_eval_queued(id: Uuid, commit_id: CommitId, project_id: Option<Uuid>) -> MEvaluation {
     entity::evaluation::Model {
         id,
         project: project_id,
@@ -68,7 +68,7 @@ fn make_commit(id: Uuid) -> entity::commit::Model {
     }
 }
 
-fn make_project(id: Uuid, org_id: Uuid) -> entity::project::Model {
+fn make_project(id: Uuid, org_id: OrganizationId) -> entity::project::Model {
     entity::project::Model {
         id,
         organization: org_id,
@@ -88,7 +88,7 @@ fn make_project(id: Uuid, org_id: Uuid) -> entity::project::Model {
     }
 }
 
-fn make_direct_build(id: Uuid, org_id: Uuid, eval_id: Uuid) -> entity::direct_build::Model {
+fn make_direct_build(id: Uuid, org_id: OrganizationId, eval_id: Uuid) -> entity::direct_build::Model {
     entity::direct_build::Model {
         id,
         organization: org_id,
@@ -116,7 +116,7 @@ fn make_build_queued(id: Uuid, eval_id: Uuid, drv_id: Uuid) -> MBuild {
     }
 }
 
-fn make_derivation(id: Uuid, org_id: Uuid, path: &str) -> MDerivation {
+fn make_derivation(id: Uuid, org_id: OrganizationId, path: &str) -> MDerivation {
     entity::derivation::Model {
         id,
         organization: org_id,

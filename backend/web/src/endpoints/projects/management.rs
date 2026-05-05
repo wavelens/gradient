@@ -28,6 +28,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
+use gradient_core::types::ids::*;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct MakeProjectRequest {
@@ -203,7 +204,7 @@ pub async fn put(
         .to_string();
 
     let project = AProject {
-        id: Set(Uuid::now_v7()),
+        id: Set(ProjectId::now_v7()),
         organization: Set(organization.id),
         name: Set(body.name.clone()),
         active: Set(true),

@@ -20,6 +20,7 @@ use sea_orm::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
+use gradient_core::types::ids::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StringListItem {
@@ -50,8 +51,8 @@ async fn find_user_by_username(state: &Arc<ServerState>, username: &str) -> WebR
 
 async fn find_org_membership(
     state: &Arc<ServerState>,
-    org_id: Uuid,
-    user_id: Uuid,
+    org_id: OrganizationId,
+    user_id: UserId,
 ) -> WebResult<Option<MOrganizationUser>> {
     Ok(EOrganizationUser::find()
         .filter(
@@ -149,7 +150,7 @@ pub async fn post_organization_users(
         .or_not_found("Role")?;
 
     AOrganizationUser {
-        id: Set(Uuid::now_v7()),
+        id: Set(OrganizationUserId::now_v7()),
         organization: Set(organization.id),
         user: Set(target_user.id),
         role: Set(role.id),

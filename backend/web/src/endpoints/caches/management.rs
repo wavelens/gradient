@@ -24,6 +24,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
+use gradient_core::types::ids::*;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct MakeCacheRequest {
@@ -146,7 +147,7 @@ pub async fn put(
         })?;
 
     let cache = ACache {
-        id: Set(Uuid::now_v7()),
+        id: Set(CacheId::now_v7()),
         name: Set(body.name.clone()),
         active: Set(true),
         display_name: Set(body.display_name.trim().to_string()),
@@ -163,7 +164,7 @@ pub async fn put(
     let cache = cache.insert(&state.web_db).await?;
 
     ACacheUpstream {
-        id: Set(Uuid::now_v7()),
+        id: Set(CacheUpstreamId::now_v7()),
         cache: Set(cache.id),
         display_name: Set("cache.nixos.org".to_string()),
         mode: Set(CacheSubscriptionMode::ReadOnly),

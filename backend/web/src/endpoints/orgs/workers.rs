@@ -21,6 +21,7 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
+use gradient_core::types::ids::*;
 
 use crate::helpers::{OptionExt, ok_json};
 use crate::error::{WebError, WebResult};
@@ -53,7 +54,7 @@ pub struct RegisterWorkerRequest {
 
 #[derive(Serialize)]
 pub struct RegisterWorkerResponse {
-    pub peer_id: Uuid,
+    pub peer_id: OrganizationId,
     /// Only present when the token was server-generated (i.e. not supplied in the request).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub token: Option<String>,
@@ -145,7 +146,7 @@ pub async fn post_org_worker(
     let token_hash = password_auth::generate_hash(&token);
 
     let row = AWorkerRegistration {
-        id: Set(Uuid::now_v7()),
+        id: Set(WorkerRegistrationId::now_v7()),
         peer_id: Set(org.id),
         worker_id: Set(worker_id_str.clone()),
         token_hash: Set(token_hash),

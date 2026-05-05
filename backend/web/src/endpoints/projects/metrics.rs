@@ -16,10 +16,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::Arc;
 use uuid::Uuid;
+use gradient_core::types::ids::*;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ProjectMetricPoint {
-    pub evaluation_id: Uuid,
+    pub evaluation_id: EvaluationId,
     pub created_at: chrono::NaiveDateTime,
     pub build_time_total_ms: i64,
     pub eval_time_ms: i64,
@@ -177,7 +178,7 @@ pub struct EntryPointMetricsQuery {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct EntryPointMetricPoint {
-    pub evaluation_id: Uuid,
+    pub evaluation_id: EvaluationId,
     pub created_at: chrono::NaiveDateTime,
     pub build_status: entity::build::BuildStatus,
     pub build_time_ms: Option<i64>,

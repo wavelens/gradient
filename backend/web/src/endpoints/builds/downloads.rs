@@ -17,6 +17,7 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
+use gradient_core::types::ids::*;
 
 use super::BuildAccessContext;
 use crate::endpoints::content_type_for_filename;
@@ -47,7 +48,7 @@ fn relative_in_output(full: &str, output_root: &str) -> String {
 /// as the local [`BuildProduct`] type.
 async fn collect_build_products(
     state: &Arc<ServerState>,
-    _build_id: Uuid,
+    _build_id: BuildId,
     build_outputs: Vec<MDerivationOutput>,
 ) -> Vec<BuildProduct> {
     let output_ids: Vec<Uuid> = build_outputs.iter().map(|o| o.id).collect();
@@ -81,7 +82,7 @@ async fn collect_build_products(
 /// Returns `None` when no matching product is found.
 async fn find_and_serve_file(
     state: &Arc<ServerState>,
-    build_id: Uuid,
+    build_id: BuildId,
     build_outputs: Vec<MDerivationOutput>,
     filename: &str,
 ) -> WebResult<Option<Response>> {

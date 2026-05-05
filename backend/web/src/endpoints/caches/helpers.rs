@@ -20,6 +20,7 @@ use sea_orm::{
 use std::sync::Arc;
 use tracing::error;
 use uuid::Uuid;
+use gradient_core::types::ids::*;
 
 /// Extracts HTTP Basic Auth credentials and resolves them to a user.
 /// The password field is treated as a JWT or API key (the username is ignored).
