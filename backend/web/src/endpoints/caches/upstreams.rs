@@ -37,11 +37,11 @@ pub enum AddUpstreamRequest {
 
 #[derive(Serialize)]
 pub struct UpstreamCacheItem {
-    pub id: Uuid,
+    pub id: CacheUpstreamId,
     pub display_name: String,
     pub mode: CacheSubscriptionMode,
     /// Set for internal upstreams.
-    pub upstream_cache_id: Option<Uuid>,
+    pub upstream_cache_id: Option<CacheId>,
     /// Set for external upstreams.
     pub url: Option<String>,
     pub public_key: Option<String>,
@@ -70,7 +70,7 @@ async fn load_cache_for_user(
 async fn load_upstream(
     state: &Arc<ServerState>,
     cache_id: CacheId,
-    upstream_id: Uuid,
+    upstream_id: CacheUpstreamId,
 ) -> WebResult<MCacheUpstream> {
     ECacheUpstream::find_by_id(upstream_id)
         .filter(CCacheUpstream::Cache.eq(cache_id))
@@ -111,7 +111,7 @@ pub async fn put_cache_upstream(
     Extension(user): Extension<MUser>,
     Path(cache): Path<String>,
     Json(body): Json<AddUpstreamRequest>,
-) -> WebResult<Json<BaseResponse<Uuid>>> {
+) -> WebResult<Json<BaseResponse<CacheUpstreamId>>> {
     let cache = load_cache_for_user(&state, user.id, cache).await?;
 
     let record = match body {
@@ -159,7 +159,7 @@ pub async fn put_cache_upstream(
 pub async fn patch_cache_upstream(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
-    Path((cache, upstream_id)): Path<(String, Uuid)>,
+    Path((cache, upstream_id)): Path<(String, CacheUpstreamId)>,
     Json(body): Json<PatchUpstreamRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let cache = load_cache_for_user(&state, user.id, cache).await?;
@@ -195,7 +195,7 @@ pub async fn patch_cache_upstream(
 pub async fn delete_cache_upstream(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
-    Path((cache, upstream_id)): Path<(String, Uuid)>,
+    Path((cache, upstream_id)): Path<(String, CacheUpstreamId)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let cache = load_cache_for_user(&state, user.id, cache).await?;
     let record = load_upstream(&state, cache.id, upstream_id).await?;

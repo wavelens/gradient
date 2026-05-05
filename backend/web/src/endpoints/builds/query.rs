@@ -20,7 +20,7 @@ use super::BuildAccessContext;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct BuildWithOutputs {
-    pub id: Uuid,
+    pub id: BuildId,
     pub evaluation: EvaluationId,
     pub status: entity::build::BuildStatus,
     pub derivation_path: String,
@@ -31,7 +31,7 @@ pub struct BuildWithOutputs {
     /// When set, this build is a follower of another build (same derivation,
     /// different evaluation) whose terminal status will be copied here. The
     /// scheduler does not dispatch builds with `via` set.
-    pub via: Option<Uuid>,
+    pub via: Option<BuildId>,
     pub output: HashMap<String, String>,
     pub created_at: chrono::NaiveDateTime,
     pub updated_at: chrono::NaiveDateTime,

@@ -271,7 +271,7 @@ async fn check_badge_org_access(
 /// build status in the latest completed evaluation.
 async fn badge_status_for_entry_point(
     state: &Arc<ServerState>,
-    project_id: uuid::Uuid,
+    project_id: ProjectId,
     eval_attr: &str,
 ) -> Result<(Option<EvaluationStatus>, bool), WebError> {
     let evaluation = EEvaluation::find()
@@ -328,7 +328,7 @@ async fn badge_status_for_latest_eval(
 
     let has_failed = match &eval {
         Some(e) if e.status == EvaluationStatus::Completed => {
-            let ep_build_ids: Vec<Uuid> = EEntryPoint::find()
+            let ep_build_ids: Vec<BuildId> = EEntryPoint::find()
                 .filter(CEntryPoint::Evaluation.eq(e.id))
                 .all(&state.web_db)
                 .await?
