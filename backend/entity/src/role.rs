@@ -6,16 +6,17 @@
 
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+
+use crate::ids::{OrganizationId, RoleId};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "role")]
 pub struct Model {
     #[sea_orm(primary_key)]
-    pub id: Uuid,
+    pub id: RoleId,
     #[sea_orm(indexed)]
     pub name: String,
-    pub organization: Option<Uuid>,
+    pub organization: Option<OrganizationId>,
     pub permission: i64,
 }
 

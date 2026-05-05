@@ -7,7 +7,8 @@
 use chrono::NaiveDateTime;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+
+use crate::ids::{CacheId, CachedPathId, CachedPathSignatureId};
 
 /// Associates a `cached_path` with a cache, optionally carrying a signature.
 ///
@@ -23,9 +24,9 @@ use uuid::Uuid;
 #[sea_orm(table_name = "cached_path_signature")]
 pub struct Model {
     #[sea_orm(primary_key)]
-    pub id: Uuid,
-    pub cached_path: Uuid,
-    pub cache: Uuid,
+    pub id: CachedPathSignatureId,
+    pub cached_path: CachedPathId,
+    pub cache: CacheId,
     pub signature: Option<Vec<u8>>,
     pub created_at: NaiveDateTime,
 }

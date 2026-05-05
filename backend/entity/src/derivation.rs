@@ -7,14 +7,15 @@
 use chrono::NaiveDateTime;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+
+use crate::ids::{DerivationId, OrganizationId};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "derivation")]
 pub struct Model {
     #[sea_orm(primary_key)]
-    pub id: Uuid,
-    pub organization: Uuid,
+    pub id: DerivationId,
+    pub organization: OrganizationId,
     pub derivation_path: String,
     pub architecture: super::server::Architecture,
     pub created_at: NaiveDateTime,

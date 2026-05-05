@@ -7,7 +7,8 @@
 use chrono::NaiveDateTime;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+
+use crate::ids::CachedPathId;
 
 /// A cached Nix store path.
 ///
@@ -19,7 +20,7 @@ use uuid::Uuid;
 #[sea_orm(table_name = "cached_path")]
 pub struct Model {
     #[sea_orm(primary_key)]
-    pub id: Uuid,
+    pub id: CachedPathId,
     /// Full store path, e.g. `/nix/store/abc123-source`.
     pub store_path: String,
     /// The 32-char hash portion of the store path (unique, used for narinfo lookups).

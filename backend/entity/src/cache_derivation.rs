@@ -7,7 +7,8 @@
 use chrono::NaiveDateTime;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+
+use crate::ids::{CacheDerivationId, CacheId, DerivationId};
 
 /// Presence tracking: records which caches currently hold a complete copy of
 /// a derivation's outputs (including the transitive closure). The cacher
@@ -19,9 +20,9 @@ use uuid::Uuid;
 #[sea_orm(table_name = "cache_derivation")]
 pub struct Model {
     #[sea_orm(primary_key)]
-    pub id: Uuid,
-    pub cache: Uuid,
-    pub derivation: Uuid,
+    pub id: CacheDerivationId,
+    pub cache: CacheId,
+    pub derivation: DerivationId,
     pub cached_at: NaiveDateTime,
     pub last_fetched_at: Option<NaiveDateTime>,
 }

@@ -7,16 +7,17 @@
 use chrono::NaiveDateTime;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+
+use crate::ids::{BuildId, EntryPointId, EvaluationId, ProjectId};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "entry_point")]
 pub struct Model {
     #[sea_orm(primary_key)]
-    pub id: Uuid,
-    pub project: Uuid,
-    pub evaluation: Uuid,
-    pub build: Uuid,
+    pub id: EntryPointId,
+    pub project: ProjectId,
+    pub evaluation: EvaluationId,
+    pub build: BuildId,
     pub eval: String,
     pub created_at: NaiveDateTime,
     pub repo_check_id: Option<i64>,

@@ -7,14 +7,15 @@
 use chrono::NaiveDateTime;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+
+use crate::ids::{CachedPathId, DerivationId, DerivationOutputId};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "derivation_output")]
 pub struct Model {
     #[sea_orm(primary_key)]
-    pub id: Uuid,
-    pub derivation: Uuid,
+    pub id: DerivationOutputId,
+    pub derivation: DerivationId,
     pub name: String,
     pub output: String,
     pub hash: String,
@@ -25,7 +26,7 @@ pub struct Model {
     /// Link to the `cached_path` row when this output is cached.
     /// Replaces the old `derivation_output_signature` join — the signature
     /// lives on `cached_path` directly.
-    pub cached_path: Option<Uuid>,
+    pub cached_path: Option<CachedPathId>,
     pub created_at: NaiveDateTime,
 }
 
@@ -63,7 +64,7 @@ pub enum CacheLink {
     NotCached,
     /// The output is cached; `cached_path` is the ID of the
     /// `cached_path` row that holds the NAR metadata.
-    Cached { cached_path: uuid::Uuid },
+    Cached { cached_path: CachedPathId },
 }
 
 impl Model {

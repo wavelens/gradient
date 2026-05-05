@@ -6,7 +6,8 @@
 
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+
+use crate::ids::FeatureId;
 
 /// Discriminates between a Nix system-feature (e.g. `"kvm"`, `"big-parallel"`)
 /// and a Nix architecture / system string (e.g. `"x86_64-linux"`).
@@ -28,7 +29,7 @@ pub enum FeatureKind {
 #[sea_orm(table_name = "system_requirement")]
 pub struct Model {
     #[sea_orm(primary_key)]
-    pub id: Uuid,
+    pub id: FeatureId,
     pub name: String,
     pub kind: FeatureKind,
 }

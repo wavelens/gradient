@@ -6,7 +6,8 @@
 
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+
+use crate::ids::{CacheId, OrganizationCacheId, OrganizationId};
 
 #[derive(Debug, Clone, PartialEq, Eq, DeriveActiveEnum, EnumIter, Deserialize, Serialize)]
 #[sea_orm(rs_type = "i32", db_type = "Integer")]
@@ -26,9 +27,9 @@ pub enum CacheSubscriptionMode {
 #[sea_orm(table_name = "organization_cache")]
 pub struct Model {
     #[sea_orm(primary_key)]
-    pub id: Uuid,
-    pub organization: Uuid,
-    pub cache: Uuid,
+    pub id: OrganizationCacheId,
+    pub organization: OrganizationId,
+    pub cache: CacheId,
     pub mode: CacheSubscriptionMode,
 }
 

@@ -7,7 +7,8 @@
 use chrono::NaiveDateTime;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+
+use crate::ids::{OrganizationId, UserId, WorkerRegistrationId};
 
 /// Tracks which peers (orgs, caches, proxies) have registered a given worker ID
 /// and holds the SHA-256 hash of the peer-issued token for challenge-response auth.
@@ -15,9 +16,9 @@ use uuid::Uuid;
 #[sea_orm(table_name = "worker_registration")]
 pub struct Model {
     #[sea_orm(primary_key)]
-    pub id: Uuid,
+    pub id: WorkerRegistrationId,
     /// The peer (org, cache, or proxy) that registered this worker.
-    pub peer_id: Uuid,
+    pub peer_id: OrganizationId,
     /// The persistent worker identity UUID sent in `InitConnection`.
     pub worker_id: String,
     /// SHA-256 hex digest of the token issued by the peer to this worker.
@@ -43,7 +44,7 @@ pub struct Model {
     pub display_name: String,
     /// User who created this registration. NULL for legacy rows registered
     /// before this column was introduced.
-    pub created_by: Option<Uuid>,
+    pub created_by: Option<UserId>,
     pub created_at: NaiveDateTime,
 }
 

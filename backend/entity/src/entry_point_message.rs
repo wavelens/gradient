@@ -5,7 +5,8 @@
  */
 
 use sea_orm::entity::prelude::*;
-use uuid::Uuid;
+
+use crate::ids::{EntryPointId, EntryPointMessageId, EvaluationMessageId};
 
 /// Join table: attaches an `evaluation_message` to one or more `entry_point` rows.
 ///
@@ -16,9 +17,9 @@ use uuid::Uuid;
 #[sea_orm(table_name = "entry_point_message")]
 pub struct Model {
     #[sea_orm(primary_key)]
-    pub id: Uuid,
-    pub entry_point: Uuid,
-    pub message: Uuid,
+    pub id: EntryPointMessageId,
+    pub entry_point: EntryPointId,
+    pub message: EvaluationMessageId,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
