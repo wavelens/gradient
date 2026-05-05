@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_core::types::ids::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -14,7 +15,7 @@ pub struct MakeEvaluationRequest {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct BuildItem {
-    pub id: Uuid,
+    pub id: BuildId,
     pub name: String,
     pub status: String,
     pub has_artefacts: bool,
@@ -40,16 +41,16 @@ pub struct BuildsQuery {
 
 #[derive(Serialize, Debug)]
 pub struct EvaluationResponse {
-    pub id: Uuid,
-    pub project: Option<Uuid>,
+    pub id: EvaluationId,
+    pub project: Option<ProjectId>,
     pub project_name: Option<String>,
     pub project_display_name: Option<String>,
     pub repository: String,
     pub commit: String,
     pub wildcard: String,
     pub status: entity::evaluation::EvaluationStatus,
-    pub previous: Option<Uuid>,
-    pub next: Option<Uuid>,
+    pub previous: Option<EvaluationId>,
+    pub next: Option<EvaluationId>,
     pub created_at: chrono::NaiveDateTime,
     pub error_count: u64,
     pub warning_count: u64,
@@ -59,19 +60,19 @@ pub struct EvaluationResponse {
 /// Compact entry-point representation returned inline on the evaluation.
 #[derive(Serialize, Debug)]
 pub struct EntryPointBrief {
-    pub id: Uuid,
+    pub id: EntryPointId,
     pub eval: String,
     pub build_status: entity::build::BuildStatus,
 }
 
 #[derive(Serialize, Debug)]
 pub struct EvaluationMessageResponse {
-    pub id: Uuid,
+    pub id: EvaluationMessageId,
     pub level: entity::evaluation_message::MessageLevel,
     pub message: String,
     pub source: Option<String>,
     pub created_at: chrono::NaiveDateTime,
-    pub entry_points: Vec<Uuid>,
+    pub entry_points: Vec<EntryPointId>,
 }
 
 /// `/nix/store/hash-name-version.drv` → `name-version`

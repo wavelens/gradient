@@ -17,8 +17,8 @@ use uuid::Uuid;
 #[derive(Debug, Clone)]
 pub struct RecordedBuildExecution {
     pub server_id: Uuid,
-    pub organization_id: Uuid,
-    pub build_id: Uuid,
+    pub organization_id: OrganizationId,
+    pub build_id: BuildId,
     pub dependencies: Vec<String>,
 }
 

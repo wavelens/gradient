@@ -36,7 +36,7 @@ use uuid::Uuid;
 #[derive(Serialize, Debug)]
 pub struct IntegrationResponse {
     pub id: Uuid,
-    pub organization: Uuid,
+    pub organization: OrganizationId,
     pub name: String,
     pub display_name: String,
     pub kind: String,
@@ -44,7 +44,7 @@ pub struct IntegrationResponse {
     pub endpoint_url: Option<String>,
     pub has_secret: bool,
     pub has_access_token: bool,
-    pub created_by: Uuid,
+    pub created_by: UserId,
     pub created_at: chrono::NaiveDateTime,
 }
 

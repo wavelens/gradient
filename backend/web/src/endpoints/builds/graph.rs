@@ -41,7 +41,7 @@ pub(super) async fn authorize_build_opt(
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct DependencyNode {
-    pub id: Uuid,
+    pub id: BuildId,
     pub name: String,
     pub path: String,
     pub status: String,
@@ -51,13 +51,13 @@ pub struct DependencyNode {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct DependencyEdge {
-    pub source: Uuid,
-    pub target: Uuid,
+    pub source: BuildId,
+    pub target: BuildId,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct BuildGraph {
-    pub root: Uuid,
+    pub root: BuildId,
     pub nodes: Vec<DependencyNode>,
     pub edges: Vec<DependencyEdge>,
 }
@@ -69,16 +69,16 @@ struct GraphWaveResult {
     nodes: Vec<DependencyNode>,
     edges: Vec<DependencyEdge>,
     /// Build IDs not yet visited, to be queued for the next wave.
-    next_wave: Vec<Uuid>,
+    next_wave: Vec<BuildId>,
 }
 
 /// Process one BFS wave: fetch builds+derivations for `batch`, resolve
 /// dependency edges, and collect unvisited dependents for the next wave.
 async fn process_graph_wave(
     state: &Arc<ServerState>,
-    batch: &[Uuid],
+    batch: &[BuildId],
     evaluation_id: EvaluationId,
-    visited: &mut HashSet<Uuid>,
+    visited: &mut HashSet<BuildId>,
 ) -> WebResult<GraphWaveResult> {
     let builds = EBuild::find()
         .filter(CBuild::Id.is_in(batch.to_vec()))
@@ -86,7 +86,7 @@ async fn process_graph_wave(
         .await?;
 
     let drv_ids: Vec<DerivationId> = builds.iter().map(|b| b.derivation).collect();
-    let drv_by_id: HashMap<Uuid, MDerivation> = EDerivation::find()
+    let drv_by_id: HashMap<DerivationId, MDerivation> = EDerivation::find()
         .filter(CDerivation::Id.is_in(drv_ids.clone()))
         .all(&state.web_db)
         .await?
@@ -122,7 +122,7 @@ async fn process_graph_wave(
     }
 
     let dep_drv_ids: Vec<DerivationId> = dep_rows.iter().map(|e| e.dependency).collect();
-    let build_by_drv: HashMap<Uuid, Uuid> = EBuild::find()
+    let build_by_drv: HashMap<DerivationId, BuildId> = EBuild::find()
         .filter(CBuild::Evaluation.eq(evaluation_id))
         .filter(CBuild::Derivation.is_in(dep_drv_ids))
         .all(&state.web_db)
@@ -131,11 +131,11 @@ async fn process_graph_wave(
         .map(|b| (b.derivation, b.id))
         .collect();
 
-    let parent_build_by_drv: HashMap<Uuid, Uuid> =
+    let parent_build_by_drv: HashMap<DerivationId, BuildId> =
         builds.iter().map(|b| (b.derivation, b.id)).collect();
 
     let mut edges: Vec<DependencyEdge> = Vec::new();
-    let mut next_wave: Vec<Uuid> = Vec::new();
+    let mut next_wave: Vec<BuildId> = Vec::new();
     for edge in dep_rows {
         let Some(&parent_build_id) = parent_build_by_drv.get(&edge.derivation) else {
             continue;
@@ -163,7 +163,7 @@ async fn process_graph_wave(
 pub async fn get_build_dependencies(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
-    Path(build_id): Path<Uuid>,
+    Path(build_id): Path<BuildId>,
 ) -> WebResult<Json<BaseResponse<Vec<DependencyNode>>>> {
     authorize_build_opt(&state, &maybe_user, build_id).await?;
 
@@ -190,7 +190,7 @@ pub async fn get_build_dependencies(
             .filter(CDerivation::Id.is_in(dep_drv_ids))
             .all(&state.web_db)
             .await?;
-        let drv_by_id: HashMap<Uuid, MDerivation> =
+        let drv_by_id: HashMap<DerivationId, MDerivation> =
             dep_drvs.into_iter().map(|d| (d.id, d)).collect();
         for b in dep_builds {
             if let Some(drv) = drv_by_id.get(&b.derivation) {
@@ -213,7 +213,7 @@ pub async fn get_build_dependencies(
 pub async fn get_build_graph(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
-    Path(build_id): Path<Uuid>,
+    Path(build_id): Path<BuildId>,
 ) -> WebResult<Json<BaseResponse<BuildGraph>>> {
     authorize_build_opt(&state, &maybe_user, build_id).await?;
 
@@ -223,10 +223,10 @@ pub async fn get_build_graph(
         .or_not_found("Build")?;
     let evaluation_id = root_build.evaluation;
 
-    let mut visited_builds: HashSet<Uuid> = HashSet::new();
+    let mut visited_builds: HashSet<BuildId> = HashSet::new();
     let mut nodes: Vec<DependencyNode> = Vec::new();
     let mut edges: Vec<DependencyEdge> = Vec::new();
-    let mut queue: VecDeque<Vec<Uuid>> = VecDeque::new();
+    let mut queue: VecDeque<Vec<BuildId>> = VecDeque::new();
 
     visited_builds.insert(build_id);
     queue.push_back(vec![build_id]);

@@ -20,7 +20,7 @@ pub async fn post_evaluation(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Extension(scheduler): Extension<Arc<scheduler::Scheduler>>,
-    Path(evaluation_id): Path<Uuid>,
+    Path(evaluation_id): Path<EvaluationId>,
     Json(body): Json<MakeEvaluationRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let ctx = EvalAccessContext::load(&state, evaluation_id, &Some(user.clone())).await?;

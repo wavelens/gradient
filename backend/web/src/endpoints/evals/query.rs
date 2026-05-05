@@ -26,7 +26,7 @@ use super::types::{
 pub async fn get_evaluation(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
-    Path(evaluation_id): Path<Uuid>,
+    Path(evaluation_id): Path<EvaluationId>,
 ) -> WebResult<Json<BaseResponse<EvaluationResponse>>> {
     let ctx = EvalAccessContext::load(&state, evaluation_id, &maybe_user).await?;
     let evaluation = ctx.evaluation;
@@ -109,7 +109,7 @@ pub async fn get_evaluation(
 pub async fn get_evaluation_builds(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
-    Path(evaluation_id): Path<Uuid>,
+    Path(evaluation_id): Path<EvaluationId>,
     Query(query): Query<BuildsQuery>,
 ) -> WebResult<Json<BaseResponse<PaginatedBuilds>>> {
     let ctx = EvalAccessContext::load(&state, evaluation_id, &maybe_user).await?;
@@ -142,7 +142,7 @@ pub async fn get_evaluation_builds(
             .filter(CDerivationOutput::Derivation.is_in(drv_ids))
             .all(&state.web_db)
             .await?;
-        let output_ids: Vec<Uuid> = outputs.iter().map(|o| o.id).collect();
+        let output_ids: Vec<DerivationOutputId> = outputs.iter().map(|o| o.id).collect();
         let mut m: HashMap<Uuid, bool> = HashMap::new();
         if !output_ids.is_empty() {
             for bp in EBuildProduct::find()
@@ -228,7 +228,7 @@ pub async fn get_evaluation_builds(
 pub async fn get_evaluation_messages(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
-    Path(evaluation_id): Path<Uuid>,
+    Path(evaluation_id): Path<EvaluationId>,
 ) -> WebResult<Json<BaseResponse<Vec<EvaluationMessageResponse>>>> {
     let ctx = EvalAccessContext::load(&state, evaluation_id, &maybe_user).await?;
     let evaluation = ctx.evaluation;
@@ -239,7 +239,7 @@ pub async fn get_evaluation_messages(
         .all(&state.web_db)
         .await?;
 
-    let msg_ids: Vec<Uuid> = messages.iter().map(|m| m.id).collect();
+    let msg_ids: Vec<EvaluationMessageId> = messages.iter().map(|m| m.id).collect();
 
     // Fetch all entry_point_message join rows for these messages in one query.
     let ep_rows = if msg_ids.is_empty() {

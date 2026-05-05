@@ -51,7 +51,7 @@ async fn collect_build_products(
     _build_id: BuildId,
     build_outputs: Vec<MDerivationOutput>,
 ) -> Vec<BuildProduct> {
-    let output_ids: Vec<Uuid> = build_outputs.iter().map(|o| o.id).collect();
+    let output_ids: Vec<DerivationOutputId> = build_outputs.iter().map(|o| o.id).collect();
     if output_ids.is_empty() {
         return Vec::new();
     }
@@ -86,7 +86,7 @@ async fn find_and_serve_file(
     build_outputs: Vec<MDerivationOutput>,
     filename: &str,
 ) -> WebResult<Option<Response>> {
-    let output_ids: Vec<Uuid> = build_outputs.iter().map(|o| o.id).collect();
+    let output_ids: Vec<DerivationOutputId> = build_outputs.iter().map(|o| o.id).collect();
     if output_ids.is_empty() {
         return Ok(None);
     }
@@ -215,7 +215,7 @@ pub struct DownloadQuery {
 pub async fn get_build_downloads(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
-    Path(build_id): Path<Uuid>,
+    Path(build_id): Path<BuildId>,
 ) -> WebResult<Json<BaseResponse<Vec<BuildProduct>>>> {
     let ctx = BuildAccessContext::load(&state, build_id, &maybe_user).await?;
 
@@ -232,7 +232,7 @@ pub async fn get_build_downloads(
 pub async fn get_build_download_token(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
-    Path(build_id): Path<Uuid>,
+    Path(build_id): Path<BuildId>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     BuildAccessContext::load(&state, build_id, &Some(user)).await?;
 
@@ -245,7 +245,7 @@ pub async fn get_build_download_token(
 pub async fn get_build_download(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
-    Path((build_id, filename)): Path<(Uuid, String)>,
+    Path((build_id, filename)): Path<(BuildId, String)>,
     Query(query): Query<DownloadQuery>,
 ) -> Result<Response, WebError> {
     let ctx = BuildAccessContext::load_unguarded(&state, build_id).await?;

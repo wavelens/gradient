@@ -122,7 +122,7 @@ pub async fn get_project_metrics(
         let build_time_total_ms: i64 = builds.iter().filter_map(|b| b.build_time_ms).sum();
 
         // Resolve entry-point builds for this evaluation.
-        let ep_build_ids: Vec<Uuid> = EEntryPoint::find()
+        let ep_build_ids: Vec<BuildId> = EEntryPoint::find()
             .filter(CEntryPoint::Evaluation.eq(evaluation.id))
             .all(&state.web_db)
             .await?
@@ -130,7 +130,7 @@ pub async fn get_project_metrics(
             .map(|ep| ep.build)
             .collect();
 
-        let ep_drv_ids: Vec<Uuid> = if ep_build_ids.is_empty() {
+        let ep_drv_ids: Vec<DerivationId> = if ep_build_ids.is_empty() {
             vec![]
         } else {
             EBuild::find()

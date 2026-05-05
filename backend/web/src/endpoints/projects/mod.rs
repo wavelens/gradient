@@ -36,7 +36,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ProjectResponse {
     pub id: Uuid,
-    pub organization: Uuid,
+    pub organization: OrganizationId,
     pub name: String,
     pub active: bool,
     pub display_name: String,
@@ -46,7 +46,7 @@ pub struct ProjectResponse {
     pub last_evaluation: Option<Uuid>,
     pub last_evaluation_status: Option<EvaluationStatus>,
     pub force_evaluation: bool,
-    pub created_by: Uuid,
+    pub created_by: UserId,
     pub created_at: chrono::NaiveDateTime,
     pub managed: bool,
     pub keep_evaluations: i32,

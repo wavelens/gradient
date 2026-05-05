@@ -105,7 +105,7 @@ pub async fn get(
     let raw = paginator.fetch_page(page - 1).await?;
 
     // Batch-fetch the status of the last evaluation for each project.
-    let eval_ids: Vec<Uuid> = raw.iter().filter_map(|p| p.last_evaluation).collect();
+    let eval_ids: Vec<EvaluationId> = raw.iter().filter_map(|p| p.last_evaluation).collect();
     let eval_status_map: HashMap<Uuid, entity::evaluation::EvaluationStatus> =
         if eval_ids.is_empty() {
             HashMap::new()

@@ -191,7 +191,7 @@ pub async fn post_organization_subscribe_cache(
 /// existing rows are skipped. Best-effort: errors are logged, not
 /// propagated.
 async fn enqueue_backfill_signatures(state: &ServerState, org_id: OrganizationId, cache_id: CacheId) {
-    let drv_ids: Vec<Uuid> = match EDerivation::find()
+    let drv_ids: Vec<DerivationId> = match EDerivation::find()
         .filter(CDerivation::Organization.eq(org_id))
         .all(&state.web_db)
         .await

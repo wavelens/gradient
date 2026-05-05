@@ -24,7 +24,7 @@ use super::BuildAccessContext;
 pub async fn get_build_log(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
-    Path(build_id): Path<Uuid>,
+    Path(build_id): Path<BuildId>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let ctx = BuildAccessContext::load(&state, build_id, &maybe_user).await?;
     let log_key = ctx.build.log_id.unwrap_or(build_id);
@@ -36,7 +36,7 @@ pub async fn get_build_log(
 pub async fn post_build_log(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
-    Path(build_id): Path<Uuid>,
+    Path(build_id): Path<BuildId>,
 ) -> Result<Response, WebError> {
     let ctx = BuildAccessContext::load(&state, build_id, &Some(user)).await?;
 

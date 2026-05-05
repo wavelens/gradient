@@ -41,7 +41,7 @@ fn test_date() -> NaiveDateTime {
     NaiveDateTime::default()
 }
 
-fn make_eval_queued(id: Uuid, commit_id: CommitId, project_id: Option<Uuid>) -> MEvaluation {
+fn make_eval_queued(id: EvaluationId, commit_id: CommitId, project_id: Option<ProjectId>) -> MEvaluation {
     entity::evaluation::Model {
         id,
         project: project_id,
@@ -58,7 +58,7 @@ fn make_eval_queued(id: Uuid, commit_id: CommitId, project_id: Option<Uuid>) -> 
     }
 }
 
-fn make_commit(id: Uuid) -> entity::commit::Model {
+fn make_commit(id: CommitId) -> entity::commit::Model {
     entity::commit::Model {
         id,
         message: "test commit".into(),
@@ -68,7 +68,7 @@ fn make_commit(id: Uuid) -> entity::commit::Model {
     }
 }
 
-fn make_project(id: Uuid, org_id: OrganizationId) -> entity::project::Model {
+fn make_project(id: ProjectId, org_id: OrganizationId) -> entity::project::Model {
     entity::project::Model {
         id,
         organization: org_id,
@@ -81,26 +81,26 @@ fn make_project(id: Uuid, org_id: OrganizationId) -> entity::project::Model {
         last_evaluation: None,
         last_check_at: test_date(),
         force_evaluation: false,
-        created_by: Uuid::nil(),
+        created_by: UserId::nil(),
         created_at: test_date(),
         managed: false,
         keep_evaluations: 30,
     }
 }
 
-fn make_direct_build(id: Uuid, org_id: OrganizationId, eval_id: Uuid) -> entity::direct_build::Model {
+fn make_direct_build(id: DirectBuildId, org_id: OrganizationId, eval_id: EvaluationId) -> entity::direct_build::Model {
     entity::direct_build::Model {
         id,
         organization: org_id,
         evaluation: eval_id,
         derivation: "/nix/store/aaaa-test.drv".into(),
         repository_path: "/tmp/repo".into(),
-        created_by: Uuid::nil(),
+        created_by: UserId::nil(),
         created_at: test_date(),
     }
 }
 
-fn make_build_queued(id: Uuid, eval_id: Uuid, drv_id: Uuid) -> MBuild {
+fn make_build_queued(id: BuildId, eval_id: EvaluationId, drv_id: DerivationId) -> MBuild {
     entity::build::Model {
         id,
         evaluation: eval_id,
@@ -116,7 +116,7 @@ fn make_build_queued(id: Uuid, eval_id: Uuid, drv_id: Uuid) -> MBuild {
     }
 }
 
-fn make_derivation(id: Uuid, org_id: OrganizationId, path: &str) -> MDerivation {
+fn make_derivation(id: DerivationId, org_id: OrganizationId, path: &str) -> MDerivation {
     entity::derivation::Model {
         id,
         organization: org_id,
@@ -136,10 +136,10 @@ fn make_scheduler(db: sea_orm::DatabaseConnection) -> Arc<Scheduler> {
 /// A single Queued evaluation with a valid commit and project → one job enqueued.
 #[tokio::test]
 async fn dispatch_queued_eval_enqueues_job() {
-    let eval_id = Uuid::now_v7();
-    let commit_id = Uuid::now_v7();
-    let project_id = Uuid::now_v7();
-    let org_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
+    let commit_id = CommitId::now_v7();
+    let project_id = ProjectId::now_v7();
+    let org_id = OrganizationId::now_v7();
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // 1. find Queued evaluations
@@ -166,10 +166,10 @@ async fn dispatch_queued_eval_enqueues_job() {
 /// The second call sees `contains_job` = true and skips the commit/org lookup.
 #[tokio::test]
 async fn dispatch_queued_eval_skips_already_enqueued() {
-    let eval_id = Uuid::now_v7();
-    let commit_id = Uuid::now_v7();
-    let project_id = Uuid::now_v7();
-    let org_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
+    let commit_id = CommitId::now_v7();
+    let project_id = ProjectId::now_v7();
+    let org_id = OrganizationId::now_v7();
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // First dispatch:
@@ -203,9 +203,9 @@ async fn dispatch_queued_eval_skips_already_enqueued() {
 /// When the commit row is missing, the eval is skipped and no job is enqueued.
 #[tokio::test]
 async fn dispatch_queued_eval_skips_missing_commit() {
-    let eval_id = Uuid::now_v7();
-    let commit_id = Uuid::now_v7();
-    let project_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
+    let commit_id = CommitId::now_v7();
+    let project_id = ProjectId::now_v7();
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // 1. find Queued evaluations
@@ -230,9 +230,9 @@ async fn dispatch_queued_eval_skips_missing_commit() {
 /// When the eval has no project (direct build), org is looked up via DirectBuild.
 #[tokio::test]
 async fn dispatch_queued_eval_via_direct_build_org() {
-    let eval_id = Uuid::now_v7();
-    let commit_id = Uuid::now_v7();
-    let org_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
+    let commit_id = CommitId::now_v7();
+    let org_id = OrganizationId::now_v7();
     let direct_build_id = Uuid::now_v7();
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -261,12 +261,12 @@ async fn dispatch_queued_eval_via_direct_build_org() {
 /// A single ready Queued build → one job enqueued with the correct drv_path.
 #[tokio::test]
 async fn dispatch_ready_build_enqueues_job() {
-    let eval_id = Uuid::now_v7();
-    let commit_id = Uuid::now_v7();
-    let project_id = Uuid::now_v7();
-    let org_id = Uuid::now_v7();
-    let drv_id = Uuid::now_v7();
-    let build_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
+    let commit_id = CommitId::now_v7();
+    let project_id = ProjectId::now_v7();
+    let org_id = OrganizationId::now_v7();
+    let drv_id = DerivationId::now_v7();
+    let build_id = BuildId::now_v7();
     let drv_path = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello.drv";
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -299,12 +299,12 @@ async fn dispatch_ready_build_enqueues_job() {
 /// Calling dispatch_ready_builds twice for the same build does not enqueue a second job.
 #[tokio::test]
 async fn dispatch_ready_build_skips_already_enqueued() {
-    let eval_id = Uuid::now_v7();
-    let commit_id = Uuid::now_v7();
-    let project_id = Uuid::now_v7();
-    let org_id = Uuid::now_v7();
-    let drv_id = Uuid::now_v7();
-    let build_id = Uuid::now_v7();
+    let eval_id = EvaluationId::now_v7();
+    let commit_id = CommitId::now_v7();
+    let project_id = ProjectId::now_v7();
+    let org_id = OrganizationId::now_v7();
+    let drv_id = DerivationId::now_v7();
+    let build_id = BuildId::now_v7();
     let drv_path = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-foo.drv";
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
