@@ -20,6 +20,7 @@ entity        = { workspace = true }
 
 anyhow     = { workspace = true }
 chrono     = { workspace = true }
+cron       = "0.12"
 sea-orm    = { workspace = true }
 serde      = { workspace = true }
 serde_json = { workspace = true }
