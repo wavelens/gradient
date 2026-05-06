@@ -6,12 +6,9 @@
 
 //! Forge-agnostic push event parsing and triggering.
 
-use gradient_core::types::*;
 use serde::Deserialize;
-use std::sync::Arc;
 use tracing::warn;
 
-use super::trigger::trigger_for_repo_urls;
 
 // ── GitHub push payload ────────────────────────────────────────────────────
 
@@ -168,12 +165,17 @@ pub(super) struct GitLabReleasePayload {
 // ── Normalised push event ──────────────────────────────────────────────────
 
 /// Forge-agnostic push event extracted from any of the supported webhook
-/// payload shapes. Call `trigger` to queue evaluations.
+/// payload shapes.
 pub(super) struct ParsedPushEvent {
     pub commit_hash: Vec<u8>,
     pub repository_urls: Vec<String>,
     pub commit_message: Option<String>,
     pub author_name: Option<String>,
+    /// Branch name extracted from `refs/heads/<branch>`, or tag name from
+    /// `refs/tags/<tag>`. Always present for valid pushes.
+    pub ref_name: String,
+    /// Whether the ref is a tag (`refs/tags/…`). False for branch pushes.
+    pub is_tag: bool,
 }
 
 /// Pull-request event normalised across forges. `commit_hash` is the PR head SHA.
@@ -196,16 +198,30 @@ pub(super) struct ParsedReleaseEvent {
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
+/// Validated push commit info.
+pub(super) struct PushCommit {
+    pub hash: Vec<u8>,
+    pub ref_name: String,
+    pub is_tag: bool,
+}
+
 /// Validates a push event ref/SHA pair and decodes the commit hash.
 ///
-/// Returns `None` for tag pushes, branch deletions (all-zero SHA), or
-/// unparseable hex.
-pub(super) fn decode_push_commit(git_ref: &str, after: &str, forge: &str) -> Option<Vec<u8>> {
-    if !git_ref.starts_with("refs/heads/") || after == "0000000000000000000000000000000000000000" {
+/// Returns `None` for branch/tag deletions (all-zero SHA) or unparseable hex.
+/// Handles both `refs/heads/<branch>` and `refs/tags/<tag>`.
+pub(super) fn decode_push_commit(git_ref: &str, after: &str, forge: &str) -> Option<PushCommit> {
+    if after == "0000000000000000000000000000000000000000" {
         return None;
     }
+    let (ref_name, is_tag) = if let Some(branch) = git_ref.strip_prefix("refs/heads/") {
+        (branch.to_string(), false)
+    } else if let Some(tag) = git_ref.strip_prefix("refs/tags/") {
+        (tag.to_string(), true)
+    } else {
+        return None;
+    };
     match hex::decode(after) {
-        Ok(b) => Some(b),
+        Ok(hash) => Some(PushCommit { hash, ref_name, is_tag }),
         Err(e) => {
             warn!(error = %e, sha = %after, forge, "Push webhook: invalid commit SHA");
             None
@@ -266,12 +282,14 @@ impl ParsedPushEvent {
                 return None;
             }
         };
-        let commit_hash = decode_push_commit(&payload.git_ref, &payload.after, "github")?;
+        let pc = decode_push_commit(&payload.git_ref, &payload.after, "github")?;
         Some(Self {
-            commit_hash,
+            commit_hash: pc.hash,
             repository_urls: vec![payload.repository.clone_url, payload.repository.ssh_url],
             commit_message: None,
             author_name: None,
+            ref_name: pc.ref_name,
+            is_tag: pc.is_tag,
         })
     }
 
@@ -283,16 +301,18 @@ impl ParsedPushEvent {
                 return None;
             }
         };
-        let commit_hash = decode_push_commit(&payload.git_ref, &payload.after, "gitea")?;
+        let pc = decode_push_commit(&payload.git_ref, &payload.after, "gitea")?;
         let mut urls = vec![payload.repository.clone_url];
         if let Some(ssh) = payload.repository.ssh_url {
             urls.push(ssh);
         }
         Some(Self {
-            commit_hash,
+            commit_hash: pc.hash,
             repository_urls: urls,
             commit_message: None,
             author_name: None,
+            ref_name: pc.ref_name,
+            is_tag: pc.is_tag,
         })
     }
 
@@ -304,32 +324,19 @@ impl ParsedPushEvent {
                 return None;
             }
         };
-        let commit_hash = decode_push_commit(&payload.git_ref, &payload.after, "gitlab")?;
+        let pc = decode_push_commit(&payload.git_ref, &payload.after, "gitlab")?;
         let mut urls = vec![payload.project.http_url];
         if let Some(ssh) = payload.project.ssh_url {
             urls.push(ssh);
         }
         Some(Self {
-            commit_hash,
+            commit_hash: pc.hash,
             repository_urls: urls,
             commit_message: None,
             author_name: None,
+            ref_name: pc.ref_name,
+            is_tag: pc.is_tag,
         })
-    }
-
-    /// Queue evaluations for all active projects whose repository URL matches.
-    /// Returns a [`WebhookTriggerOutcome`] describing which projects were queued
-    /// and which were skipped.
-    pub async fn trigger(self, state: &Arc<ServerState>) -> super::response::WebhookTriggerOutcome {
-        let url_refs: Vec<&str> = self.repository_urls.iter().map(String::as_str).collect();
-        trigger_for_repo_urls(
-            state,
-            &url_refs,
-            self.commit_hash,
-            self.commit_message,
-            self.author_name,
-        )
-        .await
     }
 }
 
@@ -482,12 +489,17 @@ mod tests {
     #[test]
     fn decode_push_commit_accepts_branch_ref() {
         let out = decode_push_commit("refs/heads/main", VALID_SHA, "github").unwrap();
-        assert_eq!(out, hex::decode(VALID_SHA).unwrap());
+        assert_eq!(out.hash, hex::decode(VALID_SHA).unwrap());
+        assert_eq!(out.ref_name, "main");
+        assert!(!out.is_tag);
     }
 
     #[test]
-    fn decode_push_commit_rejects_tag_ref() {
-        assert!(decode_push_commit("refs/tags/v1", VALID_SHA, "github").is_none());
+    fn decode_push_commit_accepts_tag_ref() {
+        let out = decode_push_commit("refs/tags/v1.0.0", VALID_SHA, "github").unwrap();
+        assert_eq!(out.hash, hex::decode(VALID_SHA).unwrap());
+        assert_eq!(out.ref_name, "v1.0.0");
+        assert!(out.is_tag);
     }
 
     #[test]

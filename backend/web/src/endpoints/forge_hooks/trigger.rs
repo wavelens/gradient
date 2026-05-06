@@ -7,13 +7,15 @@
 //! Evaluation triggering from forge webhooks.
 
 use super::response::{QueuedEvaluation, SkippedProject, WebhookTriggerOutcome};
-use gradient_core::ci::{TriggerError, trigger_evaluation};
+use entity::project_trigger as ept;
+use gradient_core::ci::{apply_trigger, ApplyInput, ApplyOutcome};
+use gradient_core::types::triggers::{ConcurrencyPolicy, TriggerConfig, TriggerType};
 use gradient_core::types::*;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Statement};
 use serde::Deserialize;
 use std::sync::Arc;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 // ── GitHub installation payload ────────────────────────────────────────────
 
@@ -105,26 +107,388 @@ async fn store_installation_id(state: &Arc<ServerState>, payload: &GitHubInstall
     }
 }
 
-// ── Project evaluation trigger ─────────────────────────────────────────────
+// ── GitHub App: resolve installation → integration ─────────────────────────
+
+/// Look up the inbound GitHub integration for a GitHub App `installation_id`.
+///
+/// Returns `None` when no org owns the given installation or the org has no
+/// inbound GitHub integration configured.
+pub(super) async fn resolve_github_integration_id(
+    state: &Arc<ServerState>,
+    installation_id: i64,
+) -> Option<IntegrationId> {
+    use gradient_core::ci::IntegrationKind;
+
+    let org = EOrganization::find()
+        .filter(COrganization::GithubInstallationId.eq(installation_id))
+        .one(&state.web_db)
+        .await
+        .ok()
+        .flatten()?;
+
+    EIntegration::find()
+        .filter(CIntegration::Organization.eq(org.id))
+        .filter(CIntegration::Kind.eq(IntegrationKind::Inbound.as_i16()))
+        .filter(CIntegration::ForgeType.eq(gradient_core::ci::ForgeType::GitHub.as_i16()))
+        .one(&state.web_db)
+        .await
+        .ok()
+        .flatten()
+        .map(|i| i.id)
+}
+
+// ── Ref kind ───────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy)]
+pub(super) enum PushRefKind<'a> {
+    Branch(&'a str),
+    Tag(&'a str),
+}
+
+// ── Fan-out functions ───────────────────────────────────────────────────────
+
+pub(super) async fn trigger_push_for_integration(
+    state: &Arc<ServerState>,
+    integration_id: IntegrationId,
+    ref_kind: PushRefKind<'_>,
+    commit_hash: Vec<u8>,
+    commit_message: Option<String>,
+    author_name: Option<String>,
+) -> WebhookTriggerOutcome {
+    fan_out_triggers(
+        state,
+        integration_id,
+        TriggerType::ReporterPush,
+        commit_hash,
+        commit_message,
+        author_name,
+        |cfg| match cfg {
+            TriggerConfig::ReporterPush { branches, tags, releases_only, .. } => {
+                if *releases_only {
+                    return FilterResult::Skip;
+                }
+                let matches = match ref_kind {
+                    PushRefKind::Branch(name) => glob_matches(branches, name),
+                    PushRefKind::Tag(name) => glob_matches(tags, name),
+                };
+                if matches { FilterResult::Fire } else { FilterResult::SkipFilter }
+            }
+            _ => FilterResult::Skip,
+        },
+    )
+    .await
+}
+
+pub(super) async fn trigger_pr_for_integration(
+    state: &Arc<ServerState>,
+    integration_id: IntegrationId,
+    branch: Option<&str>,
+    action: &str,
+    commit_hash: Vec<u8>,
+    commit_message: Option<String>,
+    author_name: Option<String>,
+) -> WebhookTriggerOutcome {
+    fan_out_triggers(
+        state,
+        integration_id,
+        TriggerType::ReporterPullRequest,
+        commit_hash,
+        commit_message,
+        author_name,
+        |cfg| match cfg {
+            TriggerConfig::ReporterPullRequest { branches, actions, .. } => {
+                if !actions.iter().any(|a| a == action) {
+                    return FilterResult::SkipFilter;
+                }
+                let matches = match branch {
+                    Some(b) => glob_matches(branches, b),
+                    None => branches.is_empty(),
+                };
+                if matches { FilterResult::Fire } else { FilterResult::SkipFilter }
+            }
+            _ => FilterResult::Skip,
+        },
+    )
+    .await
+}
+
+pub(super) async fn trigger_release_for_integration(
+    state: &Arc<ServerState>,
+    integration_id: IntegrationId,
+    tag: Option<&str>,
+    commit_hash: Vec<u8>,
+    commit_message: Option<String>,
+    author_name: Option<String>,
+) -> WebhookTriggerOutcome {
+    fan_out_triggers(
+        state,
+        integration_id,
+        TriggerType::ReporterPush,
+        commit_hash,
+        commit_message,
+        author_name,
+        |cfg| match cfg {
+            TriggerConfig::ReporterPush { tags, releases_only, .. } => {
+                if !releases_only {
+                    return FilterResult::Skip;
+                }
+                let matches = match tag {
+                    Some(t) => glob_matches(tags, t),
+                    None => tags.is_empty(),
+                };
+                if matches { FilterResult::Fire } else { FilterResult::SkipFilter }
+            }
+            _ => FilterResult::Skip,
+        },
+    )
+    .await
+}
+
+// ── Generic fan-out engine ─────────────────────────────────────────────────
+
+enum FilterResult {
+    /// Proceed to fire `apply_trigger`.
+    Fire,
+    /// Config filter did not match — add to skipped with reason "filter".
+    SkipFilter,
+    /// This trigger type / config shape doesn't apply at all — silently ignore.
+    Skip,
+}
+
+async fn fan_out_triggers<F>(
+    state: &Arc<ServerState>,
+    integration_id: IntegrationId,
+    trigger_type: TriggerType,
+    commit_hash: Vec<u8>,
+    commit_message: Option<String>,
+    author_name: Option<String>,
+    filter: F,
+) -> WebhookTriggerOutcome
+where
+    F: Fn(&TriggerConfig) -> FilterResult,
+{
+    let triggers =
+        match load_active_triggers_for_integration(state, integration_id, trigger_type).await {
+            Ok(rows) => rows,
+            Err(e) => {
+                warn!(error = %e, "load triggers for integration");
+                return WebhookTriggerOutcome::default();
+            }
+        };
+
+    let mut outcome = WebhookTriggerOutcome::default();
+    for trig in triggers {
+        let cfg = match TriggerConfig::parse_row(trig.trigger_type, &trig.config) {
+            Ok(c) => c,
+            Err(e) => {
+                warn!(trigger_id = %trig.id, error = %e, "skip trigger with invalid config");
+                continue;
+            }
+        };
+
+        match filter(&cfg) {
+            FilterResult::Skip => continue,
+            FilterResult::SkipFilter => {
+                let (project_name, organization) = project_identity(state, trig.project).await;
+                outcome.skipped.push(SkippedProject {
+                    project_id: trig.project,
+                    project_name,
+                    organization,
+                    reason: "filter".into(),
+                });
+                continue;
+            }
+            FilterResult::Fire => {}
+        }
+
+        let project = match EProject::find_by_id(trig.project).one(&state.web_db).await {
+            Ok(Some(p)) => p,
+            Ok(None) => {
+                warn!(trigger_id = %trig.id, project_id = %trig.project, "project not found for trigger");
+                continue;
+            }
+            Err(e) => {
+                warn!(error = %e, trigger_id = %trig.id, "DB error fetching project for trigger");
+                continue;
+            }
+        };
+        outcome.projects_scanned += 1;
+
+        let concurrency =
+            ConcurrencyPolicy::from_i16(trig.concurrency).unwrap_or(ConcurrencyPolicy::HardAbort);
+        let org_name = org_name_for(state, project.organization).await.unwrap_or_default();
+
+        match apply_trigger(
+            &state.web_db,
+            &project,
+            ApplyInput {
+                trigger_id: trig.id,
+                trigger_type,
+                concurrency,
+                commit_hash: commit_hash.clone(),
+                commit_message: commit_message.clone(),
+                author_name: author_name.clone(),
+                manual: false,
+            },
+        )
+        .await
+        {
+            Ok(ApplyOutcome::Created(eval)) => {
+                info!(
+                    project_id = %project.id,
+                    evaluation_id = %eval.id,
+                    "forge webhook trigger fired"
+                );
+                outcome.queued.push(QueuedEvaluation {
+                    project_id: project.id,
+                    project_name: project.name.clone(),
+                    organization: org_name,
+                    evaluation_id: eval.id,
+                });
+            }
+            Ok(ApplyOutcome::SkippedSameCommit) => {
+                outcome.skipped.push(SkippedProject {
+                    project_id: project.id,
+                    project_name: project.name.clone(),
+                    organization: org_name,
+                    reason: "same_commit".into(),
+                });
+            }
+            Ok(ApplyOutcome::SkippedConcurrency) => {
+                outcome.skipped.push(SkippedProject {
+                    project_id: project.id,
+                    project_name: project.name.clone(),
+                    organization: org_name,
+                    reason: "concurrency".into(),
+                });
+            }
+            Ok(ApplyOutcome::SkippedAllowReserved) => {
+                outcome.skipped.push(SkippedProject {
+                    project_id: project.id,
+                    project_name: project.name.clone(),
+                    organization: org_name,
+                    reason: "allow_reserved".into(),
+                });
+            }
+            Err(e) => {
+                warn!(error = %e, project_id = %project.id, "apply_trigger failed in webhook fan-out");
+                outcome.skipped.push(SkippedProject {
+                    project_id: project.id,
+                    project_name: project.name.clone(),
+                    organization: org_name,
+                    reason: "error".into(),
+                });
+            }
+        }
+    }
+    outcome
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+async fn load_active_triggers_for_integration(
+    state: &Arc<ServerState>,
+    integration_id: IntegrationId,
+    trigger_type: TriggerType,
+) -> Result<Vec<ept::Model>, sea_orm::DbErr> {
+    let sql = format!(
+        "SELECT * FROM project_trigger \
+         WHERE active = true \
+           AND trigger_type = {ttype} \
+           AND (config->>'integration_id')::uuid = '{iid}'::uuid",
+        ttype = trigger_type.as_i16(),
+        iid = integration_id,
+    );
+    EProjectTrigger::find()
+        .from_raw_sql(Statement::from_string(sea_orm::DbBackend::Postgres, sql))
+        .all(&state.web_db)
+        .await
+}
+
+/// Simple glob match: `*` matches any sequence of characters (including none).
+/// An empty `globs` list means "match everything".
+fn glob_matches(globs: &[String], name: &str) -> bool {
+    if globs.is_empty() {
+        return true;
+    }
+    globs.iter().any(|g| glob_match_pattern(g, name))
+}
+
+fn glob_match_pattern(pattern: &str, text: &str) -> bool {
+    let p: Vec<char> = pattern.chars().collect();
+    let t: Vec<char> = text.chars().collect();
+    glob_match_recursive(&p, &t, 0, 0)
+}
+
+fn glob_match_recursive(p: &[char], t: &[char], pi: usize, ti: usize) -> bool {
+    if pi == p.len() {
+        return ti == t.len();
+    }
+    if p[pi] == '*' {
+        // Skip consecutive stars.
+        let next_pi = {
+            let mut i = pi + 1;
+            while i < p.len() && p[i] == '*' {
+                i += 1;
+            }
+            i
+        };
+        // '*' at end matches everything remaining.
+        if next_pi == p.len() {
+            return true;
+        }
+        // Try matching '*' against 0..n characters.
+        for advance in 0..=(t.len() - ti) {
+            if glob_match_recursive(p, t, next_pi, ti + advance) {
+                return true;
+            }
+        }
+        false
+    } else {
+        if ti == t.len() {
+            return false;
+        }
+        if p[pi] == t[ti] {
+            glob_match_recursive(p, t, pi + 1, ti + 1)
+        } else {
+            false
+        }
+    }
+}
+
+async fn project_identity(
+    state: &Arc<ServerState>,
+    project_id: ProjectId,
+) -> (String, String) {
+    match EProject::find_by_id(project_id).one(&state.web_db).await {
+        Ok(Some(p)) => {
+            let org = org_name_for(state, p.organization).await.unwrap_or_default();
+            (p.name, org)
+        }
+        _ => (String::new(), String::new()),
+    }
+}
+
+async fn org_name_for(
+    state: &Arc<ServerState>,
+    org_id: OrganizationId,
+) -> Option<String> {
+    EOrganization::find_by_id(org_id)
+        .one(&state.web_db)
+        .await
+        .ok()
+        .flatten()
+        .map(|o| o.name)
+}
+
+// ── URL canonicalisation ───────────────────────────────────────────────────
 
 /// Canonicalises a git repository URL so that equivalent forms compare equal.
-///
-/// Handles:
-/// - Trailing whitespace, `/`, and `.git`.
-/// - `git+ssh://` / `git+https://` scheme prefixes (flake/fetchGit form) →
-///   `ssh://` / `https://`.
-/// - SCP-style SSH refs (`user@host:path`) → `ssh://user@host/path`.
-/// - `http://` → `https://` so both schemes match.
-///
-/// TODO: save canonicalised URLs in the DB (on project create/update) so the
-/// webhook path can do a cheap indexed lookup instead of scanning every active
-/// project and canonicalising on every push.
-pub(super) fn canonicalise_repo_url(u: &str) -> String {
+fn canonicalise_repo_url(u: &str) -> String {
     let u = u.trim();
     let u = u.trim_end_matches('/');
     let u = u.trim_end_matches(".git");
     let u = u.strip_prefix("git+").unwrap_or(u);
-    // SCP form: `user@host:path` (no `://`) → `ssh://user@host/path`
     let normalised = if !u.contains("://") {
         if let Some((userhost, path)) = u.split_once(':') {
             format!("ssh://{}/{}", userhost, path)
@@ -134,7 +498,6 @@ pub(super) fn canonicalise_repo_url(u: &str) -> String {
     } else {
         u.to_string()
     };
-    // Treat http and https as equivalent — forges typically redirect one to the other.
     if let Some(rest) = normalised.strip_prefix("http://") {
         format!("https://{}", rest)
     } else {
@@ -142,106 +505,10 @@ pub(super) fn canonicalise_repo_url(u: &str) -> String {
     }
 }
 
-/// Finds all active projects whose repository URL matches any of `candidate_urls`,
-/// queues an evaluation for each, and returns a per-project breakdown.
-pub(super) async fn trigger_for_repo_urls(
-    state: &Arc<ServerState>,
-    candidate_urls: &[&str],
-    commit_hash: Vec<u8>,
-    commit_message: Option<String>,
-    author_name: Option<String>,
-) -> WebhookTriggerOutcome {
-    let normalised_candidates: Vec<String> = candidate_urls
-        .iter()
-        .map(|u| canonicalise_repo_url(u))
-        .collect();
-
-    let projects = match EProject::find()
-        .filter(CProject::Active.eq(true))
-        .all(&state.web_db)
-        .await
-    {
-        Ok(p) => p,
-        Err(e) => {
-            warn!(error = %e, "DB error fetching projects for forge webhook");
-            return WebhookTriggerOutcome::default();
-        }
-    };
-
-    let mut outcome = WebhookTriggerOutcome::default();
-    for project in projects {
-        let repo_normalised = canonicalise_repo_url(&project.repository);
-        if !normalised_candidates.iter().any(|c| c == &repo_normalised) {
-            continue;
-        }
-        outcome.projects_scanned += 1;
-
-        let org_name = match EOrganization::find_by_id(project.organization)
-            .one(&state.web_db)
-            .await
-        {
-            Ok(Some(o)) => o.name,
-            _ => String::new(),
-        };
-
-        match trigger_evaluation(
-            &state.web_db,
-            &project,
-            commit_hash.clone(),
-            commit_message.clone(),
-            author_name.clone(),
-            None,
-        )
-        .await
-        {
-            Ok(eval) => {
-                info!(
-                    project_id = %project.id,
-                    evaluation_id = %eval.id,
-                    "Forge webhook triggered evaluation"
-                );
-                outcome.queued.push(QueuedEvaluation {
-                    project_id: project.id,
-                    project_name: project.name.clone(),
-                    organization: org_name,
-                    evaluation_id: eval.id,
-                });
-            }
-            Err(TriggerError::AlreadyInProgress) => {
-                debug!(project_id = %project.id, "Evaluation already in progress, skipping webhook trigger");
-                outcome.skipped.push(SkippedProject {
-                    project_id: project.id,
-                    project_name: project.name.clone(),
-                    organization: org_name,
-                    reason: "already_in_progress".to_string(),
-                });
-            }
-            Err(TriggerError::NoPreviousEvaluation) => {
-                outcome.skipped.push(SkippedProject {
-                    project_id: project.id,
-                    project_name: project.name.clone(),
-                    organization: org_name,
-                    reason: "no_previous_evaluation".to_string(),
-                });
-            }
-            Err(TriggerError::Db(e)) => {
-                warn!(error = %e, project_id = %project.id, "DB error triggering evaluation from forge webhook");
-                outcome.skipped.push(SkippedProject {
-                    project_id: project.id,
-                    project_name: project.name.clone(),
-                    organization: org_name,
-                    reason: "db_error".to_string(),
-                });
-            }
-        }
-    }
-    outcome
-}
-
 #[cfg(test)]
 mod tests {
     use super::super::WebhookTriggerOutcome;
-    use super::canonicalise_repo_url;
+    use super::{canonicalise_repo_url, glob_match_pattern, glob_matches};
 
     #[test]
     fn canonicalise_strips_dot_git_and_trailing_slash() {
@@ -312,5 +579,44 @@ mod tests {
         assert_eq!(o.projects_scanned, 0);
         assert!(o.queued.is_empty());
         assert!(o.skipped.is_empty());
+    }
+
+    #[test]
+    fn glob_empty_list_matches_all() {
+        assert!(glob_matches(&[], "main"));
+        assert!(glob_matches(&[], "anything"));
+    }
+
+    #[test]
+    fn glob_exact_match() {
+        let globs = vec!["main".to_string()];
+        assert!(glob_matches(&globs, "main"));
+        assert!(!glob_matches(&globs, "develop"));
+    }
+
+    #[test]
+    fn glob_star_prefix() {
+        assert!(glob_match_pattern("feature/*", "feature/my-branch"));
+        assert!(!glob_match_pattern("feature/*", "bugfix/my-branch"));
+    }
+
+    #[test]
+    fn glob_star_only() {
+        assert!(glob_match_pattern("*", "main"));
+        assert!(glob_match_pattern("*", ""));
+    }
+
+    #[test]
+    fn glob_version_pattern() {
+        assert!(glob_match_pattern("v*", "v1.2.3"));
+        assert!(!glob_match_pattern("v*", "1.2.3"));
+    }
+
+    #[test]
+    fn glob_multiple_patterns() {
+        let globs = vec!["main".to_string(), "release/*".to_string()];
+        assert!(glob_matches(&globs, "main"));
+        assert!(glob_matches(&globs, "release/1.0"));
+        assert!(!glob_matches(&globs, "develop"));
     }
 }
