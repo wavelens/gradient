@@ -9,6 +9,7 @@ import { CommonModule } from '@angular/common';
 import { Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { DialogModule } from 'primeng/dialog';
+import { DividerModule } from 'primeng/divider';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { UserService } from '@core/services/user.service';
@@ -23,6 +24,7 @@ import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/load
     RouterModule,
     FormsModule,
     DialogModule,
+    DividerModule,
     ButtonModule,
     InputTextModule,
     LoadingSpinnerComponent,

@@ -75,6 +75,13 @@
   .key-id { font-size: $font-size-xs; font-family: $font-family-mono; }
 }
 
+.key-actions {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  flex-shrink: 0;
+}
+
 .dialog-error {
   display: flex;
   align-items: center;
