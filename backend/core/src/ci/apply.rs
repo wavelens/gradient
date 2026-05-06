@@ -56,9 +56,36 @@ pub async fn apply_trigger<C: ConnectionTrait>(
     project: &MProject,
     input: ApplyInput,
 ) -> Result<ApplyOutcome, ApplyError> {
+    let dedup_applies = !input.manual && input.trigger_type != TriggerType::Time;
+
+    // Find any in-flight evaluation up-front; we use it for dedup against the
+    // currently-running commit AND for the concurrency policy below.
+    let active_codes: Vec<i32> = EvaluationStatus::ACTIVE
+        .iter()
+        .map(|s| s.num_value())
+        .collect();
+    let in_flight = EEvaluation::find()
+        .filter(CEvaluation::Project.eq(project.id))
+        .filter(CEvaluation::Status.is_in(active_codes))
+        .one(db)
+        .await?;
+
     // ── Same-commit dedup ─────────────────────────────────────────────────
+    // Skip when:
+    //   - an in-flight evaluation is already running on this commit
+    //     (covers polling-while-build-is-running, even if last_evaluation
+    //     is dangling or points elsewhere), OR
+    //   - last_evaluation's commit matches (covers terminal-then-poll-again).
     // Time triggers and manual fires bypass this check.
-    if !input.manual && input.trigger_type != TriggerType::Time {
+    if dedup_applies {
+        if let Some(running) = &in_flight {
+            if let Some(running_commit) = ECommit::find_by_id(running.commit).one(db).await? {
+                if running_commit.hash == input.commit_hash {
+                    return Ok(ApplyOutcome::SkippedSameCommit);
+                }
+            }
+        }
+
         if let Some(prev) = project.last_evaluation {
             if let Some(prev_eval) = EEvaluation::find_by_id(prev).one(db).await? {
                 if let Some(prev_commit) = ECommit::find_by_id(prev_eval.commit).one(db).await? {
@@ -79,14 +106,6 @@ pub async fn apply_trigger<C: ConnectionTrait>(
     let concurrent_flag = matches!(concurrency, ConcurrencyPolicy::All);
 
     if !concurrent_flag {
-        let active_codes: Vec<i32> =
-            EvaluationStatus::ACTIVE.iter().map(|s| s.num_value()).collect();
-        let in_flight = EEvaluation::find()
-            .filter(CEvaluation::Project.eq(project.id))
-            .filter(CEvaluation::Status.is_in(active_codes))
-            .one(db)
-            .await?;
-
         if let Some(running) = in_flight {
             match concurrency {
                 ConcurrencyPolicy::Skip => return Ok(ApplyOutcome::SkippedConcurrency),
@@ -289,9 +308,12 @@ mod tests {
             make_eval(running_eval_id, project.id, CommitId::nil(), EvaluationStatus::Building);
 
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            // Same-commit dedup skipped (no last_evaluation)
-            // Concurrency check returns running eval
+            // in_flight lookup returns the running eval
             .append_query_results([vec![running_eval.clone()]])
+            // dedup against running's commit: row missing → fall through
+            .append_query_results([Vec::<entity::commit::Model>::new()])
+            // No last_evaluation, so no further dedup queries.
+            // Concurrency policy reuses the in-flight eval — Skip => SkippedConcurrency.
             .into_connection();
 
         let trig = ProjectTriggerId::now_v7();
@@ -306,16 +328,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn polling_with_in_flight_same_commit_skips_without_aborting() {
+        // Regression: a polling trigger that observes the same commit currently
+        // being built must NOT abort the running evaluation. Even if
+        // last_evaluation is dangling or missing, dedup against the in-flight
+        // eval's commit catches it before the concurrency policy fires.
+        let project = make_project_with_concurrency(None, 1); // SoftAbort
+        let running_eval_id = EvaluationId::now_v7();
+        let running_commit_id = CommitId::now_v7();
+        let same_hash = vec![3u8; 20];
+        let running_eval = make_eval(
+            running_eval_id,
+            project.id,
+            running_commit_id,
+            EvaluationStatus::Building,
+        );
+
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            // in_flight lookup returns the running eval
+            .append_query_results([vec![running_eval.clone()]])
+            // dedup fetches the running eval's commit — same hash as the poll
+            .append_query_results([vec![make_commit(running_commit_id, same_hash.clone())]])
+            // dedup short-circuits with SkippedSameCommit; no abort, no insert
+            .into_connection();
+
+        let trig = ProjectTriggerId::now_v7();
+        let res = apply_trigger(
+            &db,
+            &project,
+            input(trig, TriggerType::Polling, same_hash, false),
+        )
+        .await
+        .unwrap();
+        assert!(
+            matches!(res, ApplyOutcome::SkippedSameCommit),
+            "expected SkippedSameCommit, got {res:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn all_concurrency_creates_evaluation_alongside_running() {
         let project = make_project_with_concurrency(None, 2); // All
-        let running_eval_id = EvaluationId::now_v7();
         let new_eval_id = EvaluationId::now_v7();
         let new_commit_id = CommitId::now_v7();
         let trig = ProjectTriggerId::now_v7();
         let new_hash = vec![9u8; 20];
 
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            // all policy skips the in-flight check entirely — no concurrency query
+            // in_flight lookup runs unconditionally — return empty for this test
+            .append_query_results([Vec::<entity::evaluation::Model>::new()])
+            // all policy skips the in-flight concurrency action
             // trigger_evaluation: concurrent=true skips the in-progress guard — no guard query
             // trigger_evaluation: resolve previous (no last_evaluation)
             // commit insert
@@ -450,8 +512,10 @@ mod tests {
         let new_hash = vec![7u8; 20];
 
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            // Concurrency check: returns the running eval
+            // in_flight lookup: returns the running eval
             .append_query_results([vec![running_eval.clone()]])
+            // dedup fetches the running eval's commit — row missing → fall through
+            .append_query_results([Vec::<entity::commit::Model>::new()])
             // abort_evaluation: eval fetch
             .append_query_results([vec![running_eval.clone()]])
             // abort_evaluation: eval update read-back
