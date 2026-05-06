@@ -94,6 +94,18 @@
 
 .form-actions { display: flex; gap: $spacing-md; margin-top: $spacing-lg; }
 
+.nav-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $spacing-lg;
+
+  h3 { margin: 0 0 $spacing-xs 0; }
+  p { margin: 0; }
+
+  a, button { flex-shrink: 0; white-space: nowrap; }
+}
+
 .w-full { width: 100%; }
 
 .status-row {
