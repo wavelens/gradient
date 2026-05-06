@@ -114,7 +114,6 @@ services.gradient.state.projects = {
     repository           = "git@github.com:acme/web-app.git";
     evaluation_wildcard  = "packages.x86_64-linux.*";
     active               = true;
-    inbound_integration  = "acme-prod-inbound";   # optional
     outbound_integration = "acme-status-reports"; # optional
     created_by           = "alice";
   };
@@ -133,11 +132,12 @@ services.gradient.state.projects = {
 | `evaluation_wildcard` | `packages.x86_64-linux.*` | Attr-path pattern picked up by the evaluator |
 | `active` | `true` | Disable to pause polling/evaluations without deleting |
 | `force_evaluation` | `false` | Re-evaluate on next poll regardless of the last commit hash |
-| `inbound_integration` | `null` | Name of an `inbound` integration (same org) routing webhooks to this project |
 | `outbound_integration` | `null` | Name of an `outbound` integration that receives CI status reports |
 | `created_by` | — | Username of creator (required) |
 
-`inbound_integration` / `outbound_integration` must reference an entry in `services.gradient.state.integrations` belonging to the same organization. See [Integrations](#integrations) below.
+`outbound_integration` must reference an entry in `services.gradient.state.integrations` belonging to the same organization. See [Integrations](#integrations) below.
+
+To route inbound forge webhooks to a project, declare one or more `reporter_push` or `reporter_pull_request` triggers referencing the integration. See the [Triggers](#triggers) section below.
 
 ## Integrations
 

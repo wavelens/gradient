@@ -66,9 +66,6 @@ pub struct StateProject {
     /// default of 30 for new projects). Must not exceed `GRADIENT_KEEP_EVALUATIONS` if set.
     #[serde(default)]
     pub keep_evaluations: Option<i32>,
-    /// Name of an inbound integration in the same org. `None` unlinks.
-    #[serde(default)]
-    pub inbound_integration: Option<String>,
     /// Name of an outbound integration in the same org. `None` unlinks.
     #[serde(default)]
     pub outbound_integration: Option<String>,
@@ -282,18 +279,9 @@ impl StateConfiguration {
                 });
             }
 
-            for (field_name, binding, expected_kind) in [
-                (
-                    "inbound_integration",
-                    &project.inbound_integration,
-                    "inbound",
-                ),
-                (
-                    "outbound_integration",
-                    &project.outbound_integration,
-                    "outbound",
-                ),
-            ] {
+            for (field_name, binding, expected_kind) in
+                [("outbound_integration", &project.outbound_integration, "outbound")]
+            {
                 let Some(int_name) = binding else { continue };
                 match self.integrations.get(int_name) {
                     None => errors.push(ValidationError {
