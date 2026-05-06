@@ -1188,7 +1188,8 @@ async fn build_output_inserts_build_product_rows() {
     let fake_bp = entity::build_product::Model {
         id: BuildProductId::now_v7(),
         derivation_output: drv_out_id,
-        file_type: "iso".into(),
+        file_type: "file".into(),
+        subtype: "iso".into(),
         name: "image.iso".into(),
         path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-out/image.iso".into(),
         size: Some(1024),
@@ -1202,7 +1203,8 @@ async fn build_output_inserts_build_product_rows() {
         nar_size: Some(99),
         nar_hash: Some("sha256:abc".into()),
         products: vec![BuildProduct {
-            file_type: "iso".into(),
+            file_type: "file".into(),
+            subtype: "iso".into(),
             name: "image.iso".into(),
             path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-out/image.iso".into(),
             size: Some(1024),

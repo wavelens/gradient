@@ -67,6 +67,7 @@ async fn collect_build_products(
     rows.into_iter()
         .map(|r| BuildProduct {
             file_type: r.file_type,
+            subtype: r.subtype,
             name: r.name,
             path: r.path,
             size: r.size.map(|s| s as u64),
@@ -141,7 +142,7 @@ async fn find_and_serve_file(
             }
         };
 
-        let disposition = if product.file_type == "html" {
+        let disposition = if product.subtype == "html" {
             "inline".to_string()
         } else {
             format!("attachment; filename=\"{}\"", filename)
@@ -198,6 +199,7 @@ async fn find_and_serve_file(
 #[derive(Serialize, Deserialize, Debug)]
 pub struct BuildProduct {
     pub file_type: String,
+    pub subtype: String,
     pub name: String,
     pub path: String,
     pub size: Option<u64>,

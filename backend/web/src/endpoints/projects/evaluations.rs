@@ -563,7 +563,7 @@ async fn serve_hydra_artifact(
             }
         };
 
-        let disposition = if product.file_type == "html" {
+        let disposition = if product.subtype == "html" {
             "inline".to_string()
         } else {
             format!("attachment; filename=\"{}\"", filename)

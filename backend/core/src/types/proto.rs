@@ -290,6 +290,8 @@ pub struct DerivationOutput {
 pub struct BuildProduct {
     /// Hydra product type, e.g. "file", "doc", "report".
     pub file_type: String,
+    /// Hydra product subtype (the second token), e.g. "readme", "html", "binary-dist".
+    pub subtype: String,
     /// Basename of `path`.
     pub name: String,
     /// Absolute store path to the product file (e.g. `/nix/store/abc-pkg/image.iso`).

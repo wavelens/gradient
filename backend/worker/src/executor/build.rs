@@ -199,7 +199,7 @@ async fn load_products(store_path: &str) -> Vec<BuildProduct> {
     };
     let mut products = Vec::new();
     for line in content.lines() {
-        if let Some((file_type, path)) = parse_hydra_product_line(line) {
+        if let Some((file_type, subtype, path)) = parse_hydra_product_line(line) {
             let name = std::path::Path::new(&path)
                 .file_name()
                 .and_then(|n| n.to_str())
@@ -208,6 +208,7 @@ async fn load_products(store_path: &str) -> Vec<BuildProduct> {
             let size = tokio::fs::metadata(&path).await.ok().map(|m| m.len());
             products.push(BuildProduct {
                 file_type,
+                subtype,
                 name,
                 path,
                 size,

@@ -95,6 +95,7 @@ mod m20260507_000002_drop_inbound_integration;
 mod m20260507_000003_unique_active_evaluation_per_project;
 mod m20260507_000004_move_concurrency_to_project;
 mod m20260507_000005_evaluation_concurrent_flag;
+mod m20260507_000006_add_subtype_to_build_product;
 
 pub struct Migrator;
 
@@ -191,6 +192,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260507_000003_unique_active_evaluation_per_project::Migration),
             Box::new(m20260507_000004_move_concurrency_to_project::Migration),
             Box::new(m20260507_000005_evaluation_concurrent_flag::Migration),
+            Box::new(m20260507_000006_add_subtype_to_build_product::Migration),
         ]
     }
 }

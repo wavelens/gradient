@@ -205,7 +205,8 @@ fn build_product_row() -> entity::build_product::Model {
     entity::build_product::Model {
         id: build_product_id(),
         derivation_output: drv_output_id(),
-        file_type: "iso".into(),
+        file_type: "file".into(),
+        subtype: "iso".into(),
         name: "image.iso".into(),
         path: format!("{}/image.iso", STORE_PATH),
         size: Some(ISO_BYTES.len() as i64),

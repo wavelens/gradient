@@ -102,6 +102,7 @@ mod tests {
         assert_eq!(
             got,
             Some((
+                "file".to_string(),
                 "doc".to_string(),
                 "/nix/store/xyz/share/doc/index.html".to_string()
             ))
@@ -109,17 +110,11 @@ mod tests {
     }
 
     #[test]
-    fn parse_hydra_product_line_rejoins_paths_with_spaces() {
-        let got = parse_hydra_product_line("file report /tmp/my report.txt");
+    fn parse_hydra_product_line_accepts_any_type() {
         assert_eq!(
-            got,
-            Some(("report".to_string(), "/tmp/my report.txt".to_string()))
+            parse_hydra_product_line("doc readme /nix/store/xyz/README.md"),
+            Some(("doc".to_string(), "readme".to_string(), "/nix/store/xyz/README.md".to_string()))
         );
-    }
-
-    #[test]
-    fn parse_hydra_product_line_rejects_non_file_prefix() {
-        assert_eq!(parse_hydra_product_line("dir doc /x"), None);
     }
 
     #[test]

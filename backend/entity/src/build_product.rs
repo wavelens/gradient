@@ -17,6 +17,7 @@ pub struct Model {
     pub id: BuildProductId,
     pub derivation_output: DerivationOutputId,
     pub file_type: String,
+    pub subtype: String,
     pub name: String,
     pub path: String,
     pub size: Option<i64>,

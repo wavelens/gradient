@@ -5160,11 +5160,15 @@ components:
 
     BuildProduct:
       type: object
-      required: [file_type, name, path]
+      required: [file_type, subtype, name, path]
       properties:
         file_type:
           type: string
-          description: Product type from `hydra-build-products` (e.g. `iso`, `tarball`, `doc`)
+          description: Hydra product type (first token), e.g. `file`, `doc`, `report`, `nix-build`
+          example: file
+        subtype:
+          type: string
+          description: Hydra product subtype (second token), e.g. `iso`, `readme`, `html`, `binary-dist`
           example: iso
         name:
           type: string

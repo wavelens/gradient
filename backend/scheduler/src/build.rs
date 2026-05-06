@@ -88,6 +88,7 @@ impl<'a> BuildStateHandler<'a> {
                         id: Set(BuildProductId::now_v7()),
                         derivation_output: Set(row_id),
                         file_type: Set(product.file_type.clone()),
+                        subtype: Set(product.subtype.clone()),
                         name: Set(product.name.clone()),
                         path: Set(product.path.clone()),
                         size: Set(product.size.map(|s| s as i64)),
