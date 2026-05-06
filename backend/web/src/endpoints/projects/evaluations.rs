@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::{EntryPointSummary, EvaluationSummary, ProjectDetailsResponse};
+use super::{EntryPointSummary, EvaluationSummary, EvaluationTriggerSummary, ProjectDetailsResponse};
 use crate::access::{Caller, ProjectAccess, has_permission, is_org_member, load_project};
 use crate::authorization::MaybeUser;
 use crate::endpoints::content_type_for_filename;
@@ -47,6 +47,25 @@ pub(super) async fn evaluations_to_summaries(
     }
 
     let eval_ids: Vec<EvaluationId> = evaluations.iter().map(|e| e.id).collect();
+
+    let trigger_ids: Vec<ProjectTriggerId> = evaluations
+        .iter()
+        .filter_map(|e| e.trigger)
+        .collect();
+    let triggers: HashMap<ProjectTriggerId, TriggerType> = if trigger_ids.is_empty() {
+        HashMap::new()
+    } else {
+        EProjectTrigger::find()
+            .filter(CProjectTrigger::Id.is_in(trigger_ids))
+            .all(&state.web_db)
+            .await?
+            .into_iter()
+            .filter_map(|t| {
+                TriggerType::from_i16(t.trigger_type).map(|tt| (t.id, tt))
+            })
+            .collect()
+    };
+
     let prev_ids: Vec<EvaluationId> = evaluations.iter().filter_map(|e| e.previous).collect();
     let mut combined_eval_ids: Vec<EvaluationId> = eval_ids.clone();
     combined_eval_ids.extend(prev_ids.iter().copied());
@@ -127,10 +146,18 @@ pub(super) async fn evaluations_to_summaries(
             total_entry_points - prev_count
         });
 
+        let trigger = evaluation.trigger.and_then(|tid| {
+            triggers.get(&tid).map(|&tt| EvaluationTriggerSummary {
+                id: tid,
+                trigger_type: tt,
+            })
+        });
+
         out.push(EvaluationSummary {
             id: evaluation.id,
             commit: commit_hash,
             status: evaluation.status.clone(),
+            trigger,
             total_builds,
             failed_builds,
             completed_entry_points,

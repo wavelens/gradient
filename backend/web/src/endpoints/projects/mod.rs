@@ -29,6 +29,7 @@ use gradient_core::types::ids::*;
 // ── Shared types ─────────────────────────────────────────────────────────────
 
 use entity::evaluation::EvaluationStatus;
+use gradient_core::types::{ProjectTriggerId, TriggerType};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -66,10 +67,18 @@ pub struct EntryPointSummary {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+pub struct EvaluationTriggerSummary {
+    pub id: ProjectTriggerId,
+    #[serde(rename = "type")]
+    pub trigger_type: TriggerType,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 pub struct EvaluationSummary {
     pub id: EvaluationId,
     pub commit: String,
     pub status: EvaluationStatus,
+    pub trigger: Option<EvaluationTriggerSummary>,
     pub total_builds: i64,
     pub failed_builds: i64,
     pub completed_entry_points: i64,
