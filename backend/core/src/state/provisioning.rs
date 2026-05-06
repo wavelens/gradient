@@ -859,9 +859,7 @@ impl<'a> StateApplicator<'a> {
         let org_map = self.org_lookup().await?;
 
         for state_project in state_projects.values() {
-            if state_project.inbound_integration.is_none()
-                && state_project.outbound_integration.is_none()
-            {
+            if state_project.outbound_integration.is_none() {
                 continue;
             }
 
@@ -874,20 +872,6 @@ impl<'a> StateApplicator<'a> {
                 .await?
                 .ok_or_else(|| format!("Project '{}' not found", state_project.name))?;
 
-            let inbound_id = match state_project.inbound_integration.as_deref() {
-                None => None,
-                Some(name) => Some(
-                    resolve_integration_id(
-                        self.db,
-                        org_id,
-                        name,
-                        IntegrationKind::Inbound,
-                        state_integrations,
-                        &state_project.name,
-                    )
-                    .await?,
-                ),
-            };
             let outbound_id = match state_project.outbound_integration.as_deref() {
                 None => None,
                 Some(name) => Some(
@@ -909,13 +893,11 @@ impl<'a> StateApplicator<'a> {
 
             if let Some(row) = existing {
                 let mut active: project_integration::ActiveModel = row.into();
-                active.inbound_integration = Set(inbound_id);
                 active.outbound_integration = Set(outbound_id);
                 active.update(self.db).await?;
             } else {
                 let row = project_integration::ActiveModel {
                     project: Set(project_row.id),
-                    inbound_integration: Set(inbound_id),
                     outbound_integration: Set(outbound_id),
                 };
                 row.insert(self.db).await?;
