@@ -42,6 +42,7 @@ pub async fn trigger_evaluation<C: ConnectionTrait>(
     commit_hash: Vec<u8>,
     commit_message: Option<String>,
     author_name: Option<String>,
+    trigger: Option<crate::types::ids::ProjectTriggerId>,
 ) -> Result<MEvaluation, TriggerError> {
     // Guard: reject if an evaluation is already in progress.
     let in_progress = EEvaluation::find()
@@ -87,7 +88,7 @@ pub async fn trigger_evaluation<C: ConnectionTrait>(
         flake_source: Set(None),
         repo_check_id: Set(None),
         waiting_reason: Set(None),
-        trigger: Set(None),
+        trigger: Set(trigger),
     };
     let evaluation = aevaluation.insert(db).await?;
 
@@ -309,7 +310,7 @@ mod tests {
             }])
             .into_connection();
 
-        let result = trigger_evaluation(&db, &project, vec![0u8; 20], None, None).await;
+        let result = trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None).await;
         assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
         assert_eq!(result.unwrap().status, EvaluationStatus::Queued);
     }
@@ -324,7 +325,7 @@ mod tests {
             .append_query_results([vec![existing_eval]])
             .into_connection();
 
-        let result = trigger_evaluation(&db, &project, vec![0u8; 20], None, None).await;
+        let result = trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None).await;
         assert!(matches!(result, Err(TriggerError::AlreadyInProgress)));
     }
 
@@ -343,7 +344,7 @@ mod tests {
             let db = MockDatabase::new(DatabaseBackend::Postgres)
                 .append_query_results([vec![make_eval(EvaluationId::now_v7(), status.clone())]])
                 .into_connection();
-            let result = trigger_evaluation(&db, &project, vec![0u8; 20], None, None).await;
+            let result = trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None).await;
             assert!(
                 matches!(result, Err(TriggerError::AlreadyInProgress)),
                 "{status:?} should block trigger"
@@ -408,7 +409,40 @@ mod tests {
             }])
             .into_connection();
 
-        let result = trigger_evaluation(&db, &project, vec![0u8; 20], None, None).await;
+        let result = trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None).await;
         assert!(result.is_ok(), "terminal eval should not block new trigger");
+    }
+
+    #[tokio::test]
+    async fn trigger_records_trigger_id() {
+        let project = make_project();
+        let trig = ProjectTriggerId::now_v7();
+        let eval_id = EvaluationId::now_v7();
+        let commit_id = CommitId::now_v7();
+
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([Vec::<evaluation::Model>::new()])
+            .append_query_results([vec![entity::commit::Model {
+                id: commit_id,
+                message: "".into(),
+                hash: vec![0u8; 20],
+                author: None,
+                author_name: "".into(),
+            }]])
+            .append_query_results([vec![{
+                let mut m = make_eval(eval_id, EvaluationStatus::Queued);
+                m.trigger = Some(trig);
+                m
+            }]])
+            .append_query_results([vec![project.clone()]])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            .into_connection();
+
+        let result = trigger_evaluation(&db, &project, vec![0u8; 20], None, None, Some(trig)).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().trigger, Some(trig));
     }
 }
