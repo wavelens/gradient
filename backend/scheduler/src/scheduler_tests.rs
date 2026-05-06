@@ -17,7 +17,7 @@ use gradient_core::types::proto::{
 };
 
 use super::Scheduler;
-use super::jobs::PendingEvalJob;
+use super::jobs::{PendingBuildJob, PendingEvalJob};
 
 /// Create a scheduler backed by a mock DB that returns empty results.
 fn test_scheduler() -> Arc<Scheduler> {
@@ -337,4 +337,79 @@ async fn record_eval_message_inserts_for_active_build_job() {
         )
         .await
         .expect("insert should succeed");
+}
+
+#[tokio::test]
+async fn cancel_evaluation_jobs_drops_eval_and_build_jobs() {
+    use gradient_core::types::proto::{BuildJob, BuildTask};
+
+    let scheduler = test_scheduler();
+    let peer = OrganizationId::now_v7();
+    let eval_id = EvaluationId::now_v7();
+    let build_id_a = BuildId::now_v7();
+    let build_id_b = BuildId::now_v7();
+
+    scheduler
+        .enqueue_eval_job(
+            format!("eval:{eval_id}"),
+            PendingEvalJob {
+                evaluation_id: eval_id,
+                project_id: None,
+                peer_id: peer,
+                commit_id: CommitId::now_v7(),
+                repository: "https://example.com/repo".into(),
+                job: gradient_core::types::proto::FlakeJob {
+                    tasks: vec![gradient_core::types::proto::FlakeTask::EvaluateDerivations],
+                    source: gradient_core::types::proto::FlakeSource::Repository {
+                        url: "https://example.com/repo".into(),
+                        commit: "abc123".into(),
+                    },
+                    wildcards: vec!["*".into()],
+                    timeout_secs: None,
+                },
+                required_paths: vec![],
+                queued_at: gradient_core::types::now(),
+            },
+        )
+        .await;
+
+    for (build_id, job_id) in [
+        (build_id_a, format!("build:{build_id_a}")),
+        (build_id_b, format!("build:{build_id_b}")),
+    ] {
+        scheduler
+            .enqueue_build_job(
+                job_id,
+                PendingBuildJob {
+                    build_id,
+                    evaluation_id: eval_id,
+                    peer_id: peer,
+                    job: BuildJob {
+                        builds: vec![BuildTask {
+                            build_id: build_id.to_string(),
+                            drv_path: "aaaa-hello.drv".into(),
+                            external_cached: false,
+                        }],
+                    },
+                    required_paths: vec![],
+                    architecture: "x86_64-linux".into(),
+                    required_features: vec![],
+                    dependency_count: 0,
+                    queued_at: gradient_core::types::now(),
+                },
+            )
+            .await;
+    }
+
+    assert_eq!(scheduler.pending_job_count().await, 3);
+
+    scheduler
+        .cancel_evaluation_jobs(eval_id, &[build_id_a, build_id_b])
+        .await;
+
+    let tracker = scheduler.job_tracker.read().await;
+    assert!(!tracker.contains_job(&format!("eval:{eval_id}")));
+    assert!(!tracker.contains_job(&format!("build:{build_id_a}")));
+    assert!(!tracker.contains_job(&format!("build:{build_id_b}")));
+    assert_eq!(tracker.pending_count() + tracker.active_count(), 0);
 }
