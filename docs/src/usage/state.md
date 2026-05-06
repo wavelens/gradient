@@ -114,6 +114,7 @@ services.gradient.state.projects = {
     repository           = "git@github.com:acme/web-app.git";
     evaluation_wildcard  = "packages.x86_64-linux.*";
     active               = true;
+    concurrency          = "hard_abort"; # optional, default "skip"
     outbound_integration = "acme-status-reports"; # optional
     created_by           = "alice";
   };
@@ -132,6 +133,7 @@ services.gradient.state.projects = {
 | `evaluation_wildcard` | `packages.x86_64-linux.*` | Attr-path pattern picked up by the evaluator |
 | `active` | `true` | Disable to pause polling/evaluations without deleting |
 | `force_evaluation` | `false` | Re-evaluate on next poll regardless of the last commit hash |
+| `concurrency` | `"skip"` | Policy for handling new trigger events while an evaluation is in flight (`hard_abort`, `soft_abort`, `skip`). Applies to all triggers on the project |
 | `outbound_integration` | `null` | Name of an `outbound` integration that receives CI status reports |
 | `created_by` | — | Username of creator (required) |
 
@@ -350,38 +352,40 @@ State-managed worker registrations are deleted automatically when removed from `
 Each project can have one or more triggers that decide *when* an evaluation runs.
 Triggers are configurable via the API or declaratively in state files.
 
+The concurrency policy — what happens when a new trigger event arrives while an evaluation is already in flight — is a **project-level** setting, not per-trigger. Set it on the project with `concurrency` (see [Project options](#project-options) above).
+
 ```nix
-services.gradient.state.projects.my-project.triggers = [
-  {
-    type = "polling";
-    config = { interval_secs = 60; };
-    concurrency = "skip";
-  }
-  {
-    type = "reporter_push";
-    integration = "gitea-prod";          # name of an inbound integration in the same org
-    config = {
-      branches = [ "main" "release/*" ];
-      tags = [];
-      releases_only = false;
-    };
-    concurrency = "hard_abort";
-  }
-  {
-    type = "reporter_pull_request";
-    integration = "gitea-prod";
-    config = {
-      branches = [ "main" ];
-      actions = [ "opened" "synchronize" "reopened" ];
-    };
-    concurrency = "hard_abort";
-  }
-  {
-    type = "time";
-    config = { cron = "0 0 2 * * *"; };   # 02:00 UTC every day (six-field: sec min hour dom mon dow)
-    concurrency = "skip";
-  }
-];
+services.gradient.state.projects.my-project = {
+  # ... other project options ...
+  concurrency = "hard_abort";   # applies to all triggers below
+  triggers = [
+    {
+      type = "polling";
+      config = { interval_secs = 60; };
+    }
+    {
+      type = "reporter_push";
+      integration = "gitea-prod";          # name of an inbound integration in the same org
+      config = {
+        branches = [ "main" "release/*" ];
+        tags = [];
+        releases_only = false;
+      };
+    }
+    {
+      type = "reporter_pull_request";
+      integration = "gitea-prod";
+      config = {
+        branches = [ "main" ];
+        actions = [ "opened" "synchronize" "reopened" ];
+      };
+    }
+    {
+      type = "time";
+      config = { cron = "0 0 2 * * *"; };   # 02:00 UTC every day (six-field: sec min hour dom mon dow)
+    }
+  ];
+};
 ```
 
 ### Trigger types
@@ -393,15 +397,16 @@ services.gradient.state.projects.my-project.triggers = [
 
 ### Concurrency policies
 
+Each project has a single concurrency policy that applies to all of its triggers:
+
 - **hard_abort** — cancel the in-flight evaluation and its in-flight builds, then start a new evaluation. Workers running affected builds receive cancellation through the existing job lifecycle.
 - **soft_abort** — mark the in-flight evaluation `Aborted` so the new one becomes canonical, but let already-running builds finish; their cached outputs flow into the new evaluation.
-- **allow** — *reserved.* Currently rejected with HTTP 400; multi-evaluation-per-project support is a follow-up.
 - **skip** — discard the new trigger event; keep the running evaluation.
+- **allow** — *reserved.* Currently rejected with HTTP 400; multi-evaluation-per-project support is a follow-up.
 
 ### Defaults
 
-- New projects automatically get a default `polling` trigger (interval 300s, concurrency `skip`). Existing projects were backfilled by the same logic during the migration.
-- Reporter push/PR triggers default to `hard_abort` (typical CI semantics).
-- Polling and time triggers default to `skip` in user-created configurations.
+- New projects automatically get a default `polling` trigger (interval 300s). Existing projects were backfilled by the same logic during the migration.
+- Concurrency defaults to `skip`; opt into `hard_abort` if you want push triggers to supersede running evaluations.
 
 The implicit fallback poll for projects with an inbound integration (the legacy `WEBHOOK_BACKUP_POLL_SECS` behavior) has been removed; webhook-driven projects must declare an explicit `reporter_push` trigger to receive evaluations from forge pushes.

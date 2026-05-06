@@ -1875,12 +1875,10 @@ paths:
           application/json:
             schema:
               type: object
-              required: [config, concurrency]
+              required: [config]
               properties:
                 config:
                   $ref: '#/components/schemas/TriggerConfig'
-                concurrency:
-                  $ref: '#/components/schemas/ConcurrencyPolicy'
                 active:
                   type: boolean
                   default: true
@@ -1949,8 +1947,6 @@ paths:
               properties:
                 config:
                   $ref: '#/components/schemas/TriggerConfig'
-                concurrency:
-                  $ref: '#/components/schemas/ConcurrencyPolicy'
                 active:
                   type: boolean
       responses:
@@ -4640,6 +4636,8 @@ components:
           type: string
           description: Nix attribute path to evaluate (e.g. `packages.x86_64-linux` or `checks`)
           example: "packages.x86_64-linux"
+        concurrency:
+          $ref: '#/components/schemas/ConcurrencyPolicy'
 
     PatchProjectRequest:
       type: object
@@ -4658,6 +4656,8 @@ components:
           type: integer
           minimum: 1
           description: Number of completed evaluations to retain for metrics and history
+        concurrency:
+          $ref: '#/components/schemas/ConcurrencyPolicy'
 
     Project:
       type: object
@@ -4685,6 +4685,8 @@ components:
         keep_evaluations:
           type: integer
           description: Number of completed evaluations retained for metrics and history
+        concurrency:
+          $ref: '#/components/schemas/ConcurrencyPolicy'
         created_by:
           type: string
           format: uuid
@@ -5649,7 +5651,7 @@ components:
     ConcurrencyPolicy:
       type: string
       enum: [hard_abort, soft_abort, allow, skip]
-      description: '`allow` is reserved and rejected with 400 at create/update.'
+      description: 'Project-level policy for handling new trigger events while an evaluation is in flight. `allow` is reserved and rejected with 400 at create/update.'
 
     PollingTriggerConfig:
       type: object
@@ -5715,7 +5717,7 @@ components:
 
     ProjectTrigger:
       type: object
-      required: [id, project, type, concurrency, config, active, created_at, updated_at]
+      required: [id, project, type, config, active, created_at, updated_at]
       properties:
         id:
           type: string
@@ -5725,8 +5727,6 @@ components:
           format: uuid
         type:
           $ref: '#/components/schemas/TriggerType'
-        concurrency:
-          $ref: '#/components/schemas/ConcurrencyPolicy'
         config:
           $ref: '#/components/schemas/TriggerConfig'
         active:
