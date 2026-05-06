@@ -98,38 +98,43 @@ impl<'a> ProjectGitContext<'a> {
             return Ok((true, remote_hash));
         }
 
+        // A dangling `last_evaluation` (row deleted but pointer stale) is
+        // treated as "no previous evaluation, update needed" — same path as
+        // a freshly-created project. The pointer self-heals on the next
+        // successful trigger.
         if let Some(last_evaluation) = self.project.last_evaluation {
             let evaluation = EEvaluation::find_by_id(last_evaluation)
                 .one(&self.state.worker_db)
                 .await
                 .map_err(|e| SourceError::Database {
                     reason: e.to_string(),
-                })?
-                .ok_or_else(|| SourceError::Database {
-                    reason: "Evaluation not found".to_string(),
                 })?;
 
-            if evaluation.status.is_active() {
-                debug!(status = ?evaluation.status, "Evaluation already in progress, skipping");
-                return Ok((false, remote_hash));
+            if let Some(evaluation) = evaluation {
+                if evaluation.status.is_active() {
+                    debug!(status = ?evaluation.status, "Evaluation already in progress, skipping");
+                    return Ok((false, remote_hash));
+                }
+
+                let commit = ECommit::find_by_id(evaluation.commit)
+                    .one(&self.state.worker_db)
+                    .await
+                    .map_err(|e| SourceError::Database {
+                        reason: e.to_string(),
+                    })?;
+
+                if let Some(commit) = commit {
+                    if commit.hash == remote_hash {
+                        debug!("Remote hash matches current evaluation commit, no update needed");
+                        return Ok((false, remote_hash));
+                    }
+                    info!("Remote hash differs from current evaluation commit, update needed");
+                } else {
+                    info!(eval_id = %last_evaluation, "Last evaluation's commit row missing; treating as update needed");
+                }
+            } else {
+                info!(eval_id = %last_evaluation, "Last evaluation row missing; treating as no previous evaluation");
             }
-
-            let commit = ECommit::find_by_id(evaluation.commit)
-                .one(&self.state.worker_db)
-                .await
-                .map_err(|e| SourceError::Database {
-                    reason: e.to_string(),
-                })?
-                .ok_or_else(|| SourceError::Database {
-                    reason: "Commit not found".to_string(),
-                })?;
-
-            if commit.hash == remote_hash {
-                debug!("Remote hash matches current evaluation commit, no update needed");
-                return Ok((false, remote_hash));
-            }
-
-            info!("Remote hash differs from current evaluation commit, update needed");
         } else {
             info!("No previous evaluation found, update needed");
         }

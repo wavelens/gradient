@@ -252,6 +252,8 @@ mod tests {
             .append_query_results([Vec::<entity::evaluation::Model>::new()])
             // trigger_evaluation internal in-progress check (none)
             .append_query_results([Vec::<entity::evaluation::Model>::new()])
+            // trigger_evaluation: resolve previous (returns the prev eval row)
+            .append_query_results([vec![make_eval(prev_eval_id, project.id, CommitId::nil(), EvaluationStatus::Completed)]])
             // commit insert
             .append_query_results([vec![make_commit(new_commit_id, same_hash.clone())]])
             // evaluation insert
@@ -369,6 +371,8 @@ mod tests {
             .append_query_results([Vec::<entity::evaluation::Model>::new()])
             // trigger_evaluation internal in-progress check
             .append_query_results([Vec::<entity::evaluation::Model>::new()])
+            // trigger_evaluation: resolve previous (prev row exists)
+            .append_query_results([vec![make_eval(prev_eval_id, project.id, CommitId::nil(), EvaluationStatus::Completed)]])
             // commit insert
             .append_query_results([vec![make_commit(new_commit_id, same_hash.clone())]])
             // evaluation insert

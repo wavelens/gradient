@@ -63,6 +63,17 @@ pub async fn trigger_evaluation<C: ConnectionTrait>(
         return Err(TriggerError::AlreadyInProgress);
     }
 
+    // Resolve `project.last_evaluation` against the DB so a dangling pointer
+    // (eval row gone but the project pointer still set) doesn't trip the
+    // `fk-evaluation-previous` foreign key.
+    let previous = match project.last_evaluation {
+        Some(prev_id) => EEvaluation::find_by_id(prev_id)
+            .one(db)
+            .await?
+            .map(|e| e.id),
+        None => None,
+    };
+
     let now = crate::types::now();
 
     let acommit = ACommit {
@@ -81,7 +92,7 @@ pub async fn trigger_evaluation<C: ConnectionTrait>(
         commit: Set(commit.id),
         wildcard: Set(project.evaluation_wildcard.clone()),
         status: Set(EvaluationStatus::Queued),
-        previous: Set(project.last_evaluation),
+        previous: Set(previous),
         next: Set(None),
         created_at: Set(now),
         updated_at: Set(now),
@@ -314,6 +325,43 @@ mod tests {
         let result = trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None).await;
         assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
         assert_eq!(result.unwrap().status, EvaluationStatus::Queued);
+    }
+
+    #[tokio::test]
+    async fn trigger_drops_dangling_last_evaluation_pointer() {
+        // Project points at an evaluation row that no longer exists. The
+        // resolved `previous` must fall back to None so the FK doesn't fire.
+        let stale_eval_id = EvaluationId::now_v7();
+        let mut project = make_project();
+        project.last_evaluation = Some(stale_eval_id);
+
+        let new_eval_id = EvaluationId::now_v7();
+        let commit_id = CommitId::now_v7();
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            // in-progress check: none active
+            .append_query_results([Vec::<evaluation::Model>::new()])
+            // resolve previous: row missing
+            .append_query_results([Vec::<evaluation::Model>::new()])
+            // insert commit
+            .append_query_results([vec![entity::commit::Model {
+                id: commit_id,
+                message: "".into(),
+                hash: vec![0u8; 20],
+                author: None,
+                author_name: "".into(),
+            }]])
+            // insert evaluation (previous should be None despite stale pointer)
+            .append_query_results([vec![make_eval(new_eval_id, EvaluationStatus::Queued)]])
+            // project update read-back + exec
+            .append_query_results([vec![project.clone()]])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            .into_connection();
+
+        let result = trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None).await;
+        assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
     }
 
     #[tokio::test]
