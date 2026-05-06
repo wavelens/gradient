@@ -88,6 +88,21 @@
           <small class="text-secondary">Number of completed evaluations to retain for metrics and history</small>
         </div>
 
+        <div class="form-group">
+          <label for="proj-concurrency">Trigger Concurrency</label>
+          <p-select
+            inputId="proj-concurrency"
+            [(ngModel)]="formData.concurrency"
+            [options]="concurrencyOptions"
+            optionLabel="label"
+            optionValue="value"
+            optionDisabled="disabled"
+            styleClass="w-full"
+            [disabled]="proj.managed || !proj.can_edit"
+          />
+          <small class="text-secondary">Determines how this project handles a new trigger event when an evaluation is already running.</small>
+        </div>
+
         @if (!proj.managed && proj.can_edit) {
           <div class="form-actions">
             <button pButton label="Save Changes" icon="pi pi-check" (click)="saveSettings()" [loading]="saving()" [disabled]="saving()"></button>

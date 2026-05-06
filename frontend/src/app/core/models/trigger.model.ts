@@ -42,7 +42,6 @@ export interface ProjectTrigger {
   id: string;
   project: string;
   type: TriggerType;
-  concurrency: ConcurrencyPolicy;
   config: TriggerConfig;
   active: boolean;
   last_fired_at: string | null;
@@ -52,12 +51,10 @@ export interface ProjectTrigger {
 
 export interface CreateTriggerBody {
   config: TriggerConfig;
-  concurrency: ConcurrencyPolicy;
   active?: boolean;
 }
 
 export interface UpdateTriggerBody {
   config?: TriggerConfig;
-  concurrency?: ConcurrencyPolicy;
   active?: boolean;
 }

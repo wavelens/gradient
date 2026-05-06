@@ -20,7 +20,7 @@ import { IntegrationsService } from '@core/services/integrations.service';
 import { AutoCompleteModule } from 'primeng/autocomplete';
 import { SelectModule } from 'primeng/select';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
-import { Integration, Project, ProjectIntegrationLink } from '@core/models';
+import { ConcurrencyPolicy, Integration, Project, ProjectIntegrationLink } from '@core/models';
 
 @Component({
   selector: 'app-project-settings',
@@ -67,13 +67,28 @@ export class ProjectSettingsComponent implements OnInit {
   orgDisplayName = signal('');
   projectName = '';
 
-  formData = {
+  formData: {
+    display_name: string;
+    description: string;
+    repository: string;
+    evaluation_wildcard: string;
+    keep_evaluations: number;
+    concurrency: ConcurrencyPolicy;
+  } = {
     display_name: '',
     description: '',
     repository: '',
     evaluation_wildcard: '',
     keep_evaluations: 30,
+    concurrency: 'skip',
   };
+
+  concurrencyOptions: { label: string; value: ConcurrencyPolicy; disabled?: boolean }[] = [
+    { label: 'Hard Abort: cancel running evaluation and its in-flight builds', value: 'hard_abort' },
+    { label: 'Soft Abort: mark current evaluation aborted, let in-flight builds finish', value: 'soft_abort' },
+    { label: 'Skip: keep the running evaluation, discard the new trigger event', value: 'skip' },
+    { label: 'Allow (reserved)', value: 'allow', disabled: true },
+  ];
 
   integrationsLoading = signal(true);
   savingIntegration = signal(false);
@@ -153,6 +168,7 @@ export class ProjectSettingsComponent implements OnInit {
           repository: project.repository,
           evaluation_wildcard: project.evaluation_wildcard,
           keep_evaluations: project.keep_evaluations,
+          concurrency: project.concurrency,
         };
         this.loading.set(false);
       },
