@@ -124,8 +124,12 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
         };
 
         let is_time = matches!(cfg, TriggerConfig::Time { .. });
+        let branch_for_check: Option<String> = match &cfg {
+            TriggerConfig::Polling { branch, .. } => branch.clone(),
+            _ => None,
+        };
         let due = match &cfg {
-            TriggerConfig::Polling { interval_secs } => polling_due(trig.last_fired_at, *interval_secs, now),
+            TriggerConfig::Polling { interval_secs, .. } => polling_due(trig.last_fired_at, *interval_secs, now),
             TriggerConfig::Time { cron } => cron_due(cron, trig.last_fired_at, now),
             _ => false,
         };
@@ -135,7 +139,7 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
 
         // Resolve target commit. Polling skips when there's no new commit;
         // time triggers always fire with whatever HEAD currently is.
-        let commit_hash = match check_project_updates(Arc::clone(state), project).await {
+        let commit_hash = match check_project_updates(Arc::clone(state), project, branch_for_check.as_deref()).await {
             Ok((true, hash)) => hash,
             Ok((false, hash)) if is_time => hash,
             Ok((false, _)) => {

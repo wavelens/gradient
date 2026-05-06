@@ -60,23 +60,28 @@ impl<'a> ProjectGitContext<'a> {
         })
     }
 
-    /// Check whether there is a new commit on the remote HEAD.
+    /// Check whether there is a new commit on the remote ref.
+    ///
+    /// `branch = None` polls the remote HEAD (default branch).
+    /// `branch = Some("main")` polls `refs/heads/main`.
     ///
     /// Returns `(has_update, remote_hash)`. `has_update` is `false` when the
-    /// remote HEAD matches the last evaluated commit or an evaluation is already
+    /// remote ref matches the last evaluated commit or an evaluation is already
     /// in progress.
     #[instrument(skip(self), fields(project_id = %self.project.id, project_name = %self.project.name))]
-    async fn check_for_updates(&self) -> Result<(bool, Vec<u8>), SourceError> {
+    async fn check_for_updates(&self, branch: Option<&str>) -> Result<(bool, Vec<u8>), SourceError> {
         debug!("Checking for updates on project");
 
         let url = self.project.repository.clone();
         let ssh_creds = self.ssh_creds.clone();
+        let branch_owned = branch.map(|b| b.to_owned());
 
         let remote_hash = match tokio::task::spawn_blocking(move || {
+            let branch_ref = branch_owned.as_deref();
             if let Some((private_key, public_key)) = ssh_creds {
-                ls_remote_head(&url, Some(&private_key), Some(&public_key))
+                ls_remote_head(&url, Some(&private_key), Some(&public_key), branch_ref)
             } else {
-                ls_remote_head(&url, None, None)
+                ls_remote_head(&url, None, None, branch_ref)
             }
         })
         .await
@@ -216,10 +221,11 @@ impl<'a> ProjectGitContext<'a> {
 pub async fn check_project_updates(
     state: Arc<ServerState>,
     project: &MProject,
+    branch: Option<&str>,
 ) -> Result<(bool, Vec<u8>), SourceError> {
     ProjectGitContext::new(&state, project)
         .await?
-        .check_for_updates()
+        .check_for_updates(branch)
         .await
 }
 
@@ -235,15 +241,17 @@ pub async fn get_commit_info(
         .await
 }
 
-/// Best-effort: resolve the project's current HEAD commit, message, and author name.
-/// Used for manual trigger fires (UI re-run / `/triggers/{id}/test`) where we
-/// want a concrete commit even if the polling source says "no update".
+/// Best-effort: resolve the project's current HEAD (or branch) commit, message,
+/// and author name. Used for manual trigger fires where we want a concrete
+/// commit even if the polling source says "no update".
 #[instrument(skip(state), fields(project_id = %project.id, project_name = %project.name))]
 pub async fn resolve_head(
     state: Arc<ServerState>,
     project: &MProject,
+    branch: Option<&str>,
 ) -> Result<(Vec<u8>, String, String), SourceError> {
-    let (_has_update, commit_hash) = check_project_updates(Arc::clone(&state), project).await?;
+    let (_has_update, commit_hash) =
+        check_project_updates(Arc::clone(&state), project, branch).await?;
     let (msg, _email, author) = get_commit_info(Arc::clone(&state), project, &commit_hash).await?;
     Ok((commit_hash, msg, author))
 }
@@ -393,11 +401,12 @@ fn ls_remote_head(
     url: &str,
     private_key: Option<&str>,
     public_key: Option<&str>,
+    branch: Option<&str>,
 ) -> Result<Vec<u8>, SourceError> {
     match (private_key, public_key) {
-        (Some(priv_key), Some(pub_key)) => ls_remote_head_ssh(url, priv_key, pub_key),
-        _ if url.starts_with("git://") => ls_remote_head_git_protocol(url),
-        _ => ls_remote_head_no_creds(url),
+        (Some(priv_key), Some(pub_key)) => ls_remote_head_ssh(url, priv_key, pub_key, branch),
+        _ if url.starts_with("git://") => ls_remote_head_git_protocol(url, branch),
+        _ => ls_remote_head_no_creds(url, branch),
     }
 }
 
@@ -409,7 +418,7 @@ fn ls_remote_head(
 /// This implementation sends a plain protocol-v0 pkt-line request (no
 /// `version=2` extra parameter) so the daemon responds with an immediate v0
 /// ref advertisement containing HEAD.
-fn ls_remote_head_git_protocol(url: &str) -> Result<Vec<u8>, SourceError> {
+fn ls_remote_head_git_protocol(url: &str, branch: Option<&str>) -> Result<Vec<u8>, SourceError> {
     use std::io::Write;
     use std::net::TcpStream;
     use std::time::Duration;
@@ -437,7 +446,13 @@ fn ls_remote_head_git_protocol(url: &str) -> Result<Vec<u8>, SourceError> {
             stderr: e.to_string(),
         })?;
 
-    read_head_from_pktlines(&mut stream)
+    match branch {
+        None => read_head_from_pktlines(&mut stream),
+        Some(b) => {
+            let ref_name = format!("refs/heads/{}", b);
+            read_branch_from_pktlines(&mut stream, &ref_name)
+        }
+    }
 }
 
 /// List the remote HEAD ref via libgit2 with in-memory SSH credentials.
@@ -448,6 +463,7 @@ fn ls_remote_head_ssh(
     url: &str,
     private_key: &str,
     public_key: &str,
+    branch: Option<&str>,
 ) -> Result<Vec<u8>, SourceError> {
     let mut remote =
         git2::Remote::create_detached(url).map_err(|e| SourceError::GitCommand(e.to_string()))?;
@@ -475,15 +491,11 @@ fn ls_remote_head_ssh(
         stderr: e.message().to_string(),
     })?;
 
-    list.iter()
-        .find(|h| h.name() == "HEAD")
-        .or_else(|| list.first())
-        .map(|h| h.oid().as_bytes().to_vec())
-        .ok_or(SourceError::GitHashExtraction)
+    find_ref_in_list(list, branch)
 }
 
 /// List the remote HEAD ref via libgit2 with no credentials (for https://).
-fn ls_remote_head_no_creds(url: &str) -> Result<Vec<u8>, SourceError> {
+fn ls_remote_head_no_creds(url: &str, branch: Option<&str>) -> Result<Vec<u8>, SourceError> {
     let mut remote =
         git2::Remote::create_detached(url).map_err(|e| SourceError::GitCommand(e.to_string()))?;
 
@@ -500,11 +512,33 @@ fn ls_remote_head_no_creds(url: &str) -> Result<Vec<u8>, SourceError> {
         stderr: e.message().to_string(),
     })?;
 
-    list.iter()
-        .find(|h| h.name() == "HEAD")
-        .or_else(|| list.first())
-        .map(|h| h.oid().as_bytes().to_vec())
-        .ok_or(SourceError::GitHashExtraction)
+    find_ref_in_list(list, branch)
+}
+
+/// Resolves the target ref from a libgit2 remote ref list.
+///
+/// `branch = None` → look for `HEAD`, fall back to first ref.
+/// `branch = Some("main")` → look for `refs/heads/main` exactly; returns
+/// `SourceError::GitHashExtraction` if not found (no HEAD fallback).
+fn find_ref_in_list(
+    list: &[git2::RemoteHead<'_>],
+    branch: Option<&str>,
+) -> Result<Vec<u8>, SourceError> {
+    match branch {
+        None => list
+            .iter()
+            .find(|h| h.name() == "HEAD")
+            .or_else(|| list.first())
+            .map(|h| h.oid().as_bytes().to_vec())
+            .ok_or(SourceError::GitHashExtraction),
+        Some(b) => {
+            let ref_name = format!("refs/heads/{}", b);
+            list.iter()
+                .find(|h| h.name() == ref_name)
+                .map(|h| h.oid().as_bytes().to_vec())
+                .ok_or(SourceError::GitHashExtraction)
+        }
+    }
 }
 
 /// Read pkt-lines from `reader` and return the SHA-1 hash of HEAD.
@@ -586,6 +620,70 @@ fn read_head_from_pktlines(reader: &mut dyn std::io::Read) -> Result<Vec<u8>, So
 
     // Fall back to the first non-zero ref (matches libgit2's list.first() behavior).
     first_ref.ok_or(SourceError::GitHashExtraction)
+}
+
+/// Read pkt-lines from `reader` and return the SHA-1 hash for `branch_ref`
+/// (e.g. `"refs/heads/main"`). Returns `SourceError::GitHashExtraction` if
+/// the ref is not found in the advertisement; does not fall back to HEAD.
+fn read_branch_from_pktlines(
+    reader: &mut dyn std::io::Read,
+    branch_ref: &str,
+) -> Result<Vec<u8>, SourceError> {
+    let mut len_buf = [0u8; 4];
+
+    loop {
+        std::io::Read::read_exact(reader, &mut len_buf).map_err(|e| {
+            SourceError::GitCommandFailed {
+                stderr: e.to_string(),
+            }
+        })?;
+
+        let len = std::str::from_utf8(&len_buf)
+            .ok()
+            .and_then(|s| usize::from_str_radix(s, 16).ok())
+            .ok_or(SourceError::GitOutputParsing)?;
+
+        if len == 0 {
+            break;
+        }
+
+        if len < 4 {
+            break;
+        }
+
+        let payload_len = len - 4;
+        let mut data = vec![0u8; payload_len];
+        std::io::Read::read_exact(reader, &mut data).map_err(|e| {
+            SourceError::GitCommandFailed {
+                stderr: e.to_string(),
+            }
+        })?;
+
+        if data.len() >= 41 && data[40] == b' ' {
+            let sha = match std::str::from_utf8(&data[..40]) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+
+            let ref_bytes = &data[41..];
+            let refname_end = ref_bytes
+                .iter()
+                .position(|&b| b == 0 || b == b'\n')
+                .unwrap_or(ref_bytes.len());
+
+            let refname = std::str::from_utf8(&ref_bytes[..refname_end])
+                .unwrap_or("")
+                .trim();
+
+            debug!(refname, sha, "pkt-line ref");
+
+            if refname == branch_ref {
+                return hex::decode(sha).map_err(|_| SourceError::GitOutputParsing);
+            }
+        }
+    }
+
+    Err(SourceError::GitHashExtraction)
 }
 
 /// Parses a `git://[host[:port]]/repo/path` URL into its host, port, and repo

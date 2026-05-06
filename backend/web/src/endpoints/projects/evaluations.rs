@@ -208,9 +208,10 @@ pub async fn post_project_evaluate(
 
     let mut project_for_check = project.clone();
     project_for_check.force_evaluation = true;
-    let (_has_updates, commit_hash) = check_project_updates(Arc::clone(&state), &project_for_check)
-        .await
-        .map_err(|e| anyhow::anyhow!(e))?;
+    let (_has_updates, commit_hash) =
+        check_project_updates(Arc::clone(&state), &project_for_check, None)
+            .await
+            .map_err(|e| anyhow::anyhow!(e))?;
 
     if commit_hash.is_empty() {
         return Err(WebError::internal(

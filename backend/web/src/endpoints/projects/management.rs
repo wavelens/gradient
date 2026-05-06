@@ -240,7 +240,7 @@ pub async fn put(
     let project = project.insert(&state.web_db).await?;
 
     let now = gradient_core::types::now();
-    let default_cfg = TriggerConfig::Polling { interval_secs: 300 };
+    let default_cfg = TriggerConfig::Polling { interval_secs: 300, branch: None };
     AProjectTrigger {
         id: Set(ProjectTriggerId::now_v7()),
         project: Set(project.id),
@@ -549,7 +549,7 @@ pub async fn post_project_check_repository(
     )
     .await?;
 
-    let (_has_updates, remote_hash) = check_project_updates(Arc::clone(&state), &project)
+    let (_has_updates, remote_hash) = check_project_updates(Arc::clone(&state), &project, None)
         .await
         .map_err(|e| anyhow::anyhow!(e))?;
 
