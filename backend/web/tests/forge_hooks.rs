@@ -20,7 +20,7 @@ use entity::evaluation::EvaluationStatus;
 use gradient_core::ci::{WebhookClient, encrypt_webhook_secret};
 use gradient_core::storage::{EmailSender, NarStore};
 use gradient_core::types::ids::*;
-use gradient_core::types::triggers::{ConcurrencyPolicy, TriggerConfig};
+use gradient_core::types::triggers::TriggerConfig;
 use gradient_core::types::{ServerState, WebDb, WorkerDb};
 use hmac::{Hmac, KeyInit, Mac};
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
@@ -215,6 +215,7 @@ fn project_row() -> entity::project::Model {
         created_at: fixture_date(),
         managed: false,
         keep_evaluations: 10,
+        concurrency: 3,
     }
 }
 
@@ -253,7 +254,6 @@ fn trigger_row(cfg: TriggerConfig) -> entity::project_trigger::Model {
         id: trigger_id(),
         project: project_id(),
         trigger_type: cfg.trigger_type().as_i16(),
-        concurrency: ConcurrencyPolicy::HardAbort.as_i16(),
         config: cfg.to_db_json(),
         active: true,
         last_fired_at: None,

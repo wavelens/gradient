@@ -258,6 +258,7 @@ mod tests {
             created_at: NaiveDateTime::default(),
             managed: false,
             keep_evaluations: 10,
+            concurrency: 3,
         }
     }
 

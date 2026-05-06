@@ -269,6 +269,7 @@ fn make_project(id: ProjectId, org_id: OrganizationId) -> entity::project::Model
         created_at: test_date(),
         managed: false,
         keep_evaluations: 30,
+        concurrency: 3,
     }
 }
 

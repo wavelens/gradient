@@ -18,8 +18,6 @@ pub struct Model {
     pub project: ProjectId,
     /// 0 = polling, 1 = reporter_push, 2 = reporter_pull_request, 3 = time
     pub trigger_type: i16,
-    /// 0 = hard_abort, 1 = soft_abort, 2 = allow, 3 = skip
-    pub concurrency: i16,
     pub config: serde_json::Value,
     pub active: bool,
     pub last_fired_at: Option<NaiveDateTime>,

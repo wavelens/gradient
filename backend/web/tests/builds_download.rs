@@ -141,6 +141,7 @@ fn project_row() -> entity::project::Model {
         created_at: test_date(),
         managed: false,
         keep_evaluations: 10,
+        concurrency: 3,
     }
 }
 

@@ -116,6 +116,7 @@ fn project_row() -> entity::project::Model {
         created_at: test_date(),
         managed: false,
         keep_evaluations: 10,
+        concurrency: 3,
     }
 }
 
@@ -133,7 +134,6 @@ fn polling_trigger_row() -> entity::project_trigger::Model {
         id: trigger_id(),
         project: project_id(),
         trigger_type: 0, // Polling
-        concurrency: 3,  // Skip
         config: serde_json::json!({"interval_secs": 60}),
         active: true,
         last_fired_at: None,

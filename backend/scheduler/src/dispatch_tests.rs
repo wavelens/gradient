@@ -90,6 +90,7 @@ fn make_project(id: ProjectId, org_id: OrganizationId) -> entity::project::Model
         created_at: test_date(),
         managed: false,
         keep_evaluations: 30,
+        concurrency: 3,
     }
 }
 
@@ -359,7 +360,6 @@ fn make_polling_trigger(
         id,
         project: project_id,
         trigger_type: 0, // Polling
-        concurrency: 3,  // Skip
         config: serde_json::json!({ "interval_secs": interval_secs }),
         active: true,
         last_fired_at,

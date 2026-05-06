@@ -390,6 +390,7 @@ mod tests {
             created_at: fixture_date(),
             managed,
             keep_evaluations: 30,
+            concurrency: 3,
         }
     }
 
