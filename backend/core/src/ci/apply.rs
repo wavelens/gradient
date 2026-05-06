@@ -1,0 +1,331 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+//! Orchestrates trigger fire → evaluation creation. Encapsulates commit-level
+//! deduplication and concurrency policy. Callers: scheduler dispatch loop,
+//! forge webhooks, manual API endpoints.
+
+use super::abort::{abort_evaluation, AbortKind};
+use super::trigger::{trigger_evaluation, TriggerError};
+use crate::types::triggers::{ConcurrencyPolicy, TriggerType};
+use crate::types::*;
+
+use entity::evaluation::EvaluationStatus;
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
+
+#[derive(Debug)]
+pub enum ApplyOutcome {
+    Created(MEvaluation),
+    SkippedSameCommit,
+    SkippedConcurrency,
+    SkippedAllowReserved,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ApplyError {
+    #[error(transparent)]
+    Db(#[from] sea_orm::DbErr),
+    #[error(transparent)]
+    Trigger(#[from] TriggerError),
+}
+
+pub struct ApplyInput {
+    pub trigger_id: ProjectTriggerId,
+    pub trigger_type: TriggerType,
+    pub concurrency: ConcurrencyPolicy,
+    pub commit_hash: Vec<u8>,
+    pub commit_message: Option<String>,
+    pub author_name: Option<String>,
+    /// Set true for manual UI re-runs and `/triggers/{id}/test` calls.
+    /// Bypasses the same-commit dedup check.
+    pub manual: bool,
+}
+
+pub async fn apply_trigger<C: ConnectionTrait>(
+    db: &C,
+    project: &MProject,
+    input: ApplyInput,
+) -> Result<ApplyOutcome, ApplyError> {
+    // ── Same-commit dedup ─────────────────────────────────────────────────
+    // Time triggers and manual fires bypass this check.
+    if !input.manual && input.trigger_type != TriggerType::Time {
+        if let Some(prev) = project.last_evaluation {
+            if let Some(prev_eval) = EEvaluation::find_by_id(prev).one(db).await? {
+                if let Some(prev_commit) = ECommit::find_by_id(prev_eval.commit).one(db).await? {
+                    if prev_commit.hash == input.commit_hash {
+                        return Ok(ApplyOutcome::SkippedSameCommit);
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Concurrency policy ────────────────────────────────────────────────
+    let active_codes: Vec<i32> = EvaluationStatus::ACTIVE.iter().map(|s| s.num_value()).collect();
+    let in_flight = EEvaluation::find()
+        .filter(CEvaluation::Project.eq(project.id))
+        .filter(CEvaluation::Status.is_in(active_codes))
+        .one(db)
+        .await?;
+
+    if let Some(running) = in_flight {
+        match input.concurrency {
+            ConcurrencyPolicy::Skip => return Ok(ApplyOutcome::SkippedConcurrency),
+            ConcurrencyPolicy::HardAbort => abort_evaluation(db, running.id, AbortKind::Hard).await?,
+            ConcurrencyPolicy::SoftAbort => abort_evaluation(db, running.id, AbortKind::Soft).await?,
+            ConcurrencyPolicy::Allow => {
+                // Reserved — multi-eval-per-project support is a follow-up.
+                return Ok(ApplyOutcome::SkippedAllowReserved);
+            }
+        }
+    }
+
+    let eval = trigger_evaluation(
+        db,
+        project,
+        input.commit_hash,
+        input.commit_message,
+        input.author_name,
+        Some(input.trigger_id),
+    )
+    .await?;
+    Ok(ApplyOutcome::Created(eval))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::NaiveDateTime;
+    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+    use uuid::Uuid;
+
+    fn make_project_with_last_eval(last: Option<EvaluationId>) -> MProject {
+        MProject {
+            id: ProjectId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap()),
+            organization: OrganizationId::nil(),
+            name: "test-project".into(),
+            active: true,
+            display_name: "Test".into(),
+            description: "".into(),
+            repository: "https://example/r".into(),
+            evaluation_wildcard: "*".into(),
+            last_evaluation: last,
+            last_check_at: NaiveDateTime::default(),
+            force_evaluation: false,
+            created_by: UserId::nil(),
+            created_at: NaiveDateTime::default(),
+            managed: false,
+            keep_evaluations: 10,
+        }
+    }
+
+    fn make_eval(
+        id: EvaluationId,
+        project: ProjectId,
+        commit: CommitId,
+        status: EvaluationStatus,
+    ) -> entity::evaluation::Model {
+        entity::evaluation::Model {
+            id,
+            project: Some(project),
+            repository: "".into(),
+            commit,
+            wildcard: "*".into(),
+            status,
+            previous: None,
+            next: None,
+            created_at: NaiveDateTime::default(),
+            updated_at: NaiveDateTime::default(),
+            flake_source: None,
+            repo_check_id: None,
+            waiting_reason: None,
+            trigger: None,
+        }
+    }
+
+    fn make_commit(id: CommitId, hash: Vec<u8>) -> entity::commit::Model {
+        entity::commit::Model {
+            id,
+            message: "".into(),
+            hash,
+            author: None,
+            author_name: "".into(),
+        }
+    }
+
+    fn input(
+        trig: ProjectTriggerId,
+        ttype: TriggerType,
+        conc: ConcurrencyPolicy,
+        hash: Vec<u8>,
+        manual: bool,
+    ) -> ApplyInput {
+        ApplyInput {
+            trigger_id: trig,
+            trigger_type: ttype,
+            concurrency: conc,
+            commit_hash: hash,
+            commit_message: None,
+            author_name: None,
+            manual,
+        }
+    }
+
+    #[tokio::test]
+    async fn skips_when_same_commit_as_last_eval() {
+        let prev_eval_id = EvaluationId::now_v7();
+        let prev_commit_id = CommitId::now_v7();
+        let project = make_project_with_last_eval(Some(prev_eval_id));
+        let same_hash = vec![1u8; 20];
+
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            // Same-commit dedup: fetch prev eval
+            .append_query_results([vec![make_eval(
+                prev_eval_id,
+                project.id,
+                prev_commit_id,
+                EvaluationStatus::Completed,
+            )]])
+            // Same-commit dedup: fetch prev commit
+            .append_query_results([vec![make_commit(prev_commit_id, same_hash.clone())]])
+            .into_connection();
+
+        let trig = ProjectTriggerId::now_v7();
+        let res = apply_trigger(
+            &db,
+            &project,
+            input(trig, TriggerType::Polling, ConcurrencyPolicy::Skip, same_hash, false),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(res, ApplyOutcome::SkippedSameCommit));
+    }
+
+    #[tokio::test]
+    async fn time_trigger_bypasses_same_commit_check() {
+        let prev_eval_id = EvaluationId::now_v7();
+        let project = make_project_with_last_eval(Some(prev_eval_id));
+        let same_hash = vec![1u8; 20];
+        let new_eval_id = EvaluationId::now_v7();
+        let new_commit_id = CommitId::now_v7();
+        let trig = ProjectTriggerId::now_v7();
+
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            // No same-commit dedup queries (time bypasses)
+            // Concurrency check: no in-flight
+            .append_query_results([Vec::<entity::evaluation::Model>::new()])
+            // trigger_evaluation internal in-progress check (none)
+            .append_query_results([Vec::<entity::evaluation::Model>::new()])
+            // commit insert
+            .append_query_results([vec![make_commit(new_commit_id, same_hash.clone())]])
+            // evaluation insert
+            .append_query_results([vec![{
+                let mut m = make_eval(new_eval_id, project.id, new_commit_id, EvaluationStatus::Queued);
+                m.trigger = Some(trig);
+                m
+            }]])
+            // project update read-back
+            .append_query_results([vec![project.clone()]])
+            // project update exec
+            .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+            .into_connection();
+
+        let res = apply_trigger(
+            &db,
+            &project,
+            input(trig, TriggerType::Time, ConcurrencyPolicy::Skip, same_hash, false),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(res, ApplyOutcome::Created(_)));
+    }
+
+    #[tokio::test]
+    async fn skip_concurrency_with_running_eval() {
+        let project = make_project_with_last_eval(None);
+        let running_eval_id = EvaluationId::now_v7();
+        let running_eval =
+            make_eval(running_eval_id, project.id, CommitId::nil(), EvaluationStatus::Building);
+
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            // Same-commit dedup skipped (no last_evaluation)
+            // Concurrency check returns running eval
+            .append_query_results([vec![running_eval.clone()]])
+            .into_connection();
+
+        let trig = ProjectTriggerId::now_v7();
+        let res = apply_trigger(
+            &db,
+            &project,
+            input(trig, TriggerType::Polling, ConcurrencyPolicy::Skip, vec![9u8; 20], false),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(res, ApplyOutcome::SkippedConcurrency));
+    }
+
+    #[tokio::test]
+    async fn allow_concurrency_returns_skipped_allow_reserved() {
+        let project = make_project_with_last_eval(None);
+        let running_eval_id = EvaluationId::now_v7();
+        let running_eval =
+            make_eval(running_eval_id, project.id, CommitId::nil(), EvaluationStatus::Building);
+
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![running_eval.clone()]])
+            .into_connection();
+
+        let trig = ProjectTriggerId::now_v7();
+        let res = apply_trigger(
+            &db,
+            &project,
+            input(trig, TriggerType::Polling, ConcurrencyPolicy::Allow, vec![9u8; 20], false),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(res, ApplyOutcome::SkippedAllowReserved));
+    }
+
+    #[tokio::test]
+    async fn manual_bypasses_same_commit_check() {
+        let prev_eval_id = EvaluationId::now_v7();
+        let project = make_project_with_last_eval(Some(prev_eval_id));
+        let same_hash = vec![1u8; 20];
+        let new_eval_id = EvaluationId::now_v7();
+        let new_commit_id = CommitId::now_v7();
+        let trig = ProjectTriggerId::now_v7();
+
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            // manual=true skips same-commit dedup entirely
+            // Concurrency check: no in-flight
+            .append_query_results([Vec::<entity::evaluation::Model>::new()])
+            // trigger_evaluation internal in-progress check
+            .append_query_results([Vec::<entity::evaluation::Model>::new()])
+            // commit insert
+            .append_query_results([vec![make_commit(new_commit_id, same_hash.clone())]])
+            // evaluation insert
+            .append_query_results([vec![make_eval(
+                new_eval_id,
+                project.id,
+                new_commit_id,
+                EvaluationStatus::Queued,
+            )]])
+            // project update read-back
+            .append_query_results([vec![project.clone()]])
+            // project update exec
+            .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+            .into_connection();
+
+        let res = apply_trigger(
+            &db,
+            &project,
+            input(trig, TriggerType::Polling, ConcurrencyPolicy::Skip, same_hash, true),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(res, ApplyOutcome::Created(_)));
+    }
+}
