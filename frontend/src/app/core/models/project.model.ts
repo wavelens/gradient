@@ -5,6 +5,7 @@
  */
 
 import { BuildStatus, Architecture } from './build.model';
+import { TriggerType } from './trigger.model';
 
 export interface Project {
   id: string;
@@ -90,6 +91,7 @@ export interface Evaluation {
   error_count: number;
   warning_count: number;
   waiting_reason?: WaitingReason;
+  trigger: { id: string; type: TriggerType } | null;
 }
 
 export interface WaitingReason {
