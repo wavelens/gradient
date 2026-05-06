@@ -187,9 +187,9 @@ export class ProjectTriggersComponent implements OnInit {
   private buildConfig(): object {
     switch (this.form.type) {
       case 'polling':
-        return { interval_secs: Math.max(10, this.form.interval_secs) };
+        return { type: 'polling', interval_secs: Math.max(10, this.form.interval_secs) };
       case 'reporter_push': {
-        const cfg: any = { integration_id: this.form.integration_id };
+        const cfg: any = { type: 'reporter_push', integration_id: this.form.integration_id };
         const branches = this.splitList(this.form.branches);
         const tags = this.splitList(this.form.tags);
         if (branches.length) cfg.branches = branches;
@@ -198,7 +198,7 @@ export class ProjectTriggersComponent implements OnInit {
         return cfg;
       }
       case 'reporter_pull_request': {
-        const cfg: any = { integration_id: this.form.integration_id };
+        const cfg: any = { type: 'reporter_pull_request', integration_id: this.form.integration_id };
         const branches = this.splitList(this.form.branches);
         const actions = this.splitList(this.form.actions);
         if (branches.length) cfg.branches = branches;
@@ -206,7 +206,7 @@ export class ProjectTriggersComponent implements OnInit {
         return cfg;
       }
       case 'time':
-        return { cron: this.form.cron.trim() };
+        return { type: 'time', cron: this.form.cron.trim() };
     }
   }
 

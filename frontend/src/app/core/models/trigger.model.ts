@@ -8,10 +8,12 @@ export type TriggerType = 'polling' | 'reporter_push' | 'reporter_pull_request' 
 export type ConcurrencyPolicy = 'hard_abort' | 'soft_abort' | 'allow' | 'skip';
 
 export interface PollingTriggerConfig {
+  type: 'polling';
   interval_secs: number;
 }
 
 export interface ReporterPushTriggerConfig {
+  type: 'reporter_push';
   integration_id: string;
   branches?: string[];
   tags?: string[];
@@ -19,12 +21,14 @@ export interface ReporterPushTriggerConfig {
 }
 
 export interface ReporterPullRequestTriggerConfig {
+  type: 'reporter_pull_request';
   integration_id: string;
   branches?: string[];
   actions?: string[];
 }
 
 export interface TimeTriggerConfig {
+  type: 'time';
   cron: string;
 }
 
