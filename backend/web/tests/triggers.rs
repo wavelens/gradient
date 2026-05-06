@@ -541,8 +541,47 @@ fn delete_trigger_not_found_returns_404() {
     });
 }
 
-// fire_now is not integration-tested here because it calls resolve_head which
-// makes actual git network requests — it will be exercised by E2E smoke tests.
+#[test]
+fn fire_now_on_inactive_trigger_returns_400() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let session_id = SessionId::now_v7();
+        let token = make_token(session_id);
+        let tid = trigger_id();
+
+        let inactive_trigger = project_trigger::Model {
+            active: false,
+            ..polling_trigger_row()
+        };
+
+        let db = with_project_edit(with_auth(
+            MockDatabase::new(DatabaseBackend::Postgres),
+            session_id,
+        ))
+        .append_query_results([vec![inactive_trigger]]);
+
+        let server = make_server(db.into_connection());
+        let res = server
+            .post(&format!("{}/{}/test", BASE_URL, tid))
+            .add_header("authorization", format!("Bearer {}", token))
+            .await;
+
+        res.assert_status_bad_request();
+        let body: Value = res.json();
+        assert_eq!(body["error"], true);
+        assert!(
+            body["message"].as_str().unwrap().contains("inactive"),
+            "expected inactive mention, got: {}",
+            body["message"]
+        );
+    });
+}
+
+// fire_now is not integration-tested further here because it calls resolve_head
+// which makes actual git network requests — it will be exercised by E2E smoke tests.
 
 #[test]
 fn create_project_seeds_default_polling_trigger() {
