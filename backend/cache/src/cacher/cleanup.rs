@@ -65,9 +65,9 @@ const STALE_CACHED_NARS_SELECT: &str = r#"SELECT cd.id, cd.cache, cd.derivation
                        AND b.status NOT IN ($2, $3, $4)
                  )
                  AND NOT EXISTS (
-                     SELECT 1 FROM derivation_output do
-                     WHERE do.derivation = cd.derivation
-                       AND do.ca IS NOT NULL
+                     SELECT 1 FROM derivation_output dout
+                     WHERE dout.derivation = cd.derivation
+                       AND dout.ca IS NOT NULL
                  )"#;
 
 pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
@@ -230,9 +230,9 @@ async fn active_hashes(state: &Arc<ServerState>) -> Result<HashSet<String>> {
         .query_all(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             r#"
-            SELECT DISTINCT do.hash AS hash
-            FROM derivation_output do
-            JOIN build b ON b.derivation = do.derivation
+            SELECT DISTINCT dout.hash AS hash
+            FROM derivation_output dout
+            JOIN build b ON b.derivation = dout.derivation
             WHERE b.status NOT IN ($1, $2, $3)
             UNION
             SELECT cp.hash AS hash

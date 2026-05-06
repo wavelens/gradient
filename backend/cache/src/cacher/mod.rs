@@ -51,12 +51,12 @@ pub async fn cache_loop(state: Arc<ServerState>) {
         }
 
         if let Err(e) = cleanup_orphaned_cache_files(Arc::clone(&state)).await {
-            error!(error = %e, "Cache cleanup failed");
+            error!(error = ?e, "Cache cleanup failed");
         } else {
             info!("Cache cleanup completed successfully");
         }
         if let Err(e) = cleanup_old_evaluations(Arc::clone(&state)).await {
-            error!(error = %e, "Evaluation GC failed");
+            error!(error = ?e, "Evaluation GC failed");
         } else {
             info!("Evaluation GC completed successfully");
         }
@@ -66,14 +66,14 @@ pub async fn cache_loop(state: Arc<ServerState>) {
         )
         .await
         {
-            error!(error = %e, "Derivation GC failed");
+            error!(error = ?e, "Derivation GC failed");
         } else {
             info!("Derivation GC completed successfully");
         }
         if state.config.storage.nar_ttl_hours > 0
             && let Err(e) = cleanup_stale_cached_nars(Arc::clone(&state)).await
         {
-            error!(error = %e, "NAR TTL GC failed");
+            error!(error = ?e, "NAR TTL GC failed");
         }
     }
 }
@@ -100,7 +100,7 @@ pub async fn sign_sweep_loop(state: Arc<ServerState>) {
             _ = interval.tick() => {}
         }
         if let Err(e) = sign_missing_signatures(Arc::clone(&state)).await {
-            error!(error = %e, "Signature sweep failed");
+            error!(error = ?e, "Signature sweep failed");
         }
     }
 }
