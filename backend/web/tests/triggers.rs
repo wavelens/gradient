@@ -22,7 +22,7 @@
 
 use axum_test::TestServer;
 use chrono::{Duration, Utc};
-use entity::{ids::*, organization_user, project_trigger, session};
+use entity::{ids::*, organization_user, project, project_trigger, session};
 use gradient_core::storage::{EmailSender, NarStore};
 use gradient_core::types::{RuntimeConfig, SecretString, ServerState, SessionId, WebDb, WorkerDb};
 use jsonwebtoken::{EncodingKey, Header, encode};
@@ -543,3 +543,75 @@ fn delete_trigger_not_found_returns_404() {
 
 // fire_now is not integration-tested here because it calls resolve_head which
 // makes actual git network requests — it will be exercised by E2E smoke tests.
+
+#[test]
+fn create_project_seeds_default_polling_trigger() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let session_id = SessionId::now_v7();
+        let token = make_token(session_id);
+
+        let created_project = project::Model {
+            id: project_id(),
+            organization: org_id(),
+            name: "new-project".into(),
+            active: true,
+            display_name: "New Project".into(),
+            description: "".into(),
+            repository: "https://github.com/test/repo".into(),
+            evaluation_wildcard: "*".into(),
+            last_evaluation: None,
+            last_check_at: test_date(),
+            force_evaluation: false,
+            created_by: user_id(),
+            created_at: test_date(),
+            managed: false,
+            keep_evaluations: 30,
+        };
+
+        let seeded_trigger = project_trigger::Model {
+            id: trigger_id(),
+            project: project_id(),
+            trigger_type: 0,  // Polling
+            concurrency: 3,   // Skip
+            config: serde_json::json!({"interval_secs": 300}),
+            active: true,
+            last_fired_at: None,
+            created_at: test_date(),
+            updated_at: test_date(),
+        };
+
+        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+            // load_org: SELECT org
+            .append_query_results([vec![org()]])
+            // load_org: SELECT org_user (require CreateProject permission)
+            .append_query_results([vec![admin_membership()]])
+            // check existing project: returns empty
+            .append_query_results([Vec::<project::Model>::new()])
+            // INSERT project RETURNING
+            .append_query_results([vec![created_project]])
+            // INSERT trigger RETURNING
+            .append_query_results([vec![seeded_trigger]]);
+
+        let server = make_server(db.into_connection());
+        let res = server
+            .put("/api/v1/projects/test-org")
+            .add_header("authorization", format!("Bearer {}", token))
+            .json(&serde_json::json!({
+                "name": "new-project",
+                "display_name": "New Project",
+                "description": "",
+                "repository": "https://github.com/test/repo",
+                "evaluation_wildcard": "*"
+            }))
+            .await;
+
+        res.assert_status_ok();
+        let body: Value = res.json();
+        assert_eq!(body["error"], false);
+        assert_eq!(body["message"], project_id().to_string());
+    });
+}
