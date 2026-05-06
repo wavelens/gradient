@@ -20,7 +20,6 @@ import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/load
 import {
   ProjectTrigger,
   TriggerType,
-  ConcurrencyPolicy,
   CreateTriggerBody,
   UpdateTriggerBody,
   Integration,
@@ -34,7 +33,6 @@ interface Option<T> {
 
 interface TriggerFormState {
   type: TriggerType;
-  concurrency: ConcurrencyPolicy;
   active: boolean;
   interval_secs: number;
   integration_id: string;
@@ -47,7 +45,6 @@ interface TriggerFormState {
 
 const DEFAULT_FORM: TriggerFormState = {
   type: 'polling',
-  concurrency: 'skip',
   active: true,
   interval_secs: 300,
   integration_id: '',
@@ -108,13 +105,6 @@ export class ProjectTriggersComponent implements OnInit {
     { label: 'Time (cron)', value: 'time' },
   ];
 
-  concurrencyOptions: Option<ConcurrencyPolicy>[] = [
-    { label: 'Skip — skip new trigger if one is running', value: 'skip' },
-    { label: 'Soft Abort — cancel running eval before starting new', value: 'soft_abort' },
-    { label: 'Hard Abort — force-abort running eval', value: 'hard_abort' },
-    { label: 'Allow — run concurrently (reserved)', value: 'allow', disabled: true },
-  ];
-
   integrationOptions = computed<Option<string>[]>(() => {
     const opts: Option<string>[] = [{ label: '— select integration —', value: '' }];
     for (const i of this.inboundIntegrations()) {
@@ -162,7 +152,6 @@ export class ProjectTriggersComponent implements OnInit {
     const cfg = trigger.config as any;
     this.form = {
       type: trigger.type,
-      concurrency: trigger.concurrency,
       active: trigger.active,
       interval_secs: cfg.interval_secs ?? 300,
       integration_id: cfg.integration_id ?? '',
@@ -215,7 +204,6 @@ export class ProjectTriggersComponent implements OnInit {
     this.error.set(null);
     const body: CreateTriggerBody = {
       config: this.buildConfig() as any,
-      concurrency: this.form.concurrency,
       active: this.form.active,
     };
     this.triggersService.create(this.orgName, this.projectName, body).subscribe({
@@ -238,7 +226,6 @@ export class ProjectTriggersComponent implements OnInit {
     this.error.set(null);
     const body: UpdateTriggerBody = {
       config: this.buildConfig() as any,
-      concurrency: this.form.concurrency,
       active: this.form.active,
     };
     this.triggersService.update(this.orgName, this.projectName, target.id, body).subscribe({

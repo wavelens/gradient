@@ -40,7 +40,6 @@
                 <div>
                   <div class="trigger-summary">{{ configSummary(trigger) }}</div>
                   <div class="trigger-meta text-secondary">
-                    <span>Concurrency: {{ trigger.concurrency }}</span>
                     <span class="status-chip" [class.status-ok]="trigger.active" [class.status-warn]="!trigger.active">
                       {{ trigger.active ? 'Active' : 'Inactive' }}
                     </span>
@@ -149,25 +148,6 @@
     />
     @if (isEdit) {
       <small class="text-secondary">Trigger type cannot be changed after creation.</small>
-    }
-  </div>
-
-  <div class="form-group">
-    <label for="trig-concurrency">Concurrency</label>
-    <p-select
-      inputId="trig-concurrency"
-      [(ngModel)]="form.concurrency"
-      [options]="concurrencyOptions"
-      optionLabel="label"
-      optionValue="value"
-      optionDisabled="disabled"
-      styleClass="w-full"
-    />
-    @if (form.concurrency === 'allow') {
-      <div class="dialog-warn">
-        <span class="material-symbols-outlined">warning</span>
-        "Allow" is reserved and not yet enforced — evaluations will still be serialised.
-      </div>
     }
   </div>
 

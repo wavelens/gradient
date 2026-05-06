@@ -5,7 +5,7 @@
  */
 
 import { BuildStatus, Architecture } from './build.model';
-import { TriggerType } from './trigger.model';
+import { ConcurrencyPolicy, TriggerType } from './trigger.model';
 
 export interface Project {
   id: string;
@@ -21,6 +21,7 @@ export interface Project {
   last_check_at?: string;
   force_evaluation: boolean;
   keep_evaluations: number;
+  concurrency: ConcurrencyPolicy;
   created_by?: string;
   created_at?: string;
   managed: boolean;
