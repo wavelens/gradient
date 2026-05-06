@@ -218,6 +218,10 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
                 .put(projects::put_project_integration)
                 .delete(projects::delete_project_integration),
         )
+        .nest(
+            "/projects/{organization}/{project}/triggers",
+            projects::triggers::router(),
+        )
         .route("/evals/{evaluation}", post(evals::post_evaluation))
         .route(
             "/evals/{evaluation}/builds",

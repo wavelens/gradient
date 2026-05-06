@@ -8,6 +8,7 @@ pub mod evaluations;
 pub mod integrations;
 pub mod management;
 pub mod metrics;
+pub mod triggers;
 
 pub use self::evaluations::{
     EntryPointDownloadQuery, EntryPointsQuery, EvaluateRequest, get_entry_point_download,
