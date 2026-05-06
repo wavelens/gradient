@@ -324,6 +324,7 @@ cdk-virtual-scroll-viewport.builds-list {
   &.status-completed, &.status-substituted { background: rgba($color-success, 0.15); color: $color-success; }
   &.status-failed  { background: rgba($color-danger, 0.15); color: $color-danger; }
   &.status-aborted, &.status-dependencyfailed { background: rgba($color-secondary, 0.15); color: $color-secondary; }
+  &.trigger { background: rgba($color-border, 0.4); border: 1px solid rgba($color-border, 0.8); color: $text-secondary; font-weight: 500; text-transform: uppercase; }
 }
 
 // ── Error banner ──────────────────────────────────────────────────────────────

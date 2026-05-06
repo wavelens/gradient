@@ -211,6 +211,18 @@
       }
     }
 
+    .trigger-badge {
+      display: inline-block;
+      padding: $spacing-xs $spacing-sm;
+      border-radius: $border-radius-sm;
+      font-size: $font-size-xs;
+      font-weight: 500;
+      text-transform: uppercase;
+      background-color: rgba($color-border, 0.4);
+      border: 1px solid rgba($color-border, 0.8);
+      color: $text-secondary;
+    }
+
     .status-badge {
       display: inline-block;
       padding: $spacing-xs $spacing-sm;

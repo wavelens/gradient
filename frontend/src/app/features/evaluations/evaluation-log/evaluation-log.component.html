@@ -153,6 +153,10 @@
             <span class="metric-value">{{ ev.created_at + 'Z' | date: 'MMM d, HH:mm' }}</span>
           </div>
           <div class="info-metric">
+            <span class="metric-label">Via</span>
+            <span class="status-badge trigger">{{ getTriggerLabel(ev.trigger?.type ?? null) }}</span>
+          </div>
+          <div class="info-metric">
             <span class="metric-label">Commit</span>
             <code class="commit-hash">{{ (ev.commit || '').slice(0, 8) }}</code>
           </div>
