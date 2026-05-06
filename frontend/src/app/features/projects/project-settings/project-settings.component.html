@@ -116,19 +116,6 @@
           <app-loading-spinner message="Loading integrations..." />
         } @else {
           <div class="form-group">
-            <label for="inbound-integration">Inbound Integration</label>
-            <p-select
-              inputId="inbound-integration"
-              [(ngModel)]="inboundSelection"
-              [options]="inboundIntegrationOptions()"
-              optionLabel="label"
-              optionValue="value"
-              styleClass="w-full"
-              [disabled]="proj.managed || !proj.can_edit"
-            />
-            <small class="text-secondary">Forge webhook source that will trigger evaluations for this project.</small>
-          </div>
-          <div class="form-group">
             <label for="outbound-integration">Outbound Integration</label>
             <p-select
               inputId="outbound-integration"

@@ -43,11 +43,9 @@ export interface PatchIntegrationRequest {
 
 export interface ProjectIntegrationLink {
   project: string;
-  inbound_integration: string | null;
   outbound_integration: string | null;
 }
 
 export interface SetProjectIntegrationRequest {
-  inbound_integration?: string | null;
   outbound_integration?: string | null;
 }
