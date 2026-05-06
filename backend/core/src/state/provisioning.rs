@@ -363,6 +363,7 @@ impl<'a> StateApplicator<'a> {
                 proj.evaluation_wildcard = Set(state_project.evaluation_wildcard.clone());
                 proj.force_evaluation = Set(state_project.force_evaluation);
                 proj.created_by = Set(created_by_id);
+                proj.concurrency = Set(state_project.concurrency.as_i16());
                 proj.managed = Set(true);
                 proj.update(self.db).await?;
                 tracing::info!("Updated managed project: {}", state_project.name);
@@ -387,7 +388,7 @@ impl<'a> StateApplicator<'a> {
                     created_at: Set(now),
                     managed: Set(true),
                     keep_evaluations: Set(0),
-                    concurrency: Set(3),
+                    concurrency: Set(state_project.concurrency.as_i16()),
                 };
                 let inserted = proj.insert(self.db).await?;
                 tracing::info!("Created managed project: {}", state_project.name);
@@ -1312,14 +1313,13 @@ mod helper_tests {
 mod trigger_helper_tests {
     use super::{build_trigger_config, trigger_key};
     use crate::state::StateTrigger;
-    use crate::types::triggers::{ConcurrencyPolicy, TriggerConfig, TriggerType};
+    use crate::types::triggers::{TriggerConfig, TriggerType};
     use crate::types::IntegrationId;
     use std::collections::HashMap;
 
     fn polling_trigger(interval_secs: u64) -> StateTrigger {
         StateTrigger {
             trigger_type: TriggerType::Polling,
-            concurrency: ConcurrencyPolicy::Skip,
             integration: None,
             config: serde_json::json!({ "interval_secs": interval_secs }),
             active: true,
@@ -1341,7 +1341,6 @@ mod trigger_helper_tests {
     fn build_polling_defaults_interval_when_missing() {
         let t = StateTrigger {
             trigger_type: TriggerType::Polling,
-            concurrency: ConcurrencyPolicy::Skip,
             integration: None,
             config: serde_json::Value::Null,
             active: true,
@@ -1354,7 +1353,6 @@ mod trigger_helper_tests {
     fn build_polling_rejects_too_small_interval() {
         let t = polling_trigger(5);
         let err = build_trigger_config(&t, &empty_integrations()).unwrap_err();
-        // The outer context says "validation failed"; the chain contains the specific reason.
         let full = format!("{err:#}");
         assert!(
             full.contains("interval_secs") || full.contains("validation"),
@@ -1366,7 +1364,6 @@ mod trigger_helper_tests {
     fn build_time_trigger() {
         let t = StateTrigger {
             trigger_type: TriggerType::Time,
-            concurrency: ConcurrencyPolicy::Allow,
             integration: None,
             config: serde_json::json!({ "cron": "0 0 2 * * *" }),
             active: true,
@@ -1379,7 +1376,6 @@ mod trigger_helper_tests {
     fn build_time_trigger_requires_cron() {
         let t = StateTrigger {
             trigger_type: TriggerType::Time,
-            concurrency: ConcurrencyPolicy::Allow,
             integration: None,
             config: serde_json::json!({}),
             active: true,
@@ -1392,7 +1388,6 @@ mod trigger_helper_tests {
     fn build_reporter_push_requires_integration_name() {
         let t = StateTrigger {
             trigger_type: TriggerType::ReporterPush,
-            concurrency: ConcurrencyPolicy::Skip,
             integration: None,
             config: serde_json::json!({}),
             active: true,
@@ -1405,7 +1400,6 @@ mod trigger_helper_tests {
     fn build_reporter_push_errors_on_unknown_integration() {
         let t = StateTrigger {
             trigger_type: TriggerType::ReporterPush,
-            concurrency: ConcurrencyPolicy::Skip,
             integration: Some("github-app".into()),
             config: serde_json::json!({}),
             active: true,
@@ -1423,7 +1417,6 @@ mod trigger_helper_tests {
 
         let t = StateTrigger {
             trigger_type: TriggerType::ReporterPush,
-            concurrency: ConcurrencyPolicy::SoftAbort,
             integration: Some("gh".into()),
             config: serde_json::json!({ "branches": ["main"], "tags": [], "releases_only": false }),
             active: true,
@@ -1457,13 +1450,11 @@ mod trigger_helper_tests {
     fn state_trigger_serde_round_trip() {
         let json = serde_json::json!({
             "type": "polling",
-            "concurrency": "skip",
             "config": { "interval_secs": 120 },
             "active": true
         });
         let t: StateTrigger = serde_json::from_value(json.clone()).unwrap();
         assert_eq!(t.trigger_type, TriggerType::Polling);
-        assert_eq!(t.concurrency, ConcurrencyPolicy::Skip);
         assert!(t.active);
     }
 
@@ -1471,7 +1462,6 @@ mod trigger_helper_tests {
     fn state_trigger_active_defaults_to_true() {
         let json = serde_json::json!({
             "type": "polling",
-            "concurrency": "allow",
             "config": { "interval_secs": 60 }
         });
         let t: StateTrigger = serde_json::from_value(json).unwrap();

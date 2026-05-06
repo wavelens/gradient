@@ -73,13 +73,19 @@ pub struct StateProject {
     /// (back-compat). `Some([])` is an error — a project must have at least one.
     #[serde(default)]
     pub triggers: Option<Vec<StateTrigger>>,
+    /// Concurrency policy for this project. Defaults to `skip` when omitted.
+    #[serde(default = "default_skip")]
+    pub concurrency: ConcurrencyPolicy,
+}
+
+fn default_skip() -> ConcurrencyPolicy {
+    ConcurrencyPolicy::Skip
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct StateTrigger {
     #[serde(rename = "type")]
     pub trigger_type: TriggerType,
-    pub concurrency: ConcurrencyPolicy,
     /// Name of an inbound integration in the same org. Required for
     /// `reporter_push` and `reporter_pull_request` triggers.
     #[serde(default)]
@@ -506,5 +512,41 @@ mod tests {
         assert!(cfg.projects["web"].description.is_none());
         assert!(cfg.caches["main"].description.is_none());
         assert!(cfg.validate().is_valid);
+    }
+
+    #[test]
+    fn state_project_concurrency_defaults_to_skip() {
+        let json = r#"{
+            "projects": {
+                "web": {
+                    "name": "web",
+                    "organization": "acme",
+                    "display_name": "Web",
+                    "repository": "https://example.com/acme/web.git",
+                    "created_by": "alice"
+                }
+            }
+        }"#;
+        let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
+        assert_eq!(cfg.projects["web"].concurrency, ConcurrencyPolicy::Skip);
+    }
+
+    #[test]
+    fn state_project_concurrency_hard_abort_round_trip() {
+        let json = r#"{
+            "projects": {
+                "web": {
+                    "name": "web",
+                    "organization": "acme",
+                    "display_name": "Web",
+                    "repository": "https://example.com/acme/web.git",
+                    "created_by": "alice",
+                    "concurrency": "hard_abort"
+                }
+            }
+        }"#;
+        let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
+        assert_eq!(cfg.projects["web"].concurrency, ConcurrencyPolicy::HardAbort);
+        assert_eq!(cfg.projects["web"].concurrency.as_i16(), 0);
     }
 }

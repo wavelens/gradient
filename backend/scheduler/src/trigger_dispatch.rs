@@ -50,7 +50,7 @@ use std::time::Duration;
 use entity::project_trigger as ept;
 use gradient_core::ci::{apply_trigger, ApplyInput, ApplyOutcome};
 use gradient_core::sources::{check_project_updates, get_commit_info};
-use gradient_core::types::triggers::{ConcurrencyPolicy, TriggerConfig, TriggerType};
+use gradient_core::types::triggers::{TriggerConfig, TriggerType};
 use gradient_core::types::*;
 use sea_orm::{ActiveModelTrait as _, ColumnTrait, Condition, EntityTrait, QueryFilter};
 use tracing::{debug, error, info, warn};
@@ -155,14 +155,12 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
             .unwrap_or_else(|_| (String::new(), None, String::new()));
 
         let trigger_type = cfg.trigger_type();
-        let concurrency = ConcurrencyPolicy::from_i16(project.concurrency).unwrap_or(ConcurrencyPolicy::Skip);
         match apply_trigger(
             state.worker_db.inner(),
             project,
             ApplyInput {
                 trigger_id: trig.id,
                 trigger_type,
-                concurrency,
                 commit_hash,
                 commit_message: Some(msg),
                 author_name: Some(author),

@@ -16,7 +16,7 @@ use axum::{Extension, Json, Router};
 use chrono::Utc;
 use gradient_core::ci::{apply_trigger, ApplyInput, ApplyOutcome};
 use gradient_core::sources::resolve_head;
-use gradient_core::types::triggers::{ConcurrencyPolicy, TriggerConfig, TriggerType};
+use gradient_core::types::triggers::{TriggerConfig, TriggerType};
 use gradient_core::types::*;
 use scheduler::Scheduler;
 use sea_orm::ActiveValue::Set;
@@ -282,8 +282,6 @@ pub async fn fire_now(
 
     let trigger_type = TriggerType::from_i16(row.trigger_type)
         .ok_or_else(|| WebError::internal("invalid trigger_type in row"))?;
-    let concurrency = ConcurrencyPolicy::from_i16(proj.concurrency)
-        .unwrap_or(ConcurrencyPolicy::Skip);
 
     let (commit_hash, commit_message, author_name) = resolve_head(Arc::clone(&state), &proj)
         .await
@@ -292,7 +290,6 @@ pub async fn fire_now(
     let input = ApplyInput {
         trigger_id: row.id,
         trigger_type,
-        concurrency,
         commit_hash,
         commit_message: Some(commit_message),
         author_name: Some(author_name),

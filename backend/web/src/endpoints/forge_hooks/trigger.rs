@@ -9,7 +9,7 @@
 use super::response::{QueuedEvaluation, SkippedProject, WebhookTriggerOutcome};
 use entity::project_trigger as ept;
 use gradient_core::ci::{apply_trigger, ApplyInput, ApplyOutcome};
-use gradient_core::types::triggers::{ConcurrencyPolicy, TriggerConfig, TriggerType};
+use gradient_core::types::triggers::{TriggerConfig, TriggerType};
 use gradient_core::types::*;
 use scheduler::Scheduler;
 use sea_orm::ActiveValue::Set;
@@ -322,8 +322,6 @@ where
         };
         outcome.projects_scanned += 1;
 
-        let concurrency =
-            ConcurrencyPolicy::from_i16(project.concurrency).unwrap_or(ConcurrencyPolicy::Skip);
         let org_name = org_name_for(state, project.organization).await.unwrap_or_default();
 
         match apply_trigger(
@@ -332,7 +330,6 @@ where
             ApplyInput {
                 trigger_id: trig.id,
                 trigger_type,
-                concurrency,
                 commit_hash: commit_hash.clone(),
                 commit_message: commit_message.clone(),
                 author_name: author_name.clone(),
