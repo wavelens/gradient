@@ -629,7 +629,7 @@ pub async fn fetch_external_cached_outputs(
     store: &LocalNixStore,
     task: &BuildTask,
     updater: &mut JobUpdater,
-) -> Result<Vec<String>> {
+) -> Result<Vec<(String, String)>> {
     let mut prefetcher = InputPrefetcher::new(store, task, updater);
 
     // Step 1 — ensure the .drv is local so we can read its outputs.
@@ -643,24 +643,24 @@ pub async fn fetch_external_cached_outputs(
     let drv = parse_drv(&drv_bytes)
         .with_context(|| format!("parse .drv {} for external_cached fetch", full_drv_path))?;
 
-    let output_paths: Vec<String> = drv
+    let outputs: Vec<(String, String)> = drv
         .outputs
         .into_iter()
-        .filter_map(|o| (!o.path.is_empty()).then_some(o.path))
+        .filter_map(|o| (!o.path.is_empty()).then_some((o.name, o.path)))
         .collect();
-    if output_paths.is_empty() {
+    if outputs.is_empty() {
         return Ok(Vec::new());
     }
 
     // Step 3 — fetch any output not already in the local store, plus its
     // transitive runtime closure (so the daemon will accept the imports).
     let missing = prefetcher
-        .filter_missing(output_paths.iter().cloned().collect())
+        .filter_missing(outputs.iter().map(|(_, p)| p.clone()).collect())
         .await?;
     if !missing.is_empty() {
         prefetcher.fetch_closure(missing).await?;
     }
-    Ok(output_paths)
+    Ok(outputs)
 }
 
 // ── NarImporter ───────────────────────────────────────────────────────────────

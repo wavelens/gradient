@@ -259,21 +259,24 @@ impl JobExecutor {
                     );
                     e
                 })?;
-                updater.report_build_output(
-                    build_task.build_id.clone(),
-                    outputs
-                        .iter()
-                        .map(|p| proto::messages::BuildOutput {
-                            name: String::new(),
-                            store_path: p.clone(),
-                            hash: String::new(),
+                let reported = outputs
+                    .iter()
+                    .map(|(name, path)| {
+                        let hash = gradient_core::sources::get_hash_from_path(path.clone())
+                            .map(|(h, _)| h)
+                            .unwrap_or_default();
+                        proto::messages::BuildOutput {
+                            name: name.clone(),
+                            store_path: path.clone(),
+                            hash,
                             nar_size: None,
                             nar_hash: None,
                             products: Vec::new(),
-                        })
-                        .collect(),
-                )?;
-                all_output_paths.extend(outputs);
+                        }
+                    })
+                    .collect();
+                updater.report_build_output(build_task.build_id.clone(), reported)?;
+                all_output_paths.extend(outputs.into_iter().map(|(_, p)| p));
                 continue;
             }
 
