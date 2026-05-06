@@ -1136,7 +1136,7 @@ Run with `cargo test -p scheduler --tests waiting_reason_tests`.
 
 - `core::types::triggers` — round-trip serialisation, polling interval validation (≥10s), six-field cron parsing, type/JSON shape mismatches.
 - `core::ci::abort` — `abort_evaluation` hard vs soft, terminal eval no-op.
-- `core::ci::apply` — `apply_trigger` orchestration: same-commit dedup, time-trigger and manual bypass, concurrency policies (skip / hard_abort / soft_abort / allow→reserved).
+- `core::ci::apply` — `apply_trigger` orchestration: same-commit dedup, time-trigger and manual bypass, project-level concurrency policies (skip / hard_abort / soft_abort / allow→reserved).
 - `core::state::provisioning` — trigger config builder helpers, integration name resolution, key stability.
 - `scheduler::trigger_dispatch` — `polling_due` and `cron_due` boundary conditions; `dispatch_once` no-trigger and within-interval skip cases.
 - `scheduler::jobs::JobTracker::remove_job` — pending and active map removal; unknown id no-op.

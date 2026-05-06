@@ -209,6 +209,25 @@
         '';
       };
 
+      concurrency = mkOption {
+        type = types.enum [ "hard_abort" "soft_abort" "skip" ];
+        default = "skip";
+        description = ''
+          Project-level policy for handling new trigger events while an
+          evaluation is in flight.
+
+          - `hard_abort` cancels the running evaluation (and its in-flight
+            builds) and starts a fresh one.
+          - `soft_abort` marks the running evaluation Aborted so the new one
+            becomes canonical, but lets in-flight builds finish; their cached
+            outputs flow into the new evaluation.
+          - `skip` discards the new trigger event.
+
+          `allow` (multi-evaluation-per-project) is reserved and rejected at
+          the API; it is intentionally not exposed here.
+        '';
+      };
+
       triggers = mkOption {
         type = types.nullOr (types.listOf triggerType);
         default = null;
@@ -221,26 +240,23 @@
           least one trigger.
 
           A new project always receives a default polling trigger
-          (interval 300s, concurrency `skip`) automatically; declaring
-          `triggers` here replaces that default with the listed set.
+          (interval 300s) automatically; declaring `triggers` here replaces
+          that default with the listed set.
         '';
         example = literalExpression ''
           [
             {
               type = "polling";
               config = { interval_secs = 60; };
-              concurrency = "skip";
             }
             {
               type = "reporter_push";
               integration = "acme-prod-inbound";
               config = { branches = [ "main" "release/*" ]; };
-              concurrency = "hard_abort";
             }
             {
               type = "time";
               config = { cron = "0 0 2 * * *"; };
-              concurrency = "skip";
             }
           ]
         '';
@@ -333,24 +349,6 @@
       type = mkOption {
         type = types.enum [ "polling" "reporter_push" "reporter_pull_request" "time" ];
         description = "Trigger kind. Drives which `config` shape is expected and how the dispatch loop fires it.";
-      };
-
-      concurrency = mkOption {
-        type = types.enum [ "hard_abort" "soft_abort" "skip" "allow" ];
-        default = "skip";
-        description = ''
-          Behaviour when the trigger fires while another evaluation is in
-          flight for the same project.
-
-          - `hard_abort` cancels the running evaluation (and its in-flight
-            builds) and starts a fresh one.
-          - `soft_abort` marks the running evaluation Aborted so the new one
-            becomes canonical, but lets in-flight builds finish; their cached
-            outputs flow into the new evaluation.
-          - `skip` discards the new trigger event.
-          - `allow` is **reserved** — multi-evaluation-per-project support is
-            a follow-up. The API currently rejects it with 400.
-        '';
       };
 
       integration = mkOption {
@@ -682,12 +680,12 @@ in
               repository = "https://github.com/acme-corp/web-app.git";
               evaluation_wildcard = "nixosConfigurations.*.config.system.build.toplevel";
               active = true;
+              concurrency = "hard_abort";
               created_by = "alice";
               triggers = [
                 {
                   type = "polling";
                   config = { interval_secs = 300; };
-                  concurrency = "skip";
                 }
               ];
             };
