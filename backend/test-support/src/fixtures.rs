@@ -83,5 +83,6 @@ pub fn eval_at(id: EvaluationId, offset_secs: i64) -> evaluation::Model {
         flake_source: None,
         repo_check_id: None,
         waiting_reason: None,
+        trigger: None,
     }
 }

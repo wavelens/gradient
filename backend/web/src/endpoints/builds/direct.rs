@@ -161,6 +161,7 @@ pub async fn post_direct_build(
         flake_source: Set(None),
         repo_check_id: Set(None),
         waiting_reason: Set(None),
+        trigger: Set(None),
     };
     let evaluation = evaluation
         .insert(&state.web_db)

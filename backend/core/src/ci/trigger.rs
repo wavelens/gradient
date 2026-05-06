@@ -87,6 +87,7 @@ pub async fn trigger_evaluation<C: ConnectionTrait>(
         flake_source: Set(None),
         repo_check_id: Set(None),
         waiting_reason: Set(None),
+        trigger: Set(None),
     };
     let evaluation = aevaluation.insert(db).await?;
 
@@ -168,6 +169,7 @@ pub async fn trigger_restart_builds<C: ConnectionTrait>(
         flake_source: Set(prev_eval.flake_source.clone()),
         repo_check_id: Set(None),
         waiting_reason: Set(None),
+        trigger: Set(None),
     };
     let new_eval = aevaluation.insert(db).await?;
 
@@ -275,6 +277,7 @@ mod tests {
             flake_source: None,
             repo_check_id: None,
             waiting_reason: None,
+            trigger: None,
         }
     }
 
