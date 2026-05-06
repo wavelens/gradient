@@ -144,6 +144,8 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
             }
             Err(e) => {
                 warn!(error = %e, project = %project.name, "trigger commit resolution failed");
+                // Update on error too, otherwise transient failures retry every 5s.
+                update_last_fired(state, &trig, now).await;
                 continue;
             }
         };
