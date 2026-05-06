@@ -158,10 +158,10 @@
     <div class="settings-section">
       <h2>Triggers</h2>
       <div class="settings-card">
-        <p class="text-secondary">
-          Triggers control how and when evaluations run for this project — polling intervals, forge push and pull-request events, and cron schedules.
-        </p>
-        <div class="form-actions">
+        <div class="nav-row">
+          <p class="text-secondary">
+            Triggers control how and when evaluations run for this project — polling intervals, forge push and pull-request events, and cron schedules.
+          </p>
           <a pButton label="Manage Triggers" icon="pi pi-clock" severity="secondary" [routerLink]="['/organization', orgName, 'project', projectName, 'triggers']"></a>
         </div>
       </div>
