@@ -20,6 +20,7 @@ mod trigger;
 
 pub use response::{QueuedEvaluation, SkippedProject, WebhookResponse, WebhookTriggerOutcome};
 
+use axum::Extension;
 use axum::Json;
 use axum::body::Bytes;
 use axum::extract::{Path, State};
@@ -30,6 +31,7 @@ use gradient_core::ci::{
 };
 use gradient_core::types::input::load_secret;
 use gradient_core::types::*;
+use scheduler::Scheduler;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
 use subtle::ConstantTimeEq;
@@ -49,6 +51,7 @@ use trigger::{
 /// `POST /api/v1/hooks/github` — receives all events from the GitHub App.
 pub async fn github_app_webhook(
     State(state): State<Arc<ServerState>>,
+    Extension(scheduler): Extension<Arc<Scheduler>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> WebResult<Json<BaseResponse<WebhookResponse>>> {
@@ -94,7 +97,7 @@ pub async fn github_app_webhook(
                 return Err(WebError::bad_request("malformed webhook payload"));
             };
             let urls = parsed.repository_urls.clone();
-            let outcome = dispatch_github_app_push(&state, parsed, &body).await;
+            let outcome = dispatch_github_app_push(&state, &scheduler, parsed, &body).await;
             WebhookResponse {
                 event: "push".to_string(),
                 repository_urls: urls,
@@ -108,7 +111,7 @@ pub async fn github_app_webhook(
                 return Err(WebError::bad_request("malformed webhook payload"));
             };
             let urls = parsed.repository_urls.clone();
-            let outcome = dispatch_github_app_pr(&state, parsed, &body).await;
+            let outcome = dispatch_github_app_pr(&state, &scheduler, parsed, &body).await;
             WebhookResponse {
                 event: "pull_request".to_string(),
                 repository_urls: urls,
@@ -122,7 +125,7 @@ pub async fn github_app_webhook(
                 return Err(WebError::bad_request("malformed webhook payload"));
             };
             let urls = parsed.repository_urls.clone();
-            let outcome = dispatch_github_app_release(&state, parsed, &body).await;
+            let outcome = dispatch_github_app_release(&state, &scheduler, parsed, &body).await;
             WebhookResponse {
                 event: "release".to_string(),
                 repository_urls: urls,
@@ -161,6 +164,7 @@ fn github_installation_id_from_body(body: &[u8]) -> Option<i64> {
 
 async fn dispatch_github_app_push(
     state: &Arc<ServerState>,
+    scheduler: &Arc<Scheduler>,
     parsed: ParsedPushEvent,
     body: &[u8],
 ) -> WebhookTriggerOutcome {
@@ -181,6 +185,7 @@ async fn dispatch_github_app_push(
     };
     trigger_push_for_integration(
         state,
+        scheduler,
         integration_id,
         ref_kind,
         parsed.commit_hash,
@@ -192,6 +197,7 @@ async fn dispatch_github_app_push(
 
 async fn dispatch_github_app_pr(
     state: &Arc<ServerState>,
+    scheduler: &Arc<Scheduler>,
     parsed: ParsedPullRequestEvent,
     body: &[u8],
 ) -> WebhookTriggerOutcome {
@@ -205,6 +211,7 @@ async fn dispatch_github_app_pr(
     };
     trigger_pr_for_integration(
         state,
+        scheduler,
         integration_id,
         parsed.branch.as_deref(),
         &parsed.action,
@@ -217,6 +224,7 @@ async fn dispatch_github_app_pr(
 
 async fn dispatch_github_app_release(
     state: &Arc<ServerState>,
+    scheduler: &Arc<Scheduler>,
     parsed: ParsedReleaseEvent,
     body: &[u8],
 ) -> WebhookTriggerOutcome {
@@ -230,6 +238,7 @@ async fn dispatch_github_app_release(
     };
     trigger_release_for_integration(
         state,
+        scheduler,
         integration_id,
         parsed.tag.as_deref(),
         parsed.commit_hash,
@@ -247,6 +256,7 @@ async fn dispatch_github_app_release(
 /// The `forge` path segment is one of: `gitea`, `forgejo`, `gitlab`.
 pub async fn forge_webhook(
     State(state): State<Arc<ServerState>>,
+    Extension(scheduler): Extension<Arc<Scheduler>>,
     Path((forge, org_name, integration_name)): Path<(String, String, String)>,
     headers: HeaderMap,
     body: Bytes,
@@ -326,6 +336,7 @@ pub async fn forge_webhook(
             };
             let outcome = trigger_push_for_integration(
                 &state,
+                &scheduler,
                 integration_id,
                 ref_kind,
                 parsed.commit_hash,
@@ -355,6 +366,7 @@ pub async fn forge_webhook(
             let urls = parsed.repository_urls.clone();
             let outcome = trigger_pr_for_integration(
                 &state,
+                &scheduler,
                 integration_id,
                 parsed.branch.as_deref(),
                 &parsed.action,
@@ -383,6 +395,7 @@ pub async fn forge_webhook(
             let urls = parsed.repository_urls.clone();
             let outcome = trigger_release_for_integration(
                 &state,
+                &scheduler,
                 integration_id,
                 parsed.tag.as_deref(),
                 parsed.commit_hash,

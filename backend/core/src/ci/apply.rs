@@ -18,7 +18,16 @@ use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 
 #[derive(Debug)]
 pub enum ApplyOutcome {
-    Created(MEvaluation),
+    Created {
+        evaluation: MEvaluation,
+        /// `Some(eval_id)` if a concurrency policy aborted an in-flight eval.
+        /// The caller is responsible for calling `Scheduler::cancel_evaluation_jobs`
+        /// for that eval to purge its in-memory `JobTracker` entries.
+        aborted_evaluation: Option<EvaluationId>,
+        /// Build IDs marked `Aborted` by a `HardAbort` policy. Empty for
+        /// `SoftAbort` (builds keep running) and the no-abort path.
+        aborted_builds: Vec<BuildId>,
+    },
     SkippedSameCommit,
     SkippedConcurrency,
     SkippedAllowReserved,
@@ -71,11 +80,20 @@ pub async fn apply_trigger<C: ConnectionTrait>(
         .one(db)
         .await?;
 
+    let mut aborted_evaluation: Option<EvaluationId> = None;
+    let mut aborted_builds: Vec<BuildId> = Vec::new();
+
     if let Some(running) = in_flight {
         match input.concurrency {
             ConcurrencyPolicy::Skip => return Ok(ApplyOutcome::SkippedConcurrency),
-            ConcurrencyPolicy::HardAbort => abort_evaluation(db, running.id, AbortKind::Hard).await?,
-            ConcurrencyPolicy::SoftAbort => abort_evaluation(db, running.id, AbortKind::Soft).await?,
+            ConcurrencyPolicy::HardAbort => {
+                aborted_builds = abort_evaluation(db, running.id, AbortKind::Hard).await?;
+                aborted_evaluation = Some(running.id);
+            }
+            ConcurrencyPolicy::SoftAbort => {
+                abort_evaluation(db, running.id, AbortKind::Soft).await?;
+                aborted_evaluation = Some(running.id);
+            }
             ConcurrencyPolicy::Allow => {
                 // Reserved — multi-eval-per-project support is a follow-up.
                 return Ok(ApplyOutcome::SkippedAllowReserved);
@@ -102,7 +120,7 @@ pub async fn apply_trigger<C: ConnectionTrait>(
         }
         Err(e) => return Err(e.into()),
     };
-    Ok(ApplyOutcome::Created(eval))
+    Ok(ApplyOutcome::Created { evaluation: eval, aborted_evaluation, aborted_builds })
 }
 
 #[cfg(test)]
@@ -250,7 +268,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(matches!(res, ApplyOutcome::Created(_)));
+        assert!(matches!(res, ApplyOutcome::Created { .. }));
     }
 
     #[tokio::test]
@@ -368,6 +386,78 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(matches!(res, ApplyOutcome::Created(_)));
+        assert!(matches!(res, ApplyOutcome::Created { .. }));
+    }
+
+    #[tokio::test]
+    async fn hard_abort_populates_aborted_fields() {
+        let project = make_project_with_last_eval(None);
+        let running_eval_id = EvaluationId::now_v7();
+        let running_eval =
+            make_eval(running_eval_id, project.id, CommitId::nil(), EvaluationStatus::Building);
+        let active_build_id = BuildId::now_v7();
+        let active_build = entity::build::Model {
+            id: active_build_id,
+            evaluation: running_eval_id,
+            derivation: DerivationId::nil(),
+            status: entity::build::BuildStatus::Building,
+            log_id: None,
+            build_time_ms: None,
+            worker: None,
+            via: None,
+            external_cached: false,
+            created_at: chrono::NaiveDateTime::default(),
+            updated_at: chrono::NaiveDateTime::default(),
+        };
+        let new_eval_id = EvaluationId::now_v7();
+        let new_commit_id = CommitId::now_v7();
+        let trig = ProjectTriggerId::now_v7();
+        let new_hash = vec![7u8; 20];
+
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            // Concurrency check: returns the running eval
+            .append_query_results([vec![running_eval.clone()]])
+            // abort_evaluation: eval fetch
+            .append_query_results([vec![running_eval.clone()]])
+            // abort_evaluation: eval update read-back
+            .append_query_results([vec![running_eval.clone()]])
+            // abort_evaluation: eval exec
+            .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+            // abort_evaluation: builds list
+            .append_query_results([vec![active_build.clone()]])
+            // abort_evaluation: active build refetch
+            .append_query_results([vec![active_build.clone()]])
+            // abort_evaluation: active build exec
+            .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+            // trigger_evaluation: in-progress guard
+            .append_query_results([Vec::<entity::evaluation::Model>::new()])
+            // trigger_evaluation: commit insert
+            .append_query_results([vec![make_commit(new_commit_id, new_hash.clone())]])
+            // trigger_evaluation: eval insert
+            .append_query_results([vec![{
+                let mut m = make_eval(new_eval_id, project.id, new_commit_id, EvaluationStatus::Queued);
+                m.trigger = Some(trig);
+                m
+            }]])
+            // trigger_evaluation: project update read-back
+            .append_query_results([vec![project.clone()]])
+            // trigger_evaluation: project exec
+            .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+            .into_connection();
+
+        let res = apply_trigger(
+            &db,
+            &project,
+            input(trig, TriggerType::Polling, ConcurrencyPolicy::HardAbort, new_hash, false),
+        )
+        .await
+        .unwrap();
+
+        let ApplyOutcome::Created { evaluation, aborted_evaluation, aborted_builds } = res else {
+            panic!("expected Created, got {res:?}");
+        };
+        assert_eq!(evaluation.id, new_eval_id);
+        assert_eq!(aborted_evaluation, Some(running_eval_id));
+        assert_eq!(aborted_builds, vec![active_build_id]);
     }
 }
