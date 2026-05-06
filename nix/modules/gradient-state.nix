@@ -368,7 +368,7 @@
         description = ''
           Type-specific configuration. Shape depends on `type`:
 
-          - `polling`: `{ interval_secs = 300; }` (minimum 10 seconds)
+          - `polling`: `{ interval_secs = 300; branch = "main"; }` (minimum 10 seconds; `branch` optional, defaults to remote HEAD)
           - `reporter_push`: `{ branches = [ "main" "release/*" ]; tags = [ ]; releases_only = false; }`
           - `reporter_pull_request`: `{ branches = [ ]; actions = [ "opened" "synchronize" "reopened" ]; }`
           - `time`: `{ cron = "0 0 2 * * *"; }` (six-field: sec min hour dom mon dow, UTC)

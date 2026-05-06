@@ -5660,6 +5660,10 @@ components:
         interval_secs:
           type: integer
           minimum: 10
+        branch:
+          type: string
+          nullable: true
+          description: 'Branch to poll (e.g. "main"). Leave null/omit to poll the remote HEAD (the repo''s default branch).'
 
     ReporterPushTriggerConfig:
       type: object
