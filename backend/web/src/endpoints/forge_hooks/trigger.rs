@@ -190,6 +190,7 @@ pub(super) async fn trigger_for_repo_urls(
             commit_hash.clone(),
             commit_message.clone(),
             author_name.clone(),
+            None,
         )
         .await
         {

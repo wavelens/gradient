@@ -148,6 +148,7 @@ pub(crate) async fn poll_projects_for_evaluations(scheduler: &Scheduler) -> anyh
             commit_hash,
             Some(commit_message),
             Some(author_name),
+            None,
         )
         .await
         {

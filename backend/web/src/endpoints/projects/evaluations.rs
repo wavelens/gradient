@@ -191,7 +191,7 @@ pub async fn post_project_evaluate(
         ));
     }
 
-    gradient_core::ci::trigger_evaluation(&state.web_db, &project, commit_hash, None, None)
+    gradient_core::ci::trigger_evaluation(&state.web_db, &project, commit_hash, None, None, None)
         .await
         .map_err(|e| match e {
             gradient_core::ci::TriggerError::AlreadyInProgress => {
