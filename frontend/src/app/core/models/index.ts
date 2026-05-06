@@ -13,3 +13,4 @@ export * from './cache.model';
 export * from './worker.model';
 export * from './commit.model';
 export * from './integration.model';
+export * from './trigger.model';
