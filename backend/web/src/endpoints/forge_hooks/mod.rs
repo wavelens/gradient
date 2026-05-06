@@ -38,8 +38,11 @@ use tracing::{debug, warn};
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 
-use events::ParsedPushEvent;
-use trigger::handle_github_installation;
+use events::{ParsedPullRequestEvent, ParsedPushEvent, ParsedReleaseEvent};
+use trigger::{
+    PushRefKind, handle_github_installation, resolve_github_integration_id,
+    trigger_pr_for_integration, trigger_push_for_integration, trigger_release_for_integration,
+};
 
 // ── GitHub App webhook ─────────────────────────────────────────────────────
 
@@ -91,9 +94,37 @@ pub async fn github_app_webhook(
                 return Err(WebError::bad_request("malformed webhook payload"));
             };
             let urls = parsed.repository_urls.clone();
-            let outcome = parsed.trigger(&state).await;
+            let outcome = dispatch_github_app_push(&state, parsed, &body).await;
             WebhookResponse {
                 event: "push".to_string(),
+                repository_urls: urls,
+                projects_scanned: outcome.projects_scanned,
+                queued: outcome.queued,
+                skipped: outcome.skipped,
+            }
+        }
+        "pull_request" => {
+            let Some(parsed) = ParsedPullRequestEvent::from_github(&body) else {
+                return Err(WebError::bad_request("malformed webhook payload"));
+            };
+            let urls = parsed.repository_urls.clone();
+            let outcome = dispatch_github_app_pr(&state, parsed, &body).await;
+            WebhookResponse {
+                event: "pull_request".to_string(),
+                repository_urls: urls,
+                projects_scanned: outcome.projects_scanned,
+                queued: outcome.queued,
+                skipped: outcome.skipped,
+            }
+        }
+        "release" => {
+            let Some(parsed) = ParsedReleaseEvent::from_github(&body) else {
+                return Err(WebError::bad_request("malformed webhook payload"));
+            };
+            let urls = parsed.repository_urls.clone();
+            let outcome = dispatch_github_app_release(&state, parsed, &body).await;
+            WebhookResponse {
+                event: "release".to_string(),
                 repository_urls: urls,
                 projects_scanned: outcome.projects_scanned,
                 queued: outcome.queued,
@@ -110,10 +141,108 @@ pub async fn github_app_webhook(
     Ok(ok_json(response))
 }
 
+// ── GitHub App dispatch helpers ────────────────────────────────────────────
+
+/// Extract installation_id from a GitHub App payload (push/pr/release all carry it).
+fn github_installation_id_from_body(body: &[u8]) -> Option<i64> {
+    #[derive(serde::Deserialize)]
+    struct WithInstallation {
+        installation: Option<InstallationId>,
+    }
+    #[derive(serde::Deserialize)]
+    struct InstallationId {
+        id: i64,
+    }
+    serde_json::from_slice::<WithInstallation>(body)
+        .ok()
+        .and_then(|p| p.installation)
+        .map(|i| i.id)
+}
+
+async fn dispatch_github_app_push(
+    state: &Arc<ServerState>,
+    parsed: ParsedPushEvent,
+    body: &[u8],
+) -> WebhookTriggerOutcome {
+    let Some(installation_id) = github_installation_id_from_body(body) else {
+        warn!("GitHub App push: missing installation_id");
+        return WebhookTriggerOutcome::default();
+    };
+    let Some(integration_id) = resolve_github_integration_id(state, installation_id).await else {
+        warn!(installation_id, "GitHub App push: no integration found for installation");
+        return WebhookTriggerOutcome::default();
+    };
+    let ref_name = parsed.ref_name.clone();
+    let is_tag = parsed.is_tag;
+    let ref_kind = if is_tag {
+        PushRefKind::Tag(&ref_name)
+    } else {
+        PushRefKind::Branch(&ref_name)
+    };
+    trigger_push_for_integration(
+        state,
+        integration_id,
+        ref_kind,
+        parsed.commit_hash,
+        parsed.commit_message,
+        parsed.author_name,
+    )
+    .await
+}
+
+async fn dispatch_github_app_pr(
+    state: &Arc<ServerState>,
+    parsed: ParsedPullRequestEvent,
+    body: &[u8],
+) -> WebhookTriggerOutcome {
+    let Some(installation_id) = github_installation_id_from_body(body) else {
+        warn!("GitHub App pull_request: missing installation_id");
+        return WebhookTriggerOutcome::default();
+    };
+    let Some(integration_id) = resolve_github_integration_id(state, installation_id).await else {
+        warn!(installation_id, "GitHub App pull_request: no integration found for installation");
+        return WebhookTriggerOutcome::default();
+    };
+    trigger_pr_for_integration(
+        state,
+        integration_id,
+        parsed.branch.as_deref(),
+        &parsed.action,
+        parsed.commit_hash,
+        None,
+        None,
+    )
+    .await
+}
+
+async fn dispatch_github_app_release(
+    state: &Arc<ServerState>,
+    parsed: ParsedReleaseEvent,
+    body: &[u8],
+) -> WebhookTriggerOutcome {
+    let Some(installation_id) = github_installation_id_from_body(body) else {
+        warn!("GitHub App release: missing installation_id");
+        return WebhookTriggerOutcome::default();
+    };
+    let Some(integration_id) = resolve_github_integration_id(state, installation_id).await else {
+        warn!(installation_id, "GitHub App release: no integration found for installation");
+        return WebhookTriggerOutcome::default();
+    };
+    trigger_release_for_integration(
+        state,
+        integration_id,
+        parsed.tag.as_deref(),
+        parsed.commit_hash,
+        None,
+        None,
+    )
+    .await
+}
+
 // ── Generic forge webhook ──────────────────────────────────────────────────
 
-/// `POST /api/v1/hooks/{forge}/{org_name}/{integration_name}` — receives push
-/// events from a named inbound integration.
+/// `POST /api/v1/hooks/{forge}/{org_name}/{integration_name}` — receives push,
+/// pull-request, and release events from a named inbound integration.
 ///
 /// The `forge` path segment is one of: `gitea`, `forgejo`, `gitlab`.
 pub async fn forge_webhook(
@@ -174,26 +303,148 @@ pub async fn forge_webhook(
         return Err(WebError::unauthorized("invalid webhook signature"));
     }
 
-    let parsed = match forge_type {
-        ForgeType::Gitea | ForgeType::Forgejo => ParsedPushEvent::from_gitea(&body),
-        ForgeType::GitLab => ParsedPushEvent::from_gitlab(&body),
-        ForgeType::GitHub => unreachable!("checked above"),
-    };
-    let Some(parsed) = parsed else {
-        return Err(WebError::bad_request("malformed webhook payload"));
+    let integration_id = integration.id;
+    let event_type = forge_event_type(forge_type, &headers);
+
+    let response = match event_type {
+        ForgeEvent::Push => {
+            let parsed = match forge_type {
+                ForgeType::Gitea | ForgeType::Forgejo => ParsedPushEvent::from_gitea(&body),
+                ForgeType::GitLab => ParsedPushEvent::from_gitlab(&body),
+                ForgeType::GitHub => unreachable!(),
+            };
+            let Some(parsed) = parsed else {
+                return Err(WebError::bad_request("malformed webhook payload"));
+            };
+            let urls = parsed.repository_urls.clone();
+            let ref_name = parsed.ref_name.clone();
+            let is_tag = parsed.is_tag;
+            let ref_kind = if is_tag {
+                PushRefKind::Tag(&ref_name)
+            } else {
+                PushRefKind::Branch(&ref_name)
+            };
+            let outcome = trigger_push_for_integration(
+                &state,
+                integration_id,
+                ref_kind,
+                parsed.commit_hash,
+                parsed.commit_message,
+                parsed.author_name,
+            )
+            .await;
+            WebhookResponse {
+                event: "push".to_string(),
+                repository_urls: urls,
+                projects_scanned: outcome.projects_scanned,
+                queued: outcome.queued,
+                skipped: outcome.skipped,
+            }
+        }
+        ForgeEvent::PullRequest => {
+            let parsed = match forge_type {
+                ForgeType::Gitea | ForgeType::Forgejo => {
+                    ParsedPullRequestEvent::from_gitea(&body)
+                }
+                ForgeType::GitLab => ParsedPullRequestEvent::from_gitlab(&body),
+                ForgeType::GitHub => unreachable!(),
+            };
+            let Some(parsed) = parsed else {
+                return Err(WebError::bad_request("malformed webhook payload"));
+            };
+            let urls = parsed.repository_urls.clone();
+            let outcome = trigger_pr_for_integration(
+                &state,
+                integration_id,
+                parsed.branch.as_deref(),
+                &parsed.action,
+                parsed.commit_hash,
+                None,
+                None,
+            )
+            .await;
+            WebhookResponse {
+                event: "pull_request".to_string(),
+                repository_urls: urls,
+                projects_scanned: outcome.projects_scanned,
+                queued: outcome.queued,
+                skipped: outcome.skipped,
+            }
+        }
+        ForgeEvent::Release => {
+            let parsed = match forge_type {
+                ForgeType::Gitea | ForgeType::Forgejo => ParsedReleaseEvent::from_gitea(&body),
+                ForgeType::GitLab => ParsedReleaseEvent::from_gitlab(&body),
+                ForgeType::GitHub => unreachable!(),
+            };
+            let Some(parsed) = parsed else {
+                return Err(WebError::bad_request("malformed webhook payload"));
+            };
+            let urls = parsed.repository_urls.clone();
+            let outcome = trigger_release_for_integration(
+                &state,
+                integration_id,
+                parsed.tag.as_deref(),
+                parsed.commit_hash,
+                None,
+                None,
+            )
+            .await;
+            WebhookResponse {
+                event: "release".to_string(),
+                repository_urls: urls,
+                projects_scanned: outcome.projects_scanned,
+                queued: outcome.queued,
+                skipped: outcome.skipped,
+            }
+        }
+        ForgeEvent::Unknown(name) => WebhookResponse::empty(&name),
     };
 
-    let urls = parsed.repository_urls.clone();
-    let outcome = parsed.trigger(&state).await;
-
-    Ok(ok_json(WebhookResponse {
-        event: "push".to_string(),
-        repository_urls: urls,
-        projects_scanned: outcome.projects_scanned,
-        queued: outcome.queued,
-        skipped: outcome.skipped,
-    }))
+    Ok(ok_json(response))
 }
+
+// ── Forge event type detection ─────────────────────────────────────────────
+
+enum ForgeEvent {
+    Push,
+    PullRequest,
+    Release,
+    Unknown(String),
+}
+
+fn forge_event_type(forge: ForgeType, headers: &HeaderMap) -> ForgeEvent {
+    match forge {
+        ForgeType::Gitea | ForgeType::Forgejo => {
+            let event = headers
+                .get("X-Gitea-Event")
+                .or_else(|| headers.get("X-Gogs-Event"))
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("");
+            match event {
+                "push" => ForgeEvent::Push,
+                "pull_request" => ForgeEvent::PullRequest,
+                "release" => ForgeEvent::Release,
+                other => ForgeEvent::Unknown(other.to_string()),
+            }
+        }
+        ForgeType::GitLab => {
+            let event = headers
+                .get("X-Gitlab-Event")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("");
+            match event {
+                "Push Hook" | "Tag Push Hook" => ForgeEvent::Push,
+                "Merge Request Hook" => ForgeEvent::PullRequest,
+                "Release Hook" => ForgeEvent::Release,
+                other => ForgeEvent::Unknown(other.to_string()),
+            }
+        }
+        ForgeType::GitHub => ForgeEvent::Unknown("github".into()),
+    }
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────
 
 fn verify_forge_signature(
     forge: ForgeType,

@@ -6,19 +6,21 @@
 
 //! Integration tests for inbound forge webhook endpoints.
 //!
-//! Verifies `BaseResponse<WebhookResponse>` envelope shape across eight cases:
-//! - Generic forge (Gitea): no matching project, matching project queues,
-//!   invalid signature, integration not found.
-//! - GitHub App: push matching project queues, ping, installation, not configured.
+//! Tests verify `BaseResponse<WebhookResponse>` across these scenarios:
+//! - Generic forge (Gitea): no matching trigger, push fires trigger, invalid
+//!   signature, integration not found, non-matching branch glob is skipped,
+//!   PR event fires, PR action mismatch is skipped, release event fires.
+//! - GitHub App: push fires, ping, installation, not configured.
 //!
-//! Uses manual Tokio runtimes because `#[tokio::test]` expands to `::gradient_core::…`
-//! which clashes with the local `core` crate name in this workspace.
+//! Uses manual Tokio runtimes because `#[tokio::test]` expands to
+//! `::gradient_core::…` which clashes with the local `core` crate name.
 
 use axum_test::TestServer;
 use entity::evaluation::EvaluationStatus;
 use gradient_core::ci::{WebhookClient, encrypt_webhook_secret};
 use gradient_core::storage::{EmailSender, NarStore};
 use gradient_core::types::ids::*;
+use gradient_core::types::triggers::{ConcurrencyPolicy, TriggerConfig};
 use gradient_core::types::{ServerState, WebDb, WorkerDb};
 use hmac::{Hmac, KeyInit, Mac};
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
@@ -35,15 +37,12 @@ use web::create_router;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/// Write `content` to a unique file under the system temp dir and return the path.
-/// The file is intentionally not cleaned up — tests are short-lived.
 fn temp_secret_file(content: &str) -> String {
     let path = std::env::temp_dir().join(format!("gradient-test-crypt-{}", Uuid::now_v7()));
     std::fs::write(&path, content).expect("write temp secret file");
     path.to_string_lossy().into_owned()
 }
 
-/// HMAC-SHA256 of `body` with `secret` as a bare hex string (Gitea format, no prefix).
 fn gitea_signature(secret: &str, body: &[u8]) -> String {
     type HmacSha256 = Hmac<Sha256>;
     let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).expect("hmac key");
@@ -51,15 +50,10 @@ fn gitea_signature(secret: &str, body: &[u8]) -> String {
     hex::encode(mac.finalize().into_bytes())
 }
 
-/// HMAC-SHA256 of `body` with `secret` as `sha256=<hex>` (GitHub format).
 fn github_signature(secret: &str, body: &[u8]) -> String {
     format!("sha256={}", gitea_signature(secret, body))
 }
 
-/// Build a `ServerState` with an optionally-overridden `crypt_secret_file` and
-/// `github_app_webhook_secret_file`. When `gh_secret_path` is `Some`, the three
-/// required GitHub App config fields are all set so that `github_app_config()`
-/// returns `Some(…)`.
 fn make_state(
     db: sea_orm::DatabaseConnection,
     crypt_path: Option<String>,
@@ -70,7 +64,6 @@ fn make_state(
         None => test_cli(),
     };
     if let Some(ref p) = gh_secret_path {
-        // All three fields must be present for `github_app_config()` to return Some.
         cli.github_app.github_app_id = Some(1234);
         cli.github_app.github_app_private_key_file = Some("/dev/null".into());
         cli.github_app.github_app_webhook_secret_file = Some(p.clone());
@@ -119,8 +112,10 @@ fn eval_id() -> EvaluationId {
 fn commit_id() -> CommitId {
     CommitId::new(Uuid::parse_str("a0000000-0000-0000-0000-000000000006").unwrap())
 }
+fn trigger_id() -> ProjectTriggerId {
+    ProjectTriggerId::new(Uuid::parse_str("a0000000-0000-0000-0000-000000000007").unwrap())
+}
 
-/// A Gitea push payload whose `clone_url` matches `https://gitea.example.com/test-org/repo`.
 const GITEA_PUSH_BODY: &str = r#"{
     "ref": "refs/heads/main",
     "after": "abcdef0123456789abcdef0123456789abcdef01",
@@ -130,14 +125,23 @@ const GITEA_PUSH_BODY: &str = r#"{
     }
 }"#;
 
-/// A GitHub push payload whose `clone_url` matches `https://github.com/gh-org/repo`.
+const GITEA_PUSH_BRANCH_BODY: &str = r#"{
+    "ref": "refs/heads/feature/new-thing",
+    "after": "abcdef0123456789abcdef0123456789abcdef01",
+    "repository": {
+        "clone_url": "https://gitea.example.com/test-org/repo",
+        "ssh_url": "git@gitea.example.com:test-org/repo.git"
+    }
+}"#;
+
 const GITHUB_PUSH_BODY: &str = r#"{
     "ref": "refs/heads/main",
     "after": "abcdef0123456789abcdef0123456789abcdef01",
     "repository": {
         "clone_url": "https://github.com/gh-org/repo",
         "ssh_url": "git@github.com:gh-org/repo.git"
-    }
+    },
+    "installation": { "id": 9999 }
 }"#;
 
 fn org_row(name: &str) -> entity::organization::Model {
@@ -156,6 +160,12 @@ fn org_row(name: &str) -> entity::organization::Model {
     }
 }
 
+fn org_row_with_installation(name: &str, installation_id: i64) -> entity::organization::Model {
+    let mut row = org_row(name);
+    row.github_installation_id = Some(installation_id);
+    row
+}
+
 fn integration_row(secret_ciphertext: &str) -> entity::integration::Model {
     entity::integration::Model {
         id: integration_id(),
@@ -172,7 +182,23 @@ fn integration_row(secret_ciphertext: &str) -> entity::integration::Model {
     }
 }
 
-fn project_row(repo_url: &str) -> entity::project::Model {
+fn github_integration_row() -> entity::integration::Model {
+    entity::integration::Model {
+        id: integration_id(),
+        organization: org_id(),
+        name: "github-app".into(),
+        display_name: "GitHub App".into(),
+        kind: 0,       // Inbound
+        forge_type: 3, // GitHub
+        secret: None,
+        endpoint_url: None,
+        access_token: None,
+        created_by: user_id(),
+        created_at: fixture_date(),
+    }
+}
+
+fn project_row() -> entity::project::Model {
     entity::project::Model {
         id: project_id(),
         organization: org_id(),
@@ -180,7 +206,7 @@ fn project_row(repo_url: &str) -> entity::project::Model {
         active: true,
         display_name: "Test Project".into(),
         description: String::new(),
-        repository: repo_url.to_string(),
+        repository: "https://gitea.example.com/test-org/repo".into(),
         evaluation_wildcard: "*".into(),
         last_evaluation: None,
         last_check_at: fixture_date(),
@@ -221,30 +247,84 @@ fn commit_row() -> entity::commit::Model {
     }
 }
 
-// ── Test 1: Generic forge — no matching project (Gitea) ───────────────────────
+/// Build a `project_trigger` row with the given config.
+fn trigger_row(cfg: TriggerConfig) -> entity::project_trigger::Model {
+    entity::project_trigger::Model {
+        id: trigger_id(),
+        project: project_id(),
+        trigger_type: cfg.trigger_type().as_i16(),
+        concurrency: ConcurrencyPolicy::HardAbort.as_i16(),
+        config: cfg.to_db_json(),
+        active: true,
+        last_fired_at: None,
+        created_at: fixture_date(),
+        updated_at: fixture_date(),
+    }
+}
+
+fn reporter_push_trigger(branches: Vec<&str>) -> TriggerConfig {
+    TriggerConfig::ReporterPush {
+        integration_id: integration_id(),
+        branches: branches.into_iter().map(String::from).collect(),
+        tags: vec![],
+        releases_only: false,
+    }
+}
+
+fn reporter_push_releases_only_trigger() -> TriggerConfig {
+    TriggerConfig::ReporterPush {
+        integration_id: integration_id(),
+        branches: vec![],
+        tags: vec![],
+        releases_only: true,
+    }
+}
+
+fn reporter_pr_trigger(actions: Vec<&str>) -> TriggerConfig {
+    TriggerConfig::ReporterPullRequest {
+        integration_id: integration_id(),
+        branches: vec![],
+        actions: actions.into_iter().map(String::from).collect(),
+    }
+}
+
+/// Mock DB chain for a successful `apply_trigger` call with no prior evaluation
+/// (skips same-commit dedup) and no in-flight evaluation.
+fn apply_trigger_db_chain(
+    db: MockDatabase,
+) -> MockDatabase {
+    db.append_query_results([Vec::<entity::evaluation::Model>::new()]) // in-flight check
+        .append_query_results([Vec::<entity::evaluation::Model>::new()]) // trigger_evaluation: in-progress check
+        .append_query_results([vec![commit_row()]])                      // INSERT commit
+        .append_query_results([vec![eval_row(EvaluationStatus::Queued)]]) // INSERT eval
+        .append_query_results([vec![project_row()]])                     // SELECT project for update
+        .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }]) // UPDATE project
+}
+
+// ── Test 1: Generic forge — no matching trigger (Gitea) ───────────────────────
 
 #[test]
-fn forge_webhook_no_matching_project() {
+fn forge_webhook_no_matching_trigger() {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .unwrap();
-    rt.block_on(async { forge_webhook_no_matching_project_inner().await });
+    rt.block_on(async { forge_webhook_no_matching_trigger_inner().await });
 }
 
-async fn forge_webhook_no_matching_project_inner() {
+async fn forge_webhook_no_matching_trigger_inner() {
     let plaintext_secret = "test-secret-plaintext";
-    let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!"); // 32 bytes for AES-256
-    let ciphertext = encrypt_webhook_secret(&crypt_path, plaintext_secret).expect("encrypt failed");
+    let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!"); // 32 bytes
+    let ciphertext = encrypt_webhook_secret(&crypt_path, plaintext_secret).expect("encrypt");
 
     // Mock chain:
     // 1. SELECT org by name → org row
     // 2. SELECT integration → integration row
-    // 3. SELECT all active projects → empty list (no matching project)
+    // 3. load_active_triggers_for_integration → empty (no trigger rows)
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![org_row("test-org")]])
         .append_query_results([vec![integration_row(&ciphertext)]])
-        .append_query_results([Vec::<entity::project::Model>::new()])
+        .append_query_results([Vec::<entity::project_trigger::Model>::new()])
         .into_connection();
 
     let state = make_state(db, Some(crypt_path), None);
@@ -256,66 +336,51 @@ async fn forge_webhook_no_matching_project_inner() {
 
     let response = server
         .post("/api/v1/hooks/gitea/test-org/my-hook")
+        .add_header("X-Gitea-Event", "push")
         .add_header("X-Gitea-Signature", &sig)
         .bytes(body.into())
         .await;
 
     response.assert_status_ok();
     let json: Value = response.json();
-    assert_eq!(json["error"], false, "expected error=false");
+    assert_eq!(json["error"], false);
     let msg = &json["message"];
-    assert_eq!(msg["event"], "push", "expected event=push");
-    assert_eq!(msg["projects_scanned"], 0, "expected 0 projects_scanned");
-    assert!(
-        msg["queued"].as_array().unwrap().is_empty(),
-        "expected empty queued"
-    );
-    assert!(
-        msg["skipped"].as_array().unwrap().is_empty(),
-        "expected empty skipped"
-    );
+    assert_eq!(msg["event"], "push");
+    assert_eq!(msg["projects_scanned"], 0);
+    assert!(msg["queued"].as_array().unwrap().is_empty());
+    assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
 
-// ── Test 2: Generic forge — matching project queues evaluation ─────────────────
+// ── Test 2: Generic forge — push fires matching trigger ───────────────────────
 
 #[test]
-fn forge_webhook_matching_project_queues() {
+fn forge_webhook_push_fires_trigger() {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .unwrap();
-    rt.block_on(async { forge_webhook_matching_project_queues_inner().await });
+    rt.block_on(async { forge_webhook_push_fires_trigger_inner().await });
 }
 
-async fn forge_webhook_matching_project_queues_inner() {
+async fn forge_webhook_push_fires_trigger_inner() {
     let plaintext_secret = "test-secret-plaintext";
     let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!"); // 32 bytes
-    let ciphertext = encrypt_webhook_secret(&crypt_path, plaintext_secret).expect("encrypt failed");
+    let ciphertext = encrypt_webhook_secret(&crypt_path, plaintext_secret).expect("encrypt");
 
     // Mock chain:
     // 1. SELECT org by name → org row
     // 2. SELECT integration → integration row
-    // 3. SELECT all active projects → [matching project]
-    // 4. SELECT org by id (per-project lookup) → org row
-    // 5. SELECT in-progress eval → empty (trigger_evaluation step 1)
-    // 6. INSERT commit → commit row
-    // 7. INSERT evaluation → eval row
-    // 8. SELECT project for update
-    // 9. UPDATE project (exec)
+    // 3. load_active_triggers → [reporter_push trigger matching this integration_id]
+    // 4. EProject::find_by_id → project row
+    // 5. EOrganization::find_by_id (org_name_for) → org row
+    // 6–11. apply_trigger chain
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![org_row("test-org")]])
         .append_query_results([vec![integration_row(&ciphertext)]])
-        .append_query_results([vec![project_row("https://gitea.example.com/test-org/repo")]])
-        .append_query_results([vec![org_row("test-org")]]) // per-project org lookup
-        .append_query_results([Vec::<entity::evaluation::Model>::new()]) // no in-progress eval
-        .append_query_results([vec![commit_row()]]) // INSERT commit
-        .append_query_results([vec![eval_row(EvaluationStatus::Queued)]]) // INSERT eval
-        .append_query_results([vec![project_row("https://gitea.example.com/test-org/repo")]]) // SELECT for update
-        .append_exec_results([MockExecResult {
-            last_insert_id: 0,
-            rows_affected: 1,
-        }]) // UPDATE project
-        .into_connection();
+        .append_query_results([vec![trigger_row(reporter_push_trigger(vec![]))]])
+        .append_query_results([vec![project_row()]])
+        .append_query_results([vec![org_row("test-org")]]);
+    let db = apply_trigger_db_chain(db).into_connection();
 
     let state = make_state(db, Some(crypt_path), None);
     let router = create_router(state);
@@ -326,6 +391,7 @@ async fn forge_webhook_matching_project_queues_inner() {
 
     let response = server
         .post("/api/v1/hooks/gitea/test-org/my-hook")
+        .add_header("X-Gitea-Event", "push")
         .add_header("X-Gitea-Signature", &sig)
         .bytes(body.into())
         .await;
@@ -338,19 +404,10 @@ async fn forge_webhook_matching_project_queues_inner() {
     assert_eq!(msg["projects_scanned"], 1);
 
     let queued = msg["queued"].as_array().unwrap();
-    assert_eq!(queued.len(), 1, "expected one queued evaluation");
-    assert_eq!(
-        queued[0]["project_name"], "test-project",
-        "unexpected project name"
-    );
-    assert_eq!(
-        queued[0]["organization"], "test-org",
-        "unexpected organization"
-    );
-    assert!(
-        msg["skipped"].as_array().unwrap().is_empty(),
-        "expected empty skipped"
-    );
+    assert_eq!(queued.len(), 1);
+    assert_eq!(queued[0]["project_name"], "test-project");
+    assert_eq!(queued[0]["organization"], "test-org");
+    assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
 
 // ── Test 3: Generic forge — invalid signature → 401 ───────────────────────────
@@ -368,7 +425,6 @@ async fn forge_webhook_invalid_signature_inner() {
     let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!");
     let ciphertext = encrypt_webhook_secret(&crypt_path, "correct-secret").expect("encrypt");
 
-    // Mock chain: org → integration (handler reads both before signature check).
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![org_row("test-org")]])
         .append_query_results([vec![integration_row(&ciphertext)]])
@@ -383,6 +439,7 @@ async fn forge_webhook_invalid_signature_inner() {
 
     let response = server
         .post("/api/v1/hooks/gitea/test-org/my-hook")
+        .add_header("X-Gitea-Event", "push")
         .add_header("X-Gitea-Signature", &wrong_sig)
         .bytes(body.into())
         .await;
@@ -405,13 +462,11 @@ fn forge_webhook_integration_not_found() {
 }
 
 async fn forge_webhook_integration_not_found_inner() {
-    // Mock chain: org found, integration not found.
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![org_row("test-org")]])
         .append_query_results([Vec::<entity::integration::Model>::new()])
         .into_connection();
 
-    // crypt_path doesn't matter here — we never reach decryption
     let state = make_state(
         db,
         Some(temp_secret_file("any-32-byte-secret-here!!!!!!!!")),
@@ -422,6 +477,7 @@ async fn forge_webhook_integration_not_found_inner() {
 
     let response = server
         .post("/api/v1/hooks/gitea/test-org/missing-hook")
+        .add_header("X-Gitea-Event", "push")
         .add_header("X-Gitea-Signature", "doesnotmatter")
         .bytes(GITEA_PUSH_BODY.as_bytes().into())
         .await;
@@ -432,41 +488,341 @@ async fn forge_webhook_integration_not_found_inner() {
     assert_eq!(json["message"], "integration not found");
 }
 
-// ── Test 5: GitHub App — push matching project queues ─────────────────────────
+// ── Test 5: Generic forge — branch glob non-match → skipped ──────────────────
 
 #[test]
-fn github_app_webhook_push_queues() {
+fn forge_webhook_branch_glob_no_match_skipped() {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .unwrap();
-    rt.block_on(async { github_app_webhook_push_queues_inner().await });
+    rt.block_on(async { forge_webhook_branch_glob_no_match_skipped_inner().await });
 }
 
-async fn github_app_webhook_push_queues_inner() {
+async fn forge_webhook_branch_glob_no_match_skipped_inner() {
+    let plaintext_secret = "test-secret-plaintext";
+    let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!");
+    let ciphertext = encrypt_webhook_secret(&crypt_path, plaintext_secret).expect("encrypt");
+
+    // Trigger only allows "release/*" branches; push is to "feature/new-thing"
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![org_row("test-org")]])
+        .append_query_results([vec![integration_row(&ciphertext)]])
+        .append_query_results([vec![trigger_row(reporter_push_trigger(vec!["release/*"]))]])
+        // project_identity lookup (for skipped entry)
+        .append_query_results([vec![project_row()]])
+        .append_query_results([vec![org_row("test-org")]])
+        .into_connection();
+
+    let state = make_state(db, Some(crypt_path), None);
+    let router = create_router(state);
+    let server = TestServer::new(router);
+
+    let body = GITEA_PUSH_BRANCH_BODY.as_bytes();
+    let sig = gitea_signature(plaintext_secret, body);
+
+    let response = server
+        .post("/api/v1/hooks/gitea/test-org/my-hook")
+        .add_header("X-Gitea-Event", "push")
+        .add_header("X-Gitea-Signature", &sig)
+        .bytes(body.into())
+        .await;
+
+    response.assert_status_ok();
+    let json: Value = response.json();
+    assert_eq!(json["error"], false);
+    let msg = &json["message"];
+    assert_eq!(msg["event"], "push");
+    assert_eq!(msg["projects_scanned"], 0);
+    assert!(msg["queued"].as_array().unwrap().is_empty());
+
+    let skipped = msg["skipped"].as_array().unwrap();
+    assert_eq!(skipped.len(), 1);
+    assert_eq!(skipped[0]["reason"], "filter");
+}
+
+// ── Test 6: Generic forge — PR event fires trigger ────────────────────────────
+
+#[test]
+fn forge_webhook_pr_fires_trigger() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async { forge_webhook_pr_fires_trigger_inner().await });
+}
+
+const VALID_SHA: &str = "abcdef0123456789abcdef0123456789abcdef01";
+
+async fn forge_webhook_pr_fires_trigger_inner() {
+    let plaintext_secret = "test-secret-plaintext";
+    let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!");
+    let ciphertext = encrypt_webhook_secret(&crypt_path, plaintext_secret).expect("encrypt");
+
+    let pr_body = format!(
+        r#"{{
+            "action": "opened",
+            "pull_request": {{
+                "head": {{
+                    "sha": "{VALID_SHA}",
+                    "ref": "feature-x",
+                    "name": "feature-x"
+                }}
+            }},
+            "repository": {{
+                "clone_url": "https://gitea.example.com/test-org/repo",
+                "ssh_url": "git@gitea.example.com:test-org/repo.git"
+            }}
+        }}"#
+    );
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![org_row("test-org")]])
+        .append_query_results([vec![integration_row(&ciphertext)]])
+        .append_query_results([vec![trigger_row(reporter_pr_trigger(vec!["opened", "synchronize"]))]])
+        .append_query_results([vec![project_row()]])
+        .append_query_results([vec![org_row("test-org")]]);
+    let db = apply_trigger_db_chain(db).into_connection();
+
+    let state = make_state(db, Some(crypt_path), None);
+    let router = create_router(state);
+    let server = TestServer::new(router);
+
+    let body_bytes: Vec<u8> = pr_body.into_bytes();
+    let sig = gitea_signature(plaintext_secret, &body_bytes);
+
+    let response = server
+        .post("/api/v1/hooks/gitea/test-org/my-hook")
+        .add_header("X-Gitea-Event", "pull_request")
+        .add_header("X-Gitea-Signature", &sig)
+        .bytes(body_bytes.into())
+        .await;
+
+    response.assert_status_ok();
+    let json: Value = response.json();
+    assert_eq!(json["error"], false);
+    let msg = &json["message"];
+    assert_eq!(msg["event"], "pull_request");
+    assert_eq!(msg["projects_scanned"], 1);
+
+    let queued = msg["queued"].as_array().unwrap();
+    assert_eq!(queued.len(), 1);
+    assert_eq!(queued[0]["project_name"], "test-project");
+    assert!(msg["skipped"].as_array().unwrap().is_empty());
+}
+
+// ── Test 7: Generic forge — PR action mismatch → skipped ──────────────────────
+
+#[test]
+fn forge_webhook_pr_action_mismatch_skipped() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async { forge_webhook_pr_action_mismatch_skipped_inner().await });
+}
+
+async fn forge_webhook_pr_action_mismatch_skipped_inner() {
+    let plaintext_secret = "test-secret-plaintext";
+    let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!");
+    let ciphertext = encrypt_webhook_secret(&crypt_path, plaintext_secret).expect("encrypt");
+
+    // Trigger only fires on "opened"; we send "closed"
+    let pr_body = format!(
+        r#"{{
+            "action": "closed",
+            "pull_request": {{
+                "head": {{
+                    "sha": "{VALID_SHA}",
+                    "name": "feature-x"
+                }}
+            }},
+            "repository": {{
+                "clone_url": "https://gitea.example.com/test-org/repo"
+            }}
+        }}"#
+    );
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![org_row("test-org")]])
+        .append_query_results([vec![integration_row(&ciphertext)]])
+        .append_query_results([vec![trigger_row(reporter_pr_trigger(vec!["opened"]))]])
+        // project_identity lookup for skipped
+        .append_query_results([vec![project_row()]])
+        .append_query_results([vec![org_row("test-org")]])
+        .into_connection();
+
+    let state = make_state(db, Some(crypt_path), None);
+    let router = create_router(state);
+    let server = TestServer::new(router);
+
+    let body_bytes: Vec<u8> = pr_body.into_bytes();
+    let sig = gitea_signature(plaintext_secret, &body_bytes);
+
+    let response = server
+        .post("/api/v1/hooks/gitea/test-org/my-hook")
+        .add_header("X-Gitea-Event", "pull_request")
+        .add_header("X-Gitea-Signature", &sig)
+        .bytes(body_bytes.into())
+        .await;
+
+    response.assert_status_ok();
+    let json: Value = response.json();
+    assert_eq!(json["error"], false);
+    let msg = &json["message"];
+    assert_eq!(msg["event"], "pull_request");
+    assert_eq!(msg["projects_scanned"], 0);
+    assert!(msg["queued"].as_array().unwrap().is_empty());
+
+    let skipped = msg["skipped"].as_array().unwrap();
+    assert_eq!(skipped.len(), 1);
+    assert_eq!(skipped[0]["reason"], "filter");
+}
+
+// ── Test 8: Generic forge — release event fires releases_only trigger ─────────
+
+#[test]
+fn forge_webhook_release_fires_releases_only_trigger() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async { forge_webhook_release_fires_releases_only_trigger_inner().await });
+}
+
+async fn forge_webhook_release_fires_releases_only_trigger_inner() {
+    let plaintext_secret = "test-secret-plaintext";
+    let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!");
+    let ciphertext = encrypt_webhook_secret(&crypt_path, plaintext_secret).expect("encrypt");
+
+    let release_body = format!(
+        r#"{{
+            "action": "published",
+            "release": {{
+                "tag_name": "v1.0.0",
+                "sha": "{VALID_SHA}",
+                "target_commitish": "main"
+            }},
+            "repository": {{
+                "clone_url": "https://gitea.example.com/test-org/repo",
+                "ssh_url": "git@gitea.example.com:test-org/repo.git"
+            }}
+        }}"#
+    );
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![org_row("test-org")]])
+        .append_query_results([vec![integration_row(&ciphertext)]])
+        .append_query_results([vec![trigger_row(reporter_push_releases_only_trigger())]])
+        .append_query_results([vec![project_row()]])
+        .append_query_results([vec![org_row("test-org")]]);
+    let db = apply_trigger_db_chain(db).into_connection();
+
+    let state = make_state(db, Some(crypt_path), None);
+    let router = create_router(state);
+    let server = TestServer::new(router);
+
+    let body_bytes: Vec<u8> = release_body.into_bytes();
+    let sig = gitea_signature(plaintext_secret, &body_bytes);
+
+    let response = server
+        .post("/api/v1/hooks/gitea/test-org/my-hook")
+        .add_header("X-Gitea-Event", "release")
+        .add_header("X-Gitea-Signature", &sig)
+        .bytes(body_bytes.into())
+        .await;
+
+    response.assert_status_ok();
+    let json: Value = response.json();
+    assert_eq!(json["error"], false);
+    let msg = &json["message"];
+    assert_eq!(msg["event"], "release");
+    assert_eq!(msg["projects_scanned"], 1);
+
+    let queued = msg["queued"].as_array().unwrap();
+    assert_eq!(queued.len(), 1);
+    assert_eq!(queued[0]["project_name"], "test-project");
+    assert!(msg["skipped"].as_array().unwrap().is_empty());
+}
+
+// ── Test 9: Generic forge — push does NOT fire releases_only trigger ──────────
+
+#[test]
+fn forge_webhook_push_does_not_fire_releases_only_trigger() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async { forge_webhook_push_does_not_fire_releases_only_trigger_inner().await });
+}
+
+async fn forge_webhook_push_does_not_fire_releases_only_trigger_inner() {
+    let plaintext_secret = "test-secret-plaintext";
+    let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!");
+    let ciphertext = encrypt_webhook_secret(&crypt_path, plaintext_secret).expect("encrypt");
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![org_row("test-org")]])
+        .append_query_results([vec![integration_row(&ciphertext)]])
+        // releases_only trigger returned; push handler should skip it
+        .append_query_results([vec![trigger_row(reporter_push_releases_only_trigger())]])
+        .into_connection();
+
+    let state = make_state(db, Some(crypt_path), None);
+    let router = create_router(state);
+    let server = TestServer::new(router);
+
+    let body = GITEA_PUSH_BODY.as_bytes();
+    let sig = gitea_signature(plaintext_secret, body);
+
+    let response = server
+        .post("/api/v1/hooks/gitea/test-org/my-hook")
+        .add_header("X-Gitea-Event", "push")
+        .add_header("X-Gitea-Signature", &sig)
+        .bytes(body.into())
+        .await;
+
+    response.assert_status_ok();
+    let json: Value = response.json();
+    assert_eq!(json["error"], false);
+    let msg = &json["message"];
+    assert_eq!(msg["projects_scanned"], 0);
+    assert!(msg["queued"].as_array().unwrap().is_empty());
+    // silently skipped (releases_only triggers are just skipped, not added to skipped list)
+    assert!(msg["skipped"].as_array().unwrap().is_empty());
+}
+
+// ── Test 10: GitHub App — push fires trigger ───────────────────────────────────
+
+#[test]
+fn github_app_webhook_push_fires_trigger() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async { github_app_webhook_push_fires_trigger_inner().await });
+}
+
+async fn github_app_webhook_push_fires_trigger_inner() {
     let gh_secret = "github-webhook-secret";
     let gh_secret_path = temp_secret_file(gh_secret);
 
-    // Mock chain for GitHub App push:
-    // 1. SELECT all active projects → [matching project]
-    // 2. SELECT org by id (per-project lookup) → org row
-    // 3. SELECT in-progress eval → empty
-    // 4. INSERT commit → commit row
-    // 5. INSERT evaluation → eval row
-    // 6. SELECT project for update
-    // 7. UPDATE project (exec)
+    // Mock chain:
+    // resolve_github_integration_id:
+    //   1. SELECT org by installation_id → org row (with installation_id=9999)
+    //   2. SELECT inbound GitHub integration for org → integration row
+    // fan_out_triggers:
+    //   3. load_active_triggers → [reporter_push trigger]
+    //   4. EProject::find_by_id → project row
+    //   5. org_name_for → org row
+    //   6–11. apply_trigger chain
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        .append_query_results([vec![project_row("https://github.com/gh-org/repo")]])
-        .append_query_results([vec![org_row("gh-org")]]) // per-project org lookup
-        .append_query_results([Vec::<entity::evaluation::Model>::new()])
-        .append_query_results([vec![commit_row()]])
-        .append_query_results([vec![eval_row(EvaluationStatus::Queued)]])
-        .append_query_results([vec![project_row("https://github.com/gh-org/repo")]])
-        .append_exec_results([MockExecResult {
-            last_insert_id: 0,
-            rows_affected: 1,
-        }])
-        .into_connection();
+        .append_query_results([vec![org_row_with_installation("gh-org", 9999)]])
+        .append_query_results([vec![github_integration_row()]])
+        .append_query_results([vec![trigger_row(reporter_push_trigger(vec![]))]])
+        .append_query_results([vec![project_row()]])
+        .append_query_results([vec![org_row("gh-org")]]);
+    let db = apply_trigger_db_chain(db).into_connection();
 
     let state = make_state(db, None, Some(gh_secret_path));
     let router = create_router(state);
@@ -490,13 +846,13 @@ async fn github_app_webhook_push_queues_inner() {
     assert_eq!(msg["projects_scanned"], 1);
 
     let queued = msg["queued"].as_array().unwrap();
-    assert_eq!(queued.len(), 1, "expected one queued evaluation");
+    assert_eq!(queued.len(), 1);
     assert_eq!(queued[0]["project_name"], "test-project");
     assert_eq!(queued[0]["organization"], "gh-org");
     assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
 
-// ── Test 6: GitHub App — ping ─────────────────────────────────────────────────
+// ── Test 11: GitHub App — ping ─────────────────────────────────────────────────
 
 #[test]
 fn github_app_webhook_ping() {
@@ -511,7 +867,6 @@ async fn github_app_webhook_ping_inner() {
     let gh_secret = "github-webhook-secret";
     let gh_secret_path = temp_secret_file(gh_secret);
 
-    // Ping → no DB queries needed
     let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
 
     let state = make_state(db, None, Some(gh_secret_path));
@@ -538,7 +893,7 @@ async fn github_app_webhook_ping_inner() {
     assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
 
-// ── Test 7: GitHub App — installation (org not found, just warns) ─────────────
+// ── Test 12: GitHub App — installation (org not found, just warns) ─────────────
 
 #[test]
 fn github_app_webhook_installation() {
@@ -553,7 +908,6 @@ async fn github_app_webhook_installation_inner() {
     let gh_secret = "github-webhook-secret";
     let gh_secret_path = temp_secret_file(gh_secret);
 
-    // Mock chain: store_installation_id calls SELECT org by name → None (not found).
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([Vec::<entity::organization::Model>::new()])
         .into_connection();
@@ -590,7 +944,7 @@ async fn github_app_webhook_installation_inner() {
     assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
 
-// ── Test 8: GitHub App — not configured → 503 ────────────────────────────────
+// ── Test 13: GitHub App — not configured → 503 ────────────────────────────────
 
 #[test]
 fn github_app_webhook_not_configured() {
@@ -602,11 +956,8 @@ fn github_app_webhook_not_configured() {
 }
 
 async fn github_app_webhook_not_configured_inner() {
-    // Default test_cli has github_app_webhook_secret_file = None → github_app_config() = None.
-    // No DB queries expected.
     let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
 
-    // make_state with gh_secret_path=None → uses test_cli() → no GitHub App config.
     let state = make_state(db, None, None);
     let router = create_router(state);
     let server = TestServer::new(router);
