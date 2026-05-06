@@ -6,6 +6,7 @@
 
 mod provisioning;
 
+use crate::types::triggers::{ConcurrencyPolicy, TriggerType};
 use entity::organization_cache::CacheSubscriptionMode;
 use sea_orm::DatabaseConnection;
 use serde::{Deserialize, Serialize};
@@ -71,6 +72,34 @@ pub struct StateProject {
     /// Name of an outbound integration in the same org. `None` unlinks.
     #[serde(default)]
     pub outbound_integration: Option<String>,
+    /// Declarative trigger list. `None` leaves existing triggers untouched
+    /// (back-compat). `Some([])` is an error — a project must have at least one.
+    #[serde(default)]
+    pub triggers: Option<Vec<StateTrigger>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct StateTrigger {
+    #[serde(rename = "type")]
+    pub trigger_type: TriggerType,
+    pub concurrency: ConcurrencyPolicy,
+    /// Name of an inbound integration in the same org. Required for
+    /// `reporter_push` and `reporter_pull_request` triggers.
+    #[serde(default)]
+    pub integration: Option<String>,
+    /// Type-specific config shape:
+    /// - polling: `{ interval_secs }`
+    /// - reporter_push: `{ branches, tags, releases_only }`
+    /// - reporter_pull_request: `{ branches, actions }`
+    /// - time: `{ cron }`
+    #[serde(default)]
+    pub config: serde_json::Value,
+    #[serde(default = "default_active")]
+    pub active: bool,
+}
+
+fn default_active() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

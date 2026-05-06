@@ -6,17 +6,18 @@
 
 use super::{
     StateApiKey, StateCache, StateConfiguration, StateIntegration, StateOrganization, StateProject,
-    StateUpstream, StateUser, StateWorker,
+    StateTrigger, StateUpstream, StateUser, StateWorker,
 };
 use crate::ci::{ForgeType, IntegrationKind, encrypt_webhook_secret};
 use crate::types::consts::BASE_ROLE_ADMIN_ID;
 use crate::types::input::load_secret_bytes;
+use crate::types::triggers::{ConcurrencyPolicy, TriggerConfig};
 use crate::types::*;
 use anyhow::{Context, Result};
 use base64::{Engine, engine::general_purpose};
 use entity::organization_cache::CacheSubscriptionMode;
 use entity::*;
-use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use ssh_key::PrivateKey;
 use std::collections::HashMap;
 use std::fs;
@@ -351,7 +352,8 @@ impl<'a> StateApplicator<'a> {
 
             let now = now();
 
-            if let Some(existing) = existing_project {
+            let project_row = if let Some(existing) = existing_project {
+                let project_id = existing.id;
                 let mut proj: project::ActiveModel = existing.into();
                 proj.organization = Set(org_id);
                 proj.active = Set(state_project.active);
@@ -364,6 +366,10 @@ impl<'a> StateApplicator<'a> {
                 proj.managed = Set(true);
                 proj.update(self.db).await?;
                 tracing::info!("Updated managed project: {}", state_project.name);
+                project::Entity::find_by_id(project_id)
+                    .one(self.db)
+                    .await?
+                    .ok_or_else(|| format!("Project '{}' vanished after update", state_project.name))?
             } else {
                 let proj = project::ActiveModel {
                     id: Set(ProjectId::now_v7()),
@@ -382,8 +388,29 @@ impl<'a> StateApplicator<'a> {
                     managed: Set(true),
                     keep_evaluations: Set(0),
                 };
-                proj.insert(self.db).await?;
+                let inserted = proj.insert(self.db).await?;
                 tracing::info!("Created managed project: {}", state_project.name);
+                inserted
+            };
+
+            if let Some(triggers) = &state_project.triggers {
+                let integrations_by_name: HashMap<String, IntegrationId> =
+                    integration::Entity::find()
+                        .filter(integration::Column::Organization.eq(org_id))
+                        .all(self.db)
+                        .await?
+                        .into_iter()
+                        .map(|r| (r.name, r.id))
+                        .collect();
+
+                apply_project_triggers(self.db, &project_row, triggers, &integrations_by_name)
+                    .await
+                    .map_err(|e| {
+                        format!(
+                            "Failed to apply triggers for project '{}': {}",
+                            state_project.name, e
+                        )
+                    })?;
             }
         }
 
@@ -960,6 +987,164 @@ impl<'a> StateApplicator<'a> {
     }
 }
 
+// ── Trigger sync ─────────────────────────────────────────────────────────────
+
+async fn apply_project_triggers<C: ConnectionTrait>(
+    db: &C,
+    project: &MProject,
+    desired: &[StateTrigger],
+    integrations_by_name: &HashMap<String, IntegrationId>,
+) -> anyhow::Result<()> {
+    if desired.is_empty() {
+        anyhow::bail!("project '{}' must have at least one trigger", project.name);
+    }
+
+    let mut desired_by_key: HashMap<String, (TriggerConfig, ConcurrencyPolicy, bool)> =
+        HashMap::new();
+    for t in desired {
+        let cfg = build_trigger_config(t, integrations_by_name)?;
+        let key = trigger_key(&cfg, t.concurrency);
+        desired_by_key.insert(key, (cfg, t.concurrency, t.active));
+    }
+
+    let existing: Vec<MProjectTrigger> = EProjectTrigger::find()
+        .filter(CProjectTrigger::Project.eq(project.id))
+        .all(db)
+        .await?;
+
+    let mut existing_by_key: HashMap<String, MProjectTrigger> = HashMap::new();
+    for row in existing {
+        let cfg = TriggerConfig::parse_row(row.trigger_type, &row.config)
+            .context("parse existing trigger")?;
+        let conc =
+            ConcurrencyPolicy::from_i16(row.concurrency).unwrap_or(ConcurrencyPolicy::Skip);
+        let key = trigger_key(&cfg, conc);
+        existing_by_key.insert(key, row);
+    }
+
+    let now = crate::types::now();
+
+    for (key, (cfg, conc, active)) in &desired_by_key {
+        if existing_by_key.contains_key(key) {
+            continue;
+        }
+        AProjectTrigger {
+            id: Set(ProjectTriggerId::now_v7()),
+            project: Set(project.id),
+            trigger_type: Set(cfg.trigger_type().as_i16()),
+            concurrency: Set(conc.as_i16()),
+            config: Set(cfg.to_db_json()),
+            active: Set(*active),
+            last_fired_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(db)
+        .await?;
+    }
+
+    for (key, row) in existing_by_key {
+        if let Some((_, _, active)) = desired_by_key.get(&key) {
+            if row.active != *active {
+                let mut a: AProjectTrigger = row.into();
+                a.active = Set(*active);
+                a.updated_at = Set(now);
+                a.update(db).await?;
+            }
+        } else {
+            EProjectTrigger::delete_by_id(row.id).exec(db).await?;
+        }
+    }
+
+    Ok(())
+}
+
+fn build_trigger_config(
+    t: &StateTrigger,
+    integrations: &HashMap<String, IntegrationId>,
+) -> anyhow::Result<TriggerConfig> {
+    use crate::types::triggers::TriggerType as TT;
+    let cfg = match t.trigger_type {
+        TT::Polling => {
+            let interval = t
+                .config
+                .get("interval_secs")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(300) as u32;
+            TriggerConfig::Polling {
+                interval_secs: interval,
+            }
+        }
+        TT::ReporterPush | TT::ReporterPullRequest => {
+            let name = t
+                .integration
+                .as_ref()
+                .context("reporter trigger requires `integration` name")?;
+            let id = *integrations
+                .get(name)
+                .with_context(|| format!("unknown integration: {name}"))?;
+            if t.trigger_type == TT::ReporterPush {
+                TriggerConfig::ReporterPush {
+                    integration_id: id,
+                    branches: t
+                        .config
+                        .get("branches")
+                        .and_then(|v| serde_json::from_value(v.clone()).ok())
+                        .unwrap_or_default(),
+                    tags: t
+                        .config
+                        .get("tags")
+                        .and_then(|v| serde_json::from_value(v.clone()).ok())
+                        .unwrap_or_default(),
+                    releases_only: t
+                        .config
+                        .get("releases_only")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false),
+                }
+            } else {
+                TriggerConfig::ReporterPullRequest {
+                    integration_id: id,
+                    branches: t
+                        .config
+                        .get("branches")
+                        .and_then(|v| serde_json::from_value(v.clone()).ok())
+                        .unwrap_or_default(),
+                    actions: t
+                        .config
+                        .get("actions")
+                        .and_then(|v| serde_json::from_value(v.clone()).ok())
+                        .unwrap_or_else(|| {
+                            vec!["opened".into(), "synchronize".into(), "reopened".into()]
+                        }),
+                }
+            }
+        }
+        TT::Time => {
+            let cron = t
+                .config
+                .get("cron")
+                .and_then(|v| v.as_str())
+                .context("time trigger requires `cron`")?
+                .to_string();
+            TriggerConfig::Time { cron }
+        }
+    };
+    cfg.validate().context("trigger config validation failed")?;
+    Ok(cfg)
+}
+
+fn trigger_key(cfg: &TriggerConfig, concurrency: ConcurrencyPolicy) -> String {
+    let json = cfg.to_db_json();
+    let canonical = serde_json::to_string(&json).unwrap_or_default();
+    format!(
+        "{}|{}|{}",
+        cfg.trigger_type().as_i16(),
+        canonical,
+        concurrency.as_i16()
+    )
+}
+
 // ── Pure helpers ──────────────────────────────────────────────────────────────
 
 /// Validate the contents of a user password credential file. The file must
@@ -1129,4 +1314,187 @@ mod helper_tests {
         // must always be a non-empty path so format!() composes a valid path.
         assert!(!credentials_dir().is_empty());
     }
+}
+
+#[cfg(test)]
+mod trigger_helper_tests {
+    use super::{build_trigger_config, trigger_key};
+    use crate::state::StateTrigger;
+    use crate::types::triggers::{ConcurrencyPolicy, TriggerConfig, TriggerType};
+    use crate::types::IntegrationId;
+    use std::collections::HashMap;
+
+    fn polling_trigger(interval_secs: u64) -> StateTrigger {
+        StateTrigger {
+            trigger_type: TriggerType::Polling,
+            concurrency: ConcurrencyPolicy::Skip,
+            integration: None,
+            config: serde_json::json!({ "interval_secs": interval_secs }),
+            active: true,
+        }
+    }
+
+    fn empty_integrations() -> HashMap<String, IntegrationId> {
+        HashMap::new()
+    }
+
+    #[test]
+    fn build_polling_trigger() {
+        let t = polling_trigger(60);
+        let cfg = build_trigger_config(&t, &empty_integrations()).unwrap();
+        assert_eq!(cfg, TriggerConfig::Polling { interval_secs: 60 });
+    }
+
+    #[test]
+    fn build_polling_defaults_interval_when_missing() {
+        let t = StateTrigger {
+            trigger_type: TriggerType::Polling,
+            concurrency: ConcurrencyPolicy::Skip,
+            integration: None,
+            config: serde_json::Value::Null,
+            active: true,
+        };
+        let cfg = build_trigger_config(&t, &empty_integrations()).unwrap();
+        assert_eq!(cfg, TriggerConfig::Polling { interval_secs: 300 });
+    }
+
+    #[test]
+    fn build_polling_rejects_too_small_interval() {
+        let t = polling_trigger(5);
+        let err = build_trigger_config(&t, &empty_integrations()).unwrap_err();
+        // The outer context says "validation failed"; the chain contains the specific reason.
+        let full = format!("{err:#}");
+        assert!(
+            full.contains("interval_secs") || full.contains("validation"),
+            "expected polling interval rejection, got: {full}"
+        );
+    }
+
+    #[test]
+    fn build_time_trigger() {
+        let t = StateTrigger {
+            trigger_type: TriggerType::Time,
+            concurrency: ConcurrencyPolicy::Allow,
+            integration: None,
+            config: serde_json::json!({ "cron": "0 0 2 * * *" }),
+            active: true,
+        };
+        let cfg = build_trigger_config(&t, &empty_integrations()).unwrap();
+        assert_eq!(cfg, TriggerConfig::Time { cron: "0 0 2 * * *".into() });
+    }
+
+    #[test]
+    fn build_time_trigger_requires_cron() {
+        let t = StateTrigger {
+            trigger_type: TriggerType::Time,
+            concurrency: ConcurrencyPolicy::Allow,
+            integration: None,
+            config: serde_json::json!({}),
+            active: true,
+        };
+        let err = build_trigger_config(&t, &empty_integrations()).unwrap_err();
+        assert!(err.to_string().contains("cron"));
+    }
+
+    #[test]
+    fn build_reporter_push_requires_integration_name() {
+        let t = StateTrigger {
+            trigger_type: TriggerType::ReporterPush,
+            concurrency: ConcurrencyPolicy::Skip,
+            integration: None,
+            config: serde_json::json!({}),
+            active: true,
+        };
+        let err = build_trigger_config(&t, &empty_integrations()).unwrap_err();
+        assert!(err.to_string().contains("integration"));
+    }
+
+    #[test]
+    fn build_reporter_push_errors_on_unknown_integration() {
+        let t = StateTrigger {
+            trigger_type: TriggerType::ReporterPush,
+            concurrency: ConcurrencyPolicy::Skip,
+            integration: Some("github-app".into()),
+            config: serde_json::json!({}),
+            active: true,
+        };
+        let err = build_trigger_config(&t, &empty_integrations()).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("github-app"), "expected integration name in error: {msg}");
+    }
+
+    #[test]
+    fn build_reporter_push_with_known_integration() {
+        let int_id = IntegrationId::nil();
+        let mut integrations = HashMap::new();
+        integrations.insert("gh".into(), int_id);
+
+        let t = StateTrigger {
+            trigger_type: TriggerType::ReporterPush,
+            concurrency: ConcurrencyPolicy::SoftAbort,
+            integration: Some("gh".into()),
+            config: serde_json::json!({ "branches": ["main"], "tags": [], "releases_only": false }),
+            active: true,
+        };
+        let cfg = build_trigger_config(&t, &integrations).unwrap();
+        assert_eq!(
+            cfg,
+            TriggerConfig::ReporterPush {
+                integration_id: int_id,
+                branches: vec!["main".into()],
+                tags: vec![],
+                releases_only: false,
+            }
+        );
+    }
+
+    #[test]
+    fn trigger_key_differs_by_type() {
+        let polling = TriggerConfig::Polling { interval_secs: 60 };
+        let time = TriggerConfig::Time { cron: "0 0 * * * *".into() };
+        let conc = ConcurrencyPolicy::Skip;
+        assert_ne!(trigger_key(&polling, conc), trigger_key(&time, conc));
+    }
+
+    #[test]
+    fn trigger_key_differs_by_concurrency() {
+        let cfg = TriggerConfig::Polling { interval_secs: 60 };
+        let key_skip = trigger_key(&cfg, ConcurrencyPolicy::Skip);
+        let key_allow = trigger_key(&cfg, ConcurrencyPolicy::Allow);
+        assert_ne!(key_skip, key_allow);
+    }
+
+    #[test]
+    fn trigger_key_stable_for_same_config() {
+        let cfg = TriggerConfig::Polling { interval_secs: 300 };
+        let conc = ConcurrencyPolicy::HardAbort;
+        assert_eq!(trigger_key(&cfg, conc), trigger_key(&cfg, conc));
+    }
+
+    #[test]
+    fn state_trigger_serde_round_trip() {
+        let json = serde_json::json!({
+            "type": "polling",
+            "concurrency": "skip",
+            "config": { "interval_secs": 120 },
+            "active": true
+        });
+        let t: StateTrigger = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(t.trigger_type, TriggerType::Polling);
+        assert_eq!(t.concurrency, ConcurrencyPolicy::Skip);
+        assert!(t.active);
+    }
+
+    #[test]
+    fn state_trigger_active_defaults_to_true() {
+        let json = serde_json::json!({
+            "type": "polling",
+            "concurrency": "allow",
+            "config": { "interval_secs": 60 }
+        });
+        let t: StateTrigger = serde_json::from_value(json).unwrap();
+        assert!(t.active);
+    }
+
+    // TODO: integration test for apply_project_triggers full DB round-trip (T30 smoke)
 }
