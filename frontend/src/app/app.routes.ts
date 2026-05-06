@@ -193,6 +193,14 @@ export const routes: Routes = [
             (m) => m.ProjectSettingsComponent
           ),
       },
+      {
+        path: 'organization/:org/project/:project/triggers',
+        title: 'Project Triggers',
+        loadComponent: () =>
+          import('./features/projects/project-triggers/project-triggers.component').then(
+            (m) => m.ProjectTriggersComponent
+          ),
+      },
 
       // Caches
       {
