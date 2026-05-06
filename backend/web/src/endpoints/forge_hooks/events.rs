@@ -83,7 +83,6 @@ pub(super) struct GitHubPRRef {
 
 #[derive(Deserialize)]
 pub(super) struct GitHubReleasePayload {
-    pub action: String,
     pub release: GitHubRelease,
     pub repository: GitHubRepository,
 }
@@ -120,7 +119,6 @@ pub(super) struct GiteaPRRef {
 
 #[derive(Deserialize)]
 pub(super) struct GiteaReleasePayload {
-    pub action: String,
     pub release: GiteaRelease,
     pub repository: GiteaRepository,
 }
@@ -156,7 +154,6 @@ pub(super) struct GitLabCommit {
 
 #[derive(Deserialize)]
 pub(super) struct GitLabReleasePayload {
-    pub action: String,
     pub project: GitLabProject,
     pub commit: Option<GitLabCommit>,
     pub tag: Option<String>,
