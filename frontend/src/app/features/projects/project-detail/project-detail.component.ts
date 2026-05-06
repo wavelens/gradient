@@ -14,7 +14,7 @@ import { OrganizationsService } from '@core/services/organizations.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { EmptyStateComponent } from '@shared/components/empty-state/empty-state.component';
-import { ProjectDetail, EvaluationSummary, EvaluationStatus, EntryPointSummary, BuildStatus } from '@core/models';
+import { ProjectDetail, EvaluationSummary, EvaluationStatus, EntryPointSummary, BuildStatus, TriggerType } from '@core/models';
 
 @Component({
   selector: 'app-project-detail',
@@ -261,6 +261,16 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
       case 'Fetching': return 'cloud_download';
       case 'EvaluatingFlake': case 'EvaluatingDerivation': case 'Building': return 'sync';
       default: return 'help';
+    }
+  }
+
+  getTriggerLabel(type: TriggerType | null): string {
+    switch (type) {
+      case 'polling': return 'Polling';
+      case 'reporter_push': return 'Push';
+      case 'reporter_pull_request': return 'PR';
+      case 'time': return 'Schedule';
+      default: return 'Manual';
     }
   }
 

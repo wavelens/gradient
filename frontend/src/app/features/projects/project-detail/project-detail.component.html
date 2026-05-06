@@ -184,6 +184,9 @@
                   <span class="status-badge" [class]="getStatusClass(evaluation.status)">
                     {{ getStatusLabel(evaluation.status) }}
                   </span>
+                  <span class="trigger-badge">
+                    {{ getTriggerLabel(evaluation.trigger?.type ?? null) }}
+                  </span>
                 </div>
                 <div class="build-stats build-stats--grid">
                   <span class="build-stat" title="Total builds in this evaluation">

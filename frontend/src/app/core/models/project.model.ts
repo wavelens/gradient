@@ -38,6 +38,7 @@ export interface EvaluationSummary {
   entry_point_diff: number | null;
   created_at: string;
   updated_at: string;
+  trigger: { id: string; type: TriggerType } | null;
 }
 
 export interface EntryPointSummary {
