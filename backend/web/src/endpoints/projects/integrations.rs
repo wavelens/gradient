@@ -23,7 +23,6 @@ use std::sync::Arc;
 #[derive(Serialize, Debug)]
 pub struct ProjectIntegrationResponse {
     pub project: ProjectId,
-    pub inbound_integration: Option<IntegrationId>,
     pub outbound_integration: Option<IntegrationId>,
 }
 
@@ -31,7 +30,6 @@ impl From<MProjectIntegration> for ProjectIntegrationResponse {
     fn from(m: MProjectIntegration) -> Self {
         ProjectIntegrationResponse {
             project: m.project,
-            inbound_integration: m.inbound_integration,
             outbound_integration: m.outbound_integration,
         }
     }
@@ -39,7 +37,6 @@ impl From<MProjectIntegration> for ProjectIntegrationResponse {
 
 #[derive(Deserialize, Debug)]
 pub struct PutProjectIntegrationRequest {
-    pub inbound_integration: Option<IntegrationId>,
     pub outbound_integration: Option<IntegrationId>,
 }
 
@@ -94,7 +91,6 @@ pub async fn get_project_integration(
         Some(l) => ProjectIntegrationResponse::from(l),
         None => ProjectIntegrationResponse {
             project: proj.id,
-            inbound_integration: None,
             outbound_integration: None,
         },
     };
@@ -121,9 +117,6 @@ pub async fn put_project_integration(
     )
     .await?;
 
-    if let Some(id) = body.inbound_integration {
-        validate_integration(&state, org.id, id, IntegrationKind::Inbound).await?;
-    }
     if let Some(id) = body.outbound_integration {
         validate_integration(&state, org.id, id, IntegrationKind::Outbound).await?;
     }
@@ -135,14 +128,12 @@ pub async fn put_project_integration(
     let updated = match existing {
         Some(row) => {
             let mut active = row.into_active_model();
-            active.inbound_integration = Set(body.inbound_integration);
             active.outbound_integration = Set(body.outbound_integration);
             active.update(&state.web_db).await?
         }
         None => {
             AProjectIntegration {
                 project: Set(proj.id),
-                inbound_integration: Set(body.inbound_integration),
                 outbound_integration: Set(body.outbound_integration),
             }
             .insert(&state.web_db)

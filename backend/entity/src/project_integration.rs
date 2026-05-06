@@ -14,7 +14,6 @@ use crate::ids::{IntegrationId, ProjectId};
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub project: ProjectId,
-    pub inbound_integration: Option<IntegrationId>,
     pub outbound_integration: Option<IntegrationId>,
 }
 
@@ -26,12 +25,6 @@ pub enum Relation {
         to = "super::project::Column::Id"
     )]
     Project,
-    #[sea_orm(
-        belongs_to = "super::integration::Entity",
-        from = "Column::InboundIntegration",
-        to = "super::integration::Column::Id"
-    )]
-    InboundIntegration,
     #[sea_orm(
         belongs_to = "super::integration::Entity",
         from = "Column::OutboundIntegration",
