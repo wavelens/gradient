@@ -14,6 +14,7 @@ pub mod ids;
 pub mod input;
 pub mod proto;
 pub mod secret;
+pub mod triggers;
 pub mod waiting_reason;
 pub mod wildcard;
 
@@ -36,6 +37,7 @@ pub use self::input::*;
 pub use self::io::*;
 pub use self::nix_cache::*;
 pub use self::secret::{SecretBytes, SecretString};
+pub use self::triggers::{ConcurrencyPolicy, TriggerConfig, TriggerConfigError, TriggerType};
 pub use self::waiting_reason::{UnmetRequirement, WaitingReason};
 pub use self::wildcard::*;
 
