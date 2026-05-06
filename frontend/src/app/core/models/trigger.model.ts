@@ -10,6 +10,8 @@ export type ConcurrencyPolicy = 'hard_abort' | 'soft_abort' | 'allow' | 'skip';
 export interface PollingTriggerConfig {
   type: 'polling';
   interval_secs: number;
+  /** Branch to poll (e.g. "main"). Leave undefined/null to poll the remote HEAD. */
+  branch?: string | null;
 }
 
 export interface ReporterPushTriggerConfig {
