@@ -21,7 +21,9 @@
  */
 
 use futures::{SinkExt, StreamExt};
-use proto::messages::{ClientMessage, GradientCapabilities, PROTO_VERSION, ServerMessage};
+use proto::messages::{
+    ClientMessage, GradientCapabilities, PROTO_VERSION, ServerMessage, decode_server_message,
+};
 use rkyv::rancor::Error as RkyvError;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use uuid::Uuid;
@@ -128,10 +130,7 @@ async fn recv(
     loop {
         match ws.next().await {
             Some(Ok(Message::Binary(bytes))) => {
-                let mut aligned = rkyv::util::AlignedVec::<16>::new();
-                aligned.extend_from_slice(&bytes);
-                return rkyv::from_bytes::<ServerMessage, RkyvError>(&aligned)
-                    .expect("rkyv deserialize ServerMessage");
+                return decode_server_message(&bytes).expect("rkyv deserialize ServerMessage");
             }
             Some(Ok(Message::Ping(_) | Message::Pong(_))) => continue,
             Some(Ok(other)) => {
