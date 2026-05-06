@@ -96,6 +96,7 @@ mod m20260507_000003_unique_active_evaluation_per_project;
 mod m20260507_000004_move_concurrency_to_project;
 mod m20260507_000005_evaluation_concurrent_flag;
 mod m20260507_000006_add_subtype_to_build_product;
+mod m20260507_000007_add_sign_cache_to_project;
 
 pub struct Migrator;
 
@@ -193,6 +194,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260507_000004_move_concurrency_to_project::Migration),
             Box::new(m20260507_000005_evaluation_concurrent_flag::Migration),
             Box::new(m20260507_000006_add_subtype_to_build_product::Migration),
+            Box::new(m20260507_000007_add_sign_cache_to_project::Migration),
         ]
     }
 }
