@@ -131,20 +131,23 @@ pub async fn gc_project_evaluations(
     Ok(())
 }
 
-/// Derivation GC pass: deletes `derivation` rows that have no remaining `build` rows
-/// pointing at them and whose grace period has expired. The grace lets rapid
-/// re-evaluations reuse recent derivations without re-inserting.
+/// Derivation GC pass: deletes `derivation` rows that have no remaining `build`
+/// rows pointing at them and whose grace period has expired. The grace lets
+/// rapid re-evaluations reuse recent derivations without re-inserting.
 ///
-/// For each orphan it:
-///   1. Removes any `cache_derivation` rows (FK cascade also removes them, but doing it
-///      explicitly lets us delete the NAR files first).
-///   2. Deletes the derivation row — FK cascade cleans up outputs / dep edges / features /
-///      signatures.
+/// NAR deletion is keyed by the orphan-only output hashes — a hash referenced
+/// by any *non-orphan* `derivation_output` (typical for FOD source tarballs
+/// that many drvs share via `fetchurl`) keeps both its NAR and its
+/// `cached_path` row. For hashes referenced only by orphans, both the NAR
+/// file and the `cached_path` row are removed; `cached_path_signature`
+/// cascades from `cached_path`. The derivation rows are deleted last; FK
+/// cascade cleans up `cache_derivation`, `derivation_output`, dep edges,
+/// and feature edges.
 pub async fn gc_orphan_derivations(state: Arc<ServerState>, grace_hours: i64) -> Result<()> {
+    use std::collections::HashSet;
+
     let cutoff = crate::types::now() - ChronoDuration::hours(grace_hours.max(0));
 
-    // Find candidate derivations: no build rows, created before the cutoff.
-    // Use raw SQL: SeaORM doesn't have a clean LEFT JOIN ... IS NULL builder.
     let rows = state
         .worker_db
         .query_all(Statement::from_sql_and_values(
@@ -170,34 +173,51 @@ pub async fn gc_orphan_derivations(state: Arc<ServerState>, grace_hours: i64) ->
 
     info!(count = drv_ids.len(), "Running orphan derivation GC");
 
-    for drv_id in drv_ids {
-        // 1. Cache presence rows + their NAR files.
-        let cache_rows = ECacheDerivation::find()
-            .filter(CCacheDerivation::Derivation.eq(drv_id))
+    let orphan_outputs = EDerivationOutput::find()
+        .filter(CDerivationOutput::Derivation.is_in(drv_ids.clone()))
+        .all(&state.worker_db)
+        .await
+        .context("GC: failed to query orphan derivation outputs")?;
+
+    let orphan_hashes: HashSet<String> = orphan_outputs.iter().map(|o| o.hash.clone()).collect();
+
+    let still_referenced: HashSet<String> = if orphan_hashes.is_empty() {
+        HashSet::new()
+    } else {
+        let drv_id_set: HashSet<DerivationId> = drv_ids.iter().copied().collect();
+        EDerivationOutput::find()
+            .filter(CDerivationOutput::Hash.is_in(orphan_hashes.iter().cloned().collect::<Vec<_>>()))
             .all(&state.worker_db)
             .await
-            .context("Failed to query cache_derivation rows")?;
+            .context("GC: failed to query non-orphan references for orphan output hashes")?
+            .into_iter()
+            .filter(|o| !drv_id_set.contains(&o.derivation))
+            .map(|o| o.hash)
+            .collect()
+    };
 
-        let outputs = EDerivationOutput::find()
-            .filter(CDerivationOutput::Derivation.eq(drv_id))
-            .all(&state.worker_db)
-            .await
-            .context("Failed to query derivation outputs")?;
+    let to_delete: Vec<String> = orphan_hashes
+        .into_iter()
+        .filter(|h| !still_referenced.contains(h))
+        .collect();
 
-        for cache_row in cache_rows {
-            // Once we drop the row, the (cache, derivation) pairing is gone.
-            // FK cascade will also remove it on derivation delete, but doing it here
-            // lets us first remove the NAR files.
-            for o in &outputs {
-                if let Err(e) = state.nar_storage.delete(&o.hash).await {
-                    warn!(error = %e, hash = %o.hash, "GC: failed to remove NAR file");
-                }
-            }
-            let _ = cache_row.into_active_model().delete(&state.worker_db).await;
+    for hash in &to_delete {
+        if let Err(e) = state.nar_storage.delete(hash).await {
+            warn!(error = %e, %hash, "GC: failed to remove NAR file");
         }
+    }
 
-        // 2. Delete the derivation row. FK cascade removes outputs / dep edges /
-        //    features / signatures.
+    if !to_delete.is_empty() {
+        if let Err(e) = ECachedPath::delete_many()
+            .filter(CCachedPath::Hash.is_in(to_delete.clone()))
+            .exec(&state.worker_db)
+            .await
+        {
+            warn!(error = %e, "GC: failed to delete cached_path rows for orphan hashes");
+        }
+    }
+
+    for drv_id in drv_ids {
         if let Some(d) = EDerivation::find_by_id(drv_id)
             .one(&state.worker_db)
             .await

@@ -1176,6 +1176,34 @@ Tests (`cargo test -p proto`):
   inbound buffer happened to land at a non-16-byte-aligned allocator
   address.
 
+## Cache GC — guard shared-hash NARs and purge zombie cached_path rows
+
+Two bugs together inflated cache stats and over-deleted shared NARs:
+
+- `gc_orphan_derivations` deleted the NAR for every output of every orphan
+  derivation, with no check whether another (non-orphan) `derivation_output`
+  shared the same hash via `cached_path`. FOD source tarballs are the
+  textbook case — `fetchurl` derivations across many projects all
+  reference the same `<hash>-<name>`, so when one drv aged into the
+  orphan window its NAR vanished for everyone. Fixed by collecting all
+  orphan output hashes, subtracting hashes still referenced by any
+  non-orphan `derivation_output`, and only deleting the difference (NAR
+  file plus `cached_path` row; `cached_path_signature` cascades).
+- The previous code didn't drop `cached_path` rows at all. Each
+  over-deletion left a row behind that `cached_path_signature` still
+  pointed at, so `COUNT(cps.id)` in `web/src/endpoints/stats.rs` reported
+  packages whose NARs were long gone. `cleanup_orphaned_cache_files` now
+  finishes with a `purge_zombie_cached_paths` pass: any `cached_path`
+  with `file_hash IS NOT NULL` whose hash is not in the on-disk list is
+  deleted, dragging its signature placeholders along via cascade.
+
+Tests (`cargo test -p cache --tests cacher::cleanup`):
+
+- `purges_cached_paths_whose_nar_is_missing` — feeds a `cached_path`
+  whose hash is absent from the local NAR store and asserts the live
+  NAR is preserved while the orphan-files pass exercises the new
+  cleanup branch.
+
 ## Substituted classification — match cached_path by hash, not by foreign-key link
 
 `compute_truly_substituted` previously demanded
