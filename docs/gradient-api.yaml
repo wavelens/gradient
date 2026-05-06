@@ -98,6 +98,8 @@ tags:
     description: Organization management, members, SSH keys, cache subscriptions
   - name: projects
     description: Project management and evaluation triggers
+  - name: triggers
+    description: Per-project evaluation triggers (polling, reporter_push, reporter_pull_request, time)
   - name: evals
     description: Evaluation details, status, and log streaming
   - name: builds
@@ -1544,8 +1546,11 @@ paths:
       tags: [integrations]
       summary: Get project integration link
       description: >-
-        Returns the inbound/outbound integration IDs linked to this project.
-        Both fields are `null` when no link exists.
+        Returns the outbound integration ID linked to this project, or `null`
+        when no link exists. Inbound integration linkage moved to `/triggers`
+        (configure a `reporter_push` or `reporter_pull_request` trigger that
+        references an `integration_id`). This endpoint now manages only the
+        outbound integration link.
       operationId: getProjectIntegration
       responses:
         '200':
@@ -1567,10 +1572,11 @@ paths:
       tags: [integrations]
       summary: Set project integration link
       description: >-
-        Upserts the project → org-integration link. Each ID must reference an
-        integration in the same organization whose `kind` matches the field
-        (inbound/outbound). Pass `null` to unset either side. Requires
-        Admin/Write on the project.
+        Upserts the project → outbound-integration link. The ID must reference
+        an outbound integration in the same organization. Pass `null` to unset.
+        Requires Admin/Write on the project. Inbound integration linkage moved
+        to `/triggers` (configure a `reporter_push` or `reporter_pull_request`
+        trigger that references an `integration_id`).
       operationId: putProjectIntegration
       requestBody:
         required: true
@@ -1828,6 +1834,198 @@ paths:
                 format: binary
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ── Triggers ─────────────────────────────────────────────────────────────────
+
+  /projects/{organization}/{project}/triggers:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
+    get:
+      tags: [triggers]
+      summary: List project triggers
+      operationId: listProjectTriggers
+      responses:
+        '200':
+          description: List of triggers
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ProjectTrigger'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [triggers]
+      summary: Create project trigger
+      operationId: createProjectTrigger
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [config, concurrency]
+              properties:
+                config:
+                  $ref: '#/components/schemas/TriggerConfig'
+                concurrency:
+                  $ref: '#/components/schemas/ConcurrencyPolicy'
+                active:
+                  type: boolean
+                  default: true
+      responses:
+        '200':
+          description: Trigger created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/ProjectTrigger'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /projects/{organization}/{project}/triggers/{id}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Trigger UUID
+    get:
+      tags: [triggers]
+      summary: Get project trigger
+      operationId: getProjectTrigger
+      responses:
+        '200':
+          description: Trigger
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/ProjectTrigger'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [triggers]
+      summary: Update project trigger
+      operationId: updateProjectTrigger
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                config:
+                  $ref: '#/components/schemas/TriggerConfig'
+                concurrency:
+                  $ref: '#/components/schemas/ConcurrencyPolicy'
+                active:
+                  type: boolean
+      responses:
+        '200':
+          description: Trigger updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/ProjectTrigger'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [triggers]
+      summary: Delete project trigger
+      operationId: deleteProjectTrigger
+      responses:
+        '200':
+          description: Trigger deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BoolResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /projects/{organization}/{project}/triggers/{id}/test:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Trigger UUID
+    post:
+      tags: [triggers]
+      summary: Manually fire trigger
+      operationId: testProjectTrigger
+      description: >-
+        Resolves the project HEAD and applies the trigger immediately, bypassing
+        commit dedup. Returns the apply outcome.
+      responses:
+        '200':
+          description: Trigger apply outcome
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: string
+                        description: Outcome description
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -4691,6 +4889,11 @@ components:
           description: Nix attribute wildcard that was evaluated
         status:
           $ref: '#/components/schemas/EvaluationStatus'
+        trigger:
+          allOf:
+            - $ref: '#/components/schemas/EvaluationTriggerSummary'
+          nullable: true
+          description: The trigger that initiated this evaluation, or null if started manually.
         previous:
           type: string
           format: uuid
@@ -5421,15 +5624,11 @@ components:
 
     ProjectIntegrationLink:
       type: object
-      required: [project, inbound_integration, outbound_integration]
+      required: [project, outbound_integration]
       properties:
         project:
           type: string
           format: uuid
-        inbound_integration:
-          type: string
-          format: uuid
-          nullable: true
         outbound_integration:
           type: string
           format: uuid
@@ -5438,14 +5637,120 @@ components:
     PutProjectIntegrationRequest:
       type: object
       properties:
-        inbound_integration:
-          type: string
-          format: uuid
-          nullable: true
         outbound_integration:
           type: string
           format: uuid
           nullable: true
+
+    TriggerType:
+      type: string
+      enum: [polling, reporter_push, reporter_pull_request, time]
+
+    ConcurrencyPolicy:
+      type: string
+      enum: [hard_abort, soft_abort, allow, skip]
+      description: '`allow` is reserved and rejected with 400 at create/update.'
+
+    PollingTriggerConfig:
+      type: object
+      required: [interval_secs]
+      properties:
+        interval_secs:
+          type: integer
+          minimum: 10
+
+    ReporterPushTriggerConfig:
+      type: object
+      required: [integration_id]
+      properties:
+        integration_id:
+          type: string
+          format: uuid
+        branches:
+          type: array
+          items:
+            type: string
+          description: 'Glob patterns matched against branch names. Empty = match all.'
+        tags:
+          type: array
+          items:
+            type: string
+          description: 'Glob patterns matched against tag names. Empty = match all.'
+        releases_only:
+          type: boolean
+          description: 'When true, fires only on forge release events with a matching tag glob.'
+
+    ReporterPullRequestTriggerConfig:
+      type: object
+      required: [integration_id]
+      properties:
+        integration_id:
+          type: string
+          format: uuid
+        branches:
+          type: array
+          items:
+            type: string
+          description: 'Target branches to filter on. Empty = match all.'
+        actions:
+          type: array
+          items:
+            type: string
+          description: 'PR actions that fire the trigger. Defaults to ["opened","synchronize","reopened"].'
+
+    TimeTriggerConfig:
+      type: object
+      required: [cron]
+      properties:
+        cron:
+          type: string
+          description: 'Six-field cron expression (sec min hour dom mon dow), UTC.'
+
+    TriggerConfig:
+      anyOf:
+        - $ref: '#/components/schemas/PollingTriggerConfig'
+        - $ref: '#/components/schemas/ReporterPushTriggerConfig'
+        - $ref: '#/components/schemas/ReporterPullRequestTriggerConfig'
+        - $ref: '#/components/schemas/TimeTriggerConfig'
+
+    ProjectTrigger:
+      type: object
+      required: [id, project, type, concurrency, config, active, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        project:
+          type: string
+          format: uuid
+        type:
+          $ref: '#/components/schemas/TriggerType'
+        concurrency:
+          $ref: '#/components/schemas/ConcurrencyPolicy'
+        config:
+          $ref: '#/components/schemas/TriggerConfig'
+        active:
+          type: boolean
+        last_fired_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    EvaluationTriggerSummary:
+      type: object
+      required: [id, type]
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          $ref: '#/components/schemas/TriggerType'
 
     WebhookResponse:
       type: object
