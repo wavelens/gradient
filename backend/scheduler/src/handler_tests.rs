@@ -64,6 +64,7 @@ fn make_eval(id: EvaluationId, status: EvaluationStatus) -> MEvaluation {
         flake_source: None,
         repo_check_id: None,
         waiting_reason: None,
+        trigger: None,
     }
 }
 
@@ -246,6 +247,7 @@ fn make_eval_with_project(
         flake_source: None,
         repo_check_id: None,
         waiting_reason: None,
+        trigger: None,
     }
 }
 

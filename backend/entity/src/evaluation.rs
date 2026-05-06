@@ -8,7 +8,7 @@ use chrono::NaiveDateTime;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{CommitId, EvaluationId, ProjectId};
+use crate::ids::{CommitId, EvaluationId, ProjectId, ProjectTriggerId};
 
 #[derive(Debug, Clone, PartialEq, Eq, DeriveActiveEnum, EnumIter, Deserialize, Serialize)]
 #[sea_orm(rs_type = "i32", db_type = "Integer")]
@@ -87,6 +87,7 @@ pub struct Model {
     pub flake_source: Option<String>,
     pub repo_check_id: Option<i64>,
     pub waiting_reason: Option<serde_json::Value>,
+    pub trigger: Option<ProjectTriggerId>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -115,6 +116,12 @@ pub enum Relation {
         to = "super::evaluation::Column::Id"
     )]
     NextEvaluation,
+    #[sea_orm(
+        belongs_to = "super::project_trigger::Entity",
+        from = "Column::Trigger",
+        to = "super::project_trigger::Column::Id"
+    )]
+    Trigger,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

@@ -59,6 +59,7 @@ fn make_eval_queued(
         flake_source: None,
         repo_check_id: None,
         waiting_reason: None,
+        trigger: None,
     }
 }
 
