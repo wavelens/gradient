@@ -230,6 +230,19 @@ pub async fn get_commit_info(
         .await
 }
 
+/// Best-effort: resolve the project's current HEAD commit, message, and author name.
+/// Used for manual trigger fires (UI re-run / `/triggers/{id}/test`) where we
+/// want a concrete commit even if the polling source says "no update".
+#[instrument(skip(state), fields(project_id = %project.id, project_name = %project.name))]
+pub async fn resolve_head(
+    state: Arc<ServerState>,
+    project: &MProject,
+) -> Result<(Vec<u8>, String, String), SourceError> {
+    let (_has_update, commit_hash) = check_project_updates(Arc::clone(&state), project).await?;
+    let (msg, _email, author) = get_commit_info(Arc::clone(&state), project, &commit_hash).await?;
+    Ok((commit_hash, msg, author))
+}
+
 // ── Libgit2Prefetcher ─────────────────────────────────────────────────────────
 
 /// Production `FlakePrefetcher` backed by libgit2 + the Nix C API.
