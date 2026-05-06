@@ -26,6 +26,10 @@ pub async fn update_build_status(
     build: MBuild,
     status: BuildStatus,
 ) -> MBuild {
+    if build.status == status {
+        return build;
+    }
+
     match BuildStateMachine::validate(build.status.clone(), status.clone()) {
         Ok(_) => {}
         Err(e) => {
