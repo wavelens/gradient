@@ -4605,6 +4605,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "core",
+ "cron",
  "entity",
  "sea-orm",
  "serde",
