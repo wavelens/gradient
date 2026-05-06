@@ -180,6 +180,7 @@ pub(super) async fn mark_nar_stored(
         .filter(CDerivationOutput::Hash.eq(hash))
         .all(&state.worker_db)
         .await?;
+    let mut marked = 0usize;
     for row in outputs {
         let mut active = row.into_active_model();
         active.is_cached = Set(true);
@@ -187,12 +188,16 @@ pub(super) async fn mark_nar_stored(
         if let Err(e) = active.update(&state.worker_db).await {
             warn!(store_path, error = %e, "failed to mark derivation_output cached");
         } else {
-            info!(
-                store_path,
-                file_size = record.file_size,
-                "derivation_output marked cached after NarPush"
-            );
+            marked += 1;
         }
+    }
+    if marked > 0 {
+        info!(
+            store_path,
+            file_size = record.file_size,
+            count = marked,
+            "derivation_outputs marked cached after NarPush"
+        );
     }
 
     // Enqueue signing: insert a placeholder `cached_path_signature` row
