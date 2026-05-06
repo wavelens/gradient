@@ -322,9 +322,6 @@ pub async fn fire_now(
         ApplyOutcome::SkippedConcurrency => {
             serde_json::json!({ "outcome": "SkippedConcurrency" })
         }
-        ApplyOutcome::SkippedAllowReserved => {
-            serde_json::json!({ "outcome": "SkippedAllowReserved" })
-        }
     };
 
     Ok(ok_json(body))

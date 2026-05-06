@@ -235,6 +235,7 @@ fn eval_row(status: EvaluationStatus) -> entity::evaluation::Model {
         repo_check_id: None,
         waiting_reason: None,
         trigger: None,
+        concurrent: false,
     }
 }
 

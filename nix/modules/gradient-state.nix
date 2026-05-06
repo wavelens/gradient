@@ -210,7 +210,7 @@
       };
 
       concurrency = mkOption {
-        type = types.enum [ "hard_abort" "soft_abort" "skip" ];
+        type = types.enum [ "hard_abort" "soft_abort" "skip" "all" ];
         default = "skip";
         description = ''
           Project-level policy for handling new trigger events while an
@@ -222,9 +222,8 @@
             becomes canonical, but lets in-flight builds finish; their cached
             outputs flow into the new evaluation.
           - `skip` discards the new trigger event.
-
-          `allow` (multi-evaluation-per-project) is reserved and rejected at
-          the API; it is intentionally not exposed here.
+          - `all` runs a new evaluation alongside the in-flight one
+            (multi-eval per project).
         '';
       };
 

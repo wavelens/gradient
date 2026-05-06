@@ -589,7 +589,7 @@ fn create_project_seeds_default_polling_trigger() {
 }
 
 #[test]
-fn create_project_with_allow_concurrency_returns_400() {
+fn create_project_with_all_concurrency_returns_id() {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -598,9 +598,42 @@ fn create_project_with_allow_concurrency_returns_400() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
+        let created_project = project::Model {
+            id: project_id(),
+            organization: org_id(),
+            name: "new-project".into(),
+            active: true,
+            display_name: "New Project".into(),
+            description: "".into(),
+            repository: "https://github.com/test/repo".into(),
+            evaluation_wildcard: "*".into(),
+            last_evaluation: None,
+            last_check_at: test_date(),
+            force_evaluation: false,
+            created_by: user_id(),
+            created_at: test_date(),
+            managed: false,
+            keep_evaluations: 30,
+            concurrency: 2, // All
+        };
+
+        let seeded_trigger = entity::project_trigger::Model {
+            id: trigger_id(),
+            project: project_id(),
+            trigger_type: 0,
+            config: serde_json::json!({"interval_secs": 300}),
+            active: true,
+            last_fired_at: None,
+            created_at: test_date(),
+            updated_at: test_date(),
+        };
+
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
             .append_query_results([vec![org()]])
-            .append_query_results([vec![admin_membership()]]);
+            .append_query_results([vec![admin_membership()]])
+            .append_query_results([Vec::<project::Model>::new()])
+            .append_query_results([vec![created_project]])
+            .append_query_results([vec![seeded_trigger]]);
 
         let server = make_server(db.into_connection());
         let res = server
@@ -612,18 +645,14 @@ fn create_project_with_allow_concurrency_returns_400() {
                 "description": "",
                 "repository": "https://github.com/test/repo",
                 "evaluation_wildcard": "*",
-                "concurrency": "allow"
+                "concurrency": "all"
             }))
             .await;
 
-        res.assert_status_bad_request();
+        res.assert_status_ok();
         let body: Value = res.json();
-        assert_eq!(body["error"], true);
-        assert!(
-            body["message"].as_str().unwrap().contains("allow"),
-            "expected allow mention, got: {}",
-            body["message"]
-        );
+        assert_eq!(body["error"], false);
+        assert_eq!(body["message"], project_id().to_string());
     });
 }
 
@@ -724,7 +753,7 @@ fn patch_project_concurrency_to_skip() {
 }
 
 #[test]
-fn patch_project_allow_concurrency_returns_400() {
+fn patch_project_all_concurrency_returns_ok() {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -733,22 +762,19 @@ fn patch_project_allow_concurrency_returns_400() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let db = with_project_edit(with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id));
+        let db = with_project_edit(with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id))
+            .append_query_results([vec![project_row()]])
+            .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }]);
 
         let server = make_server(db.into_connection());
         let res = server
             .patch("/api/v1/projects/test-org/test-project")
             .add_header("authorization", format!("Bearer {}", token))
-            .json(&serde_json::json!({"concurrency": "allow"}))
+            .json(&serde_json::json!({"concurrency": "all"}))
             .await;
 
-        res.assert_status_bad_request();
+        res.assert_status_ok();
         let body: Value = res.json();
-        assert_eq!(body["error"], true);
-        assert!(
-            body["message"].as_str().unwrap().contains("allow"),
-            "expected allow mention, got: {}",
-            body["message"]
-        );
+        assert_eq!(body["error"], false);
     });
 }

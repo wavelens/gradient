@@ -87,7 +87,7 @@ export class ProjectSettingsComponent implements OnInit {
     { label: 'Hard Abort: cancel running evaluation and its in-flight builds', value: 'hard_abort' },
     { label: 'Soft Abort: mark current evaluation aborted, let in-flight builds finish', value: 'soft_abort' },
     { label: 'Skip: keep the running evaluation, discard the new trigger event', value: 'skip' },
-    { label: 'Allow (reserved)', value: 'allow', disabled: true },
+    { label: 'All: run a new evaluation alongside the in-flight one', value: 'all' },
   ];
 
   integrationsLoading = signal(true);

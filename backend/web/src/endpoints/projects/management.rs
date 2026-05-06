@@ -168,10 +168,6 @@ pub async fn put(
     Path(organization): Path<String>,
     Json(body): Json<MakeProjectRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    if let Some(ConcurrencyPolicy::Allow) = body.concurrency {
-        return Err(WebError::bad_request("`allow` concurrency is reserved"));
-    }
-
     if check_index_name(body.name.clone().as_str()).is_err() {
         return Err(WebError::invalid_name("Project Name"));
     }
@@ -441,9 +437,6 @@ impl<'a> ProjectPatcher<'a> {
     }
 
     fn apply_concurrency(&mut self, concurrency: ConcurrencyPolicy) -> WebResult<()> {
-        if concurrency == ConcurrencyPolicy::Allow {
-            return Err(WebError::bad_request("`allow` concurrency is reserved"));
-        }
         self.aproject.concurrency = Set(concurrency.as_i16());
         Ok(())
     }

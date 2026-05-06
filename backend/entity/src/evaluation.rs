@@ -88,6 +88,7 @@ pub struct Model {
     pub repo_check_id: Option<i64>,
     pub waiting_reason: Option<serde_json::Value>,
     pub trigger: Option<ProjectTriggerId>,
+    pub concurrent: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

@@ -133,7 +133,7 @@ services.gradient.state.projects = {
 | `evaluation_wildcard` | `packages.x86_64-linux.*` | Attr-path pattern picked up by the evaluator |
 | `active` | `true` | Disable to pause polling/evaluations without deleting |
 | `force_evaluation` | `false` | Re-evaluate on next poll regardless of the last commit hash |
-| `concurrency` | `"skip"` | Policy for handling new trigger events while an evaluation is in flight (`hard_abort`, `soft_abort`, `skip`). Applies to all triggers on the project |
+| `concurrency` | `"skip"` | Policy for handling new trigger events while an evaluation is in flight (`hard_abort`, `soft_abort`, `skip`, `all`). Applies to all triggers on the project |
 | `outbound_integration` | `null` | Name of an `outbound` integration that receives CI status reports |
 | `created_by` | — | Username of creator (required) |
 
@@ -402,7 +402,7 @@ Each project has a single concurrency policy that applies to all of its triggers
 - **hard_abort** — cancel the in-flight evaluation and its in-flight builds, then start a new evaluation. Workers running affected builds receive cancellation through the existing job lifecycle.
 - **soft_abort** — mark the in-flight evaluation `Aborted` so the new one becomes canonical, but let already-running builds finish; their cached outputs flow into the new evaluation.
 - **skip** — discard the new trigger event; keep the running evaluation.
-- **allow** — *reserved.* Currently rejected with HTTP 400; multi-evaluation-per-project support is a follow-up.
+- **all** — run a new evaluation alongside the in-flight one. The new eval is flagged `concurrent` so it bypasses the "one active eval per project" guard while leaving that guard intact for `hard_abort` / `soft_abort` / `skip`.
 
 ### Defaults
 

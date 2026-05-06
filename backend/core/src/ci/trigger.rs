@@ -30,9 +30,12 @@ pub enum TriggerError {
 
 /// Creates a new `Queued` evaluation for `project` at `commit_hash`.
 ///
-/// - Refuses with [`TriggerError::AlreadyInProgress`] when the project already
-///   has a running evaluation (Queued / Fetching / EvaluatingFlake /
-///   EvaluatingDerivation / Building / Waiting).
+/// - When `concurrent` is false, refuses with [`TriggerError::AlreadyInProgress`]
+///   if the project already has a running evaluation (Queued / Fetching /
+///   EvaluatingFlake / EvaluatingDerivation / Building / Waiting).
+/// - When `concurrent` is true (used by the `all` concurrency policy), skips
+///   the in-progress guard and sets `evaluation.concurrent = true` on the new
+///   row so the partial unique index lets it through.
 /// - Inserts a `Commit` row, then an `Evaluation` row with status `Queued`.
 /// - Sets `project.force_evaluation = true` and resets `last_check_at` so the
 ///   scheduler picks it up immediately on its next tick.
@@ -43,24 +46,26 @@ pub async fn trigger_evaluation<C: ConnectionTrait>(
     commit_message: Option<String>,
     author_name: Option<String>,
     trigger: Option<crate::types::ids::ProjectTriggerId>,
+    concurrent: bool,
 ) -> Result<MEvaluation, TriggerError> {
-    // Guard: reject if an evaluation is already in progress.
-    let in_progress = EEvaluation::find()
-        .filter(CEvaluation::Project.eq(project.id))
-        .filter(
-            Condition::any()
-                .add(CEvaluation::Status.eq(EvaluationStatus::Queued))
-                .add(CEvaluation::Status.eq(EvaluationStatus::Fetching))
-                .add(CEvaluation::Status.eq(EvaluationStatus::EvaluatingFlake))
-                .add(CEvaluation::Status.eq(EvaluationStatus::EvaluatingDerivation))
-                .add(CEvaluation::Status.eq(EvaluationStatus::Building))
-                .add(CEvaluation::Status.eq(EvaluationStatus::Waiting)),
-        )
-        .one(db)
-        .await?;
+    if !concurrent {
+        let in_progress = EEvaluation::find()
+            .filter(CEvaluation::Project.eq(project.id))
+            .filter(
+                Condition::any()
+                    .add(CEvaluation::Status.eq(EvaluationStatus::Queued))
+                    .add(CEvaluation::Status.eq(EvaluationStatus::Fetching))
+                    .add(CEvaluation::Status.eq(EvaluationStatus::EvaluatingFlake))
+                    .add(CEvaluation::Status.eq(EvaluationStatus::EvaluatingDerivation))
+                    .add(CEvaluation::Status.eq(EvaluationStatus::Building))
+                    .add(CEvaluation::Status.eq(EvaluationStatus::Waiting)),
+            )
+            .one(db)
+            .await?;
 
-    if in_progress.is_some() {
-        return Err(TriggerError::AlreadyInProgress);
+        if in_progress.is_some() {
+            return Err(TriggerError::AlreadyInProgress);
+        }
     }
 
     // Resolve `project.last_evaluation` against the DB so a dangling pointer
@@ -100,6 +105,7 @@ pub async fn trigger_evaluation<C: ConnectionTrait>(
         repo_check_id: Set(None),
         waiting_reason: Set(None),
         trigger: Set(trigger),
+        concurrent: Set(concurrent),
     };
     let evaluation = aevaluation.insert(db).await?;
 
@@ -182,6 +188,7 @@ pub async fn trigger_restart_builds<C: ConnectionTrait>(
         repo_check_id: Set(None),
         waiting_reason: Set(None),
         trigger: Set(None),
+        concurrent: Set(false),
     };
     let new_eval = aevaluation.insert(db).await?;
 
@@ -291,6 +298,7 @@ mod tests {
             repo_check_id: None,
             waiting_reason: None,
             trigger: None,
+            concurrent: false,
         }
     }
 
@@ -322,7 +330,7 @@ mod tests {
             }])
             .into_connection();
 
-        let result = trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None).await;
+        let result = trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None, false).await;
         assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
         assert_eq!(result.unwrap().status, EvaluationStatus::Queued);
     }
@@ -360,7 +368,7 @@ mod tests {
             }])
             .into_connection();
 
-        let result = trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None).await;
+        let result = trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None, false).await;
         assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
     }
 
@@ -374,7 +382,7 @@ mod tests {
             .append_query_results([vec![existing_eval]])
             .into_connection();
 
-        let result = trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None).await;
+        let result = trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None, false).await;
         assert!(matches!(result, Err(TriggerError::AlreadyInProgress)));
     }
 
@@ -393,7 +401,7 @@ mod tests {
             let db = MockDatabase::new(DatabaseBackend::Postgres)
                 .append_query_results([vec![make_eval(EvaluationId::now_v7(), status.clone())]])
                 .into_connection();
-            let result = trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None).await;
+            let result = trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None, false).await;
             assert!(
                 matches!(result, Err(TriggerError::AlreadyInProgress)),
                 "{status:?} should block trigger"
@@ -458,7 +466,7 @@ mod tests {
             }])
             .into_connection();
 
-        let result = trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None).await;
+        let result = trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None, false).await;
         assert!(result.is_ok(), "terminal eval should not block new trigger");
     }
 
@@ -490,7 +498,7 @@ mod tests {
             }])
             .into_connection();
 
-        let result = trigger_evaluation(&db, &project, vec![0u8; 20], None, None, Some(trig)).await;
+        let result = trigger_evaluation(&db, &project, vec![0u8; 20], None, None, Some(trig), false).await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap().trigger, Some(trig));
     }

@@ -60,6 +60,7 @@ fn make_eval_queued(
         repo_check_id: None,
         waiting_reason: None,
         trigger: None,
+        concurrent: false,
     }
 }
 

@@ -5,7 +5,7 @@
  */
 
 export type TriggerType = 'polling' | 'reporter_push' | 'reporter_pull_request' | 'time';
-export type ConcurrencyPolicy = 'hard_abort' | 'soft_abort' | 'allow' | 'skip';
+export type ConcurrencyPolicy = 'hard_abort' | 'soft_abort' | 'all' | 'skip';
 
 export interface PollingTriggerConfig {
   type: 'polling';

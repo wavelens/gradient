@@ -30,7 +30,6 @@ pub enum ApplyOutcome {
     },
     SkippedSameCommit,
     SkippedConcurrency,
-    SkippedAllowReserved,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -75,30 +74,32 @@ pub async fn apply_trigger<C: ConnectionTrait>(
     let concurrency =
         ConcurrencyPolicy::from_i16(project.concurrency).unwrap_or(ConcurrencyPolicy::Skip);
 
-    let active_codes: Vec<i32> = EvaluationStatus::ACTIVE.iter().map(|s| s.num_value()).collect();
-    let in_flight = EEvaluation::find()
-        .filter(CEvaluation::Project.eq(project.id))
-        .filter(CEvaluation::Status.is_in(active_codes))
-        .one(db)
-        .await?;
-
     let mut aborted_evaluation: Option<EvaluationId> = None;
     let mut aborted_builds: Vec<BuildId> = Vec::new();
+    let concurrent_flag = matches!(concurrency, ConcurrencyPolicy::All);
 
-    if let Some(running) = in_flight {
-        match concurrency {
-            ConcurrencyPolicy::Skip => return Ok(ApplyOutcome::SkippedConcurrency),
-            ConcurrencyPolicy::HardAbort => {
-                aborted_builds = abort_evaluation(db, running.id, AbortKind::Hard).await?;
-                aborted_evaluation = Some(running.id);
-            }
-            ConcurrencyPolicy::SoftAbort => {
-                abort_evaluation(db, running.id, AbortKind::Soft).await?;
-                aborted_evaluation = Some(running.id);
-            }
-            ConcurrencyPolicy::Allow => {
-                // Reserved — multi-eval-per-project support is a follow-up.
-                return Ok(ApplyOutcome::SkippedAllowReserved);
+    if !concurrent_flag {
+        let active_codes: Vec<i32> =
+            EvaluationStatus::ACTIVE.iter().map(|s| s.num_value()).collect();
+        let in_flight = EEvaluation::find()
+            .filter(CEvaluation::Project.eq(project.id))
+            .filter(CEvaluation::Status.is_in(active_codes))
+            .one(db)
+            .await?;
+
+        if let Some(running) = in_flight {
+            match concurrency {
+                ConcurrencyPolicy::Skip => return Ok(ApplyOutcome::SkippedConcurrency),
+                ConcurrencyPolicy::HardAbort => {
+                    aborted_builds =
+                        abort_evaluation(db, running.id, AbortKind::Hard).await?;
+                    aborted_evaluation = Some(running.id);
+                }
+                ConcurrencyPolicy::SoftAbort => {
+                    abort_evaluation(db, running.id, AbortKind::Soft).await?;
+                    aborted_evaluation = Some(running.id);
+                }
+                ConcurrencyPolicy::All => unreachable!("filtered above"),
             }
         }
     }
@@ -110,6 +111,7 @@ pub async fn apply_trigger<C: ConnectionTrait>(
         input.commit_message,
         input.author_name,
         Some(input.trigger_id),
+        concurrent_flag,
     )
     .await
     {
@@ -178,6 +180,7 @@ mod tests {
             repo_check_id: None,
             waiting_reason: None,
             trigger: None,
+            concurrent: false,
         }
     }
 
@@ -303,25 +306,48 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn allow_concurrency_returns_skipped_allow_reserved() {
-        let project = make_project_with_concurrency(None, 2); // Allow
+    async fn all_concurrency_creates_evaluation_alongside_running() {
+        let project = make_project_with_concurrency(None, 2); // All
         let running_eval_id = EvaluationId::now_v7();
-        let running_eval =
-            make_eval(running_eval_id, project.id, CommitId::nil(), EvaluationStatus::Building);
+        let new_eval_id = EvaluationId::now_v7();
+        let new_commit_id = CommitId::now_v7();
+        let trig = ProjectTriggerId::now_v7();
+        let new_hash = vec![9u8; 20];
 
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![running_eval.clone()]])
+            // all policy skips the in-flight check entirely — no concurrency query
+            // trigger_evaluation: concurrent=true skips the in-progress guard — no guard query
+            // trigger_evaluation: resolve previous (no last_evaluation)
+            // commit insert
+            .append_query_results([vec![make_commit(new_commit_id, new_hash.clone())]])
+            // evaluation insert — the new eval carries concurrent=true
+            .append_query_results([vec![{
+                let mut m = make_eval(new_eval_id, project.id, new_commit_id, EvaluationStatus::Queued);
+                m.trigger = Some(trig);
+                m.concurrent = true;
+                m
+            }]])
+            // project update read-back
+            .append_query_results([vec![project.clone()]])
+            // project update exec
+            .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
             .into_connection();
 
-        let trig = ProjectTriggerId::now_v7();
         let res = apply_trigger(
             &db,
             &project,
-            input(trig, TriggerType::Polling, vec![9u8; 20], false),
+            input(trig, TriggerType::Polling, new_hash, false),
         )
         .await
         .unwrap();
-        assert!(matches!(res, ApplyOutcome::SkippedAllowReserved));
+
+        let ApplyOutcome::Created { evaluation, aborted_evaluation, aborted_builds } = res else {
+            panic!("expected Created, got {res:?}");
+        };
+        assert_eq!(evaluation.id, new_eval_id);
+        assert!(evaluation.concurrent, "new eval must carry concurrent=true");
+        assert_eq!(aborted_evaluation, None);
+        assert!(aborted_builds.is_empty());
     }
 
     #[tokio::test]

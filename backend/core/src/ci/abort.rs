@@ -92,6 +92,7 @@ mod tests {
             repo_check_id: None,
             waiting_reason: None,
             trigger: None,
+            concurrent: false,
         }
     }
 

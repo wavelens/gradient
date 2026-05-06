@@ -48,7 +48,7 @@ impl TriggerType {
 pub enum ConcurrencyPolicy {
     HardAbort,
     SoftAbort,
-    Allow,
+    All,
     Skip,
 }
 
@@ -57,7 +57,7 @@ impl ConcurrencyPolicy {
         match self {
             Self::HardAbort => 0,
             Self::SoftAbort => 1,
-            Self::Allow => 2,
+            Self::All => 2,
             Self::Skip => 3,
         }
     }
@@ -66,7 +66,7 @@ impl ConcurrencyPolicy {
         Some(match v {
             0 => Self::HardAbort,
             1 => Self::SoftAbort,
-            2 => Self::Allow,
+            2 => Self::All,
             3 => Self::Skip,
             _ => return None,
         })
@@ -229,7 +229,7 @@ mod tests {
         for (p, n) in [
             (ConcurrencyPolicy::HardAbort, 0),
             (ConcurrencyPolicy::SoftAbort, 1),
-            (ConcurrencyPolicy::Allow, 2),
+            (ConcurrencyPolicy::All, 2),
             (ConcurrencyPolicy::Skip, 3),
         ] {
             assert_eq!(p.as_i16(), n);

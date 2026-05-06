@@ -65,6 +65,7 @@ fn make_eval(id: EvaluationId, status: EvaluationStatus) -> MEvaluation {
         repo_check_id: None,
         waiting_reason: None,
         trigger: None,
+        concurrent: false,
     }
 }
 
@@ -248,6 +249,7 @@ fn make_eval_with_project(
         repo_check_id: None,
         waiting_reason: None,
         trigger: None,
+        concurrent: false,
     }
 }
 

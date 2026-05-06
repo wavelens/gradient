@@ -370,14 +370,6 @@ where
                     reason: "concurrency".into(),
                 });
             }
-            Ok(ApplyOutcome::SkippedAllowReserved) => {
-                outcome.skipped.push(SkippedProject {
-                    project_id: project.id,
-                    project_name: project.name.clone(),
-                    organization: org_name,
-                    reason: "allow_reserved".into(),
-                });
-            }
             Err(e) => {
                 warn!(error = %e, project_id = %project.id, "apply_trigger failed in webhook fan-out");
                 outcome.skipped.push(SkippedProject {

@@ -94,6 +94,7 @@ mod m20260507_000001_add_trigger_to_evaluation;
 mod m20260507_000002_drop_inbound_integration;
 mod m20260507_000003_unique_active_evaluation_per_project;
 mod m20260507_000004_move_concurrency_to_project;
+mod m20260507_000005_evaluation_concurrent_flag;
 
 pub struct Migrator;
 
@@ -189,6 +190,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260507_000002_drop_inbound_integration::Migration),
             Box::new(m20260507_000003_unique_active_evaluation_per_project::Migration),
             Box::new(m20260507_000004_move_concurrency_to_project::Migration),
+            Box::new(m20260507_000005_evaluation_concurrent_flag::Migration),
         ]
     }
 }
