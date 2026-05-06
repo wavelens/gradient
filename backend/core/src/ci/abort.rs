@@ -30,13 +30,13 @@ pub async fn abort_evaluation<C: ConnectionTrait>(
     db: &C,
     eval_id: EvaluationId,
     kind: AbortKind,
-) -> Result<(), sea_orm::DbErr> {
+) -> Result<Vec<BuildId>, sea_orm::DbErr> {
     let eval = EEvaluation::find_by_id(eval_id).one(db).await?;
     let Some(eval) = eval else {
-        return Ok(());
+        return Ok(Vec::new());
     };
     if !eval.status.is_active() {
-        return Ok(());
+        return Ok(Vec::new());
     }
 
     let mut active: AEvaluation = eval.clone().into();
@@ -49,6 +49,7 @@ pub async fn abort_evaluation<C: ConnectionTrait>(
             .filter(CBuild::Evaluation.eq(eval_id))
             .all(db)
             .await?;
+        let mut aborted_ids = Vec::new();
         for b in builds {
             if matches!(
                 b.status,
@@ -59,13 +60,15 @@ pub async fn abort_evaluation<C: ConnectionTrait>(
             ) {
                 continue;
             }
+            aborted_ids.push(b.id);
             let mut ab: ABuild = b.into();
             ab.status = Set(BuildStatus::Aborted);
             ab.updated_at = Set(crate::types::now());
             ab.update(db).await?;
         }
+        return Ok(aborted_ids);
     }
-    Ok(())
+    Ok(Vec::new())
 }
 
 #[cfg(test)]
@@ -114,7 +117,8 @@ mod tests {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![eval.clone()]])
             .into_connection();
-        abort_evaluation(&db, eval.id, AbortKind::Hard).await.unwrap();
+        let ids = abort_evaluation(&db, eval.id, AbortKind::Hard).await.unwrap();
+        assert!(ids.is_empty());
     }
 
     #[tokio::test]
@@ -128,7 +132,8 @@ mod tests {
             // exec result for update
             .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
             .into_connection();
-        abort_evaluation(&db, eval.id, AbortKind::Soft).await.unwrap();
+        let ids = abort_evaluation(&db, eval.id, AbortKind::Soft).await.unwrap();
+        assert!(ids.is_empty(), "soft abort returns no build IDs");
     }
 
     #[tokio::test]
@@ -136,6 +141,7 @@ mod tests {
         let eval = make_eval(EvaluationStatus::Building);
         let active_build = make_build(eval.id, BuildStatus::Building);
         let done_build = make_build(eval.id, BuildStatus::Completed);
+        let active_build_id = active_build.id;
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             // initial eval fetch
             .append_query_results([vec![eval.clone()]])
@@ -150,8 +156,7 @@ mod tests {
             // active build exec
             .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
             .into_connection();
-        abort_evaluation(&db, eval.id, AbortKind::Hard).await.unwrap();
-        // No assertion on the second build — completed/substituted/failed/aborted
-        // are skipped without an additional update round-trip.
+        let ids = abort_evaluation(&db, eval.id, AbortKind::Hard).await.unwrap();
+        assert_eq!(ids, vec![active_build_id], "hard abort returns IDs of builds it marked Aborted");
     }
 }

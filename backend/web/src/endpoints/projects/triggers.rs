@@ -18,6 +18,7 @@ use gradient_core::ci::{apply_trigger, ApplyInput, ApplyOutcome};
 use gradient_core::sources::resolve_head;
 use gradient_core::types::triggers::{ConcurrencyPolicy, TriggerConfig, TriggerType};
 use gradient_core::types::*;
+use scheduler::Scheduler;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
@@ -275,6 +276,7 @@ pub async fn delete_one(
 pub async fn fire_now(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(scheduler): Extension<Arc<Scheduler>>,
     Path((organization, project, id)): Path<(String, String, ProjectTriggerId)>,
 ) -> WebResult<Json<BaseResponse<serde_json::Value>>> {
     let (_org, proj) = load_project(
@@ -320,10 +322,15 @@ pub async fn fire_now(
         .map_err(|e| WebError::internal(e.to_string()))?;
 
     let body = match outcome {
-        ApplyOutcome::Created(eval) => serde_json::json!({
-            "outcome": "Created",
-            "evaluation_id": eval.id,
-        }),
+        ApplyOutcome::Created { evaluation: eval, aborted_evaluation, aborted_builds } => {
+            if let Some(aborted_id) = aborted_evaluation {
+                scheduler.cancel_evaluation_jobs(aborted_id, &aborted_builds).await;
+            }
+            serde_json::json!({
+                "outcome": "Created",
+                "evaluation_id": eval.id,
+            })
+        }
         ApplyOutcome::SkippedSameCommit => serde_json::json!({ "outcome": "SkippedSameCommit" }),
         ApplyOutcome::SkippedConcurrency => {
             serde_json::json!({ "outcome": "SkippedConcurrency" })

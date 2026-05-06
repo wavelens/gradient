@@ -11,6 +11,7 @@ use entity::project_trigger as ept;
 use gradient_core::ci::{apply_trigger, ApplyInput, ApplyOutcome};
 use gradient_core::types::triggers::{ConcurrencyPolicy, TriggerConfig, TriggerType};
 use gradient_core::types::*;
+use scheduler::Scheduler;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Statement};
 use serde::Deserialize;
@@ -149,6 +150,7 @@ pub(super) enum PushRefKind<'a> {
 
 pub(super) async fn trigger_push_for_integration(
     state: &Arc<ServerState>,
+    scheduler: &Arc<Scheduler>,
     integration_id: IntegrationId,
     ref_kind: PushRefKind<'_>,
     commit_hash: Vec<u8>,
@@ -157,6 +159,7 @@ pub(super) async fn trigger_push_for_integration(
 ) -> WebhookTriggerOutcome {
     fan_out_triggers(
         state,
+        scheduler,
         integration_id,
         TriggerType::ReporterPush,
         commit_hash,
@@ -181,6 +184,7 @@ pub(super) async fn trigger_push_for_integration(
 
 pub(super) async fn trigger_pr_for_integration(
     state: &Arc<ServerState>,
+    scheduler: &Arc<Scheduler>,
     integration_id: IntegrationId,
     branch: Option<&str>,
     action: &str,
@@ -190,6 +194,7 @@ pub(super) async fn trigger_pr_for_integration(
 ) -> WebhookTriggerOutcome {
     fan_out_triggers(
         state,
+        scheduler,
         integration_id,
         TriggerType::ReporterPullRequest,
         commit_hash,
@@ -214,6 +219,7 @@ pub(super) async fn trigger_pr_for_integration(
 
 pub(super) async fn trigger_release_for_integration(
     state: &Arc<ServerState>,
+    scheduler: &Arc<Scheduler>,
     integration_id: IntegrationId,
     tag: Option<&str>,
     commit_hash: Vec<u8>,
@@ -222,6 +228,7 @@ pub(super) async fn trigger_release_for_integration(
 ) -> WebhookTriggerOutcome {
     fan_out_triggers(
         state,
+        scheduler,
         integration_id,
         TriggerType::ReporterPush,
         commit_hash,
@@ -257,6 +264,7 @@ enum FilterResult {
 
 async fn fan_out_triggers<F>(
     state: &Arc<ServerState>,
+    scheduler: &Arc<Scheduler>,
     integration_id: IntegrationId,
     trigger_type: TriggerType,
     commit_hash: Vec<u8>,
@@ -333,7 +341,10 @@ where
         )
         .await
         {
-            Ok(ApplyOutcome::Created(eval)) => {
+            Ok(ApplyOutcome::Created { evaluation: eval, aborted_evaluation, aborted_builds }) => {
+                if let Some(aborted_id) = aborted_evaluation {
+                    scheduler.cancel_evaluation_jobs(aborted_id, &aborted_builds).await;
+                }
                 info!(
                     project_id = %project.id,
                     evaluation_id = %eval.id,
