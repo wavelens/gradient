@@ -5651,7 +5651,8 @@ components:
     ConcurrencyPolicy:
       type: string
       enum: [hard_abort, soft_abort, all, skip]
-      description: 'Project-level policy for handling new trigger events while an evaluation is in flight. `all` runs a new evaluation alongside the in-flight one.'
+      default: soft_abort
+      description: 'Project-level policy for handling new trigger events while an evaluation is in flight. Defaults to `soft_abort`: marks the running evaluation Aborted but lets its in-flight builds finish so the new evaluation can reuse cached outputs. `all` runs a new evaluation alongside the in-flight one.'
 
     PollingTriggerConfig:
       type: object

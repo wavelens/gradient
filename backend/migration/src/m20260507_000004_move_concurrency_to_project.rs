@@ -5,8 +5,9 @@
  */
 
 //! Move concurrency policy from per-trigger to per-project. Adds
-//! `project.concurrency` (default 3 = skip) and drops the column on
-//! `project_trigger`. No data migration — every project starts at `skip`.
+//! `project.concurrency` (default 1 = soft_abort) and drops the column
+//! on `project_trigger`. No data migration — every project starts at
+//! `soft_abort`.
 
 use sea_orm_migration::prelude::*;
 
@@ -24,7 +25,7 @@ impl MigrationTrait for Migration {
                         ColumnDef::new(Project::Concurrency)
                             .small_integer()
                             .not_null()
-                            .default(3),
+                            .default(1),
                     )
                     .to_owned(),
             )
@@ -49,7 +50,7 @@ impl MigrationTrait for Migration {
                         ColumnDef::new(ProjectTrigger::Concurrency)
                             .small_integer()
                             .not_null()
-                            .default(3),
+                            .default(1),
                     )
                     .to_owned(),
             )

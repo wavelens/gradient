@@ -145,7 +145,7 @@ pub async fn get(
                 force_evaluation: p.force_evaluation,
                 keep_evaluations: p.keep_evaluations,
                 concurrency: ConcurrencyPolicy::from_i16(p.concurrency)
-                    .unwrap_or(ConcurrencyPolicy::Skip),
+                    .unwrap_or(ConcurrencyPolicy::SoftAbort),
                 created_by: p.created_by,
                 created_at: p.created_at,
                 managed: p.managed,
@@ -230,7 +230,7 @@ pub async fn put(
         created_at: Set(gradient_core::types::now()),
         managed: Set(false),
         keep_evaluations: Set(30),
-        concurrency: Set(body.concurrency.unwrap_or(ConcurrencyPolicy::Skip).as_i16()),
+        concurrency: Set(body.concurrency.unwrap_or(ConcurrencyPolicy::SoftAbort).as_i16()),
     };
 
     let project = project.insert(&state.web_db).await?;
@@ -305,7 +305,7 @@ pub async fn get_project(
         managed: project.managed,
         keep_evaluations: project.keep_evaluations,
         concurrency: ConcurrencyPolicy::from_i16(project.concurrency)
-            .unwrap_or(ConcurrencyPolicy::Skip),
+            .unwrap_or(ConcurrencyPolicy::SoftAbort),
         can_edit,
     }))
 }

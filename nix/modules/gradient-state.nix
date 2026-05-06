@@ -211,7 +211,7 @@
 
       concurrency = mkOption {
         type = types.enum [ "hard_abort" "soft_abort" "skip" "all" ];
-        default = "skip";
+        default = "soft_abort";
         description = ''
           Project-level policy for handling new trigger events while an
           evaluation is in flight.

@@ -71,8 +71,8 @@ pub async fn apply_trigger<C: ConnectionTrait>(
     }
 
     // ── Concurrency policy ────────────────────────────────────────────────
-    let concurrency =
-        ConcurrencyPolicy::from_i16(project.concurrency).unwrap_or(ConcurrencyPolicy::Skip);
+    let concurrency = ConcurrencyPolicy::from_i16(project.concurrency)
+        .unwrap_or(ConcurrencyPolicy::SoftAbort);
 
     let mut aborted_evaluation: Option<EvaluationId> = None;
     let mut aborted_builds: Vec<BuildId> = Vec::new();

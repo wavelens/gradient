@@ -73,13 +73,13 @@ pub struct StateProject {
     /// (back-compat). `Some([])` is an error — a project must have at least one.
     #[serde(default)]
     pub triggers: Option<Vec<StateTrigger>>,
-    /// Concurrency policy for this project. Defaults to `skip` when omitted.
-    #[serde(default = "default_skip")]
+    /// Concurrency policy for this project. Defaults to `soft_abort` when omitted.
+    #[serde(default = "default_soft_abort")]
     pub concurrency: ConcurrencyPolicy,
 }
 
-fn default_skip() -> ConcurrencyPolicy {
-    ConcurrencyPolicy::Skip
+fn default_soft_abort() -> ConcurrencyPolicy {
+    ConcurrencyPolicy::SoftAbort
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -515,7 +515,7 @@ mod tests {
     }
 
     #[test]
-    fn state_project_concurrency_defaults_to_skip() {
+    fn state_project_concurrency_defaults_to_soft_abort() {
         let json = r#"{
             "projects": {
                 "web": {
@@ -528,7 +528,7 @@ mod tests {
             }
         }"#;
         let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
-        assert_eq!(cfg.projects["web"].concurrency, ConcurrencyPolicy::Skip);
+        assert_eq!(cfg.projects["web"].concurrency, ConcurrencyPolicy::SoftAbort);
     }
 
     #[test]

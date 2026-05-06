@@ -114,7 +114,7 @@ services.gradient.state.projects = {
     repository           = "git@github.com:acme/web-app.git";
     evaluation_wildcard  = "packages.x86_64-linux.*";
     active               = true;
-    concurrency          = "hard_abort"; # optional, default "skip"
+    concurrency          = "hard_abort"; # optional, default "soft_abort"
     outbound_integration = "acme-status-reports"; # optional
     created_by           = "alice";
   };
@@ -407,6 +407,6 @@ Each project has a single concurrency policy that applies to all of its triggers
 ### Defaults
 
 - New projects automatically get a default `polling` trigger (interval 300s). Existing projects were backfilled by the same logic during the migration.
-- Concurrency defaults to `skip`; opt into `hard_abort` if you want push triggers to supersede running evaluations.
+- Concurrency defaults to `soft_abort` — a new trigger event marks the running evaluation Aborted while letting its in-flight builds finish; the new evaluation reuses any cached outputs they produce. Switch to `hard_abort` to also cancel the running builds, `skip` to drop the new event, or `all` to run multiple evaluations concurrently.
 
 The implicit fallback poll for projects with an inbound integration (the legacy `WEBHOOK_BACKUP_POLL_SECS` behavior) has been removed; webhook-driven projects must declare an explicit `reporter_push` trigger to receive evaluations from forge pushes.

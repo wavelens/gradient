@@ -80,7 +80,7 @@ export class ProjectSettingsComponent implements OnInit {
     repository: '',
     evaluation_wildcard: '',
     keep_evaluations: 30,
-    concurrency: 'skip',
+    concurrency: 'soft_abort',
   };
 
   concurrencyOptions: { label: string; value: ConcurrencyPolicy; disabled?: boolean }[] = [
