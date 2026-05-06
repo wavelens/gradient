@@ -361,7 +361,7 @@ services.gradient.state.projects.my-project = {
   triggers = [
     {
       type = "polling";
-      config = { interval_secs = 60; };
+      config = { interval_secs = 60; branch = "main"; };
     }
     {
       type = "reporter_push";
@@ -390,7 +390,7 @@ services.gradient.state.projects.my-project = {
 
 ### Trigger types
 
-- **polling** — periodically check the git repository for new commits. `interval_secs` minimum 10, default 300.
+- **polling** — periodically check the git repository for new commits. `interval_secs` minimum 10, default 300. **branch** (optional) — track a specific branch; leave unset to follow the remote HEAD (the repo's default branch).
 - **reporter_push** — fires on forge push events. Filters: `branches`, `tags` (glob patterns; empty = match all), `releases_only` (only fires on explicit forge release events).
 - **reporter_pull_request** — fires on PR/MR events. Filters: `branches`, `actions` (default: opened/synchronize/reopened).
 - **time** — fires on a six-field cron schedule (UTC). Re-evaluates the project HEAD even if the commit hasn't changed.

@@ -1134,7 +1134,7 @@ Run with `cargo test -p scheduler --tests waiting_reason_tests`.
 
 ## Project triggers (issue #116)
 
-- `core::types::triggers` — round-trip serialisation, polling interval validation (≥10s), six-field cron parsing, type/JSON shape mismatches.
+- `core::types::triggers` — round-trip serialisation, polling interval validation (≥10s), polling branch field (optional, nullable), six-field cron parsing, type/JSON shape mismatches.
 - `core::ci::abort` — `abort_evaluation` hard vs soft, terminal eval no-op.
 - `core::ci::apply` — `apply_trigger` orchestration: same-commit dedup, time-trigger and manual bypass, project-level concurrency policies (skip / hard_abort / soft_abort / allow→reserved).
 - `core::state::provisioning` — trigger config builder helpers, integration name resolution, key stability.
