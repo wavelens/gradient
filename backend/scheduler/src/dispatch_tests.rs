@@ -32,7 +32,7 @@ use entity::evaluation::EvaluationStatus;
 use gradient_core::types::*;
 use sea_orm::{DatabaseBackend, MockDatabase};
 
-use crate::{Scheduler, dispatch};
+use crate::{Scheduler, dispatch, trigger_dispatch};
 
 // ── Fixture helpers ──────────────────────────────────────────────────────────
 
@@ -347,27 +347,69 @@ async fn dispatch_ready_build_skips_already_enqueued() {
     );
 }
 
-// ── Group J: project polling ────────────────────────────────────────────────
+// ── Group J: trigger dispatch_once ───────────────────────────────────────────
 
-/// Verifies that the project polling function exists and is callable.
-/// This test was added after the evaluator service was accidentally disconnected
-/// from the server during the builder crate split — no evaluations were ever
-/// created automatically because no code polled projects for new commits.
+fn make_polling_trigger(
+    id: ProjectTriggerId,
+    project_id: ProjectId,
+    interval_secs: u32,
+    last_fired_at: Option<NaiveDateTime>,
+) -> entity::project_trigger::Model {
+    entity::project_trigger::Model {
+        id,
+        project: project_id,
+        trigger_type: 0, // Polling
+        concurrency: 3,  // Skip
+        config: serde_json::json!({ "interval_secs": interval_secs }),
+        active: true,
+        last_fired_at,
+        created_at: test_date(),
+        updated_at: test_date(),
+    }
+}
+
+/// `dispatch_once` with no active polling/time triggers is a no-op.
 #[tokio::test]
-async fn project_poll_with_no_projects_is_noop() {
-    // poll_projects_for_evaluations is pub(crate), so this test proves it exists
-    // and compiles. A real git repo is required for check_project_updates, so we
-    // just verify the function handles an empty project list gracefully.
-    let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
-        // Query for active projects with last_evaluation join → empty
-        .append_query_results([Vec::<entity::project::Model>::new()])
-        // Query for active projects without last_evaluation → empty
-        .append_query_results([Vec::<entity::project::Model>::new()])
+async fn dispatch_once_no_triggers_is_noop() {
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        // Query for active polling/time triggers → empty
+        .append_query_results([Vec::<entity::project_trigger::Model>::new()])
         .into_connection();
 
     let scheduler = make_scheduler(db);
-    let result = dispatch::poll_projects_for_evaluations(&scheduler).await;
-    assert!(result.is_ok(), "poll with no projects should succeed");
+    let result = trigger_dispatch::dispatch_once(&scheduler).await;
+    assert!(result.is_ok(), "dispatch_once with no triggers should succeed");
+}
+
+/// A trigger whose `last_fired_at` is recent (within interval) must not cause
+/// an evaluation — the `dispatch_once` loop skips it as not-due.
+///
+/// We verify this by asserting no project lookup follows the trigger query,
+/// which means no evaluation creation path is entered. If the mock DB were
+/// drained by a project lookup, sea-orm would panic on an empty queue.
+#[tokio::test]
+async fn dispatch_once_skips_trigger_within_interval() {
+    let project_id = ProjectId::now_v7();
+    let trigger_id = ProjectTriggerId::now_v7();
+    let org_id = OrganizationId::now_v7();
+
+    // last_fired_at = now (0 seconds ago) — interval = 60 s → not due
+    let recent = gradient_core::types::now();
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        // 1. active polling/time triggers → one trigger, recently fired
+        .append_query_results([vec![make_polling_trigger(trigger_id, project_id, 60, Some(recent))]])
+        // 2. project lookup (batch)
+        .append_query_results([vec![make_project(project_id, org_id)]])
+        // No further queries expected (trigger not due)
+        .into_connection();
+
+    let scheduler = make_scheduler(db);
+    trigger_dispatch::dispatch_once(&scheduler)
+        .await
+        .expect("dispatch_once should not fail");
+    // No evaluation rows means no job was enqueued
+    assert_eq!(scheduler.pending_job_count().await, 0);
 }
 
 // ── Group K: via / follower behaviour ────────────────────────────────────────

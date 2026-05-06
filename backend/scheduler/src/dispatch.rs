@@ -7,7 +7,7 @@
 //! Background loops that poll the DB and enqueue jobs into the in-memory scheduler.
 //!
 //! Three loops run concurrently:
-//! - `project_poll_loop`: polls active projects for new git commits → creates `Queued` evaluations
+//! - `trigger_dispatch::trigger_dispatch_loop`: fires polling/time triggers → creates evaluations
 //! - `eval_dispatch_loop`: finds `Queued` evaluations → enqueues `FlakeJob`s
 //! - `build_dispatch_loop`: finds ready `Queued` builds → enqueues `BuildJob`s
 //!
@@ -20,14 +20,12 @@ use std::time::Duration;
 
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
-use gradient_core::ci::TriggerError;
-use gradient_core::sources::{check_project_updates, get_commit_info};
 use gradient_core::types::input::vec_to_hex;
 use gradient_core::types::wildcard::Wildcard;
 use gradient_core::types::*;
-use sea_orm::{ActiveModelTrait as _, ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 use super::Scheduler;
 use super::jobs::{PendingBuildJob, PendingEvalJob};
@@ -41,138 +39,9 @@ pub fn start_dispatch_loops(scheduler: Arc<Scheduler>) {
     let s1 = Arc::clone(&scheduler);
     let s2 = Arc::clone(&scheduler);
     let s3 = Arc::clone(&scheduler);
-    shutdown.spawn(async move { project_poll_loop(s3).await });
+    shutdown.spawn(async move { super::trigger_dispatch::trigger_dispatch_loop(s3).await });
     shutdown.spawn(async move { eval_dispatch_loop(s1).await });
     shutdown.spawn(async move { build_dispatch_loop(s2).await });
-}
-
-// ── Project polling ──────────────────────────────────────────────────────────
-
-async fn project_poll_loop(scheduler: Arc<Scheduler>) {
-    let mut interval = tokio::time::interval(Duration::from_secs(30));
-    let cancel = scheduler.state.shutdown.token();
-    info!("project poll loop started");
-    loop {
-        tokio::select! {
-            _ = cancel.cancelled() => {
-                info!("project poll loop shutting down");
-                return;
-            }
-            _ = interval.tick() => {}
-        }
-        if let Err(e) = poll_projects_for_evaluations(&scheduler).await {
-            error!(error = %e, "project poll error");
-        }
-    }
-}
-
-/// Polls active projects for new git commits and creates `Queued` evaluations.
-///
-/// Projects whose organization has a forge webhook configured are polled every
-/// [`WEBHOOK_BACKUP_POLL_SECS`] (30 min) as a fallback in case a webhook delivery
-/// fails. Projects without a webhook use the CLI `evaluation_timeout`.
-pub(crate) async fn poll_projects_for_evaluations(scheduler: &Scheduler) -> anyhow::Result<()> {
-    let state = &scheduler.state;
-    let now = gradient_core::types::now();
-    let threshold = now - chrono::Duration::seconds(state.config.eval.evaluation_timeout);
-
-    // Poll all active projects that haven't been checked recently.
-    // LEFT JOIN evaluation so new projects (no last_evaluation) are also included.
-    // The inbound_integration column was dropped in T6; webhook-based triggering
-    // is handled by project_trigger rows (T15).
-    let terminal_eval_statuses = format!(
-        "({}, {}, {})",
-        EvaluationStatus::Completed.num_value(),
-        EvaluationStatus::Failed.num_value(),
-        EvaluationStatus::Aborted.num_value(),
-    );
-    let sql = sea_orm::Statement::from_string(
-        sea_orm::DbBackend::Postgres,
-        format!(
-            r#"
-            SELECT p.*
-            FROM project p
-            LEFT JOIN evaluation e ON p.last_evaluation = e.id
-            WHERE p.active = true
-            AND p.last_check_at <= '{threshold}'
-            AND (
-                e.status IN {terminal}
-                OR p.force_evaluation = true
-                OR p.last_evaluation IS NULL
-            )
-            ORDER BY p.last_check_at ASC
-            "#,
-            threshold = threshold.format("%Y-%m-%d %H:%M:%S%.f"),
-            terminal = terminal_eval_statuses,
-        ),
-    );
-
-    let projects = EProject::find()
-        .from_raw_sql(sql)
-        .all(&state.worker_db)
-        .await?;
-
-    for project in &projects {
-        let (has_update, commit_hash) = match check_project_updates(Arc::clone(state), project)
-            .await
-        {
-            Ok(result) => result,
-            Err(e) => {
-                warn!(project = %project.name, error = %e, "failed to check project for updates");
-                continue;
-            }
-        };
-
-        if !has_update {
-            // Update last_check_at so we don't re-check immediately.
-            let mut ap: AProject = project.clone().into();
-            ap.last_check_at = sea_orm::ActiveValue::Set(gradient_core::types::now());
-            if let Err(e) = ap.update(&state.worker_db).await {
-                warn!(project = %project.name, error = %e, "failed to update last_check_at");
-            }
-            continue;
-        }
-
-        let (commit_message, _, author_name) =
-            match get_commit_info(Arc::clone(state), project, &commit_hash).await {
-                Ok(info) => info,
-                Err(e) => {
-                    warn!(project = %project.name, error = %e, "failed to fetch commit info");
-                    (String::new(), None, String::new())
-                }
-            };
-
-        match gradient_core::ci::trigger_evaluation(
-            state.worker_db.inner(),
-            project,
-            commit_hash,
-            Some(commit_message),
-            Some(author_name),
-            None,
-        )
-        .await
-        {
-            Ok(eval) => {
-                info!(project = %project.name, evaluation_id = %eval.id, "created evaluation from project poll");
-                // Clear force_evaluation so the project is not re-evaluated on every
-                // subsequent poll cycle.
-                let mut ap: AProject = project.clone().into();
-                ap.force_evaluation = sea_orm::ActiveValue::Set(false);
-                ap.last_check_at = sea_orm::ActiveValue::Set(gradient_core::types::now());
-                if let Err(e) = ap.update(&state.worker_db).await {
-                    warn!(project = %project.name, error = %e, "failed to clear force_evaluation");
-                }
-            }
-            Err(TriggerError::AlreadyInProgress) => {
-                debug!(project = %project.name, "evaluation already in progress, skipping");
-            }
-            Err(e) => {
-                error!(project = %project.name, error = %e, "failed to create evaluation");
-            }
-        }
-    }
-
-    Ok(())
 }
 
 // ── Eval dispatch ─────────────────────────────────────────────────────────────
