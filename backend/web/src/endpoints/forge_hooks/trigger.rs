@@ -13,7 +13,7 @@ use gradient_core::types::triggers::{ConcurrencyPolicy, TriggerConfig, TriggerTy
 use gradient_core::types::*;
 use scheduler::Scheduler;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Statement};
+use sea_orm::{ActiveModelTrait, ColumnTrait, DbBackend, EntityTrait, IntoActiveModel, QueryFilter, Statement, Value};
 use serde::Deserialize;
 use std::sync::Arc;
 use tracing::{info, warn};
@@ -402,16 +402,19 @@ async fn load_active_triggers_for_integration(
     integration_id: IntegrationId,
     trigger_type: TriggerType,
 ) -> Result<Vec<ept::Model>, sea_orm::DbErr> {
-    let sql = format!(
-        "SELECT * FROM project_trigger \
-         WHERE active = true \
-           AND trigger_type = {ttype} \
-           AND (config->>'integration_id')::uuid = '{iid}'::uuid",
-        ttype = trigger_type.as_i16(),
-        iid = integration_id,
+    let stmt = Statement::from_sql_and_values(
+        DbBackend::Postgres,
+        &format!(
+            "SELECT * FROM project_trigger \
+             WHERE active = true \
+               AND trigger_type = {} \
+               AND (config->>'integration_id')::uuid = $1",
+            trigger_type.as_i16(),
+        ),
+        [Value::Uuid(Some(Box::new(integration_id.into_inner())))],
     );
     EProjectTrigger::find()
-        .from_raw_sql(Statement::from_string(sea_orm::DbBackend::Postgres, sql))
+        .from_raw_sql(stmt)
         .all(&state.web_db)
         .await
 }
