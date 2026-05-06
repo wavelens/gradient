@@ -5,6 +5,7 @@
  */
 
 pub mod abort;
+pub mod apply;
 pub mod github_app;
 pub mod github_app_manifest;
 pub mod integration_lookup;
@@ -15,6 +16,7 @@ pub mod trigger;
 pub mod webhook;
 
 pub use self::abort::{abort_evaluation, AbortKind};
+pub use self::apply::{apply_trigger, ApplyError, ApplyInput, ApplyOutcome};
 pub use self::github_app::*;
 pub use self::integration_lookup::*;
 pub use self::reporter::*;
