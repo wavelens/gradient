@@ -28,7 +28,7 @@
     <div class="artefacts-list">
       @for (artefact of artefacts(); track artefact.name) {
         <div class="artefact-row">
-          <span class="file-type-badge">{{ fileTypeLabel(artefact.file_type) }}</span>
+          <span class="file-type-badge">{{ fileTypeLabel(artefact) }}</span>
           <span class="artefact-name">{{ artefact.name }}</span>
           @if (artefact.size !== undefined) {
             <span class="artefact-size">{{ formatSize(artefact.size) }}</span>
@@ -36,12 +36,12 @@
           <a
             class="download-btn"
             [href]="downloadUrl(artefact)"
-            [attr.target]="artefact.file_type === 'html' ? '_blank' : null"
-            [attr.rel]="artefact.file_type === 'html' ? 'noopener noreferrer' : null"
-            [title]="(artefact.file_type === 'html' ? 'Open ' : 'Download ') + artefact.name"
+            [attr.target]="isHtml(artefact) ? '_blank' : null"
+            [attr.rel]="isHtml(artefact) ? 'noopener noreferrer' : null"
+            [title]="(isHtml(artefact) ? 'Open ' : 'Download ') + artefact.name"
           >
-            <span class="material-symbols-outlined">{{ artefact.file_type === 'html' ? 'open_in_new' : 'download' }}</span>
-            <span>{{ artefact.file_type === 'html' ? 'Open' : 'Download' }}</span>
+            <span class="material-symbols-outlined">{{ isHtml(artefact) ? 'open_in_new' : 'download' }}</span>
+            <span>{{ isHtml(artefact) ? 'Open' : 'Download' }}</span>
           </a>
         </div>
       }

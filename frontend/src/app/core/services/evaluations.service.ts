@@ -46,10 +46,18 @@ export interface PaginatedBuilds {
 }
 
 export interface BuildProduct {
+  /** Hydra product type — first token of the `hydra-build-products` line, e.g. `file`, `doc`, `nix-build`, `report`. */
   file_type: string;
+  /** Hydra product subtype — second token, e.g. `html`, `readme`, `binary-dist`, `out`. Empty when absent. */
+  subtype: string;
   name: string;
   path: string;
   size?: number;
+}
+
+/** True for products that should open inline in a browser tab rather than triggering a download. */
+export function isHtmlArtefact(p: BuildProduct): boolean {
+  return p.subtype === 'html' || p.file_type === 'html';
 }
 
 @Injectable({ providedIn: 'root' })

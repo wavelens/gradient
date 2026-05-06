@@ -6,7 +6,7 @@
 
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
-import { EvaluationsService, BuildProduct } from '@core/services/evaluations.service';
+import { EvaluationsService, BuildProduct, isHtmlArtefact } from '@core/services/evaluations.service';
 import { AuthService } from '@core/services/auth.service';
 import { OrganizationsService } from '@core/services/organizations.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
@@ -88,16 +88,21 @@ export class BuildArtefactsComponent implements OnInit {
     return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
   }
 
-  fileTypeLabel(fileType: string): string {
-    const labels: Record<string, string> = {
-      'html': 'HTML',
-      'iso': 'ISO',
-      'tar': 'TAR',
-      'rpm': 'RPM',
-      'deb': 'DEB',
-      'doc': 'DOC',
-      'file': 'FILE',
-    };
-    return labels[fileType] ?? fileType.toUpperCase();
+  /** True when the artefact should open inline in a browser tab. */
+  isHtml(p: BuildProduct): boolean {
+    return isHtmlArtefact(p);
+  }
+
+  /**
+   * Display label combining Hydra type and subtype. Falls back to whichever
+   * field is populated.  Examples: `file html` → `HTML`, `doc readme` → `DOC/README`,
+   * `nix-build out` → `NIX-BUILD`.
+   */
+  fileTypeLabel(p: BuildProduct): string {
+    if (this.isHtml(p)) return 'HTML';
+    const t = p.file_type?.toUpperCase() ?? '';
+    const s = p.subtype?.toUpperCase() ?? '';
+    if (t && s && s !== 'OUT') return `${t}/${s}`;
+    return t || s || 'FILE';
   }
 }
