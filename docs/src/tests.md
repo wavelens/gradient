@@ -1131,3 +1131,18 @@ returned by `GET /evals/{evaluation}` is locked in:
   connected.
 
 Run with `cargo test -p scheduler --tests waiting_reason_tests`.
+
+## Project triggers (issue #116)
+
+- `core::types::triggers` — round-trip serialisation, polling interval validation (≥10s), six-field cron parsing, type/JSON shape mismatches.
+- `core::ci::abort` — `abort_evaluation` hard vs soft, terminal eval no-op.
+- `core::ci::apply` — `apply_trigger` orchestration: same-commit dedup, time-trigger and manual bypass, concurrency policies (skip / hard_abort / soft_abort / allow→reserved).
+- `core::state::provisioning` — trigger config builder helpers, integration name resolution, key stability.
+- `scheduler::trigger_dispatch` — `polling_due` and `cron_due` boundary conditions; `dispatch_once` no-trigger and within-interval skip cases.
+- `scheduler::jobs::JobTracker::remove_job` — pending and active map removal; unknown id no-op.
+- `scheduler::Scheduler::cancel_evaluation_jobs` — drops eval and per-build entries from the tracker.
+- `web::endpoints::projects::triggers` — list/create/read/update/delete + 400 on `allow` and on invalid config.
+- `web::endpoints::projects::evaluations` — response includes nullable `trigger` summary, populated for evaluations created by a trigger.
+- `web::endpoints::forge_hooks::events` — PR (github/gitea/gitlab) and release (github/gitea/gitlab) parsers; GitLab action mapping; tag-ref support on push parsers.
+- `web::endpoints::forge_hooks` integration — push fans out to matching trigger row; branch glob filter skip; PR action filter; release fires only `releases_only` triggers; GitHub App push by installation_id.
+- `web::endpoints::projects::management` — creating a project seeds a default polling trigger.

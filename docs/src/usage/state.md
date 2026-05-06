@@ -344,3 +344,64 @@ State-managed worker registrations are deleted automatically when removed from `
 | `enable_eval` | `true` | Server-side gate for the `eval` capability |
 | `enable_build` | `true` | Server-side gate for the `build` capability |
 | `created_by` | — | Username of creator (required) |
+
+## Triggers
+
+Each project can have one or more triggers that decide *when* an evaluation runs.
+Triggers are configurable via the API or declaratively in state files.
+
+```nix
+services.gradient.state.projects.my-project.triggers = [
+  {
+    type = "polling";
+    config = { interval_secs = 60; };
+    concurrency = "skip";
+  }
+  {
+    type = "reporter_push";
+    integration = "gitea-prod";          # name of an inbound integration in the same org
+    config = {
+      branches = [ "main" "release/*" ];
+      tags = [];
+      releases_only = false;
+    };
+    concurrency = "hard_abort";
+  }
+  {
+    type = "reporter_pull_request";
+    integration = "gitea-prod";
+    config = {
+      branches = [ "main" ];
+      actions = [ "opened" "synchronize" "reopened" ];
+    };
+    concurrency = "hard_abort";
+  }
+  {
+    type = "time";
+    config = { cron = "0 0 2 * * *"; };   # 02:00 UTC every day (six-field: sec min hour dom mon dow)
+    concurrency = "skip";
+  }
+];
+```
+
+### Trigger types
+
+- **polling** — periodically check the git repository for new commits. `interval_secs` minimum 10, default 300.
+- **reporter_push** — fires on forge push events. Filters: `branches`, `tags` (glob patterns; empty = match all), `releases_only` (only fires on explicit forge release events).
+- **reporter_pull_request** — fires on PR/MR events. Filters: `branches`, `actions` (default: opened/synchronize/reopened).
+- **time** — fires on a six-field cron schedule (UTC). Re-evaluates the project HEAD even if the commit hasn't changed.
+
+### Concurrency policies
+
+- **hard_abort** — cancel the in-flight evaluation and its in-flight builds, then start a new evaluation. Workers running affected builds receive cancellation through the existing job lifecycle.
+- **soft_abort** — mark the in-flight evaluation `Aborted` so the new one becomes canonical, but let already-running builds finish; their cached outputs flow into the new evaluation.
+- **allow** — *reserved.* Currently rejected with HTTP 400; multi-evaluation-per-project support is a follow-up.
+- **skip** — discard the new trigger event; keep the running evaluation.
+
+### Defaults
+
+- New projects automatically get a default `polling` trigger (interval 300s, concurrency `skip`). Existing projects were backfilled by the same logic during the migration.
+- Reporter push/PR triggers default to `hard_abort` (typical CI semantics).
+- Polling and time triggers default to `skip` in user-created configurations.
+
+The implicit fallback poll for projects with an inbound integration (the legacy `WEBHOOK_BACKUP_POLL_SECS` behavior) has been removed; webhook-driven projects must declare an explicit `reporter_push` trigger to receive evaluations from forge pushes.
