@@ -1071,6 +1071,7 @@ fn build_trigger_config(
                 .unwrap_or(300) as u32;
             TriggerConfig::Polling {
                 interval_secs: interval,
+                branch: t.config.get("branch").and_then(|v| v.as_str()).map(|s| s.to_owned()),
             }
         }
         TT::ReporterPush | TT::ReporterPullRequest => {
@@ -1334,7 +1335,7 @@ mod trigger_helper_tests {
     fn build_polling_trigger() {
         let t = polling_trigger(60);
         let cfg = build_trigger_config(&t, &empty_integrations()).unwrap();
-        assert_eq!(cfg, TriggerConfig::Polling { interval_secs: 60 });
+        assert_eq!(cfg, TriggerConfig::Polling { interval_secs: 60, branch: None });
     }
 
     #[test]
@@ -1346,7 +1347,7 @@ mod trigger_helper_tests {
             active: true,
         };
         let cfg = build_trigger_config(&t, &empty_integrations()).unwrap();
-        assert_eq!(cfg, TriggerConfig::Polling { interval_secs: 300 });
+        assert_eq!(cfg, TriggerConfig::Polling { interval_secs: 300, branch: None });
     }
 
     #[test]
@@ -1435,14 +1436,14 @@ mod trigger_helper_tests {
 
     #[test]
     fn trigger_key_differs_by_type() {
-        let polling = TriggerConfig::Polling { interval_secs: 60 };
+        let polling = TriggerConfig::Polling { interval_secs: 60, branch: None };
         let time = TriggerConfig::Time { cron: "0 0 * * * *".into() };
         assert_ne!(trigger_key(&polling), trigger_key(&time));
     }
 
     #[test]
     fn trigger_key_stable_for_same_config() {
-        let cfg = TriggerConfig::Polling { interval_secs: 300 };
+        let cfg = TriggerConfig::Polling { interval_secs: 300, branch: None };
         assert_eq!(trigger_key(&cfg), trigger_key(&cfg));
     }
 

@@ -76,7 +76,13 @@ impl ConcurrencyPolicy {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TriggerConfig {
-    Polling { interval_secs: u32 },
+    Polling {
+        interval_secs: u32,
+        /// Branch to poll (`refs/heads/<branch>`). `None` polls the remote HEAD
+        /// (the repo's default branch).
+        #[serde(default)]
+        branch: Option<String>,
+    },
     ReporterPush {
         integration_id: IntegrationId,
         #[serde(default)]
@@ -147,7 +153,7 @@ impl TriggerConfig {
 
     pub fn validate(&self) -> Result<(), TriggerConfigError> {
         match self {
-            Self::Polling { interval_secs } if *interval_secs < 10 => {
+            Self::Polling { interval_secs, .. } if *interval_secs < 10 => {
                 Err(TriggerConfigError::PollingIntervalTooSmall)
             }
             Self::Time { cron } => {
@@ -175,16 +181,25 @@ mod tests {
 
     #[test]
     fn polling_config_round_trip() {
-        let cfg = TriggerConfig::Polling { interval_secs: 60 };
+        let cfg = TriggerConfig::Polling { interval_secs: 60, branch: None };
         let db = cfg.to_db_json();
-        assert_eq!(db, serde_json::json!({"interval_secs": 60}));
+        assert!(db.get("type").is_none(), "db json should not carry the type tag");
+        let parsed = TriggerConfig::parse_row(0, &db).unwrap();
+        assert_eq!(parsed, cfg);
+    }
+
+    #[test]
+    fn polling_config_with_branch_round_trip() {
+        let cfg = TriggerConfig::Polling { interval_secs: 120, branch: Some("develop".into()) };
+        let db = cfg.to_db_json();
+        assert_eq!(db["branch"], serde_json::json!("develop"));
         let parsed = TriggerConfig::parse_row(0, &db).unwrap();
         assert_eq!(parsed, cfg);
     }
 
     #[test]
     fn polling_under_10_seconds_rejected() {
-        let cfg = TriggerConfig::Polling { interval_secs: 5 };
+        let cfg = TriggerConfig::Polling { interval_secs: 5, branch: None };
         assert!(matches!(cfg.validate(), Err(TriggerConfigError::PollingIntervalTooSmall)));
     }
 

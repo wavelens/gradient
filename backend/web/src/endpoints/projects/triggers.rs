@@ -283,9 +283,17 @@ pub async fn fire_now(
     let trigger_type = TriggerType::from_i16(row.trigger_type)
         .ok_or_else(|| WebError::internal("invalid trigger_type in row"))?;
 
-    let (commit_hash, commit_message, author_name) = resolve_head(Arc::clone(&state), &proj)
-        .await
-        .map_err(|e| WebError::internal(e.to_string()))?;
+    let branch_for_fire: Option<String> = TriggerConfig::parse_row(row.trigger_type, &row.config)
+        .ok()
+        .and_then(|cfg| match cfg {
+            TriggerConfig::Polling { branch, .. } => branch,
+            _ => None,
+        });
+
+    let (commit_hash, commit_message, author_name) =
+        resolve_head(Arc::clone(&state), &proj, branch_for_fire.as_deref())
+            .await
+            .map_err(|e| WebError::internal(e.to_string()))?;
 
     let input = ApplyInput {
         trigger_id: row.id,
