@@ -259,22 +259,21 @@ impl JobExecutor {
                     );
                     e
                 })?;
-                let reported = outputs
-                    .iter()
-                    .map(|(name, path)| {
-                        let hash = gradient_core::sources::get_hash_from_path(path.clone())
-                            .map(|(h, _)| h)
-                            .unwrap_or_default();
-                        proto::messages::BuildOutput {
-                            name: name.clone(),
-                            store_path: path.clone(),
-                            hash,
-                            nar_size: None,
-                            nar_hash: None,
-                            products: Vec::new(),
-                        }
-                    })
-                    .collect();
+                let mut reported = Vec::with_capacity(outputs.len());
+                for (name, path) in &outputs {
+                    let hash = gradient_core::sources::get_hash_from_path(path.clone())
+                        .map(|(h, _)| h)
+                        .unwrap_or_default();
+                    let products = build::load_products(path).await;
+                    reported.push(proto::messages::BuildOutput {
+                        name: name.clone(),
+                        store_path: path.clone(),
+                        hash,
+                        nar_size: None,
+                        nar_hash: None,
+                        products,
+                    });
+                }
                 updater.report_build_output(build_task.build_id.clone(), reported)?;
                 all_output_paths.extend(outputs.into_iter().map(|(_, p)| p));
                 continue;

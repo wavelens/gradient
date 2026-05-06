@@ -1175,3 +1175,23 @@ Tests (`cargo test -p proto`):
   reconnect-time deserialisation failures observed when the server's
   inbound buffer happened to land at a non-16-byte-aligned allocator
   address.
+
+## Build artefacts — `external_cached` outputs include `hydra-build-products`
+
+Builds that are dispatched as `external_cached` (substituted from upstream,
+not rebuilt locally) used to report `products: Vec::new()` even when the
+fetched output contained `nix-support/hydra-build-products`, leaving the
+artefacts page empty for any drv that was already on `cache.nixos.org`.
+The worker's external-cache branch now calls `load_products` on each
+fetched output path, the same loader the regular build path uses.
+
+Tests (`cargo test -p worker executor::build::tests`):
+
+- `load_products_returns_empty_when_file_absent` — the loader is a no-op
+  when the output has no `nix-support/hydra-build-products`, so substituted
+  outputs without artefacts remain artefact-free.
+- `load_products_parses_hydra_lines` — a `file html …/index.html` line in
+  `nix-support/hydra-build-products` produces one `BuildProduct` with the
+  `file_type`, `subtype`, `name` (basename), and `size` (stat) populated.
+  Regression for substituted/external-cached builds whose artefacts never
+  reached the `build_product` table.

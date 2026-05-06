@@ -192,7 +192,7 @@ impl ParsedDerivation {
 
 /// Read and parse `nix-support/hydra-build-products` from `store_path`, returning
 /// one [`BuildProduct`] per valid line. Returns an empty vec if the file is absent.
-async fn load_products(store_path: &str) -> Vec<BuildProduct> {
+pub(super) async fn load_products(store_path: &str) -> Vec<BuildProduct> {
     let file_path = format!("{}/nix-support/hydra-build-products", store_path);
     let Ok(content) = tokio::fs::read_to_string(&file_path).await else {
         return Vec::new();
@@ -614,5 +614,32 @@ mod tests {
     fn ca_fixed_rejects_wrong_length_hash() {
         // sha256 needs 32 bytes (64 hex chars); pass 8 bytes (16 hex chars).
         assert!(ca_fixed_output("sha256", "deadbeefdeadbeef").is_err());
+    }
+
+    #[tokio::test]
+    async fn load_products_returns_empty_when_file_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let products = load_products(dir.path().to_str().unwrap()).await;
+        assert!(products.is_empty());
+    }
+
+    #[tokio::test]
+    async fn load_products_parses_hydra_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let support = dir.path().join("nix-support");
+        tokio::fs::create_dir_all(&support).await.unwrap();
+        let report_path = dir.path().join("index.html");
+        tokio::fs::write(&report_path, b"<html></html>").await.unwrap();
+
+        let products_file = support.join("hydra-build-products");
+        let line = format!("file html {}", report_path.display());
+        tokio::fs::write(&products_file, line).await.unwrap();
+
+        let products = load_products(dir.path().to_str().unwrap()).await;
+        assert_eq!(products.len(), 1);
+        assert_eq!(products[0].file_type, "file");
+        assert_eq!(products[0].subtype, "html");
+        assert_eq!(products[0].name, "index.html");
+        assert_eq!(products[0].size, Some(13));
     }
 }
