@@ -1176,6 +1176,29 @@ Tests (`cargo test -p proto`):
   inbound buffer happened to land at a non-16-byte-aligned allocator
   address.
 
+## Substituted classification — match cached_path by hash, not by foreign-key link
+
+`compute_truly_substituted` previously demanded
+`derivation_output.cached_path IS NOT NULL` and `is_cached = true` to mark
+a drv as `Substituted`. That link is set lazily by `mark_nar_stored` on
+upload, so a re-evaluated drv whose output hash was already in
+`cached_path` (shared FOD source, manual cache push, fresh eval before
+its first upload) was misclassified as needing a build and rerun every
+time. The worker's `CacheQuery` handler already merges by hash for the
+same reason; the eval-time decision now does too.
+
+Tests (`cargo test -p scheduler --tests substitut`):
+
+- `eval_result_substituted_derivation_completes_eval` — original happy
+  path: linked cached_path with file_hash → drv marked Substituted, eval
+  completes immediately.
+- `eval_result_substitutes_when_hash_in_cached_path_without_link` —
+  regression: derivation_output with `is_cached = false` and
+  `cached_path = None`, but a `cached_path` row with the same hash and
+  `file_hash IS NOT NULL` exists. The drv is marked Substituted and the
+  eval completes without dispatching a build. Confirms the hash-based
+  fallback in `compute_truly_substituted`.
+
 ## Build artefacts — `external_cached` outputs include `hydra-build-products`
 
 Builds that are dispatched as `external_cached` (substituted from upstream,

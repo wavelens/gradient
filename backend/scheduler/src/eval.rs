@@ -282,10 +282,19 @@ impl<'a> EvalResultProcessor<'a> {
         Ok(())
     }
 
-    /// Return the subset of `drv_ids` whose every `derivation_output` row
-    /// links to a `cached_path` with `file_hash IS NOT NULL`. These are the
-    /// drvs the server can confidently mark `Substituted` — anything else
-    /// must be built (or substituted later when the bytes show up).
+    /// Return the subset of `drv_ids` whose every `derivation_output` row's
+    /// hash matches a `cached_path` with `file_hash IS NOT NULL`. These are
+    /// the drvs the server can confidently mark `Substituted` — anything
+    /// else must be built (or substituted later when the bytes show up).
+    ///
+    /// Matching is by hash rather than the explicit
+    /// `derivation_output.cached_path` link because that link is set lazily
+    /// by `mark_nar_stored` on upload. A new drv whose output hash is
+    /// already in `cached_path` (shared FOD source, re-evaluated build
+    /// before its first upload, manual cache push) would otherwise be
+    /// misclassified as "needs to build" and rerun pointlessly. The
+    /// worker-facing `CacheQuery` handler already merges by hash for the
+    /// same reason; this brings the eval-time decision in line.
     async fn compute_truly_substituted(
         &self,
         drv_ids: &[DerivationId],
@@ -304,32 +313,23 @@ impl<'a> EvalResultProcessor<'a> {
             return Ok(std::collections::HashSet::new());
         }
 
-        let cached_path_ids: Vec<CachedPathId> = outputs
+        let hashes: Vec<String> = outputs
             .iter()
-            .filter_map(|o| o.cached_path)
+            .map(|o| o.hash.clone())
             .collect::<std::collections::HashSet<_>>()
             .into_iter()
             .collect();
 
-        let fully_cached_ids: std::collections::HashSet<CachedPathId> =
-            if cached_path_ids.is_empty() {
-                std::collections::HashSet::new()
-            } else {
-                ECachedPath::find()
-                    .filter(CCachedPath::Id.is_in(cached_path_ids))
-                    .all(&self.state.worker_db)
-                    .await
-                    .context("compute_truly_substituted: load cached_path")?
-                    .into_iter()
-                    .filter(|cp| cp.is_fully_cached())
-                    .map(|cp| cp.id)
-                    .collect()
-            };
+        let fully_cached_hashes: std::collections::HashSet<String> = ECachedPath::find()
+            .filter(CCachedPath::Hash.is_in(hashes))
+            .all(&self.state.worker_db)
+            .await
+            .context("compute_truly_substituted: load cached_path")?
+            .into_iter()
+            .filter(|cp| cp.is_fully_cached())
+            .map(|cp| cp.hash)
+            .collect();
 
-        // Group outputs by drv. A drv is truly substituted iff it has at
-        // least one output AND every output is linked to a fully-cached
-        // cached_path. Drvs without any derivation_output rows yet (eval
-        // racing with another worker) fall through as not-substituted.
         let mut outputs_by_drv: HashMap<DerivationId, Vec<&MDerivationOutput>> = HashMap::new();
         for o in &outputs {
             outputs_by_drv.entry(o.derivation).or_default().push(o);
@@ -337,13 +337,8 @@ impl<'a> EvalResultProcessor<'a> {
 
         let mut substituted = std::collections::HashSet::new();
         for (drv_id, outs) in outputs_by_drv {
-            let all_present = !outs.is_empty()
-                && outs.iter().all(|o| {
-                    o.is_cached
-                        && o.cached_path
-                            .map(|cp| fully_cached_ids.contains(&cp))
-                            .unwrap_or(false)
-                });
+            let all_present =
+                !outs.is_empty() && outs.iter().all(|o| fully_cached_hashes.contains(&o.hash));
             if all_present {
                 substituted.insert(drv_id);
             }

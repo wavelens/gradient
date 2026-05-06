@@ -106,12 +106,17 @@ fn make_drv_output(
     name: &str,
     path: &str,
 ) -> MDerivationOutput {
+    let hash = path
+        .strip_prefix("/nix/store/")
+        .and_then(|s| s.split('-').next())
+        .unwrap_or("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        .to_string();
     entity::derivation_output::Model {
         id,
         derivation: drv_id,
         name: name.to_string(),
         output: path.to_string(),
-        hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+        hash,
         package: name.to_string(),
         ca: None,
         nar_size: None,
@@ -514,6 +519,60 @@ async fn eval_result_substituted_derivation_completes_eval() {
         // 6. find Created builds → empty (build is Substituted, not Created)
         .append_query_results([Vec::<MBuild>::new()])
         // 7. update eval → Completed
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
+        .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Completed)]])
+        .into_connection();
+
+    let state = make_state(db);
+    let job = make_eval_job(eval_id, org_id);
+
+    let result =
+        eval_handler::handle_eval_result(&state, &job, vec![discovered], vec![], vec![]).await;
+    assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
+}
+
+/// `compute_truly_substituted` matches by hash, not by the
+/// `derivation_output.cached_path` link, so a re-evaluated drv whose
+/// output hash is in `cached_path` (e.g. shared FOD source, manual cache
+/// push) gets marked Substituted on the very first eval pass — the link
+/// is otherwise only set after a fresh upload runs `mark_nar_stored`.
+#[tokio::test]
+async fn eval_result_substitutes_when_hash_in_cached_path_without_link() {
+    let eval_id = EvaluationId::now_v7();
+    let org_id = OrganizationId::now_v7();
+    let drv_id = DerivationId::now_v7();
+    let build_id = BuildId::now_v7();
+    let cp_id = CachedPathId::now_v7();
+
+    let drv_path = "/nix/store/dddddddddddddddddddddddddddddddd-sub.drv";
+    let out_path = "/nix/store/cccccccccccccccccccccccccccccccc-sub";
+    let mut discovered = make_discovered(drv_path, vec![("out", out_path)], vec![]);
+    discovered.substituted = true;
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Building)]])
+        .append_query_results([vec![make_derivation(drv_id, org_id, drv_path)]])
+        // derivation_output: hash matches the cached_path below, but
+        // cached_path link is None and is_cached is false — the row was
+        // inserted by eval before any upload had run.
+        .append_query_results([vec![make_drv_output(
+            DerivationOutputId::now_v7(),
+            drv_id,
+            "out",
+            out_path,
+        )]])
+        // cached_path keyed by the same hash, fully uploaded.
+        .append_query_results([vec![make_fully_cached_path(cp_id, out_path)]])
+        .append_query_results([vec![make_build(
+            build_id,
+            eval_id,
+            drv_id,
+            BuildStatus::Substituted,
+        )]])
+        .append_query_results([Vec::<MBuild>::new()])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
