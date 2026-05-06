@@ -213,7 +213,6 @@ fn list_triggers_returns_rows() {
         let items = body["message"].as_array().expect("message is array");
         assert_eq!(items.len(), 1);
         assert_eq!(items[0]["type"], "polling");
-        assert_eq!(items[0]["concurrency"], "skip");
         assert_eq!(items[0]["active"], true);
     });
 }
@@ -288,8 +287,7 @@ fn create_polling_trigger_valid() {
             .post(BASE_URL)
             .add_header("authorization", format!("Bearer {}", token))
             .json(&serde_json::json!({
-                "config": {"type": "polling", "interval_secs": 60},
-                "concurrency": "skip"
+                "config": {"type": "polling", "interval_secs": 60}
             }))
             .await;
 
@@ -297,7 +295,6 @@ fn create_polling_trigger_valid() {
         let body: Value = res.json();
         assert_eq!(body["error"], false);
         assert_eq!(body["message"]["type"], "polling");
-        assert_eq!(body["message"]["concurrency"], "skip");
     });
 }
 
@@ -318,8 +315,7 @@ fn create_polling_trigger_interval_too_small_returns_400() {
             .post(BASE_URL)
             .add_header("authorization", format!("Bearer {}", token))
             .json(&serde_json::json!({
-                "config": {"type": "polling", "interval_secs": 5},
-                "concurrency": "skip"
+                "config": {"type": "polling", "interval_secs": 5}
             }))
             .await;
 
@@ -328,39 +324,6 @@ fn create_polling_trigger_interval_too_small_returns_400() {
         assert_eq!(body["error"], true);
         let msg = body["message"].as_str().unwrap();
         assert!(msg.contains("interval_secs"), "expected interval message, got: {msg}");
-    });
-}
-
-#[test]
-fn create_concurrency_allow_returns_400() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-
-        let db = with_project_edit(with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id));
-
-        let server = make_server(db.into_connection());
-        let res = server
-            .post(BASE_URL)
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&serde_json::json!({
-                "config": {"type": "polling", "interval_secs": 60},
-                "concurrency": "allow"
-            }))
-            .await;
-
-        res.assert_status_bad_request();
-        let body: Value = res.json();
-        assert_eq!(body["error"], true);
-        assert!(
-            body["message"].as_str().unwrap().contains("allow"),
-            "expected allow mention, got: {}",
-            body["message"]
-        );
     });
 }
 
@@ -381,8 +344,7 @@ fn create_invalid_cron_returns_400() {
             .post(BASE_URL)
             .add_header("authorization", format!("Bearer {}", token))
             .json(&serde_json::json!({
-                "config": {"type": "time", "cron": "not a cron"},
-                "concurrency": "skip"
+                "config": {"type": "time", "cron": "not a cron"}
             }))
             .await;
 
@@ -413,13 +375,13 @@ fn patch_trigger_updates_fields() {
         let res = server
             .patch(&format!("{}/{}", BASE_URL, tid))
             .add_header("authorization", format!("Bearer {}", token))
-            .json(&serde_json::json!({"concurrency": "hard_abort"}))
+            .json(&serde_json::json!({"active": false}))
             .await;
 
         res.assert_status_ok();
         let body: Value = res.json();
         assert_eq!(body["error"], false);
-        assert_eq!(body["message"]["concurrency"], "hard_abort");
+        assert_eq!(body["message"]["type"], "polling");
     });
 }
 
@@ -457,31 +419,6 @@ fn patch_trigger_config_type_change() {
         let body: Value = res.json();
         assert_eq!(body["error"], false);
         assert_eq!(body["message"]["type"], "time");
-    });
-}
-
-#[test]
-fn patch_trigger_allow_concurrency_returns_400() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-        let tid = trigger_id();
-
-        let db = with_project_edit(with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id))
-            .append_query_results([vec![polling_trigger_row()]]);
-
-        let server = make_server(db.into_connection());
-        let res = server
-            .patch(&format!("{}/{}", BASE_URL, tid))
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&serde_json::json!({"concurrency": "allow"}))
-            .await;
-
-        res.assert_status_bad_request();
     });
 }
 
@@ -648,5 +585,170 @@ fn create_project_seeds_default_polling_trigger() {
         let body: Value = res.json();
         assert_eq!(body["error"], false);
         assert_eq!(body["message"], project_id().to_string());
+    });
+}
+
+#[test]
+fn create_project_with_allow_concurrency_returns_400() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let session_id = SessionId::now_v7();
+        let token = make_token(session_id);
+
+        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+            .append_query_results([vec![org()]])
+            .append_query_results([vec![admin_membership()]]);
+
+        let server = make_server(db.into_connection());
+        let res = server
+            .put("/api/v1/projects/test-org")
+            .add_header("authorization", format!("Bearer {}", token))
+            .json(&serde_json::json!({
+                "name": "new-project",
+                "display_name": "New Project",
+                "description": "",
+                "repository": "https://github.com/test/repo",
+                "evaluation_wildcard": "*",
+                "concurrency": "allow"
+            }))
+            .await;
+
+        res.assert_status_bad_request();
+        let body: Value = res.json();
+        assert_eq!(body["error"], true);
+        assert!(
+            body["message"].as_str().unwrap().contains("allow"),
+            "expected allow mention, got: {}",
+            body["message"]
+        );
+    });
+}
+
+#[test]
+fn create_project_with_hard_abort_concurrency_returns_id() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let session_id = SessionId::now_v7();
+        let token = make_token(session_id);
+
+        let created_project = project::Model {
+            id: project_id(),
+            organization: org_id(),
+            name: "new-project".into(),
+            active: true,
+            display_name: "New Project".into(),
+            description: "".into(),
+            repository: "https://github.com/test/repo".into(),
+            evaluation_wildcard: "*".into(),
+            last_evaluation: None,
+            last_check_at: test_date(),
+            force_evaluation: false,
+            created_by: user_id(),
+            created_at: test_date(),
+            managed: false,
+            keep_evaluations: 30,
+            concurrency: 0, // HardAbort
+        };
+
+        let seeded_trigger = entity::project_trigger::Model {
+            id: trigger_id(),
+            project: project_id(),
+            trigger_type: 0,
+            config: serde_json::json!({"interval_secs": 300}),
+            active: true,
+            last_fired_at: None,
+            created_at: test_date(),
+            updated_at: test_date(),
+        };
+
+        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+            .append_query_results([vec![org()]])
+            .append_query_results([vec![admin_membership()]])
+            .append_query_results([Vec::<project::Model>::new()])
+            .append_query_results([vec![created_project]])
+            .append_query_results([vec![seeded_trigger]]);
+
+        let server = make_server(db.into_connection());
+        let res = server
+            .put("/api/v1/projects/test-org")
+            .add_header("authorization", format!("Bearer {}", token))
+            .json(&serde_json::json!({
+                "name": "new-project",
+                "display_name": "New Project",
+                "description": "",
+                "repository": "https://github.com/test/repo",
+                "evaluation_wildcard": "*",
+                "concurrency": "hard_abort"
+            }))
+            .await;
+
+        res.assert_status_ok();
+        let body: Value = res.json();
+        assert_eq!(body["error"], false);
+        assert_eq!(body["message"], project_id().to_string());
+    });
+}
+
+#[test]
+fn patch_project_concurrency_to_skip() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let session_id = SessionId::now_v7();
+        let token = make_token(session_id);
+
+        let db = with_project_edit(with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id))
+            // aproject.update() — read-back then exec
+            .append_query_results([vec![project_row()]])
+            .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }]);
+
+        let server = make_server(db.into_connection());
+        let res = server
+            .patch("/api/v1/projects/test-org/test-project")
+            .add_header("authorization", format!("Bearer {}", token))
+            .json(&serde_json::json!({"concurrency": "skip"}))
+            .await;
+
+        res.assert_status_ok();
+        let body: Value = res.json();
+        assert_eq!(body["error"], false);
+    });
+}
+
+#[test]
+fn patch_project_allow_concurrency_returns_400() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let session_id = SessionId::now_v7();
+        let token = make_token(session_id);
+
+        let db = with_project_edit(with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id));
+
+        let server = make_server(db.into_connection());
+        let res = server
+            .patch("/api/v1/projects/test-org/test-project")
+            .add_header("authorization", format!("Bearer {}", token))
+            .json(&serde_json::json!({"concurrency": "allow"}))
+            .await;
+
+        res.assert_status_bad_request();
+        let body: Value = res.json();
+        assert_eq!(body["error"], true);
+        assert!(
+            body["message"].as_str().unwrap().contains("allow"),
+            "expected allow mention, got: {}",
+            body["message"]
+        );
     });
 }

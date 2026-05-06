@@ -44,7 +44,6 @@ pub enum ApplyError {
 pub struct ApplyInput {
     pub trigger_id: ProjectTriggerId,
     pub trigger_type: TriggerType,
-    pub concurrency: ConcurrencyPolicy,
     pub commit_hash: Vec<u8>,
     pub commit_message: Option<String>,
     pub author_name: Option<String>,
@@ -73,6 +72,9 @@ pub async fn apply_trigger<C: ConnectionTrait>(
     }
 
     // ── Concurrency policy ────────────────────────────────────────────────
+    let concurrency =
+        ConcurrencyPolicy::from_i16(project.concurrency).unwrap_or(ConcurrencyPolicy::Skip);
+
     let active_codes: Vec<i32> = EvaluationStatus::ACTIVE.iter().map(|s| s.num_value()).collect();
     let in_flight = EEvaluation::find()
         .filter(CEvaluation::Project.eq(project.id))
@@ -84,7 +86,7 @@ pub async fn apply_trigger<C: ConnectionTrait>(
     let mut aborted_builds: Vec<BuildId> = Vec::new();
 
     if let Some(running) = in_flight {
-        match input.concurrency {
+        match concurrency {
             ConcurrencyPolicy::Skip => return Ok(ApplyOutcome::SkippedConcurrency),
             ConcurrencyPolicy::HardAbort => {
                 aborted_builds = abort_evaluation(db, running.id, AbortKind::Hard).await?;
@@ -131,6 +133,10 @@ mod tests {
     use uuid::Uuid;
 
     fn make_project_with_last_eval(last: Option<EvaluationId>) -> MProject {
+        make_project_with_concurrency(last, 3) // Skip
+    }
+
+    fn make_project_with_concurrency(last: Option<EvaluationId>, concurrency: i16) -> MProject {
         MProject {
             id: ProjectId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap()),
             organization: OrganizationId::nil(),
@@ -147,7 +153,7 @@ mod tests {
             created_at: NaiveDateTime::default(),
             managed: false,
             keep_evaluations: 10,
-            concurrency: 3,
+            concurrency,
         }
     }
 
@@ -188,14 +194,12 @@ mod tests {
     fn input(
         trig: ProjectTriggerId,
         ttype: TriggerType,
-        conc: ConcurrencyPolicy,
         hash: Vec<u8>,
         manual: bool,
     ) -> ApplyInput {
         ApplyInput {
             trigger_id: trig,
             trigger_type: ttype,
-            concurrency: conc,
             commit_hash: hash,
             commit_message: None,
             author_name: None,
@@ -226,7 +230,7 @@ mod tests {
         let res = apply_trigger(
             &db,
             &project,
-            input(trig, TriggerType::Polling, ConcurrencyPolicy::Skip, same_hash, false),
+            input(trig, TriggerType::Polling, same_hash, false),
         )
         .await
         .unwrap();
@@ -265,7 +269,7 @@ mod tests {
         let res = apply_trigger(
             &db,
             &project,
-            input(trig, TriggerType::Time, ConcurrencyPolicy::Skip, same_hash, false),
+            input(trig, TriggerType::Time, same_hash, false),
         )
         .await
         .unwrap();
@@ -289,7 +293,7 @@ mod tests {
         let res = apply_trigger(
             &db,
             &project,
-            input(trig, TriggerType::Polling, ConcurrencyPolicy::Skip, vec![9u8; 20], false),
+            input(trig, TriggerType::Polling, vec![9u8; 20], false),
         )
         .await
         .unwrap();
@@ -298,7 +302,7 @@ mod tests {
 
     #[tokio::test]
     async fn allow_concurrency_returns_skipped_allow_reserved() {
-        let project = make_project_with_last_eval(None);
+        let project = make_project_with_concurrency(None, 2); // Allow
         let running_eval_id = EvaluationId::now_v7();
         let running_eval =
             make_eval(running_eval_id, project.id, CommitId::nil(), EvaluationStatus::Building);
@@ -311,7 +315,7 @@ mod tests {
         let res = apply_trigger(
             &db,
             &project,
-            input(trig, TriggerType::Polling, ConcurrencyPolicy::Allow, vec![9u8; 20], false),
+            input(trig, TriggerType::Polling, vec![9u8; 20], false),
         )
         .await
         .unwrap();
@@ -340,7 +344,7 @@ mod tests {
         let res = apply_trigger(
             &db,
             &project,
-            input(trig, TriggerType::Polling, ConcurrencyPolicy::Skip, vec![1u8; 20], false),
+            input(trig, TriggerType::Polling, vec![1u8; 20], false),
         )
         .await
         .unwrap();
@@ -383,7 +387,7 @@ mod tests {
         let res = apply_trigger(
             &db,
             &project,
-            input(trig, TriggerType::Polling, ConcurrencyPolicy::Skip, same_hash, true),
+            input(trig, TriggerType::Polling, same_hash, true),
         )
         .await
         .unwrap();
@@ -392,7 +396,7 @@ mod tests {
 
     #[tokio::test]
     async fn hard_abort_populates_aborted_fields() {
-        let project = make_project_with_last_eval(None);
+        let project = make_project_with_concurrency(None, 0); // HardAbort
         let running_eval_id = EvaluationId::now_v7();
         let running_eval =
             make_eval(running_eval_id, project.id, CommitId::nil(), EvaluationStatus::Building);
@@ -449,7 +453,7 @@ mod tests {
         let res = apply_trigger(
             &db,
             &project,
-            input(trig, TriggerType::Polling, ConcurrencyPolicy::HardAbort, new_hash, false),
+            input(trig, TriggerType::Polling, new_hash, false),
         )
         .await
         .unwrap();

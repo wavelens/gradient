@@ -29,6 +29,7 @@ use gradient_core::types::ids::*;
 // ── Shared types ─────────────────────────────────────────────────────────────
 
 use entity::evaluation::EvaluationStatus;
+use gradient_core::types::triggers::ConcurrencyPolicy;
 use gradient_core::types::{ProjectTriggerId, TriggerType};
 use serde::{Deserialize, Serialize};
 
@@ -49,6 +50,7 @@ pub struct ProjectResponse {
     pub created_at: chrono::NaiveDateTime,
     pub managed: bool,
     pub keep_evaluations: i32,
+    pub concurrency: ConcurrencyPolicy,
     pub can_edit: bool,
 }
 

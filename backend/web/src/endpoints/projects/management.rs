@@ -18,7 +18,7 @@ use gradient_core::nix::RepositoryUrl;
 use gradient_core::sources::check_project_updates;
 use gradient_core::types::consts::*;
 use gradient_core::types::input::{check_index_name, validate_display_name, vec_to_hex};
-use gradient_core::types::triggers::{TriggerConfig, TriggerType};
+use gradient_core::types::triggers::{ConcurrencyPolicy, TriggerConfig, TriggerType};
 use gradient_core::types::wildcard::Wildcard;
 use gradient_core::types::*;
 use sea_orm::ActiveValue::Set;
@@ -36,6 +36,8 @@ pub struct MakeProjectRequest {
     pub description: String,
     pub repository: String,
     pub evaluation_wildcard: String,
+    #[serde(default)]
+    pub concurrency: Option<ConcurrencyPolicy>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -46,6 +48,7 @@ pub struct PatchProjectRequest {
     pub repository: Option<String>,
     pub evaluation_wildcard: Option<String>,
     pub keep_evaluations: Option<i32>,
+    pub concurrency: Option<ConcurrencyPolicy>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -141,6 +144,8 @@ pub async fn get(
                 last_evaluation_status,
                 force_evaluation: p.force_evaluation,
                 keep_evaluations: p.keep_evaluations,
+                concurrency: ConcurrencyPolicy::from_i16(p.concurrency)
+                    .unwrap_or(ConcurrencyPolicy::Skip),
                 created_by: p.created_by,
                 created_at: p.created_at,
                 managed: p.managed,
@@ -163,6 +168,10 @@ pub async fn put(
     Path(organization): Path<String>,
     Json(body): Json<MakeProjectRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
+    if let Some(ConcurrencyPolicy::Allow) = body.concurrency {
+        return Err(WebError::bad_request("`allow` concurrency is reserved"));
+    }
+
     if check_index_name(body.name.clone().as_str()).is_err() {
         return Err(WebError::invalid_name("Project Name"));
     }
@@ -225,7 +234,7 @@ pub async fn put(
         created_at: Set(gradient_core::types::now()),
         managed: Set(false),
         keep_evaluations: Set(30),
-        concurrency: Set(3),
+        concurrency: Set(body.concurrency.unwrap_or(ConcurrencyPolicy::Skip).as_i16()),
     };
 
     let project = project.insert(&state.web_db).await?;
@@ -299,6 +308,8 @@ pub async fn get_project(
         created_at: project.created_at,
         managed: project.managed,
         keep_evaluations: project.keep_evaluations,
+        concurrency: ConcurrencyPolicy::from_i16(project.concurrency)
+            .unwrap_or(ConcurrencyPolicy::Skip),
         can_edit,
     }))
 }
@@ -340,6 +351,9 @@ pub async fn patch_project(
     }
     if let Some(keep) = body.keep_evaluations {
         patcher.apply_keep_evaluations(keep)?;
+    }
+    if let Some(concurrency) = body.concurrency {
+        patcher.apply_concurrency(concurrency)?;
     }
 
     aproject.force_evaluation = Set(true);
@@ -423,6 +437,14 @@ impl<'a> ProjectPatcher<'a> {
             )));
         }
         self.aproject.keep_evaluations = Set(keep);
+        Ok(())
+    }
+
+    fn apply_concurrency(&mut self, concurrency: ConcurrencyPolicy) -> WebResult<()> {
+        if concurrency == ConcurrencyPolicy::Allow {
+            return Err(WebError::bad_request("`allow` concurrency is reserved"));
+        }
+        self.aproject.concurrency = Set(concurrency.as_i16());
         Ok(())
     }
 }
