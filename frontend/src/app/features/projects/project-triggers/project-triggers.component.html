@@ -1,0 +1,275 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<div class="container">
+  <div class="page-header">
+    <div>
+      <div class="breadcrumb">
+        <a [routerLink]="['/organization', orgName]" class="breadcrumb-link">{{ orgDisplayName() || orgName }}</a>
+        <span class="breadcrumb-separator">/</span>
+        <a [routerLink]="['/organization', orgName, 'project', projectName]" class="breadcrumb-link">{{ projectName }}</a>
+        <span class="breadcrumb-separator">/</span>
+        <span class="breadcrumb-current">Triggers</span>
+      </div>
+      <h1>Triggers</h1>
+      <p class="text-secondary">Conditions that automatically start an evaluation</p>
+    </div>
+    <button pButton label="New Trigger" icon="pi pi-plus" (click)="startCreate()"></button>
+  </div>
+
+  @if (loading()) {
+    <app-loading-spinner message="Loading triggers..." />
+  } @else {
+    @if (triggers().length === 0) {
+      <div class="empty-state">
+        <span class="material-symbols-outlined">schedule_send</span>
+        <h3>No triggers configured</h3>
+        <p class="text-secondary">Create a trigger to automatically start evaluations on a schedule, push event, or pull request.</p>
+        <button pButton label="New Trigger" icon="pi pi-plus" (click)="startCreate()"></button>
+      </div>
+    } @else {
+      <div class="triggers-list">
+        @for (trigger of triggers(); track trigger.id) {
+          <div class="trigger-row">
+            <div class="trigger-header">
+              <div class="trigger-info">
+                <span class="badge" [class]="'badge-' + trigger.type">{{ typeLabel(trigger.type) }}</span>
+                <div>
+                  <div class="trigger-summary">{{ configSummary(trigger) }}</div>
+                  <div class="trigger-meta text-secondary">
+                    <span>Concurrency: {{ trigger.concurrency }}</span>
+                    <span class="status-chip" [class.status-ok]="trigger.active" [class.status-warn]="!trigger.active">
+                      {{ trigger.active ? 'Active' : 'Inactive' }}
+                    </span>
+                    <span>Last fired: {{ relativeTime(trigger.last_fired_at) }}</span>
+                    @if (fireSuccessId() === trigger.id) {
+                      <span class="fire-success">
+                        <span class="material-symbols-outlined">check_circle</span>
+                        Evaluation queued
+                      </span>
+                    }
+                  </div>
+                </div>
+              </div>
+              <div class="trigger-actions">
+                <button
+                  pButton
+                  label="Fire Now"
+                  icon="pi pi-play"
+                  severity="secondary"
+                  size="small"
+                  [loading]="firingId() === trigger.id"
+                  [disabled]="firingId() !== null || deletingId() !== null"
+                  (click)="fireNow(trigger.id)"
+                ></button>
+                <button
+                  pButton
+                  label="Edit"
+                  icon="pi pi-pencil"
+                  severity="secondary"
+                  size="small"
+                  [disabled]="firingId() !== null || deletingId() !== null"
+                  (click)="startEdit(trigger)"
+                ></button>
+                <button
+                  pButton
+                  label="Delete"
+                  icon="pi pi-trash"
+                  severity="danger"
+                  size="small"
+                  [loading]="deletingId() === trigger.id"
+                  [disabled]="deletingId() !== null || firingId() !== null"
+                  (click)="deleteTrigger(trigger.id)"
+                ></button>
+              </div>
+            </div>
+          </div>
+        }
+      </div>
+    }
+  }
+</div>
+
+<!-- Create Dialog -->
+<p-dialog
+  header="New Trigger"
+  [(visible)]="showCreateDialog"
+  [modal]="true"
+  [style]="{ width: '560px' }"
+  [draggable]="false"
+  [resizable]="false"
+  (onHide)="cancelEdit()"
+>
+  <ng-container *ngTemplateOutlet="triggerForm; context: { isEdit: false }"></ng-container>
+  <ng-template pTemplate="footer">
+    <button pButton label="Cancel" severity="secondary" (click)="showCreateDialog.set(false)" [disabled]="saving()"></button>
+    <button pButton label="Create" icon="pi pi-check" (click)="saveCreate()" [loading]="saving()" [disabled]="saving()"></button>
+  </ng-template>
+</p-dialog>
+
+<!-- Edit Dialog -->
+<p-dialog
+  header="Edit Trigger"
+  [(visible)]="showEditDialog"
+  [modal]="true"
+  [style]="{ width: '560px' }"
+  [draggable]="false"
+  [resizable]="false"
+  (onHide)="cancelEdit()"
+>
+  <ng-container *ngTemplateOutlet="triggerForm; context: { isEdit: true }"></ng-container>
+  <ng-template pTemplate="footer">
+    <button pButton label="Cancel" severity="secondary" (click)="showEditDialog.set(false)" [disabled]="saving()"></button>
+    <button pButton label="Save" icon="pi pi-check" (click)="saveEdit()" [loading]="saving()" [disabled]="saving()"></button>
+  </ng-template>
+</p-dialog>
+
+<!-- Shared form template -->
+<ng-template #triggerForm let-isEdit="isEdit">
+  @if (error()) {
+    <div class="dialog-error">
+      <span class="material-symbols-outlined">error</span>
+      {{ error() }}
+    </div>
+  }
+
+  <div class="form-group">
+    <label for="trig-type">Type</label>
+    <p-select
+      inputId="trig-type"
+      [(ngModel)]="form.type"
+      [options]="typeOptions"
+      optionLabel="label"
+      optionValue="value"
+      styleClass="w-full"
+      [disabled]="isEdit"
+    />
+    @if (isEdit) {
+      <small class="text-secondary">Trigger type cannot be changed after creation.</small>
+    }
+  </div>
+
+  <div class="form-group">
+    <label for="trig-concurrency">Concurrency</label>
+    <p-select
+      inputId="trig-concurrency"
+      [(ngModel)]="form.concurrency"
+      [options]="concurrencyOptions"
+      optionLabel="label"
+      optionValue="value"
+      optionDisabled="disabled"
+      styleClass="w-full"
+    />
+    @if (form.concurrency === 'allow') {
+      <div class="dialog-warn">
+        <span class="material-symbols-outlined">warning</span>
+        "Allow" is reserved and not yet enforced — evaluations will still be serialised.
+      </div>
+    }
+  </div>
+
+  @if (form.type === 'polling') {
+    <div class="form-group">
+      <label for="trig-interval">Interval (seconds)</label>
+      <input
+        pInputText
+        id="trig-interval"
+        type="number"
+        min="10"
+        [(ngModel)]="form.interval_secs"
+        class="w-full"
+      />
+      <small class="text-secondary">Minimum 10 seconds. Example: 300 = every 5 minutes.</small>
+    </div>
+  }
+
+  @if (form.type === 'reporter_push' || form.type === 'reporter_pull_request') {
+    <div class="form-group">
+      <label for="trig-integration">Integration</label>
+      <p-select
+        inputId="trig-integration"
+        [(ngModel)]="form.integration_id"
+        [options]="integrationOptions()"
+        optionLabel="label"
+        optionValue="value"
+        styleClass="w-full"
+      />
+      <small class="text-secondary">Inbound integration that delivers webhooks for this trigger.</small>
+    </div>
+    <div class="form-group">
+      <label for="trig-branches">Branches</label>
+      <input
+        pInputText
+        id="trig-branches"
+        [(ngModel)]="form.branches"
+        class="w-full"
+        placeholder="main, release/*, develop"
+      />
+      <small class="text-secondary">Comma-separated list. Leave blank to match any branch.</small>
+    </div>
+  }
+
+  @if (form.type === 'reporter_push') {
+    <div class="form-group">
+      <label for="trig-tags">Tags</label>
+      <input
+        pInputText
+        id="trig-tags"
+        [(ngModel)]="form.tags"
+        class="w-full"
+        placeholder="v*, release-*"
+      />
+      <small class="text-secondary">Comma-separated tag patterns. Leave blank to match any tag.</small>
+    </div>
+    <div class="form-group checkbox-group">
+      <p-checkbox
+        inputId="trig-releases-only"
+        [(ngModel)]="form.releases_only"
+        [binary]="true"
+      />
+      <label for="trig-releases-only">Releases only — fire only on release events, not regular pushes</label>
+    </div>
+  }
+
+  @if (form.type === 'reporter_pull_request') {
+    <div class="form-group">
+      <label for="trig-actions">Actions</label>
+      <input
+        pInputText
+        id="trig-actions"
+        [(ngModel)]="form.actions"
+        class="w-full"
+        placeholder="opened, synchronize, reopened"
+      />
+      <small class="text-secondary">Comma-separated PR action names. Leave blank to fire on any action.</small>
+    </div>
+  }
+
+  @if (form.type === 'time') {
+    <div class="form-group">
+      <label for="trig-cron">Cron Expression</label>
+      <input
+        pInputText
+        id="trig-cron"
+        [(ngModel)]="form.cron"
+        class="w-full"
+        placeholder="0 0 2 * * *"
+      />
+      <small class="text-secondary">
+        Six fields: sec min hour dom mon dow (UTC). Example: <code>0 0 2 * * *</code> = 02:00 UTC daily.
+      </small>
+    </div>
+  }
+
+  <div class="form-group checkbox-group">
+    <p-checkbox
+      inputId="trig-active"
+      [(ngModel)]="form.active"
+      [binary]="true"
+    />
+    <label for="trig-active">Active</label>
+  </div>
+</ng-template>
