@@ -127,6 +127,7 @@ fn project_row() -> entity::project::Model {
         created_at: test_date(),
         managed: false,
         keep_evaluations: 10,
+        concurrency: 3,
     }
 }
 
@@ -144,7 +145,6 @@ fn polling_trigger_row() -> project_trigger::Model {
         id: trigger_id(),
         project: project_id(),
         trigger_type: 0, // Polling
-        concurrency: 3,  // Skip
         config: serde_json::json!({"interval_secs": 60}),
         active: true,
         last_fired_at: None,
@@ -403,10 +403,7 @@ fn patch_trigger_updates_fields() {
         let token = make_token(session_id);
         let tid = trigger_id();
 
-        let updated = project_trigger::Model {
-            concurrency: 0, // HardAbort
-            ..polling_trigger_row()
-        };
+        let updated = polling_trigger_row();
 
         let db = with_project_edit(with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id))
             .append_query_results([vec![polling_trigger_row()]])
@@ -439,7 +436,6 @@ fn patch_trigger_config_type_change() {
 
         let updated = project_trigger::Model {
             trigger_type: 3, // Time
-            concurrency: 3,
             config: serde_json::json!({"cron": "0 0 2 * * *"}),
             ..polling_trigger_row()
         };
@@ -609,13 +605,13 @@ fn create_project_seeds_default_polling_trigger() {
             created_at: test_date(),
             managed: false,
             keep_evaluations: 30,
+            concurrency: 3,
         };
 
         let seeded_trigger = project_trigger::Model {
             id: trigger_id(),
             project: project_id(),
             trigger_type: 0,  // Polling
-            concurrency: 3,   // Skip
             config: serde_json::json!({"interval_secs": 300}),
             active: true,
             last_fired_at: None,

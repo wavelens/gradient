@@ -31,6 +31,8 @@ pub struct Model {
     pub created_at: NaiveDateTime,
     pub managed: bool,
     pub keep_evaluations: i32,
+    /// 0 = hard_abort, 1 = soft_abort, 2 = allow, 3 = skip
+    pub concurrency: i16,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

@@ -11,7 +11,7 @@ use super::{
 use crate::ci::{ForgeType, IntegrationKind, encrypt_webhook_secret};
 use crate::types::consts::BASE_ROLE_ADMIN_ID;
 use crate::types::input::load_secret_bytes;
-use crate::types::triggers::{ConcurrencyPolicy, TriggerConfig};
+use crate::types::triggers::TriggerConfig;
 use crate::types::*;
 use anyhow::{Context, Result};
 use base64::{Engine, engine::general_purpose};
@@ -387,6 +387,7 @@ impl<'a> StateApplicator<'a> {
                     created_at: Set(now),
                     managed: Set(true),
                     keep_evaluations: Set(0),
+                    concurrency: Set(3),
                 };
                 let inserted = proj.insert(self.db).await?;
                 tracing::info!("Created managed project: {}", state_project.name);
@@ -999,12 +1000,11 @@ async fn apply_project_triggers<C: ConnectionTrait>(
         anyhow::bail!("project '{}' must have at least one trigger", project.name);
     }
 
-    let mut desired_by_key: HashMap<String, (TriggerConfig, ConcurrencyPolicy, bool)> =
-        HashMap::new();
+    let mut desired_by_key: HashMap<String, (TriggerConfig, bool)> = HashMap::new();
     for t in desired {
         let cfg = build_trigger_config(t, integrations_by_name)?;
-        let key = trigger_key(&cfg, t.concurrency);
-        desired_by_key.insert(key, (cfg, t.concurrency, t.active));
+        let key = trigger_key(&cfg);
+        desired_by_key.insert(key, (cfg, t.active));
     }
 
     let existing: Vec<MProjectTrigger> = EProjectTrigger::find()
@@ -1016,15 +1016,13 @@ async fn apply_project_triggers<C: ConnectionTrait>(
     for row in existing {
         let cfg = TriggerConfig::parse_row(row.trigger_type, &row.config)
             .context("parse existing trigger")?;
-        let conc =
-            ConcurrencyPolicy::from_i16(row.concurrency).unwrap_or(ConcurrencyPolicy::Skip);
-        let key = trigger_key(&cfg, conc);
+        let key = trigger_key(&cfg);
         existing_by_key.insert(key, row);
     }
 
     let now = crate::types::now();
 
-    for (key, (cfg, conc, active)) in &desired_by_key {
+    for (key, (cfg, active)) in &desired_by_key {
         if existing_by_key.contains_key(key) {
             continue;
         }
@@ -1032,7 +1030,6 @@ async fn apply_project_triggers<C: ConnectionTrait>(
             id: Set(ProjectTriggerId::now_v7()),
             project: Set(project.id),
             trigger_type: Set(cfg.trigger_type().as_i16()),
-            concurrency: Set(conc.as_i16()),
             config: Set(cfg.to_db_json()),
             active: Set(*active),
             last_fired_at: Set(None),
@@ -1044,7 +1041,7 @@ async fn apply_project_triggers<C: ConnectionTrait>(
     }
 
     for (key, row) in existing_by_key {
-        if let Some((_, _, active)) = desired_by_key.get(&key) {
+        if let Some((_, active)) = desired_by_key.get(&key) {
             if row.active != *active {
                 let mut a: AProjectTrigger = row.into();
                 a.active = Set(*active);
@@ -1134,15 +1131,10 @@ fn build_trigger_config(
     Ok(cfg)
 }
 
-fn trigger_key(cfg: &TriggerConfig, concurrency: ConcurrencyPolicy) -> String {
+fn trigger_key(cfg: &TriggerConfig) -> String {
     let json = cfg.to_db_json();
     let canonical = serde_json::to_string(&json).unwrap_or_default();
-    format!(
-        "{}|{}|{}",
-        cfg.trigger_type().as_i16(),
-        canonical,
-        concurrency.as_i16()
-    )
+    format!("{}|{}", cfg.trigger_type().as_i16(), canonical)
 }
 
 // ── Pure helpers ──────────────────────────────────────────────────────────────
@@ -1452,23 +1444,13 @@ mod trigger_helper_tests {
     fn trigger_key_differs_by_type() {
         let polling = TriggerConfig::Polling { interval_secs: 60 };
         let time = TriggerConfig::Time { cron: "0 0 * * * *".into() };
-        let conc = ConcurrencyPolicy::Skip;
-        assert_ne!(trigger_key(&polling, conc), trigger_key(&time, conc));
-    }
-
-    #[test]
-    fn trigger_key_differs_by_concurrency() {
-        let cfg = TriggerConfig::Polling { interval_secs: 60 };
-        let key_skip = trigger_key(&cfg, ConcurrencyPolicy::Skip);
-        let key_allow = trigger_key(&cfg, ConcurrencyPolicy::Allow);
-        assert_ne!(key_skip, key_allow);
+        assert_ne!(trigger_key(&polling), trigger_key(&time));
     }
 
     #[test]
     fn trigger_key_stable_for_same_config() {
         let cfg = TriggerConfig::Polling { interval_secs: 300 };
-        let conc = ConcurrencyPolicy::HardAbort;
-        assert_eq!(trigger_key(&cfg, conc), trigger_key(&cfg, conc));
+        assert_eq!(trigger_key(&cfg), trigger_key(&cfg));
     }
 
     #[test]

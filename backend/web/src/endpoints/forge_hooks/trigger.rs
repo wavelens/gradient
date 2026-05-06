@@ -323,7 +323,7 @@ where
         outcome.projects_scanned += 1;
 
         let concurrency =
-            ConcurrencyPolicy::from_i16(trig.concurrency).unwrap_or(ConcurrencyPolicy::HardAbort);
+            ConcurrencyPolicy::from_i16(project.concurrency).unwrap_or(ConcurrencyPolicy::Skip);
         let org_name = org_name_for(state, project.organization).await.unwrap_or_default();
 
         match apply_trigger(

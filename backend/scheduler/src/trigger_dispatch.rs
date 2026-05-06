@@ -155,7 +155,7 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
             .unwrap_or_else(|_| (String::new(), None, String::new()));
 
         let trigger_type = cfg.trigger_type();
-        let concurrency = ConcurrencyPolicy::from_i16(trig.concurrency).unwrap_or(ConcurrencyPolicy::Skip);
+        let concurrency = ConcurrencyPolicy::from_i16(project.concurrency).unwrap_or(ConcurrencyPolicy::Skip);
         match apply_trigger(
             state.worker_db.inner(),
             project,

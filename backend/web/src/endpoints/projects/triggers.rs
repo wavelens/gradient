@@ -37,7 +37,6 @@ pub struct TriggerOut {
     pub project: ProjectId,
     #[serde(rename = "type")]
     pub trigger_type: TriggerType,
-    pub concurrency: ConcurrencyPolicy,
     pub config: serde_json::Value,
     pub active: bool,
     pub last_fired_at: Option<chrono::NaiveDateTime>,
@@ -51,8 +50,6 @@ impl From<MProjectTrigger> for TriggerOut {
             id: m.id,
             project: m.project,
             trigger_type: TriggerType::from_i16(m.trigger_type).unwrap_or(TriggerType::Polling),
-            concurrency: ConcurrencyPolicy::from_i16(m.concurrency)
-                .unwrap_or(ConcurrencyPolicy::Skip),
             config: m.config,
             active: m.active,
             last_fired_at: m.last_fired_at,
@@ -65,7 +62,6 @@ impl From<MProjectTrigger> for TriggerOut {
 #[derive(Deserialize, Debug)]
 pub struct CreateBody {
     pub config: TriggerConfig,
-    pub concurrency: ConcurrencyPolicy,
     #[serde(default = "default_true")]
     pub active: bool,
 }
@@ -77,22 +73,12 @@ fn default_true() -> bool {
 #[derive(Deserialize, Debug)]
 pub struct UpdateBody {
     pub config: Option<TriggerConfig>,
-    pub concurrency: Option<ConcurrencyPolicy>,
     pub active: Option<bool>,
 }
 
 #[derive(Serialize, Debug)]
 pub struct DeletedResponse {
     pub deleted: bool,
-}
-
-fn reject_allow(concurrency: ConcurrencyPolicy) -> WebResult<()> {
-    if concurrency == ConcurrencyPolicy::Allow {
-        return Err(WebError::bad_request(
-            "concurrency `allow` is reserved",
-        ));
-    }
-    Ok(())
 }
 
 /// `GET /projects/{org}/{project}/triggers` — list all triggers for the project.
@@ -137,7 +123,6 @@ pub async fn create(
     )
     .await?;
 
-    reject_allow(body.concurrency)?;
     body.config
         .validate()
         .map_err(|e| WebError::bad_request(e.to_string()))?;
@@ -150,7 +135,6 @@ pub async fn create(
         id: Set(ProjectTriggerId::now_v7()),
         project: Set(proj.id),
         trigger_type: Set(trigger_type.as_i16()),
-        concurrency: Set(body.concurrency.as_i16()),
         config: Set(config_json),
         active: Set(body.active),
         last_fired_at: Set(None),
@@ -214,9 +198,6 @@ pub async fn update(
         .await?
         .or_not_found("Trigger")?;
 
-    if let Some(ref c) = body.concurrency {
-        reject_allow(*c)?;
-    }
     if let Some(ref cfg) = body.config {
         cfg.validate()
             .map_err(|e| WebError::bad_request(e.to_string()))?;
@@ -227,9 +208,6 @@ pub async fn update(
         let tt = cfg.trigger_type();
         active.trigger_type = Set(tt.as_i16());
         active.config = Set(cfg.to_db_json());
-    }
-    if let Some(c) = body.concurrency {
-        active.concurrency = Set(c.as_i16());
     }
     if let Some(a) = body.active {
         active.active = Set(a);
@@ -304,8 +282,8 @@ pub async fn fire_now(
 
     let trigger_type = TriggerType::from_i16(row.trigger_type)
         .ok_or_else(|| WebError::internal("invalid trigger_type in row"))?;
-    let concurrency = ConcurrencyPolicy::from_i16(row.concurrency)
-        .ok_or_else(|| WebError::internal("invalid concurrency in row"))?;
+    let concurrency = ConcurrencyPolicy::from_i16(proj.concurrency)
+        .unwrap_or(ConcurrencyPolicy::Skip);
 
     let (commit_hash, commit_message, author_name) = resolve_head(Arc::clone(&state), &proj)
         .await

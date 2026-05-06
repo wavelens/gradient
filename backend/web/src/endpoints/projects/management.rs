@@ -18,7 +18,7 @@ use gradient_core::nix::RepositoryUrl;
 use gradient_core::sources::check_project_updates;
 use gradient_core::types::consts::*;
 use gradient_core::types::input::{check_index_name, validate_display_name, vec_to_hex};
-use gradient_core::types::triggers::{ConcurrencyPolicy, TriggerConfig, TriggerType};
+use gradient_core::types::triggers::{TriggerConfig, TriggerType};
 use gradient_core::types::wildcard::Wildcard;
 use gradient_core::types::*;
 use sea_orm::ActiveValue::Set;
@@ -225,6 +225,7 @@ pub async fn put(
         created_at: Set(gradient_core::types::now()),
         managed: Set(false),
         keep_evaluations: Set(30),
+        concurrency: Set(3),
     };
 
     let project = project.insert(&state.web_db).await?;
@@ -235,7 +236,6 @@ pub async fn put(
         id: Set(ProjectTriggerId::now_v7()),
         project: Set(project.id),
         trigger_type: Set(TriggerType::Polling.as_i16()),
-        concurrency: Set(ConcurrencyPolicy::Skip.as_i16()),
         config: Set(default_cfg.to_db_json()),
         active: Set(true),
         last_fired_at: Set(None),
