@@ -164,6 +164,17 @@
       />
       <small class="text-secondary">Minimum 10 seconds. Example: 300 = every 5 minutes.</small>
     </div>
+    <div class="form-group">
+      <label for="trig-branch">Branch</label>
+      <input
+        pInputText
+        id="trig-branch"
+        [(ngModel)]="form.branch"
+        placeholder="HEAD (default branch)"
+        class="w-full"
+      />
+      <small class="text-secondary">Leave empty to track the repo's default branch (HEAD).</small>
+    </div>
   }
 
   @if (form.type === 'reporter_push' || form.type === 'reporter_pull_request') {

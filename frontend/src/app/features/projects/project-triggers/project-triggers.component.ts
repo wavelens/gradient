@@ -20,6 +20,7 @@ import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/load
 import {
   ProjectTrigger,
   TriggerType,
+  PollingTriggerConfig,
   CreateTriggerBody,
   UpdateTriggerBody,
   Integration,
@@ -35,6 +36,7 @@ interface TriggerFormState {
   type: TriggerType;
   active: boolean;
   interval_secs: number;
+  branch: string;
   integration_id: string;
   branches: string;
   tags: string;
@@ -47,6 +49,7 @@ const DEFAULT_FORM: TriggerFormState = {
   type: 'polling',
   active: true,
   interval_secs: 300,
+  branch: '',
   integration_id: '',
   branches: '',
   tags: '',
@@ -154,6 +157,7 @@ export class ProjectTriggersComponent implements OnInit {
       type: trigger.type,
       active: trigger.active,
       interval_secs: cfg.interval_secs ?? 300,
+      branch: cfg.branch ?? '',
       integration_id: cfg.integration_id ?? '',
       branches: (cfg.branches ?? []).join(', '),
       tags: (cfg.tags ?? []).join(', '),
@@ -175,8 +179,14 @@ export class ProjectTriggersComponent implements OnInit {
 
   private buildConfig(): object {
     switch (this.form.type) {
-      case 'polling':
-        return { type: 'polling', interval_secs: Math.max(10, this.form.interval_secs) };
+      case 'polling': {
+        const trimmed = this.form.branch?.trim() ?? '';
+        return {
+          type: 'polling',
+          interval_secs: Math.max(10, this.form.interval_secs),
+          branch: trimmed === '' ? null : trimmed,
+        } as PollingTriggerConfig;
+      }
       case 'reporter_push': {
         const cfg: any = { type: 'reporter_push', integration_id: this.form.integration_id };
         const branches = this.splitList(this.form.branches);
@@ -281,8 +291,11 @@ export class ProjectTriggersComponent implements OnInit {
   configSummary(trigger: ProjectTrigger): string {
     const cfg = trigger.config as any;
     switch (trigger.type) {
-      case 'polling':
-        return `every ${this.formatSeconds(cfg.interval_secs ?? 300)}`;
+      case 'polling': {
+        let summary = `every ${this.formatSeconds(cfg.interval_secs ?? 300)}`;
+        if (cfg.branch) summary += `, branch ${cfg.branch}`;
+        return summary;
+      }
       case 'reporter_push': {
         const integration = this.inboundIntegrations().find((i) => i.id === cfg.integration_id);
         const name = integration ? (integration.display_name || integration.name) : cfg.integration_id;
