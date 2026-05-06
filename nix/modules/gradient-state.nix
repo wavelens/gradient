@@ -198,17 +198,6 @@
         description = "Whether to force evaluation on next check";
       };
 
-      inbound_integration = mkOption {
-        type = types.nullOr types.str;
-        default = null;
-        description = ''
-          Name of an **inbound** integration in the same organization that
-          receives push webhooks for this project. Null disables inbound
-          webhook routing for the project. The integration must be declared
-          in `services.gradient.state.integrations`.
-        '';
-      };
-
       outbound_integration = mkOption {
         type = types.nullOr types.str;
         default = null;
@@ -217,6 +206,43 @@
           receives CI status reports for this project. Null disables status
           reporting. The integration must be declared in
           `services.gradient.state.integrations`.
+        '';
+      };
+
+      triggers = mkOption {
+        type = types.nullOr (types.listOf triggerType);
+        default = null;
+        description = ''
+          List of evaluation triggers for the project. Each trigger declares
+          *how* and *when* an evaluation runs (polling, forge push, forge PR,
+          cron schedule). When `null`, existing trigger rows are left
+          untouched (back-compat for state files predating this option). When
+          set to `[]`, provisioning errors out — every project must have at
+          least one trigger.
+
+          A new project always receives a default polling trigger
+          (interval 300s, concurrency `skip`) automatically; declaring
+          `triggers` here replaces that default with the listed set.
+        '';
+        example = literalExpression ''
+          [
+            {
+              type = "polling";
+              config = { interval_secs = 60; };
+              concurrency = "skip";
+            }
+            {
+              type = "reporter_push";
+              integration = "acme-prod-inbound";
+              config = { branches = [ "main" "release/*" ]; };
+              concurrency = "hard_abort";
+            }
+            {
+              type = "time";
+              config = { cron = "0 0 2 * * *"; };
+              concurrency = "skip";
+            }
+          ]
         '';
       };
 
@@ -301,6 +327,68 @@
     };
   });
 
+
+  triggerType = types.submodule ({ name, ... }: {
+    options = {
+      type = mkOption {
+        type = types.enum [ "polling" "reporter_push" "reporter_pull_request" "time" ];
+        description = "Trigger kind. Drives which `config` shape is expected and how the dispatch loop fires it.";
+      };
+
+      concurrency = mkOption {
+        type = types.enum [ "hard_abort" "soft_abort" "skip" "allow" ];
+        default = "skip";
+        description = ''
+          Behaviour when the trigger fires while another evaluation is in
+          flight for the same project.
+
+          - `hard_abort` cancels the running evaluation (and its in-flight
+            builds) and starts a fresh one.
+          - `soft_abort` marks the running evaluation Aborted so the new one
+            becomes canonical, but lets in-flight builds finish; their cached
+            outputs flow into the new evaluation.
+          - `skip` discards the new trigger event.
+          - `allow` is **reserved** — multi-evaluation-per-project support is
+            a follow-up. The API currently rejects it with 400.
+        '';
+      };
+
+      integration = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        description = ''
+          Name of an inbound integration in the same organization that backs
+          this trigger. Required for `reporter_push` and `reporter_pull_request`;
+          ignored for `polling` and `time`. Must be declared in
+          `services.gradient.state.integrations`.
+        '';
+      };
+
+      config = mkOption {
+        type = types.attrs;
+        default = { };
+        description = ''
+          Type-specific configuration. Shape depends on `type`:
+
+          - `polling`: `{ interval_secs = 300; }` (minimum 10 seconds)
+          - `reporter_push`: `{ branches = [ "main" "release/*" ]; tags = [ ]; releases_only = false; }`
+          - `reporter_pull_request`: `{ branches = [ ]; actions = [ "opened" "synchronize" "reopened" ]; }`
+          - `time`: `{ cron = "0 0 2 * * *"; }` (six-field: sec min hour dom mon dow, UTC)
+
+          Empty `branches`/`tags`/`actions` lists mean "match all".
+        '';
+        example = literalExpression ''
+          { interval_secs = 60; }
+        '';
+      };
+
+      active = mkOption {
+        type = types.bool;
+        default = true;
+        description = "Whether the trigger is active. Inactive triggers are stored but never fire.";
+      };
+    };
+  });
 
   cacheType = types.submodule ({ config, name, ... }: {
     options = {
@@ -595,6 +683,13 @@ in
               evaluation_wildcard = "nixosConfigurations.*.config.system.build.toplevel";
               active = true;
               created_by = "alice";
+              triggers = [
+                {
+                  type = "polling";
+                  config = { interval_secs = 300; };
+                  concurrency = "skip";
+                }
+              ];
             };
           };
           caches = {
