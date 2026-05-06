@@ -91,6 +91,18 @@ impl Scheduler {
         }
     }
 
+    /// Drop the eval job and any associated build jobs from the in-memory
+    /// tracker. Workers that have already been assigned will finish or time out
+    /// normally; the DB-side abort (via `core::ci::abort_evaluation`) is the
+    /// caller's responsibility.
+    pub async fn cancel_evaluation_jobs(&self, eval_id: EvaluationId, build_ids: &[BuildId]) {
+        let mut tracker = self.job_tracker.write().await;
+        tracker.remove_job(&format!("eval:{eval_id}"));
+        for bid in build_ids {
+            tracker.remove_job(&format!("build:{bid}"));
+        }
+    }
+
     /// Spawn background project polling, eval dispatch, and build dispatch loops.
     ///
     /// Call once after creating the scheduler, before serving requests.

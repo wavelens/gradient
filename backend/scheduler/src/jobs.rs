@@ -367,6 +367,11 @@ impl JobTracker {
         self.pending.contains_key(job_id) || self.active.contains_key(job_id)
     }
 
+    pub fn remove_job(&mut self, job_id: &str) {
+        self.pending.remove(job_id);
+        self.active.remove(job_id);
+    }
+
     /// Iterate over active jobs: yields `(job_id, worker_id, &PendingJob)`.
     pub fn active_jobs(&self) -> impl Iterator<Item = (&str, &str, &PendingJob)> {
         self.active
@@ -794,5 +799,38 @@ mod tests {
         );
         // Now in active, not pending — should still be "contained".
         assert!(tracker.contains_job("j1"));
+    }
+
+    #[test]
+    fn remove_job_drops_pending_entry() {
+        let mut tracker = JobTracker::new();
+        let peer = OrganizationId::now_v7();
+        tracker.add_pending("j1".into(), eval_job(peer));
+        assert!(tracker.contains_job("j1"));
+        tracker.remove_job("j1");
+        assert!(!tracker.contains_job("j1"));
+    }
+
+    #[test]
+    fn remove_job_drops_active_entry() {
+        let mut tracker = JobTracker::new();
+        let peer = OrganizationId::now_v7();
+        tracker.add_pending("j1".into(), eval_job(peer));
+        tracker.take_best_of_kind(
+            "w1",
+            None,
+            None,
+            &JobKind::Flake,
+            &Policy::default_build_policy(),
+        );
+        assert!(tracker.contains_job("j1"));
+        tracker.remove_job("j1");
+        assert!(!tracker.contains_job("j1"));
+    }
+
+    #[test]
+    fn remove_job_unknown_id_is_noop() {
+        let mut tracker = JobTracker::new();
+        tracker.remove_job("does-not-exist");
     }
 }
