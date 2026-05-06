@@ -106,7 +106,7 @@
       deploy = ./nix/modules/gradient-deploy.nix;
       gradient = { config, lib, ... }: {
         imports = [ ./nix/modules/gradient.nix ];
-        nixpkgs.overlays = lib.mkIf config.services.gradient.enable [
+        nixpkgs.overlays = lib.mkIf (config.services.gradient.enable || config.services.gradient.worker.enable) [
           self.overlays.default
         ];
       };
