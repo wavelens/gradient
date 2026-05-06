@@ -492,97 +492,10 @@ async fn org_name_for(
         .map(|o| o.name)
 }
 
-// ── URL canonicalisation ───────────────────────────────────────────────────
-
-/// Canonicalises a git repository URL so that equivalent forms compare equal.
-fn canonicalise_repo_url(u: &str) -> String {
-    let u = u.trim();
-    let u = u.trim_end_matches('/');
-    let u = u.trim_end_matches(".git");
-    let u = u.strip_prefix("git+").unwrap_or(u);
-    let normalised = if !u.contains("://") {
-        if let Some((userhost, path)) = u.split_once(':') {
-            format!("ssh://{}/{}", userhost, path)
-        } else {
-            u.to_string()
-        }
-    } else {
-        u.to_string()
-    };
-    if let Some(rest) = normalised.strip_prefix("http://") {
-        format!("https://{}", rest)
-    } else {
-        normalised
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::super::WebhookTriggerOutcome;
-    use super::{canonicalise_repo_url, glob_match_pattern, glob_matches};
-
-    #[test]
-    fn canonicalise_strips_dot_git_and_trailing_slash() {
-        assert_eq!(
-            canonicalise_repo_url("https://git.example.com/org/repo.git/"),
-            "https://git.example.com/org/repo"
-        );
-    }
-
-    #[test]
-    fn canonicalise_strips_git_plus_ssh_prefix() {
-        assert_eq!(
-            canonicalise_repo_url("git+ssh://git@git.example.com/org/repo.git"),
-            "ssh://git@git.example.com/org/repo"
-        );
-    }
-
-    #[test]
-    fn canonicalise_strips_git_plus_https_prefix() {
-        assert_eq!(
-            canonicalise_repo_url("git+https://git.example.com/org/repo"),
-            "https://git.example.com/org/repo"
-        );
-    }
-
-    #[test]
-    fn canonicalise_converts_scp_form_to_ssh_url() {
-        assert_eq!(
-            canonicalise_repo_url("git@git.example.com:org/repo.git"),
-            "ssh://git@git.example.com/org/repo"
-        );
-    }
-
-    #[test]
-    fn canonicalise_upgrades_http_to_https() {
-        assert_eq!(
-            canonicalise_repo_url("http://git.example.com/org/repo"),
-            "https://git.example.com/org/repo"
-        );
-    }
-
-    #[test]
-    fn canonicalise_equates_flake_ssh_and_scp_forms() {
-        let scp = canonicalise_repo_url("git@git.example.com:org/repo.git");
-        let flake = canonicalise_repo_url("git+ssh://git@git.example.com/org/repo.git");
-        let plain_ssh = canonicalise_repo_url("ssh://git@git.example.com/org/repo");
-        assert_eq!(scp, flake);
-        assert_eq!(flake, plain_ssh);
-    }
-
-    #[test]
-    fn canonicalise_equates_flake_https_and_plain_https() {
-        let a = canonicalise_repo_url("git+https://git.example.com/org/repo.git");
-        let b = canonicalise_repo_url("https://git.example.com/org/repo");
-        assert_eq!(a, b);
-    }
-
-    #[test]
-    fn canonicalise_is_idempotent() {
-        let once = canonicalise_repo_url("git+ssh://git@git.example.com/org/repo.git/");
-        let twice = canonicalise_repo_url(&once);
-        assert_eq!(once, twice);
-    }
+    use super::{glob_match_pattern, glob_matches};
 
     #[test]
     fn trigger_outcome_default_is_empty() {
