@@ -83,7 +83,7 @@ pub async fn apply_trigger<C: ConnectionTrait>(
         }
     }
 
-    let eval = trigger_evaluation(
+    let eval = match trigger_evaluation(
         db,
         project,
         input.commit_hash,
@@ -91,7 +91,17 @@ pub async fn apply_trigger<C: ConnectionTrait>(
         input.author_name,
         Some(input.trigger_id),
     )
-    .await?;
+    .await
+    {
+        Ok(e) => e,
+        Err(TriggerError::AlreadyInProgress) => return Ok(ApplyOutcome::SkippedConcurrency),
+        Err(TriggerError::Db(ref e))
+            if e.to_string().contains("uq_evaluation_one_active_per_project") =>
+        {
+            return Ok(ApplyOutcome::SkippedConcurrency);
+        }
+        Err(e) => return Err(e.into()),
+    };
     Ok(ApplyOutcome::Created(eval))
 }
 
@@ -287,6 +297,38 @@ mod tests {
         .await
         .unwrap();
         assert!(matches!(res, ApplyOutcome::SkippedAllowReserved));
+    }
+
+    #[tokio::test]
+    async fn unique_constraint_violation_returns_skipped_concurrency() {
+        let project = make_project_with_last_eval(None);
+        let new_commit_id = CommitId::now_v7();
+        let trig = ProjectTriggerId::now_v7();
+
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            // Concurrency check: no in-flight (races past the guard)
+            .append_query_results([Vec::<entity::evaluation::Model>::new()])
+            // trigger_evaluation: no in-progress guard
+            .append_query_results([Vec::<entity::evaluation::Model>::new()])
+            // commit insert
+            .append_query_results([vec![make_commit(new_commit_id, vec![1u8; 20])]])
+            // evaluation insert fails with unique constraint violation
+            .append_query_errors([sea_orm::DbErr::Custom(
+                "uq_evaluation_one_active_per_project".into(),
+            )])
+            .into_connection();
+
+        let res = apply_trigger(
+            &db,
+            &project,
+            input(trig, TriggerType::Polling, ConcurrencyPolicy::Skip, vec![1u8; 20], false),
+        )
+        .await
+        .unwrap();
+        assert!(
+            matches!(res, ApplyOutcome::SkippedConcurrency),
+            "expected SkippedConcurrency, got {res:?}"
+        );
     }
 
     #[tokio::test]
