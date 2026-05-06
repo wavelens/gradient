@@ -298,6 +298,10 @@ pub async fn fire_now(
         .await?
         .or_not_found("Trigger")?;
 
+    if !row.active {
+        return Err(WebError::bad_request("trigger is inactive"));
+    }
+
     let trigger_type = TriggerType::from_i16(row.trigger_type)
         .ok_or_else(|| WebError::internal("invalid trigger_type in row"))?;
     let concurrency = ConcurrencyPolicy::from_i16(row.concurrency)
