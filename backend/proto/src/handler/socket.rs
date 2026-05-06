@@ -29,7 +29,7 @@ use tokio_tungstenite::{
 };
 use tracing::{debug, error, trace, warn};
 
-use crate::messages::{ClientMessage, ServerMessage};
+use crate::messages::{ClientMessage, ServerMessage, decode_client_message};
 use scheduler::Scheduler;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -123,7 +123,7 @@ impl ProtoSocket {
             Ok(b) => b,
             Err(()) => return None,
         };
-        match rkyv::from_bytes::<ClientMessage, RkyvError>(&bytes) {
+        match decode_client_message(&bytes) {
             Ok(msg) => {
                 trace!(?msg, bytes = bytes.len(), "recv ClientMessage");
                 Some(msg)
@@ -193,7 +193,7 @@ impl ProtoReader {
                 Self::Axum(s) => s.next().await,
                 Self::Tungstenite(s) => match s.next().await? {
                     Ok(TungsteniteMessage::Binary(bytes)) => {
-                        match rkyv::from_bytes::<ClientMessage, RkyvError>(&bytes) {
+                        match decode_client_message(&bytes) {
                             Ok(msg) => {
                                 trace!(?msg, bytes = bytes.len(), "recv ClientMessage");
                                 return Some(msg);
@@ -215,7 +215,7 @@ impl ProtoReader {
             };
             match frame? {
                 Ok(AxumMessage::Binary(bytes)) => {
-                    match rkyv::from_bytes::<ClientMessage, RkyvError>(&bytes) {
+                    match decode_client_message(&bytes) {
                         Ok(msg) => {
                             trace!(?msg, bytes = bytes.len(), "recv ClientMessage");
                             return Some(msg);
@@ -667,7 +667,7 @@ mod writer_tests {
 #[cfg(test)]
 mod serve_nar_tests {
     use super::*;
-    use rkyv::rancor::Error as RkyvError;
+    use crate::messages::decode_server_message;
     use sea_orm::{DatabaseBackend, MockDatabase};
     use test_support::state::test_state;
     use tokio::sync::mpsc;
@@ -687,7 +687,7 @@ mod serve_nar_tests {
     }
 
     fn decode(bytes: &[u8]) -> ServerMessage {
-        rkyv::from_bytes::<ServerMessage, RkyvError>(bytes).expect("decode ServerMessage")
+        decode_server_message(bytes).expect("decode ServerMessage")
     }
 
     fn variant_of(msg: &ServerMessage) -> &'static str {

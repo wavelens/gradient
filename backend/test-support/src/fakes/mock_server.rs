@@ -14,7 +14,7 @@
 
 use anyhow::{Context, Result};
 use futures::{SinkExt, StreamExt};
-use proto::messages::{ClientMessage, ServerMessage};
+use proto::messages::{ClientMessage, ServerMessage, decode_client_message};
 use rkyv::rancor::Error as RkyvError;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::tungstenite::Message;
@@ -74,12 +74,7 @@ impl MockServerConn {
         loop {
             match self.socket.next().await {
                 Some(Ok(Message::Binary(bytes))) => {
-                    // rkyv 0.8 requires the buffer to be aligned; network
-                    // buffers are not guaranteed to satisfy this.  Copy into
-                    // an AlignedVec before deserialising.
-                    let mut aligned = rkyv::util::AlignedVec::<16>::new();
-                    aligned.extend_from_slice(&bytes);
-                    return rkyv::from_bytes::<ClientMessage, RkyvError>(&aligned)
+                    return decode_client_message(&bytes)
                         .context("failed to deserialise ClientMessage");
                 }
                 Some(Ok(Message::Ping(_))) | Some(Ok(Message::Pong(_))) => continue,

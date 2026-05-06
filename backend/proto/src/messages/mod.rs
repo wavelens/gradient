@@ -6,6 +6,7 @@
 
 pub mod client;
 pub mod server;
+pub mod wire;
 
 // Job and scheduling types live in core::types::proto — re-exported here for
 // backward compatibility so existing `proto::messages::FlakeJob` paths still work.
@@ -17,6 +18,7 @@ pub use gradient_core::types::proto::{
     QueryMode, RequiredPath,
 };
 pub use server::{FailedPeer, ServerMessage};
+pub use wire::{decode_client_message, decode_server_message};
 
 /// Wire protocol version implemented by this build.
 pub const PROTO_VERSION: u16 = 1;

@@ -12,7 +12,7 @@ pub mod listener;
 use anyhow::{Context, Result};
 use futures::SinkExt;
 use futures::StreamExt;
-use proto::messages::{ClientMessage, ServerMessage};
+use proto::messages::{ClientMessage, ServerMessage, decode_server_message};
 use rkyv::rancor::Error as RkyvError;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
@@ -96,9 +96,7 @@ impl ProtoConnection {
                 None => return Ok(None),
                 Some(Err(e)) => return Err(e.into()),
                 Some(Ok(Message::Binary(bytes))) => {
-                    let mut aligned = rkyv::util::AlignedVec::<16>::new();
-                    aligned.extend_from_slice(&bytes);
-                    let msg = rkyv::from_bytes::<ServerMessage, RkyvError>(&aligned)
+                    let msg = decode_server_message(&bytes)
                         .context("failed to deserialise ServerMessage")?;
                     trace!(?msg, bytes = bytes.len(), "recv ServerMessage");
                     return Ok(Some(msg));
@@ -225,9 +223,7 @@ impl ProtoReader {
                 None => return Ok(None),
                 Some(Err(e)) => return Err(e.into()),
                 Some(Ok(tokio_tungstenite::tungstenite::Message::Binary(bytes))) => {
-                    let mut aligned = rkyv::util::AlignedVec::<16>::new();
-                    aligned.extend_from_slice(&bytes);
-                    let msg = rkyv::from_bytes::<ServerMessage, rkyv::rancor::Error>(&aligned)
+                    let msg = decode_server_message(&bytes)
                         .context("failed to deserialise ServerMessage")?;
                     tracing::trace!(?msg, bytes = bytes.len(), "recv ServerMessage (reader)");
                     return Ok(Some(msg));

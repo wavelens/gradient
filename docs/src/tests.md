@@ -1146,3 +1146,32 @@ Run with `cargo test -p scheduler --tests waiting_reason_tests`.
 - `web::endpoints::forge_hooks::events` — PR (github/gitea/gitlab) and release (github/gitea/gitlab) parsers; GitLab action mapping; tag-ref support on push parsers.
 - `web::endpoints::forge_hooks` integration — push fans out to matching trigger row; branch glob filter skip; PR action filter; release fires only `releases_only` triggers; GitHub App push by installation_id.
 - `web::endpoints::projects::management` — creating a project seeds a default polling trigger.
+
+## Proto wire decoders — alignment-safe deserialisation
+
+`rkyv::from_bytes` requires the input slice to be aligned to the archive's
+required alignment (16 bytes for `ClientMessage` / `ServerMessage`), but
+inbound WebSocket buffers (`axum::body::Bytes`, `tungstenite::Message::Binary`)
+only guarantee `align_of::<u8>() == 1`. Decoding a bare `&[u8]` therefore
+fails non-deterministically depending on the allocator's output, surfacing
+on the server as `proto::handler::socket: failed to deserialize client
+message` and on the worker as `Connection reset without closing handshake`
+once the server tears down the socket.
+
+`backend/proto/src/messages/wire.rs` provides `decode_client_message` and
+`decode_server_message`, both of which copy inbound bytes into an
+`AlignedVec<16>` before calling `rkyv::from_bytes`. Every WebSocket-receive
+path in the workspace funnels through these helpers; open-coding
+`rkyv::from_bytes` on raw network bytes is the bug they exist to prevent.
+
+Tests (`cargo test -p proto`):
+
+- `messages::wire::tests::decode_client_message_handles_misaligned_input`
+  and `…::decode_server_message_handles_misaligned_input` —
+  encode a representative message, place the bytes at a deliberately
+  misaligned address (`AlignedVec<16>` base + 1) so the input pointer is
+  guaranteed not to be 16-byte-aligned, then assert the helper still
+  decodes back to the original value. This is the regression for the
+  reconnect-time deserialisation failures observed when the server's
+  inbound buffer happened to land at a non-16-byte-aligned allocator
+  address.
