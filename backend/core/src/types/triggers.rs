@@ -10,67 +10,32 @@
 //! `sec min hour dom mon dow` — not the five-field POSIX form.
 
 use crate::types::ids::IntegrationId;
+use num_enum::{IntoPrimitive, TryFromPrimitive};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(i16)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, IntoPrimitive, TryFromPrimitive,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum TriggerType {
-    Polling,
-    ReporterPush,
-    ReporterPullRequest,
-    Time,
+    Polling = 0,
+    ReporterPush = 1,
+    ReporterPullRequest = 2,
+    Time = 3,
 }
 
-impl TriggerType {
-    pub const fn as_i16(self) -> i16 {
-        match self {
-            Self::Polling => 0,
-            Self::ReporterPush => 1,
-            Self::ReporterPullRequest => 2,
-            Self::Time => 3,
-        }
-    }
-
-    pub fn from_i16(v: i16) -> Option<Self> {
-        Some(match v {
-            0 => Self::Polling,
-            1 => Self::ReporterPush,
-            2 => Self::ReporterPullRequest,
-            3 => Self::Time,
-            _ => return None,
-        })
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(i16)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, IntoPrimitive, TryFromPrimitive,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ConcurrencyPolicy {
-    HardAbort,
-    SoftAbort,
-    All,
-    Skip,
-}
-
-impl ConcurrencyPolicy {
-    pub const fn as_i16(self) -> i16 {
-        match self {
-            Self::HardAbort => 0,
-            Self::SoftAbort => 1,
-            Self::All => 2,
-            Self::Skip => 3,
-        }
-    }
-
-    pub fn from_i16(v: i16) -> Option<Self> {
-        Some(match v {
-            0 => Self::HardAbort,
-            1 => Self::SoftAbort,
-            2 => Self::All,
-            3 => Self::Skip,
-            _ => return None,
-        })
-    }
+    HardAbort = 0,
+    SoftAbort = 1,
+    All = 2,
+    Skip = 3,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -130,7 +95,8 @@ impl TriggerConfig {
 
     /// Parse a row's `(trigger_type, config_json)` pair into a typed config.
     pub fn parse_row(trigger_type: i16, config: &serde_json::Value) -> Result<Self, TriggerConfigError> {
-        let tag = TriggerType::from_i16(trigger_type).ok_or(TriggerConfigError::TypeMismatch(trigger_type))?;
+        let tag = TriggerType::try_from(trigger_type)
+            .map_err(|_| TriggerConfigError::TypeMismatch(trigger_type))?;
         let mut value = config.clone();
         if let serde_json::Value::Object(ref mut m) = value {
             m.insert(
@@ -232,9 +198,10 @@ mod tests {
             (ConcurrencyPolicy::All, 2),
             (ConcurrencyPolicy::Skip, 3),
         ] {
-            assert_eq!(p.as_i16(), n);
-            assert_eq!(ConcurrencyPolicy::from_i16(n), Some(p));
+            assert_eq!(i16::from(p), n);
+            assert_eq!(ConcurrencyPolicy::try_from(n), Ok(p));
         }
+        assert!(ConcurrencyPolicy::try_from(99).is_err());
     }
 
     #[test]
@@ -245,9 +212,10 @@ mod tests {
             (TriggerType::ReporterPullRequest, 2),
             (TriggerType::Time, 3),
         ] {
-            assert_eq!(t.as_i16(), n);
-            assert_eq!(TriggerType::from_i16(n), Some(t));
+            assert_eq!(i16::from(t), n);
+            assert_eq!(TriggerType::try_from(n), Ok(t));
         }
+        assert!(TriggerType::try_from(99).is_err());
     }
 
     #[test]

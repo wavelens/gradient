@@ -5,32 +5,46 @@
  */
 
 use chrono::NaiveDateTime;
+use num_enum::{IntoPrimitive, TryFromPrimitive};
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{CommitId, EvaluationId, ProjectId, ProjectTriggerId};
 
-#[derive(Debug, Clone, PartialEq, Eq, DeriveActiveEnum, EnumIter, Deserialize, Serialize)]
+#[repr(i32)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    DeriveActiveEnum,
+    EnumIter,
+    Deserialize,
+    Serialize,
+    IntoPrimitive,
+    TryFromPrimitive,
+)]
 #[sea_orm(rs_type = "i32", db_type = "Integer")]
 pub enum EvaluationStatus {
     #[sea_orm(num_value = 0)]
-    Queued,
+    Queued = 0,
     #[sea_orm(num_value = 1)]
-    EvaluatingFlake,
+    EvaluatingFlake = 1,
     #[sea_orm(num_value = 2)]
-    EvaluatingDerivation,
+    EvaluatingDerivation = 2,
     #[sea_orm(num_value = 3)]
-    Building,
+    Building = 3,
     #[sea_orm(num_value = 4)]
-    Waiting,
+    Waiting = 4,
     #[sea_orm(num_value = 5)]
-    Completed,
+    Completed = 5,
     #[sea_orm(num_value = 6)]
-    Failed,
+    Failed = 6,
     #[sea_orm(num_value = 7)]
-    Aborted,
+    Aborted = 7,
     #[sea_orm(num_value = 8)]
-    Fetching,
+    Fetching = 8,
 }
 
 impl EvaluationStatus {
@@ -54,20 +68,6 @@ impl EvaluationStatus {
         Self::Building,
         Self::Waiting,
     ];
-
-    pub const fn num_value(&self) -> i32 {
-        match self {
-            Self::Queued => 0,
-            Self::EvaluatingFlake => 1,
-            Self::EvaluatingDerivation => 2,
-            Self::Building => 3,
-            Self::Waiting => 4,
-            Self::Completed => 5,
-            Self::Failed => 6,
-            Self::Aborted => 7,
-            Self::Fetching => 8,
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
