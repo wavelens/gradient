@@ -15,6 +15,7 @@ use super::reporter::{
 };
 use super::webhook::decrypt_webhook_secret;
 use crate::types::*;
+use num_enum::{IntoPrimitive, TryFromPrimitive};
 use sea_orm::EntityTrait;
 use std::fs;
 use std::sync::Arc;
@@ -22,21 +23,15 @@ use tracing::warn;
 
 /// Numeric encoding of `integration.kind`.
 #[repr(i16)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IntoPrimitive, TryFromPrimitive)]
 pub enum IntegrationKind {
     Inbound = 0,
     Outbound = 1,
 }
 
-impl IntegrationKind {
-    pub fn as_i16(self) -> i16 {
-        self as i16
-    }
-}
-
 /// Numeric encoding of `integration.forge_type`.
 #[repr(i16)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IntoPrimitive, TryFromPrimitive)]
 pub enum ForgeType {
     Gitea = 0,
     Forgejo = 1,
@@ -45,20 +40,6 @@ pub enum ForgeType {
 }
 
 impl ForgeType {
-    pub fn as_i16(self) -> i16 {
-        self as i16
-    }
-
-    pub fn from_i16(v: i16) -> Option<Self> {
-        match v {
-            0 => Some(Self::Gitea),
-            1 => Some(Self::Forgejo),
-            2 => Some(Self::GitLab),
-            3 => Some(Self::GitHub),
-            _ => None,
-        }
-    }
-
     pub fn from_path_segment(s: &str) -> Option<Self> {
         match s {
             "gitea" => Some(Self::Gitea),
@@ -110,7 +91,7 @@ pub async fn resolve_outbound_reporter_for_project(
     let outbound_id = outbound_id.unwrap();
 
     let integration = match EIntegration::find_by_id(outbound_id)
-        .filter(CIntegration::Kind.eq(IntegrationKind::Outbound.as_i16()))
+        .filter(CIntegration::Kind.eq(i16::from(IntegrationKind::Outbound)))
         .one(&state.worker_db)
         .await
     {
@@ -122,9 +103,9 @@ pub async fn resolve_outbound_reporter_for_project(
         }
     };
 
-    let forge = match ForgeType::from_i16(integration.forge_type) {
-        Some(f) => f,
-        None => return Arc::new(NoopCiReporter),
+    let forge = match ForgeType::try_from(integration.forge_type) {
+        Ok(f) => f,
+        Err(_) => return Arc::new(NoopCiReporter),
     };
 
     // Decrypt access token if present.

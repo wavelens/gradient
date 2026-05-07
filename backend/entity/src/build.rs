@@ -5,49 +5,50 @@
  */
 
 use chrono::NaiveDateTime;
+use num_enum::{IntoPrimitive, TryFromPrimitive};
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{BuildId, DerivationId, EvaluationId};
 
-#[derive(Debug, Clone, PartialEq, Eq, DeriveActiveEnum, EnumIter, Deserialize, Serialize)]
+#[repr(i32)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    DeriveActiveEnum,
+    EnumIter,
+    Deserialize,
+    Serialize,
+    IntoPrimitive,
+    TryFromPrimitive,
+)]
 #[sea_orm(rs_type = "i32", db_type = "Integer")]
 pub enum BuildStatus {
     #[sea_orm(num_value = 0)]
-    Created,
+    Created = 0,
     #[sea_orm(num_value = 1)]
-    Queued,
+    Queued = 1,
     #[sea_orm(num_value = 2)]
-    Building,
+    Building = 2,
     #[sea_orm(num_value = 3)]
-    Completed,
+    Completed = 3,
     #[sea_orm(num_value = 4)]
-    Failed,
+    Failed = 4,
     #[sea_orm(num_value = 5)]
-    Aborted,
+    Aborted = 5,
     #[sea_orm(num_value = 6)]
-    DependencyFailed,
+    DependencyFailed = 6,
     /// The derivation was already present in the Nix store at evaluation
     /// time; no actual work was performed in this evaluation. Distinct from
     /// `Completed` (which means "we ran the build and it succeeded").
     #[sea_orm(num_value = 7)]
-    Substituted,
+    Substituted = 7,
 }
 
 impl BuildStatus {
-    pub const fn num_value(&self) -> i32 {
-        match self {
-            Self::Created => 0,
-            Self::Queued => 1,
-            Self::Building => 2,
-            Self::Completed => 3,
-            Self::Failed => 4,
-            Self::Aborted => 5,
-            Self::DependencyFailed => 6,
-            Self::Substituted => 7,
-        }
-    }
-
     /// Maps internal-only states onto their API-facing equivalents.
     /// `Created` is a transient pre-queue state the scheduler flips to
     /// `Queued` almost immediately, so it is collapsed to `Queued` for clients.
@@ -129,7 +130,7 @@ mod tests {
             BuildStatus::DependencyFailed,
             BuildStatus::Substituted,
         ] {
-            assert_eq!(status.clone().for_api(), status);
+            assert_eq!(status.for_api(), status);
         }
     }
 }
