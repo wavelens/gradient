@@ -12,7 +12,7 @@ pub mod traits;
 #[cfg(test)]
 mod tests;
 
-pub use handler::proto_router;
+pub use handler::{ProtoLimiter, proto_router};
 pub use messages::{ClientMessage, PROTO_VERSION, ServerMessage};
 
 // Re-export from the scheduler crate for backward compatibility.

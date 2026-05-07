@@ -36,7 +36,7 @@ use tracing::Span;
 
 use endpoints::{admin, *};
 use gradient_core::types::ServerState;
-use proto::proto_router;
+use proto::{ProtoLimiter, proto_router};
 use scheduler::Scheduler;
 use std::sync::Arc;
 
@@ -443,6 +443,8 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
     scheduler.start();
     proto::outbound::start_outbound_loop(Arc::clone(&scheduler));
 
+    let proto_limiter = Arc::new(ProtoLimiter::new(state.config.proto.max_proto_connections));
+
     // Default tier covers everything left under /api/v1 (the bulk authenticated
     // surface) plus the proto WS upgrade.
     let api = api.route_layer(GovernorLayer::new(rl_per_ms(200, 150)));
@@ -451,7 +453,8 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
     let mut app = Router::new()
         .nest("/api/v1", api)
         .merge(proto_router().route_layer(GovernorLayer::new(rl_per_ms(200, 150))))
-        .layer(axum::Extension(scheduler));
+        .layer(axum::Extension(scheduler))
+        .layer(axum::Extension(proto_limiter));
 
     // Public NAR cache surface — substituters issue many requests per build,
     // so the burst is generous (1000 / 1000).

@@ -7,6 +7,7 @@
 mod auth;
 mod cache;
 mod dispatch;
+mod limiter;
 mod nar;
 mod session;
 mod socket;
@@ -16,16 +17,23 @@ use std::sync::Arc;
 use axum::Router;
 use axum::extract::ws::WebSocketUpgrade;
 use axum::extract::{Extension, State};
-use axum::response::IntoResponse;
+use axum::http::{HeaderValue, StatusCode, header};
+use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use gradient_core::types::*;
 use scheduler::Scheduler;
 
+pub use limiter::ProtoLimiter;
 pub(crate) use session::handle_socket;
 pub(crate) use socket::{MAX_PROTO_MESSAGE_SIZE, ProtoSocket};
 
 #[cfg(test)]
 pub(crate) use socket::{HANDSHAKE_TIMEOUT, NAR_PUSH_CHUNK_SIZE};
+
+/// `Retry-After` value returned with a 503 when the proto connection cap is
+/// hit — long enough to absorb a brief surge, short enough that a recovered
+/// worker reconnects promptly.
+const RETRY_AFTER: HeaderValue = HeaderValue::from_static("10");
 
 /// Returns the axum [`Router`] that serves the `/proto` WebSocket endpoint.
 pub fn proto_router() -> Router<Arc<ServerState>> {
@@ -36,15 +44,32 @@ async fn ws_upgrade(
     ws: WebSocketUpgrade,
     State(state): State<Arc<ServerState>>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
-) -> impl IntoResponse {
+    Extension(limiter): Extension<Arc<ProtoLimiter>>,
+) -> Response {
+    let Some(permit) = limiter.try_acquire() else {
+        tracing::warn!(
+            capacity = limiter.capacity(),
+            in_use = limiter.in_use(),
+            "proto connection limit reached; rejecting upgrade",
+        );
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            [(header::RETRY_AFTER, RETRY_AFTER)],
+            "proto connection limit reached",
+        )
+            .into_response();
+    };
+
     ws.max_message_size(MAX_PROTO_MESSAGE_SIZE)
         .max_frame_size(MAX_PROTO_MESSAGE_SIZE)
-        .on_upgrade(move |sock| {
+        .on_upgrade(move |sock| async move {
+            let _permit = permit;
             session::handle_socket(
                 socket::ProtoSocket::Axum(Box::new(sock)),
                 state,
                 scheduler,
                 false,
             )
+            .await;
         })
 }
