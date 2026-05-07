@@ -39,6 +39,7 @@ hex                   = { workspace = true }
 hmac                  = { workspace = true }
 libc                  = { workspace = true }
 nix-bindings          = { workspace = true }
+num_enum              = { workspace = true }
 object_store          = { workspace = true }
 rand                  = { workspace = true }
 reqwest               = { workspace = true }

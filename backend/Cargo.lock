@@ -985,6 +985,7 @@ dependencies = [
  "migration",
  "mockall",
  "nix-bindings",
+ "num_enum",
  "object_store",
  "password-auth",
  "rand 0.10.1",
@@ -1518,6 +1519,7 @@ name = "entity"
 version = "1.1.1"
 dependencies = [
  "chrono",
+ "num_enum",
  "sea-orm",
  "serde",
  "serde_json",
