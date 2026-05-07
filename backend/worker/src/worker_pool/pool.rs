@@ -149,10 +149,11 @@ impl EvalWorker {
             "received eval worker response"
         );
         serde_json::from_str(self.line.trim_end())
-            .inspect_err(|_| {
+            .inspect_err(|error| {
                 error!(
-                    "Failed to parse JSON. Raw input: |{}|",
-                    self.line.trim_end()
+                    %error,
+                    raw_input = self.line.trim_end(),
+                    "Failed to parse eval worker JSON response"
                 );
             })
             .context("parsing eval worker response")
@@ -188,13 +189,13 @@ impl EvalWorker {
         let mut bytes = match serde_json::to_vec(&EvalRequest::Shutdown) {
             Ok(b) => b,
             Err(e) => {
-                warn!(pid, "failed to serialize Shutdown request: {e}");
+                warn!(pid, error = %e, "failed to serialize Shutdown request");
                 return;
             }
         };
         bytes.push(b'\n');
         if let Err(e) = self.stdin.write_all(&bytes).await {
-            debug!(pid, "failed to write Shutdown to eval worker: {e}");
+            debug!(pid, error = %e, "failed to write Shutdown to eval worker");
             return;
         }
         let _ = self.stdin.flush().await;
@@ -202,7 +203,7 @@ impl EvalWorker {
         trace!(pid, "Shutdown sent; waiting for eval worker to exit");
         match tokio::time::timeout(std::time::Duration::from_secs(5), self.child.wait()).await {
             Ok(Ok(status)) => trace!(pid, ?status, "eval worker exited cleanly"),
-            Ok(Err(e)) => debug!(pid, "waiting on eval worker exit: {e}"),
+            Ok(Err(e)) => debug!(pid, error = %e, "waiting on eval worker exit failed"),
             Err(_) => warn!(
                 pid,
                 "eval worker did not exit within 5s of Shutdown; will be killed"

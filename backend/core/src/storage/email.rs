@@ -173,7 +173,7 @@ impl EmailSender for EmailService {
 
         transport.send(&email).context("Failed to send email")?;
 
-        info!("Verification email sent to {}", to_email);
+        info!(to = to_email, "Verification email sent");
         Ok(())
     }
 
@@ -256,7 +256,7 @@ impl EmailSender for EmailService {
 
         transport.send(&email).context("Failed to send email")?;
 
-        info!("Password reset email sent to {}", to_email);
+        info!(to = to_email, "Password reset email sent");
         Ok(())
     }
 }

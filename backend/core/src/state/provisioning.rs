@@ -321,9 +321,9 @@ impl<'a> StateApplicator<'a> {
                 };
                 membership.insert(self.db).await?;
                 tracing::info!(
-                    "Added {} as admin member of organization: {}",
-                    state_org.created_by,
-                    state_org.name
+                    username = %state_org.created_by,
+                    organization = %state_org.name,
+                    "Added admin member to organization"
                 );
             }
         }
@@ -530,9 +530,9 @@ impl<'a> StateApplicator<'a> {
                     };
                     org_cache_model.insert(self.db).await?;
                     tracing::info!(
-                        "Created organization_cache association: {} -> {}",
-                        org_name,
-                        state_cache.name
+                        organization = %org_name,
+                        cache = %state_cache.name,
+                        "Created organization_cache association"
                     );
                 }
             }
@@ -607,9 +607,9 @@ impl<'a> StateApplicator<'a> {
         }
 
         tracing::debug!(
-            "Applied {} upstreams to cache '{}'",
-            upstreams.len(),
-            cache_name
+            count = upstreams.len(),
+            cache = %cache_name,
+            "Applied upstreams to cache"
         );
         Ok(())
     }
@@ -933,8 +933,8 @@ impl<'a> StateApplicator<'a> {
                 row.insert(self.db).await?;
             }
             tracing::info!(
-                "Updated project integration link for '{}'",
-                state_project.name
+                project = %state_project.name,
+                "Updated project integration link"
             );
         }
 

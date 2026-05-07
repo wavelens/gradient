@@ -296,7 +296,7 @@ async fn prefetch_flake_inner(
         return Ok(None);
     }
 
-    debug!("SSH repository – cloning via libgit2: {}", repository);
+    debug!(repository, "SSH repository – cloning via libgit2");
 
     let (private_key, public_key) =
         super::ssh_key::decrypt_ssh_private_key(&crypt_secret_file, organization, &serve_url)?;
@@ -342,7 +342,7 @@ async fn prefetch_flake_inner(
                 stderr: e.message().to_string(),
             })?;
 
-        debug!("Cloned repository to {:?} at rev {}", temp_path, rev);
+        debug!(?temp_path, rev, "Cloned repository");
 
         crate::nix::lock_flake_with_ssh_key(&temp_path, &private_key).map_err(|e| {
             SourceError::NixFlakeArchiveFailed {
@@ -350,7 +350,7 @@ async fn prefetch_flake_inner(
             }
         })?;
 
-        debug!("Locked flake and prefetched inputs for {:?}", temp_path);
+        debug!(?temp_path, "Locked flake and prefetched inputs");
 
         Ok::<(), SourceError>(())
     })
