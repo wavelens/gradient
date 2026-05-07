@@ -1332,3 +1332,39 @@ Tests (`cargo test -p web --test commits_authorization`):
 - `nonexistent_commit_returns_404` and
   `commit_without_evaluation_returns_404` — both shapes of "no path"
   return `404` without leaking which case applied.
+
+## Proto WebSocket connection cap (#89)
+
+`max_proto_connections` (env `GRADIENT_MAX_PROTO_CONNECTIONS`, default
+256) was previously declared as configuration but never read — workers
+could open `/proto` WebSockets without bound, exhausting file
+descriptors, scheduler slots, and memory. The proto upgrade handler now
+holds a permit on a `ProtoLimiter` (a `tokio::sync::Semaphore` sized
+from the config) for the lifetime of each connection; once the limit is
+hit, further upgrade attempts get `503 Service Unavailable` with
+`Retry-After: 10`.
+
+Unit tests (`cargo test -p proto handler::limiter`):
+
+- `new_clamps_zero_capacity_to_one` — a misconfigured `0` collapses to
+  `1` so the endpoint never silently rejects every upgrade; operators
+  who want the endpoint disabled set `discoverable = false`.
+- `try_acquire_returns_none_when_exhausted` — at capacity the next
+  acquire fails immediately rather than queueing.
+- `dropping_permit_releases_slot` — the slot is reclaimed when the
+  permit is dropped, which corresponds to the upgraded session ending.
+- `in_use_tracks_held_permits` — the operator-visible `in_use()` count
+  matches the number of live permits (used in the rejection log line).
+
+Integration tests (`cargo test -p web --test proto_connection_limit`)
+cover the wiring of the limiter into the proto router:
+
+- `upgrade_rejected_with_503_and_retry_after_when_limit_exhausted` — a
+  WS-shaped GET against a saturated limiter returns `503` with the
+  documented `Retry-After: 10` header. Direct regression for #89.
+- `upgrade_proceeds_past_limiter_when_slot_is_free` — a fresh limiter
+  does not produce the rejection response, confirming the handler only
+  short-circuits on exhaustion.
+- `slot_is_released_for_subsequent_upgrades_after_drop` — a held permit
+  forces the first upgrade to `503`; dropping it lets the next request
+  through, confirming the permit lifetime is what gates the slot.
