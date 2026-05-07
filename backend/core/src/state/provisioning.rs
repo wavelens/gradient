@@ -359,7 +359,7 @@ impl<'a> StateApplicator<'a> {
                 proj.display_name = Set(state_project.display_name.clone());
                 proj.description = Set(state_project.description.clone().unwrap_or_default());
                 proj.repository = Set(state_project.repository.clone());
-                proj.evaluation_wildcard = Set(state_project.evaluation_wildcard.clone());
+                proj.wildcard = Set(state_project.wildcard.clone());
                 proj.force_evaluation = Set(state_project.force_evaluation);
                 proj.created_by = Set(created_by_id);
                 proj.concurrency = Set(i16::from(state_project.concurrency));
@@ -380,7 +380,7 @@ impl<'a> StateApplicator<'a> {
                     display_name: Set(state_project.display_name.clone()),
                     description: Set(state_project.description.clone().unwrap_or_default()),
                     repository: Set(state_project.repository.clone()),
-                    evaluation_wildcard: Set(state_project.evaluation_wildcard.clone()),
+                    wildcard: Set(state_project.wildcard.clone()),
                     force_evaluation: Set(state_project.force_evaluation),
                     created_by: Set(created_by_id),
                     last_evaluation: Set(None),

@@ -345,6 +345,12 @@ Backend (`cargo test -p core --lib state::tests`):
 - `org_project_cache_descriptions_optional` — `description` on
   organizations, projects, and caches is optional; a full config without
   them validates cleanly.
+- `state_project_accepts_wildcard_field` — `StateProject` deserialises
+  the canonical `wildcard` field.
+- `state_project_accepts_legacy_evaluation_wildcard_alias` — pre-rename
+  state files using `evaluation_wildcard` continue to parse via the
+  serde alias, so existing `gradient-state.nix` configurations don't
+  break on upgrade.
 
 These pin the wire contract between `nix/modules/gradient-state.nix`
 (`types.nullOr types.str` on `password_file` and the three `description`

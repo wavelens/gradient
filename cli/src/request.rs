@@ -35,7 +35,7 @@ pub struct MakeProjectRequest {
     pub name: String,
     pub description: String,
     pub repository: String,
-    pub evaluation_wildcard: String,
+    pub wildcard: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -384,13 +384,13 @@ pub async fn create_project(
     name: String,
     description: String,
     repository: String,
-    evaluation_wildcard: String,
+    wildcard: String,
 ) -> Result<BaseResponse<String>, String> {
     let req = MakeProjectRequest {
         name,
         description,
         repository,
-        evaluation_wildcard,
+        wildcard,
     };
 
     let res = get_client(

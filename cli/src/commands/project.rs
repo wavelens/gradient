@@ -28,7 +28,7 @@ pub enum Commands {
         #[arg(short, long)]
         repository: Option<String>,
         #[arg(short = 'w', long)]
-        evaluation_wildcard: Option<String>,
+        wildcard: Option<String>,
     },
     List,
     Edit {
@@ -41,7 +41,7 @@ pub enum Commands {
         #[arg(short, long)]
         repository: Option<String>,
         #[arg(short = 'w', long)]
-        evaluation_wildcard: Option<String>,
+        wildcard: Option<String>,
     },
     Delete,
     Evaluate,
@@ -101,10 +101,7 @@ pub async fn handle(cmd: Commands) {
             println!("Name: {}", project.message.name);
             println!("Description: {}", project.message.description);
             println!("Repository: {}", project.message.repository);
-            println!(
-                "Evaluation Wildcard: {}",
-                project.message.evaluation_wildcard
-            );
+            println!("Wildcard: {}", project.message.wildcard);
             println!("Organization ID: {}", project.message.organization);
             println!();
 
@@ -197,7 +194,7 @@ pub async fn handle(cmd: Commands) {
             display_name,
             description,
             repository,
-            evaluation_wildcard,
+            wildcard,
         } => {
             let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
                 Some(id) => id,
@@ -212,7 +209,7 @@ pub async fn handle(cmd: Commands) {
                 ("Display Name", display_name),
                 ("Description", description),
                 ("Repository", repository),
-                ("Evaluation Wildcard", evaluation_wildcard),
+                ("Wildcard", wildcard),
             ]
             .iter()
             .map(|(k, v)| (k.to_string(), v.clone()))
@@ -228,7 +225,7 @@ pub async fn handle(cmd: Commands) {
                 input.get("Display Name").unwrap().clone(),
                 input.get("Description").unwrap().clone(),
                 input.get("Repository").unwrap().clone(),
-                input.get("Evaluation Wildcard").unwrap().clone(),
+                input.get("Wildcard").unwrap().clone(),
             )
             .await
             .map_err(|e| {
@@ -282,7 +279,7 @@ pub async fn handle(cmd: Commands) {
             display_name,
             description,
             repository,
-            evaluation_wildcard,
+            wildcard,
         } => {
             let (organization, project) =
                 match set_get_value(ConfigKey::SelectedProject, None, true) {
@@ -324,8 +321,8 @@ pub async fn handle(cmd: Commands) {
                     Some(repository.unwrap_or(current_project.repository)),
                 ),
                 (
-                    "Evaluation Wildcard",
-                    Some(evaluation_wildcard.unwrap_or(current_project.evaluation_wildcard)),
+                    "Wildcard",
+                    Some(wildcard.unwrap_or(current_project.wildcard)),
                 ),
             ]
             .iter()
@@ -342,7 +339,7 @@ pub async fn handle(cmd: Commands) {
                 input.get("Display Name").cloned(),
                 input.get("Description").cloned(),
                 input.get("Repository").cloned(),
-                input.get("Evaluation Wildcard").cloned(),
+                input.get("Wildcard").cloned(),
             )
             .await
             .map_err(|e| {

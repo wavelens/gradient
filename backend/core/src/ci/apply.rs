@@ -161,7 +161,7 @@ mod tests {
             display_name: "Test".into(),
             description: "".into(),
             repository: "https://example/r".into(),
-            evaluation_wildcard: "*".into(),
+            wildcard: "*".into(),
             last_evaluation: last,
             last_check_at: NaiveDateTime::default(),
             force_evaluation: false,

@@ -37,7 +37,7 @@ pub struct MakeProjectRequest {
     pub display_name: String,
     pub description: String,
     pub repository: String,
-    pub evaluation_wildcard: String,
+    pub wildcard: String,
     #[serde(default)]
     pub concurrency: Option<ConcurrencyPolicy>,
     #[serde(default)]
@@ -50,7 +50,7 @@ pub struct PatchProjectRequest {
     pub display_name: Option<String>,
     pub description: Option<String>,
     pub repository: Option<String>,
-    pub evaluation_wildcard: Option<String>,
+    pub wildcard: Option<String>,
     pub keep_evaluations: Option<i32>,
     pub concurrency: Option<ConcurrencyPolicy>,
     pub sign_cache: Option<bool>,
@@ -144,7 +144,7 @@ pub async fn get(
                 display_name: p.display_name,
                 description: p.description,
                 repository: p.repository,
-                evaluation_wildcard: p.evaluation_wildcard,
+                wildcard: p.wildcard,
                 last_evaluation: p.last_evaluation,
                 last_evaluation_status,
                 force_evaluation: p.force_evaluation,
@@ -213,8 +213,8 @@ pub async fn put(
         return Err(WebError::already_exists("Project Name"));
     }
 
-    let evaluation_wildcard = body
-        .evaluation_wildcard
+    let wildcard = body
+        .wildcard
         .trim()
         .parse::<Wildcard>()
         .map_err(|e| WebError::bad_request(e.to_string()))?
@@ -228,7 +228,7 @@ pub async fn put(
         display_name: Set(body.display_name.trim().to_string()),
         description: Set(body.description.trim().to_string()),
         repository: Set(body.repository.clone()),
-        evaluation_wildcard: Set(evaluation_wildcard),
+        wildcard: Set(wildcard),
         last_evaluation: Set(None),
         last_check_at: Set(*NULL_TIME),
         force_evaluation: Set(false),
@@ -305,7 +305,7 @@ pub async fn get_project(
         display_name: project.display_name,
         description: project.description,
         repository: project.repository,
-        evaluation_wildcard: project.evaluation_wildcard,
+        wildcard: project.wildcard,
         last_evaluation: project.last_evaluation,
         last_evaluation_status,
         force_evaluation: project.force_evaluation,
@@ -352,8 +352,8 @@ pub async fn patch_project(
     if let Some(repository) = body.repository {
         patcher.apply_repository(repository)?;
     }
-    if let Some(evaluation_wildcard) = body.evaluation_wildcard {
-        patcher.apply_evaluation_wildcard(evaluation_wildcard)?;
+    if let Some(wildcard) = body.wildcard {
+        patcher.apply_wildcard(wildcard)?;
     }
     if let Some(keep) = body.keep_evaluations {
         patcher.apply_keep_evaluations(keep)?;
@@ -422,13 +422,13 @@ impl<'a> ProjectPatcher<'a> {
         Ok(())
     }
 
-    fn apply_evaluation_wildcard(&mut self, evaluation_wildcard: String) -> WebResult<()> {
-        let evaluation_wildcard = evaluation_wildcard
+    fn apply_wildcard(&mut self, wildcard: String) -> WebResult<()> {
+        let wildcard = wildcard
             .trim()
             .parse::<Wildcard>()
             .map_err(|e| WebError::bad_request(e.to_string()))?
             .to_string();
-        self.aproject.evaluation_wildcard = Set(evaluation_wildcard);
+        self.aproject.wildcard = Set(wildcard);
         Ok(())
     }
 

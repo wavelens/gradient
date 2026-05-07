@@ -111,7 +111,7 @@ fn project_with(sign_cache: bool) -> project::Model {
         display_name: "Test Project".into(),
         description: "".into(),
         repository: "https://github.com/test/repo".into(),
-        evaluation_wildcard: "*".into(),
+        wildcard: "*".into(),
         last_evaluation: None,
         last_check_at: test_date(),
         force_evaluation: false,
@@ -229,7 +229,7 @@ fn create_project_accepts_sign_cache_false() {
                 "display_name": "Test Project",
                 "description": "",
                 "repository": "https://github.com/test/repo",
-                "evaluation_wildcard": "*",
+                "wildcard": "*",
                 "sign_cache": false
             }))
             .await;

@@ -100,7 +100,7 @@ with subtest("check api /orgs/{organization}"):
     assert req.get("message").get("id") == org_id, "Organization ID should match"
 
     req = json.loads(machine.succeed("""
-        curl -XPUT http://localhost:3000/api/v1/projects/org_name -H 'Authorization: Bearer api_key' -H 'Content-Type: application/json' -d '{"name": "myproject", "display_name": "My Project", "description": "My Project", "repository": "git@github.com:Wavelens/Gradient.git", "evaluation_wildcard": "packages.*"}'
+        curl -XPUT http://localhost:3000/api/v1/projects/org_name -H 'Authorization: Bearer api_key' -H 'Content-Type: application/json' -d '{"name": "myproject", "display_name": "My Project", "description": "My Project", "repository": "git@github.com:Wavelens/Gradient.git", "wildcard": "packages.*"}'
     """.replace("api_key", api_key).replace("org_name", org_name)))
 
     assert req.get("error") == False, req.get("message")

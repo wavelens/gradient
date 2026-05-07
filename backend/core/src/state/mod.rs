@@ -55,8 +55,8 @@ pub struct StateProject {
     #[serde(default)]
     pub description: Option<String>,
     pub repository: String,
-    #[serde(default = "default_main")]
-    pub evaluation_wildcard: String,
+    #[serde(default = "default_main", alias = "evaluation_wildcard")]
+    pub wildcard: String,
     #[serde(default = "default_true")]
     pub active: bool,
     #[serde(default)]
@@ -532,6 +532,44 @@ mod tests {
         }"#;
         let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
         assert_eq!(cfg.projects["web"].concurrency, ConcurrencyPolicy::SoftAbort);
+    }
+
+    #[test]
+    fn state_project_accepts_wildcard_field() {
+        let json = r#"{
+            "projects": {
+                "web": {
+                    "name": "web",
+                    "organization": "acme",
+                    "display_name": "Web",
+                    "repository": "https://example.com/acme/web.git",
+                    "wildcard": "packages.x86_64-linux.*",
+                    "created_by": "alice"
+                }
+            }
+        }"#;
+        let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
+        assert_eq!(cfg.projects["web"].wildcard, "packages.x86_64-linux.*");
+    }
+
+    #[test]
+    fn state_project_accepts_legacy_evaluation_wildcard_alias() {
+        // Existing nix configurations using `evaluation_wildcard` must keep
+        // working after the rename to `wildcard`.
+        let json = r#"{
+            "projects": {
+                "web": {
+                    "name": "web",
+                    "organization": "acme",
+                    "display_name": "Web",
+                    "repository": "https://example.com/acme/web.git",
+                    "evaluation_wildcard": "checks.*",
+                    "created_by": "alice"
+                }
+            }
+        }"#;
+        let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
+        assert_eq!(cfg.projects["web"].wildcard, "checks.*");
     }
 
     #[test]

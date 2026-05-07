@@ -62,7 +62,7 @@ export class OrganizationDetailComponent implements OnInit, OnDestroy {
     display_name: '',
     description: '',
     repository: '',
-    evaluation_wildcard: 'packages.x86_64-linux.*',
+    wildcard: 'packages.x86_64-linux.*',
   };
 
   protected projectNameEditedByUser = false;
@@ -104,7 +104,7 @@ export class OrganizationDetailComponent implements OnInit, OnDestroy {
   }
 
   openCreateDialog(): void {
-    this.newProject = { name: '', display_name: '', description: '', repository: '', evaluation_wildcard: 'packages.x86_64-linux.*' };
+    this.newProject = { name: '', display_name: '', description: '', repository: '', wildcard: 'packages.x86_64-linux.*' };
     this.projectNameEditedByUser = false;
     this.nameCheckState.set('idle');
     this.createError.set(null);
@@ -173,7 +173,7 @@ export class OrganizationDetailComponent implements OnInit, OnDestroy {
   }
 
   get wildcardInvalid(): boolean {
-    const w = this.newProject.evaluation_wildcard.trim();
+    const w = this.newProject.wildcard.trim();
     if (!w) return false; // empty means use default — not invalid
     const parts = w.split(',').map((p) => p.trim());
     return parts.some((p) => !p || p.startsWith('.') || /\s/.test(p));

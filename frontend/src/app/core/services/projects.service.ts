@@ -36,7 +36,7 @@ export class ProjectsService {
       display_name: string;
       description: string;
       repository: string;
-      evaluation_wildcard: string;
+      wildcard: string;
     }
   ): Observable<string> {
     return this.api.put<string>(`projects/${organization}`, data);

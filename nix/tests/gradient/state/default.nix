@@ -108,7 +108,7 @@
                   display_name = "Web Application";
                   description = "Main web application";
                   repository = "https://github.com/corp/web-app.git";
-                  evaluation_wildcard = "package.x86_64-linux.*";
+                  wildcard = "package.x86_64-linux.*";
                   active = true;
                   force_evaluation = false;
                   created_by = "alice";
@@ -118,7 +118,7 @@
                   display_name = "Mobile App";
                   description = "Mobile application for iOS and Android";
                   repository = "https://github.com/corp/mobile-app.git";
-                  evaluation_wildcard = "main";
+                  wildcard = "main";
                   active = true;
                   force_evaluation = false;
                   created_by = "bob";

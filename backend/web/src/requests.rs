@@ -32,7 +32,7 @@ pub struct MakeProjectRequest {
     pub name: String,
     pub description: String,
     pub repository: String,
-    pub evaluation_wildcard: String,
+    pub wildcard: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
