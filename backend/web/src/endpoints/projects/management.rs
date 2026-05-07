@@ -38,6 +38,8 @@ pub struct MakeProjectRequest {
     pub evaluation_wildcard: String,
     #[serde(default)]
     pub concurrency: Option<ConcurrencyPolicy>,
+    #[serde(default)]
+    pub sign_cache: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -49,6 +51,7 @@ pub struct PatchProjectRequest {
     pub evaluation_wildcard: Option<String>,
     pub keep_evaluations: Option<i32>,
     pub concurrency: Option<ConcurrencyPolicy>,
+    pub sign_cache: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -149,6 +152,7 @@ pub async fn get(
                 created_by: p.created_by,
                 created_at: p.created_at,
                 managed: p.managed,
+                sign_cache: p.sign_cache,
                 can_edit,
             }
         })
@@ -231,6 +235,7 @@ pub async fn put(
         managed: Set(false),
         keep_evaluations: Set(30),
         concurrency: Set(body.concurrency.unwrap_or(ConcurrencyPolicy::SoftAbort).as_i16()),
+        sign_cache: Set(body.sign_cache.unwrap_or(true)),
     };
 
     let project = project.insert(&state.web_db).await?;
@@ -306,6 +311,7 @@ pub async fn get_project(
         keep_evaluations: project.keep_evaluations,
         concurrency: ConcurrencyPolicy::from_i16(project.concurrency)
             .unwrap_or(ConcurrencyPolicy::SoftAbort),
+        sign_cache: project.sign_cache,
         can_edit,
     }))
 }
@@ -350,6 +356,9 @@ pub async fn patch_project(
     }
     if let Some(concurrency) = body.concurrency {
         patcher.apply_concurrency(concurrency)?;
+    }
+    if let Some(sign_cache) = body.sign_cache {
+        patcher.apply_sign_cache(sign_cache);
     }
 
     aproject.force_evaluation = Set(true);
@@ -439,6 +448,10 @@ impl<'a> ProjectPatcher<'a> {
     fn apply_concurrency(&mut self, concurrency: ConcurrencyPolicy) -> WebResult<()> {
         self.aproject.concurrency = Set(concurrency.as_i16());
         Ok(())
+    }
+
+    fn apply_sign_cache(&mut self, sign_cache: bool) {
+        self.aproject.sign_cache = Set(sign_cache);
     }
 }
 
