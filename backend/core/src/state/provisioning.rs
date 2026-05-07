@@ -364,6 +364,7 @@ impl<'a> StateApplicator<'a> {
                 proj.force_evaluation = Set(state_project.force_evaluation);
                 proj.created_by = Set(created_by_id);
                 proj.concurrency = Set(state_project.concurrency.as_i16());
+                proj.sign_cache = Set(state_project.sign_cache);
                 proj.managed = Set(true);
                 proj.update(self.db).await?;
                 tracing::info!("Updated managed project: {}", state_project.name);
@@ -389,6 +390,7 @@ impl<'a> StateApplicator<'a> {
                     managed: Set(true),
                     keep_evaluations: Set(0),
                     concurrency: Set(state_project.concurrency.as_i16()),
+                    sign_cache: Set(state_project.sign_cache),
                 };
                 let inserted = proj.insert(self.db).await?;
                 tracing::info!("Created managed project: {}", state_project.name);

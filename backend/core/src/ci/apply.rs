@@ -175,6 +175,7 @@ mod tests {
             managed: false,
             keep_evaluations: 10,
             concurrency,
+            sign_cache: true,
         }
     }
 

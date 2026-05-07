@@ -391,6 +391,7 @@ mod tests {
             managed,
             keep_evaluations: 30,
             concurrency: 3,
+            sign_cache: true,
         }
     }
 
