@@ -61,7 +61,9 @@ pub(super) async fn evaluations_to_summaries(
             .await?
             .into_iter()
             .filter_map(|t| {
-                TriggerType::from_i16(t.trigger_type).map(|tt| (t.id, tt))
+                TriggerType::try_from(t.trigger_type)
+                    .ok()
+                    .map(|tt| (t.id, tt))
             })
             .collect()
     };
@@ -156,7 +158,7 @@ pub(super) async fn evaluations_to_summaries(
         out.push(EvaluationSummary {
             id: evaluation.id,
             commit: commit_hash,
-            status: evaluation.status.clone(),
+            status: evaluation.status,
             trigger,
             total_builds,
             failed_builds,
@@ -463,11 +465,11 @@ impl EntryPointRelatedData {
                 build_id: build.id,
                 derivation_path: drv.derivation_path.clone(),
                 eval: ep.eval.clone(),
-                build_status: build.status.clone().for_api(),
+                build_status: build.status.for_api(),
                 has_artefacts: *self.has_products.get(&build.derivation).unwrap_or(&false),
                 architecture: drv.architecture.clone(),
                 evaluation_id: evaluation.id,
-                evaluation_status: evaluation.status.clone(),
+                evaluation_status: evaluation.status,
                 created_at: ep.created_at,
             });
         }

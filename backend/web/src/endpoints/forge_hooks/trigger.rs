@@ -129,8 +129,10 @@ pub(super) async fn resolve_github_integration_id(
 
     EIntegration::find()
         .filter(CIntegration::Organization.eq(org.id))
-        .filter(CIntegration::Kind.eq(IntegrationKind::Inbound.as_i16()))
-        .filter(CIntegration::ForgeType.eq(gradient_core::ci::ForgeType::GitHub.as_i16()))
+        .filter(CIntegration::Kind.eq(i16::from(IntegrationKind::Inbound)))
+        .filter(CIntegration::ForgeType.eq(i16::from(
+            gradient_core::ci::ForgeType::GitHub,
+        )))
         .one(&state.web_db)
         .await
         .ok()
@@ -394,12 +396,12 @@ async fn load_active_triggers_for_integration(
 ) -> Result<Vec<ept::Model>, sea_orm::DbErr> {
     let stmt = Statement::from_sql_and_values(
         DbBackend::Postgres,
-        &format!(
+        format!(
             "SELECT * FROM project_trigger \
              WHERE active = true \
                AND trigger_type = {} \
                AND (config->>'integration_id')::uuid = $1",
-            trigger_type.as_i16(),
+            i16::from(trigger_type),
         ),
         [Value::Uuid(Some(Box::new(integration_id.into_inner())))],
     );

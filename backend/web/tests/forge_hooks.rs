@@ -255,7 +255,7 @@ fn trigger_row(cfg: TriggerConfig) -> entity::project_trigger::Model {
     entity::project_trigger::Model {
         id: trigger_id(),
         project: project_id(),
-        trigger_type: cfg.trigger_type().as_i16(),
+        trigger_type: i16::from(cfg.trigger_type()),
         config: cfg.to_db_json(),
         active: true,
         last_fired_at: None,

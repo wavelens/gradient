@@ -126,12 +126,12 @@ fn kind_to_str(k: i16) -> &'static str {
 }
 
 fn forge_to_str(f: i16) -> &'static str {
-    match ForgeType::from_i16(f) {
-        Some(ForgeType::Gitea) => "gitea",
-        Some(ForgeType::Forgejo) => "forgejo",
-        Some(ForgeType::GitLab) => "gitlab",
-        Some(ForgeType::GitHub) => "github",
-        None => "unknown",
+    match ForgeType::try_from(f) {
+        Ok(ForgeType::Gitea) => "gitea",
+        Ok(ForgeType::Forgejo) => "forgejo",
+        Ok(ForgeType::GitLab) => "gitlab",
+        Ok(ForgeType::GitHub) => "github",
+        Err(_) => "unknown",
     }
 }
 
@@ -198,7 +198,7 @@ pub async fn put_integration(
     // Name must be unique within (organization, kind).
     let existing = EIntegration::find()
         .filter(CIntegration::Organization.eq(org.id))
-        .filter(CIntegration::Kind.eq(kind.as_i16()))
+        .filter(CIntegration::Kind.eq(i16::from(kind)))
         .filter(CIntegration::Name.eq(body.name.as_str()))
         .one(&state.web_db)
         .await?;
@@ -240,8 +240,8 @@ pub async fn put_integration(
         organization: Set(org.id),
         name: Set(body.name),
         display_name: Set(display_name),
-        kind: Set(kind.as_i16()),
-        forge_type: Set(forge.as_i16()),
+        kind: Set(i16::from(kind)),
+        forge_type: Set(i16::from(forge)),
         secret: Set(encrypted_secret),
         endpoint_url: Set(endpoint_url),
         access_token: Set(encrypted_token),
@@ -331,7 +331,7 @@ pub async fn patch_integration(
                  enable the App on the organization instead of switching forge_type to github.",
             ));
         }
-        active.forge_type = Set(parsed.as_i16());
+        active.forge_type = Set(i16::from(parsed));
     }
 
     if let Some(url) = body.endpoint_url {

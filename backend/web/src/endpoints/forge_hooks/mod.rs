@@ -281,7 +281,7 @@ pub async fn forge_webhook(
 
     let integration = EIntegration::find()
         .filter(CIntegration::Organization.eq(org.id))
-        .filter(CIntegration::Kind.eq(IntegrationKind::Inbound.as_i16()))
+        .filter(CIntegration::Kind.eq(i16::from(IntegrationKind::Inbound)))
         .filter(CIntegration::Name.eq(integration_name.as_str()))
         .one(&state.web_db)
         .await

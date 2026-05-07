@@ -552,6 +552,6 @@ mod tests {
         }"#;
         let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
         assert_eq!(cfg.projects["web"].concurrency, ConcurrencyPolicy::HardAbort);
-        assert_eq!(cfg.projects["web"].concurrency.as_i16(), 0);
+        assert_eq!(i16::from(cfg.projects["web"].concurrency), 0);
     }
 }

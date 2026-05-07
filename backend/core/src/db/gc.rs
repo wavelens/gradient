@@ -207,15 +207,14 @@ pub async fn gc_orphan_derivations(state: Arc<ServerState>, grace_hours: i64) ->
         }
     }
 
-    if !to_delete.is_empty() {
-        if let Err(e) = ECachedPath::delete_many()
+    if !to_delete.is_empty()
+        && let Err(e) = ECachedPath::delete_many()
             .filter(CCachedPath::Hash.is_in(to_delete.clone()))
             .exec(&state.worker_db)
             .await
         {
             warn!(error = %e, "GC: failed to delete cached_path rows for orphan hashes");
         }
-    }
 
     for drv_id in drv_ids {
         if let Some(d) = EDerivation::find_by_id(drv_id)
