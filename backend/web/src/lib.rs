@@ -284,7 +284,6 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             "/user/settings",
             get(user::get_settings).patch(user::patch_settings),
         )
-        .route("/commits/{commit}", get(commits::get_commit))
         .route(
             "/webhook/{organization}",
             get(webhooks::get).put(webhooks::put),
@@ -373,6 +372,7 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             "/builds/{build}/download/{filename}",
             get(builds::get_build_download),
         )
+        .route("/commits/{commit}", get(commits::get_commit))
         .route("/caches/{cache}", get(caches::get_cache))
         .route(
             "/caches/{cache}/public-key",
