@@ -26,6 +26,20 @@ use tracing::{debug, warn};
 /// invocation; remaining rows are picked up by the next scheduled pass.
 const SIGN_SWEEP_BATCH: u64 = 1000;
 
+/// Skip a `cached_path` iff every producing project has `sign_cache=false`
+/// and at least one such project exists. Paths absent from `producers`
+/// (i.e. not produced by any project — `.drv` files, direct builds) are
+/// signed normally.
+pub(crate) fn compute_skipped_cached_paths(
+    producers: &HashMap<CachedPathId, Vec<bool>>,
+) -> HashSet<CachedPathId> {
+    producers
+        .iter()
+        .filter(|(_, flags)| !flags.is_empty() && flags.iter().all(|f| !f))
+        .map(|(id, _)| *id)
+        .collect()
+}
+
 /// One pass: sign every pending `cached_path_signature` row and update
 /// `cache_derivation` where newly-signed paths complete a derivation
 /// closure. Errors on individual rows are logged and skipped.
@@ -69,6 +83,9 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
         .map(|c| (c.id, c))
         .collect();
 
+    let producers = load_producing_project_flags(&state, &cached_paths).await?;
+    let skipped: HashSet<CachedPathId> = compute_skipped_cached_paths(&producers);
+
     // Build a per-cache signer once (one crypt-secret read + one private-key
     // decryption per cache, not per row). `None` marks caches whose key
     // failed to decode — we skip their rows for this pass.
@@ -106,6 +123,15 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
         let Some(cp) = cached_paths.get(&row.cached_path) else {
             continue;
         };
+
+        if skipped.contains(&row.cached_path) {
+            debug!(
+                store_path = %cp.store_path,
+                cache = %cache.id,
+                "sign sweep: skipping (project sign_cache=false)"
+            );
+            continue;
+        }
 
         let (Some(nar_hash), Some(nar_size)) = (cp.nar_hash.as_deref(), cp.nar_size) else {
             continue;
@@ -238,6 +264,61 @@ async fn try_record_cache_derivation(
     Ok(())
 }
 
+/// Loads, for every cached_path in `cached_paths`, the `sign_cache` flag of
+/// every project that produced a matching `derivation_output`. Cached_paths
+/// whose hash matches no `derivation_output` (e.g. `.drv` files) are absent
+/// from the returned map — that means "no producing project, sign normally".
+async fn load_producing_project_flags(
+    state: &Arc<ServerState>,
+    cached_paths: &HashMap<CachedPathId, MCachedPath>,
+) -> anyhow::Result<HashMap<CachedPathId, Vec<bool>>> {
+    use sea_orm::{ConnectionTrait, FromQueryResult, Statement};
+
+    let mut out: HashMap<CachedPathId, Vec<bool>> = HashMap::new();
+    if cached_paths.is_empty() {
+        return Ok(out);
+    }
+
+    let cp_by_hash: HashMap<&str, CachedPathId> = cached_paths
+        .values()
+        .map(|cp| (cp.hash.as_str(), cp.id))
+        .collect();
+    let hashes: Vec<String> = cp_by_hash.keys().map(|s| s.to_string()).collect();
+
+    #[derive(FromQueryResult)]
+    struct Row {
+        hash: String,
+        sign_cache: bool,
+    }
+
+    let backend = state.worker_db.get_database_backend();
+    let stmt = Statement::from_sql_and_values(
+        backend,
+        r#"
+            SELECT do_.hash AS hash, p.sign_cache AS sign_cache
+            FROM derivation_output do_
+            JOIN derivation d   ON d.id = do_.derivation
+            JOIN build b        ON b.derivation = d.id
+            JOIN evaluation e   ON e.id = b.evaluation
+            JOIN project p      ON p.id = e.project
+            WHERE do_.hash = ANY($1)
+        "#,
+        [hashes.into()],
+    );
+
+    let rows = Row::find_by_statement(stmt)
+        .all(&state.worker_db)
+        .await?;
+
+    for r in rows {
+        if let Some(&id) = cp_by_hash.get(r.hash.as_str()) {
+            out.entry(id).or_default().push(r.sign_cache);
+        }
+    }
+
+    Ok(out)
+}
+
 /// Converts a nar_hash from any common format to `sha256:<nix32>`.
 ///
 /// Handles `sha256:<hex>` (from streaming workers), `sha256-<base64>` (SRI),
@@ -315,5 +396,37 @@ mod tests {
         let zero_hex = "0".repeat(64);
         let out = hex_hash_to_nix32(&format!("sha256:{zero_hex}"));
         assert_eq!(out, format!("sha256:{}", "0".repeat(52)));
+    }
+
+    fn cp(id: u128) -> CachedPathId {
+        CachedPathId::new(uuid::Uuid::from_u128(id))
+    }
+
+    #[test]
+    fn skip_when_all_producing_projects_private() {
+        let mut producers: HashMap<CachedPathId, Vec<bool>> = HashMap::new();
+        producers.insert(cp(1), vec![false, false]);
+        producers.insert(cp(2), vec![false, true]);
+        producers.insert(cp(3), vec![true]);
+
+        let skipped = compute_skipped_cached_paths(&producers);
+
+        assert!(skipped.contains(&cp(1)), "private-only path must be skipped");
+        assert!(!skipped.contains(&cp(2)), "mixed path must be signed");
+        assert!(!skipped.contains(&cp(3)), "public-only path must be signed");
+        assert!(
+            !skipped.contains(&cp(4)),
+            "orphan (absent from map) must be signed"
+        );
+    }
+
+    #[test]
+    fn skip_set_empty_when_no_private_producers() {
+        let mut producers: HashMap<CachedPathId, Vec<bool>> = HashMap::new();
+        producers.insert(cp(1), vec![true]);
+        producers.insert(cp(2), vec![true, true]);
+
+        let skipped = compute_skipped_cached_paths(&producers);
+        assert!(skipped.is_empty());
     }
 }
