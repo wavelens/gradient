@@ -49,9 +49,9 @@ pub async fn get_build(
         .await?
         .ok_or_else(|| {
             tracing::error!(
-                "Derivation {} not found for build {}",
-                build.derivation,
-                build_id
+                derivation_id = %build.derivation,
+                %build_id,
+                "Derivation not found for build"
             );
             WebError::data_inconsistency("Build")
         })?;

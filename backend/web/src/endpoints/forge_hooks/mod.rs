@@ -68,7 +68,7 @@ pub async fn github_app_webhook(
     let secret = match load_secret(&github_app.webhook_secret_file) {
         Ok(s) => s,
         Err(e) => {
-            warn!("Failed to load GitHub webhook secret: {}", e);
+            warn!(error = %e, "Failed to load GitHub webhook secret");
             return Err(WebError::internal("webhook secret unavailable"));
         }
     };

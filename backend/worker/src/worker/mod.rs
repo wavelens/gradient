@@ -246,14 +246,14 @@ impl Worker<Connected> {
 
 impl Worker<Connected> {
     async fn setup_connection(conn: &mut ProtoConnection, config: &WorkerConfig) -> Result<()> {
-        perform_setup(conn, config, "capabilities negotiated").await
+        perform_setup(conn, config, "outbound").await
     }
 
     async fn setup_connection_incoming(
         conn: &mut ProtoConnection,
         config: &WorkerConfig,
     ) -> Result<()> {
-        perform_setup(conn, config, "incoming connection: capabilities negotiated").await
+        perform_setup(conn, config, "inbound").await
     }
 
     async fn build_executor(config: &WorkerConfig) -> Result<(JobExecutor, JobScorer)> {
@@ -273,7 +273,7 @@ impl Worker<Connected> {
 async fn perform_setup(
     conn: &mut ProtoConnection,
     config: &WorkerConfig,
-    negotiated_msg: &str,
+    direction: &str,
 ) -> Result<()> {
     let peer_id = load_or_generate_id(&config.data_dir, config.worker_id.as_deref())
         .context("failed to load or generate persistent worker ID")?;
@@ -281,9 +281,10 @@ async fn perform_setup(
     let handshake = perform_handshake(conn, peer_id, peer_tokens, config.capabilities()).await?;
     conn.set_server_version(handshake.server_version);
     info!(
+        direction,
         negotiated = ?handshake.negotiated,
         server_version = conn.server_version(),
-        "{negotiated_msg}"
+        "capabilities negotiated"
     );
     if handshake.negotiated.build {
         let architectures = config

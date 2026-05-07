@@ -546,7 +546,7 @@ impl<'a> DispatchContext<'a> {
                 data.len(),
                 nar_buffers.total_bytes().saturating_add(data.len()),
             );
-            warn!(peer_id = %self.peer_id, %job_id, %store_path, "{reason}");
+            warn!(peer_id = %self.peer_id, %job_id, %store_path, %reason, "session NAR upload buffer would exceed limit");
             self.abort_job(&job_id, reason).await;
         }
         // The buffer is held until `on_nar_uploaded` arrives; that handler
@@ -604,7 +604,7 @@ impl<'a> DispatchContext<'a> {
                 .map(str::to_owned)
             else {
                 let reason = format!("NarUploaded for malformed store path {store_path}");
-                error!(peer_id = %self.peer_id, %job_id, %store_path, "{reason}");
+                error!(peer_id = %self.peer_id, %job_id, %store_path, %reason, "NarUploaded for malformed store path");
                 self.abort_job(&job_id, reason).await;
                 return;
             };
