@@ -4505,7 +4505,10 @@ components:
           description: |-
             One of: `login.success`, `login.failure`, `logout`, `register`,
             `user.delete`, `api_key.create`, `api_key.revoke`,
-            `api_key.delete`, `session.revoke`.
+            `api_key.delete`, `session.revoke`, `auth.deny`,
+            `organization.delete`, `organization.member.add`,
+            `organization.member.remove`, `organization.member.role_change`,
+            `project.delete`, `cache.delete`.
         ip: { type: string, nullable: true }
         user_agent: { type: string, nullable: true }
         metadata:

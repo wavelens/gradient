@@ -6,12 +6,14 @@
 
 use super::helpers::cleanup_nars_for_orgs;
 use crate::access::{CacheAccess, load_cache};
+use crate::audit::{RequestInfo, events, record as audit_record};
 use crate::authorization::MaybeUser;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use axum::Extension;
 use axum::Json;
 use axum::extract::{Path, Query, State};
+use axum::http::HeaderMap;
 use chrono::NaiveDateTime;
 use entity::organization_cache::CacheSubscriptionMode;
 use gradient_core::db::get_any_cache_by_name;
@@ -286,13 +288,14 @@ pub async fn patch_cache(
 
 pub async fn delete_cache(
     state: State<Arc<ServerState>>,
+    headers: HeaderMap,
     Extension(user): Extension<MUser>,
     Path(cache): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let cache = load_cache(&state, user.id, cache, CacheAccess::Editable).await?;
+    let cache_id = cache.id;
+    let cache_name = cache.name.clone();
 
-    // Collect orgs that subscribe to this cache before deleting it, so we can
-    // clean up orphaned NAR files in the background afterwards.
     let subscribing_orgs: Vec<OrganizationId> = EOrganizationCache::find()
         .filter(COrganizationCache::Cache.eq(cache.id))
         .all(&state.web_db)
@@ -305,9 +308,20 @@ pub async fn delete_cache(
     let acache: ACache = cache.into();
     acache.delete(&state.web_db).await?;
 
-    // Spawn background task to delete now-orphaned NAR files. Tracked via
-    // the shared shutdown registry so SIGTERM drains it instead of leaving
-    // orphaned NAR files only partially removed.
+    let info = RequestInfo::from_headers(&headers);
+    audit_record(
+        &state.web_db,
+        Some(user.id),
+        events::CACHE_DELETE,
+        &info,
+        Some(serde_json::json!({
+            "cache_id": cache_id.to_string(),
+            "cache_name": cache_name,
+            "subscribing_orgs": subscribing_orgs.iter().map(|o| o.to_string()).collect::<Vec<_>>(),
+        })),
+    )
+    .await;
+
     let state_bg = Arc::clone(&state);
     state.shutdown.spawn(async move {
         cleanup_nars_for_orgs(state_bg, subscribing_orgs).await;

@@ -6,11 +6,13 @@
 
 use super::ProjectResponse;
 use crate::access::{Caller, OrgAccess, ProjectAccess, has_permission, load_org, load_project};
+use crate::audit::{RequestInfo, events, record as audit_record};
 use crate::authorization::MaybeUser;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::Permission;
 use axum::extract::{Path, Query, State};
+use axum::http::HeaderMap;
 use axum::{Extension, Json};
 
 use gradient_core::db::get_any_organization_by_name;
@@ -459,10 +461,11 @@ impl<'a> ProjectPatcher<'a> {
 
 pub async fn delete_project(
     state: State<Arc<ServerState>>,
+    headers: HeaderMap,
     Extension(user): Extension<MUser>,
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let (_organization, project) = load_project(
+    let (organization_row, project) = load_project(
         &state,
         Caller::User(&user),
         organization,
@@ -473,8 +476,24 @@ pub async fn delete_project(
         },
     )
     .await?;
+    let project_id = project.id;
+    let project_name = project.name.clone();
     let aproject: AProject = project.into();
     aproject.delete(&state.web_db).await?;
+
+    let info = RequestInfo::from_headers(&headers);
+    audit_record(
+        &state.web_db,
+        Some(user.id),
+        events::PROJECT_DELETE,
+        &info,
+        Some(serde_json::json!({
+            "organization_id": organization_row.id.to_string(),
+            "project_id": project_id.to_string(),
+            "project_name": project_name,
+        })),
+    )
+    .await;
 
     let res = BaseResponse {
         error: false,

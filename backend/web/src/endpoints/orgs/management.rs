@@ -5,11 +5,13 @@
  */
 
 use crate::access::{Caller, OrgAccess, load_org};
+use crate::audit::{RequestInfo, events, record as audit_record};
 use crate::authorization::MaybeUser;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::permissions::Permission;
 use axum::extract::{Path, Query, State};
+use axum::http::HeaderMap;
 use axum::{Extension, Json};
 
 use gradient_core::sources::generate_ssh_key;
@@ -408,6 +410,7 @@ pub async fn patch_organization(
 
 pub async fn delete_organization(
     state: State<Arc<ServerState>>,
+    headers: HeaderMap,
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
@@ -421,8 +424,23 @@ pub async fn delete_organization(
         },
     )
     .await?;
+    let org_id = organization.id;
+    let org_name = organization.name.clone();
     let aorganization: AOrganization = organization.into();
     aorganization.delete(&state.web_db).await?;
+
+    let info = RequestInfo::from_headers(&headers);
+    audit_record(
+        &state.web_db,
+        Some(user.id),
+        events::ORG_DELETE,
+        &info,
+        Some(serde_json::json!({
+            "organization_id": org_id.to_string(),
+            "organization_name": org_name,
+        })),
+    )
+    .await;
 
     let res = BaseResponse {
         error: false,
