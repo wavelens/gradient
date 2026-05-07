@@ -149,7 +149,7 @@ pub async fn post_basic_register(
             )
             .await
     {
-        tracing::warn!("Failed to send verification email: {}", e);
+        tracing::warn!(error = %e, "Failed to send verification email");
     }
 
     let message = if state
@@ -414,7 +414,7 @@ pub async fn get_oidc_login(
         )
         .body(Body::empty())
         .map_err(|e| {
-            tracing::error!("Failed to build HTTP response: {}", e);
+            tracing::error!(error = %e, "Failed to build HTTP response");
             WebError::internal("Failed to build redirect response")
         })
 }
@@ -471,7 +471,7 @@ pub async fn get_oidc_callback(
         .header("Set-Cookie", &clear_csrf)
         .body(Body::empty())
         .map_err(|e| {
-            tracing::error!("Failed to build HTTP response: {}", e);
+            tracing::error!(error = %e, "Failed to build HTTP response");
             WebError::internal("Failed to build redirect response")
         })
 }

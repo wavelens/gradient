@@ -55,7 +55,7 @@ pub async fn post_organization_ssh(
 
     let (private_key, public_key) = generate_ssh_key(&state.config.secrets.crypt_secret_file)
         .map_err(|e| {
-            tracing::error!("Failed to generate SSH key: {}", e);
+            tracing::error!(error = %e, "Failed to generate SSH key");
             WebError::failed_ssh_key_generation()
         })?;
 

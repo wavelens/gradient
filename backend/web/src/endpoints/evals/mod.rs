@@ -53,9 +53,9 @@ impl EvalAccessContext {
                     .await?
                     .ok_or_else(|| {
                         tracing::error!(
-                            "Project {} not found for evaluation {}",
-                            project_id,
-                            evaluation_id
+                            %project_id,
+                            %evaluation_id,
+                            "Project not found for evaluation",
                         );
                         WebError::data_inconsistency("Evaluation")
                     })?;
@@ -70,7 +70,7 @@ impl EvalAccessContext {
                     .one(&state.web_db)
                     .await?
                     .ok_or_else(|| {
-                        tracing::error!("DirectBuild not found for evaluation {}", evaluation_id);
+                        tracing::error!(%evaluation_id, "DirectBuild not found for evaluation");
                         WebError::data_inconsistency("Direct build")
                     })?
                     .organization;
@@ -81,7 +81,7 @@ impl EvalAccessContext {
             .one(&state.web_db)
             .await?
             .ok_or_else(|| {
-                tracing::error!("Organization {} not found", organization_id);
+                tracing::error!(%organization_id, "Organization not found");
                 WebError::data_inconsistency("Organization")
             })?;
 

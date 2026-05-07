@@ -179,7 +179,7 @@ impl IntoResponse for WebError {
 
         let message: String = match &self {
             Self::Internal(err) => {
-                tracing::error!("Internal error: {:#}", err);
+                tracing::error!(error = format!("{err:#}"), "Internal error");
                 "Internal server error".to_string()
             }
             Self::BadRequest(_, m)

@@ -77,7 +77,7 @@ impl EvalWorker {
         if let Some(pid) = child.id() {
             let path = format!("/proc/{pid}/oom_score_adj");
             if let Err(e) = std::fs::write(&path, "600") {
-                tracing::warn!(pid, "failed to set oom_score_adj for eval worker: {e}");
+                tracing::warn!(pid, error = %e, "failed to set oom_score_adj for eval worker");
             }
         }
 

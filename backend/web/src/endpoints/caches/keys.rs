@@ -67,7 +67,7 @@ pub async fn get_cache_key(
         state.config.server.serve_url.clone(),
     )
     .map_err(|e| {
-        tracing::error!("Failed to generate cache key: {}", e);
+        tracing::error!(error = %e, "Failed to generate cache key");
         WebError::internal("Failed to generate cache key")
     })?;
 
@@ -87,7 +87,7 @@ pub async fn get_cache_public_key(
         state.config.server.serve_url.clone(),
     )
     .map_err(|e| {
-        tracing::error!("Failed to derive public key: {}", e);
+        tracing::error!(error = %e, "Failed to derive public key");
         WebError::internal("Failed to derive public key")
     })?;
 
