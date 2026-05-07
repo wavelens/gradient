@@ -190,6 +190,28 @@ Backend (`cargo test -p web --tests narinfo`):
   and is persisted in `mark_nar_stored`.
 - `shows a friendly error when credentials are no longer available`
 
+## Per-project `sign_cache` option (#125)
+
+Backend:
+
+- `cache::cacher::sign_sweep::tests::skip_when_all_producing_projects_private` —
+  `compute_skipped_cached_paths` skips a path iff every producing project has
+  `sign_cache=false` and at least one such project exists. A mixed
+  public+private path stays signed (option B semantics).
+- `cache::cacher::sign_sweep::tests::skip_set_empty_when_no_private_producers` —
+  no skips when all producers are public.
+- `web::tests::projects_sign_cache::get_project_includes_sign_cache` — GET
+  `/api/v1/projects/{org}/{name}` returns `sign_cache` in the response body.
+- `web::tests::projects_sign_cache::patch_project_writes_sign_cache_false` —
+  PATCH with `{ "sign_cache": false }` is accepted and round-trips.
+- `web::tests::projects_sign_cache::create_project_accepts_sign_cache_false` —
+  PUT body may include `sign_cache: false`; default is `true` when omitted.
+- `web::tests::narinfo::narinfo_returns_404_when_signature_null` —
+  regression: when `cached_path_signature.signature` is NULL (the state the
+  sweep leaves rows in for `sign_cache=false` projects), the narinfo handler
+  returns 404 rather than serving an unsigned narinfo. The whole privacy
+  guarantee depends on this and we lock it in here.
+
 ## `mark_nar_stored` filters derivation_output by hash
 
 `proto::handler::nar::mark_nar_stored` previously located the

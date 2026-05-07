@@ -4638,6 +4638,16 @@ components:
           example: "packages.x86_64-linux"
         concurrency:
           $ref: '#/components/schemas/ConcurrencyPolicy'
+        sign_cache:
+          type: boolean
+          default: true
+          description: |
+            When false, build outputs from this project are pushed to the
+            cache but their narinfo signatures are left empty. External Nix
+            clients won't trust the cache for these paths, effectively
+            keeping the project's outputs private even within a public
+            cache. A path also produced by a `sign_cache=true` project is
+            still signed (the public producer wins).
 
     PatchProjectRequest:
       type: object
@@ -4658,6 +4668,10 @@ components:
           description: Number of completed evaluations to retain for metrics and history
         concurrency:
           $ref: '#/components/schemas/ConcurrencyPolicy'
+        sign_cache:
+          type: boolean
+          description: |
+            See `MakeProjectRequest.sign_cache`. Omit to leave unchanged.
 
     Project:
       type: object
@@ -4687,6 +4701,9 @@ components:
           description: Number of completed evaluations retained for metrics and history
         concurrency:
           $ref: '#/components/schemas/ConcurrencyPolicy'
+        sign_cache:
+          type: boolean
+          description: See `MakeProjectRequest.sign_cache`.
         created_by:
           type: string
           format: uuid
