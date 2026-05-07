@@ -28,6 +28,13 @@ pub mod events {
     pub const API_KEY_REVOKE: &str = "api_key.revoke";
     pub const API_KEY_DELETE: &str = "api_key.delete";
     pub const SESSION_REVOKE: &str = "session.revoke";
+    pub const AUTH_DENY: &str = "auth.deny";
+    pub const ORG_DELETE: &str = "organization.delete";
+    pub const ORG_MEMBER_ADD: &str = "organization.member.add";
+    pub const ORG_MEMBER_REMOVE: &str = "organization.member.remove";
+    pub const ORG_MEMBER_ROLE_CHANGE: &str = "organization.member.role_change";
+    pub const PROJECT_DELETE: &str = "project.delete";
+    pub const CACHE_DELETE: &str = "cache.delete";
 }
 
 /// Caller context derived from the inbound HTTP request — used to enrich
@@ -60,7 +67,10 @@ impl RequestInfo {
     }
 }
 
-/// Insert an `audit_log` row. Errors are logged at `warn` level and dropped.
+/// Insert an `audit_log` row and emit a structured tracing event. DB errors
+/// are warned and dropped; the tracing event always fires so operators
+/// tailing the live log see security-relevant activity even if the DB
+/// insert is failing.
 pub async fn record<C: ConnectionTrait>(
     db: &C,
     user_id: Option<UserId>,
@@ -68,6 +78,16 @@ pub async fn record<C: ConnectionTrait>(
     info: &RequestInfo,
     metadata: Option<serde_json::Value>,
 ) {
+    tracing::info!(
+        target: "audit",
+        event,
+        user_id = user_id.map(|id| id.to_string()),
+        ip = info.ip.as_deref(),
+        user_agent = info.user_agent.as_deref(),
+        metadata = metadata.as_ref().map(|m| m.to_string()),
+        "security event",
+    );
+
     let row = AAuditLog {
         id: Set(AuditLogId::now_v7()),
         user_id: Set(user_id),

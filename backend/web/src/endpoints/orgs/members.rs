@@ -5,11 +5,13 @@
  */
 
 use crate::access::{Caller, OrgAccess, load_org};
+use crate::audit::{RequestInfo, events, record as audit_record};
 use crate::authorization::MaybeUser;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::Permission;
 use axum::extract::{Path, State};
+use axum::http::HeaderMap;
 use axum::{Extension, Json};
 use gradient_core::types::*;
 use sea_orm::ActiveValue::Set;
@@ -117,6 +119,7 @@ pub async fn get_organization_users(
 
 pub async fn post_organization_users(
     state: State<Arc<ServerState>>,
+    headers: HeaderMap,
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
     Json(body): Json<AddUserRequest>,
@@ -161,11 +164,26 @@ pub async fn post_organization_users(
     .insert(&state.web_db)
     .await?;
 
+    let info = RequestInfo::from_headers(&headers);
+    audit_record(
+        &state.web_db,
+        Some(user.id),
+        events::ORG_MEMBER_ADD,
+        &info,
+        Some(serde_json::json!({
+            "organization_id": organization.id.to_string(),
+            "target_user_id": target_user.id.to_string(),
+            "role": role.name,
+        })),
+    )
+    .await;
+
     Ok(ok_json("User invited".to_string()))
 }
 
 pub async fn patch_organization_users(
     state: State<Arc<ServerState>>,
+    headers: HeaderMap,
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
     Json(body): Json<AddUserRequest>,
@@ -186,6 +204,7 @@ pub async fn patch_organization_users(
         .await?
         .ok_or_else(|| WebError::bad_request("User not in Organization"))?;
 
+    let previous_role_id = membership.role;
     let role = ERole::find()
         .filter(CRole::Name.eq(body.role.clone()))
         .one(&state.web_db)
@@ -196,11 +215,27 @@ pub async fn patch_organization_users(
     active.role = Set(role.id);
     active.update(&state.web_db).await?;
 
+    let info = RequestInfo::from_headers(&headers);
+    audit_record(
+        &state.web_db,
+        Some(user.id),
+        events::ORG_MEMBER_ROLE_CHANGE,
+        &info,
+        Some(serde_json::json!({
+            "organization_id": organization.id.to_string(),
+            "target_user_id": target_user.id.to_string(),
+            "previous_role_id": previous_role_id.to_string(),
+            "new_role": role.name,
+        })),
+    )
+    .await;
+
     Ok(ok_json("User role updated".to_string()))
 }
 
 pub async fn delete_organization_users(
     state: State<Arc<ServerState>>,
+    headers: HeaderMap,
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
     Json(body): Json<RemoveUserRequest>,
@@ -223,6 +258,19 @@ pub async fn delete_organization_users(
 
     let active: AOrganizationUser = membership.into();
     active.delete(&state.web_db).await?;
+
+    let info = RequestInfo::from_headers(&headers);
+    audit_record(
+        &state.web_db,
+        Some(user.id),
+        events::ORG_MEMBER_REMOVE,
+        &info,
+        Some(serde_json::json!({
+            "organization_id": organization.id.to_string(),
+            "target_user_id": target_user.id.to_string(),
+        })),
+    )
+    .await;
 
     Ok(ok_json("User kicked".to_string()))
 }
