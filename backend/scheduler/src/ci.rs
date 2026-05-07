@@ -153,8 +153,41 @@ pub async fn report_ci_for_entry_points(
     let _ = entry_points; // signature kept for backwards-compatibility with callers
 }
 
+/// Spawn a best-effort `Pending` top-level CI report for a freshly-queued
+/// evaluation.
+///
+/// Called from every site that creates a `Queued` evaluation via
+/// `apply_trigger` (scheduler trigger dispatch, manual API trigger, forge
+/// webhook fan-out). The report goes out as soon as the evaluation row exists
+/// — before any worker has picked the eval up — so the commit shows a pending
+/// check immediately.
+///
+/// No-op when the evaluation has no project: direct builds and restart flows
+/// don't currently report CI status.
+pub fn spawn_pending_ci_for_eval(state: Arc<ServerState>, eval: &MEvaluation) {
+    let Some(project_id) = eval.project else {
+        return;
+    };
+    let repo = eval.repository.clone();
+    let commit_id = eval.commit;
+    let evaluation_id = eval.id;
+    let s = Arc::clone(&state);
+    state.shutdown.spawn(async move {
+        report_ci_for_evaluation(
+            s,
+            project_id,
+            commit_id,
+            &repo,
+            evaluation_id,
+            CiStatus::Pending,
+        )
+        .await;
+    });
+}
+
 /// Reports a single `"gradient"` top-level CI status for the whole evaluation.
 ///
+/// - **Pending** when the evaluation is queued (before any worker picks it up).
 /// - **Running** when evaluation starts (before nix eval).
 /// - **Failure** if nix eval itself fails.
 /// - **Success / Failure / Error** when all builds finish (reported from builder).
@@ -263,5 +296,73 @@ pub async fn report_ci_for_evaluation(
             error = format!("{e:#}"),
             "CI evaluation status report failed"
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::NaiveDateTime;
+    use sea_orm::{DatabaseBackend, MockDatabase};
+    use test_support::prelude::test_state;
+
+    fn make_eval(project: Option<ProjectId>) -> MEvaluation {
+        entity::evaluation::Model {
+            id: EvaluationId::now_v7(),
+            project,
+            repository: "https://example.com/repo".into(),
+            commit: CommitId::now_v7(),
+            wildcard: "*".into(),
+            status: entity::evaluation::EvaluationStatus::Queued,
+            previous: None,
+            next: None,
+            created_at: NaiveDateTime::default(),
+            updated_at: NaiveDateTime::default(),
+            flake_source: None,
+            repo_check_id: None,
+            waiting_reason: None,
+            trigger: None,
+            concurrent: false,
+        }
+    }
+
+    fn empty_state() -> Arc<ServerState> {
+        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        test_state(db)
+    }
+
+    #[tokio::test]
+    async fn pending_ci_skips_when_eval_has_no_project() {
+        let state = empty_state();
+        let eval = make_eval(None);
+
+        spawn_pending_ci_for_eval(Arc::clone(&state), &eval);
+
+        assert_eq!(
+            state.shutdown.pending(),
+            0,
+            "no project ⇒ no spawned task"
+        );
+    }
+
+    #[tokio::test]
+    async fn pending_ci_spawns_task_when_eval_has_project() {
+        let state = empty_state();
+        let eval = make_eval(Some(ProjectId::now_v7()));
+
+        spawn_pending_ci_for_eval(Arc::clone(&state), &eval);
+
+        assert!(
+            state.shutdown.pending() >= 1,
+            "project present ⇒ task tracked on shutdown",
+        );
+
+        // Drain the spawned task so it doesn't outlive the test. With an empty
+        // mock DB the inner report bails on the first missing query and exits
+        // cleanly, so a short timeout is enough.
+        let _ = state
+            .shutdown
+            .cancel_and_drain(std::time::Duration::from_secs(1))
+            .await;
     }
 }

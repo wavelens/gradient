@@ -342,6 +342,7 @@ where
                 if let Some(aborted_id) = aborted_evaluation {
                     scheduler.cancel_evaluation_jobs(aborted_id, &aborted_builds).await;
                 }
+                scheduler::ci::spawn_pending_ci_for_eval(Arc::clone(state), &eval);
                 info!(
                     project_id = %project.id,
                     evaluation_id = %eval.id,
