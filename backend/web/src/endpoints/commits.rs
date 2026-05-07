@@ -4,17 +4,23 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::error::WebResult;
+use crate::authorization::MaybeUser;
+use crate::error::{WebError, WebResult};
 use crate::helpers::OptionExt;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::types::*;
-use sea_orm::EntityTrait;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use std::collections::HashSet;
 use std::sync::Arc;
 
+/// `GET /commits/{commit}` — returns commit metadata when the caller can
+/// reach the commit through an evaluation in an organization they belong to,
+/// or the org is public. Anything else maps to `404` so the endpoint never
+/// confirms or denies the existence of a commit the caller can't see.
 pub async fn get_commit(
     state: State<Arc<ServerState>>,
-    Extension(_user): Extension<MUser>,
+    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Path(commit_id): Path<CommitId>,
 ) -> WebResult<Json<BaseResponse<MCommit>>> {
     let commit = ECommit::find_by_id(commit_id)
@@ -22,12 +28,71 @@ pub async fn get_commit(
         .await?
         .or_not_found("Commit")?;
 
-    // TODO: Check if user has access to the commit
+    let evaluations = EEvaluation::find()
+        .filter(CEvaluation::Commit.eq(commit_id))
+        .all(&state.web_db)
+        .await?;
 
-    let res = BaseResponse {
-        error: false,
-        message: commit,
+    if evaluations.is_empty() {
+        return Err(WebError::not_found("Commit"));
+    }
+
+    let mut org_ids: HashSet<OrganizationId> = HashSet::new();
+
+    let project_ids: Vec<ProjectId> = evaluations.iter().filter_map(|e| e.project).collect();
+    if !project_ids.is_empty() {
+        let projects = EProject::find()
+            .filter(CProject::Id.is_in(project_ids))
+            .all(&state.web_db)
+            .await?;
+        org_ids.extend(projects.into_iter().map(|p| p.organization));
+    }
+
+    let direct_eval_ids: Vec<EvaluationId> = evaluations
+        .iter()
+        .filter(|e| e.project.is_none())
+        .map(|e| e.id)
+        .collect();
+    if !direct_eval_ids.is_empty() {
+        let direct_builds = EDirectBuild::find()
+            .filter(CDirectBuild::Evaluation.is_in(direct_eval_ids))
+            .all(&state.web_db)
+            .await?;
+        org_ids.extend(direct_builds.into_iter().map(|d| d.organization));
+    }
+
+    if org_ids.is_empty() {
+        return Err(WebError::not_found("Commit"));
+    }
+
+    let org_id_vec: Vec<OrganizationId> = org_ids.into_iter().collect();
+
+    let organizations = EOrganization::find()
+        .filter(COrganization::Id.is_in(org_id_vec.clone()))
+        .all(&state.web_db)
+        .await?;
+
+    let any_public = organizations.iter().any(|o| o.public);
+
+    let accessible = if any_public {
+        true
+    } else if let Some(user) = &maybe_user {
+        EOrganizationUser::find()
+            .filter(COrganizationUser::User.eq(user.id))
+            .filter(COrganizationUser::Organization.is_in(org_id_vec))
+            .one(&state.web_db)
+            .await?
+            .is_some()
+    } else {
+        false
     };
 
-    Ok(Json(res))
+    if !accessible {
+        return Err(WebError::not_found("Commit"));
+    }
+
+    Ok(Json(BaseResponse {
+        error: false,
+        message: commit,
+    }))
 }
