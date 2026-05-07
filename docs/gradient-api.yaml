@@ -3382,8 +3382,17 @@ paths:
     get:
       tags: [commits]
       summary: Get commit
-      description: Returns commit metadata (message, hash, author). Access control is not yet enforced — any authenticated user can fetch any commit.
+      description: |
+        Returns commit metadata (message, hash, author). Visibility follows the
+        commit's reachability: the caller must be a member of an organization
+        that owns an evaluation (or direct build) referencing the commit, or
+        that organization must be public. Anonymous callers may read commits
+        reachable through public organizations only. All other cases return
+        `404` so existence isn't leaked.
       operationId: getCommit
+      security:
+        - bearerAuth: []
+        - {}
       responses:
         '200':
           description: Commit
@@ -3396,8 +3405,6 @@ paths:
                     properties:
                       message:
                         $ref: '#/components/schemas/Commit'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
 
