@@ -128,6 +128,7 @@ fn project_row() -> entity::project::Model {
         managed: false,
         keep_evaluations: 10,
         concurrency: 3,
+        sign_cache: true,
     }
 }
 
@@ -543,6 +544,7 @@ fn create_project_seeds_default_polling_trigger() {
             managed: false,
             keep_evaluations: 30,
             concurrency: 3,
+            sign_cache: true,
         };
 
         let seeded_trigger = project_trigger::Model {
@@ -615,6 +617,7 @@ fn create_project_with_all_concurrency_returns_id() {
             managed: false,
             keep_evaluations: 30,
             concurrency: 2, // All
+            sign_cache: true,
         };
 
         let seeded_trigger = entity::project_trigger::Model {
@@ -683,6 +686,7 @@ fn create_project_with_hard_abort_concurrency_returns_id() {
             managed: false,
             keep_evaluations: 30,
             concurrency: 0, // HardAbort
+            sign_cache: true,
         };
 
         let seeded_trigger = entity::project_trigger::Model {

@@ -76,6 +76,11 @@ pub struct StateProject {
     /// Concurrency policy for this project. Defaults to `soft_abort` when omitted.
     #[serde(default = "default_soft_abort")]
     pub concurrency: ConcurrencyPolicy,
+    /// When `false`, build outputs from this project are pushed to the cache
+    /// but their narinfo signatures are left empty, so external Nix clients
+    /// won't trust them. Defaults to `true`.
+    #[serde(default = "default_true")]
+    pub sign_cache: bool,
 }
 
 fn default_soft_abort() -> ConcurrencyPolicy {

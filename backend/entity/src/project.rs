@@ -33,6 +33,7 @@ pub struct Model {
     pub keep_evaluations: i32,
     /// 0 = hard_abort, 1 = soft_abort, 2 = allow, 3 = skip
     pub concurrency: i16,
+    pub sign_cache: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

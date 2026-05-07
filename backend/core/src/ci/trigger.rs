@@ -277,6 +277,7 @@ mod tests {
             managed: false,
             keep_evaluations: 10,
             concurrency: 3,
+            sign_cache: true,
         }
     }
 

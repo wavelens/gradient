@@ -277,6 +277,7 @@ fn make_project(id: ProjectId, org_id: OrganizationId) -> entity::project::Model
         managed: false,
         keep_evaluations: 30,
         concurrency: 3,
+        sign_cache: true,
     }
 }
 

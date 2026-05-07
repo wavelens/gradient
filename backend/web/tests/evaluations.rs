@@ -117,6 +117,7 @@ fn project_row() -> entity::project::Model {
         managed: false,
         keep_evaluations: 10,
         concurrency: 3,
+        sign_cache: true,
     }
 }
 
