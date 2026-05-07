@@ -1289,3 +1289,16 @@ Tests (`cargo test -p scheduler --tests ci::tests`):
 - `pending_ci_spawns_task_when_eval_has_project` — when the evaluation
   has a project, the helper registers a task on the shutdown tracker so
   `cancel_and_drain` covers the in-flight report on shutdown.
+
+## Enum primitive conversions via `num_enum` (#80)
+
+`BuildStatus`, `EvaluationStatus`, `IntegrationKind`, `ForgeType`,
+`TriggerType`, and `ConcurrencyPolicy` derive
+`num_enum::IntoPrimitive`/`TryFromPrimitive` instead of hand-rolled
+`as_i16`/`from_i16`/`num_value` helpers. Database rows still use the
+explicit discriminants — moving them in source would silently break the
+on-disk encoding.
+
+The `concurrency_round_trip` and `trigger_type_round_trip` tests in
+`core/src/types/triggers.rs` cover the integer ↔ enum mapping and assert
+that out-of-range values produce an error rather than panicking.
