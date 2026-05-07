@@ -156,7 +156,7 @@ impl ProtoConnection {
                     let bytes = match rkyv::to_bytes::<RkyvError>(&msg) {
                         Ok(b) => b,
                         Err(e) => {
-                            tracing::warn!("serialisation error: {}", e);
+                            tracing::warn!(error = %e, "serialisation error");
                             continue;
                         }
                     };
@@ -164,13 +164,13 @@ impl ProtoConnection {
                     if let Err(e) =
                         SinkExt::feed(&mut sink, Message::Binary(bytes.to_vec().into())).await
                     {
-                        tracing::warn!("WebSocket write error: {}", e);
+                        tracing::warn!(error = %e, "WebSocket write error");
                         break 'drain;
                     }
                     tracing::trace!(?msg, bytes = len, "send ClientMessage (split)");
                 }
                 if let Err(e) = SinkExt::flush(&mut sink).await {
-                    tracing::warn!("WebSocket flush error: {}", e);
+                    tracing::warn!(error = %e, "WebSocket flush error");
                     break;
                 }
             }

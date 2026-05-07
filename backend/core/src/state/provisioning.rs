@@ -137,12 +137,12 @@ macro_rules! unmark_managed {
             let label_value = model.$name_field.clone();
             if $delete_state {
                 $entity::Entity::delete_by_id(model.id).exec($db).await?;
-                tracing::info!(concat!("Deleted ", $label, ": {}"), label_value);
+                tracing::info!(kind = $label, name = %label_value, "Deleted managed entity");
             } else {
                 let mut active: $entity::ActiveModel = model.into();
                 active.managed = Set(false);
                 active.update($db).await?;
-                tracing::info!(concat!("Unmanaged ", $label, ": {}"), label_value);
+                tracing::info!(kind = $label, name = %label_value, "Unmanaged entity");
             }
         }
     }};
@@ -216,7 +216,7 @@ impl<'a> StateApplicator<'a> {
                 user.superuser = Set(state_user.superuser);
                 user.managed = Set(true);
                 user.update(self.db).await?;
-                tracing::info!("Updated managed user: {}", state_user.username);
+                tracing::info!(username = %state_user.username, "Updated managed user");
             } else {
                 let user = user::ActiveModel {
                     id: Set(UserId::now_v7()),
@@ -235,7 +235,7 @@ impl<'a> StateApplicator<'a> {
                     oidc_subject: Set(None),
                 };
                 user.insert(self.db).await?;
-                tracing::info!("Created managed user: {}", state_user.username);
+                tracing::info!(username = %state_user.username, "Created managed user");
             }
         }
 
@@ -284,7 +284,7 @@ impl<'a> StateApplicator<'a> {
                 }
                 org.managed = Set(true);
                 org.update(self.db).await?;
-                tracing::info!("Updated managed organization: {}", state_org.name);
+                tracing::info!(name = %state_org.name, "Updated managed organization");
                 org_id
             } else {
                 let org_id = OrganizationId::now_v7();
@@ -302,7 +302,7 @@ impl<'a> StateApplicator<'a> {
                     github_installation_id: Set(state_org.github_installation_id),
                 };
                 org.insert(self.db).await?;
-                tracing::info!("Created managed organization: {}", state_org.name);
+                tracing::info!(name = %state_org.name, "Created managed organization");
                 org_id
             };
 
@@ -366,7 +366,7 @@ impl<'a> StateApplicator<'a> {
                 proj.sign_cache = Set(state_project.sign_cache);
                 proj.managed = Set(true);
                 proj.update(self.db).await?;
-                tracing::info!("Updated managed project: {}", state_project.name);
+                tracing::info!(name = %state_project.name, "Updated managed project");
                 project::Entity::find_by_id(project_id)
                     .one(self.db)
                     .await?
@@ -392,7 +392,7 @@ impl<'a> StateApplicator<'a> {
                     sign_cache: Set(state_project.sign_cache),
                 };
                 let inserted = proj.insert(self.db).await?;
-                tracing::info!("Created managed project: {}", state_project.name);
+                tracing::info!(name = %state_project.name, "Created managed project");
                 inserted
             };
 
@@ -481,7 +481,7 @@ impl<'a> StateApplicator<'a> {
                 cache_model.public = Set(state_cache.public);
                 cache_model.managed = Set(true);
                 cache_model.update(self.db).await?;
-                tracing::info!("Updated managed cache: {}", state_cache.name);
+                tracing::info!(name = %state_cache.name, "Updated managed cache");
                 existing.id
             } else {
                 let cache_id = CacheId::now_v7();
@@ -500,7 +500,7 @@ impl<'a> StateApplicator<'a> {
                     managed: Set(true),
                 };
                 cache_model.insert(self.db).await?;
-                tracing::info!("Created managed cache: {}", state_cache.name);
+                tracing::info!(name = %state_cache.name, "Created managed cache");
                 cache_id
             };
 
@@ -649,7 +649,7 @@ impl<'a> StateApplicator<'a> {
                 api_key.key = Set(key_hash);
                 api_key.managed = Set(true);
                 api_key.update(self.db).await?;
-                tracing::info!("Updated managed API key: {}", state_api_key.name);
+                tracing::info!(name = %state_api_key.name, "Updated managed API key");
             } else {
                 let api_key_model = api::ActiveModel {
                     id: Set(ApiId::now_v7()),
@@ -663,7 +663,7 @@ impl<'a> StateApplicator<'a> {
                     revoked_at: Set(None),
                 };
                 api_key_model.insert(self.db).await?;
-                tracing::info!("Created managed API key: {}", state_api_key.name);
+                tracing::info!(name = %state_api_key.name, "Created managed API key");
             }
         }
 
@@ -715,7 +715,7 @@ impl<'a> StateApplicator<'a> {
                 reg.enable_build = Set(state_worker.enable_build);
                 reg.created_by = Set(Some(created_by_id));
                 reg.update(self.db).await?;
-                tracing::info!("Updated worker registration: {}", state_worker.worker_id);
+                tracing::info!(worker_id = %state_worker.worker_id, "Updated worker registration");
             } else {
                 let reg = worker_registration::ActiveModel {
                     id: Set(WorkerRegistrationId::now_v7()),
@@ -733,7 +733,7 @@ impl<'a> StateApplicator<'a> {
                     created_at: Set(now()),
                 };
                 reg.insert(self.db).await?;
-                tracing::info!("Created worker registration: {}", state_worker.worker_id);
+                tracing::info!(worker_id = %state_worker.worker_id, "Created worker registration");
             }
         }
 
@@ -832,7 +832,7 @@ impl<'a> StateApplicator<'a> {
                 active.access_token = Set(encrypted_token);
                 active.created_by = Set(created_by_id);
                 active.update(self.db).await?;
-                tracing::info!("Updated managed integration: {}", state_int.name);
+                tracing::info!(name = %state_int.name, "Updated managed integration");
             } else {
                 let row = integration::ActiveModel {
                     id: Set(IntegrationId::now_v7()),
@@ -848,7 +848,7 @@ impl<'a> StateApplicator<'a> {
                     created_at: Set(now()),
                 };
                 row.insert(self.db).await?;
-                tracing::info!("Created managed integration: {}", state_int.name);
+                tracing::info!(name = %state_int.name, "Created managed integration");
             }
         }
 
@@ -982,7 +982,7 @@ impl<'a> StateApplicator<'a> {
                 worker_registration::Entity::delete_by_id(reg.id)
                     .exec(db)
                     .await?;
-                tracing::info!("Deleted worker registration: {}", worker_id);
+                tracing::info!(worker_id, "Deleted worker registration");
             }
         }
 

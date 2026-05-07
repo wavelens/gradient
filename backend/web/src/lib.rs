@@ -117,24 +117,31 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
 
     let trace = TraceLayer::new_for_http()
         .on_request(|request: &Request<Body>, _span: &Span| {
-            tracing::debug!("started {} {}", request.method(), request.uri().path())
+            tracing::debug!(
+                method = %request.method(),
+                path = request.uri().path(),
+                "request started",
+            )
         })
         .on_response(
             |_response: &Response<Body>, latency: Duration, _span: &Span| {
-                tracing::debug!("response generated in {:?}", latency)
+                tracing::debug!(latency_ms = latency.as_millis() as u64, "response generated")
             },
         )
         .on_body_chunk(|chunk: &Bytes, _latency: Duration, _span: &Span| {
-            tracing::debug!("sending {} bytes", chunk.len())
+            tracing::debug!(bytes = chunk.len(), "sending chunk")
         })
         .on_eos(
             |_trailers: Option<&HeaderMap>, stream_duration: Duration, _span: &Span| {
-                tracing::debug!("stream closed after {:?}", stream_duration)
+                tracing::debug!(
+                    duration_ms = stream_duration.as_millis() as u64,
+                    "stream closed",
+                )
             },
         )
         .on_failure(
             |error: ServerErrorsFailureClass, _latency: Duration, _span: &Span| {
-                tracing::debug!("request failed with {:?}", error)
+                tracing::debug!(error = ?error, "request failed")
             },
         );
 
@@ -481,7 +488,7 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
     let listener = tokio::net::TcpListener::bind(&server_url)
         .await
         .map_err(|e| {
-            tracing::error!("Failed to bind to {}: {}", server_url, e);
+            tracing::error!(addr = %server_url, error = %e, "Failed to bind listener");
             e
         })?;
 

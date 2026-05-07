@@ -145,7 +145,7 @@ pub async fn put(
 
     let (private_key, public_key) = generate_signing_key(&state.config.secrets.crypt_secret_file)
         .map_err(|e| {
-        tracing::error!("Failed to generate signing key: {}", e);
+        tracing::error!(error = %e, "Failed to generate signing key");
         WebError::internal("Failed to generate signing key")
     })?;
 
@@ -216,7 +216,7 @@ pub async fn get_cache(
         state.config.server.serve_url.clone(),
     )
     .map_err(|e| {
-        tracing::error!("Failed to derive public key: {}", e);
+        tracing::error!(error = %e, "Failed to derive public key");
         WebError::internal("Failed to derive public key")
     })?;
 

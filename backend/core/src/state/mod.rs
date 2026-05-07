@@ -419,7 +419,7 @@ pub async fn load_and_apply_state(
         return Ok(());
     };
 
-    tracing::info!("Loading state configuration from: {}", path);
+    tracing::info!(path, "Loading state configuration");
 
     let config = StateConfiguration::from_file(path)?;
 
