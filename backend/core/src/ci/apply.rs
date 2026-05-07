@@ -62,7 +62,8 @@ pub async fn apply_trigger<C: ConnectionTrait>(
     // currently-running commit AND for the concurrency policy below.
     let active_codes: Vec<i32> = EvaluationStatus::ACTIVE
         .iter()
-        .map(|s| s.num_value())
+        .copied()
+        .map(i32::from)
         .collect();
     let in_flight = EEvaluation::find()
         .filter(CEvaluation::Project.eq(project.id))
@@ -78,35 +79,30 @@ pub async fn apply_trigger<C: ConnectionTrait>(
     //   - last_evaluation's commit matches (covers terminal-then-poll-again).
     // Time triggers and manual fires bypass this check.
     if dedup_applies {
-        if let Some(running) = &in_flight {
-            if let Some(running_commit) = ECommit::find_by_id(running.commit).one(db).await? {
-                if running_commit.hash == input.commit_hash {
+        if let Some(running) = &in_flight
+            && let Some(running_commit) = ECommit::find_by_id(running.commit).one(db).await?
+                && running_commit.hash == input.commit_hash {
                     return Ok(ApplyOutcome::SkippedSameCommit);
                 }
-            }
-        }
 
-        if let Some(prev) = project.last_evaluation {
-            if let Some(prev_eval) = EEvaluation::find_by_id(prev).one(db).await? {
-                if let Some(prev_commit) = ECommit::find_by_id(prev_eval.commit).one(db).await? {
-                    if prev_commit.hash == input.commit_hash {
+        if let Some(prev) = project.last_evaluation
+            && let Some(prev_eval) = EEvaluation::find_by_id(prev).one(db).await?
+                && let Some(prev_commit) = ECommit::find_by_id(prev_eval.commit).one(db).await?
+                    && prev_commit.hash == input.commit_hash {
                         return Ok(ApplyOutcome::SkippedSameCommit);
                     }
-                }
-            }
-        }
     }
 
     // ── Concurrency policy ────────────────────────────────────────────────
-    let concurrency = ConcurrencyPolicy::from_i16(project.concurrency)
-        .unwrap_or(ConcurrencyPolicy::SoftAbort);
+    let concurrency =
+        ConcurrencyPolicy::try_from(project.concurrency).unwrap_or(ConcurrencyPolicy::SoftAbort);
 
     let mut aborted_evaluation: Option<EvaluationId> = None;
     let mut aborted_builds: Vec<BuildId> = Vec::new();
     let concurrent_flag = matches!(concurrency, ConcurrencyPolicy::All);
 
-    if !concurrent_flag {
-        if let Some(running) = in_flight {
+    if !concurrent_flag
+        && let Some(running) = in_flight {
             match concurrency {
                 ConcurrencyPolicy::Skip => return Ok(ApplyOutcome::SkippedConcurrency),
                 ConcurrencyPolicy::HardAbort => {
@@ -121,7 +117,6 @@ pub async fn apply_trigger<C: ConnectionTrait>(
                 ConcurrencyPolicy::All => unreachable!("filtered above"),
             }
         }
-    }
 
     let eval = match trigger_evaluation(
         db,

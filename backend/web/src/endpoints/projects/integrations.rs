@@ -53,7 +53,7 @@ async fn validate_integration(
         .await?
         .or_not_found("Integration")?;
 
-    if row.kind != expected_kind.as_i16() {
+    if row.kind != i16::from(expected_kind) {
         return Err(WebError::bad_request(format!(
             "Integration {} is not {}.",
             integration_id,

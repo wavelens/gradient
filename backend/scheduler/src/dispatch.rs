@@ -490,9 +490,9 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
                   WHERE dd.derivation = b.derivation) DESC,
                 b.updated_at ASC
         "#,
-            queued = BuildStatus::Queued.num_value(),
-            completed = BuildStatus::Completed.num_value(),
-            substituted = BuildStatus::Substituted.num_value(),
+            queued = i32::from(BuildStatus::Queued),
+            completed = i32::from(BuildStatus::Completed),
+            substituted = i32::from(BuildStatus::Substituted),
         ),
     );
 

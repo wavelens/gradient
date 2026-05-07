@@ -30,7 +30,7 @@ pub async fn update_build_status(
         return build;
     }
 
-    match BuildStateMachine::validate(build.status.clone(), status.clone()) {
+    match BuildStateMachine::validate(build.status, status) {
         Ok(_) => {}
         Err(e) => {
             // Loud: a rejected transition usually means the build is stuck
@@ -54,7 +54,7 @@ pub async fn update_build_status(
 
     let mut active_build: ABuild = build.clone().into_active_model();
 
-    let webhook_status = status.clone();
+    let webhook_status = status;
     let now = crate::types::now();
     // When transitioning out of `Building` into a terminal state, record the
     // elapsed wall-clock time. `build.updated_at` is the timestamp of the
@@ -126,7 +126,7 @@ pub async fn update_evaluation_status(
     // The state machine validates the transition locally. The filtered update_many
     // below also guards atomically in the DB, so concurrent aborts cannot be
     // clobbered by an in-flight evaluator.
-    match EvalStateMachine::validate(evaluation.status.clone(), status.clone()) {
+    match EvalStateMachine::validate(evaluation.status, status) {
         Ok(_) => {}
         Err(e) => {
             warn!(evaluation_id = %evaluation.id, error = %e, "Skipping invalid evaluation status transition");
@@ -136,13 +136,13 @@ pub async fn update_evaluation_status(
 
     debug!(evaluation_id = %evaluation.id, status = ?status, "Updating evaluation status");
 
-    let webhook_status = status.clone();
+    let webhook_status = status;
     let now = crate::types::now();
 
     let mut update = EEvaluation::update_many()
         .col_expr(
             CEvaluation::Status,
-            sea_orm::sea_query::Expr::value(status.clone()),
+            sea_orm::sea_query::Expr::value(status),
         )
         .col_expr(CEvaluation::UpdatedAt, sea_orm::sea_query::Expr::value(now));
 

@@ -203,7 +203,7 @@ pub async fn trigger_restart_builds<C: ConnectionTrait>(
         std::collections::HashMap::with_capacity(prev_builds.len());
 
     for prev_build in &prev_builds {
-        let new_status = restart_build_status(prev_build.status.clone());
+        let new_status = restart_build_status(prev_build.status);
         let new_build_id = BuildId::now_v7();
         let abuild = ABuild {
             id: Set(new_build_id),
@@ -400,7 +400,7 @@ mod tests {
         for status in active_statuses {
             let project = make_project();
             let db = MockDatabase::new(DatabaseBackend::Postgres)
-                .append_query_results([vec![make_eval(EvaluationId::now_v7(), status.clone())]])
+                .append_query_results([vec![make_eval(EvaluationId::now_v7(), status)]])
                 .into_connection();
             let result = trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None, false).await;
             assert!(
@@ -435,7 +435,7 @@ mod tests {
             BuildStatus::DependencyFailed,
         ] {
             assert_eq!(
-                restart_build_status(s.clone()),
+                restart_build_status(s),
                 BuildStatus::Queued,
                 "{s:?} should be re-queued"
             );

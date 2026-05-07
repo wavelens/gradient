@@ -83,8 +83,8 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
         .filter(ept::Column::Active.eq(true))
         .filter(
             Condition::any()
-                .add(ept::Column::TriggerType.eq(TriggerType::Polling.as_i16()))
-                .add(ept::Column::TriggerType.eq(TriggerType::Time.as_i16())),
+                .add(ept::Column::TriggerType.eq(i16::from(TriggerType::Polling)))
+                .add(ept::Column::TriggerType.eq(i16::from(TriggerType::Time))),
         )
         .all(&state.worker_db)
         .await?;

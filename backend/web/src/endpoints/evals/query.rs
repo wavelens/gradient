@@ -179,7 +179,7 @@ pub async fn get_evaluation_builds(
             Some(BuildItem {
                 id: b.id,
                 name: drv.derivation_path.clone(),
-                status: format!("{:?}", b.status.clone().for_api()),
+                status: format!("{:?}", b.status.for_api()),
                 has_artefacts: *has_artefacts_map.get(&b.derivation).unwrap_or(&false),
                 updated_at: b.updated_at,
                 build_time_ms: b.build_time_ms,

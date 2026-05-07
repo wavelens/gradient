@@ -106,7 +106,7 @@ async fn resolve_integration_id(
     }
     let row = integration::Entity::find()
         .filter(integration::Column::Organization.eq(org_id))
-        .filter(integration::Column::Kind.eq(kind.as_i16()))
+        .filter(integration::Column::Kind.eq(i16::from(kind)))
         .filter(integration::Column::Name.eq(name))
         .one(db)
         .await?
@@ -363,7 +363,7 @@ impl<'a> StateApplicator<'a> {
                 proj.evaluation_wildcard = Set(state_project.evaluation_wildcard.clone());
                 proj.force_evaluation = Set(state_project.force_evaluation);
                 proj.created_by = Set(created_by_id);
-                proj.concurrency = Set(state_project.concurrency.as_i16());
+                proj.concurrency = Set(i16::from(state_project.concurrency));
                 proj.sign_cache = Set(state_project.sign_cache);
                 proj.managed = Set(true);
                 proj.update(self.db).await?;
@@ -389,7 +389,7 @@ impl<'a> StateApplicator<'a> {
                     created_at: Set(now),
                     managed: Set(true),
                     keep_evaluations: Set(0),
-                    concurrency: Set(state_project.concurrency.as_i16()),
+                    concurrency: Set(i16::from(state_project.concurrency)),
                     sign_cache: Set(state_project.sign_cache),
                 };
                 let inserted = proj.insert(self.db).await?;
@@ -814,7 +814,7 @@ impl<'a> StateApplicator<'a> {
 
             let existing = integration::Entity::find()
                 .filter(integration::Column::Organization.eq(org_id))
-                .filter(integration::Column::Kind.eq(kind.as_i16()))
+                .filter(integration::Column::Kind.eq(i16::from(kind)))
                 .filter(integration::Column::Name.eq(&state_int.name))
                 .one(self.db)
                 .await?;
@@ -827,7 +827,7 @@ impl<'a> StateApplicator<'a> {
             if let Some(existing) = existing {
                 let mut active: integration::ActiveModel = existing.into();
                 active.display_name = Set(display_name);
-                active.forge_type = Set(forge.as_i16());
+                active.forge_type = Set(i16::from(forge));
                 active.endpoint_url = Set(endpoint);
                 active.secret = Set(encrypted_secret);
                 active.access_token = Set(encrypted_token);
@@ -840,8 +840,8 @@ impl<'a> StateApplicator<'a> {
                     organization: Set(org_id),
                     name: Set(state_int.name.clone()),
                     display_name: Set(display_name),
-                    kind: Set(kind.as_i16()),
-                    forge_type: Set(forge.as_i16()),
+                    kind: Set(i16::from(kind)),
+                    forge_type: Set(i16::from(forge)),
                     secret: Set(encrypted_secret),
                     endpoint_url: Set(endpoint),
                     access_token: Set(encrypted_token),
@@ -1032,7 +1032,7 @@ async fn apply_project_triggers<C: ConnectionTrait>(
         AProjectTrigger {
             id: Set(ProjectTriggerId::now_v7()),
             project: Set(project.id),
-            trigger_type: Set(cfg.trigger_type().as_i16()),
+            trigger_type: Set(i16::from(cfg.trigger_type())),
             config: Set(cfg.to_db_json()),
             active: Set(*active),
             last_fired_at: Set(None),
@@ -1138,7 +1138,7 @@ fn build_trigger_config(
 fn trigger_key(cfg: &TriggerConfig) -> String {
     let json = cfg.to_db_json();
     let canonical = serde_json::to_string(&json).unwrap_or_default();
-    format!("{}|{}", cfg.trigger_type().as_i16(), canonical)
+    format!("{}|{}", i16::from(cfg.trigger_type()), canonical)
 }
 
 // ── Pure helpers ──────────────────────────────────────────────────────────────

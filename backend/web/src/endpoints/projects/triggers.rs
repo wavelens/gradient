@@ -49,7 +49,7 @@ impl From<MProjectTrigger> for TriggerOut {
         Self {
             id: m.id,
             project: m.project,
-            trigger_type: TriggerType::from_i16(m.trigger_type).unwrap_or(TriggerType::Polling),
+            trigger_type: TriggerType::try_from(m.trigger_type).unwrap_or(TriggerType::Polling),
             config: m.config,
             active: m.active,
             last_fired_at: m.last_fired_at,
@@ -134,7 +134,7 @@ pub async fn create(
     let row = AProjectTrigger {
         id: Set(ProjectTriggerId::now_v7()),
         project: Set(proj.id),
-        trigger_type: Set(trigger_type.as_i16()),
+        trigger_type: Set(i16::from(trigger_type)),
         config: Set(config_json),
         active: Set(body.active),
         last_fired_at: Set(None),
@@ -206,7 +206,7 @@ pub async fn update(
     let mut active: AProjectTrigger = row.into();
     if let Some(cfg) = body.config {
         let tt = cfg.trigger_type();
-        active.trigger_type = Set(tt.as_i16());
+        active.trigger_type = Set(i16::from(tt));
         active.config = Set(cfg.to_db_json());
     }
     if let Some(a) = body.active {
@@ -280,8 +280,8 @@ pub async fn fire_now(
         return Err(WebError::bad_request("trigger is inactive"));
     }
 
-    let trigger_type = TriggerType::from_i16(row.trigger_type)
-        .ok_or_else(|| WebError::internal("invalid trigger_type in row"))?;
+    let trigger_type = TriggerType::try_from(row.trigger_type)
+        .map_err(|_| WebError::internal("invalid trigger_type in row"))?;
 
     let branch_for_fire: Option<String> = TriggerConfig::parse_row(row.trigger_type, &row.config)
         .ok()

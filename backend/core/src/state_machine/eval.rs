@@ -59,7 +59,7 @@ impl EvalStateMachine {
             return Err(InvalidEvalTransition { from, to });
         }
 
-        match (from.clone(), to.clone()) {
+        match (from, to) {
             // Normal progression through evaluation phases
             (EvaluationStatus::Queued, EvaluationStatus::Fetching) => Ok(to),
             (EvaluationStatus::Queued, EvaluationStatus::EvaluatingFlake) => Ok(to),
@@ -115,7 +115,7 @@ mod tests {
         ];
         for (from, to) in chain {
             assert!(
-                EvalStateMachine::validate(from.clone(), to.clone()).is_ok(),
+                EvalStateMachine::validate(from, to).is_ok(),
                 "{from:?} → {to:?} failed"
             );
         }
@@ -145,7 +145,7 @@ mod tests {
         ];
         for from in nonterminals {
             assert!(
-                EvalStateMachine::validate(from.clone(), EvaluationStatus::Failed).is_ok(),
+                EvalStateMachine::validate(from, EvaluationStatus::Failed).is_ok(),
                 "{from:?} → Failed failed"
             );
         }
@@ -163,7 +163,7 @@ mod tests {
         ];
         for from in nonterminals {
             assert!(
-                EvalStateMachine::validate(from.clone(), EvaluationStatus::Aborted).is_ok(),
+                EvalStateMachine::validate(from, EvaluationStatus::Aborted).is_ok(),
                 "{from:?} → Aborted failed"
             );
         }
@@ -182,7 +182,7 @@ mod tests {
                 EvaluationStatus::Fetching,
             ] {
                 assert!(
-                    EvalStateMachine::validate(from.clone(), to.clone()).is_err(),
+                    EvalStateMachine::validate(from, to).is_err(),
                     "{from:?} → {to:?} should be rejected"
                 );
             }
@@ -205,7 +205,7 @@ mod tests {
             EvaluationStatus::Building,
             EvaluationStatus::Fetching,
         ] {
-            assert!(EvalStateMachine::validate(s.clone(), s).is_ok());
+            assert!(EvalStateMachine::validate(s, s).is_ok());
         }
     }
 

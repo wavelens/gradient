@@ -63,7 +63,7 @@ impl BuildStateMachine {
             return Err(InvalidBuildTransition { from, to });
         }
 
-        match (from.clone(), to.clone()) {
+        match (from, to) {
             // Normal progression (still enforced for non-terminal states so
             // we don't accidentally skip Queued / Building in the UI).
             (BuildStatus::Created, BuildStatus::Queued) => Ok(to),
@@ -137,7 +137,7 @@ mod tests {
             BuildStatus::Building,
         ] {
             assert!(
-                BuildStateMachine::validate(from.clone(), BuildStatus::Aborted).is_ok(),
+                BuildStateMachine::validate(from, BuildStatus::Aborted).is_ok(),
                 "{from:?} → Aborted should be valid"
             );
         }
@@ -151,7 +151,7 @@ mod tests {
             BuildStatus::Building,
         ] {
             assert!(
-                BuildStateMachine::validate(from.clone(), BuildStatus::DependencyFailed).is_ok(),
+                BuildStateMachine::validate(from, BuildStatus::DependencyFailed).is_ok(),
                 "{from:?} → DependencyFailed should be valid"
             );
         }
@@ -174,7 +174,7 @@ mod tests {
                 BuildStatus::Building,
             ] {
                 assert!(
-                    BuildStateMachine::validate(from.clone(), to.clone()).is_err(),
+                    BuildStateMachine::validate(*from, to).is_err(),
                     "{from:?} → {to:?} should be rejected"
                 );
             }
@@ -189,7 +189,7 @@ mod tests {
             BuildStatus::Building,
             BuildStatus::Completed,
         ] {
-            assert!(BuildStateMachine::validate(s.clone(), s).is_ok());
+            assert!(BuildStateMachine::validate(s, s).is_ok());
         }
     }
 
@@ -220,7 +220,7 @@ mod tests {
         for from in &from_states {
             for to in &terminal_states {
                 assert!(
-                    BuildStateMachine::validate(from.clone(), to.clone()).is_ok(),
+                    BuildStateMachine::validate(*from, *to).is_ok(),
                     "{from:?} → {to:?} should be valid (terminal shortcut)"
                 );
             }

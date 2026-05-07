@@ -196,7 +196,7 @@ impl<'a> BuildStateHandler<'a> {
             else {
                 continue;
             };
-            update_build_status(Arc::clone(self.state), reloaded, leader.status.clone()).await;
+            update_build_status(Arc::clone(self.state), reloaded, leader.status).await;
 
             if matches!(
                 leader.status,
