@@ -18,7 +18,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, Write};
-use tracing::trace;
+use tracing::{error, trace};
 
 use crate::nix::flake::{discover_derivations, get_derivation_path};
 use crate::nix::nix_eval::{NixEvaluator, escape_nix_str};
@@ -86,8 +86,10 @@ pub struct ResolvedItem {
 /// them with one persistent `NixEvaluator`, writes `EvalResponse` lines to
 /// stdout. Returns when stdin reaches EOF or a `Shutdown` request is received.
 ///
-/// Logs go to stderr (inherited from parent) so the parent's tracing layer
-/// still captures them.
+/// Diagnostics go through `tracing` (configured in `worker::main` to write
+/// formatted records to stderr, which the parent inherits) so init failures
+/// and stdin errors stay visible to JSON log aggregators with structured
+/// fields, target metadata, and `RUST_LOG` filtering applied.
 pub fn run_eval_worker() -> std::io::Result<()> {
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
@@ -100,7 +102,10 @@ pub fn run_eval_worker() -> std::io::Result<()> {
     let evaluator = match NixEvaluator::new() {
         Ok(e) => Some(e),
         Err(e) => {
-            eprintln!("eval worker: NixEvaluator init failed: {:#}", e);
+            error!(
+                error = format!("{e:#}"),
+                "eval worker: NixEvaluator init failed"
+            );
             None
         }
     };
@@ -111,7 +116,7 @@ pub fn run_eval_worker() -> std::io::Result<()> {
         let n = match reader.read_line(&mut line) {
             Ok(n) => n,
             Err(e) => {
-                eprintln!("eval worker: stdin read error: {}", e);
+                error!(error = %e, "eval worker: stdin read error");
                 return Err(e);
             }
         };
