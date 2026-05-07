@@ -1268,3 +1268,24 @@ Tests (`cargo test -p worker executor::build::tests`):
   `file_type`, `subtype`, `name` (basename), and `size` (stat) populated.
   Regression for substituted/external-cached builds whose artefacts never
   reached the `build_product` table.
+
+## CI pending status fires at queue time (#117)
+
+The top-level `gradient` CI status used to first appear on a commit only
+when a worker picked the evaluation up and it transitioned `Queued →
+Fetching`. During the gap between insert and worker pickup the commit
+showed no status, hiding that work had been scheduled. The scheduler now
+spawns a `Pending` report from `scheduler::ci::spawn_pending_ci_for_eval`
+at every site that creates a `Queued` evaluation via `apply_trigger`
+(scheduler trigger dispatch, manual API fire, forge webhook fan-out). The
+existing `Running`-on-`Fetching` transition is preserved and updates the
+same check run id.
+
+Tests (`cargo test -p scheduler --tests ci::tests`):
+
+- `pending_ci_skips_when_eval_has_no_project` — direct builds and other
+  project-less evaluations don't get a CI report; the helper returns
+  without spawning so the shutdown tracker stays empty.
+- `pending_ci_spawns_task_when_eval_has_project` — when the evaluation
+  has a project, the helper registers a task on the shutdown tracker so
+  `cancel_and_drain` covers the in-flight report on shutdown.
