@@ -22,6 +22,7 @@ export interface Project {
   force_evaluation: boolean;
   keep_evaluations: number;
   concurrency: ConcurrencyPolicy;
+  sign_cache: boolean;
   created_by?: string;
   created_at?: string;
   managed: boolean;
