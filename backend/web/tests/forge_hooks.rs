@@ -207,7 +207,7 @@ fn project_row() -> entity::project::Model {
         display_name: "Test Project".into(),
         description: String::new(),
         repository: "https://gitea.example.com/test-org/repo".into(),
-        evaluation_wildcard: "*".into(),
+        wildcard: "*".into(),
         last_evaluation: None,
         last_check_at: fixture_date(),
         force_evaluation: false,

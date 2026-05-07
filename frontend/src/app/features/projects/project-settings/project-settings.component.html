@@ -78,7 +78,7 @@
               <span class="material-symbols-outlined">help</span>
             </a>
           </label>
-          <input pInputText id="proj-wildcard" [(ngModel)]="formData.evaluation_wildcard" class="w-full" [disabled]="proj.managed || !proj.can_edit" />
+          <input pInputText id="proj-wildcard" [(ngModel)]="formData.wildcard" class="w-full" [disabled]="proj.managed || !proj.can_edit" />
           <small class="text-secondary">Pattern for selecting which outputs to evaluate</small>
         </div>
 

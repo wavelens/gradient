@@ -83,7 +83,7 @@ fn make_project(id: ProjectId, org_id: OrganizationId) -> entity::project::Model
         display_name: "Test Project".into(),
         description: "".into(),
         repository: "https://example.com/repo".into(),
-        evaluation_wildcard: "*".into(),
+        wildcard: "*".into(),
         last_evaluation: None,
         last_check_at: test_date(),
         force_evaluation: false,

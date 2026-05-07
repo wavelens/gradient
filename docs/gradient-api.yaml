@@ -1243,7 +1243,7 @@ paths:
     put:
       tags: [projects]
       summary: Create project
-      description: Creates a new project in the organization. `evaluation_wildcard` is a Nix attribute selector such as `packages.x86_64-linux` or `checks`.
+      description: Creates a new project in the organization. `wildcard` is a Nix attribute selector such as `packages.x86_64-linux` or `checks`.
       operationId: createProject
       requestBody:
         required: true
@@ -1256,7 +1256,7 @@ paths:
               display_name: My Project
               repository: "https://github.com/example/repo.git"
               branch: main
-              evaluation_wildcard: "packages.x86_64-linux"
+              wildcard: "packages.x86_64-linux"
       responses:
         '200':
           description: Project UUID
@@ -4625,7 +4625,7 @@ components:
 
     MakeProjectRequest:
       type: object
-      required: [name, display_name, repository, evaluation_wildcard]
+      required: [name, display_name, repository, wildcard]
       properties:
         name:
           type: string
@@ -4642,7 +4642,7 @@ components:
           type: string
           description: Git branch to track (defaults to default branch)
           example: main
-        evaluation_wildcard:
+        wildcard:
           type: string
           description: Nix attribute path to evaluate (e.g. `packages.x86_64-linux` or `checks`)
           example: "packages.x86_64-linux"
@@ -4670,7 +4670,7 @@ components:
           type: string
         branch:
           type: string
-        evaluation_wildcard:
+        wildcard:
           type: string
         keep_evaluations:
           type: integer
@@ -4685,7 +4685,7 @@ components:
 
     Project:
       type: object
-      required: [id, name, display_name, organization, repository, evaluation_wildcard, active, created_by, created_at]
+      required: [id, name, display_name, organization, repository, wildcard, active, created_by, created_at]
       properties:
         id:
           type: string
@@ -4702,7 +4702,7 @@ components:
         branch:
           type: string
           nullable: true
-        evaluation_wildcard:
+        wildcard:
           type: string
         active:
           type: boolean

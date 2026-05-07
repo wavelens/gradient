@@ -73,7 +73,7 @@ export class ProjectSettingsComponent implements OnInit {
     display_name: string;
     description: string;
     repository: string;
-    evaluation_wildcard: string;
+    wildcard: string;
     keep_evaluations: number;
     concurrency: ConcurrencyPolicy;
     sign_cache: boolean;
@@ -81,7 +81,7 @@ export class ProjectSettingsComponent implements OnInit {
     display_name: '',
     description: '',
     repository: '',
-    evaluation_wildcard: '',
+    wildcard: '',
     keep_evaluations: 30,
     concurrency: 'soft_abort',
     sign_cache: true,
@@ -170,7 +170,7 @@ export class ProjectSettingsComponent implements OnInit {
           display_name: project.display_name,
           description: project.description,
           repository: project.repository,
-          evaluation_wildcard: project.evaluation_wildcard,
+          wildcard: project.wildcard,
           keep_evaluations: project.keep_evaluations,
           concurrency: project.concurrency,
           sign_cache: project.sign_cache,

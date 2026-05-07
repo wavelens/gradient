@@ -119,7 +119,7 @@ fn project_row() -> entity::project::Model {
         display_name: "Test Project".into(),
         description: "".into(),
         repository: "https://github.com/test/repo".into(),
-        evaluation_wildcard: "*".into(),
+        wildcard: "*".into(),
         last_evaluation: None,
         last_check_at: test_date(),
         force_evaluation: false,
@@ -535,7 +535,7 @@ fn create_project_seeds_default_polling_trigger() {
             display_name: "New Project".into(),
             description: "".into(),
             repository: "https://github.com/test/repo".into(),
-            evaluation_wildcard: "*".into(),
+            wildcard: "*".into(),
             last_evaluation: None,
             last_check_at: test_date(),
             force_evaluation: false,
@@ -579,7 +579,7 @@ fn create_project_seeds_default_polling_trigger() {
                 "display_name": "New Project",
                 "description": "",
                 "repository": "https://github.com/test/repo",
-                "evaluation_wildcard": "*"
+                "wildcard": "*"
             }))
             .await;
 
@@ -608,7 +608,7 @@ fn create_project_with_all_concurrency_returns_id() {
             display_name: "New Project".into(),
             description: "".into(),
             repository: "https://github.com/test/repo".into(),
-            evaluation_wildcard: "*".into(),
+            wildcard: "*".into(),
             last_evaluation: None,
             last_check_at: test_date(),
             force_evaluation: false,
@@ -647,7 +647,7 @@ fn create_project_with_all_concurrency_returns_id() {
                 "display_name": "New Project",
                 "description": "",
                 "repository": "https://github.com/test/repo",
-                "evaluation_wildcard": "*",
+                "wildcard": "*",
                 "concurrency": "all"
             }))
             .await;
@@ -677,7 +677,7 @@ fn create_project_with_hard_abort_concurrency_returns_id() {
             display_name: "New Project".into(),
             description: "".into(),
             repository: "https://github.com/test/repo".into(),
-            evaluation_wildcard: "*".into(),
+            wildcard: "*".into(),
             last_evaluation: None,
             last_check_at: test_date(),
             force_evaluation: false,
@@ -716,7 +716,7 @@ fn create_project_with_hard_abort_concurrency_returns_id() {
                 "display_name": "New Project",
                 "description": "",
                 "repository": "https://github.com/test/repo",
-                "evaluation_wildcard": "*",
+                "wildcard": "*",
                 "concurrency": "hard_abort"
             }))
             .await;

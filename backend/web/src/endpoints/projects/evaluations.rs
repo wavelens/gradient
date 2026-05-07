@@ -303,7 +303,7 @@ pub async fn get_project_details(
         display_name: project.display_name,
         description: project.description,
         repository: project.repository,
-        evaluation_wildcard: project.evaluation_wildcard,
+        wildcard: project.wildcard,
         active: project.active,
         created_at: project.created_at,
         keep_evaluations: project.keep_evaluations,

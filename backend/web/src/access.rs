@@ -381,7 +381,7 @@ mod tests {
             display_name: "Test".into(),
             description: String::new(),
             repository: "git@example.com:test/test.git".into(),
-            evaluation_wildcard: "*".into(),
+            wildcard: "*".into(),
             active: true,
             last_evaluation: None,
             last_check_at: fixture_date(),

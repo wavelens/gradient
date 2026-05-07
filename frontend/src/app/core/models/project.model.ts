@@ -15,7 +15,7 @@ export interface Project {
   display_name: string;
   description: string;
   repository: string;
-  evaluation_wildcard: string;
+  wildcard: string;
   last_evaluation?: string;
   last_evaluation_status?: EvaluationStatus;
   last_check_at?: string;
@@ -62,7 +62,7 @@ export interface ProjectDetail {
   display_name: string;
   description: string;
   repository: string;
-  evaluation_wildcard: string;
+  wildcard: string;
   active: boolean;
   created_at: string;
   keep_evaluations: number;

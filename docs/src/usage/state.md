@@ -112,7 +112,7 @@ services.gradient.state.projects = {
     display_name         = "Web App";
     description          = "Production web application";
     repository           = "git@github.com:acme/web-app.git";
-    evaluation_wildcard  = "packages.x86_64-linux.*";
+    wildcard             = "packages.x86_64-linux.*";
     active               = true;
     concurrency          = "hard_abort"; # optional, default "soft_abort"
     outbound_integration = "acme-status-reports"; # optional
@@ -130,7 +130,7 @@ services.gradient.state.projects = {
 | `display_name` | `<name>` | Display name |
 | `description` | `null` | Optional description |
 | `repository` | — | Git URL (required) |
-| `evaluation_wildcard` | `packages.x86_64-linux.*` | Attr-path pattern picked up by the evaluator |
+| `wildcard` | `packages.x86_64-linux.*` | Attr-path pattern picked up by the evaluator. The legacy name `evaluation_wildcard` is still accepted as an alias |
 | `active` | `true` | Disable to pause polling/evaluations without deleting |
 | `force_evaluation` | `false` | Re-evaluate on next poll regardless of the last commit hash |
 | `concurrency` | `"skip"` | Policy for handling new trigger events while an evaluation is in flight (`hard_abort`, `soft_abort`, `skip`, `all`). Applies to all triggers on the project |

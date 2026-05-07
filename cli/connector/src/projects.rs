@@ -16,7 +16,7 @@ pub struct ProjectResponse {
     pub display_name: String,
     pub description: String,
     pub repository: String,
-    pub evaluation_wildcard: String,
+    pub wildcard: String,
     pub last_evaluation: Option<String>,
     pub force_evaluation: bool,
     pub created_by: String,
@@ -29,7 +29,7 @@ struct MakeProjectRequest {
     pub display_name: String,
     pub description: String,
     pub repository: String,
-    pub evaluation_wildcard: String,
+    pub wildcard: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -38,7 +38,7 @@ struct PatchProjectRequest {
     pub display_name: Option<String>,
     pub description: Option<String>,
     pub repository: Option<String>,
-    pub evaluation_wildcard: Option<String>,
+    pub wildcard: Option<String>,
 }
 
 pub async fn get(
@@ -66,14 +66,14 @@ pub async fn put(
     display_name: String,
     description: String,
     repository: String,
-    evaluation_wildcard: String,
+    wildcard: String,
 ) -> Result<BaseResponse<String>, String> {
     let req = MakeProjectRequest {
         name,
         display_name,
         description,
         repository,
-        evaluation_wildcard,
+        wildcard,
     };
 
     let res = get_client(
@@ -119,14 +119,14 @@ pub async fn patch_project(
     display_name: Option<String>,
     description: Option<String>,
     repository: Option<String>,
-    evaluation_wildcard: Option<String>,
+    wildcard: Option<String>,
 ) -> Result<BaseResponse<String>, String> {
     let req = PatchProjectRequest {
         name,
         display_name,
         description,
         repository,
-        evaluation_wildcard,
+        wildcard,
     };
 
     let res = get_client(
