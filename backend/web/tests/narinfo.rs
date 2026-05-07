@@ -214,3 +214,122 @@ async fn narinfo_served_from_db_inner() {
         "narinfo body missing Deriver field from cached_path row:\n{body}"
     );
 }
+
+/// Regression: when the `cached_path_signature` row's `signature` column is
+/// `NULL` (the state the sign sweep leaves rows in for `sign_cache=false`
+/// projects), the narinfo handler must return 404 — never serve an unsigned
+/// narinfo. The whole `sign_cache=false` privacy guarantee depends on this.
+#[test]
+fn narinfo_returns_404_when_signature_null() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async { narinfo_unsigned_inner().await });
+}
+
+async fn narinfo_unsigned_inner() {
+    let cache_row = entity::cache::Model {
+        id: cache_id(),
+        name: "test-cache".into(),
+        display_name: "Test Cache".into(),
+        description: String::new(),
+        active: true,
+        priority: 30,
+        public_key: "test-pub-key".into(),
+        private_key: "test-priv-key".into(),
+        public: true,
+        created_by: UserId::new(org_id().into_inner()),
+        created_at: test_date(),
+        managed: false,
+    };
+
+    let drv_output_row = entity::derivation_output::Model {
+        id: drv_output_id(),
+        derivation: deriv_id(),
+        name: "out".into(),
+        output: format!("/nix/store/{}-hello", FIXTURE_HASH),
+        hash: FIXTURE_HASH.into(),
+        package: "hello".into(),
+        ca: None,
+        nar_size: Some(67890),
+        is_cached: true,
+        cached_path: Some(cached_path_id()),
+        created_at: test_date(),
+    };
+
+    let deriv_row = entity::derivation::Model {
+        id: deriv_id(),
+        organization: org_id(),
+        derivation_path: format!("/nix/store/{}-hello.drv", FIXTURE_HASH),
+        architecture: "x86_64-linux".into(),
+        created_at: test_date(),
+    };
+
+    let org_cache_row = entity::organization_cache::Model {
+        id: org_cache_id(),
+        organization: org_id(),
+        cache: cache_id(),
+        mode: entity::organization_cache::CacheSubscriptionMode::ReadWrite,
+    };
+
+    let cached_path_row = entity::cached_path::Model {
+        id: cached_path_id(),
+        store_path: format!("/nix/store/{}-hello", FIXTURE_HASH),
+        hash: FIXTURE_HASH.into(),
+        package: "hello".into(),
+        file_hash: Some(
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000".into(),
+        ),
+        file_size: Some(12345),
+        nar_size: Some(67890),
+        nar_hash: Some("sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73".into()),
+        references: Some(String::new()),
+        ca: None,
+        deriver: Some(format!("/nix/store/{}-hello.drv", FIXTURE_HASH)),
+        created_at: test_date(),
+    };
+
+    let unsigned_sig_row = entity::cached_path_signature::Model {
+        id: cached_path_sig_id(),
+        cached_path: cached_path_id(),
+        cache: cache_id(),
+        signature: None,
+        created_at: test_date(),
+    };
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![cache_row]])
+        .append_query_results([vec![drv_output_row]])
+        .append_query_results([vec![deriv_row]])
+        .append_query_results([vec![org_cache_row]])
+        .append_query_results([vec![cached_path_row]])
+        .append_query_results([vec![unsigned_sig_row]])
+        .into_connection();
+
+    let cli = test_cli();
+    let nar_storage = NarStore::local(&cli.storage.base_path).expect("create test NarStore");
+    let state = Arc::new(ServerState {
+        web_db: WebDb::new(db),
+        worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
+        config: std::sync::Arc::new(gradient_core::types::RuntimeConfig::from_cli(&cli)),
+        log_storage: Arc::new(NoopLogStorage),
+        webhooks: Arc::new(RecordingWebhookClient::new()) as Arc<dyn WebhookClient>,
+        email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
+        nar_storage,
+        manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+        pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+        http: gradient_core::http::build_client().expect("http client"),
+        shutdown: gradient_core::shutdown::Shutdown::new(),
+        jwt_secret: gradient_core::types::SecretString::new("test-jwt-secret".to_string()),
+    });
+
+    let router = create_router(state);
+    let server = TestServer::new(router);
+
+    let response = server
+        .get(&format!("/cache/test-cache/{}.narinfo", FIXTURE_HASH))
+        .await;
+
+    response.assert_status_not_found();
+}
