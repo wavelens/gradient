@@ -419,7 +419,6 @@ pub async fn load_and_apply_state(
         return Ok(());
     };
 
-    println!("Loading state configuration from: {}", path);
     tracing::info!("Loading state configuration from: {}", path);
 
     let config = StateConfiguration::from_file(path)?;
@@ -439,7 +438,6 @@ pub async fn load_and_apply_state(
         .into());
     }
 
-    println!("State configuration validated successfully");
     tracing::info!("State configuration validated successfully");
 
     provisioning::apply_state_to_database(db, &config, crypt_secret_file, delete_state).await?;
