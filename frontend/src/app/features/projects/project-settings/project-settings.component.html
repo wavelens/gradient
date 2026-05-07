@@ -103,6 +103,17 @@
           <small class="text-secondary">Determines how this project handles a new trigger event when an evaluation is already running.</small>
         </div>
 
+        <div class="form-group checkbox-group">
+          <p-checkbox
+            inputId="proj-sign-cache"
+            [(ngModel)]="formData.sign_cache"
+            [binary]="true"
+            [disabled]="proj.managed || !proj.can_edit"
+          />
+          <label for="proj-sign-cache">Sign cache (allow public access to build outputs)</label>
+          <small class="text-secondary">When off, build outputs are still cached for Gradient itself but narinfos remain unsigned, keeping the project's paths private to external Nix clients even when the cache is public.</small>
+        </div>
+
         @if (!proj.managed && proj.can_edit) {
           <div class="form-actions">
             <button pButton label="Save Changes" icon="pi pi-check" (click)="saveSettings()" [loading]="saving()" [disabled]="saving()"></button>

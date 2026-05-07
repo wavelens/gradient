@@ -19,6 +19,7 @@ import { OrganizationsService } from '@core/services/organizations.service';
 import { IntegrationsService } from '@core/services/integrations.service';
 import { AutoCompleteModule } from 'primeng/autocomplete';
 import { SelectModule } from 'primeng/select';
+import { CheckboxModule } from 'primeng/checkbox';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { ConcurrencyPolicy, Integration, Project, ProjectIntegrationLink } from '@core/models';
 
@@ -35,6 +36,7 @@ import { ConcurrencyPolicy, Integration, Project, ProjectIntegrationLink } from 
     TextareaModule,
     AutoCompleteModule,
     SelectModule,
+    CheckboxModule,
     LoadingSpinnerComponent,
   ],
   templateUrl: './project-settings.component.html',
@@ -74,6 +76,7 @@ export class ProjectSettingsComponent implements OnInit {
     evaluation_wildcard: string;
     keep_evaluations: number;
     concurrency: ConcurrencyPolicy;
+    sign_cache: boolean;
   } = {
     display_name: '',
     description: '',
@@ -81,6 +84,7 @@ export class ProjectSettingsComponent implements OnInit {
     evaluation_wildcard: '',
     keep_evaluations: 30,
     concurrency: 'soft_abort',
+    sign_cache: true,
   };
 
   concurrencyOptions: { label: string; value: ConcurrencyPolicy; disabled?: boolean }[] = [
@@ -169,6 +173,7 @@ export class ProjectSettingsComponent implements OnInit {
           evaluation_wildcard: project.evaluation_wildcard,
           keep_evaluations: project.keep_evaluations,
           concurrency: project.concurrency,
+          sign_cache: project.sign_cache,
         };
         this.loading.set(false);
       },
