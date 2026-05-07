@@ -50,7 +50,6 @@ pub(super) async fn apply_state_to_database(
     app.apply_workers(&config.workers).await?;
     app.unmark_removed_entities(config, delete_state).await?;
 
-    println!("State applied successfully");
     tracing::info!("State applied successfully");
     Ok(())
 }

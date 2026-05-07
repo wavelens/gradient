@@ -34,18 +34,19 @@ use storage::{FileLogStorage, S3LogStorage};
 use types::*;
 
 pub async fn init_state(cli: Cli) -> Arc<ServerState> {
-    println!(
-        "Starting Gradient Server on {}:{}",
-        cli.server.ip, cli.server.port
+    tracing::info!(
+        ip = %cli.server.ip,
+        port = cli.server.port,
+        state_file = ?cli.storage.state_file,
+        "Starting Gradient server bootstrap",
     );
-    println!("State file configured: {:?}", cli.storage.state_file);
 
     let config = Arc::new(RuntimeConfig::from_cli(&cli));
 
     let db = match connect_db(&cli).await {
         Ok(db) => db,
         Err(e) => {
-            eprintln!("Failed to connect to database: {}", e);
+            tracing::error!(error = %e, "Failed to connect to database");
             std::process::exit(1);
         }
     };
@@ -53,12 +54,11 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
     let web_db = match connect_web_db(&cli).await {
         Ok(db) => db,
         Err(e) => {
-            eprintln!("Failed to connect web database pool: {}", e);
+            tracing::error!(error = %e, "Failed to connect web database pool");
             std::process::exit(1);
         }
     };
 
-    // Load and apply state configuration if provided
     if let Err(e) = load_and_apply_state(
         &db,
         cli.storage.state_file.as_deref(),
@@ -67,11 +67,10 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
     )
     .await
     {
-        eprintln!("Failed to load state configuration: {}", e);
+        tracing::error!(error = %e, "Failed to load state configuration");
         std::process::exit(1);
     }
 
-    // Cap keep_evaluations on all projects that exceed the configured maximum.
     if cli.storage.keep_evaluations > 0 {
         let max = cli.storage.keep_evaluations as i32;
         let over_limit = EProject::find()
@@ -86,21 +85,23 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
                     let mut active = project.into_active_model();
                     active.keep_evaluations = Set(max);
                     if let Err(e) = active.update(&db).await {
-                        eprintln!("Failed to cap keep_evaluations for project: {}", e);
+                        tracing::error!(error = %e, "Failed to cap keep_evaluations for project");
                     }
                 }
                 if count > 0 {
-                    println!("Capped keep_evaluations to {} on {} project(s)", max, count);
+                    tracing::info!(max, count, "Capped keep_evaluations on projects");
                 }
             }
-            Err(e) => eprintln!("Failed to query projects for keep_evaluations cap: {}", e),
+            Err(e) => {
+                tracing::error!(error = %e, "Failed to query projects for keep_evaluations cap");
+            }
         }
     }
 
     let local_log_storage = match FileLogStorage::new(Path::new(&cli.storage.base_path)).await {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("Failed to initialize log storage: {}", e);
+            tracing::error!(error = %e, "Failed to initialize log storage");
             std::process::exit(1);
         }
     };
@@ -108,7 +109,7 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
     let http = match http::build_client() {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("Failed to build shared HTTP client: {}", e);
+            tracing::error!(error = %e, "Failed to build shared HTTP client");
             std::process::exit(1);
         }
     };
@@ -119,7 +120,7 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
     let jwt_secret = match types::input::load_secret(&cli.secrets.jwt_secret_file) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("{}", e);
+            tracing::error!(error = %e, "Failed to load JWT secret");
             std::process::exit(1);
         }
     };
@@ -127,7 +128,7 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
     let email_service = match EmailService::new(cli.email_config()).await {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("Failed to initialize email service: {}", e);
+            tracing::error!(error = %e, "Failed to initialize email service");
             std::process::exit(1);
         }
     };
@@ -138,7 +139,11 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
             Some(path) => match std::fs::read_to_string(path) {
                 Ok(s) => Some(s.trim().to_string()),
                 Err(e) => {
-                    eprintln!("Failed to read S3 secret access key file '{}': {}", path, e);
+                    tracing::error!(
+                        path,
+                        error = %e,
+                        "Failed to read S3 secret access key file",
+                    );
                     std::process::exit(1);
                 }
             },
@@ -155,40 +160,40 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
         ) {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("Failed to initialize S3 NAR storage: {}", e);
+                tracing::error!(error = %e, "Failed to initialize S3 NAR storage");
                 std::process::exit(1);
             }
         };
         if let Err(e) = store.ping().await {
-            eprintln!(
-                "S3 NAR storage unreachable (bucket '{}'): {:#}",
-                s3.bucket, e
+            tracing::error!(
+                bucket = %s3.bucket,
+                error = format!("{e:#}"),
+                "S3 NAR storage unreachable",
             );
             std::process::exit(1);
         }
-        println!("NAR storage: S3 bucket '{}'", s3.bucket);
-        tracing::debug!(
+        tracing::info!(
             bucket = %s3.bucket,
             access_key_id = ?s3.access_key_id.as_deref(),
             secret_loaded = secret.is_some(),
-            "S3 NAR storage initialized",
+            "NAR storage: S3",
         );
         store
     } else {
         match NarStore::local(&cli.storage.base_path) {
             Ok(store) => {
-                println!("NAR storage: local ({})", cli.storage.base_path);
+                tracing::info!(path = %cli.storage.base_path, "NAR storage: local");
                 store
             }
             Err(e) => {
-                eprintln!("Failed to initialize local NAR storage: {}", e);
+                tracing::error!(error = %e, "Failed to initialize local NAR storage");
                 std::process::exit(1);
             }
         }
     };
 
     let log_storage: Arc<dyn storage::LogStorage> = if cli.s3_config().is_some() {
-        println!("Log storage: S3 (with local cache)");
+        tracing::info!("Log storage: S3 (with local cache)");
         Arc::new(S3LogStorage::new(
             local_log_storage,
             nar_storage.inner(),
