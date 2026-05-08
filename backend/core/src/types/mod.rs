@@ -28,7 +28,9 @@ pub use self::cli::{
     DatabaseArgs, EmailArgs, EvalArgs, GitHubAppArgs, LimitsArgs, LoggingArgs, MetricsArgs,
     OidcArgs, ProtoArgs, RegistrationArgs, S3Args, SecretsArgs, ServerArgs, StorageArgs,
 };
-pub use self::config::{EmailConfig, GitHubAppConfig, OidcConfig, RuntimeConfig, S3Config};
+pub use self::config::{
+    EmailConfig, GitHubAppConfig, MetricsConfig, OidcConfig, RuntimeConfig, S3Config,
+};
 pub use self::consts::*;
 pub use self::db::{WebDb, WorkerDb};
 pub use self::entity_aliases::*;

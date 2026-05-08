@@ -63,6 +63,15 @@ pub struct GitHubAppConfig {
     pub webhook_secret_file: String,
 }
 
+/// Metrics endpoint configuration — only present when `metrics_token_file`
+/// is set and the file contains a non-empty token. The token is loaded once
+/// at startup; rotation requires a server restart.
+#[derive(Debug, Clone)]
+pub struct MetricsConfig {
+    /// Bearer token, loaded from `metrics_token_file` at startup.
+    pub token: String,
+}
+
 /// S3 / object-storage configuration — only present when `s3_bucket` is set.
 #[derive(Debug, Clone)]
 pub struct S3Config {
@@ -128,6 +137,18 @@ impl Cli {
             prefix: self.s3.s3_prefix.clone(),
         })
     }
+
+    /// Returns the typed metrics config when a token file path is configured
+    /// and the file contains a non-empty token after trimming.
+    pub fn metrics_config(&self) -> Option<MetricsConfig> {
+        let path = self.metrics.metrics_token_file.as_ref()?;
+        let raw = std::fs::read_to_string(path).ok()?;
+        let token = raw.trim().to_string();
+        if token.is_empty() {
+            return None;
+        }
+        Some(MetricsConfig { token })
+    }
 }
 
 /// Resolved runtime configuration carried by `ServerState`.
@@ -154,6 +175,7 @@ pub struct RuntimeConfig {
     pub email: Option<EmailConfig>,
     pub s3: Option<S3Config>,
     pub github_app: Option<GitHubAppConfig>,
+    pub metrics: Option<MetricsConfig>,
 }
 
 impl RuntimeConfig {
@@ -174,6 +196,7 @@ impl RuntimeConfig {
             email: cli.email_config(),
             s3: cli.s3_config(),
             github_app: cli.github_app_config(),
+            metrics: cli.metrics_config(),
         }
     }
 }
@@ -364,5 +387,50 @@ mod tests {
         assert!(email.require_verification);
         assert!(runtime.s3.is_some());
         assert!(runtime.github_app.is_some());
+    }
+
+    #[test]
+    fn metrics_config_unset_returns_none() {
+        let cli = base_cli();
+        assert!(cli.metrics_config().is_none());
+    }
+
+    #[test]
+    fn metrics_config_empty_file_returns_none() {
+        use std::io::Write;
+        let mut tmp = tempfile::NamedTempFile::new().expect("tempfile");
+        write!(tmp, "   \n  ").expect("write");
+        let path = tmp.path().to_string_lossy().into_owned();
+
+        let mut cli = base_cli();
+        cli.metrics.metrics_token_file = Some(path);
+        assert!(cli.metrics_config().is_none());
+    }
+
+    #[test]
+    fn metrics_config_loaded_from_file() {
+        use std::io::Write;
+        let mut tmp = tempfile::NamedTempFile::new().expect("tempfile");
+        write!(tmp, "  s3cret-token\n").expect("write");
+        let path = tmp.path().to_string_lossy().into_owned();
+
+        let mut cli = base_cli();
+        cli.metrics.metrics_token_file = Some(path);
+
+        let cfg = cli.metrics_config().expect("Some");
+        assert_eq!(cfg.token, "s3cret-token");
+    }
+
+    #[test]
+    fn runtime_config_metrics_propagates() {
+        use std::io::Write;
+        let mut tmp = tempfile::NamedTempFile::new().expect("tempfile");
+        write!(tmp, "tok").expect("write");
+        let path = tmp.path().to_string_lossy().into_owned();
+
+        let mut cli = base_cli();
+        cli.metrics.metrics_token_file = Some(path);
+        let runtime = RuntimeConfig::from_cli(&cli);
+        assert!(runtime.metrics.is_some());
     }
 }
