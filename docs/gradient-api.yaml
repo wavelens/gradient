@@ -5154,7 +5154,7 @@ components:
         | `EvaluatingFlake` | Running `nix eval` on the flake |
         | `EvaluatingDerivation` | Resolving derivation paths |
         | `Building` | Builds are in progress |
-        | `Waiting` | Waiting for build servers to become available |
+        | `Waiting` | Stalled because no connected worker can pick up the evaluation — either no worker is connected at all (pre-build phase) or none of the connected workers can satisfy the pending builds' `(architecture, required_features)` |
         | `Completed` | All builds finished successfully |
         | `Failed` | At least one build failed |
         | `Aborted` | Cancelled by user |
@@ -5216,12 +5216,14 @@ components:
     WaitingReason:
       type: object
       description: |
-        Populated only when `status == "Waiting"`. Explains which
-        `(architecture, required_features)` combinations no connected worker
-        can satisfy, alongside the architectures the connected pool *does*
-        offer. Refreshed whenever the scheduler reconciles the evaluation
-        against the live worker pool (worker connect/disconnect, capability
-        update, dispatch tick).
+        Populated only when `status == "Waiting"`. In the build phase, lists
+        the `(architecture, required_features)` combinations no connected
+        worker can satisfy, alongside the architectures the connected pool
+        *does* offer. In the pre-build phase, an empty `unmet` list with
+        `connected_workers == 0` indicates the evaluation is stalled simply
+        because no worker is connected at all. Refreshed whenever the
+        scheduler reconciles the evaluation against the live worker pool
+        (worker connect/disconnect, capability update, dispatch tick).
       required: [unmet, connected_workers, available_architectures]
       properties:
         unmet:

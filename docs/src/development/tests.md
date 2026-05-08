@@ -1065,6 +1065,9 @@ Tests use `RecordingJobReporter` — no real git server or WebSocket needed.
 | `eval_sm_building_waiting_cycle` | Building↔Waiting back-and-forth is valid |
 | `eval_sm_any_nonterminal_to_failed` | All non-terminal states → Failed valid |
 | `eval_sm_any_nonterminal_to_aborted` | All non-terminal states → Aborted valid |
+| `eval_sm_pre_build_states_can_enter_waiting` | Queued/Fetching/EvaluatingFlake/EvaluatingDerivation → Waiting all valid (pre-build stall when no worker is connected, issue #97) |
+| `eval_sm_waiting_recovers_to_queued` | Waiting → Queued valid (pre-build recovery once a worker becomes available) |
+| `eval_sm_waiting_cannot_skip_into_pre_build_phases` | Waiting → Fetching/EvaluatingFlake/EvaluatingDerivation rejected; recovery routes through Queued only |
 | `eval_sm_terminal_rejects_all` | Completed/Failed/Aborted cannot transition away |
 | `eval_sm_skip_fetching_ok` | Queued → EvaluatingFlake (skip Fetching) is valid |
 | `eval_sm_same_state_ok` | from == to → Ok |
