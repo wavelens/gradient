@@ -25,6 +25,7 @@ pub mod fakes;
 pub mod fixtures;
 pub mod log_storage;
 pub mod state;
+pub mod web;
 
 pub mod prelude {
     pub use crate::cli::test_cli;

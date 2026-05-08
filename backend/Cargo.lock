@@ -5519,18 +5519,22 @@ version = "1.1.1"
 dependencies = [
  "anyhow",
  "async-trait",
+ "axum-test",
  "chrono",
  "core",
  "entity",
  "futures",
  "harmonia-store-core",
+ "jsonwebtoken",
  "password-auth",
  "proto",
  "rkyv",
  "sea-orm",
+ "serde",
  "tokio",
  "tokio-tungstenite",
  "uuid",
+ "web",
 ]
 
 [[package]]
