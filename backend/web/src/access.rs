@@ -21,14 +21,14 @@
 
 use crate::error::{WebError, WebResult};
 use crate::helpers::OptionExt;
-use crate::permissions::{Permission, role_grants};
+use crate::permissions::{Permission, PermissionMask, mask_grants};
 use gradient_core::db::{
     get_any_cache_by_name, get_any_organization_by_name, get_any_project_by_name,
 };
 use gradient_core::types::ids::{IntegrationId, OrganizationId, UserId, WebhookId};
 use gradient_core::types::{
-    CIntegration, COrganizationUser, CWebhook, EIntegration, EOrganizationUser, EWebhook, MCache,
-    MIntegration, MOrganization, MOrganizationUser, MProject, MUser, MWebhook, ServerState,
+    CIntegration, COrganizationUser, CWebhook, EIntegration, EOrganizationUser, ERole, EWebhook,
+    MCache, MIntegration, MOrganization, MOrganizationUser, MProject, MUser, MWebhook, ServerState,
 };
 use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter};
 use std::sync::Arc;
@@ -282,8 +282,8 @@ pub async fn has_permission(
     permission: Permission,
 ) -> WebResult<bool> {
     Ok(
-        match load_org_membership(state, user_id, organization_id).await? {
-            Some(m) => role_grants(m.role, permission),
+        match load_membership_with_permissions(state, user_id, organization_id).await? {
+            Some((_, mask)) => mask_grants(mask, permission),
             None => false,
         },
     )
@@ -304,6 +304,31 @@ pub async fn load_org_membership(
         .await?)
 }
 
+/// Load the membership row together with the role's permission bitmask.
+///
+/// Two queries are issued (membership lookup, then role lookup by id) rather
+/// than a JOIN; this keeps the mock-DB test fixtures readable and the second
+/// roundtrip is gated on the first returning a row, so the cost is paid only
+/// for authenticated members.
+pub async fn load_membership_with_permissions(
+    state: &Arc<ServerState>,
+    user_id: UserId,
+    organization_id: OrganizationId,
+) -> WebResult<Option<(MOrganizationUser, PermissionMask)>> {
+    let Some(membership) = load_org_membership(state, user_id, organization_id).await? else {
+        return Ok(None);
+    };
+    // The `organization_user.role -> role.id` FK is NOT NULL, so a missing
+    // role here means the seed step never ran or the row was hand-deleted —
+    // treat it as "no permissions" rather than panicking.
+    let mask = ERole::find_by_id(membership.role)
+        .one(&state.web_db)
+        .await?
+        .map(|r| r.permission)
+        .unwrap_or(0);
+    Ok(Some((membership, mask)))
+}
+
 // ── Internal helpers ─────────────────────────────────────────────────────────
 
 async fn require_org_permission(
@@ -313,11 +338,11 @@ async fn require_org_permission(
     permission: Permission,
     not_found_label: &str,
 ) -> WebResult<()> {
-    let membership = load_org_membership(state, user_id, org_id)
+    let (_, mask) = load_membership_with_permissions(state, user_id, org_id)
         .await?
         .ok_or_else(|| WebError::not_found(not_found_label))?;
 
-    if !role_grants(membership.role, permission) {
+    if !mask_grants(mask, permission) {
         return Err(WebError::forbidden(
             "You do not have permission to perform this action.",
         ));
@@ -404,6 +429,27 @@ mod tests {
         }
     }
 
+    fn role_fixture(id: RoleId, permission: PermissionMask) -> entity::role::Model {
+        entity::role::Model {
+            id,
+            name: "fixture".into(),
+            organization: None,
+            permission,
+        }
+    }
+
+    fn admin_role_row() -> entity::role::Model {
+        role_fixture(BASE_ROLE_ADMIN_ID, crate::permissions::admin_mask())
+    }
+
+    fn write_role_row() -> entity::role::Model {
+        role_fixture(BASE_ROLE_WRITE_ID, crate::permissions::write_mask())
+    }
+
+    fn view_role_row() -> entity::role::Model {
+        role_fixture(BASE_ROLE_VIEW_ID, crate::permissions::view_mask())
+    }
+
     fn user_fixture() -> MUser {
         entity::user::Model {
             id: UserId::new(uuid!("a0000000-0000-0000-0000-000000000004")),
@@ -468,6 +514,7 @@ mod tests {
             let db = MockDatabase::new(DatabaseBackend::Postgres)
                 .append_query_results([vec![org_fixture(false, false)]])
                 .append_query_results([vec![membership_fixture(BASE_ROLE_ADMIN_ID)]])
+                .append_query_results([vec![admin_role_row()]])
                 .into_connection();
             let state = make_state(db);
             let r = load_org(
@@ -488,6 +535,7 @@ mod tests {
             let db = MockDatabase::new(DatabaseBackend::Postgres)
                 .append_query_results([vec![org_fixture(false, false)]])
                 .append_query_results([vec![membership_fixture(BASE_ROLE_VIEW_ID)]])
+                .append_query_results([vec![view_role_row()]])
                 .into_connection();
             let state = make_state(db);
             let err = load_org(
@@ -509,6 +557,7 @@ mod tests {
             let db = MockDatabase::new(DatabaseBackend::Postgres)
                 .append_query_results([vec![org_fixture(false, true)]])
                 .append_query_results([vec![membership_fixture(BASE_ROLE_ADMIN_ID)]])
+                .append_query_results([vec![admin_role_row()]])
                 .into_connection();
             let state = make_state(db);
             let err = load_org(
@@ -555,6 +604,7 @@ mod tests {
             let db = MockDatabase::new(DatabaseBackend::Postgres)
                 .append_query_results([vec![org_fixture(false, false)]])
                 .append_query_results([vec![membership_fixture(BASE_ROLE_WRITE_ID)]])
+                .append_query_results([vec![write_role_row()]])
                 .into_connection();
             let state = make_state(db);
             let r = load_org(&state, Caller::User(&user), "test-org".into(), access).await;
@@ -573,6 +623,7 @@ mod tests {
             let db = MockDatabase::new(DatabaseBackend::Postgres)
                 .append_query_results([vec![org_fixture(false, false)]])
                 .append_query_results([vec![membership_fixture(BASE_ROLE_VIEW_ID)]])
+                .append_query_results([vec![view_role_row()]])
                 .into_connection();
             let state = make_state(db);
             let err = load_org(&state, Caller::User(&user), "test-org".into(), access)
@@ -652,6 +703,7 @@ mod tests {
                 .append_query_results([vec![org_fixture(false, false)]])
                 .append_query_results([vec![project_fixture(false)]])
                 .append_query_results([vec![membership_fixture(BASE_ROLE_ADMIN_ID)]])
+                .append_query_results([vec![admin_role_row()]])
                 .into_connection();
             let state = make_state(db);
             let r = load_project(
@@ -678,6 +730,7 @@ mod tests {
                 .append_query_results([vec![org_fixture(false, false)]])
                 .append_query_results([vec![project_fixture(false)]])
                 .append_query_results([vec![membership_fixture(BASE_ROLE_VIEW_ID)]])
+                .append_query_results([vec![view_role_row()]])
                 .into_connection();
             let state = make_state(db);
             let err = load_project(
@@ -705,6 +758,7 @@ mod tests {
                 .append_query_results([vec![org_fixture(false, false)]])
                 .append_query_results([vec![project_fixture(true)]])
                 .append_query_results([vec![membership_fixture(BASE_ROLE_ADMIN_ID)]])
+                .append_query_results([vec![admin_role_row()]])
                 .into_connection();
             let state = make_state(db);
             let err = load_project(

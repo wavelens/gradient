@@ -65,6 +65,15 @@ fn admin_membership() -> organization_user::Model {
     }
 }
 
+fn admin_role_row() -> entity::role::Model {
+    entity::role::Model {
+        id: gradient_core::types::consts::BASE_ROLE_ADMIN_ID,
+        name: "Admin".into(),
+        organization: None,
+        permission: gradient_core::permissions::admin_mask(),
+    }
+}
+
 fn polling_trigger_row() -> project_trigger::Model {
     project_trigger::Model {
         id: trigger_id(),
@@ -103,10 +112,12 @@ fn with_project_member(db: MockDatabase) -> MockDatabase {
 /// 1. SELECT org
 /// 2. SELECT project
 /// 3. SELECT org_user (permission check)
+/// 4. SELECT role (bitmask lookup behind `mask_grants`)
 fn with_project_edit(db: MockDatabase) -> MockDatabase {
     db.append_query_results([vec![org()]])
         .append_query_results([vec![project_row()]])
         .append_query_results([vec![admin_membership()]])
+        .append_query_results([vec![admin_role_row()]])
 }
 
 const BASE_URL: &str = "/api/v1/projects/test-org/test-project/triggers";
@@ -487,6 +498,8 @@ fn create_project_seeds_default_polling_trigger() {
             .append_query_results([vec![org()]])
             // load_org: SELECT org_user (require CreateProject permission)
             .append_query_results([vec![admin_membership()]])
+            // load_org: SELECT role (bitmask lookup)
+            .append_query_results([vec![admin_role_row()]])
             // check existing project: returns empty
             .append_query_results([Vec::<project::Model>::new()])
             // INSERT project RETURNING
@@ -558,6 +571,7 @@ fn create_project_with_all_concurrency_returns_id() {
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
             .append_query_results([vec![org()]])
             .append_query_results([vec![admin_membership()]])
+            .append_query_results([vec![admin_role_row()]])
             .append_query_results([Vec::<project::Model>::new()])
             .append_query_results([vec![created_project]])
             .append_query_results([vec![seeded_trigger]]);
@@ -627,6 +641,7 @@ fn create_project_with_hard_abort_concurrency_returns_id() {
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
             .append_query_results([vec![org()]])
             .append_query_results([vec![admin_membership()]])
+            .append_query_results([vec![admin_role_row()]])
             .append_query_results([Vec::<project::Model>::new()])
             .append_query_results([vec![created_project]])
             .append_query_results([vec![seeded_trigger]]);

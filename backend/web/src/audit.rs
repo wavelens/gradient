@@ -33,6 +33,9 @@ pub mod events {
     pub const ORG_MEMBER_ADD: &str = "organization.member.add";
     pub const ORG_MEMBER_REMOVE: &str = "organization.member.remove";
     pub const ORG_MEMBER_ROLE_CHANGE: &str = "organization.member.role_change";
+    pub const ORG_ROLE_CREATE: &str = "organization.role.create";
+    pub const ORG_ROLE_UPDATE: &str = "organization.role.update";
+    pub const ORG_ROLE_DELETE: &str = "organization.role.delete";
     pub const PROJECT_DELETE: &str = "project.delete";
     pub const CACHE_DELETE: &str = "cache.delete";
 }
