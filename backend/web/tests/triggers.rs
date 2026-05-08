@@ -20,89 +20,13 @@
 //!   5. SELECT project (by org + name)
 //!   6. SELECT org_user membership (permission check)
 
-use axum_test::TestServer;
-use chrono::{Duration, Utc};
-use entity::{ids::*, organization_user, project, project_trigger, session};
-use gradient_core::storage::{EmailSender, NarStore};
-use gradient_core::types::{RuntimeConfig, SecretString, ServerState, SessionId, WebDb, WorkerDb};
-use jsonwebtoken::{EncodingKey, Header, encode};
+use entity::{ids::*, organization_user, project, project_trigger};
+use gradient_core::types::SessionId;
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
-use serde::Serialize;
 use serde_json::Value;
-use std::sync::Arc;
-use test_support::cli::test_cli;
-use test_support::fakes::email::InMemoryEmailSender;
-use test_support::fakes::webhooks::RecordingWebhookClient;
 use test_support::fixtures::{org, org_id, project_id, test_date, user, user_id};
-use test_support::log_storage::NoopLogStorage;
+use test_support::web::{live_session, make_test_server, make_token};
 use uuid::Uuid;
-use web::create_router;
-
-const JWT_SECRET: &str = "test-jwt-secret";
-
-// ── Auth helpers ──────────────────────────────────────────────────────────────
-
-#[derive(Serialize)]
-struct Claims {
-    exp: usize,
-    iat: usize,
-    id: UserId,
-    jti: SessionId,
-}
-
-fn make_token(session_id: SessionId) -> String {
-    let now = Utc::now();
-    let claims = Claims {
-        iat: now.timestamp() as usize,
-        exp: (now + Duration::hours(1)).timestamp() as usize,
-        id: user_id(),
-        jti: session_id,
-    };
-    encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret(JWT_SECRET.as_bytes()),
-    )
-    .expect("sign jwt")
-}
-
-fn live_session(id: SessionId) -> session::Model {
-    let now = Utc::now().naive_utc();
-    session::Model {
-        id,
-        user_id: user_id(),
-        created_at: now,
-        expires_at: now + chrono::Duration::hours(1),
-        last_used_at: now,
-        revoked_at: None,
-        user_agent: None,
-        ip: None,
-        remember_me: false,
-    }
-}
-
-// ── Server factory ─────────────────────────────────────────────────────────────
-
-fn make_server(db: sea_orm::DatabaseConnection) -> TestServer {
-    let cli = test_cli();
-    let config = Arc::new(RuntimeConfig::from_cli(&cli));
-    let nar_storage = NarStore::local(&config.storage.base_path).expect("nar store");
-    let state = Arc::new(ServerState {
-        web_db: WebDb::new(db),
-        worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
-        config,
-        log_storage: Arc::new(NoopLogStorage),
-        webhooks: Arc::new(RecordingWebhookClient::new()) as Arc<dyn gradient_core::ci::WebhookClient>,
-        email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
-        nar_storage,
-        manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-        pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-        http: gradient_core::http::build_client().expect("http client"),
-        shutdown: gradient_core::shutdown::Shutdown::new(),
-        jwt_secret: SecretString::new(JWT_SECRET.to_string()),
-    });
-    TestServer::new(create_router(state))
-}
 
 // ── Fixture helpers ────────────────────────────────────────────────────────────
 
@@ -202,7 +126,7 @@ fn list_triggers_returns_rows() {
         let db = with_project_member(with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id))
             .append_query_results([vec![polling_trigger_row()]]);
 
-        let server = make_server(db.into_connection());
+        let server = make_test_server(db.into_connection());
         let res = server
             .get(BASE_URL)
             .add_header("authorization", format!("Bearer {}", token))
@@ -232,7 +156,7 @@ fn get_trigger_returns_row() {
         let db = with_project_member(with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id))
             .append_query_results([vec![polling_trigger_row()]]);
 
-        let server = make_server(db.into_connection());
+        let server = make_test_server(db.into_connection());
         let res = server
             .get(&format!("{}/{}", BASE_URL, tid))
             .add_header("authorization", format!("Bearer {}", token))
@@ -260,7 +184,7 @@ fn get_trigger_not_found_returns_404() {
         let db = with_project_member(with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id))
             .append_query_results([Vec::<project_trigger::Model>::new()]);
 
-        let server = make_server(db.into_connection());
+        let server = make_test_server(db.into_connection());
         let res = server
             .get(&format!("{}/{}", BASE_URL, tid))
             .add_header("authorization", format!("Bearer {}", token))
@@ -283,7 +207,7 @@ fn create_polling_trigger_valid() {
         let db = with_project_edit(with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id))
             .append_query_results([vec![polling_trigger_row()]]);
 
-        let server = make_server(db.into_connection());
+        let server = make_test_server(db.into_connection());
         let res = server
             .post(BASE_URL)
             .add_header("authorization", format!("Bearer {}", token))
@@ -311,7 +235,7 @@ fn create_polling_trigger_interval_too_small_returns_400() {
 
         let db = with_project_edit(with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id));
 
-        let server = make_server(db.into_connection());
+        let server = make_test_server(db.into_connection());
         let res = server
             .post(BASE_URL)
             .add_header("authorization", format!("Bearer {}", token))
@@ -340,7 +264,7 @@ fn create_invalid_cron_returns_400() {
 
         let db = with_project_edit(with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id));
 
-        let server = make_server(db.into_connection());
+        let server = make_test_server(db.into_connection());
         let res = server
             .post(BASE_URL)
             .add_header("authorization", format!("Bearer {}", token))
@@ -372,7 +296,7 @@ fn patch_trigger_updates_fields() {
             .append_query_results([vec![polling_trigger_row()]])
             .append_query_results([vec![updated]]);
 
-        let server = make_server(db.into_connection());
+        let server = make_test_server(db.into_connection());
         let res = server
             .patch(&format!("{}/{}", BASE_URL, tid))
             .add_header("authorization", format!("Bearer {}", token))
@@ -407,7 +331,7 @@ fn patch_trigger_config_type_change() {
             .append_query_results([vec![polling_trigger_row()]])
             .append_query_results([vec![updated]]);
 
-        let server = make_server(db.into_connection());
+        let server = make_test_server(db.into_connection());
         let res = server
             .patch(&format!("{}/{}", BASE_URL, tid))
             .add_header("authorization", format!("Bearer {}", token))
@@ -438,7 +362,7 @@ fn delete_trigger_removes_row() {
             .append_query_results([vec![polling_trigger_row()]])
             .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }]);
 
-        let server = make_server(db.into_connection());
+        let server = make_test_server(db.into_connection());
         let res = server
             .delete(&format!("{}/{}", BASE_URL, tid))
             .add_header("authorization", format!("Bearer {}", token))
@@ -465,7 +389,7 @@ fn delete_trigger_not_found_returns_404() {
         let db = with_project_edit(with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id))
             .append_query_results([Vec::<project_trigger::Model>::new()]);
 
-        let server = make_server(db.into_connection());
+        let server = make_test_server(db.into_connection());
         let res = server
             .delete(&format!("{}/{}", BASE_URL, tid))
             .add_header("authorization", format!("Bearer {}", token))
@@ -497,7 +421,7 @@ fn fire_now_on_inactive_trigger_returns_400() {
         ))
         .append_query_results([vec![inactive_trigger]]);
 
-        let server = make_server(db.into_connection());
+        let server = make_test_server(db.into_connection());
         let res = server
             .post(&format!("{}/{}/test", BASE_URL, tid))
             .add_header("authorization", format!("Bearer {}", token))
@@ -570,7 +494,7 @@ fn create_project_seeds_default_polling_trigger() {
             // INSERT trigger RETURNING
             .append_query_results([vec![seeded_trigger]]);
 
-        let server = make_server(db.into_connection());
+        let server = make_test_server(db.into_connection());
         let res = server
             .put("/api/v1/projects/test-org")
             .add_header("authorization", format!("Bearer {}", token))
@@ -638,7 +562,7 @@ fn create_project_with_all_concurrency_returns_id() {
             .append_query_results([vec![created_project]])
             .append_query_results([vec![seeded_trigger]]);
 
-        let server = make_server(db.into_connection());
+        let server = make_test_server(db.into_connection());
         let res = server
             .put("/api/v1/projects/test-org")
             .add_header("authorization", format!("Bearer {}", token))
@@ -707,7 +631,7 @@ fn create_project_with_hard_abort_concurrency_returns_id() {
             .append_query_results([vec![created_project]])
             .append_query_results([vec![seeded_trigger]]);
 
-        let server = make_server(db.into_connection());
+        let server = make_test_server(db.into_connection());
         let res = server
             .put("/api/v1/projects/test-org")
             .add_header("authorization", format!("Bearer {}", token))
@@ -743,7 +667,7 @@ fn patch_project_concurrency_to_skip() {
             .append_query_results([vec![project_row()]])
             .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }]);
 
-        let server = make_server(db.into_connection());
+        let server = make_test_server(db.into_connection());
         let res = server
             .patch("/api/v1/projects/test-org/test-project")
             .add_header("authorization", format!("Bearer {}", token))
@@ -770,7 +694,7 @@ fn patch_project_all_concurrency_returns_ok() {
             .append_query_results([vec![project_row()]])
             .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }]);
 
-        let server = make_server(db.into_connection());
+        let server = make_test_server(db.into_connection());
         let res = server
             .patch("/api/v1/projects/test-org/test-project")
             .add_header("authorization", format!("Bearer {}", token))

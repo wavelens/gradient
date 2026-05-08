@@ -18,6 +18,7 @@ workspace = true
 gradient-core       = { workspace = true }
 entity              = { workspace = true }
 proto               = { workspace = true }
+web                 = { workspace = true }
 
 anyhow              = { workspace = true }
 async-trait         = { workspace = true }
@@ -27,6 +28,10 @@ harmonia-store-core = { workspace = true }
 password-auth       = { workspace = true }
 rkyv                = { workspace = true }
 sea-orm             = { workspace = true }
+serde               = { workspace = true }
 tokio               = { workspace = true, features = ["macros", "sync"] }
 tokio-tungstenite   = { workspace = true }
 uuid                = { workspace = true }
+
+axum-test    = { version = "20.0", default-features = false }
+jsonwebtoken = { version = "10.3", default-features = false, features = ["aws_lc_rs"] }
