@@ -15,13 +15,13 @@ use jsonwebtoken::{
     jwk::JwkSet,
 };
 use rand::RngExt as _;
-use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::{
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use subtle::ConstantTimeEq;
 use url::Url;
-
-use super::middleware::update_last_login;
 
 /// State + nonce returned to the caller of [`oidc_login_create`].
 ///
@@ -289,10 +289,17 @@ async fn create_or_update_user(
         .clone()
         .unwrap_or_else(|| claims.sub.clone());
 
+    let tx = state
+        .web_db
+        .inner()
+        .begin()
+        .await
+        .context("Failed to start OIDC user transaction")?;
+
     let existing = EUser::find()
         .filter(CUser::OidcIssuer.eq(&claims.iss))
         .filter(CUser::OidcSubject.eq(&claims.sub))
-        .one(&state.web_db)
+        .one(&tx)
         .await
         .context("Database error while finding OIDC user")?;
 
@@ -300,25 +307,27 @@ async fn create_or_update_user(
         let email_changed = claims.email.as_ref().is_some_and(|e| e != &user.email);
         let name_changed = claims.name.as_ref().is_some_and(|n| n != &user.name);
 
-        let user = if email_changed || name_changed {
-            let mut auser: AUser = user.into();
+        let mut auser: AUser = user.into();
+        auser.last_login_at = Set(gradient_core::types::now());
+        if email_changed {
             if let Some(ref new_email) = claims.email {
                 auser.email = Set(new_email.clone());
             }
+        }
+        if name_changed {
             if let Some(ref new_name) = claims.name {
                 auser.name = Set(new_name.clone());
             }
-            auser
-                .update(&state.web_db)
-                .await
-                .context("Failed to update OIDC user")?
-        } else {
-            user
-        };
-
-        return update_last_login(state, user)
+        }
+        let user = auser
+            .update(&tx)
             .await
-            .context("Failed to update last login");
+            .context("Failed to update OIDC user")?;
+
+        tx.commit()
+            .await
+            .context("Failed to commit OIDC user transaction")?;
+        return Ok(user);
     }
 
     let collision = EUser::find()
@@ -327,7 +336,7 @@ async fn create_or_update_user(
                 .add(CUser::Username.eq(&login_name))
                 .add(CUser::Email.eq(&email)),
         )
-        .one(&state.web_db)
+        .one(&tx)
         .await
         .context("Database error while checking for OIDC username/email collision")?;
 
@@ -338,7 +347,7 @@ async fn create_or_update_user(
         );
     }
 
-    let new_user = AUser {
+    let user = AUser {
         id: Set(UserId::now_v7()),
         username: Set(login_name),
         name: Set(display_name),
@@ -353,12 +362,14 @@ async fn create_or_update_user(
         superuser: Set(false),
         oidc_issuer: Set(Some(claims.iss)),
         oidc_subject: Set(Some(claims.sub)),
-    };
+    }
+    .insert(&tx)
+    .await
+    .context("Failed to create user")?;
 
-    let user = new_user
-        .insert(&state.web_db)
+    tx.commit()
         .await
-        .context("Failed to create user")?;
+        .context("Failed to commit OIDC user transaction")?;
 
     Ok(user)
 }
