@@ -160,6 +160,20 @@ impl From<DbErr> for WebError {
     }
 }
 
+/// Returns true when `err` is a PostgreSQL unique-constraint violation
+/// (SQLSTATE 23505).
+fn is_unique_violation(err: &DbErr) -> bool {
+    use sea_orm::{RuntimeErr, sqlx};
+    let sqlx_err = match err {
+        DbErr::Query(RuntimeErr::SqlxError(e)) | DbErr::Exec(RuntimeErr::SqlxError(e)) => e,
+        _ => return false,
+    };
+    matches!(
+        sqlx_err,
+        sqlx::Error::Database(db_err) if db_err.code().as_deref() == Some("23505")
+    )
+}
+
 impl From<gradient_core::types::input::InputError> for WebError {
     fn from(err: gradient_core::types::input::InputError) -> Self {
         Self::BadRequest(ErrorCode::INPUT_VALIDATION, err.to_string())
@@ -351,6 +365,15 @@ impl WebError {
             format!("Invalid username: {}", reason),
         )
     }
+
+    /// Map a SeaORM error to `already_exists(label)` if it is a Postgres
+    /// unique-constraint violation; otherwise pass through as `Internal`.
+    pub fn from_db_err(err: DbErr, label: &str) -> Self {
+        if is_unique_violation(&err) {
+            return Self::already_exists(label);
+        }
+        Self::from(err)
+    }
 }
 
 /// Returns `Forbidden` when the user is not a superuser. Use at the top of
@@ -363,5 +386,32 @@ pub fn require_superuser(user: &gradient_core::types::MUser) -> Result<(), WebEr
             ErrorCode::SUPERUSER_REQUIRED,
             "superuser required".into(),
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sea_orm::{DbErr, RuntimeErr};
+
+    #[test]
+    fn from_db_err_passes_through_non_db_errors() {
+        let err = DbErr::Custom("boom".into());
+        let mapped = WebError::from_db_err(err, "Anything");
+        assert!(matches!(mapped, WebError::Internal(_)));
+    }
+
+    #[test]
+    fn from_db_err_passes_through_query_string_errors() {
+        let err = DbErr::Query(RuntimeErr::Internal("nope".into()));
+        let mapped = WebError::from_db_err(err, "Cache Name");
+        assert!(matches!(mapped, WebError::Internal(_)));
+    }
+
+    #[test]
+    fn from_db_err_record_not_found_is_internal() {
+        let err = DbErr::RecordNotFound("nothing".into());
+        let mapped = WebError::from_db_err(err, "User");
+        assert!(matches!(mapped, WebError::Internal(_)));
     }
 }
