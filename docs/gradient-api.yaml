@@ -1116,6 +1116,166 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /orgs/{organization}/roles:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationSlug'
+    get:
+      tags: [orgs]
+      summary: List roles available in the organization
+      description: |
+        Returns the three immutable built-in roles (Admin/Write/View) plus any
+        custom roles owned by this organization, along with the catalogue of
+        permissions that custom roles may carry.
+
+        Visible to any member of the organization so the add-member UI can
+        populate its role dropdown.
+      operationId: listOrgRoles
+      responses:
+        '200':
+          description: Role catalogue
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/RoleListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [orgs]
+      summary: Create a custom role
+      description: |
+        Creates a new role scoped to this organization. The caller must hold
+        the **manageRoles** permission. The role's permission set is freely
+        chosen from the capabilities returned by `GET /orgs/{org}/roles` →
+        `available_permissions`. Built-in role names (Admin, Write, View) and
+        any name already used by another role in the same org are rejected
+        with `409`.
+      operationId: createOrgRole
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRoleRequest'
+      responses:
+        '200':
+          description: Role created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/RoleResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /orgs/{organization}/roles/{role_id}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationSlug'
+      - name: role_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Role identifier (UUIDv7).
+    get:
+      tags: [orgs]
+      summary: Fetch a role
+      operationId: getOrgRole
+      responses:
+        '200':
+          description: Role
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/RoleResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [orgs]
+      summary: Update a custom role
+      description: |
+        Renames a custom role and/or replaces its permission set. The three
+        built-in roles (Admin, Write, View) are immutable; attempts to modify
+        them return `403`.
+      operationId: patchOrgRole
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchRoleRequest'
+      responses:
+        '200':
+          description: Role updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/RoleResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      tags: [orgs]
+      summary: Delete a custom role
+      description: |
+        Deletes a custom role. The built-in roles cannot be deleted (`403`).
+        A role currently assigned to one or more members cannot be deleted
+        until those members are reassigned (`400`).
+      operationId: deleteOrgRole
+      responses:
+        '200':
+          description: Role deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BoolResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /orgs/{organization}/ssh:
     parameters:
       - $ref: '#/components/parameters/OrganizationSlug'
@@ -4593,6 +4753,102 @@ components:
         username:
           type: string
           example: bob
+
+    RoleResponse:
+      type: object
+      required: [id, name, organization, builtin, permissions]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: releaser
+        organization:
+          type: string
+          format: uuid
+          nullable: true
+          description: |
+            `null` for built-in roles; the owning organization id for custom
+            roles.
+        builtin:
+          type: boolean
+          description: |
+            True for the three immutable system roles (Admin/Write/View).
+            Built-in roles cannot be edited or deleted via the API.
+        permissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/PermissionId'
+
+    RoleListResponse:
+      type: object
+      required: [roles, available_permissions]
+      properties:
+        roles:
+          type: array
+          items:
+            $ref: '#/components/schemas/RoleResponse'
+        available_permissions:
+          type: array
+          description: |
+            Catalogue of every capability a custom role may grant. Use this to
+            populate the role-management UI so it is forward-compatible with
+            future capability additions without a frontend release.
+          items:
+            type: object
+            required: [id, mutating]
+            properties:
+              id:
+                $ref: '#/components/schemas/PermissionId'
+              mutating:
+                type: boolean
+
+    CreateRoleRequest:
+      type: object
+      required: [name, permissions]
+      properties:
+        name:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9-]*[a-z0-9]$'
+          example: releaser
+        permissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/PermissionId'
+
+    PatchRoleRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9-]*[a-z0-9]$'
+        permissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/PermissionId'
+
+    PermissionId:
+      type: string
+      description: |
+        A capability identifier (camelCase). The full set is enumerated by
+        `GET /orgs/{organization}/roles` → `available_permissions`. New
+        capabilities may be appended in future releases; existing identifiers
+        are stable.
+      enum:
+        - viewOrg
+        - manageOrgSettings
+        - deleteOrg
+        - manageMembers
+        - manageRoles
+        - manageIntegrations
+        - manageWebhooks
+        - manageWorkers
+        - manageSubscriptions
+        - manageSshKey
+        - createProject
+        - editProject
+        - triggerEvaluation
 
     Organization:
       type: object
