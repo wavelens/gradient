@@ -401,7 +401,10 @@ pub async fn patch_organization(
         .trim()
         .to_string());
 
-    let organization = aorganization.update(&state.web_db).await?;
+    let organization = aorganization
+        .update(&state.web_db)
+        .await
+        .map_err(|e| WebError::from_db_err(e, "Organization Name"))?;
 
     let res = BaseResponse {
         error: false,
