@@ -27,7 +27,7 @@ use std::time::Duration;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
-use tracing::{info, warn};
+use tracing::{Instrument, info, warn};
 
 #[derive(Clone, Debug)]
 pub struct Shutdown {
@@ -73,12 +73,18 @@ impl Shutdown {
 
     /// Register a background task with the tracker. Replaces bare
     /// `tokio::spawn` for anything outliving a single request.
+    ///
+    /// The future is instrumented with the current `tracing` span, so cleanup
+    /// work spawned from inside an HTTP handler keeps the request span (and
+    /// therefore the request-id) on every log line. Outside of a request
+    /// `Span::current()` is the root no-op span — instrumenting is then
+    /// effectively free.
     pub fn spawn<F>(&self, future: F) -> JoinHandle<F::Output>
     where
         F: Future + Send + 'static,
         F::Output: Send + 'static,
     {
-        self.tracker.spawn(future)
+        self.tracker.spawn(future.in_current_span())
     }
 
     /// Trigger shutdown. Idempotent.
