@@ -171,7 +171,31 @@ pub async fn trigger_restart_builds<C: ConnectionTrait>(
 
     let now = crate::types::now();
 
-    // Create a new evaluation that starts directly in `Building` state.
+    // Load the previous evaluation's builds *before* inserting the new
+    // evaluation so we can decide its initial status. If every previous build
+    // maps to `Substituted` (i.e. there is nothing to actually rebuild), we
+    // insert the evaluation as `Completed`; otherwise it starts in `Building`
+    // and the scheduler's `check_evaluation_done` will close it out as the
+    // queued builds finish.
+    //
+    // Without this, an all-`Substituted` restart would leave the evaluation
+    // stuck in `Building` forever — no build job ever runs, so nothing fires
+    // the completion check.
+    let prev_builds = EBuild::find()
+        .filter(CBuild::Evaluation.eq(prev_eval.id))
+        .all(db)
+        .await?;
+
+    let any_pending = prev_builds.iter().any(|b| {
+        !matches!(restart_build_status(b.status), BuildStatus::Substituted)
+    });
+    let initial_status = if any_pending {
+        EvaluationStatus::Building
+    } else {
+        EvaluationStatus::Completed
+    };
+
+    // Create the new evaluation with the computed initial status.
     let new_eval_id = EvaluationId::now_v7();
     let aevaluation = AEvaluation {
         id: Set(new_eval_id),
@@ -179,7 +203,7 @@ pub async fn trigger_restart_builds<C: ConnectionTrait>(
         repository: Set(prev_eval.repository.clone()),
         commit: Set(prev_eval.commit),
         wildcard: Set(prev_eval.wildcard.clone()),
-        status: Set(EvaluationStatus::Building),
+        status: Set(initial_status),
         previous: Set(Some(prev_eval.id)),
         next: Set(None),
         created_at: Set(now),
@@ -191,12 +215,6 @@ pub async fn trigger_restart_builds<C: ConnectionTrait>(
         concurrent: Set(false),
     };
     let new_eval = aevaluation.insert(db).await?;
-
-    // Load all builds from the previous evaluation.
-    let prev_builds = EBuild::find()
-        .filter(CBuild::Evaluation.eq(prev_eval.id))
-        .all(db)
-        .await?;
 
     // Create new builds for the new evaluation and track old→new build ID mapping.
     let mut build_id_map: std::collections::HashMap<BuildId, BuildId> =
@@ -502,5 +520,142 @@ mod tests {
         let result = trigger_evaluation(&db, &project, vec![0u8; 20], None, None, Some(trig), false).await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap().trigger, Some(trig));
+    }
+
+    // ── trigger_restart_builds ───────────────────────────────────────────────
+
+    fn make_build(id: BuildId, eval_id: EvaluationId, status: BuildStatus) -> entity::build::Model {
+        entity::build::Model {
+            id,
+            evaluation: eval_id,
+            derivation: DerivationId::now_v7(),
+            status,
+            log_id: None,
+            build_time_ms: None,
+            worker: None,
+            via: None,
+            external_cached: false,
+            created_at: NaiveDateTime::default(),
+            updated_at: NaiveDateTime::default(),
+        }
+    }
+
+    /// Regression for the "evaluations stuck in Building forever" symptom:
+    /// when every previous build is `Completed`/`Substituted`,
+    /// `restart_build_status` maps them all to `Substituted` (terminal) and
+    /// no build job is ever dispatched. The new evaluation must therefore
+    /// start in `Completed`, not `Building`, otherwise nothing fires
+    /// `check_evaluation_done` and the row is stuck.
+    #[tokio::test]
+    async fn restart_with_all_cached_inserts_completed_eval() {
+        let project = make_project();
+        let prev_eval_id = EvaluationId::now_v7();
+        let prev_eval = make_eval(prev_eval_id, EvaluationStatus::Completed);
+        let new_eval_id = EvaluationId::now_v7();
+
+        let prev_builds = vec![
+            make_build(BuildId::now_v7(), prev_eval_id, BuildStatus::Completed),
+            make_build(BuildId::now_v7(), prev_eval_id, BuildStatus::Substituted),
+            make_build(BuildId::now_v7(), prev_eval_id, BuildStatus::Completed),
+        ];
+
+        let inserted_eval = {
+            let mut e = make_eval(new_eval_id, EvaluationStatus::Completed);
+            e.previous = Some(prev_eval_id);
+            e
+        };
+
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            // 1. in-progress check: none
+            .append_query_results([Vec::<evaluation::Model>::new()])
+            // 2. find prev_eval
+            .append_query_results([vec![prev_eval]])
+            // 3. load prev_builds (all terminal)
+            .append_query_results([prev_builds])
+            // 4. INSERT new evaluation → returns the row with status=Completed
+            .append_query_results([vec![inserted_eval]])
+            // 5. INSERT 3 builds (each returns the inserted row; we don't read back)
+            .append_query_results([vec![make_build(
+                BuildId::now_v7(),
+                new_eval_id,
+                BuildStatus::Substituted,
+            )]])
+            .append_query_results([vec![make_build(
+                BuildId::now_v7(),
+                new_eval_id,
+                BuildStatus::Substituted,
+            )]])
+            .append_query_results([vec![make_build(
+                BuildId::now_v7(),
+                new_eval_id,
+                BuildStatus::Substituted,
+            )]])
+            // 6. SELECT entry points: none
+            .append_query_results([Vec::<entity::entry_point::Model>::new()])
+            // 7. SELECT project for update read-back
+            .append_query_results([vec![project.clone()]])
+            // 8. UPDATE project
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            .into_connection();
+
+        let result = trigger_restart_builds(&db, &project).await;
+        assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
+        assert_eq!(
+            result.unwrap().status,
+            EvaluationStatus::Completed,
+            "all-cached restart must start the new eval as Completed, not Building",
+        );
+    }
+
+    /// When at least one previous build maps to `Queued`, the new eval must
+    /// start in `Building` so the dispatcher picks it up and the eventual
+    /// `check_evaluation_done` flips it to its terminal state.
+    #[tokio::test]
+    async fn restart_with_one_failed_inserts_building_eval() {
+        let project = make_project();
+        let prev_eval_id = EvaluationId::now_v7();
+        let prev_eval = make_eval(prev_eval_id, EvaluationStatus::Failed);
+        let new_eval_id = EvaluationId::now_v7();
+
+        let prev_builds = vec![
+            make_build(BuildId::now_v7(), prev_eval_id, BuildStatus::Completed),
+            make_build(BuildId::now_v7(), prev_eval_id, BuildStatus::Failed),
+        ];
+
+        let inserted_eval = {
+            let mut e = make_eval(new_eval_id, EvaluationStatus::Building);
+            e.previous = Some(prev_eval_id);
+            e
+        };
+
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([Vec::<evaluation::Model>::new()])
+            .append_query_results([vec![prev_eval]])
+            .append_query_results([prev_builds])
+            .append_query_results([vec![inserted_eval]])
+            .append_query_results([vec![make_build(
+                BuildId::now_v7(),
+                new_eval_id,
+                BuildStatus::Substituted,
+            )]])
+            .append_query_results([vec![make_build(
+                BuildId::now_v7(),
+                new_eval_id,
+                BuildStatus::Queued,
+            )]])
+            .append_query_results([Vec::<entity::entry_point::Model>::new()])
+            .append_query_results([vec![project.clone()]])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            .into_connection();
+
+        let result = trigger_restart_builds(&db, &project).await;
+        assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
+        assert_eq!(result.unwrap().status, EvaluationStatus::Building);
     }
 }
