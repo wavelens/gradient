@@ -31,8 +31,10 @@ impl std::error::Error for InvalidEvalTransition {}
 /// The valid transition graph is:
 /// ```text
 /// Queued → Fetching → EvaluatingFlake → EvaluatingDerivation
-///        → Building → Waiting → Building (back-and-forth)
+///        → Building ⇄ Waiting
 ///        → Completed | Failed | Aborted
+/// {Queued,Fetching,EvaluatingFlake,EvaluatingDerivation} → Waiting
+/// Waiting → Queued (recovery once a worker becomes available)
 /// * → Aborted (from any non-terminal state)
 /// * → Failed  (from any non-terminal state)
 /// ```
@@ -72,6 +74,15 @@ impl EvalStateMachine {
             (EvaluationStatus::Building, EvaluationStatus::Waiting) => Ok(to),
             (EvaluationStatus::Waiting, EvaluationStatus::Building) => Ok(to),
             (EvaluationStatus::Building, EvaluationStatus::Completed) => Ok(to),
+
+            // Pre-build phases stall into Waiting when no worker can pick up
+            // the eval job; recovery routes through Queued so the dispatch
+            // loop replays the normal progression.
+            (EvaluationStatus::Queued, EvaluationStatus::Waiting) => Ok(to),
+            (EvaluationStatus::Fetching, EvaluationStatus::Waiting) => Ok(to),
+            (EvaluationStatus::EvaluatingFlake, EvaluationStatus::Waiting) => Ok(to),
+            (EvaluationStatus::EvaluatingDerivation, EvaluationStatus::Waiting) => Ok(to),
+            (EvaluationStatus::Waiting, EvaluationStatus::Queued) => Ok(to),
 
             // Terminal transitions from any non-terminal state
             (_, EvaluationStatus::Failed) => Ok(to),
@@ -165,6 +176,45 @@ mod tests {
             assert!(
                 EvalStateMachine::validate(from, EvaluationStatus::Aborted).is_ok(),
                 "{from:?} → Aborted failed"
+            );
+        }
+    }
+
+    #[test]
+    fn eval_sm_pre_build_states_can_enter_waiting() {
+        let pre_build = [
+            EvaluationStatus::Queued,
+            EvaluationStatus::Fetching,
+            EvaluationStatus::EvaluatingFlake,
+            EvaluationStatus::EvaluatingDerivation,
+        ];
+        for from in pre_build {
+            assert!(
+                EvalStateMachine::validate(from, EvaluationStatus::Waiting).is_ok(),
+                "{from:?} → Waiting should be allowed"
+            );
+        }
+    }
+
+    #[test]
+    fn eval_sm_waiting_recovers_to_queued() {
+        assert!(
+            EvalStateMachine::validate(EvaluationStatus::Waiting, EvaluationStatus::Queued).is_ok()
+        );
+    }
+
+    #[test]
+    fn eval_sm_waiting_cannot_skip_into_pre_build_phases() {
+        // Recovery from Waiting goes via Queued; jumping straight to a later
+        // pre-build phase would let us bypass the dispatch path.
+        for to in [
+            EvaluationStatus::Fetching,
+            EvaluationStatus::EvaluatingFlake,
+            EvaluationStatus::EvaluatingDerivation,
+        ] {
+            assert!(
+                EvalStateMachine::validate(EvaluationStatus::Waiting, to).is_err(),
+                "Waiting → {to:?} should be rejected"
             );
         }
     }

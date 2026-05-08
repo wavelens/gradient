@@ -304,30 +304,34 @@ impl<'a> BuildStateHandler<'a> {
         Ok(())
     }
 
-    /// Sweep every in-flight evaluation (`Building` or `Waiting`) and reconcile
-    /// its status against the current set of connected workers' capabilities.
+    /// Sweep every in-flight evaluation and reconcile its status against the
+    /// current set of connected workers.
     ///
-    /// - `Building` → `Waiting` when **none** of the eval's still-pending builds
-    ///   has a connected worker whose `architectures` + `system_features` can
-    ///   satisfy it. Surfaces "no worker configured for these builds" in the UI
-    ///   instead of leaving the eval stuck silently.
-    /// - `Waiting` → `Building` when **any** pending build now has a matching
-    ///   worker (e.g. an aarch64 worker just connected, or an existing worker
-    ///   added a new system feature via re-advertised capabilities).
+    /// Two regimes apply, keyed on whether the eval has any pending builds:
     ///
-    /// Cheap: one query for the small set of in-flight evals, one query for
-    /// their non-terminal builds + derivations, one query for required features.
-    /// Worker caps are taken as a snapshot from the in-memory pool. Safe to call
-    /// from the dispatch loop and from worker-capability change hooks.
+    /// - **Pre-build phase** (no pending builds yet, status in
+    ///   `Queued`/`Fetching`/`EvaluatingFlake`/`EvaluatingDerivation`): if no
+    ///   worker is connected, flip to `Waiting` so the UI can explain why the
+    ///   eval is stuck. A `Waiting` eval with no pending builds came from this
+    ///   path; if a worker has since connected, recover to `Queued` and let the
+    ///   dispatch loop replay the normal progression.
+    /// - **Build phase** (pending builds present, status in
+    ///   `Building`/`Waiting`): flip `Building ↔ Waiting` based on whether any
+    ///   pending build's `(architecture, required_features)` is satisfiable by
+    ///   the connected pool, persisting the structured reason for the UI.
     pub async fn reconcile_waiting_state(
         &self,
         worker_caps: &[(Vec<String>, Vec<String>)],
     ) -> Result<()> {
         let evals = EEvaluation::find()
-            .filter(
-                CEvaluation::Status
-                    .is_in(vec![EvaluationStatus::Building, EvaluationStatus::Waiting]),
-            )
+            .filter(CEvaluation::Status.is_in(vec![
+                EvaluationStatus::Queued,
+                EvaluationStatus::Fetching,
+                EvaluationStatus::EvaluatingFlake,
+                EvaluationStatus::EvaluatingDerivation,
+                EvaluationStatus::Building,
+                EvaluationStatus::Waiting,
+            ]))
             .all(&self.state.worker_db)
             .await
             .context("fetch in-flight evaluations")?;
@@ -347,24 +351,37 @@ impl<'a> BuildStateHandler<'a> {
                 .await
                 .context("fetch pending builds")?;
 
-            if pending_builds.is_empty() {
-                // Nothing left to gate — terminal-status decision happens in
-                // `check_evaluation_done`, not here.
-                continue;
-            }
-
-            let drv_ids: Vec<DerivationId> = pending_builds.iter().map(|b| b.derivation).collect();
-            let checker = BuildabilityChecker::load(self.state, &drv_ids).await?;
-            let target = if checker.any_buildable(&pending_builds, worker_caps) {
-                EvaluationStatus::Building
+            let (target, new_reason) = if pending_builds.is_empty() {
+                match eval.status {
+                    EvaluationStatus::Building => continue,
+                    EvaluationStatus::Queued
+                    | EvaluationStatus::Fetching
+                    | EvaluationStatus::EvaluatingFlake
+                    | EvaluationStatus::EvaluatingDerivation
+                    | EvaluationStatus::Waiting => decide_pre_build_target(worker_caps.len()),
+                    _ => continue,
+                }
             } else {
-                EvaluationStatus::Waiting
-            };
-
-            let new_reason = if matches!(target, EvaluationStatus::Waiting) {
-                Some(checker.compute_waiting_reason(&pending_builds, worker_caps))
-            } else {
-                None
+                if !matches!(
+                    eval.status,
+                    EvaluationStatus::Building | EvaluationStatus::Waiting
+                ) {
+                    continue;
+                }
+                let drv_ids: Vec<DerivationId> =
+                    pending_builds.iter().map(|b| b.derivation).collect();
+                let checker = BuildabilityChecker::load(self.state, &drv_ids).await?;
+                let target = if checker.any_buildable(&pending_builds, worker_caps) {
+                    EvaluationStatus::Building
+                } else {
+                    EvaluationStatus::Waiting
+                };
+                let reason = if matches!(target, EvaluationStatus::Waiting) {
+                    Some(checker.compute_waiting_reason(&pending_builds, worker_caps))
+                } else {
+                    None
+                };
+                (target, reason)
             };
 
             if eval.status != target {
@@ -378,9 +395,6 @@ impl<'a> BuildStateHandler<'a> {
                 );
             }
 
-            // Persist the structured reason whenever the eval is (or stays in)
-            // Waiting so the API surface refreshes as the worker pool changes,
-            // and clear it on transitions back to Building.
             persist_waiting_reason(self.state, eval.id, &eval.waiting_reason, new_reason.as_ref())
                 .await;
 
@@ -390,6 +404,26 @@ impl<'a> BuildStateHandler<'a> {
         }
 
         Ok(())
+    }
+}
+
+/// Picks the target status for a pre-build evaluation based on whether any
+/// worker is currently connected. When no worker is connected we surface
+/// `Waiting` with an empty `unmet` list so the frontend explains the stall;
+/// otherwise we leave it (or recover it) to `Queued` and clear any stored
+/// reason.
+fn decide_pre_build_target(connected_workers: usize) -> (EvaluationStatus, Option<WaitingReason>) {
+    if connected_workers == 0 {
+        (
+            EvaluationStatus::Waiting,
+            Some(WaitingReason {
+                unmet: Vec::new(),
+                connected_workers: 0,
+                available_architectures: Vec::new(),
+            }),
+        )
+    } else {
+        (EvaluationStatus::Queued, None)
     }
 }
 
@@ -765,6 +799,23 @@ mod waiting_reason_tests {
         assert_eq!(reason.unmet.len(), 1);
         assert_eq!(reason.unmet[0].architecture, "aarch64-linux");
         assert_eq!(reason.unmet[0].build_count, 3);
+    }
+
+    #[test]
+    fn pre_build_target_no_workers_yields_waiting_with_empty_unmet() {
+        let (target, reason) = decide_pre_build_target(0);
+        assert_eq!(target, EvaluationStatus::Waiting);
+        let reason = reason.expect("waiting target must carry a reason");
+        assert_eq!(reason.connected_workers, 0);
+        assert!(reason.unmet.is_empty());
+        assert!(reason.available_architectures.is_empty());
+    }
+
+    #[test]
+    fn pre_build_target_with_workers_yields_queued_and_clears_reason() {
+        let (target, reason) = decide_pre_build_target(2);
+        assert_eq!(target, EvaluationStatus::Queued);
+        assert!(reason.is_none());
     }
 
     #[test]
