@@ -21,7 +21,7 @@ use axum::Json;
 use axum::extract::rejection::JsonRejection;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use sea_orm::DbErr;
+use sea_orm::{DbErr, RuntimeErr, sqlx};
 use serde::Serialize;
 use std::fmt;
 use thiserror::Error;
@@ -160,17 +160,14 @@ impl From<DbErr> for WebError {
     }
 }
 
-/// Returns true when `err` is a PostgreSQL unique-constraint violation
-/// (SQLSTATE 23505).
 fn is_unique_violation(err: &DbErr) -> bool {
-    use sea_orm::{RuntimeErr, sqlx};
     let sqlx_err = match err {
         DbErr::Query(RuntimeErr::SqlxError(e)) | DbErr::Exec(RuntimeErr::SqlxError(e)) => e,
         _ => return false,
     };
     matches!(
         sqlx_err,
-        sqlx::Error::Database(db_err) if db_err.code().as_deref() == Some("23505")
+        sqlx::Error::Database(db_err) if db_err.is_unique_violation()
     )
 }
 
@@ -366,9 +363,9 @@ impl WebError {
         )
     }
 
-    /// Map a SeaORM error to `already_exists(label)` if it is a Postgres
-    /// unique-constraint violation; otherwise pass through as `Internal`.
-    pub fn from_db_err(err: DbErr, label: &str) -> Self {
+    /// Constructor for INSERT/UPDATE sites where a unique index is the
+    /// source of truth for collision detection.
+    pub(crate) fn from_db_err(err: DbErr, label: &str) -> Self {
         if is_unique_violation(&err) {
             return Self::already_exists(label);
         }
