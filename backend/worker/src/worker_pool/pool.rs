@@ -5,8 +5,10 @@
  */
 
 use anyhow::{Context, Result};
+use futures::stream::{FuturesUnordered, StreamExt};
 use std::ops::{Deref, DerefMut};
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
@@ -38,12 +40,7 @@ impl EvalWorker {
         let exe = std::env::current_exe().context("locating current executable")?;
         trace!(exe = %exe.display(), "spawning eval worker subprocess");
         let mut command = Command::new(&exe);
-        command
-            .arg("--eval-worker")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .kill_on_drop(true);
+        command.arg("--eval-worker");
 
         // Match the Nix CLI: bump the subprocess's stack to 64 MiB so libnix's
         // libstdc++ std::regex DFS executor (used by `builtins.match` /
@@ -65,22 +62,34 @@ impl EvalWorker {
             });
         }
 
-        let mut child = command.spawn().context("spawning eval worker subprocess")?;
-
-        let stdin = child.stdin.take().context("worker stdin missing")?;
-        let stdout = BufReader::new(child.stdout.take().context("worker stdout missing")?);
+        let worker = Self::from_command(command)?;
 
         // Mark the subprocess as the preferred OOM-kill target so that the kernel
         // sacrifices eval workers (which hold large Nix/Boehm-GC heaps) before
         // the parent process or other services when memory runs low.
         #[cfg(target_os = "linux")]
-        if let Some(pid) = child.id() {
+        if let Some(pid) = worker.child.id() {
             let path = format!("/proc/{pid}/oom_score_adj");
             if let Err(e) = std::fs::write(&path, "600") {
                 tracing::warn!(pid, error = %e, "failed to set oom_score_adj for eval worker");
             }
         }
 
+        Ok(worker)
+    }
+
+    /// Spawn the given pre-configured command and wrap its stdin/stdout into
+    /// an [`EvalWorker`]. Test seam used by pool tests to stand up a
+    /// controllable subprocess (e.g. `cat`) without depending on libnix.
+    fn from_command(mut command: Command) -> Result<Self> {
+        command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .kill_on_drop(true);
+        let mut child = command.spawn().context("spawning eval worker subprocess")?;
+        let stdin = child.stdin.take().context("worker stdin missing")?;
+        let stdout = BufReader::new(child.stdout.take().context("worker stdout missing")?);
         Ok(Self {
             child,
             stdin,
@@ -183,7 +192,7 @@ impl EvalWorker {
     /// subprocess can run libnix's atexit handlers (flush eval-cache
     /// SQLite, release locks, drop temp roots) instead of being SIGKILL'd
     /// by `kill_on_drop`.
-    async fn shutdown(mut self) {
+    pub(super) async fn shutdown(mut self) {
         let pid = self.child.id();
         trace!(pid, "sending Shutdown to eval worker");
         let mut bytes = match serde_json::to_vec(&EvalRequest::Shutdown) {
@@ -252,6 +261,10 @@ pub struct EvalWorkerPool {
     /// release evaluation memory back to the OS. `0` disables
     /// recycling.
     max_evaluations_per_worker: usize,
+    /// Set by [`EvalWorkerPool::shutdown`]. Causes `PooledEvalWorker::drop`
+    /// to gracefully shut its worker down instead of returning it to the
+    /// (now-closed) idle vec.
+    shutting_down: Arc<AtomicBool>,
 }
 
 impl EvalWorkerPool {
@@ -262,6 +275,7 @@ impl EvalWorkerPool {
             semaphore: Arc::new(Semaphore::new(max)),
             max,
             max_evaluations_per_worker,
+            shutting_down: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -290,8 +304,57 @@ impl EvalWorkerPool {
             idle: Arc::clone(&self.idle),
             healthy: true,
             max_evaluations_per_worker: self.max_evaluations_per_worker,
+            shutting_down: Arc::clone(&self.shutting_down),
             _permit: permit,
         })
+    }
+
+    /// Gracefully shut the pool down.
+    ///
+    /// Closes the semaphore (so future [`acquire`](Self::acquire) calls
+    /// fail), flips the `shutting_down` flag (so any [`PooledEvalWorker`]
+    /// that gets dropped after this point gracefully terminates its
+    /// subprocess instead of being returned to the idle vec), then
+    /// concurrently sends `Shutdown` to every currently-idle worker and
+    /// waits up to 5 s per worker for it to exit.
+    ///
+    /// Idempotent.
+    pub async fn shutdown(&self) {
+        // Order matters: set the flag BEFORE closing the semaphore. If we
+        // closed first, an in-flight `acquire().await` could resolve with
+        // an Err, bypass `PooledEvalWorker::drop` entirely, and the parent
+        // task could re-enter the pool path before the flag was visible.
+        self.shutting_down.store(true, Ordering::SeqCst);
+        self.semaphore.close();
+
+        let drained: Vec<EvalWorker> = {
+            let mut idle = self.idle.lock().unwrap();
+            std::mem::take(&mut *idle)
+        };
+        if drained.is_empty() {
+            return;
+        }
+        debug!(count = drained.len(), "gracefully shutting down idle eval workers");
+        let mut tasks: FuturesUnordered<_> =
+            drained.into_iter().map(|w| w.shutdown()).collect();
+        while tasks.next().await.is_some() {}
+    }
+
+    #[cfg(test)]
+    pub(super) fn idle_count(&self) -> usize {
+        self.idle.lock().unwrap().len()
+    }
+
+    #[cfg(test)]
+    pub(super) fn is_shutting_down(&self) -> bool {
+        self.shutting_down.load(Ordering::SeqCst)
+    }
+
+    /// Test seam: push a pre-built worker into the idle vec so subsequent
+    /// `acquire()` calls reuse it instead of spawning a fresh one.
+    #[cfg(test)]
+    pub(super) fn push_for_test(&self, worker: EvalWorker) {
+        self.idle.lock().unwrap().push(worker);
     }
 }
 
@@ -305,6 +368,7 @@ pub struct PooledEvalWorker {
     idle: Arc<Mutex<Vec<EvalWorker>>>,
     healthy: bool,
     max_evaluations_per_worker: usize,
+    shutting_down: Arc<AtomicBool>,
     _permit: OwnedSemaphorePermit,
 }
 
@@ -331,6 +395,24 @@ impl DerefMut for PooledEvalWorker {
 impl Drop for PooledEvalWorker {
     fn drop(&mut self) {
         if let Some(worker) = self.worker.take() {
+            // Pool is shutting down: gracefully terminate the subprocess so
+            // it can run libnix's atexit handlers instead of being SIGKILL'd
+            // by `kill_on_drop`. Mirrors the recycle path below.
+            if self.shutting_down.load(Ordering::SeqCst) {
+                if self.healthy {
+                    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                        trace!("pool shutting down; gracefully terminating eval worker");
+                        handle.spawn(async move {
+                            worker.shutdown().await;
+                        });
+                        return;
+                    }
+                    trace!("pool shutting down; no tokio runtime — killing eval worker via Drop");
+                }
+                drop(worker);
+                return;
+            }
+
             // Recycle after the configured eval count to reclaim
             // Boehm-GC memory held by the subprocess.
             let overused = self.max_evaluations_per_worker > 0
@@ -365,5 +447,88 @@ impl Drop for PooledEvalWorker {
             debug!("discarding eval worker (unhealthy or pool poisoned)");
             drop(worker);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    /// Spawn a `cat` subprocess wrapped as an `EvalWorker`. `cat` echoes
+    /// stdin to stdout and exits cleanly when stdin closes — exactly the
+    /// behaviour `EvalWorker::shutdown` relies on (it writes the Shutdown
+    /// JSON line then drops stdin).
+    fn fake_worker() -> EvalWorker {
+        EvalWorker::from_command(Command::new("cat")).expect("spawn cat")
+    }
+
+    #[tokio::test]
+    async fn shutdown_with_no_idle_workers_returns_immediately() {
+        let pool = EvalWorkerPool::new(2, 0);
+        tokio::time::timeout(Duration::from_secs(1), pool.shutdown())
+            .await
+            .expect("shutdown should not hang on empty pool");
+        assert!(pool.is_shutting_down());
+        assert_eq!(pool.idle_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn shutdown_drains_idle_workers_gracefully() {
+        let pool = EvalWorkerPool::new(2, 0);
+        pool.push_for_test(fake_worker());
+        pool.push_for_test(fake_worker());
+        assert_eq!(pool.idle_count(), 2);
+
+        tokio::time::timeout(Duration::from_secs(6), pool.shutdown())
+            .await
+            .expect("shutdown should complete within the per-worker 5s budget");
+
+        assert!(pool.is_shutting_down());
+        assert_eq!(pool.idle_count(), 0, "idle vec must be drained");
+    }
+
+    #[tokio::test]
+    async fn acquire_after_shutdown_errors() {
+        let pool = EvalWorkerPool::new(2, 0);
+        pool.shutdown().await;
+        match pool.acquire().await {
+            Ok(_) => panic!("acquire after shutdown must fail"),
+            Err(e) => assert!(
+                e.to_string().contains("semaphore closed"),
+                "unexpected error: {e}"
+            ),
+        }
+    }
+
+    #[tokio::test]
+    async fn inflight_worker_shuts_down_gracefully_on_pool_shutdown() {
+        let pool = Arc::new(EvalWorkerPool::new(1, 0));
+        pool.push_for_test(fake_worker());
+
+        let pooled = pool.acquire().await.expect("acquire");
+        assert_eq!(pool.idle_count(), 0);
+
+        // Drive shutdown concurrently with releasing the in-flight worker.
+        let pool2 = Arc::clone(&pool);
+        let shutdown = tokio::spawn(async move { pool2.shutdown().await });
+
+        // Give shutdown a chance to flip the flag before we drop the handle.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        drop(pooled);
+
+        tokio::time::timeout(Duration::from_secs(6), shutdown)
+            .await
+            .expect("shutdown timed out")
+            .expect("shutdown task panicked");
+
+        assert!(pool.is_shutting_down());
+        // The dropped in-flight worker must NOT have been pushed back into
+        // idle — it should have taken the graceful-shutdown branch.
+        assert_eq!(
+            pool.idle_count(),
+            0,
+            "in-flight worker must not be returned to idle once pool is shutting down"
+        );
     }
 }

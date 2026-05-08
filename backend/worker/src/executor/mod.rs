@@ -150,6 +150,14 @@ impl JobExecutor {
         }
     }
 
+    /// Gracefully shut every idle eval-worker subprocess down so libnix's
+    /// atexit handlers run (flush eval-cache SQLite, drop temp GC roots)
+    /// instead of being SIGKILL'd by `kill_on_drop` when the runtime tears
+    /// down on signal.
+    pub async fn shutdown(&self) {
+        self.evaluator.shutdown().await;
+    }
+
     /// Execute a `FlakeJob` (fetch → eval-flake → eval-derivations).
     ///
     /// When `FetchFlake` and eval tasks are in the same job, the local clone

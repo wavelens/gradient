@@ -41,6 +41,12 @@ impl WorkerPoolResolver {
             pool: Arc::new(EvalWorkerPool::new(workers, max_evaluations_per_worker)),
         }
     }
+
+    /// Gracefully shut every idle eval-worker subprocess down. See
+    /// [`EvalWorkerPool::shutdown`] for the contract.
+    pub async fn shutdown(&self) {
+        self.pool.shutdown().await;
+    }
 }
 
 #[async_trait]

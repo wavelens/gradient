@@ -1594,3 +1594,32 @@ no-op refactor of the error variant. The existing access-control tests
 (`evaluations.rs`, `builds_download.rs`, `commits_authorization.rs`)
 still cover the response side of the data-inconsistency paths and pass
 unchanged.
+
+## Worker eval-pool graceful shutdown (#95)
+
+`EvalWorkerPool` now exposes `shutdown()`, which closes the acquire
+semaphore, flips a `shutting_down` flag observed by
+`PooledEvalWorker::drop`, and concurrently sends each idle worker the
+`EvalRequest::Shutdown` opcode (waiting up to 5 s per child for a clean
+exit). The worker binary installs a SIGINT/SIGTERM handler that cancels
+a `tokio_util::sync::CancellationToken`; the dispatch loop, the
+listener, and the reconnect/back-off loop all observe the token and
+break out, after which `JobExecutor::shutdown` drains the pool. This
+replaces the previous SIGKILL-on-drop path, which leaked GC roots and
+temp files because libnix's atexit handlers never ran.
+
+Unit tests in `backend/worker/src/worker_pool/pool.rs`:
+
+- `shutdown_with_no_idle_workers_returns_immediately` — `shutdown()` on
+  a fresh pool must not block.
+- `shutdown_drains_idle_workers_gracefully` — pre-populated idle workers
+  are sent through the graceful path and the idle vec is empty
+  afterwards. Uses a `cat` subprocess as a stand-in worker so the test
+  does not need libnix.
+- `acquire_after_shutdown_errors` — once `shutdown()` returns, further
+  `acquire()` calls fail fast with a "semaphore closed" error.
+- `inflight_worker_shuts_down_gracefully_on_pool_shutdown` — when
+  `shutdown()` runs concurrently with an in-flight `PooledEvalWorker`
+  being released, the released worker takes the graceful-shutdown
+  branch in `Drop` instead of being pushed back into the (now drained)
+  idle vec.

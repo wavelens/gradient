@@ -20,6 +20,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use clap::Parser;
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
 use config::WorkerConfig;
@@ -61,11 +62,17 @@ fn main() -> Result<()> {
             );
         }
 
+        let shutdown = CancellationToken::new();
+        install_signal_handler(shutdown.clone());
+
         // Start the listener for incoming server connections if discoverable.
         if config.discoverable {
             let listener_config = config.clone();
+            let listener_shutdown = shutdown.clone();
             tokio::spawn(async move {
-                if let Err(e) = connection::listener::start_listener(listener_config).await {
+                if let Err(e) =
+                    connection::listener::start_listener(listener_config, listener_shutdown).await
+                {
                     error!(error = %e, "listener failed");
                 }
             });
@@ -73,29 +80,57 @@ fn main() -> Result<()> {
 
         let mut backoff = INITIAL_BACKOFF;
 
-        // Initial connection.
-        let mut worker = loop {
-            match Worker::connect(config.clone()).await {
-                Ok(w) => {
-                    backoff = INITIAL_BACKOFF;
-                    break w;
+        // Initial connection — abandon retries if shutdown fires.
+        let initial = tokio::select! {
+            _ = shutdown.cancelled() => None,
+            w = async {
+                loop {
+                    match Worker::connect(config.clone()).await {
+                        Ok(w) => break w,
+                        Err(e) => {
+                            error!(
+                                error = %e,
+                                delay_secs = backoff.as_secs(),
+                                "connection failed; retrying"
+                            );
+                            tokio::time::sleep(backoff).await;
+                            backoff = (backoff * 2).min(MAX_BACKOFF);
+                        }
+                    }
                 }
-                Err(e) => {
-                    error!(error = %e, delay_secs = backoff.as_secs(), "connection failed; retrying");
-                    tokio::time::sleep(backoff).await;
-                    backoff = (backoff * 2).min(MAX_BACKOFF);
-                }
-            }
+            } => Some(w),
         };
+        let Some(mut worker) = initial else {
+            // Signal arrived before we connected: nothing to drain.
+            info!("shutdown requested during initial connect");
+            return Ok(());
+        };
+        backoff = INITIAL_BACKOFF;
+
+        // Cache an executor handle so we can gracefully drain the eval pool
+        // even after `worker` is consumed by `run` / `reconnect`. The handle
+        // shares the underlying `Arc<WorkerEvaluator>` so the pool stays
+        // alive until the last clone is dropped.
+        let executor_handle = worker.executor_handle();
 
         // Run → reconnect loop.
         loop {
-            let (disconnected, outcome) = worker.run().await;
+            let (disconnected, outcome) = worker.run(shutdown.clone()).await;
+
+            // Shutdown signalled during run(): exit before attempting reconnect.
+            if shutdown.is_cancelled() {
+                info!("shutdown signal received; tearing down worker");
+                drop(disconnected);
+                executor_handle.shutdown().await;
+                return Ok(());
+            }
 
             match outcome {
                 Ok(RunOutcome::Drained) => {
                     info!("server requested drain; shutting down");
-                    break;
+                    drop(disconnected);
+                    executor_handle.shutdown().await;
+                    return Ok(());
                 }
                 Ok(RunOutcome::CleanDisconnect) => {
                     warn!(delay_secs = backoff.as_secs(), "connection closed; reconnecting");
@@ -105,22 +140,64 @@ fn main() -> Result<()> {
                 }
             }
 
-            // Reconnect with exponential backoff. Never give up — a transient
-            // network blip must not kill the worker.
-            worker = retry_reconnect(
-                disconnected,
-                |d| async move { d.reconnect().await },
-                |delay| tokio::time::sleep(delay),
-                backoff,
-                MAX_BACKOFF,
-            )
-            .await;
-            info!("reconnected successfully");
-            backoff = INITIAL_BACKOFF;
+            // Reconnect with exponential backoff, but bail out if shutdown
+            // fires while we're waiting. Never give up otherwise — a transient
+            // network blip must not kill the worker. The disconnected handle
+            // is consumed by retry_reconnect; if shutdown cancels the future
+            // mid-attempt the cached `executor_handle` still drives the
+            // graceful pool shutdown.
+            let reconnected = tokio::select! {
+                _ = shutdown.cancelled() => None,
+                w = retry_reconnect(
+                    disconnected,
+                    |d| async move { d.reconnect().await },
+                    |delay| tokio::time::sleep(delay),
+                    backoff,
+                    MAX_BACKOFF,
+                ) => Some(w),
+            };
+            match reconnected {
+                Some(w) => {
+                    info!("reconnected successfully");
+                    worker = w;
+                    backoff = INITIAL_BACKOFF;
+                }
+                None => {
+                    info!("shutdown requested during reconnect");
+                    executor_handle.shutdown().await;
+                    return Ok(());
+                }
+            }
         }
-
-        Ok(())
     })
+}
+
+/// Install a SIGINT/SIGTERM handler that cancels `shutdown` so the run loop
+/// can break out and call [`Worker::shutdown`] before exit.
+fn install_signal_handler(shutdown: CancellationToken) {
+    tokio::spawn(async move {
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{SignalKind, signal};
+            let mut sigterm = match signal(SignalKind::terminate()) {
+                Ok(s) => s,
+                Err(e) => {
+                    error!(error = %e, "failed to install SIGTERM handler");
+                    return;
+                }
+            };
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => info!("received SIGINT, shutting down"),
+                _ = sigterm.recv() => info!("received SIGTERM, shutting down"),
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = tokio::signal::ctrl_c().await;
+            info!("received Ctrl-C, shutting down");
+        }
+        shutdown.cancel();
+    });
 }
 
 /// Build the tracing `EnvFilter` from the worker's log-level config.

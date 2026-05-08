@@ -30,6 +30,7 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use proto::messages::{ClientMessage, JobCandidate, JobKind};
+use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use crate::config::WorkerConfig;
@@ -62,6 +63,18 @@ pub struct Worker<S> {
     /// Connection state: [`Connected`] or [`Disconnected`].
     conn_state: S,
     _marker: PhantomData<S>,
+}
+
+impl<S> Worker<S> {
+    /// Cheap clone of the executor so callers can keep a shutdown handle
+    /// alive across `Worker` consumption (e.g. across `run` / `reconnect`
+    /// boundaries) and call [`JobExecutor::shutdown`] to gracefully drain
+    /// the eval pool. The internal `Arc<WorkerEvaluator>` is reference-
+    /// counted, so the underlying pool stays alive as long as any clone
+    /// exists.
+    pub fn executor_handle(&self) -> JobExecutor {
+        self.executor.clone()
+    }
 }
 
 // ── Constructors (→ Worker<Connected>) ───────────────────────────────────────
@@ -194,7 +207,13 @@ impl Worker<Connected> {
     ///
     /// On an `Err` outcome the disconnected worker is still returned so the
     /// caller can reconnect without losing the executor / credential caches.
-    pub async fn run(self) -> (Worker<Disconnected>, Result<RunOutcome>) {
+    ///
+    /// `shutdown` is observed by the inner `select!`; cancelling it causes
+    /// the loop to exit cleanly with [`RunOutcome::CleanDisconnect`].
+    pub async fn run(
+        self,
+        shutdown: CancellationToken,
+    ) -> (Worker<Disconnected>, Result<RunOutcome>) {
         let Worker {
             config,
             executor,
@@ -216,6 +235,7 @@ impl Worker<Connected> {
             &mut credentials,
             &candidates,
             &last_scores,
+            shutdown,
         )
         .await;
 
