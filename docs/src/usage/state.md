@@ -261,6 +261,11 @@ Each entry in `upstreams` is one of:
 | `url` | string | (`external`) Substituter URL — e.g. `https://cache.nixos.org` |
 | `public_key` | string | (`external`) Trusted public key in `<name>:<base64>` form |
 
+Outbound requests to `external` substituters (and to every other HTTP target the
+server, worker, or CLI talks to) carry the user-agent
+`Gradient/<version> (+https://github.com/wavelens/gradient)`, so cache operators
+can attribute traffic and build allowlists or per-client metrics around it.
+
 ## API Keys
 
 ```nix

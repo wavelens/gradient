@@ -997,8 +997,10 @@ each created a fresh TCP/TLS connection pool with inconsistent (or
 absent) timeout and redirect policy.
 
 `backend/core/src/http.rs` builds the project-wide client with sane
-defaults (30 s timeout, `redirect::none`, `gradient/<version>`
-user-agent). The server stores it once on `ServerState::http`; the
+defaults (30 s timeout, `redirect::none`, and a branded
+`Gradient/<version> (+https://github.com/wavelens/gradient)`
+user-agent so upstream cache operators can attribute traffic). The
+server stores it once on `ServerState::http`; the
 worker exposes it through a `OnceLock` (`worker::http::client()`); the
 CLI exposes it through `connector::http_client()`.
 
@@ -1011,9 +1013,11 @@ Unit tests in `backend/core/src/http.rs`:
 
 - `build_client_succeeds` — the default builder yields a usable
   `reqwest::Client`.
-- `user_agent_is_prefixed` — the user-agent string is namespaced
-  `gradient/...` so server logs can identify outbound calls from
-  Gradient processes.
+- `user_agent_includes_brand_and_contact_url` — the user-agent string
+  starts with `Gradient/` and embeds the project URL so cache operators
+  can identify and contact-trace outbound calls (`#205`).
+- `user_agent_does_not_use_lowercase_brand` — regression guard against
+  the previous lowercase `gradient/` format (`#205`).
 
 ## Graceful shutdown (`#72`)
 
