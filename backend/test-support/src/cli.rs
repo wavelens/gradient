@@ -61,5 +61,6 @@ pub fn test_cli_with_crypt(crypt_secret_file: String) -> Cli {
         },
         s3: S3Args::default(),
         github_app: GitHubAppArgs::default(),
+        metrics: MetricsArgs::default(),
     }
 }
