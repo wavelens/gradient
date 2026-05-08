@@ -129,6 +129,14 @@ cdk-virtual-scroll-viewport.builds-list {
   contain: strict;
 }
 
+// CDK injects `.cdk-virtual-scroll-content-wrapper` as `position: absolute`
+// with `width: auto`, so flex rows inside it would size to their natural
+// content width and overflow the 260 px sidebar. Pinning the wrapper to the
+// viewport width re-activates `text-overflow: ellipsis` on `.build-name`.
+:host ::ng-deep .builds-list .cdk-virtual-scroll-content-wrapper {
+  width: 100%;
+}
+
 .no-builds {
   padding: $spacing-md;
   font-size: $font-size-sm;
