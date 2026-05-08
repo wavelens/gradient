@@ -18,8 +18,9 @@ use std::sync::Arc;
 use super::EvalAccessContext;
 use super::types::{
     BuildItem, BuildsQuery, EntryPointBrief, EvaluationMessageResponse, EvaluationResponse,
-    PaginatedBuilds,
+    EvaluationTriggerSummary, PaginatedBuilds,
 };
+use gradient_core::types::triggers::TriggerType;
 
 pub async fn get_evaluation(
     state: State<Arc<ServerState>>,
@@ -93,6 +94,26 @@ pub async fn get_evaluation(
         None
     };
 
+    // Resolve `evaluation.trigger -> project_trigger.trigger_type` so the eval
+    // log page can render the correct "Via" badge. `None` here means the run
+    // was started manually (API / UI), not by a project trigger — the frontend
+    // renders that as "Manual".
+    let trigger = if let Some(trigger_id) = evaluation.trigger {
+        EProjectTrigger::find_by_id(trigger_id)
+            .one(&state.web_db)
+            .await?
+            .and_then(|t| {
+                TriggerType::try_from(t.trigger_type)
+                    .ok()
+                    .map(|tt| EvaluationTriggerSummary {
+                        id: trigger_id,
+                        trigger_type: tt,
+                    })
+            })
+    } else {
+        None
+    };
+
     let res = BaseResponse {
         error: false,
         message: EvaluationResponse {
@@ -110,6 +131,7 @@ pub async fn get_evaluation(
             error_count,
             warning_count,
             entry_points,
+            trigger,
             waiting_reason,
         },
     };
