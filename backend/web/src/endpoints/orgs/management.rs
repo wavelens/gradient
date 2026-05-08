@@ -21,7 +21,7 @@ use gradient_core::types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, JoinType, PaginatorTrait, QueryFilter, QueryOrder,
-    QuerySelect,
+    QuerySelect, TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -243,6 +243,8 @@ pub async fn put(
             WebError::failed_ssh_key_generation()
         })?;
 
+    let tx = state.web_db.inner().begin().await?;
+
     let organization = AOrganization {
         id: Set(OrganizationId::now_v7()),
         name: Set(body.name.clone()),
@@ -255,25 +257,26 @@ pub async fn put(
         created_at: Set(gradient_core::types::now()),
         managed: Set(false),
         github_installation_id: Set(None),
-    };
+    }
+    .insert(&tx)
+    .await
+    .map_err(|e| WebError::from_db_err(e, "Organization Name"))?;
 
-    let organization = organization.insert(&state.web_db).await?;
-
-    let organization_user = AOrganizationUser {
+    AOrganizationUser {
         id: Set(OrganizationUserId::now_v7()),
         organization: Set(organization.id),
         user: Set(user.id),
         role: Set(BASE_ROLE_ADMIN_ID),
-    };
+    }
+    .insert(&tx)
+    .await?;
 
-    organization_user.insert(&state.web_db).await?;
+    tx.commit().await?;
 
-    let res = BaseResponse {
+    Ok(Json(BaseResponse {
         error: false,
         message: organization.id.to_string(),
-    };
-
-    Ok(Json(res))
+    }))
 }
 
 pub async fn get_public_organizations(
