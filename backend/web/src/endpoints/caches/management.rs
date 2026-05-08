@@ -21,7 +21,9 @@ use gradient_core::sources::{format_cache_public_key, generate_signing_key};
 use gradient_core::types::input::{check_index_name, validate_display_name};
 use gradient_core::types::*;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, QueryFilter};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, QueryFilter, TransactionTrait,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -149,6 +151,8 @@ pub async fn put(
         WebError::internal("Failed to generate signing key")
     })?;
 
+    let tx = state.web_db.inner().begin().await?;
+
     let cache = ACache {
         id: Set(CacheId::now_v7()),
         name: Set(body.name.clone()),
@@ -162,9 +166,10 @@ pub async fn put(
         created_by: Set(user.id),
         created_at: Set(gradient_core::types::now()),
         managed: Set(false),
-    };
-
-    let cache = cache.insert(&state.web_db).await?;
+    }
+    .insert(&tx)
+    .await
+    .map_err(|e| WebError::from_db_err(e, "Cache Name"))?;
 
     ACacheUpstream {
         id: Set(CacheUpstreamId::now_v7()),
@@ -177,8 +182,10 @@ pub async fn put(
             "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=".to_string(),
         )),
     }
-    .insert(&state.web_db)
+    .insert(&tx)
     .await?;
+
+    tx.commit().await?;
 
     Ok(ok_json(cache.id.to_string()))
 }
