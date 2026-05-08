@@ -39,6 +39,7 @@ fn make_state() -> Arc<ServerState> {
         http: gradient_core::http::build_client().expect("http client"),
         shutdown: gradient_core::shutdown::Shutdown::new(),
         jwt_secret: gradient_core::types::SecretString::new("test-jwt-secret".to_string()),
+        started_at: chrono::Utc::now(),
     })
 }
 

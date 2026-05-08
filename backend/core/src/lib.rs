@@ -217,5 +217,6 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
         http,
         shutdown: Shutdown::new(),
         jwt_secret,
+        started_at: chrono::Utc::now(),
     })
 }

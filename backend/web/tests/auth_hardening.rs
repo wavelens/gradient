@@ -87,6 +87,7 @@ fn server_with(web_db_setup: impl FnOnce(MockDatabase) -> MockDatabase) -> TestS
         http: gradient_core::http::build_client().expect("http client"),
         shutdown: gradient_core::shutdown::Shutdown::new(),
         jwt_secret: SecretString::new(JWT_SECRET.to_string()),
+        started_at: chrono::Utc::now(),
     });
     TestServer::new(create_router(state))
 }
