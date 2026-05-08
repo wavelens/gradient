@@ -49,6 +49,15 @@ info:
     Client IP is taken from `X-Forwarded-For` / `X-Real-IP` (deployments are
     expected behind a reverse proxy), falling back to the connection peer IP.
 
+    ## Request Tracing
+
+    Every response carries an `x-request-id` header. If the client (or an
+    upstream reverse proxy) supplies an `x-request-id` on the request, it is
+    preserved verbatim; otherwise the server mints a UUID v7. Use this id to
+    correlate client-side traces with server logs — every log line emitted
+    while the request is in flight (handler, DB, spawned cleanup tasks)
+    carries the same id.
+
     ## Common Response Envelope
 
     Every JSON response is wrapped in a standard envelope:

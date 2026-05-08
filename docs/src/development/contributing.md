@@ -28,6 +28,10 @@ nix run .#backend
 cd backend
 cargo run
 
+# Tip: parallel `rustc` jobs are capped at 2 in `backend/.cargo/config.toml`
+# (`[build] jobs = 2`) to keep peak memory bounded on dev machines. Override
+# with `cargo build -j N` if you have more headroom.
+
 # Frontend
 nix run .#frontend
 > run_tests()

@@ -1430,3 +1430,59 @@ upload path live in `backend/web/src/endpoints/builds/direct.rs`:
   guard and leaves the directory in place, matching the contract that
   the upload only becomes "real" once the surrounding transaction has
   committed.
+
+## Request-id correlation across handler / DB / cleanup tasks (#86)
+
+Without a stable per-request id, a single HTTP request that issues four
+DB queries plus a webhook delivery emits five unrelated log lines, and
+cleanup work spawned through `Shutdown::spawn` loses the request
+context entirely. `create_router` (`backend/web/src/lib.rs`) now wires
+`SetRequestIdLayer` (with a `MakeRequestUuid` UUID-v7 minter),
+`TraceLayer::make_span_with` (which opens an `http_request` span
+carrying `method`, the `MatchedPath` route, and the `x-request-id`),
+and `PropagateRequestIdLayer` (which echoes the id on the response).
+`Shutdown::spawn` (`backend/core/src/shutdown.rs`) wraps every spawned
+future with `.in_current_span()`, so cleanup tasks inherit the request
+span and the id is on every line they emit.
+
+Tests (`cargo test -p web --test request_id`):
+
+- `missing_request_id_is_generated` — a request without `x-request-id`
+  comes back with one, and the value parses as a UUID. Confirms the
+  `MakeRequestUuid` minter is wired in front of `TraceLayer`.
+- `supplied_request_id_is_echoed` — a request that *does* carry
+  `x-request-id` has its value preserved verbatim on the response, so a
+  reverse-proxy that injects an upstream trace id keeps the trace
+  stitched end-to-end.
+- `each_request_gets_a_distinct_id` — successive auto-generated ids
+  differ; otherwise log correlation collapses across concurrent
+  requests on the same connection.
+
+## FK-chasing data-inconsistency log level (#85)
+
+Access-context loaders (`EvalAccessContext` in
+`backend/web/src/endpoints/evals/mod.rs`, `BuildAccessContext` in
+`backend/web/src/endpoints/builds/mod.rs`, the derivation lookup in
+`backend/web/src/endpoints/builds/query.rs`) chase from a child row to
+its parent through FK columns. When the parent is missing — almost
+always a transient race against a concurrent delete — the previous
+implementation logged the event twice at error level: once at the
+callsite and again inside `WebError::IntoResponse` for the wrapping
+`Internal` variant. That noise drowned legitimate server errors.
+
+The fix introduces a dedicated `WebError::DataInconsistency` variant.
+External behaviour is unchanged (HTTP 500, code `internal`, body
+`Internal server error`); the difference is operational:
+
+- `IntoResponse` no longer logs for the new variant — the rich-context
+  warn line is emitted exactly once at the construction callsite,
+  carrying the structured ids (`project_id`, `evaluation_id`,
+  `derivation_id`, `organization_id`) that triage actually needs.
+- The callsite log itself is now `tracing::warn!`, not `error!`, so
+  these benign races no longer pollute the error stream.
+
+No new tests were added: the change is a log-level adjustment and a
+no-op refactor of the error variant. The existing access-control tests
+(`evaluations.rs`, `builds_download.rs`, `commits_authorization.rs`)
+still cover the response side of the data-inconsistency paths and pass
+unchanged.
