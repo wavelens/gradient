@@ -630,6 +630,8 @@ pub async fn post_resend_verification(
     state: State<Arc<ServerState>>,
     Json(body): Json<CheckUsernameRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
+    use sea_orm::TransactionTrait;
+
     if !state
         .config
         .email
@@ -656,13 +658,14 @@ pub async fn post_resend_verification(
     let verification_token = generate_verification_token();
     let verification_expires = gradient_core::types::now() + chrono::Duration::hours(24);
 
+    let tx = state.web_db.inner().begin().await?;
+
     let mut user_active: AUser = user.clone().into();
     user_active.email_verification_token = Set(Some(verification_token.clone()));
     user_active.email_verification_token_expires = Set(Some(verification_expires));
+    user_active.update(&tx).await?;
 
-    user_active.update(&state.web_db).await?;
-
-    if let Err(e) = state
+    state
         .email
         .send_verification_email(
             &user.email,
@@ -671,12 +674,9 @@ pub async fn post_resend_verification(
             &state.config.server.serve_url,
         )
         .await
-    {
-        return Err(WebError::internal(format!(
-            "Failed to send verification email: {}",
-            e
-        )));
-    }
+        .map_err(|e| WebError::internal(format!("Failed to send verification email: {}", e)))?;
+
+    tx.commit().await?;
 
     Ok(ok_json("Verification email sent successfully".to_string()))
 }
