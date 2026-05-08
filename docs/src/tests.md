@@ -1209,8 +1209,37 @@ returned by `GET /evals/{evaluation}` is locked in:
 - `builtin_arch_satisfied_by_any_worker` — `architecture == "builtin"`
   derivations are never counted as unmet so long as any worker is
   connected.
+- `pre_build_target_no_workers_yields_waiting_with_empty_unmet` — when an
+  evaluation is in a pre-build phase (`Queued`/`Fetching`/`EvaluatingFlake`/
+  `EvaluatingDerivation`) and no worker is connected, the reconciler picks
+  `Waiting` with an empty `unmet` list so the UI can explain the stall
+  without inventing fake build requirements (issue #97).
+- `pre_build_target_with_workers_yields_queued_and_clears_reason` — once
+  any worker is connected the pre-build helper recovers the eval to
+  `Queued` and clears any stored `WaitingReason`, letting the dispatch
+  loop replay the normal progression.
 
 Run with `cargo test -p scheduler --tests waiting_reason_tests`.
+
+## Pre-build evaluation stall when no worker exists (issue #97)
+
+`backend/core/src/state_machine/eval.rs::tests` extends the evaluation
+state machine to allow the scheduler to surface a "no worker connected"
+stall before any builds have been queued:
+
+- `eval_sm_pre_build_states_can_enter_waiting` — every pre-build status
+  (`Queued`, `Fetching`, `EvaluatingFlake`, `EvaluatingDerivation`) can
+  transition to `Waiting`, matching what `BuildStateHandler::reconcile_waiting_state`
+  now does when `worker_caps.is_empty()`.
+- `eval_sm_waiting_recovers_to_queued` — the recovery edge `Waiting →
+  Queued` is valid; this is the path the reconciler takes once a worker
+  reconnects, so the dispatch loop replays the normal pre-build chain
+  rather than skipping straight back into a later phase.
+- `eval_sm_waiting_cannot_skip_into_pre_build_phases` — direct
+  `Waiting → Fetching/EvaluatingFlake/EvaluatingDerivation` transitions
+  are rejected so that recovery always flows through `Queued`.
+
+Run with `cargo test -p core --tests state_machine::eval`.
 
 ## Project triggers (issue #116)
 
