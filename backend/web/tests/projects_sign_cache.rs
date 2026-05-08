@@ -12,7 +12,8 @@
 
 use axum_test::TestServer;
 use chrono::{Duration, Utc};
-use entity::{ids::*, organization_user, project, project_trigger, session};
+use entity::{ids::*, organization_user, project, project_trigger, role, session};
+use gradient_core::permissions::admin_mask;
 use gradient_core::storage::{EmailSender, NarStore};
 use gradient_core::types::{RuntimeConfig, SecretString, ServerState, SessionId, WebDb, WorkerDb};
 use jsonwebtoken::{EncodingKey, Header, encode};
@@ -102,6 +103,15 @@ fn admin_membership() -> organization_user::Model {
     }
 }
 
+fn admin_role_row() -> role::Model {
+    role::Model {
+        id: gradient_core::types::consts::BASE_ROLE_ADMIN_ID,
+        name: "Admin".into(),
+        organization: None,
+        permission: admin_mask(),
+    }
+}
+
 fn project_with(sign_cache: bool) -> project::Model {
     project::Model {
         id: project_id(),
@@ -145,7 +155,8 @@ fn get_project_includes_sign_cache() {
             .append_query_results([vec![org()]])
             .append_query_results([vec![project_with(false)]])
             .append_query_results([vec![admin_membership()]])
-            .append_query_results([vec![admin_membership()]]);
+            .append_query_results([vec![admin_membership()]])
+            .append_query_results([vec![admin_role_row()]]);
 
         let server = make_server(db.into_connection());
         let res = server
@@ -177,6 +188,7 @@ fn patch_project_writes_sign_cache_false() {
             .append_query_results([vec![org()]])
             .append_query_results([vec![project_with(true)]])
             .append_query_results([vec![admin_membership()]])
+            .append_query_results([vec![admin_role_row()]])
             .append_query_results([vec![project_with(false)]]);
 
         let server = make_server(db.into_connection());
@@ -216,6 +228,7 @@ fn create_project_accepts_sign_cache_false() {
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
             .append_query_results([vec![org()]])
             .append_query_results([vec![admin_membership()]])
+            .append_query_results([vec![admin_role_row()]])
             .append_query_results([Vec::<project::Model>::new()])
             .append_query_results([vec![project_with(false)]])
             .append_query_results([vec![seeded_trigger]]);

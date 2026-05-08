@@ -211,6 +211,16 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
                 .delete(orgs::delete_organization_users),
         )
         .route(
+            "/orgs/{organization}/roles",
+            get(orgs::get_organization_roles).post(orgs::post_organization_role),
+        )
+        .route(
+            "/orgs/{organization}/roles/{role_id}",
+            get(orgs::get_organization_role)
+                .patch(orgs::patch_organization_role)
+                .delete(orgs::delete_organization_role),
+        )
+        .route(
             "/orgs/{organization}/ssh",
             get(orgs::get_organization_ssh).post(orgs::post_organization_ssh),
         )

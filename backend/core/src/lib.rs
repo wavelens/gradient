@@ -11,6 +11,7 @@ pub mod http;
 pub mod hydra;
 pub mod nix;
 pub mod nix_hash;
+pub mod permissions;
 pub mod repo;
 pub mod shutdown;
 pub mod sources;

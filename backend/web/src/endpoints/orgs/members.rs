@@ -206,7 +206,13 @@ pub async fn patch_organization_users(
 
     let previous_role_id = membership.role;
     let role = ERole::find()
-        .filter(CRole::Name.eq(body.role.clone()))
+        .filter(
+            Condition::all().add(CRole::Name.eq(body.role.clone())).add(
+                Condition::any()
+                    .add(CRole::Organization.eq(organization.id))
+                    .add(CRole::Organization.is_null()),
+            ),
+        )
         .one(&state.web_db)
         .await?
         .or_not_found("Role")?;

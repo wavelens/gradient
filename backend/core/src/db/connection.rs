@@ -17,6 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tracing::log::LevelFilter;
 
+use crate::permissions::{admin_mask, view_mask, write_mask};
 use crate::types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID};
 use crate::types::*;
 
@@ -113,45 +114,45 @@ async fn update_db(db: &DatabaseConnection) -> Result<(), DbErr> {
         aevaluation.update(db).await?;
     }
 
-    let base_role_admin = ERole::find_by_id(BASE_ROLE_ADMIN_ID).one(db).await?;
+    seed_builtin_role(db, BASE_ROLE_ADMIN_ID, "Admin", admin_mask()).await?;
+    seed_builtin_role(db, BASE_ROLE_WRITE_ID, "Write", write_mask()).await?;
+    seed_builtin_role(db, BASE_ROLE_VIEW_ID, "View", view_mask()).await?;
 
-    if base_role_admin.is_none() {
-        let arole = ARole {
-            id: Set(BASE_ROLE_ADMIN_ID),
-            name: Set("Admin".to_string()),
-            organization: Set(None),
-            permission: Set(0x7FFFFFFFFFFFFFFF),
-        };
+    Ok(())
+}
 
-        arole.insert(db).await?;
+/// Insert or refresh a built-in role.
+///
+/// Built-in roles are global (`organization = NULL`) and their canonical
+/// permission bitmasks are owned by [`crate::permissions`]. Refreshing on every
+/// startup means upgrades that add new capabilities propagate to existing
+/// installations without a manual migration; the role name is also kept in
+/// sync, which avoids drift if an operator renames a built-in role by hand.
+async fn seed_builtin_role(
+    db: &DatabaseConnection,
+    role_id: RoleId,
+    name: &str,
+    permission: i64,
+) -> Result<(), DbErr> {
+    match ERole::find_by_id(role_id).one(db).await? {
+        None => {
+            ARole {
+                id: Set(role_id),
+                name: Set(name.to_string()),
+                organization: Set(None),
+                permission: Set(permission),
+            }
+            .insert(db)
+            .await?;
+        }
+        Some(existing) if existing.permission != permission || existing.name != name => {
+            let mut active: ARole = existing.into();
+            active.name = Set(name.to_string());
+            active.permission = Set(permission);
+            active.update(db).await?;
+        }
+        Some(_) => {}
     }
-
-    let base_role_write = ERole::find_by_id(BASE_ROLE_WRITE_ID).one(db).await?;
-
-    if base_role_write.is_none() {
-        let arole = ARole {
-            id: Set(BASE_ROLE_WRITE_ID),
-            name: Set("Write".to_string()),
-            organization: Set(None),
-            permission: Set(0x000000000000000),
-        };
-
-        arole.insert(db).await?;
-    }
-
-    let base_role_view = ERole::find_by_id(BASE_ROLE_VIEW_ID).one(db).await?;
-
-    if base_role_view.is_none() {
-        let arole = ARole {
-            id: Set(BASE_ROLE_VIEW_ID),
-            name: Set("View".to_string()),
-            organization: Set(None),
-            permission: Set(0x000000000000000),
-        };
-
-        arole.insert(db).await?;
-    }
-
     Ok(())
 }
 
