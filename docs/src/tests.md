@@ -1374,3 +1374,59 @@ cover the wiring of the limiter into the proto router:
 - `slot_is_released_for_subsequent_upgrades_after_drop` — a held permit
   forces the first upgrade to `503`; dropping it lets the next request
   through, confirming the permit lifetime is what gates the slot.
+
+## DB transactions for multi-step writes (issue #64)
+
+Several create/update handlers historically performed two or more
+inserts back-to-back without a transaction, so a unique-constraint
+collision or other failure on the second statement would leave the
+first row committed (orphaned org without admin membership, cache
+without its default upstream, direct-build row without its uploaded
+artefacts on disk, etc.). The handlers now wrap each multi-step write
+in a `sea_orm` transaction and map PostgreSQL `unique_violation`
+(SQLSTATE `23505`) onto a typed `WebError::already_exists` via a shared
+helper.
+
+Integration tests in `backend/web/tests/orgs_create.rs` and
+`backend/web/tests/caches_create.rs` cover the two `put` handlers that
+gained transactional scope:
+
+- `orgs::put` now wraps the `organization` insert and the admin
+  `organization_user` membership insert in a single transaction.
+- `caches::put` now wraps the `cache` insert and the default
+  `cache_upstream` insert in a single transaction.
+
+Each file contains a regression test that exercises the in-handler
+pre-check and asserts the `409 already_exists` envelope on a duplicate
+name, plus a happy-path test that drives the new `tx + commit` code
+path end-to-end and asserts both rows are present afterwards.
+`MockDatabase` does not simulate transactional rollback, so these tests
+verify call sequence and error mapping; the rollback contract itself
+is a SeaORM trust boundary.
+
+Unit tests for the SQL-error mapping live in `backend/web/src/error.rs`:
+
+- `from_db_err_passes_through_non_db_errors` — non-`DbErr::Query`
+  variants (e.g. `RecordNotFound`) round-trip as `WebError::Internal`
+  rather than being misclassified as conflicts.
+- `from_db_err_passes_through_query_string_errors` — a `DbErr::Query`
+  carrying a string-only payload (no underlying `sqlx::Error`) is
+  treated as `Internal`.
+- `from_db_err_record_not_found_is_internal` — pins the documented
+  behaviour that "row missing" is the caller's pre-check problem, not
+  a 409.
+
+The mapper uses the typed sqlx 0.8 API (`db_err.is_unique_violation()`)
+rather than scraping `to_string()`, so it survives sqlx upgrades that
+reflow the message text.
+
+Unit tests for the `TempUploadDir` RAII guard used by the direct-build
+upload path live in `backend/web/src/endpoints/builds/direct.rs`:
+
+- `temp_upload_dir_drop_removes_directory` — dropping the guard
+  without calling `commit()` removes the on-disk staging directory, so
+  a failed DB transaction cannot leave orphaned NARs behind.
+- `temp_upload_dir_commit_keeps_directory` — `commit()` consumes the
+  guard and leaves the directory in place, matching the contract that
+  the upload only becomes "real" once the surrounding transaction has
+  committed.
