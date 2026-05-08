@@ -3,6 +3,9 @@
 [build]
 # Enable incremental compilation for faster builds
 incremental = true
+# Cap parallel rustc invocations to keep peak memory bounded on dev machines.
+# Cargo.toml has no equivalent — this is the canonical place for the setting.
+jobs = 2
 
 [target.x86_64-unknown-linux-gnu]
 # Optimize for current CPU when running tests locally
