@@ -121,7 +121,10 @@ pub async fn post_basic_register(
         oidc_subject: Set(None),
     };
 
-    let user = user.insert(&state.web_db).await?;
+    let user = user
+        .insert(&state.web_db)
+        .await
+        .map_err(|e| WebError::from_db_err(e, "User"))?;
 
     let info = RequestInfo::from_headers(&headers);
     audit_record(

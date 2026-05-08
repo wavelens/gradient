@@ -288,7 +288,10 @@ pub async fn patch_cache(
         acache.priority = Set(priority);
     }
 
-    acache.update(&state.web_db).await?;
+    acache
+        .update(&state.web_db)
+        .await
+        .map_err(|e| WebError::from_db_err(e, "Cache Name"))?;
 
     Ok(ok_json("Cache updated".to_string()))
 }
