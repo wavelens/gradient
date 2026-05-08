@@ -6328,6 +6328,7 @@ dependencies = [
  "http-body-util",
  "jsonwebtoken",
  "password-auth",
+ "prometheus",
  "proto",
  "rand 0.10.1",
  "reqwest 0.13.3",
