@@ -16,13 +16,13 @@ pub mod helpers;
 pub mod permissions;
 
 use axum::body::Body;
-use axum::extract::DefaultBodyLimit;
+use axum::extract::{DefaultBodyLimit, MatchedPath};
 use axum::routing::{get, patch, post, put};
 use axum::{Router, middleware};
 use bytes::Bytes;
 use governor::middleware::NoOpMiddleware;
 use http::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
-use http::{HeaderMap, Request, Response};
+use http::{HeaderMap, HeaderValue, Request, Response};
 use std::net::{IpAddr, Ipv4Addr};
 use std::time::Duration;
 use tower_governor::GovernorLayer;
@@ -31,8 +31,12 @@ use tower_governor::governor::{GovernorConfig, GovernorConfigBuilder};
 use tower_governor::key_extractor::{KeyExtractor, SmartIpKeyExtractor};
 use tower_http::classify::ServerErrorsFailureClass;
 use tower_http::cors::{AllowOrigin, CorsLayer};
+use tower_http::request_id::{
+    MakeRequestId, PropagateRequestIdLayer, RequestId, SetRequestIdLayer,
+};
 use tower_http::trace::TraceLayer;
 use tracing::Span;
+use uuid::Uuid;
 
 use endpoints::{admin, *};
 use gradient_core::types::ServerState;
@@ -57,6 +61,23 @@ impl KeyExtractor for SmartIpOrFallback {
             Ok(ip) => Ok(ip),
             Err(_) => Ok(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
         }
+    }
+}
+
+/// Generates an x-request-id header for incoming requests that don't carry
+/// one. Using UUID v7 keeps ids monotonic per source so log scans stay
+/// roughly time-ordered. Trusted upstream proxies that already inject an
+/// `x-request-id` are passed through unchanged by `SetRequestIdLayer`.
+#[derive(Debug, Clone, Copy, Default)]
+struct MakeRequestUuid;
+
+impl MakeRequestId for MakeRequestUuid {
+    fn make_request_id<B>(&mut self, _request: &Request<B>) -> Option<RequestId> {
+        let id = Uuid::now_v7().to_string();
+        // `Uuid::now_v7().to_string()` produces ASCII hex+hyphens, always a
+        // valid header value — `from_str` cannot realistically fail.
+        let value = HeaderValue::from_str(&id).ok()?;
+        Some(RequestId::new(value))
     }
 }
 
@@ -115,10 +136,36 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         .allow_headers(vec![AUTHORIZATION, ACCEPT, CONTENT_TYPE])
         .allow_credentials(true);
 
+    // Build one span per request, populated with method, route pattern, and
+    // the request-id assigned by `SetRequestIdLayer`. All `tracing` events
+    // emitted while the request is in flight — handler logs, DB queries,
+    // and any task spawned via `Shutdown::spawn` (which inherits the
+    // current span) — are linked to the same id, so a single grep finds
+    // every line for one request.
     let trace = TraceLayer::new_for_http()
+        .make_span_with(|request: &Request<Body>| {
+            let request_id = request
+                .headers()
+                .get("x-request-id")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("");
+            // `MatchedPath` carries the route pattern (e.g. `/orgs/{organization}`)
+            // rather than the concrete path, so spans group by route in dashboards
+            // and don't blow up cardinality with concrete ids.
+            let route = request
+                .extensions()
+                .get::<MatchedPath>()
+                .map(MatchedPath::as_str)
+                .unwrap_or_else(|| request.uri().path());
+            tracing::info_span!(
+                "http_request",
+                method = %request.method(),
+                route = %route,
+                request_id = %request_id,
+            )
+        })
         .on_request(|request: &Request<Body>, _span: &Span| {
             tracing::debug!(
-                method = %request.method(),
                 path = request.uri().path(),
                 "request started",
             )
@@ -474,9 +521,16 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
 
     app = app.merge(cache_routes);
 
+    // Layer order (outer → inner, i.e. last `.layer()` is outermost):
+    //   SetRequestIdLayer    — assigns x-request-id on inbound requests
+    //   TraceLayer           — opens the span (reads the id from headers)
+    //   PropagateRequestIdLayer — copies the id onto the response
+    //   CORS                 — innermost so preflights still get traced
     app.fallback(handle_404)
         .layer(cors)
+        .layer(PropagateRequestIdLayer::x_request_id())
         .layer(trace)
+        .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
         .with_state(state)
 }
 
