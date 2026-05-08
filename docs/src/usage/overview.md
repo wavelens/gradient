@@ -65,6 +65,41 @@ Evaluations can also be triggered automatically:
 - **Forge webhooks** — for Gitea, Forgejo, GitLab, or GitHub without the App, configure a per-org push webhook. See [Forge Webhooks](../configuration.md#forge-webhooks-gitea-forgejo-gitlab-github-without-app).
 - **Polling** — fallback for projects without webhook configuration; Gradient checks for new commits every 60 seconds.
 
+## Members & Roles
+
+Each organization manages its own members and roles under
+**Organization → Settings → Members & Roles**.
+
+### Built-in roles
+
+Every organization carries the same three immutable system roles:
+
+| Role  | What it can do                                                                                            |
+|-------|-----------------------------------------------------------------------------------------------------------|
+| Admin | Everything: full settings, member & role management, project lifecycle, organization deletion.           |
+| Write | Create/edit projects, manage webhooks/integrations/workers/cache subscriptions, trigger evaluations.     |
+| View  | Read members-only content; mutate non-secret sub-resources only (workers, integrations, cache subs, SSH key). |
+
+Built-in roles cannot be edited or deleted.
+
+### Custom roles
+
+Members holding the `manageRoles` capability can create org-specific custom
+roles by ticking individual permissions:
+
+- Org-level: `viewOrg`, `manageOrgSettings`, `deleteOrg`, `manageMembers`,
+  `manageRoles`, `manageIntegrations`, `manageWebhooks`, `manageWorkers`,
+  `manageSubscriptions`, `manageSshKey`.
+- Project-level: `createProject`, `editProject`, `triggerEvaluation`.
+
+Permission identifiers and their canonical order are returned by
+`GET /api/v1/orgs/{organization}/roles`'s `available_permissions` field —
+new capabilities are appended over time and the UI picks them up
+automatically.
+
+A role currently assigned to one or more members cannot be deleted; reassign
+the affected members first.
+
 ## SSH Keys
 
 Each organization has one Ed25519 SSH key pair, generated automatically. The public key is shown in **Organization → Settings → SSH**.

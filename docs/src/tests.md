@@ -26,18 +26,23 @@ JWKS, `iss`/`aud`/`exp`/`nonce` checks, identity bound to
 All "load resource by name and check the caller may use it" logic lives in
 two modules:
 
-- `backend/web/src/permissions.rs` — declares the [`Permission`] capability
-  enum (e.g. `EditProject`, `ManageMembers`, `ManageWebhooks`) and the
-  `role_grants(role_id, permission)` lookup. Today the role → permission
-  mapping is hardcoded for the three built-in roles; replacing this single
-  function with a DB-driven lookup is what enables custom roles configurable
-  in the frontend.
+- `backend/core/src/permissions.rs` — declares the [`Permission`] capability
+  enum (e.g. `EditProject`, `ManageMembers`, `ManageRoles`, `ManageWebhooks`),
+  each capability's stable bit position in the `role.permission` bitmask
+  (`Permission::bit`), and the canonical bitmasks for the three built-in
+  roles (`admin_mask` / `write_mask` / `view_mask`). The mapping between
+  roles and capabilities lives entirely in the database — `mask_grants`
+  decides authorization from a role row's `permission` column, so custom
+  roles configured at runtime require no code change at the call sites.
+  The web crate re-exports this module as `web::permissions`.
 - `backend/web/src/access.rs` — exposes `load_org`, `load_project`,
   `load_cache`, `load_webhook_in_org`, `load_integration_in_org`, plus the
-  predicates `is_org_member` / `has_permission`. Each loader takes an access
-  policy enum (`OrgAccess`, `ProjectAccess`, `CacheAccess`) so handlers
-  declare *what level of access they need* rather than stitching together
-  ad-hoc lookup + permission + state-managed checks.
+  predicates `is_org_member` / `has_permission` and the new
+  `load_membership_with_permissions` helper that loads the membership row
+  alongside the role's permission bitmask in one logical step. Each loader
+  takes an access policy enum (`OrgAccess`, `ProjectAccess`, `CacheAccess`)
+  so handlers declare *what level of access they need* rather than stitching
+  together ad-hoc lookup + permission + state-managed checks.
 
 Unit tests in `access.rs` cover the role matrix and the managed-resource
 guard:
@@ -60,16 +65,63 @@ guard:
   same matrix at the project level, including the project-existence label
   guarantee.
 
-Unit tests in `permissions.rs` lock the role → permission mapping itself:
+Unit tests in `permissions.rs` (in `core`) lock the bitmask invariants:
 
-- `admin_grants_everything`
-- `write_excludes_admin_only`
-- `view_cannot_edit_projects_or_webhooks`
-- `unknown_role_grants_nothing`
-- `view_org_is_not_mutating`
+- `each_permission_has_unique_bit` — no capability shares a bit position.
+- `wire_names_round_trip` — every `Permission::as_wire_name()` parses back
+  via `from_wire_name`.
+- `admin_mask_grants_everything` — Admin's canonical mask covers
+  `Permission::ALL`.
+- `write_mask_excludes_admin_only_perms` — Write retains project/webhook
+  management but cannot manage members, roles, or org settings.
+- `view_mask_cannot_edit_projects_or_webhooks` — View is read-only on
+  sensitive surfaces.
+- `empty_mask_grants_nothing` — defensive: a role with `permission = 0`
+  authorizes nothing.
+- `mask_round_trips_through_vec` — `mask_to_vec` and `mask_from` are inverses.
+- `view_org_is_not_mutating` / `is_builtin_role_recognises_seed_uuids`.
 
 Run with: `cargo test -p web --lib access::tests`
-and `cargo test -p web --lib permissions::tests`.
+and `cargo test -p core --lib permissions::tests`.
+
+## Custom roles & role-management API
+
+Issue #103 / #81 wired a DB-backed permission system: every role row carries
+an `i64` bitmask in `role.permission`, capability authorization is a single
+`mask & Permission::bit() != 0`, and a new `/orgs/{org}/roles` endpoint
+family exposes CRUD for org-scoped custom roles.
+
+Integration tests in `backend/web/tests/roles_crud.rs` exercise the full API
+through `axum_test::TestServer` + `MockDatabase`:
+
+- `list_roles_returns_builtins_plus_custom` — `GET /orgs/{org}/roles` is
+  visible to any member and returns the three built-ins, all org-scoped
+  custom roles, and an `available_permissions` catalogue derived from
+  `Permission::ALL`.
+- `create_role_persists_permission_bitmask` — `POST` resolves the wire-form
+  permission identifiers, composes the bitmask, and round-trips it back on
+  the response.
+- `create_role_rejects_unknown_permission` — unknown identifiers return
+  `400` with the offending name in the message.
+- `create_role_rejects_view_role_caller` — only callers with the
+  `manageRoles` permission may create roles; a View-tier member is rejected
+  with `403`.
+- `create_role_rejects_duplicate_name` — name uniqueness is scoped to
+  `(org_id, name)` ∪ built-ins; duplicates return `409`.
+- `patch_builtin_role_is_forbidden` / `delete_builtin_role_is_forbidden` —
+  the three system roles are immutable.
+- `patch_custom_role_updates_mask` — the bitmask is overwritten wholesale
+  on PATCH so the UI can reflect a permission set without diff plumbing.
+- `delete_role_in_use_is_rejected` — deleting a role that is still assigned
+  to one or more members returns `400`; the caller must reassign first.
+- `delete_unused_custom_role_succeeds` — the happy path.
+- `custom_role_with_manage_webhooks_can_list_webhooks` /
+  `custom_role_without_manage_webhooks_is_rejected` — end-to-end
+  authorization through `access::has_permission`, proving that a custom
+  role's bitmask reaches the webhook-list gate without any role-id
+  comparison.
+
+Run with: `cargo test -p web --test roles_crud`.
 
 ## Proto handshake — organization peer filtering
 
