@@ -100,53 +100,18 @@
       </div>
     </div>
 
-    <!-- Members -->
+    <!-- Members & Roles -->
     <div class="settings-section">
-      <div class="section-header">
-        <h2>Members</h2>
-        <button pButton label="Add Member" icon="pi pi-plus" severity="secondary" (click)="openAddMemberDialog()"></button>
-      </div>
-      @if (membersLoading()) {
-        <app-loading-spinner message="Loading members..." />
-      } @else {
-        <div class="settings-card">
-          @if (members().length > 0) {
-            <div class="members-list">
-              @for (member of members(); track member.id) {
-                <div class="member-row">
-                  <div class="member-info">
-                    <span class="material-symbols-outlined">person</span>
-                    <div class="member-username">{{ member.id }}</div>
-                  </div>
-                  <div class="member-actions">
-                    <select
-                      class="role-select"
-                      [ngModel]="member.name"
-                      [disabled]="updatingRole() === member.id || removingMember() !== null"
-                      (ngModelChange)="updateMemberRole(member.id, $event)"
-                    >
-                      @for (role of roles; track role) {
-                        <option [value]="role">{{ role }}</option>
-                      }
-                    </select>
-                    <button
-                      pButton
-                      icon="pi pi-times"
-                      severity="danger"
-                      size="small"
-                      [loading]="removingMember() === member.id"
-                      [disabled]="removingMember() !== null || updatingRole() !== null"
-                      (click)="removeMember(member.id)"
-                    ></button>
-                  </div>
-                </div>
-              }
-            </div>
-          } @else {
-            <p class="text-secondary">No members found.</p>
-          }
+      <h2>Access</h2>
+      <div class="settings-card">
+        <div class="nav-row">
+          <div>
+            <h3>Members & Roles</h3>
+            <p class="text-secondary">Manage who is in this organization and what they can do</p>
+          </div>
+          <a pButton label="Manage Members" icon="pi pi-users" severity="secondary" [routerLink]="['/organization', orgName, 'members']"></a>
         </div>
-      }
+      </div>
     </div>
 
     <!-- Infrastructure -->
@@ -255,51 +220,6 @@
     </div>
   }
 </div>
-
-<!-- Add Member Dialog -->
-<p-dialog
-  header="Add Member"
-  [(visible)]="showAddMemberDialog"
-  [modal]="true"
-  [style]="{ width: '400px' }"
-  [draggable]="false"
-  [resizable]="false"
->
-  <div class="dialog-content">
-    @if (memberError()) {
-      <div class="dialog-error">
-        <span class="material-symbols-outlined">error</span>
-        {{ memberError() }}
-      </div>
-    }
-    <div class="form-group">
-      <label for="member-name">Username</label>
-      <p-autoComplete
-        id="member-name"
-        [(ngModel)]="newMember.user"
-        [suggestions]="userSuggestions()"
-        (completeMethod)="onUserSearch($event)"
-        placeholder="Enter username"
-        styleClass="w-full"
-        [forceSelection]="false"
-        appendTo="body"
-        (keyup.enter)="addMember()"
-      />
-    </div>
-    <div class="form-group">
-      <label for="member-role">Role</label>
-      <select id="member-role" [(ngModel)]="newMember.role" class="role-select">
-        @for (role of roles; track role) {
-          <option [value]="role">{{ role }}</option>
-        }
-      </select>
-    </div>
-  </div>
-  <ng-template pTemplate="footer">
-    <button pButton label="Cancel" severity="secondary" (click)="showAddMemberDialog.set(false)" [disabled]="addingMember()"></button>
-    <button pButton label="Add" (click)="addMember()" [disabled]="!newMember.user || addingMember()" [loading]="addingMember()"></button>
-  </ng-template>
-</p-dialog>
 
 <!-- Regenerate SSH Key Confirmation Dialog -->
 <p-dialog

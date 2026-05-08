@@ -153,6 +153,14 @@ export const routes: Routes = [
             (m) => m.OrganizationSettingsComponent
           ),
       },
+      {
+        path: 'organization/:org/members',
+        title: 'Members & Roles',
+        loadComponent: () =>
+          import('./features/organizations/members-roles/members-roles.component').then(
+            (m) => m.MembersRolesComponent
+          ),
+      },
 
       // Workers
       {
