@@ -48,7 +48,7 @@ pub async fn get_build(
         .one(&state.web_db)
         .await?
         .ok_or_else(|| {
-            tracing::error!(
+            tracing::warn!(
                 derivation_id = %build.derivation,
                 %build_id,
                 "Derivation not found for build"

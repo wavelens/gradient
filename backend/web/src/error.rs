@@ -106,6 +106,13 @@ pub enum WebError {
     UnprocessableEntity(ErrorCode, String),
     #[error("Service Unavailable [{0}]: {1}")]
     ServiceUnavailable(ErrorCode, String),
+    /// Referential-integrity mismatch detected at request time (e.g. a build
+    /// row whose derivation row was concurrently deleted). Maps to the same
+    /// HTTP response as [`Internal`] but is logged at warn level — the
+    /// rich-context warn line is emitted at the callsite, so `IntoResponse`
+    /// stays silent.
+    #[error("Data Inconsistency: {0}")]
+    DataInconsistency(String),
     #[error(transparent)]
     Internal(#[from] AnyhowError),
 }
@@ -133,7 +140,7 @@ impl WebError {
             Self::Conflict(..) => StatusCode::CONFLICT,
             Self::UnprocessableEntity(..) => StatusCode::UNPROCESSABLE_ENTITY,
             Self::ServiceUnavailable(..) => StatusCode::SERVICE_UNAVAILABLE,
-            Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::DataInconsistency(_) | Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 
@@ -147,7 +154,7 @@ impl WebError {
             | Self::Conflict(c, _)
             | Self::UnprocessableEntity(c, _)
             | Self::ServiceUnavailable(c, _) => *c,
-            Self::Internal(_) => ErrorCode::INTERNAL,
+            Self::DataInconsistency(_) | Self::Internal(_) => ErrorCode::INTERNAL,
         }
     }
 }
@@ -191,6 +198,11 @@ impl IntoResponse for WebError {
         let message: String = match &self {
             Self::Internal(err) => {
                 tracing::error!(error = format!("{err:#}"), "Internal error");
+                "Internal server error".to_string()
+            }
+            Self::DataInconsistency(_) => {
+                // Rich-context warn line is emitted at the construction
+                // callsite — don't double-log here.
                 "Internal server error".to_string()
             }
             Self::BadRequest(_, m)
@@ -280,13 +292,12 @@ impl WebError {
 
     /// Internal-server-error for "<resource> data inconsistency" — a
     /// referential-integrity violation discovered at request time
-    /// (e.g. a build row with no derivation row).
+    /// (e.g. a build row with no derivation row). Maps to HTTP 500 with the
+    /// generic `internal` code, but is logged at warn level via the
+    /// `DataInconsistency` variant since the cause is most often a transient
+    /// race against concurrent deletion rather than a real server bug.
     pub fn data_inconsistency(resource: &str) -> Self {
-        Self::Internal(AnyhowError::msg(format!(
-            "[{}] {} data inconsistency",
-            ErrorCode::DATA_INCONSISTENCY,
-            resource
-        )))
+        Self::DataInconsistency(format!("{} data inconsistency", resource))
     }
 
     pub fn invalid_credentials() -> Self {
