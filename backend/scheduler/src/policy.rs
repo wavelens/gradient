@@ -196,12 +196,20 @@ impl Rule for DependencyCountRule {
 ///
 /// Score contribution: seconds since `queued_at`, capped at `max_wait_secs`,
 /// scaled by `bonus_per_second`.
+///
+/// The default cap (`max_wait_secs = 3600`) yields a maximum bonus of `360`,
+/// chosen so that a build which has waited an hour outscores a fresh
+/// fully-cached candidate (`MissingPathsRule::scored_bonus = 200`) even
+/// after typical penalties on the older job. Lowering the cap re-introduces
+/// the starvation case where a stream of fresh ready-to-run jobs keeps
+/// older builds permanently behind.
 #[derive(Debug)]
 pub struct WaitTimeRule {
     /// Score bonus per second the build has been waiting (should be positive).
     pub bonus_per_second: f64,
     /// Cap on wait time used for scoring, in seconds.
-    /// Prevents very old jobs from dominating all other rules.
+    /// Prevents very old jobs from dominating all other rules while still
+    /// allowing the wait bonus to overcome the cached-fresh preference.
     pub max_wait_secs: f64,
 }
 
@@ -209,7 +217,7 @@ impl Default for WaitTimeRule {
     fn default() -> Self {
         Self {
             bonus_per_second: 0.1,
-            max_wait_secs: 600.0, // 10 minutes
+            max_wait_secs: 3600.0,
         }
     }
 }
@@ -546,6 +554,47 @@ mod tests {
         assert!(
             ancient >= cap - 0.01,
             "ancient wait should reach the cap, got {ancient}"
+        );
+    }
+
+    #[test]
+    fn default_policy_long_waiting_build_overcomes_fresh_cached() {
+        // Anti-starvation: a build waiting an hour must outscore a fresh
+        // job that the requesting worker can serve without fetching.
+        // If it doesn't, a steady stream of fresh fully-cached candidates
+        // starves older builds indefinitely. Guards against the
+        // `WaitTimeRule` cap being lowered below the `MissingPathsRule`
+        // scored bonus.
+        let policy = Policy::default_build_policy();
+        let archs = vec!["x86_64-linux".into()];
+        let feats: Vec<String> = vec![];
+        let w = worker_ctx(&archs, &feats);
+        let now = gradient_core::types::now();
+
+        let (j_fresh, ..) = build_job_ctx("x86_64-linux", Some(0), Some(0));
+        let c_fresh = JobContext {
+            job: &j_fresh,
+            missing_count: Some(0),
+            missing_nar_size: Some(0),
+            dependency_count: 0,
+            queued_at: now,
+        };
+
+        let (j_old, ..) = build_job_ctx("x86_64-linux", None, None);
+        let c_old = JobContext {
+            job: &j_old,
+            missing_count: None,
+            missing_nar_size: None,
+            dependency_count: 0,
+            queued_at: now - chrono::Duration::seconds(3600),
+        };
+
+        let s_old = policy.score(&c_old, &w);
+        let s_fresh = policy.score(&c_fresh, &w);
+        assert!(
+            s_old > s_fresh,
+            "1-hour-old build must beat fresh fully-cached candidate \
+             (anti-starvation): old={s_old} fresh={s_fresh}"
         );
     }
 
