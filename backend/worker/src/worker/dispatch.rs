@@ -17,6 +17,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::Result;
 use proto::messages::{CachedPath, ClientMessage, Job, JobCandidate, JobKind, ServerMessage};
 use tokio::sync::{mpsc, watch};
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
 use crate::config::WorkerConfig;
@@ -32,6 +33,7 @@ use super::scoring::{send_score_chunks, spawn_scoring_task};
 
 /// Returns the draining flag: `true` if the server sent `Draining` before
 /// closing the connection.
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn run_dispatch_loop(
     conn: ProtoConnection,
     config: &WorkerConfig,
@@ -40,6 +42,7 @@ pub(super) async fn run_dispatch_loop(
     credentials: &mut CredentialStore,
     candidates: &Arc<Mutex<HashMap<String, JobCandidate>>>,
     last_scores: &Arc<Mutex<HashMap<String, proto::messages::CandidateScore>>>,
+    shutdown: CancellationToken,
 ) -> Result<bool> {
     let (writer, mut reader) = conn.split();
 
@@ -62,6 +65,11 @@ pub(super) async fn run_dispatch_loop(
     loop {
         tokio::select! {
             biased;
+
+            _ = shutdown.cancelled() => {
+                info!("shutdown requested; exiting dispatch loop");
+                break;
+            }
 
             Some((job_id, result)) = done_rx.recv() => {
                 on_job_done(

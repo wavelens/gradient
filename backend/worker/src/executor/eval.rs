@@ -66,6 +66,11 @@ impl WorkerEvaluator {
             resolver: Arc::new(WorkerPoolResolver::new(eval_workers, max_evals_per_worker)),
         }
     }
+
+    /// Gracefully shut every idle eval-worker subprocess down.
+    pub async fn shutdown(&self) {
+        self.resolver.shutdown().await;
+    }
 }
 
 impl Clone for WorkerEvaluator {
