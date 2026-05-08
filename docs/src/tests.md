@@ -1340,6 +1340,29 @@ Tests (`cargo test -p scheduler --tests substitut`):
   eval completes without dispatching a build. Confirms the hash-based
   fallback in `compute_truly_substituted`.
 
+## Scheduler policy — anti-starvation cap (#112)
+
+`WaitTimeRule::max_wait_secs` caps how much wait time can contribute to a
+job's score. The previous default (600s, +60 max) was below
+`MissingPathsRule::scored_bonus` (200), so a steady stream of fresh
+fully-cached candidates outscored older queued builds indefinitely —
+builds older than 10 minutes were no longer differentiated by wait time.
+The default is now 3600s (+360 max), enough to overcome the cached-fresh
+preference plus typical penalties on the older job.
+
+Tests (`cargo test -p scheduler --lib policy`):
+
+- `default_policy_long_waiting_build_overcomes_fresh_cached` — locks in
+  the anti-starvation guarantee by composing the full
+  `Policy::default_build_policy()`: a build queued an hour ago must
+  outscore a fresh candidate the worker can serve directly. Fails if
+  `WaitTimeRule::max_wait_secs` is lowered back below the
+  `MissingPathsRule` scored bonus.
+- `wait_time_rule_longer_wait_scores_higher_but_capped` — preserved from
+  before; still asserts that the score saturates at
+  `max_wait_secs * bonus_per_second` so ancient jobs cannot dominate
+  every other rule.
+
 ## Build artefacts — `external_cached` outputs include `hydra-build-products`
 
 Builds that are dispatched as `external_cached` (substituted from upstream,
