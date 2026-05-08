@@ -17,7 +17,10 @@ use std::time::Duration;
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub fn user_agent() -> String {
-    format!("gradient/{}", env!("CARGO_PKG_VERSION"))
+    format!(
+        "Gradient/{} (+https://github.com/wavelens/gradient)",
+        env!("CARGO_PKG_VERSION")
+    )
 }
 
 fn rustls_config() -> rustls::ClientConfig {
@@ -48,7 +51,14 @@ mod tests {
     }
 
     #[test]
-    fn user_agent_is_prefixed() {
-        assert!(user_agent().starts_with("gradient/"));
+    fn user_agent_includes_brand_and_contact_url() {
+        let ua = user_agent();
+        assert!(ua.starts_with("Gradient/"));
+        assert!(ua.contains("(+https://github.com/wavelens/gradient)"));
+    }
+
+    #[test]
+    fn user_agent_does_not_use_lowercase_brand() {
+        assert!(!user_agent().starts_with("gradient/"));
     }
 }
