@@ -14,6 +14,24 @@ export interface OrgMember {
   name: string; // role name (e.g., "Admin")
 }
 
+export interface OrgRole {
+  id: string;
+  name: string;
+  organization: string | null;
+  builtin: boolean;
+  permissions: string[];
+}
+
+export interface PermissionDescriptor {
+  id: string;
+  mutating: boolean;
+}
+
+export interface RoleListResponse {
+  roles: OrgRole[];
+  available_permissions: PermissionDescriptor[];
+}
+
 @Injectable({ providedIn: 'root' })
 export class OrganizationsService {
   private api = inject(ApiService);
@@ -72,6 +90,29 @@ export class OrganizationsService {
 
   removeMember(org: string, user: string): Observable<string> {
     return this.api.delete<string>(`orgs/${org}/users`, { user });
+  }
+
+  getRoles(org: string): Observable<RoleListResponse> {
+    return this.api.get<RoleListResponse>(`orgs/${org}/roles`);
+  }
+
+  createRole(
+    org: string,
+    data: { name: string; permissions: string[] }
+  ): Observable<OrgRole> {
+    return this.api.post<OrgRole>(`orgs/${org}/roles`, data);
+  }
+
+  updateRole(
+    org: string,
+    roleId: string,
+    data: { name?: string; permissions?: string[] }
+  ): Observable<OrgRole> {
+    return this.api.patch<OrgRole>(`orgs/${org}/roles/${roleId}`, data);
+  }
+
+  deleteRole(org: string, roleId: string): Observable<boolean> {
+    return this.api.delete<boolean>(`orgs/${org}/roles/${roleId}`);
   }
 
   getSSHKey(org: string): Observable<string> {
