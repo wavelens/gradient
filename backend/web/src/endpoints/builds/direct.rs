@@ -34,6 +34,38 @@ pub struct DirectBuildInfo {
     pub status: String,
 }
 
+pub(crate) struct TempUploadDir {
+    path: Option<PathBuf>,
+}
+
+impl TempUploadDir {
+    pub(crate) async fn create(base: &str) -> WebResult<Self> {
+        let path = PathBuf::from(format!("{}/uploads/{}", base, Uuid::now_v7()));
+        fs::create_dir_all(&path)
+            .await
+            .map_err(|e| WebError::internal(format!("Failed to create temp directory: {}", e)))?;
+        Ok(Self { path: Some(path) })
+    }
+
+    pub(crate) fn path(&self) -> &Path {
+        self.path.as_deref().expect("TempUploadDir used after commit")
+    }
+
+    pub(crate) fn commit(mut self) {
+        self.path = None;
+    }
+}
+
+impl Drop for TempUploadDir {
+    fn drop(&mut self) {
+        if let Some(path) = self.path.take() {
+            if let Err(e) = std::fs::remove_dir_all(&path) {
+                tracing::warn!(error = %e, path = %path.display(), "failed to remove temp upload dir");
+            }
+        }
+    }
+}
+
 /// Reject filenames from multipart uploads that would escape the upload root.
 ///
 /// Allows nested relative paths (e.g. `src/main.rs`) but rejects absolute
@@ -74,6 +106,8 @@ pub async fn post_direct_build(
     Extension(user): Extension<MUser>,
     TypedMultipart(form): TypedMultipart<DirectBuildForm>,
 ) -> WebResult<Json<BaseResponse<String>>> {
+    use sea_orm::TransactionTrait;
+
     let DirectBuildForm {
         organization,
         derivation,
@@ -92,19 +126,9 @@ pub async fn post_direct_build(
     .await?
     .or_not_found("Organization")?;
 
-    // We'll create the DirectBuild record after the evaluation
+    let upload = TempUploadDir::create(&state.config.storage.base_path).await?;
+    let temp_root = upload.path().to_path_buf();
 
-    // Create temporary directory for files
-    let temp_dir = format!(
-        "{}/uploads/{}",
-        state.config.storage.base_path,
-        Uuid::now_v7()
-    );
-    fs::create_dir_all(&temp_dir)
-        .await
-        .map_err(|e| WebError::internal(format!("Failed to create temp directory: {}", e)))?;
-
-    let temp_root = PathBuf::from(&temp_dir);
     for field in files {
         let filename = field
             .metadata
@@ -132,25 +156,25 @@ pub async fn post_direct_build(
             .map_err(|e| WebError::internal(format!("Failed to write file {}: {}", filename, e)))?;
     }
 
-    // Create commit record
+    let temp_dir_str = temp_root.to_string_lossy().into_owned();
+
+    let tx = state.web_db.inner().begin().await?;
+
     let commit = ACommit {
         id: Set(CommitId::now_v7()),
         message: Set("Direct build submission".to_string()),
-        hash: Set(vec![0; 20]), // Dummy hash for direct builds
+        hash: Set(vec![0; 20]),
         author: Set(Some(user.id)),
         author_name: Set(user.name.clone()),
-    };
-    let commit = commit
-        .insert(&state.web_db)
-        .await
-        .map_err(|e| WebError::internal(format!("Failed to create commit: {}", e)))?;
+    }
+    .insert(&tx)
+    .await?;
 
-    // Create evaluation record (without project for direct builds)
     let now = gradient_core::types::now();
     let evaluation = AEvaluation {
         id: Set(EvaluationId::now_v7()),
-        project: Set(None), // No project for direct builds
-        repository: Set(temp_dir.clone()),
+        project: Set(None),
+        repository: Set(temp_dir_str.clone()),
         commit: Set(commit.id),
         wildcard: Set(derivation.clone()),
         status: Set(entity::evaluation::EvaluationStatus::Queued),
@@ -163,35 +187,29 @@ pub async fn post_direct_build(
         waiting_reason: Set(None),
         trigger: Set(None),
         concurrent: Set(false),
-    };
-    let evaluation = evaluation
-        .insert(&state.web_db)
-        .await
-        .map_err(|e| WebError::internal(format!("Failed to create evaluation: {}", e)))?;
+    }
+    .insert(&tx)
+    .await?;
 
-    // Create DirectBuild record
-    let direct_build = ADirectBuild {
+    ADirectBuild {
         id: Set(DirectBuildId::now_v7()),
         organization: Set(org.id),
         evaluation: Set(evaluation.id),
         derivation: Set(derivation.clone()),
-        repository_path: Set(temp_dir.clone()),
+        repository_path: Set(temp_dir_str.clone()),
         created_by: Set(user.id),
         created_at: Set(gradient_core::types::now()),
-    };
-    direct_build
-        .insert(&state.web_db)
-        .await
-        .map_err(|e| WebError::internal(format!("Failed to create direct build record: {}", e)))?;
+    }
+    .insert(&tx)
+    .await?;
 
-    // The evaluation is now Queued; the proto scheduler's dispatch loop
-    // will pick it up and send it to an available worker within seconds.
-    let res = BaseResponse {
+    tx.commit().await?;
+    upload.commit();
+
+    Ok(Json(BaseResponse {
         error: false,
         message: format!("Direct build started with evaluation ID: {}", evaluation.id),
-    };
-
-    Ok(Json(res))
+    }))
 }
 
 pub async fn get_recent_direct_builds(
@@ -259,7 +277,7 @@ pub async fn get_recent_direct_builds(
 
 #[cfg(test)]
 mod tests {
-    use super::validate_upload_filename;
+    use super::{TempUploadDir, validate_upload_filename};
 
     #[test]
     fn accepts_simple_filenames() {
@@ -298,5 +316,34 @@ mod tests {
     #[test]
     fn rejects_null_bytes() {
         assert!(validate_upload_filename("foo\0bar").is_err());
+    }
+
+    #[test]
+    fn temp_upload_dir_drop_removes_directory() {
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let path: std::path::PathBuf = rt.block_on(async {
+            let base = std::env::temp_dir();
+            let base_str = base.to_string_lossy().into_owned();
+            let dir = TempUploadDir::create(&base_str).await.expect("create temp dir");
+            let path = dir.path().to_path_buf();
+            assert!(path.exists());
+            path
+        });
+        assert!(!path.exists(), "drop should remove the directory");
+    }
+
+    #[test]
+    fn temp_upload_dir_commit_keeps_directory() {
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let path: std::path::PathBuf = rt.block_on(async {
+            let base = std::env::temp_dir();
+            let base_str = base.to_string_lossy().into_owned();
+            let dir = TempUploadDir::create(&base_str).await.expect("create temp dir");
+            let path = dir.path().to_path_buf();
+            dir.commit();
+            path
+        });
+        assert!(path.exists(), "commit should keep the directory");
+        let _ = std::fs::remove_dir_all(&path);
     }
 }
