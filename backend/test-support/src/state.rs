@@ -37,6 +37,7 @@ pub fn test_state(db: DatabaseConnection) -> Arc<ServerState> {
         http: gradient_core::http::build_client().expect("build test HTTP client"),
         shutdown: gradient_core::shutdown::Shutdown::new(),
         jwt_secret: SecretString::new("test-jwt-secret".to_string()),
+        started_at: chrono::Utc::now(),
     })
 }
 
@@ -63,6 +64,7 @@ pub fn test_state_recorded(
         http: gradient_core::http::build_client().expect("build test HTTP client"),
         shutdown: gradient_core::shutdown::Shutdown::new(),
         jwt_secret: SecretString::new("test-jwt-secret".to_string()),
+        started_at: chrono::Utc::now(),
     });
     (state, recorder)
 }

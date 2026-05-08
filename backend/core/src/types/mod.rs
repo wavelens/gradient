@@ -127,6 +127,9 @@ pub struct ServerState {
     /// memory avoids reading `secrets.jwt_secret_file` on every request and
     /// makes the auth path resilient to transient filesystem errors.
     pub jwt_secret: SecretString,
+    /// Wall-clock time the process bootstrapped. Used to derive
+    /// `gradient_uptime_seconds` for the metrics endpoint.
+    pub started_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

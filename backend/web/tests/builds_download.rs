@@ -267,6 +267,7 @@ fn listing_returns_products_from_db() {
             http: gradient_core::http::build_client().expect("http client"),
             shutdown: gradient_core::shutdown::Shutdown::new(),
             jwt_secret: gradient_core::types::SecretString::new("test-jwt-secret".to_string()),
+            started_at: chrono::Utc::now(),
         });
 
         let router = create_router(state);
@@ -343,6 +344,7 @@ fn download_streams_file_from_nar() {
             http: gradient_core::http::build_client().expect("http client"),
             shutdown: gradient_core::shutdown::Shutdown::new(),
             jwt_secret: gradient_core::types::SecretString::new("test-jwt-secret".to_string()),
+            started_at: chrono::Utc::now(),
         });
 
         let router = create_router(state);
