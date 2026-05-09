@@ -78,8 +78,13 @@ pub struct WorkerConfig {
     #[arg(long, env = "GRADIENT_MAX_CONCURRENT_BUILDS", default_value_t = 1)]
     pub max_concurrent_builds: u32,
 
-    /// Maximum number of simultaneous connections in the local nix-daemon pool.
-    #[arg(long, env = "GRADIENT_MAX_NIXDAEMON_CONNECTIONS", default_value_t = 8)]
+    /// Maximum number of simultaneous connections in the local nix-daemon
+    /// pool. Each in-flight `add_to_store_nar` (NAR import during prefetch)
+    /// holds one connection for the duration of the upload, so the pool
+    /// must comfortably fit `max_concurrent_builds *
+    /// nar_import::PREFETCH_CONCURRENCY` plus headroom for `has_path`
+    /// probes and build dispatch.
+    #[arg(long, env = "GRADIENT_MAX_NIXDAEMON_CONNECTIONS", default_value_t = 32)]
     pub max_nixdaemon_connections: usize,
 
     // ── Logging ───────────────────────────────────────────────────────────────
