@@ -63,9 +63,10 @@ async fn derivation_closure_reachable<C: sea_orm::ConnectionTrait>(
 
 /// Sum uncompressed NAR size of derivation outputs for `drv_ids`.
 ///
-/// `nar_size` is populated when the worker reports build output metadata;
-/// `file_size` (compressed) is only populated per-cache, so it's unreliable
-/// as a per-output total.
+/// `derivation_output.nar_size` is populated only when the worker actually
+/// built the output. For substituted builds it's `None`, but the size lives
+/// on the matching `cached_path` row (joined by hash). This helper coalesces
+/// the two so that completed and substituted outputs both contribute.
 ///
 /// Returns `Some(total)` when the total is > 0, `None` otherwise.
 async fn sum_output_sizes<C: sea_orm::ConnectionTrait>(
@@ -79,7 +80,31 @@ async fn sum_output_sizes<C: sea_orm::ConnectionTrait>(
         .filter(CDerivationOutput::Derivation.is_in(drv_ids))
         .all(db)
         .await?;
-    let total: i64 = outputs.iter().filter_map(|o| o.nar_size).sum();
+
+    let missing_hashes: Vec<String> = outputs
+        .iter()
+        .filter(|o| o.nar_size.is_none())
+        .map(|o| o.hash.clone())
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+
+    let cached_size_by_hash: std::collections::HashMap<String, i64> = if missing_hashes.is_empty() {
+        std::collections::HashMap::new()
+    } else {
+        ECachedPath::find()
+            .filter(CCachedPath::Hash.is_in(missing_hashes))
+            .all(db)
+            .await?
+            .into_iter()
+            .filter_map(|cp| cp.nar_size.map(|n| (cp.hash, n)))
+            .collect()
+    };
+
+    let total: i64 = outputs
+        .iter()
+        .filter_map(|o| o.nar_size.or_else(|| cached_size_by_hash.get(&o.hash).copied()))
+        .sum();
     Ok(if total > 0 { Some(total) } else { None })
 }
 
@@ -273,4 +298,97 @@ pub async fn get_entry_point_metrics(
         keep_evaluations: project.keep_evaluations,
         points,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use entity::{cached_path, derivation_output};
+    use sea_orm::{DatabaseBackend, MockDatabase};
+
+    fn now() -> chrono::NaiveDateTime {
+        chrono::Utc::now().naive_utc()
+    }
+
+    fn drv_output(
+        derivation: DerivationId,
+        hash: &str,
+        nar_size: Option<i64>,
+        cached: Option<CachedPathId>,
+    ) -> derivation_output::Model {
+        derivation_output::Model {
+            id: DerivationOutputId::now_v7(),
+            derivation,
+            name: "out".into(),
+            output: format!("/nix/store/{hash}-foo"),
+            hash: hash.into(),
+            package: "foo".into(),
+            ca: None,
+            nar_size,
+            is_cached: cached.is_some(),
+            cached_path: cached,
+            created_at: now(),
+        }
+    }
+
+    fn cached_row(id: CachedPathId, hash: &str, nar_size: i64) -> cached_path::Model {
+        cached_path::Model {
+            id,
+            store_path: format!("/nix/store/{hash}-foo"),
+            hash: hash.into(),
+            package: "foo".into(),
+            file_hash: Some("sha256:dummy".into()),
+            file_size: Some(nar_size / 2),
+            nar_size: Some(nar_size),
+            nar_hash: None,
+            references: None,
+            ca: None,
+            deriver: None,
+            created_at: now(),
+        }
+    }
+
+    #[tokio::test]
+    async fn sum_output_sizes_falls_back_to_cached_path_for_substituted() {
+        let drv_id = DerivationId::now_v7();
+        let cached_id = CachedPathId::now_v7();
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![drv_output(drv_id, "abc", None, Some(cached_id))]])
+            .append_query_results([vec![cached_row(cached_id, "abc", 1024)]])
+            .into_connection();
+
+        let total = sum_output_sizes(&db, vec![drv_id]).await.unwrap();
+        assert_eq!(total, Some(1024));
+    }
+
+    #[tokio::test]
+    async fn sum_output_sizes_mixes_built_and_substituted_outputs() {
+        let drv_built = DerivationId::now_v7();
+        let drv_sub = DerivationId::now_v7();
+        let cached_id = CachedPathId::now_v7();
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![
+                drv_output(drv_built, "built", Some(2048), None),
+                drv_output(drv_sub, "subst", None, Some(cached_id)),
+            ]])
+            .append_query_results([vec![cached_row(cached_id, "subst", 512)]])
+            .into_connection();
+
+        let total = sum_output_sizes(&db, vec![drv_built, drv_sub])
+            .await
+            .unwrap();
+        assert_eq!(total, Some(2048 + 512));
+    }
+
+    #[tokio::test]
+    async fn sum_output_sizes_returns_none_when_nothing_known() {
+        let drv_id = DerivationId::now_v7();
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![drv_output(drv_id, "unknown", None, None)]])
+            .append_query_results([Vec::<cached_path::Model>::new()])
+            .into_connection();
+
+        let total = sum_output_sizes(&db, vec![drv_id]).await.unwrap();
+        assert_eq!(total, None);
+    }
 }
