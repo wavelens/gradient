@@ -510,8 +510,23 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
     let mut app = Router::new()
         .nest("/api/v1", api)
         .merge(proto_router().route_layer(GovernorLayer::new(rl_per_ms(200, 150))))
-        .layer(axum::Extension(scheduler))
+        .layer(axum::Extension(Arc::clone(&scheduler)))
         .layer(axum::Extension(proto_limiter));
+
+    // Metrics endpoint — root-mounted, only when an operator-configured
+    // bearer token is present. Uses the same rate-limit tier as
+    // auth_sensitive (6 r/s, burst 5).
+    if state.config.metrics.is_some() {
+        let metrics_route = Router::new()
+            .route("/metrics", get(endpoints::metrics::get_metrics))
+            .route_layer(middleware::from_fn_with_state(
+                Arc::clone(&state),
+                endpoints::metrics::metrics_auth,
+            ))
+            .route_layer(GovernorLayer::new(rl_per_second(6, 5)))
+            .layer(axum::Extension(Arc::clone(&scheduler)));
+        app = app.merge(metrics_route);
+    }
 
     // Public NAR cache surface — substituters issue many requests per build,
     // so the burst is generous (1000 / 1000).
