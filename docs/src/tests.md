@@ -1317,6 +1317,45 @@ Tests (`cargo test -p cache --tests cacher::cleanup`):
   NAR is preserved while the orphan-files pass exercises the new
   cleanup branch.
 
+## Pull-mode CacheQuery surfaces unsatisfiable paths explicitly
+
+The `query` handler in `backend/proto/src/handler/cache.rs` previously
+omitted any path it could not satisfy in `Pull` mode: a path that was
+neither in the local `cached_path` table nor returned by the upstream
+narinfo probe simply did not appear in the `CacheStatus` response. The
+worker's prefetch closure walk could not distinguish "the server has
+nothing for this path" from "the server was never asked", so its
+hard-fail guard (`InputPrefetcher::query_and_split` in
+`backend/worker/src/proto/nar_import.rs`) never fired. The path was
+silently skipped, and the build only failed several layers later when
+the local nix-daemon rejected an `add_to_store_nar` for a *dependent*
+path with a confusing `path '…' is not valid` error referencing the
+silently-dropped reference.
+
+Pull mode now mirrors Push mode: every queried path appears in the
+response, with `cached: false` (and no metadata) for paths the server
+cannot serve. The worker's existing `classify_cached_entries` already
+handles the `Uncached` variant, so the closure walk now hard-fails with
+the intended `… missing from local store and not available in the
+gradient cache` message before any import is attempted.
+
+Tests (`cargo test -p proto --tests cache_query`):
+
+- `cache_query_pull_uncached_returns_entries_with_cached_false`
+  — replaces the previous `cache_query_pull_uncached_returns_empty`.
+  With an empty mock DB the handler must return one `cached: false`
+  entry per queried path, all metadata fields `None`. Locks the new
+  Pull-mode contract so a future regression to the silent-omit
+  behaviour fails the test instead of surfacing as a daemon error
+  during a real build.
+- `cache_query_normal_uncached_returns_empty` — preserved unchanged.
+  Normal mode is consumed by `mark_substituted` in
+  `backend/worker/src/executor/eval.rs`, which iterates returned
+  entries to flip a `substituted` flag without inspecting `cached`;
+  emitting `cached: false` entries there would mislabel uncached
+  derivations as substituted. The asymmetry between Pull and Normal is
+  intentional and the test makes it explicit.
+
 ## Substituted classification — match cached_path by hash, not by foreign-key link
 
 `compute_truly_substituted` previously demanded

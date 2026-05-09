@@ -68,7 +68,7 @@ bytes = { version = "1.11", default-features = false, features = ["std"] }
 
 # CLI / logging / observability
 clap               = { version = "4.6", default-features = false, features = ["std", "derive", "env", "help", "usage", "error-context"] }
-sentry             = { version = "0.47", default-features = false, features = ["backtrace", "contexts", "debug-images", "panic", "reqwest", "rustls"] }
+sentry             = { version = "0.48", default-features = false, features = ["backtrace", "contexts", "debug-images", "panic", "reqwest", "rustls"] }
 tracing            = { version = "0.1", default-features = false, features = ["std", "attributes"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "fmt", "ansi", "smallvec", "tracing-log", "env-filter", "json"] }
 

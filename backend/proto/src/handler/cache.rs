@@ -474,7 +474,38 @@ async fn query(
         extend_with_upstream_results(state, oid, uncached_pairs, &mut result).await;
     }
 
+    if matches!(mode, QueryMode::Pull) {
+        let returned: std::collections::HashSet<String> =
+            result.iter().map(|cp| cp.path.clone()).collect();
+        let missing: Vec<gradient_core::types::proto::CachedPath> = hash_path_pairs
+            .iter()
+            .filter(|(_, p)| !returned.contains(*p))
+            .map(|(_, p)| build_uncached_pull_entry(p))
+            .collect();
+        result.extend(missing);
+    }
+
     result
+}
+
+/// Pull-mode response for a path the server cannot serve (neither in the
+/// local cache nor in any configured upstream). Carries `cached: false` and
+/// no metadata so the worker's prefetch hard-fail can distinguish "server has
+/// nothing for this path" from "this path was never queried".
+fn build_uncached_pull_entry(path: &str) -> gradient_core::types::proto::CachedPath {
+    use gradient_core::types::proto::CachedPath;
+    CachedPath {
+        path: path.to_string(),
+        cached: false,
+        file_size: None,
+        nar_size: None,
+        url: None,
+        nar_hash: None,
+        references: None,
+        signatures: None,
+        deriver: None,
+        ca: None,
+    }
 }
 
 pub(super) async fn handle_cache_query(
@@ -740,14 +771,42 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cache_query_pull_uncached_returns_empty() {
+    async fn cache_query_pull_uncached_returns_entries_with_cached_false() {
+        // Pull mode must surface every queried path, even ones the server cannot
+        // serve. Without an explicit `cached: false` entry the worker has no way
+        // to distinguish "server omitted this path" from "this path was never
+        // queried", so its closure-walk hard-fail is bypassed and the build
+        // proceeds to import a dependent path with an unsatisfiable reference,
+        // surfacing as a confusing `daemon add_to_store_nar … path '…' is not
+        // valid` error instead of the intended `not available in the gradient
+        // cache` message.
         let state = make_state();
-        let paths = vec!["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello".to_string()];
+        let paths = vec![
+            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string(),
+            "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-bar".to_string(),
+        ];
         let result = query(&state, None, &paths, QueryMode::Pull).await;
-        assert!(
-            result.is_empty(),
-            "Pull mode should not return uncached paths"
-        );
+        assert_eq!(result.len(), 2, "Pull must return all queried paths");
+        for cp in &result {
+            assert!(!cp.cached, "uncached path: {}", cp.path);
+            assert!(cp.url.is_none(), "Pull-uncached carries no URL");
+            assert!(cp.nar_hash.is_none(), "Pull-uncached carries no nar_hash");
+            assert!(
+                cp.references.is_none(),
+                "Pull-uncached carries no references"
+            );
+            assert!(
+                cp.signatures.is_none(),
+                "Pull-uncached carries no signatures"
+            );
+            assert!(cp.deriver.is_none(), "Pull-uncached carries no deriver");
+            assert!(cp.ca.is_none(), "Pull-uncached carries no ca");
+            assert!(cp.file_size.is_none(), "Pull-uncached carries no file_size");
+            assert!(cp.nar_size.is_none(), "Pull-uncached carries no nar_size");
+        }
+        let returned: Vec<&str> = result.iter().map(|c| c.path.as_str()).collect();
+        assert!(returned.contains(&paths[0].as_str()));
+        assert!(returned.contains(&paths[1].as_str()));
     }
 
     #[tokio::test]

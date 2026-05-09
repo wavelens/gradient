@@ -545,7 +545,7 @@ The `architecture` field is a free-form Nix system string (e.g. `"x86_64-linux"`
 | Mode | Use case | Server returns |
 |------|----------|----------------|
 | `Normal` | Eval: mark derivations as substituted | Only cached paths (`cached: true`), no URLs, no metadata |
-| `Pull` | Build: fetch required store paths | Cached paths with full import metadata (`nar_hash`, `references`, `signatures`, `deriver`, `ca`) and presigned S3 GET URL (or `url: None` for local — use `NarRequest`). Also consults org-configured upstream caches for paths not in the local store. |
+| `Pull` | Build: fetch required store paths | **All** queried paths. Cached paths carry full import metadata (`nar_hash`, `references`, `signatures`, `deriver`, `ca`) and a presigned S3 GET URL (or `url: None` for local — use `NarRequest`). Uncached paths carry `path` + `cached: false` only, signaling "the server has nothing to offer for this path" — neither in the local cache nor in any configured upstream. Lets the worker hard-fail before importing a dependent with an unsatisfiable reference. |
 | `Push` | Fetch: upload new inputs | **All** queried paths. Cached paths carry only `path` + `cached: true`. Uncached paths carry `path`, `cached: false`, and `url` — a presigned S3 PUT URL on S3-backed stores (`None` on local; worker falls back to `NarPush`). No other metadata, no upstream lookup. |
 
 ```rust
@@ -587,7 +587,7 @@ CachedPath {
 
 - `Normal` — `path`, `cached` only (and `cached` is always `true`, since uncached paths are omitted).
 - `Pull` + `cached: true` — every field populated from `cached_path` / `cached_path_signature`; `url` is a presigned S3 GET for S3-backed stores or `None` for local (use `NarRequest`). Upstream hits populate the same fields from the sig-verified upstream narinfo.
-- `Pull` + `cached: false` — omitted from the response (server has nothing to offer).
+- `Pull` + `cached: false` — `path` + `cached` only, no metadata, no `url`. The server emits this for every queried path it cannot satisfy (neither in the local cache nor in any configured upstream) so the worker can detect "this path is genuinely unavailable" rather than mistaking server omission for "this path was never asked about". Without it, the closure walk treats unanswered references as already-present-locally, then fails opaquely deep inside `add_to_store_nar` when a dependent path is imported with an unsatisfiable reference.
 - `Push` + `cached: true` — only `path` + `cached`; worker skips the path.
 - `Push` + `cached: false` — `path`, `cached`, and `url` (presigned S3 PUT on S3-backed stores; `None` on local, worker falls back to `NarPush`). No other metadata. No upstream lookup in Push mode.
 
