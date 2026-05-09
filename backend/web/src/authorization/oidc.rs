@@ -309,15 +309,15 @@ async fn create_or_update_user(
 
         let mut auser: AUser = user.into();
         auser.last_login_at = Set(gradient_core::types::now());
-        if email_changed {
-            if let Some(ref new_email) = claims.email {
-                auser.email = Set(new_email.clone());
-            }
+        if let Some(ref new_email) = claims.email
+            && email_changed
+        {
+            auser.email = Set(new_email.clone());
         }
-        if name_changed {
-            if let Some(ref new_name) = claims.name {
-                auser.name = Set(new_name.clone());
-            }
+        if let Some(ref new_name) = claims.name
+            && name_changed
+        {
+            auser.name = Set(new_name.clone());
         }
         let user = auser
             .update(&tx)

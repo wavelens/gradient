@@ -16,7 +16,7 @@
 //! `append_exec_results` with `rows_affected: 1`, otherwise SeaORM treats the
 //! insert as a no-op and short-circuits.
 
-use entity::{ids::*, organization, organization_user, role};
+use entity::{ids::*, organization_user, role};
 use gradient_core::permissions::{Permission, admin_mask, view_mask, write_mask};
 use gradient_core::types::SessionId;
 use gradient_core::types::consts::{
@@ -24,7 +24,7 @@ use gradient_core::types::consts::{
 };
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 use serde_json::{Value, json};
-use test_support::fixtures::{org, org_id, test_date, user, user_id};
+use test_support::fixtures::{org, org_id, user, user_id};
 use test_support::web::{live_session, make_test_server, make_token};
 use uuid::Uuid;
 

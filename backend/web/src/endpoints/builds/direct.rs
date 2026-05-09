@@ -58,10 +58,10 @@ impl TempUploadDir {
 
 impl Drop for TempUploadDir {
     fn drop(&mut self) {
-        if let Some(path) = self.path.take() {
-            if let Err(e) = std::fs::remove_dir_all(&path) {
-                tracing::warn!(error = %e, path = %path.display(), "failed to remove temp upload dir");
-            }
+        if let Some(path) = self.path.take()
+            && let Err(e) = std::fs::remove_dir_all(&path)
+        {
+            tracing::warn!(error = %e, path = %path.display(), "failed to remove temp upload dir");
         }
     }
 }
