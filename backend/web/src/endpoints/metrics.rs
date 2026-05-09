@@ -13,6 +13,11 @@
 
 use std::sync::Arc;
 
+use axum::extract::State;
+use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
+use axum::http::{HeaderMap, StatusCode};
+use axum::middleware::Next;
+use axum::response::{IntoResponse, Response};
 use chrono::Utc;
 use gradient_core::types::ServerState;
 use prometheus::{
@@ -20,6 +25,7 @@ use prometheus::{
 };
 use scheduler::Scheduler;
 use sea_orm::{DatabaseBackend, FromQueryResult, Statement};
+use subtle::ConstantTimeEq;
 
 use crate::error::{WebError, WebResult};
 
@@ -344,6 +350,66 @@ pub(crate) async fn collect(
     obs.jobs_active = active as i64;
 
     Ok(obs)
+}
+
+/// Per-route middleware enforcing the bearer token configured via
+/// `MetricsConfig`. The route is only mounted when `state.config.metrics`
+/// is `Some`, so unwrapping is invariant-safe inside the closure.
+pub async fn metrics_auth(
+    State(state): State<Arc<ServerState>>,
+    headers: HeaderMap,
+    request: axum::extract::Request,
+    next: Next,
+) -> Response {
+    let Some(cfg) = state.config.metrics.as_ref() else {
+        // Defensive: the route shouldn't be reachable without a config,
+        // but a 404 here keeps behavior consistent with the unmounted case.
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    let Some(value) = headers.get(AUTHORIZATION).and_then(|v| v.to_str().ok()) else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+
+    let Some(presented) = value.strip_prefix("Bearer ") else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+
+    let presented_bytes = presented.as_bytes();
+    let token_bytes = cfg.token.as_bytes();
+
+    // Length check before constant-time compare: ConstantTimeEq's contract
+    // requires equal-length slices for a meaningful result. Token length
+    // is operator-controlled, not user-controlled, so the early return
+    // does not leak secret material.
+    if presented_bytes.len() != token_bytes.len()
+        || presented_bytes.ct_eq(token_bytes).unwrap_u8() != 1
+    {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+
+    next.run(request).await
+}
+
+pub async fn get_metrics(
+    State(state): State<Arc<ServerState>>,
+    axum::Extension(scheduler): axum::Extension<Arc<Scheduler>>,
+) -> Response {
+    match collect(&state, &scheduler).await {
+        Ok(obs) => {
+            let body = render(&obs);
+            (
+                StatusCode::OK,
+                [(CONTENT_TYPE, PROMETHEUS_CONTENT_TYPE)],
+                body,
+            )
+                .into_response()
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "metrics collection failed");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
 }
 
 #[cfg(test)]
