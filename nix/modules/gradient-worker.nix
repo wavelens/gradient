@@ -174,9 +174,14 @@ in {
       };
 
       maxNixdaemonConnections = lib.mkOption {
-        description = "Maximum number of simultaneous local Nix daemon connections in the connection pool";
+        description = ''
+          Maximum number of simultaneous local Nix daemon connections in
+          the connection pool. Should comfortably fit
+          `maxConcurrentBuilds * 8` (parallel NAR imports per build) plus
+          headroom for path-presence checks and build dispatch.
+        '';
         type = lib.types.ints.positive;
-        default = 8;
+        default = 32;
       };
 
       evalWorkers = lib.mkOption {

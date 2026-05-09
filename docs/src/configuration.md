@@ -290,7 +290,7 @@ The token must be the 48-byte random secret returned by the registration API (ge
 | `settings.evalWorkers` | `1` | Number of evaluator subprocesses |
 | `settings.maxConcurrentEvaluations` | `1` | Parallel evaluations |
 | `settings.maxEvaluationsPerWorker` | `20` | Recycle evaluator subprocess after N jobs (0 = never) |
-| `settings.maxNixdaemonConnections` | `8` | Worker's local nix-daemon connection pool size |
+| `settings.maxNixdaemonConnections` | `32` | Worker's local nix-daemon connection pool size. Each in-flight NAR import holds one connection; size for `maxConcurrentBuilds * 8` plus headroom |
 | `settings.maxProtoConnections` | `16` | Max simultaneous WebSocket connections (for discoverable mode) |
 | `settings.logLevel.default` | `info` | Worker log level |
 | `settings.logLevel.eval` | null | Evaluator log level override |

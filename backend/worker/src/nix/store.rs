@@ -11,6 +11,8 @@
 //! operations the worker needs: path presence checks, path-info queries,
 //! and triggering builds.
 
+use std::time::Duration;
+
 use anyhow::Result;
 use async_trait::async_trait;
 use harmonia_protocol::types::{DaemonError, DaemonErrorKind};
@@ -19,6 +21,33 @@ use harmonia_store_remote::DaemonStore as _;
 use harmonia_store_remote::pool::{ConnectionPool, PoolConfig};
 
 use proto::traits::WorkerStore;
+
+/// Maximum time `pool.acquire()` blocks before failing with a timeout.
+///
+/// `add_to_store_nar` legitimately holds a connection for the duration of a
+/// NAR upload + daemon ingest, which can run into the tens of seconds for
+/// large closures. With concurrent build jobs each issuing parallel
+/// prefetch imports, the pool's acquire queue can grow well past the
+/// harmonia default of 30 s — long enough that downstream acquires time
+/// out spuriously even though the pool is making forward progress.
+///
+/// 10 minutes mirrors the `HTTP_DOWNLOAD_TIMEOUT` for presigned-URL NAR
+/// fetches in `proto::nar_import` — both bound the absolute longest a
+/// single import is allowed to take. Any acquire that legitimately needs
+/// more than that points at a stuck connection and is the right thing
+/// to surface as an error.
+const POOL_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(600);
+
+/// Build the harmonia [`PoolConfig`] used by [`LocalNixStore::connect_at`].
+///
+/// Extracted so the policy is asserted in tests without a live daemon.
+pub(crate) fn build_pool_config(pool_size: usize) -> PoolConfig {
+    PoolConfig {
+        max_size: pool_size,
+        acquire_timeout: POOL_ACQUIRE_TIMEOUT,
+        ..Default::default()
+    }
+}
 
 /// Decide whether a daemon error leaves the pooled connection in an unusable
 /// state. Only clean server-side `Remote` errors are safe to recover from —
@@ -49,12 +78,8 @@ impl LocalNixStore {
 
     /// Connect to a nix-daemon at a custom socket path with the given pool size.
     pub fn connect_at(socket_path: &str, pool_size: usize) -> Result<Self> {
-        let config = PoolConfig {
-            max_size: pool_size,
-            ..Default::default()
-        };
         Ok(Self {
-            pool: ConnectionPool::new(socket_path, config),
+            pool: ConnectionPool::new(socket_path, build_pool_config(pool_size)),
         })
     }
 
@@ -148,5 +173,24 @@ mod tests {
         // connection.
         let err = DaemonError::custom("parse error L, non-absolute store path \"L\"");
         assert!(is_connection_corrupt(&err));
+    }
+
+    /// Regression for the dispatch-time pool exhaustion observed in
+    /// production: with `max_concurrent_builds * PREFETCH_CONCURRENCY`
+    /// imports queued against the pool, the harmonia default
+    /// `acquire_timeout` of 30 s fires before the pool can serve them
+    /// even though it is making forward progress. We override it to
+    /// 10 min — anything shorter is an artificial cap that surfaces as
+    /// "acquire local store for import: timeout" mid-build.
+    #[test]
+    fn pool_config_acquire_timeout_is_generous() {
+        let cfg = build_pool_config(8);
+        assert_eq!(cfg.max_size, 8);
+        assert!(
+            cfg.acquire_timeout >= Duration::from_secs(600),
+            "acquire_timeout must accommodate worst-case queue depth across \
+             concurrent build jobs; got {:?}",
+            cfg.acquire_timeout
+        );
     }
 }
