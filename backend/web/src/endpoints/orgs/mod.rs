@@ -26,9 +26,8 @@ pub use self::members::{
     get_organization_users, patch_organization_users, post_organization_users,
 };
 pub use self::roles::{
-    CreateRoleRequest, PatchRoleRequest, RoleListResponse, RoleResponse,
-    delete_organization_role, get_organization_role, get_organization_roles,
-    patch_organization_role, post_organization_role,
+    CreateRoleRequest, PatchRoleRequest, RoleListResponse, RoleResponse, delete_organization_role,
+    get_organization_role, get_organization_roles, patch_organization_role, post_organization_role,
 };
 pub use self::settings::{
     CacheSubscriptionItem, SubscribeCacheRequest, delete_organization_public,

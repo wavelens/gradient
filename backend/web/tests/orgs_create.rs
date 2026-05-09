@@ -110,18 +110,21 @@ fn put_org_creates_org_and_admin_membership() {
         let membership = org_user_row(inserted.id);
 
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results::<organization::Model, _, _>([
-                Vec::<organization::Model>::new(),
-            ])
+            .append_query_results::<organization::Model, _, _>([Vec::<organization::Model>::new()])
             .append_query_results([vec![inserted]])
             .append_query_results([vec![membership]])
             .append_exec_results([
-                MockExecResult { last_insert_id: 0, rows_affected: 1 },
-                MockExecResult { last_insert_id: 0, rows_affected: 1 },
+                MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 1,
+                },
+                MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 1,
+                },
             ]);
 
-        let server =
-            make_test_server_with(db.into_connection(), Some(temp_crypt_secret_file()));
+        let server = make_test_server_with(db.into_connection(), Some(temp_crypt_secret_file()));
         let res = server
             .put("/api/v1/orgs")
             .add_header("authorization", format!("Bearer {}", token))

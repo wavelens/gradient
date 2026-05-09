@@ -64,7 +64,9 @@ pub enum TriggerConfig {
         #[serde(default = "default_pr_actions")]
         actions: Vec<String>,
     },
-    Time { cron: String },
+    Time {
+        cron: String,
+    },
 }
 
 fn default_pr_actions() -> Vec<String> {
@@ -94,7 +96,10 @@ impl TriggerConfig {
     }
 
     /// Parse a row's `(trigger_type, config_json)` pair into a typed config.
-    pub fn parse_row(trigger_type: i16, config: &serde_json::Value) -> Result<Self, TriggerConfigError> {
+    pub fn parse_row(
+        trigger_type: i16,
+        config: &serde_json::Value,
+    ) -> Result<Self, TriggerConfigError> {
         let tag = TriggerType::try_from(trigger_type)
             .map_err(|_| TriggerConfigError::TypeMismatch(trigger_type))?;
         let mut value = config.clone();
@@ -147,16 +152,25 @@ mod tests {
 
     #[test]
     fn polling_config_round_trip() {
-        let cfg = TriggerConfig::Polling { interval_secs: 60, branch: None };
+        let cfg = TriggerConfig::Polling {
+            interval_secs: 60,
+            branch: None,
+        };
         let db = cfg.to_db_json();
-        assert!(db.get("type").is_none(), "db json should not carry the type tag");
+        assert!(
+            db.get("type").is_none(),
+            "db json should not carry the type tag"
+        );
         let parsed = TriggerConfig::parse_row(0, &db).unwrap();
         assert_eq!(parsed, cfg);
     }
 
     #[test]
     fn polling_config_with_branch_round_trip() {
-        let cfg = TriggerConfig::Polling { interval_secs: 120, branch: Some("develop".into()) };
+        let cfg = TriggerConfig::Polling {
+            interval_secs: 120,
+            branch: Some("develop".into()),
+        };
         let db = cfg.to_db_json();
         assert_eq!(db["branch"], serde_json::json!("develop"));
         let parsed = TriggerConfig::parse_row(0, &db).unwrap();
@@ -165,20 +179,33 @@ mod tests {
 
     #[test]
     fn polling_under_10_seconds_rejected() {
-        let cfg = TriggerConfig::Polling { interval_secs: 5, branch: None };
-        assert!(matches!(cfg.validate(), Err(TriggerConfigError::PollingIntervalTooSmall)));
+        let cfg = TriggerConfig::Polling {
+            interval_secs: 5,
+            branch: None,
+        };
+        assert!(matches!(
+            cfg.validate(),
+            Err(TriggerConfigError::PollingIntervalTooSmall)
+        ));
     }
 
     #[test]
     fn cron_invalid_rejected() {
-        let cfg = TriggerConfig::Time { cron: "not a cron".into() };
-        assert!(matches!(cfg.validate(), Err(TriggerConfigError::InvalidCron(_))));
+        let cfg = TriggerConfig::Time {
+            cron: "not a cron".into(),
+        };
+        assert!(matches!(
+            cfg.validate(),
+            Err(TriggerConfigError::InvalidCron(_))
+        ));
     }
 
     #[test]
     fn cron_valid_accepted() {
         // The `cron` crate uses six-field expressions: sec min hour dom mon dow.
-        let cfg = TriggerConfig::Time { cron: "0 0 2 * * *".into() };
+        let cfg = TriggerConfig::Time {
+            cron: "0 0 2 * * *".into(),
+        };
         cfg.validate().unwrap();
     }
 
@@ -228,7 +255,10 @@ mod tests {
             releases_only: false,
         };
         let db = cfg.to_db_json();
-        assert!(db.get("type").is_none(), "db json should not carry the type tag");
+        assert!(
+            db.get("type").is_none(),
+            "db json should not carry the type tag"
+        );
         let parsed = TriggerConfig::parse_row(1, &db).unwrap();
         assert_eq!(parsed, cfg);
     }

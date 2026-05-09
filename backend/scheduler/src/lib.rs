@@ -23,8 +23,8 @@ pub mod worker_pool;
 pub mod worker_state;
 
 mod job_handlers;
-mod worker_lifecycle;
 pub(crate) mod trigger_dispatch;
+mod worker_lifecycle;
 
 use std::collections::HashMap;
 use std::sync::Arc;

@@ -204,9 +204,7 @@ pub fn view_mask() -> PermissionMask {
 /// True if `role_id` is one of the immutable built-in roles. Built-in roles
 /// cannot be edited or deleted via the role-management API.
 pub fn is_builtin_role(role_id: RoleId) -> bool {
-    role_id == BASE_ROLE_ADMIN_ID
-        || role_id == BASE_ROLE_WRITE_ID
-        || role_id == BASE_ROLE_VIEW_ID
+    role_id == BASE_ROLE_ADMIN_ID || role_id == BASE_ROLE_WRITE_ID || role_id == BASE_ROLE_VIEW_ID
 }
 
 #[cfg(test)]

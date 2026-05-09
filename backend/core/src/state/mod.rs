@@ -290,9 +290,11 @@ impl StateConfiguration {
                 });
             }
 
-            for (field_name, binding, expected_kind) in
-                [("outbound_integration", &project.outbound_integration, "outbound")]
-            {
+            for (field_name, binding, expected_kind) in [(
+                "outbound_integration",
+                &project.outbound_integration,
+                "outbound",
+            )] {
                 let Some(int_name) = binding else { continue };
                 match self.integrations.get(int_name) {
                     None => errors.push(ValidationError {
@@ -531,7 +533,10 @@ mod tests {
             }
         }"#;
         let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
-        assert_eq!(cfg.projects["web"].concurrency, ConcurrencyPolicy::SoftAbort);
+        assert_eq!(
+            cfg.projects["web"].concurrency,
+            ConcurrencyPolicy::SoftAbort
+        );
     }
 
     #[test]
@@ -587,7 +592,10 @@ mod tests {
             }
         }"#;
         let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
-        assert_eq!(cfg.projects["web"].concurrency, ConcurrencyPolicy::HardAbort);
+        assert_eq!(
+            cfg.projects["web"].concurrency,
+            ConcurrencyPolicy::HardAbort
+        );
         assert_eq!(i16::from(cfg.projects["web"].concurrency), 0);
     }
 }

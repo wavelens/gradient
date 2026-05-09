@@ -19,9 +19,7 @@
 use entity::{ids::*, organization_user, role};
 use gradient_core::permissions::{Permission, admin_mask, view_mask, write_mask};
 use gradient_core::types::SessionId;
-use gradient_core::types::consts::{
-    BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID,
-};
+use gradient_core::types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID};
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 use serde_json::{Value, json};
 use test_support::fixtures::{org, org_id, user, user_id};
@@ -469,10 +467,9 @@ fn custom_role_with_manage_webhooks_can_list_webhooks() {
             .append_query_results([vec![org()]])
             .append_query_results([vec![custom_membership]])
             .append_query_results([vec![custom_role]])
-            .append_query_results::<entity::webhook::Model, _, _>([Vec::<
-                entity::webhook::Model,
-            >::new(
-            )]);
+            .append_query_results::<entity::webhook::Model, _, _>([
+                Vec::<entity::webhook::Model>::new(),
+            ]);
 
         let server = make_test_server(db.into_connection());
         let res = server
@@ -517,4 +514,3 @@ fn custom_role_without_manage_webhooks_is_rejected() {
         res.assert_status(axum::http::StatusCode::FORBIDDEN);
     });
 }
-

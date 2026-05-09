@@ -118,7 +118,9 @@ mod tests {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![eval.clone()]])
             .into_connection();
-        let ids = abort_evaluation(&db, eval.id, AbortKind::Hard).await.unwrap();
+        let ids = abort_evaluation(&db, eval.id, AbortKind::Hard)
+            .await
+            .unwrap();
         assert!(ids.is_empty());
     }
 
@@ -131,9 +133,14 @@ mod tests {
             // refetch for ActiveModel update
             .append_query_results([vec![eval.clone()]])
             // exec result for update
-            .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
             .into_connection();
-        let ids = abort_evaluation(&db, eval.id, AbortKind::Soft).await.unwrap();
+        let ids = abort_evaluation(&db, eval.id, AbortKind::Soft)
+            .await
+            .unwrap();
         assert!(ids.is_empty(), "soft abort returns no build IDs");
     }
 
@@ -149,15 +156,27 @@ mod tests {
             // eval update read-back
             .append_query_results([vec![eval.clone()]])
             // eval exec
-            .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
             // builds list
             .append_query_results([vec![active_build.clone(), done_build.clone()]])
             // active build refetch
             .append_query_results([vec![active_build.clone()]])
             // active build exec
-            .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
             .into_connection();
-        let ids = abort_evaluation(&db, eval.id, AbortKind::Hard).await.unwrap();
-        assert_eq!(ids, vec![active_build_id], "hard abort returns IDs of builds it marked Aborted");
+        let ids = abort_evaluation(&db, eval.id, AbortKind::Hard)
+            .await
+            .unwrap();
+        assert_eq!(
+            ids,
+            vec![active_build_id],
+            "hard abort returns IDs of builds it marked Aborted"
+        );
     }
 }

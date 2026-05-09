@@ -114,7 +114,11 @@ mod tests {
     fn parse_hydra_product_line_accepts_any_type() {
         assert_eq!(
             parse_hydra_product_line("doc readme /nix/store/xyz/README.md"),
-            Some(("doc".to_string(), "readme".to_string(), "/nix/store/xyz/README.md".to_string()))
+            Some((
+                "doc".to_string(),
+                "readme".to_string(),
+                "/nix/store/xyz/README.md".to_string()
+            ))
         );
     }
 

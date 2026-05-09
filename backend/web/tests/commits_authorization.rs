@@ -39,7 +39,9 @@ use std::sync::Arc;
 use test_support::cli::test_cli;
 use test_support::fakes::email::InMemoryEmailSender;
 use test_support::fakes::webhooks::RecordingWebhookClient;
-use test_support::fixtures::{commit_id, eval_at, org, org_id, project_id, test_date, user, user_id};
+use test_support::fixtures::{
+    commit_id, eval_at, org, org_id, project_id, test_date, user, user_id,
+};
 use test_support::log_storage::NoopLogStorage;
 use uuid::Uuid;
 use web::create_router;

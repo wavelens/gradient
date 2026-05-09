@@ -15,8 +15,8 @@ pub mod reporting;
 pub mod trigger;
 pub mod webhook;
 
-pub use self::abort::{abort_evaluation, AbortKind};
-pub use self::apply::{apply_trigger, ApplyError, ApplyInput, ApplyOutcome};
+pub use self::abort::{AbortKind, abort_evaluation};
+pub use self::apply::{ApplyError, ApplyInput, ApplyOutcome, apply_trigger};
 pub use self::github_app::*;
 pub use self::integration_lookup::*;
 pub use self::reporter::*;

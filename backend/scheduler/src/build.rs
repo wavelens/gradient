@@ -412,8 +412,13 @@ impl<'a> BuildStateHandler<'a> {
                 );
             }
 
-            persist_waiting_reason(self.state, eval.id, &eval.waiting_reason, new_reason.as_ref())
-                .await;
+            persist_waiting_reason(
+                self.state,
+                eval.id,
+                &eval.waiting_reason,
+                new_reason.as_ref(),
+            )
+            .await;
 
             if eval.status != target {
                 update_evaluation_status(Arc::clone(self.state), eval, target).await;
@@ -768,8 +773,7 @@ mod waiting_reason_tests {
         let builds = vec![build_for(d_x86.id, eval_id), build_for(d_arm.id, eval_id)];
         let checker = checker_with(vec![d_x86, d_arm], vec![]);
 
-        let caps: Vec<(Vec<String>, Vec<String>)> =
-            vec![(vec!["x86_64-linux".into()], vec![])];
+        let caps: Vec<(Vec<String>, Vec<String>)> = vec![(vec!["x86_64-linux".into()], vec![])];
         let reason = checker.compute_waiting_reason(&builds, &caps);
 
         assert_eq!(reason.connected_workers, 1);
@@ -788,8 +792,7 @@ mod waiting_reason_tests {
         let builds = vec![build_for(drv_id, eval_id)];
         let checker = checker_with(vec![d], vec![(drv_id, feat_id, "kvm")]);
 
-        let caps: Vec<(Vec<String>, Vec<String>)> =
-            vec![(vec!["x86_64-linux".into()], vec![])];
+        let caps: Vec<(Vec<String>, Vec<String>)> = vec![(vec!["x86_64-linux".into()], vec![])];
         let reason = checker.compute_waiting_reason(&builds, &caps);
 
         assert_eq!(reason.unmet.len(), 1);
@@ -842,8 +845,7 @@ mod waiting_reason_tests {
         let builds = vec![build_for(d.id, eval_id)];
         let checker = checker_with(vec![d], vec![]);
 
-        let caps: Vec<(Vec<String>, Vec<String>)> =
-            vec![(vec!["x86_64-linux".into()], vec![])];
+        let caps: Vec<(Vec<String>, Vec<String>)> = vec![(vec!["x86_64-linux".into()], vec![])];
         let reason = checker.compute_waiting_reason(&builds, &caps);
 
         assert!(reason.unmet.is_empty());

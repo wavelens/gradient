@@ -736,10 +736,7 @@ mod tests {
         let built = BTreeMap::new();
         let drv = drv_with_outputs(vec![
             ("out", "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo"),
-            (
-                "dev",
-                "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-foo-dev",
-            ),
+            ("dev", "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-foo-dev"),
         ]);
 
         let mut pairs = output_pairs_from_built_or_drv(&built, &drv);
@@ -795,7 +792,9 @@ mod tests {
         let support = dir.path().join("nix-support");
         tokio::fs::create_dir_all(&support).await.unwrap();
         let report_path = dir.path().join("index.html");
-        tokio::fs::write(&report_path, b"<html></html>").await.unwrap();
+        tokio::fs::write(&report_path, b"<html></html>")
+            .await
+            .unwrap();
 
         let products_file = support.join("hydra-build-products");
         let line = format!("file html {}", report_path.display());

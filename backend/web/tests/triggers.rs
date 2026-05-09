@@ -58,7 +58,9 @@ fn project_row() -> entity::project::Model {
 
 fn admin_membership() -> organization_user::Model {
     organization_user::Model {
-        id: OrganizationUserId::new(Uuid::parse_str("00000000-0000-0000-0000-0000000000aa").unwrap()),
+        id: OrganizationUserId::new(
+            Uuid::parse_str("00000000-0000-0000-0000-0000000000aa").unwrap(),
+        ),
         organization: org_id(),
         user: user_id(),
         role: gradient_core::types::consts::BASE_ROLE_ADMIN_ID,
@@ -134,8 +136,11 @@ fn list_triggers_returns_rows() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let db = with_project_member(with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id))
-            .append_query_results([vec![polling_trigger_row()]]);
+        let db = with_project_member(with_auth(
+            MockDatabase::new(DatabaseBackend::Postgres),
+            session_id,
+        ))
+        .append_query_results([vec![polling_trigger_row()]]);
 
         let server = make_test_server(db.into_connection());
         let res = server
@@ -164,8 +169,11 @@ fn get_trigger_returns_row() {
         let token = make_token(session_id);
         let tid = trigger_id();
 
-        let db = with_project_member(with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id))
-            .append_query_results([vec![polling_trigger_row()]]);
+        let db = with_project_member(with_auth(
+            MockDatabase::new(DatabaseBackend::Postgres),
+            session_id,
+        ))
+        .append_query_results([vec![polling_trigger_row()]]);
 
         let server = make_test_server(db.into_connection());
         let res = server
@@ -192,8 +200,11 @@ fn get_trigger_not_found_returns_404() {
         let token = make_token(session_id);
         let tid = ProjectTriggerId::now_v7();
 
-        let db = with_project_member(with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id))
-            .append_query_results([Vec::<project_trigger::Model>::new()]);
+        let db = with_project_member(with_auth(
+            MockDatabase::new(DatabaseBackend::Postgres),
+            session_id,
+        ))
+        .append_query_results([Vec::<project_trigger::Model>::new()]);
 
         let server = make_test_server(db.into_connection());
         let res = server
@@ -215,8 +226,11 @@ fn create_polling_trigger_valid() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let db = with_project_edit(with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id))
-            .append_query_results([vec![polling_trigger_row()]]);
+        let db = with_project_edit(with_auth(
+            MockDatabase::new(DatabaseBackend::Postgres),
+            session_id,
+        ))
+        .append_query_results([vec![polling_trigger_row()]]);
 
         let server = make_test_server(db.into_connection());
         let res = server
@@ -244,7 +258,10 @@ fn create_polling_trigger_interval_too_small_returns_400() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let db = with_project_edit(with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id));
+        let db = with_project_edit(with_auth(
+            MockDatabase::new(DatabaseBackend::Postgres),
+            session_id,
+        ));
 
         let server = make_test_server(db.into_connection());
         let res = server
@@ -259,7 +276,10 @@ fn create_polling_trigger_interval_too_small_returns_400() {
         let body: Value = res.json();
         assert_eq!(body["error"], true);
         let msg = body["message"].as_str().unwrap();
-        assert!(msg.contains("interval_secs"), "expected interval message, got: {msg}");
+        assert!(
+            msg.contains("interval_secs"),
+            "expected interval message, got: {msg}"
+        );
     });
 }
 
@@ -273,7 +293,10 @@ fn create_invalid_cron_returns_400() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let db = with_project_edit(with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id));
+        let db = with_project_edit(with_auth(
+            MockDatabase::new(DatabaseBackend::Postgres),
+            session_id,
+        ));
 
         let server = make_test_server(db.into_connection());
         let res = server
@@ -303,9 +326,12 @@ fn patch_trigger_updates_fields() {
 
         let updated = polling_trigger_row();
 
-        let db = with_project_edit(with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id))
-            .append_query_results([vec![polling_trigger_row()]])
-            .append_query_results([vec![updated]]);
+        let db = with_project_edit(with_auth(
+            MockDatabase::new(DatabaseBackend::Postgres),
+            session_id,
+        ))
+        .append_query_results([vec![polling_trigger_row()]])
+        .append_query_results([vec![updated]]);
 
         let server = make_test_server(db.into_connection());
         let res = server
@@ -338,9 +364,12 @@ fn patch_trigger_config_type_change() {
             ..polling_trigger_row()
         };
 
-        let db = with_project_edit(with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id))
-            .append_query_results([vec![polling_trigger_row()]])
-            .append_query_results([vec![updated]]);
+        let db = with_project_edit(with_auth(
+            MockDatabase::new(DatabaseBackend::Postgres),
+            session_id,
+        ))
+        .append_query_results([vec![polling_trigger_row()]])
+        .append_query_results([vec![updated]]);
 
         let server = make_test_server(db.into_connection());
         let res = server
@@ -369,9 +398,15 @@ fn delete_trigger_removes_row() {
         let token = make_token(session_id);
         let tid = trigger_id();
 
-        let db = with_project_edit(with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id))
-            .append_query_results([vec![polling_trigger_row()]])
-            .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }]);
+        let db = with_project_edit(with_auth(
+            MockDatabase::new(DatabaseBackend::Postgres),
+            session_id,
+        ))
+        .append_query_results([vec![polling_trigger_row()]])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }]);
 
         let server = make_test_server(db.into_connection());
         let res = server
@@ -397,8 +432,11 @@ fn delete_trigger_not_found_returns_404() {
         let token = make_token(session_id);
         let tid = ProjectTriggerId::now_v7();
 
-        let db = with_project_edit(with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id))
-            .append_query_results([Vec::<project_trigger::Model>::new()]);
+        let db = with_project_edit(with_auth(
+            MockDatabase::new(DatabaseBackend::Postgres),
+            session_id,
+        ))
+        .append_query_results([Vec::<project_trigger::Model>::new()]);
 
         let server = make_test_server(db.into_connection());
         let res = server
@@ -485,7 +523,7 @@ fn create_project_seeds_default_polling_trigger() {
         let seeded_trigger = project_trigger::Model {
             id: trigger_id(),
             project: project_id(),
-            trigger_type: 0,  // Polling
+            trigger_type: 0, // Polling
             config: serde_json::json!({"interval_secs": 300}),
             active: true,
             last_fired_at: None,
@@ -677,10 +715,16 @@ fn patch_project_concurrency_to_skip() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let db = with_project_edit(with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id))
-            // aproject.update() — read-back then exec
-            .append_query_results([vec![project_row()]])
-            .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }]);
+        let db = with_project_edit(with_auth(
+            MockDatabase::new(DatabaseBackend::Postgres),
+            session_id,
+        ))
+        // aproject.update() — read-back then exec
+        .append_query_results([vec![project_row()]])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }]);
 
         let server = make_test_server(db.into_connection());
         let res = server
@@ -705,9 +749,15 @@ fn patch_project_all_concurrency_returns_ok() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let db = with_project_edit(with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id))
-            .append_query_results([vec![project_row()]])
-            .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }]);
+        let db = with_project_edit(with_auth(
+            MockDatabase::new(DatabaseBackend::Postgres),
+            session_id,
+        ))
+        .append_query_results([vec![project_row()]])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }]);
 
         let server = make_test_server(db.into_connection());
         let res = server

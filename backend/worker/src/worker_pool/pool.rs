@@ -334,9 +334,11 @@ impl EvalWorkerPool {
         if drained.is_empty() {
             return;
         }
-        debug!(count = drained.len(), "gracefully shutting down idle eval workers");
-        let mut tasks: FuturesUnordered<_> =
-            drained.into_iter().map(|w| w.shutdown()).collect();
+        debug!(
+            count = drained.len(),
+            "gracefully shutting down idle eval workers"
+        );
+        let mut tasks: FuturesUnordered<_> = drained.into_iter().map(|w| w.shutdown()).collect();
         while tasks.next().await.is_some() {}
     }
 

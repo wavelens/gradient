@@ -192,18 +192,16 @@ impl ProtoReader {
             let frame = match self {
                 Self::Axum(s) => s.next().await,
                 Self::Tungstenite(s) => match s.next().await? {
-                    Ok(TungsteniteMessage::Binary(bytes)) => {
-                        match decode_client_message(&bytes) {
-                            Ok(msg) => {
-                                trace!(?msg, bytes = bytes.len(), "recv ClientMessage");
-                                return Some(msg);
-                            }
-                            Err(e) => {
-                                warn!(error = %e, "failed to deserialize client message");
-                                return None;
-                            }
+                    Ok(TungsteniteMessage::Binary(bytes)) => match decode_client_message(&bytes) {
+                        Ok(msg) => {
+                            trace!(?msg, bytes = bytes.len(), "recv ClientMessage");
+                            return Some(msg);
                         }
-                    }
+                        Err(e) => {
+                            warn!(error = %e, "failed to deserialize client message");
+                            return None;
+                        }
+                    },
                     Ok(TungsteniteMessage::Close(_)) => return None,
                     Ok(TungsteniteMessage::Ping(_) | TungsteniteMessage::Pong(_)) => continue,
                     Ok(_) => continue,
@@ -214,18 +212,16 @@ impl ProtoReader {
                 },
             };
             match frame? {
-                Ok(AxumMessage::Binary(bytes)) => {
-                    match decode_client_message(&bytes) {
-                        Ok(msg) => {
-                            trace!(?msg, bytes = bytes.len(), "recv ClientMessage");
-                            return Some(msg);
-                        }
-                        Err(e) => {
-                            warn!(error = %e, "failed to deserialize client message");
-                            return None;
-                        }
+                Ok(AxumMessage::Binary(bytes)) => match decode_client_message(&bytes) {
+                    Ok(msg) => {
+                        trace!(?msg, bytes = bytes.len(), "recv ClientMessage");
+                        return Some(msg);
                     }
-                }
+                    Err(e) => {
+                        warn!(error = %e, "failed to deserialize client message");
+                        return None;
+                    }
+                },
                 Ok(AxumMessage::Close(_)) => return None,
                 Ok(_) => continue,
                 Err(e) => {

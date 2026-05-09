@@ -8,12 +8,15 @@
 
 use super::response::{QueuedEvaluation, SkippedProject, WebhookTriggerOutcome};
 use entity::project_trigger as ept;
-use gradient_core::ci::{apply_trigger, ApplyInput, ApplyOutcome};
+use gradient_core::ci::{ApplyInput, ApplyOutcome, apply_trigger};
 use gradient_core::types::triggers::{TriggerConfig, TriggerType};
 use gradient_core::types::*;
 use scheduler::Scheduler;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, DbBackend, EntityTrait, IntoActiveModel, QueryFilter, Statement, Value};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, DbBackend, EntityTrait, IntoActiveModel, QueryFilter, Statement,
+    Value,
+};
 use serde::Deserialize;
 use std::sync::Arc;
 use tracing::{info, warn};
@@ -130,9 +133,7 @@ pub(super) async fn resolve_github_integration_id(
     EIntegration::find()
         .filter(CIntegration::Organization.eq(org.id))
         .filter(CIntegration::Kind.eq(i16::from(IntegrationKind::Inbound)))
-        .filter(CIntegration::ForgeType.eq(i16::from(
-            gradient_core::ci::ForgeType::GitHub,
-        )))
+        .filter(CIntegration::ForgeType.eq(i16::from(gradient_core::ci::ForgeType::GitHub)))
         .one(&state.web_db)
         .await
         .ok()
@@ -168,7 +169,12 @@ pub(super) async fn trigger_push_for_integration(
         commit_message,
         author_name,
         |cfg| match cfg {
-            TriggerConfig::ReporterPush { branches, tags, releases_only, .. } => {
+            TriggerConfig::ReporterPush {
+                branches,
+                tags,
+                releases_only,
+                ..
+            } => {
                 if *releases_only {
                     return FilterResult::Skip;
                 }
@@ -176,7 +182,11 @@ pub(super) async fn trigger_push_for_integration(
                     PushRefKind::Branch(name) => glob_matches(branches, name),
                     PushRefKind::Tag(name) => glob_matches(tags, name),
                 };
-                if matches { FilterResult::Fire } else { FilterResult::SkipFilter }
+                if matches {
+                    FilterResult::Fire
+                } else {
+                    FilterResult::SkipFilter
+                }
             }
             _ => FilterResult::Skip,
         },
@@ -204,7 +214,9 @@ pub(super) async fn trigger_pr_for_integration(
         commit_message,
         author_name,
         |cfg| match cfg {
-            TriggerConfig::ReporterPullRequest { branches, actions, .. } => {
+            TriggerConfig::ReporterPullRequest {
+                branches, actions, ..
+            } => {
                 if !actions.iter().any(|a| a == action) {
                     return FilterResult::SkipFilter;
                 }
@@ -212,7 +224,11 @@ pub(super) async fn trigger_pr_for_integration(
                     Some(b) => glob_matches(branches, b),
                     None => branches.is_empty(),
                 };
-                if matches { FilterResult::Fire } else { FilterResult::SkipFilter }
+                if matches {
+                    FilterResult::Fire
+                } else {
+                    FilterResult::SkipFilter
+                }
             }
             _ => FilterResult::Skip,
         },
@@ -238,7 +254,11 @@ pub(super) async fn trigger_release_for_integration(
         commit_message,
         author_name,
         |cfg| match cfg {
-            TriggerConfig::ReporterPush { tags, releases_only, .. } => {
+            TriggerConfig::ReporterPush {
+                tags,
+                releases_only,
+                ..
+            } => {
                 if !releases_only {
                     return FilterResult::Skip;
                 }
@@ -246,7 +266,11 @@ pub(super) async fn trigger_release_for_integration(
                     Some(t) => glob_matches(tags, t),
                     None => tags.is_empty(),
                 };
-                if matches { FilterResult::Fire } else { FilterResult::SkipFilter }
+                if matches {
+                    FilterResult::Fire
+                } else {
+                    FilterResult::SkipFilter
+                }
             }
             _ => FilterResult::Skip,
         },
@@ -326,7 +350,9 @@ where
         };
         outcome.projects_scanned += 1;
 
-        let org_name = org_name_for(state, project.organization).await.unwrap_or_default();
+        let org_name = org_name_for(state, project.organization)
+            .await
+            .unwrap_or_default();
 
         match apply_trigger(
             &state.web_db,
@@ -342,9 +368,15 @@ where
         )
         .await
         {
-            Ok(ApplyOutcome::Created { evaluation: eval, aborted_evaluation, aborted_builds }) => {
+            Ok(ApplyOutcome::Created {
+                evaluation: eval,
+                aborted_evaluation,
+                aborted_builds,
+            }) => {
                 if let Some(aborted_id) = aborted_evaluation {
-                    scheduler.cancel_evaluation_jobs(aborted_id, &aborted_builds).await;
+                    scheduler
+                        .cancel_evaluation_jobs(aborted_id, &aborted_builds)
+                        .await;
                 }
                 scheduler::ci::spawn_pending_ci_for_eval(Arc::clone(state), &eval);
                 info!(
@@ -464,23 +496,19 @@ fn glob_match_recursive(p: &[char], t: &[char], pi: usize, ti: usize) -> bool {
     }
 }
 
-async fn project_identity(
-    state: &Arc<ServerState>,
-    project_id: ProjectId,
-) -> (String, String) {
+async fn project_identity(state: &Arc<ServerState>, project_id: ProjectId) -> (String, String) {
     match EProject::find_by_id(project_id).one(&state.web_db).await {
         Ok(Some(p)) => {
-            let org = org_name_for(state, p.organization).await.unwrap_or_default();
+            let org = org_name_for(state, p.organization)
+                .await
+                .unwrap_or_default();
             (p.name, org)
         }
         _ => (String::new(), String::new()),
     }
 }
 
-async fn org_name_for(
-    state: &Arc<ServerState>,
-    org_id: OrganizationId,
-) -> Option<String> {
+async fn org_name_for(state: &Arc<ServerState>, org_id: OrganizationId) -> Option<String> {
     EOrganization::find_by_id(org_id)
         .one(&state.web_db)
         .await

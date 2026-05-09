@@ -338,11 +338,7 @@ mod tests {
 
         spawn_pending_ci_for_eval(Arc::clone(&state), &eval);
 
-        assert_eq!(
-            state.shutdown.pending(),
-            0,
-            "no project ⇒ no spawned task"
-        );
+        assert_eq!(state.shutdown.pending(), 0, "no project ⇒ no spawned task");
     }
 
     #[tokio::test]

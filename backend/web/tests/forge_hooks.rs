@@ -293,15 +293,16 @@ fn reporter_pr_trigger(actions: Vec<&str>) -> TriggerConfig {
 
 /// Mock DB chain for a successful `apply_trigger` call with no prior evaluation
 /// (skips same-commit dedup) and no in-flight evaluation.
-fn apply_trigger_db_chain(
-    db: MockDatabase,
-) -> MockDatabase {
+fn apply_trigger_db_chain(db: MockDatabase) -> MockDatabase {
     db.append_query_results([Vec::<entity::evaluation::Model>::new()]) // in-flight check
         .append_query_results([Vec::<entity::evaluation::Model>::new()]) // trigger_evaluation: in-progress check
-        .append_query_results([vec![commit_row()]])                      // INSERT commit
+        .append_query_results([vec![commit_row()]]) // INSERT commit
         .append_query_results([vec![eval_row(EvaluationStatus::Queued)]]) // INSERT eval
-        .append_query_results([vec![project_row()]])                     // SELECT project for update
-        .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }]) // UPDATE project
+        .append_query_results([vec![project_row()]]) // SELECT project for update
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }]) // UPDATE project
 }
 
 // ── Test 1: Generic forge — no matching trigger (Gitea) ───────────────────────
@@ -582,7 +583,10 @@ async fn forge_webhook_pr_fires_trigger_inner() {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![org_row("test-org")]])
         .append_query_results([vec![integration_row(&ciphertext)]])
-        .append_query_results([vec![trigger_row(reporter_pr_trigger(vec!["opened", "synchronize"]))]])
+        .append_query_results([vec![trigger_row(reporter_pr_trigger(vec![
+            "opened",
+            "synchronize",
+        ]))]])
         .append_query_results([vec![project_row()]])
         .append_query_results([vec![org_row("test-org")]]);
     let db = apply_trigger_db_chain(db).into_connection();

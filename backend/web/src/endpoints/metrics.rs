@@ -62,17 +62,22 @@ pub(crate) fn render(obs: &Observations) -> String {
     let registry = Registry::new();
 
     let info = IntGaugeVec::new(
-        Opts::new("gradient_info", "Build/version metadata; value is always 1."),
+        Opts::new(
+            "gradient_info",
+            "Build/version metadata; value is always 1.",
+        ),
         &["version"],
     )
     .expect("metric");
     info.with_label_values(&[&obs.version]).set(1);
     registry.register(Box::new(info)).expect("register info");
 
-    let uptime = Gauge::new("gradient_uptime_seconds", "Seconds since process start.")
-        .expect("metric");
+    let uptime =
+        Gauge::new("gradient_uptime_seconds", "Seconds since process start.").expect("metric");
     uptime.set(obs.uptime_seconds);
-    registry.register(Box::new(uptime)).expect("register uptime");
+    registry
+        .register(Box::new(uptime))
+        .expect("register uptime");
 
     register_labelled_counter(
         &registry,
@@ -99,22 +104,22 @@ pub(crate) fn render(obs: &Observations) -> String {
         &obs.evaluations_in_state,
     );
 
-    let workers = IntGauge::new("gradient_workers_connected", "Connected workers.")
-        .expect("metric");
+    let workers =
+        IntGauge::new("gradient_workers_connected", "Connected workers.").expect("metric");
     workers.set(obs.workers_connected);
     registry
         .register(Box::new(workers))
         .expect("register workers");
 
-    let pending = IntGauge::new("gradient_jobs_pending", "Pending jobs in scheduler.")
-        .expect("metric");
+    let pending =
+        IntGauge::new("gradient_jobs_pending", "Pending jobs in scheduler.").expect("metric");
     pending.set(obs.jobs_pending);
     registry
         .register(Box::new(pending))
         .expect("register pending");
 
-    let active = IntGauge::new("gradient_jobs_active", "Active jobs in scheduler.")
-        .expect("metric");
+    let active =
+        IntGauge::new("gradient_jobs_active", "Active jobs in scheduler.").expect("metric");
     active.set(obs.jobs_active);
     registry
         .register(Box::new(active))
@@ -181,17 +186,13 @@ fn register_labelled_counter(
 ) {
     let cv = IntCounterVec::new(Opts::new(name, help), &["status"]).expect("metric");
     for (label, value) in values {
-        cv.with_label_values(&[label]).inc_by((*value).max(0) as u64);
+        cv.with_label_values(&[label])
+            .inc_by((*value).max(0) as u64);
     }
     registry.register(Box::new(cv)).expect("register");
 }
 
-fn register_labelled_gauge(
-    registry: &Registry,
-    name: &str,
-    help: &str,
-    values: &[(String, i64)],
-) {
+fn register_labelled_gauge(registry: &Registry, name: &str, help: &str, values: &[(String, i64)]) {
     let gv = IntGaugeVec::new(Opts::new(name, help), &["status"]).expect("metric");
     for (label, value) in values {
         gv.with_label_values(&[label]).set(*value);
@@ -299,13 +300,11 @@ pub(crate) async fn collect(
         FROM cache_metric
     "#;
 
-    let rows: Vec<CountRow> = CountRow::find_by_statement(Statement::from_string(
-        DatabaseBackend::Postgres,
-        sql,
-    ))
-    .all(&state.web_db)
-    .await
-    .map_err(WebError::from)?;
+    let rows: Vec<CountRow> =
+        CountRow::find_by_statement(Statement::from_string(DatabaseBackend::Postgres, sql))
+            .all(&state.web_db)
+            .await
+            .map_err(WebError::from)?;
 
     let mut obs = Observations {
         version: env!("CARGO_PKG_VERSION").to_string(),

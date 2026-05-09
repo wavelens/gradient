@@ -29,9 +29,7 @@ impl MigrationTrait for Migration {
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
             .get_connection()
-            .execute_unprepared(
-                r#"DROP INDEX IF EXISTS "uq_evaluation_one_active_per_project""#,
-            )
+            .execute_unprepared(r#"DROP INDEX IF EXISTS "uq_evaluation_one_active_per_project""#)
             .await?;
         Ok(())
     }

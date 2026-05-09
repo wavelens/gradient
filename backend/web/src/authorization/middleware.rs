@@ -55,27 +55,54 @@ pub async fn authorize(
     let method = req.method().as_str().to_string();
     let path = req.uri().path().to_string();
 
-    let auth_header = req.headers().get(axum::http::header::AUTHORIZATION).cloned();
+    let auth_header = req
+        .headers()
+        .get(axum::http::header::AUTHORIZATION)
+        .cloned();
 
     let token_str: String = if let Some(header) = auth_header {
         let val = match header.to_str() {
             Ok(v) => v.to_string(),
             Err(_) => {
-                audit_deny(&state, None, info, method, path, "Authorization header empty").await;
+                audit_deny(
+                    &state,
+                    None,
+                    info,
+                    method,
+                    path,
+                    "Authorization header empty",
+                )
+                .await;
                 return Err(WebError::forbidden("Authorization header empty"));
             }
         };
         let mut parts = val.split_whitespace();
         let (bearer, token) = (parts.next(), parts.next());
         if bearer != Some("Bearer") || token.is_none() {
-            audit_deny(&state, None, info, method, path, "Invalid Authorization header").await;
+            audit_deny(
+                &state,
+                None,
+                info,
+                method,
+                path,
+                "Invalid Authorization header",
+            )
+            .await;
             return Err(WebError::forbidden("Invalid Authorization header"));
         }
         token.unwrap().to_string()
     } else if let Some(t) = token_from_cookie(&req) {
         t
     } else {
-        audit_deny(&state, None, info, method, path, "Authorization header not found").await;
+        audit_deny(
+            &state,
+            None,
+            info,
+            method,
+            path,
+            "Authorization header not found",
+        )
+        .await;
         return Err(WebError::forbidden("Authorization header not found"));
     };
 
@@ -87,7 +114,10 @@ pub async fn authorize(
         }
     };
 
-    let current_user = match EUser::find_by_id(token_data.claims.id).one(&state.web_db).await? {
+    let current_user = match EUser::find_by_id(token_data.claims.id)
+        .one(&state.web_db)
+        .await?
+    {
         Some(u) => u,
         None => {
             audit_deny(

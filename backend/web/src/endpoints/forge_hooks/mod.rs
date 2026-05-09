@@ -173,7 +173,10 @@ async fn dispatch_github_app_push(
         return WebhookTriggerOutcome::default();
     };
     let Some(integration_id) = resolve_github_integration_id(state, installation_id).await else {
-        warn!(installation_id, "GitHub App push: no integration found for installation");
+        warn!(
+            installation_id,
+            "GitHub App push: no integration found for installation"
+        );
         return WebhookTriggerOutcome::default();
     };
     let ref_name = parsed.ref_name.clone();
@@ -206,7 +209,10 @@ async fn dispatch_github_app_pr(
         return WebhookTriggerOutcome::default();
     };
     let Some(integration_id) = resolve_github_integration_id(state, installation_id).await else {
-        warn!(installation_id, "GitHub App pull_request: no integration found for installation");
+        warn!(
+            installation_id,
+            "GitHub App pull_request: no integration found for installation"
+        );
         return WebhookTriggerOutcome::default();
     };
     trigger_pr_for_integration(
@@ -233,7 +239,10 @@ async fn dispatch_github_app_release(
         return WebhookTriggerOutcome::default();
     };
     let Some(integration_id) = resolve_github_integration_id(state, installation_id).await else {
-        warn!(installation_id, "GitHub App release: no integration found for installation");
+        warn!(
+            installation_id,
+            "GitHub App release: no integration found for installation"
+        );
         return WebhookTriggerOutcome::default();
     };
     trigger_release_for_integration(
@@ -354,9 +363,7 @@ pub async fn forge_webhook(
         }
         ForgeEvent::PullRequest => {
             let parsed = match forge_type {
-                ForgeType::Gitea | ForgeType::Forgejo => {
-                    ParsedPullRequestEvent::from_gitea(&body)
-                }
+                ForgeType::Gitea | ForgeType::Forgejo => ParsedPullRequestEvent::from_gitea(&body),
                 ForgeType::GitLab => ParsedPullRequestEvent::from_gitlab(&body),
                 ForgeType::GitHub => unreachable!(),
             };

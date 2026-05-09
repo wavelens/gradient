@@ -8,8 +8,8 @@
 //! deduplication and concurrency policy. Callers: scheduler dispatch loop,
 //! forge webhooks, manual API endpoints.
 
-use super::abort::{abort_evaluation, AbortKind};
-use super::trigger::{trigger_evaluation, TriggerError};
+use super::abort::{AbortKind, abort_evaluation};
+use super::trigger::{TriggerError, trigger_evaluation};
 use crate::types::triggers::{ConcurrencyPolicy, TriggerType};
 use crate::types::*;
 
@@ -82,16 +82,18 @@ pub async fn apply_trigger<C: ConnectionTrait>(
     if dedup_applies {
         if let Some(running) = &in_flight
             && let Some(running_commit) = ECommit::find_by_id(running.commit).one(db).await?
-                && running_commit.hash == input.commit_hash {
-                    return Ok(ApplyOutcome::SkippedSameCommit);
-                }
+            && running_commit.hash == input.commit_hash
+        {
+            return Ok(ApplyOutcome::SkippedSameCommit);
+        }
 
         if let Some(prev) = project.last_evaluation
             && let Some(prev_eval) = EEvaluation::find_by_id(prev).one(db).await?
-                && let Some(prev_commit) = ECommit::find_by_id(prev_eval.commit).one(db).await?
-                    && prev_commit.hash == input.commit_hash {
-                        return Ok(ApplyOutcome::SkippedSameCommit);
-                    }
+            && let Some(prev_commit) = ECommit::find_by_id(prev_eval.commit).one(db).await?
+            && prev_commit.hash == input.commit_hash
+        {
+            return Ok(ApplyOutcome::SkippedSameCommit);
+        }
     }
 
     // ── Concurrency policy ────────────────────────────────────────────────
@@ -102,22 +104,20 @@ pub async fn apply_trigger<C: ConnectionTrait>(
     let mut aborted_builds: Vec<BuildId> = Vec::new();
     let concurrent_flag = matches!(concurrency, ConcurrencyPolicy::All);
 
-    if !concurrent_flag
-        && let Some(running) = in_flight {
-            match concurrency {
-                ConcurrencyPolicy::Skip => return Ok(ApplyOutcome::SkippedConcurrency),
-                ConcurrencyPolicy::HardAbort => {
-                    aborted_builds =
-                        abort_evaluation(db, running.id, AbortKind::Hard).await?;
-                    aborted_evaluation = Some(running.id);
-                }
-                ConcurrencyPolicy::SoftAbort => {
-                    abort_evaluation(db, running.id, AbortKind::Soft).await?;
-                    aborted_evaluation = Some(running.id);
-                }
-                ConcurrencyPolicy::All => unreachable!("filtered above"),
+    if !concurrent_flag && let Some(running) = in_flight {
+        match concurrency {
+            ConcurrencyPolicy::Skip => return Ok(ApplyOutcome::SkippedConcurrency),
+            ConcurrencyPolicy::HardAbort => {
+                aborted_builds = abort_evaluation(db, running.id, AbortKind::Hard).await?;
+                aborted_evaluation = Some(running.id);
             }
+            ConcurrencyPolicy::SoftAbort => {
+                abort_evaluation(db, running.id, AbortKind::Soft).await?;
+                aborted_evaluation = Some(running.id);
+            }
+            ConcurrencyPolicy::All => unreachable!("filtered above"),
         }
+    }
 
     let eval = match trigger_evaluation(
         db,
@@ -133,13 +133,18 @@ pub async fn apply_trigger<C: ConnectionTrait>(
         Ok(e) => e,
         Err(TriggerError::AlreadyInProgress) => return Ok(ApplyOutcome::SkippedConcurrency),
         Err(TriggerError::Db(ref e))
-            if e.to_string().contains("uq_evaluation_one_active_per_project") =>
+            if e.to_string()
+                .contains("uq_evaluation_one_active_per_project") =>
         {
             return Ok(ApplyOutcome::SkippedConcurrency);
         }
         Err(e) => return Err(e.into()),
     };
-    Ok(ApplyOutcome::Created { evaluation: eval, aborted_evaluation, aborted_builds })
+    Ok(ApplyOutcome::Created {
+        evaluation: eval,
+        aborted_evaluation,
+        aborted_builds,
+    })
 }
 
 #[cfg(test)]
@@ -272,19 +277,32 @@ mod tests {
             // trigger_evaluation internal in-progress check (none)
             .append_query_results([Vec::<entity::evaluation::Model>::new()])
             // trigger_evaluation: resolve previous (returns the prev eval row)
-            .append_query_results([vec![make_eval(prev_eval_id, project.id, CommitId::nil(), EvaluationStatus::Completed)]])
+            .append_query_results([vec![make_eval(
+                prev_eval_id,
+                project.id,
+                CommitId::nil(),
+                EvaluationStatus::Completed,
+            )]])
             // commit insert
             .append_query_results([vec![make_commit(new_commit_id, same_hash.clone())]])
             // evaluation insert
             .append_query_results([vec![{
-                let mut m = make_eval(new_eval_id, project.id, new_commit_id, EvaluationStatus::Queued);
+                let mut m = make_eval(
+                    new_eval_id,
+                    project.id,
+                    new_commit_id,
+                    EvaluationStatus::Queued,
+                );
                 m.trigger = Some(trig);
                 m
             }]])
             // project update read-back
             .append_query_results([vec![project.clone()]])
             // project update exec
-            .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
             .into_connection();
 
         let res = apply_trigger(
@@ -301,8 +319,12 @@ mod tests {
     async fn skip_concurrency_with_running_eval() {
         let project = make_project_with_last_eval(None);
         let running_eval_id = EvaluationId::now_v7();
-        let running_eval =
-            make_eval(running_eval_id, project.id, CommitId::nil(), EvaluationStatus::Building);
+        let running_eval = make_eval(
+            running_eval_id,
+            project.id,
+            CommitId::nil(),
+            EvaluationStatus::Building,
+        );
 
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             // in_flight lookup returns the running eval
@@ -381,7 +403,12 @@ mod tests {
             .append_query_results([vec![make_commit(new_commit_id, new_hash.clone())]])
             // evaluation insert — the new eval carries concurrent=true
             .append_query_results([vec![{
-                let mut m = make_eval(new_eval_id, project.id, new_commit_id, EvaluationStatus::Queued);
+                let mut m = make_eval(
+                    new_eval_id,
+                    project.id,
+                    new_commit_id,
+                    EvaluationStatus::Queued,
+                );
                 m.trigger = Some(trig);
                 m.concurrent = true;
                 m
@@ -389,7 +416,10 @@ mod tests {
             // project update read-back
             .append_query_results([vec![project.clone()]])
             // project update exec
-            .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
             .into_connection();
 
         let res = apply_trigger(
@@ -400,7 +430,12 @@ mod tests {
         .await
         .unwrap();
 
-        let ApplyOutcome::Created { evaluation, aborted_evaluation, aborted_builds } = res else {
+        let ApplyOutcome::Created {
+            evaluation,
+            aborted_evaluation,
+            aborted_builds,
+        } = res
+        else {
             panic!("expected Created, got {res:?}");
         };
         assert_eq!(evaluation.id, new_eval_id);
@@ -457,7 +492,12 @@ mod tests {
             // trigger_evaluation internal in-progress check
             .append_query_results([Vec::<entity::evaluation::Model>::new()])
             // trigger_evaluation: resolve previous (prev row exists)
-            .append_query_results([vec![make_eval(prev_eval_id, project.id, CommitId::nil(), EvaluationStatus::Completed)]])
+            .append_query_results([vec![make_eval(
+                prev_eval_id,
+                project.id,
+                CommitId::nil(),
+                EvaluationStatus::Completed,
+            )]])
             // commit insert
             .append_query_results([vec![make_commit(new_commit_id, same_hash.clone())]])
             // evaluation insert
@@ -470,7 +510,10 @@ mod tests {
             // project update read-back
             .append_query_results([vec![project.clone()]])
             // project update exec
-            .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
             .into_connection();
 
         let res = apply_trigger(
@@ -487,8 +530,12 @@ mod tests {
     async fn hard_abort_populates_aborted_fields() {
         let project = make_project_with_concurrency(None, 0); // HardAbort
         let running_eval_id = EvaluationId::now_v7();
-        let running_eval =
-            make_eval(running_eval_id, project.id, CommitId::nil(), EvaluationStatus::Building);
+        let running_eval = make_eval(
+            running_eval_id,
+            project.id,
+            CommitId::nil(),
+            EvaluationStatus::Building,
+        );
         let active_build_id = BuildId::now_v7();
         let active_build = entity::build::Model {
             id: active_build_id,
@@ -518,27 +565,41 @@ mod tests {
             // abort_evaluation: eval update read-back
             .append_query_results([vec![running_eval.clone()]])
             // abort_evaluation: eval exec
-            .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
             // abort_evaluation: builds list
             .append_query_results([vec![active_build.clone()]])
             // abort_evaluation: active build refetch
             .append_query_results([vec![active_build.clone()]])
             // abort_evaluation: active build exec
-            .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
             // trigger_evaluation: in-progress guard
             .append_query_results([Vec::<entity::evaluation::Model>::new()])
             // trigger_evaluation: commit insert
             .append_query_results([vec![make_commit(new_commit_id, new_hash.clone())]])
             // trigger_evaluation: eval insert
             .append_query_results([vec![{
-                let mut m = make_eval(new_eval_id, project.id, new_commit_id, EvaluationStatus::Queued);
+                let mut m = make_eval(
+                    new_eval_id,
+                    project.id,
+                    new_commit_id,
+                    EvaluationStatus::Queued,
+                );
                 m.trigger = Some(trig);
                 m
             }]])
             // trigger_evaluation: project update read-back
             .append_query_results([vec![project.clone()]])
             // trigger_evaluation: project exec
-            .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
             .into_connection();
 
         let res = apply_trigger(
@@ -549,7 +610,12 @@ mod tests {
         .await
         .unwrap();
 
-        let ApplyOutcome::Created { evaluation, aborted_evaluation, aborted_builds } = res else {
+        let ApplyOutcome::Created {
+            evaluation,
+            aborted_evaluation,
+            aborted_builds,
+        } = res
+        else {
             panic!("expected Created, got {res:?}");
         };
         assert_eq!(evaluation.id, new_eval_id);

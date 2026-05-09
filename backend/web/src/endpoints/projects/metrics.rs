@@ -103,7 +103,10 @@ async fn sum_output_sizes<C: sea_orm::ConnectionTrait>(
 
     let total: i64 = outputs
         .iter()
-        .filter_map(|o| o.nar_size.or_else(|| cached_size_by_hash.get(&o.hash).copied()))
+        .filter_map(|o| {
+            o.nar_size
+                .or_else(|| cached_size_by_hash.get(&o.hash).copied())
+        })
         .sum();
     Ok(if total > 0 { Some(total) } else { None })
 }

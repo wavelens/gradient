@@ -40,7 +40,9 @@ use std::sync::Arc;
 use test_support::cli::test_cli;
 use test_support::fakes::email::InMemoryEmailSender;
 use test_support::fakes::webhooks::RecordingWebhookClient;
-use test_support::fixtures::{commit_id, eval_at, org, org_id, project_id, test_date, user, user_id};
+use test_support::fixtures::{
+    commit_id, eval_at, org, org_id, project_id, test_date, user, user_id,
+};
 use test_support::log_storage::NoopLogStorage;
 use uuid::Uuid;
 use web::create_router;
@@ -123,7 +125,9 @@ fn project_row() -> entity::project::Model {
 
 fn admin_membership() -> entity::organization_user::Model {
     entity::organization_user::Model {
-        id: OrganizationUserId::new(Uuid::parse_str("00000000-0000-0000-0000-0000000000aa").unwrap()),
+        id: OrganizationUserId::new(
+            Uuid::parse_str("00000000-0000-0000-0000-0000000000aa").unwrap(),
+        ),
         organization: org_id(),
         user: user_id(),
         role: gradient_core::types::consts::BASE_ROLE_ADMIN_ID,
@@ -164,7 +168,8 @@ fn make_server(db: sea_orm::DatabaseConnection) -> TestServer {
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config,
         log_storage: Arc::new(NoopLogStorage),
-        webhooks: Arc::new(RecordingWebhookClient::new()) as Arc<dyn gradient_core::ci::WebhookClient>,
+        webhooks: Arc::new(RecordingWebhookClient::new())
+            as Arc<dyn gradient_core::ci::WebhookClient>,
         email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
         nar_storage,
         manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
@@ -207,16 +212,19 @@ fn evaluation_without_trigger_returns_null_trigger() {
 
         let eval = eval_at(eval_id(), 0); // trigger: None
 
-        let db = with_project(with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id))
-            // 7. SELECT evaluations
-            .append_query_results([vec![eval]])
-            // 8. No trigger IDs — trigger query skipped; batch loads follow:
-            // 9. SELECT commits
-            .append_query_results([vec![commit_row()]])
-            // 10. SELECT builds
-            .append_query_results([Vec::<entity::build::Model>::new()])
-            // 11. SELECT entry_points
-            .append_query_results([Vec::<entity::entry_point::Model>::new()]);
+        let db = with_project(with_auth(
+            MockDatabase::new(DatabaseBackend::Postgres),
+            session_id,
+        ))
+        // 7. SELECT evaluations
+        .append_query_results([vec![eval]])
+        // 8. No trigger IDs — trigger query skipped; batch loads follow:
+        // 9. SELECT commits
+        .append_query_results([vec![commit_row()]])
+        // 10. SELECT builds
+        .append_query_results([Vec::<entity::build::Model>::new()])
+        // 11. SELECT entry_points
+        .append_query_results([Vec::<entity::entry_point::Model>::new()]);
 
         let server = make_server(db.into_connection());
         let res = server
@@ -250,17 +258,20 @@ fn evaluation_with_trigger_returns_trigger_summary() {
             ..eval_at(eval_id(), 0)
         };
 
-        let db = with_project(with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id))
-            // 7. SELECT evaluations
-            .append_query_results([vec![eval]])
-            // 8. SELECT project_triggers (batch for trigger_ids)
-            .append_query_results([vec![polling_trigger_row()]])
-            // 9. SELECT commits
-            .append_query_results([vec![commit_row()]])
-            // 10. SELECT builds
-            .append_query_results([Vec::<entity::build::Model>::new()])
-            // 11. SELECT entry_points
-            .append_query_results([Vec::<entity::entry_point::Model>::new()]);
+        let db = with_project(with_auth(
+            MockDatabase::new(DatabaseBackend::Postgres),
+            session_id,
+        ))
+        // 7. SELECT evaluations
+        .append_query_results([vec![eval]])
+        // 8. SELECT project_triggers (batch for trigger_ids)
+        .append_query_results([vec![polling_trigger_row()]])
+        // 9. SELECT commits
+        .append_query_results([vec![commit_row()]])
+        // 10. SELECT builds
+        .append_query_results([Vec::<entity::build::Model>::new()])
+        // 11. SELECT entry_points
+        .append_query_results([Vec::<entity::entry_point::Model>::new()]);
 
         let server = make_server(db.into_connection());
         let res = server
@@ -300,17 +311,20 @@ fn evaluation_with_deleted_trigger_returns_null() {
             ..eval_at(eval_id(), 0)
         };
 
-        let db = with_project(with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id))
-            // 7. SELECT evaluations
-            .append_query_results([vec![eval]])
-            // 8. SELECT project_triggers — row not found (deleted trigger)
-            .append_query_results([Vec::<entity::project_trigger::Model>::new()])
-            // 9. SELECT commits
-            .append_query_results([vec![commit_row()]])
-            // 10. SELECT builds
-            .append_query_results([Vec::<entity::build::Model>::new()])
-            // 11. SELECT entry_points
-            .append_query_results([Vec::<entity::entry_point::Model>::new()]);
+        let db = with_project(with_auth(
+            MockDatabase::new(DatabaseBackend::Postgres),
+            session_id,
+        ))
+        // 7. SELECT evaluations
+        .append_query_results([vec![eval]])
+        // 8. SELECT project_triggers — row not found (deleted trigger)
+        .append_query_results([Vec::<entity::project_trigger::Model>::new()])
+        // 9. SELECT commits
+        .append_query_results([vec![commit_row()]])
+        // 10. SELECT builds
+        .append_query_results([Vec::<entity::build::Model>::new()])
+        // 11. SELECT entry_points
+        .append_query_results([Vec::<entity::entry_point::Model>::new()]);
 
         let server = make_server(db.into_connection());
         let res = server
@@ -323,6 +337,9 @@ fn evaluation_with_deleted_trigger_returns_null() {
         assert_eq!(body["error"], false);
         let items = body["message"].as_array().expect("message is array");
         assert_eq!(items.len(), 1);
-        assert!(items[0]["trigger"].is_null(), "expected trigger to be null when row missing");
+        assert!(
+            items[0]["trigger"].is_null(),
+            "expected trigger to be null when row missing"
+        );
     });
 }

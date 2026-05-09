@@ -140,10 +140,7 @@ pub async fn update_evaluation_status(
     let now = crate::types::now();
 
     let mut update = EEvaluation::update_many()
-        .col_expr(
-            CEvaluation::Status,
-            sea_orm::sea_query::Expr::value(status),
-        )
+        .col_expr(CEvaluation::Status, sea_orm::sea_query::Expr::value(status))
         .col_expr(CEvaluation::UpdatedAt, sea_orm::sea_query::Expr::value(now));
 
     if !matches!(status, EvaluationStatus::Waiting) {

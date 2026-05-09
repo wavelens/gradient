@@ -186,7 +186,9 @@ pub async fn gc_orphan_derivations(state: Arc<ServerState>, grace_hours: i64) ->
     } else {
         let drv_id_set: HashSet<DerivationId> = drv_ids.iter().copied().collect();
         EDerivationOutput::find()
-            .filter(CDerivationOutput::Hash.is_in(orphan_hashes.iter().cloned().collect::<Vec<_>>()))
+            .filter(
+                CDerivationOutput::Hash.is_in(orphan_hashes.iter().cloned().collect::<Vec<_>>()),
+            )
             .all(&state.worker_db)
             .await
             .context("GC: failed to query non-orphan references for orphan output hashes")?
@@ -212,9 +214,9 @@ pub async fn gc_orphan_derivations(state: Arc<ServerState>, grace_hours: i64) ->
             .filter(CCachedPath::Hash.is_in(to_delete.clone()))
             .exec(&state.worker_db)
             .await
-        {
-            warn!(error = %e, "GC: failed to delete cached_path rows for orphan hashes");
-        }
+    {
+        warn!(error = %e, "GC: failed to delete cached_path rows for orphan hashes");
+    }
 
     for drv_id in drv_ids {
         if let Some(d) = EDerivation::find_by_id(drv_id)

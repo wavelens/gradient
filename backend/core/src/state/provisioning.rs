@@ -17,7 +17,10 @@ use anyhow::{Context, Result};
 use base64::{Engine, engine::general_purpose};
 use entity::organization_cache::CacheSubscriptionMode;
 use entity::*;
-use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter,
+    Set,
+};
 use ssh_key::PrivateKey;
 use std::collections::HashMap;
 use std::fs;
@@ -370,7 +373,9 @@ impl<'a> StateApplicator<'a> {
                 project::Entity::find_by_id(project_id)
                     .one(self.db)
                     .await?
-                    .ok_or_else(|| format!("Project '{}' vanished after update", state_project.name))?
+                    .ok_or_else(|| {
+                        format!("Project '{}' vanished after update", state_project.name)
+                    })?
             } else {
                 let proj = project::ActiveModel {
                     id: Set(ProjectId::now_v7()),
@@ -1072,7 +1077,11 @@ fn build_trigger_config(
                 .unwrap_or(300) as u32;
             TriggerConfig::Polling {
                 interval_secs: interval,
-                branch: t.config.get("branch").and_then(|v| v.as_str()).map(|s| s.to_owned()),
+                branch: t
+                    .config
+                    .get("branch")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_owned()),
             }
         }
         TT::ReporterPush | TT::ReporterPullRequest => {
@@ -1315,8 +1324,8 @@ mod helper_tests {
 mod trigger_helper_tests {
     use super::{build_trigger_config, trigger_key};
     use crate::state::StateTrigger;
-    use crate::types::triggers::{TriggerConfig, TriggerType};
     use crate::types::IntegrationId;
+    use crate::types::triggers::{TriggerConfig, TriggerType};
     use std::collections::HashMap;
 
     fn polling_trigger(interval_secs: u64) -> StateTrigger {
@@ -1336,7 +1345,13 @@ mod trigger_helper_tests {
     fn build_polling_trigger() {
         let t = polling_trigger(60);
         let cfg = build_trigger_config(&t, &empty_integrations()).unwrap();
-        assert_eq!(cfg, TriggerConfig::Polling { interval_secs: 60, branch: None });
+        assert_eq!(
+            cfg,
+            TriggerConfig::Polling {
+                interval_secs: 60,
+                branch: None
+            }
+        );
     }
 
     #[test]
@@ -1348,7 +1363,13 @@ mod trigger_helper_tests {
             active: true,
         };
         let cfg = build_trigger_config(&t, &empty_integrations()).unwrap();
-        assert_eq!(cfg, TriggerConfig::Polling { interval_secs: 300, branch: None });
+        assert_eq!(
+            cfg,
+            TriggerConfig::Polling {
+                interval_secs: 300,
+                branch: None
+            }
+        );
     }
 
     #[test]
@@ -1371,7 +1392,12 @@ mod trigger_helper_tests {
             active: true,
         };
         let cfg = build_trigger_config(&t, &empty_integrations()).unwrap();
-        assert_eq!(cfg, TriggerConfig::Time { cron: "0 0 2 * * *".into() });
+        assert_eq!(
+            cfg,
+            TriggerConfig::Time {
+                cron: "0 0 2 * * *".into()
+            }
+        );
     }
 
     #[test]
@@ -1408,7 +1434,10 @@ mod trigger_helper_tests {
         };
         let err = build_trigger_config(&t, &empty_integrations()).unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("github-app"), "expected integration name in error: {msg}");
+        assert!(
+            msg.contains("github-app"),
+            "expected integration name in error: {msg}"
+        );
     }
 
     #[test]
@@ -1437,14 +1466,22 @@ mod trigger_helper_tests {
 
     #[test]
     fn trigger_key_differs_by_type() {
-        let polling = TriggerConfig::Polling { interval_secs: 60, branch: None };
-        let time = TriggerConfig::Time { cron: "0 0 * * * *".into() };
+        let polling = TriggerConfig::Polling {
+            interval_secs: 60,
+            branch: None,
+        };
+        let time = TriggerConfig::Time {
+            cron: "0 0 * * * *".into(),
+        };
         assert_ne!(trigger_key(&polling), trigger_key(&time));
     }
 
     #[test]
     fn trigger_key_stable_for_same_config() {
-        let cfg = TriggerConfig::Polling { interval_secs: 300, branch: None };
+        let cfg = TriggerConfig::Polling {
+            interval_secs: 300,
+            branch: None,
+        };
         assert_eq!(trigger_key(&cfg), trigger_key(&cfg));
     }
 

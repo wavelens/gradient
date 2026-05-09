@@ -9,7 +9,6 @@
 use serde::Deserialize;
 use tracing::warn;
 
-
 // ── GitHub push payload ────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -218,7 +217,11 @@ pub(super) fn decode_push_commit(git_ref: &str, after: &str, forge: &str) -> Opt
         return None;
     };
     match hex::decode(after) {
-        Ok(hash) => Some(PushCommit { hash, ref_name, is_tag }),
+        Ok(hash) => Some(PushCommit {
+            hash,
+            ref_name,
+            is_tag,
+        }),
         Err(e) => {
             warn!(error = %e, sha = %after, forge, "Push webhook: invalid commit SHA");
             None
@@ -348,8 +351,11 @@ impl ParsedPullRequestEvent {
                 return None;
             }
         };
-        let commit_hash =
-            decode_sha_hex(&payload.pull_request.head.sha, "github", "pull_request.head.sha")?;
+        let commit_hash = decode_sha_hex(
+            &payload.pull_request.head.sha,
+            "github",
+            "pull_request.head.sha",
+        )?;
         Some(Self {
             commit_hash,
             repository_urls: vec![payload.repository.clone_url, payload.repository.ssh_url],
@@ -366,8 +372,11 @@ impl ParsedPullRequestEvent {
                 return None;
             }
         };
-        let commit_hash =
-            decode_sha_hex(&payload.pull_request.head.sha, "gitea", "pull_request.head.sha")?;
+        let commit_hash = decode_sha_hex(
+            &payload.pull_request.head.sha,
+            "gitea",
+            "pull_request.head.sha",
+        )?;
         let branch = payload
             .pull_request
             .head

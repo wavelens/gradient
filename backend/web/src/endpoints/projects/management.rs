@@ -245,7 +245,10 @@ pub async fn put(
     let project = project.insert(&state.web_db).await?;
 
     let now = gradient_core::types::now();
-    let default_cfg = TriggerConfig::Polling { interval_secs: 300, branch: None };
+    let default_cfg = TriggerConfig::Polling {
+        interval_secs: 300,
+        branch: None,
+    };
     AProjectTrigger {
         id: Set(ProjectTriggerId::now_v7()),
         project: Set(project.id),

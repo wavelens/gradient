@@ -34,7 +34,11 @@ mod tests {
     fn parse_file_type() {
         assert_eq!(
             parse_hydra_product_line("file binary-dist /nix/store/xyz/foo.tar.gz"),
-            Some(("file".into(), "binary-dist".into(), "/nix/store/xyz/foo.tar.gz".into())),
+            Some((
+                "file".into(),
+                "binary-dist".into(),
+                "/nix/store/xyz/foo.tar.gz".into()
+            )),
         );
     }
 
@@ -42,7 +46,11 @@ mod tests {
     fn parse_doc_type() {
         assert_eq!(
             parse_hydra_product_line("doc readme /nix/store/xyz/README.md"),
-            Some(("doc".into(), "readme".into(), "/nix/store/xyz/README.md".into())),
+            Some((
+                "doc".into(),
+                "readme".into(),
+                "/nix/store/xyz/README.md".into()
+            )),
         );
     }
 
@@ -58,7 +66,11 @@ mod tests {
     fn parse_report_with_defaultpath_drops_extra() {
         assert_eq!(
             parse_hydra_product_line("report coverage /nix/store/xyz/cov index.html"),
-            Some(("report".into(), "coverage".into(), "/nix/store/xyz/cov".into())),
+            Some((
+                "report".into(),
+                "coverage".into(),
+                "/nix/store/xyz/cov".into()
+            )),
         );
     }
 

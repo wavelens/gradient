@@ -21,15 +21,49 @@ impl MigrationTrait for Migration {
                 Table::create()
                     .table(ProjectTrigger::Table)
                     .if_not_exists()
-                    .col(ColumnDef::new(ProjectTrigger::Id).uuid().not_null().primary_key())
+                    .col(
+                        ColumnDef::new(ProjectTrigger::Id)
+                            .uuid()
+                            .not_null()
+                            .primary_key(),
+                    )
                     .col(ColumnDef::new(ProjectTrigger::Project).uuid().not_null())
-                    .col(ColumnDef::new(ProjectTrigger::TriggerType).small_integer().not_null())
-                    .col(ColumnDef::new(ProjectTrigger::Concurrency).small_integer().not_null())
-                    .col(ColumnDef::new(ProjectTrigger::Config).json_binary().not_null())
-                    .col(ColumnDef::new(ProjectTrigger::Active).boolean().not_null().default(true))
-                    .col(ColumnDef::new(ProjectTrigger::LastFiredAt).date_time().null())
-                    .col(ColumnDef::new(ProjectTrigger::CreatedAt).date_time().not_null())
-                    .col(ColumnDef::new(ProjectTrigger::UpdatedAt).date_time().not_null())
+                    .col(
+                        ColumnDef::new(ProjectTrigger::TriggerType)
+                            .small_integer()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProjectTrigger::Concurrency)
+                            .small_integer()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProjectTrigger::Config)
+                            .json_binary()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProjectTrigger::Active)
+                            .boolean()
+                            .not_null()
+                            .default(true),
+                    )
+                    .col(
+                        ColumnDef::new(ProjectTrigger::LastFiredAt)
+                            .date_time()
+                            .null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProjectTrigger::CreatedAt)
+                            .date_time()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProjectTrigger::UpdatedAt)
+                            .date_time()
+                            .not_null(),
+                    )
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk-project_trigger-project")

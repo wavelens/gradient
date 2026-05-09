@@ -120,12 +120,17 @@ fn put_cache_creates_cache_and_default_upstream() {
             .append_query_results([vec![inserted]])
             .append_query_results([vec![upstream]])
             .append_exec_results([
-                MockExecResult { last_insert_id: 0, rows_affected: 1 },
-                MockExecResult { last_insert_id: 0, rows_affected: 1 },
+                MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 1,
+                },
+                MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 1,
+                },
             ]);
 
-        let server =
-            make_test_server_with(db.into_connection(), Some(temp_crypt_secret_file()));
+        let server = make_test_server_with(db.into_connection(), Some(temp_crypt_secret_file()));
         let res = server
             .put("/api/v1/caches")
             .add_header("authorization", format!("Bearer {}", token))

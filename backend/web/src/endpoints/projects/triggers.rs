@@ -14,7 +14,7 @@ use axum::extract::{Path, State};
 use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
 use chrono::Utc;
-use gradient_core::ci::{apply_trigger, ApplyInput, ApplyOutcome};
+use gradient_core::ci::{ApplyInput, ApplyOutcome, apply_trigger};
 use gradient_core::sources::resolve_head;
 use gradient_core::types::triggers::{TriggerConfig, TriggerType};
 use gradient_core::types::*;
@@ -309,9 +309,15 @@ pub async fn fire_now(
         .map_err(|e| WebError::internal(e.to_string()))?;
 
     let body = match outcome {
-        ApplyOutcome::Created { evaluation: eval, aborted_evaluation, aborted_builds } => {
+        ApplyOutcome::Created {
+            evaluation: eval,
+            aborted_evaluation,
+            aborted_builds,
+        } => {
             if let Some(aborted_id) = aborted_evaluation {
-                scheduler.cancel_evaluation_jobs(aborted_id, &aborted_builds).await;
+                scheduler
+                    .cancel_evaluation_jobs(aborted_id, &aborted_builds)
+                    .await;
             }
             scheduler::ci::spawn_pending_ci_for_eval(Arc::clone(&state), &eval);
             serde_json::json!({

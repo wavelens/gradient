@@ -48,7 +48,9 @@ impl TempUploadDir {
     }
 
     pub(crate) fn path(&self) -> &Path {
-        self.path.as_deref().expect("TempUploadDir used after commit")
+        self.path
+            .as_deref()
+            .expect("TempUploadDir used after commit")
     }
 
     pub(crate) fn commit(mut self) {
@@ -320,11 +322,16 @@ mod tests {
 
     #[test]
     fn temp_upload_dir_drop_removes_directory() {
-        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         let path: std::path::PathBuf = rt.block_on(async {
             let base = std::env::temp_dir();
             let base_str = base.to_string_lossy().into_owned();
-            let dir = TempUploadDir::create(&base_str).await.expect("create temp dir");
+            let dir = TempUploadDir::create(&base_str)
+                .await
+                .expect("create temp dir");
             let path = dir.path().to_path_buf();
             assert!(path.exists());
             path
@@ -334,11 +341,16 @@ mod tests {
 
     #[test]
     fn temp_upload_dir_commit_keeps_directory() {
-        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         let path: std::path::PathBuf = rt.block_on(async {
             let base = std::env::temp_dir();
             let base_str = base.to_string_lossy().into_owned();
-            let dir = TempUploadDir::create(&base_str).await.expect("create temp dir");
+            let dir = TempUploadDir::create(&base_str)
+                .await
+                .expect("create temp dir");
             let path = dir.path().to_path_buf();
             dir.commit();
             path

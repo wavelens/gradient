@@ -380,7 +380,10 @@ async fn dispatch_once_no_triggers_is_noop() {
 
     let scheduler = make_scheduler(db);
     let result = trigger_dispatch::dispatch_once(&scheduler).await;
-    assert!(result.is_ok(), "dispatch_once with no triggers should succeed");
+    assert!(
+        result.is_ok(),
+        "dispatch_once with no triggers should succeed"
+    );
 }
 
 /// A trigger whose `last_fired_at` is recent (within interval) must not cause
@@ -400,7 +403,12 @@ async fn dispatch_once_skips_trigger_within_interval() {
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // 1. active polling/time triggers → one trigger, recently fired
-        .append_query_results([vec![make_polling_trigger(trigger_id, project_id, 60, Some(recent))]])
+        .append_query_results([vec![make_polling_trigger(
+            trigger_id,
+            project_id,
+            60,
+            Some(recent),
+        )]])
         // 2. project lookup (batch)
         .append_query_results([vec![make_project(project_id, org_id)]])
         // No further queries expected (trigger not due)

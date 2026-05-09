@@ -69,7 +69,10 @@ impl<'a> ProjectGitContext<'a> {
     /// remote ref matches the last evaluated commit or an evaluation is already
     /// in progress.
     #[instrument(skip(self), fields(project_id = %self.project.id, project_name = %self.project.name))]
-    async fn check_for_updates(&self, branch: Option<&str>) -> Result<(bool, Vec<u8>), SourceError> {
+    async fn check_for_updates(
+        &self,
+        branch: Option<&str>,
+    ) -> Result<(bool, Vec<u8>), SourceError> {
         debug!("Checking for updates on project");
 
         let url = self.project.repository.clone();

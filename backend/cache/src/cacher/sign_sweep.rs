@@ -306,9 +306,7 @@ async fn load_producing_project_flags(
         [hashes.into()],
     );
 
-    let rows = Row::find_by_statement(stmt)
-        .all(&state.worker_db)
-        .await?;
+    let rows = Row::find_by_statement(stmt).all(&state.worker_db).await?;
 
     for r in rows {
         if let Some(&id) = cp_by_hash.get(r.hash.as_str()) {
@@ -411,7 +409,10 @@ mod tests {
 
         let skipped = compute_skipped_cached_paths(&producers);
 
-        assert!(skipped.contains(&cp(1)), "private-only path must be skipped");
+        assert!(
+            skipped.contains(&cp(1)),
+            "private-only path must be skipped"
+        );
         assert!(!skipped.contains(&cp(2)), "mixed path must be signed");
         assert!(!skipped.contains(&cp(3)), "public-only path must be signed");
         assert!(

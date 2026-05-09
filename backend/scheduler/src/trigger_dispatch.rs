@@ -37,18 +37,24 @@ pub(crate) fn cron_due(
 ) -> bool {
     use cron::Schedule;
     use std::str::FromStr;
-    let Ok(sched) = Schedule::from_str(cron_expr) else { return false; };
+    let Ok(sched) = Schedule::from_str(cron_expr) else {
+        return false;
+    };
     let after = last_fired_at.unwrap_or(now - chrono::Duration::days(1));
     let after_utc = chrono::DateTime::<Utc>::from_naive_utc_and_offset(after, Utc);
     let now_utc = chrono::DateTime::<Utc>::from_naive_utc_and_offset(now, Utc);
-    sched.after(&after_utc).next().map(|next| next <= now_utc).unwrap_or(false)
+    sched
+        .after(&after_utc)
+        .next()
+        .map(|next| next <= now_utc)
+        .unwrap_or(false)
 }
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use entity::project_trigger as ept;
-use gradient_core::ci::{apply_trigger, ApplyInput, ApplyOutcome};
+use gradient_core::ci::{ApplyInput, ApplyOutcome, apply_trigger};
 use gradient_core::sources::{check_project_updates, get_commit_info};
 use gradient_core::types::triggers::{TriggerConfig, TriggerType};
 use gradient_core::types::*;
@@ -129,7 +135,9 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
             _ => None,
         };
         let due = match &cfg {
-            TriggerConfig::Polling { interval_secs, .. } => polling_due(trig.last_fired_at, *interval_secs, now),
+            TriggerConfig::Polling { interval_secs, .. } => {
+                polling_due(trig.last_fired_at, *interval_secs, now)
+            }
             TriggerConfig::Time { cron } => cron_due(cron, trig.last_fired_at, now),
             _ => false,
         };
@@ -139,20 +147,23 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
 
         // Resolve target commit. Polling skips when there's no new commit;
         // time triggers always fire with whatever HEAD currently is.
-        let commit_hash = match check_project_updates(Arc::clone(state), project, branch_for_check.as_deref()).await {
-            Ok((true, hash)) => hash,
-            Ok((false, hash)) if is_time => hash,
-            Ok((false, _)) => {
-                update_last_fired(state, &trig, now).await;
-                continue;
-            }
-            Err(e) => {
-                warn!(error = %e, project = %project.name, "trigger commit resolution failed");
-                // Update on error too, otherwise transient failures retry every 5s.
-                update_last_fired(state, &trig, now).await;
-                continue;
-            }
-        };
+        let commit_hash =
+            match check_project_updates(Arc::clone(state), project, branch_for_check.as_deref())
+                .await
+            {
+                Ok((true, hash)) => hash,
+                Ok((false, hash)) if is_time => hash,
+                Ok((false, _)) => {
+                    update_last_fired(state, &trig, now).await;
+                    continue;
+                }
+                Err(e) => {
+                    warn!(error = %e, project = %project.name, "trigger commit resolution failed");
+                    // Update on error too, otherwise transient failures retry every 5s.
+                    update_last_fired(state, &trig, now).await;
+                    continue;
+                }
+            };
 
         let (msg, _email, author) = get_commit_info(Arc::clone(state), project, &commit_hash)
             .await
@@ -173,9 +184,15 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
         )
         .await
         {
-            Ok(ApplyOutcome::Created { evaluation: eval, aborted_evaluation, aborted_builds }) => {
+            Ok(ApplyOutcome::Created {
+                evaluation: eval,
+                aborted_evaluation,
+                aborted_builds,
+            }) => {
                 if let Some(aborted_id) = aborted_evaluation {
-                    scheduler.cancel_evaluation_jobs(aborted_id, &aborted_builds).await;
+                    scheduler
+                        .cancel_evaluation_jobs(aborted_id, &aborted_builds)
+                        .await;
                 }
                 super::ci::spawn_pending_ci_for_eval(Arc::clone(state), &eval);
                 info!(project = %project.name, trigger_id = %trig.id, evaluation_id = %eval.id, "trigger created evaluation");
@@ -216,27 +233,39 @@ mod tests {
 
     #[test]
     fn polling_under_interval_does_not_fire() {
-        assert!(!polling_due(Some(dt("2026-05-06 10:00:00")), 60, dt("2026-05-06 10:00:30")));
+        assert!(!polling_due(
+            Some(dt("2026-05-06 10:00:00")),
+            60,
+            dt("2026-05-06 10:00:30")
+        ));
     }
 
     #[test]
     fn polling_at_or_past_interval_fires() {
-        assert!(polling_due(Some(dt("2026-05-06 10:00:00")), 60, dt("2026-05-06 10:01:00")));
-        assert!(polling_due(Some(dt("2026-05-06 10:00:00")), 60, dt("2026-05-06 10:01:30")));
+        assert!(polling_due(
+            Some(dt("2026-05-06 10:00:00")),
+            60,
+            dt("2026-05-06 10:01:00")
+        ));
+        assert!(polling_due(
+            Some(dt("2026-05-06 10:00:00")),
+            60,
+            dt("2026-05-06 10:01:30")
+        ));
     }
 
     #[test]
     fn cron_every_minute_fires_after_minute_boundary() {
         // "0 * * * * *" = every minute at sec=0
         let last = dt("2026-05-06 10:00:30");
-        let now  = dt("2026-05-06 10:01:05");
+        let now = dt("2026-05-06 10:01:05");
         assert!(cron_due("0 * * * * *", Some(last), now));
     }
 
     #[test]
     fn cron_does_not_fire_before_next_boundary() {
         let last = dt("2026-05-06 10:01:00");
-        let now  = dt("2026-05-06 10:01:30");
+        let now = dt("2026-05-06 10:01:30");
         assert!(!cron_due("0 * * * * *", Some(last), now));
     }
 

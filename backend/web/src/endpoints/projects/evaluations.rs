@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::{EntryPointSummary, EvaluationSummary, EvaluationTriggerSummary, ProjectDetailsResponse};
+use super::{
+    EntryPointSummary, EvaluationSummary, EvaluationTriggerSummary, ProjectDetailsResponse,
+};
 use crate::access::{Caller, ProjectAccess, has_permission, is_org_member, load_project};
 use crate::authorization::MaybeUser;
 use crate::endpoints::content_type_for_filename;
@@ -48,10 +50,7 @@ pub(super) async fn evaluations_to_summaries(
 
     let eval_ids: Vec<EvaluationId> = evaluations.iter().map(|e| e.id).collect();
 
-    let trigger_ids: Vec<ProjectTriggerId> = evaluations
-        .iter()
-        .filter_map(|e| e.trigger)
-        .collect();
+    let trigger_ids: Vec<ProjectTriggerId> = evaluations.iter().filter_map(|e| e.trigger).collect();
     let triggers: HashMap<ProjectTriggerId, TriggerType> = if trigger_ids.is_empty() {
         HashMap::new()
     } else {
@@ -221,17 +220,25 @@ pub async fn post_project_evaluate(
         ));
     }
 
-    gradient_core::ci::trigger_evaluation(&state.web_db, &project, commit_hash, None, None, None, false)
-        .await
-        .map_err(|e| match e {
-            gradient_core::ci::TriggerError::AlreadyInProgress => {
-                WebError::bad_request("Evaluation already in progress")
-            }
-            gradient_core::ci::TriggerError::NoPreviousEvaluation => {
-                WebError::internal("Unexpected error")
-            }
-            gradient_core::ci::TriggerError::Db(db_err) => WebError::from(db_err),
-        })?;
+    gradient_core::ci::trigger_evaluation(
+        &state.web_db,
+        &project,
+        commit_hash,
+        None,
+        None,
+        None,
+        false,
+    )
+    .await
+    .map_err(|e| match e {
+        gradient_core::ci::TriggerError::AlreadyInProgress => {
+            WebError::bad_request("Evaluation already in progress")
+        }
+        gradient_core::ci::TriggerError::NoPreviousEvaluation => {
+            WebError::internal("Unexpected error")
+        }
+        gradient_core::ci::TriggerError::Db(db_err) => WebError::from(db_err),
+    })?;
 
     Ok(ok_json("Evaluation started".to_string()))
 }
