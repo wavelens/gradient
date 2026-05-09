@@ -411,7 +411,7 @@ mod tests {
     fn metrics_config_loaded_from_file() {
         use std::io::Write;
         let mut tmp = tempfile::NamedTempFile::new().expect("tempfile");
-        write!(tmp, "  s3cret-token\n").expect("write");
+        writeln!(tmp, "  s3cret-token").expect("write");
         let path = tmp.path().to_string_lossy().into_owned();
 
         let mut cli = base_cli();
