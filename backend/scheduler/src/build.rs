@@ -125,7 +125,7 @@ impl<'a> BuildStateHandler<'a> {
         self.check_evaluation_done(evaluation_id).await
     }
 
-    pub async fn handle_build_job_failed(&self, build_id: BuildId, _error: &str) -> Result<()> {
+    pub async fn handle_build_job_failed(&self, build_id: BuildId, error: &str) -> Result<()> {
         let build = match EBuild::find_by_id(build_id)
             .one(&self.state.worker_db)
             .await?
@@ -136,6 +136,23 @@ impl<'a> BuildStateHandler<'a> {
                 return Ok(());
             }
         };
+
+        // Surface the worker's failure reason in the build log so the
+        // frontend's log viewer renders it. Without this, pre-`nix build`
+        // aborts (prefetch-time errors, daemon connection failures, etc.)
+        // produce a Failed badge with an empty log — useless for diagnosis.
+        // Followers share this `log_id` via `propagate_to_followers`, so a
+        // single append covers the whole leader→followers fan-out.
+        let log_id = build.log_id.unwrap_or(build.id);
+        if let Err(e) = self
+            .state
+            .log_storage
+            .append(log_id, &format!("\n=== build failed: {error} ===\n"))
+            .await
+        {
+            warn!(%build_id, error = %e, "failed to append worker error to build log");
+        }
+
         let evaluation_id = build.evaluation;
         let derivation_id = build.derivation;
         let leader = update_build_status(Arc::clone(self.state), build, BuildStatus::Failed).await;

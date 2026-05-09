@@ -989,6 +989,68 @@ async fn build_failed_cascades_to_direct_dependent() {
     assert!(result.is_ok());
 }
 
+/// Regression: when a build fails (e.g. worker reports a prefetch-time
+/// `acquire local store for import: timeout`), the worker's error string
+/// must be appended to the build log so the frontend's log viewer surfaces
+/// it instead of rendering "No log available". Previously
+/// `handle_build_job_failed` accepted the error and dropped it on the floor.
+#[tokio::test]
+async fn build_failed_appends_worker_error_to_log() {
+    use std::sync::Arc;
+    use test_support::prelude::{RecordingLogStorage, test_state_with_log_storage};
+
+    let eval_id = EvaluationId::now_v7();
+    let drv_id = DerivationId::now_v7();
+    let build_id = BuildId::now_v7();
+
+    let build = make_build(build_id, eval_id, drv_id, BuildStatus::Building);
+    let build_failed = make_build(build_id, eval_id, drv_id, BuildStatus::Failed);
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        // 1. find_by_id(build)
+        .append_query_results([vec![build]])
+        // 2. update → Failed
+        .append_query_results([vec![build_failed.clone()]])
+        // 2a. propagate_to_followers: empty
+        .append_query_results([Vec::<MBuild>::new()])
+        // 3. cascade: no candidates
+        .append_query_results([Vec::<MBuild>::new()])
+        // 4. check active → empty
+        .append_query_results([Vec::<MBuild>::new()])
+        // 5. find eval → Building
+        .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Building)]])
+        // 6. find failed → [build]
+        .append_query_results([vec![build_failed]])
+        // 7. find eval error messages → empty
+        .append_query_results([Vec::<MEvaluationMessage>::new()])
+        // 8. update eval → Failed
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
+        .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Failed)]])
+        .into_connection();
+
+    let log = Arc::new(RecordingLogStorage::new());
+    let state = test_state_with_log_storage(db, log.clone());
+
+    let worker_error = "input prefetch failed: acquire local store for import: timeout: \
+                        acquiring connection from pool";
+    let result = build_handler::handle_build_job_failed(&state, build_id, worker_error).await;
+    assert!(result.is_ok(), "handler returned error: {result:?}");
+
+    let entries = log.entries();
+    let appended = entries
+        .iter()
+        .find(|(b, _)| *b == build_id)
+        .map(|(_, t)| t.as_str())
+        .unwrap_or_else(|| panic!("expected an append for build {build_id}, got {entries:?}"));
+    assert!(
+        appended.contains(worker_error),
+        "appended log must include the worker's error string verbatim, got: {appended:?}"
+    );
+}
+
 /// Build fails with no Created/Queued dependents — cascade is a no-op.
 /// check_evaluation_done sees only the Failed build → eval → Failed.
 #[tokio::test]
