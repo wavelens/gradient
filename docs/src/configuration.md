@@ -43,6 +43,7 @@ openssl rand -base64 48 > /run/secrets/gradient-crypt
 | `port` | `3000` | HTTP port |
 | `jwtSecretFile` | — | Path to JWT secret file (required) |
 | `cryptSecretFile` | — | Path to encryption secret file (required) |
+| `metricsTokenFile` | `null` | When set, enables `GET /metrics` (Prometheus exposition). The file's contents must be presented as `Authorization: Bearer <token>` by scrapers. When `null`, the endpoint returns 404. |
 | `databaseUrlFile` | auto | Override the PostgreSQL connection string file |
 | `reportErrors` | `false` | Send errors to Sentry |
 | `discoverable` | `true` | Accept incoming `/proto` WebSocket connections from workers |
@@ -95,6 +96,18 @@ If you want to use your own reverse proxy you have to setup redirects as follows
 - `https://example.com/cache` _(with all subpaths)_ -> `http://${ADDR}:${PORT}/cache`
 All other requests should be handled by a static webserver hosting the files at:
 - `${pkgs.gradient-frontend}/share/gradient-frontend`
+
+## Metrics
+
+Set `services.gradient.metricsTokenFile` to a file path to enable `GET /metrics` (Prometheus exposition format). When unset, the endpoint returns 404.
+
+```nix
+services.gradient.metricsTokenFile = "/run/secrets/gradient-metrics";
+```
+
+Generate a token with `openssl rand -base64 32`. Configure your Prometheus scraper with `bearer_token_file: /run/secrets/gradient-metrics` (or pass the token directly via `Authorization: Bearer <token>` for ad-hoc curls). The endpoint is rate-limited at 6 req/s with a burst of 5; a 15s scrape interval is comfortable.
+
+The MVP exposes build/evaluation status counts, scheduler queue depth, connected workers, and cache totals. Per-org/cache labels and histograms are tracked as a follow-up.
 
 ## OIDC
 

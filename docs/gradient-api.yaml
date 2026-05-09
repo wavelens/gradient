@@ -153,6 +153,37 @@ paths:
                 error: false
                 message: "200 ALIVE"
 
+  /metrics:
+    get:
+      tags: [general]
+      summary: Prometheus metrics
+      description: |-
+        Prometheus exposition endpoint. Disabled (404) until an operator
+        configures `GRADIENT_METRICS_TOKEN_FILE`. Requires a Bearer token
+        matching the contents of that file. Returns the standard Prometheus
+        text format (version 0.0.4) with build, evaluation, scheduler, and
+        cache metrics.
+      operationId: getMetrics
+      security:
+        - metricsAuth: []
+      responses:
+        '200':
+          description: Prometheus exposition (text/plain; version=0.0.4)
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: |-
+                  # HELP gradient_info Build/version metadata; value is always 1.
+                  # TYPE gradient_info gauge
+                  gradient_info{version="1.1.1"} 1
+        '401':
+          description: Missing or invalid bearer token
+        '404':
+          description: Metrics endpoint not configured on this server
+        '429':
+          description: Rate limit exceeded
+
   /config:
     get:
       tags: [general]
@@ -4152,6 +4183,12 @@ components:
       description: |-
         JWT obtained from `/auth/basic/login`, or an API key prefixed with `GRAD`
         (e.g. `Bearer GRADabcdef...`).
+    metricsAuth:
+      type: http
+      scheme: bearer
+      description: |-
+        Operator-configured bearer token loaded from `GRADIENT_METRICS_TOKEN_FILE`.
+        Independent of user authentication.
 
   parameters:
     OrganizationSlug:

@@ -1623,3 +1623,31 @@ Unit tests in `backend/worker/src/worker_pool/pool.rs`:
   being released, the released worker takes the graceful-shutdown
   branch in `Drop` instead of being pushed back into the (now drained)
   idle vec.
+
+## Prometheus metrics endpoint — `web/tests/metrics.rs`
+
+Covers `GET /metrics`, the Prometheus exposition endpoint introduced
+in #35:
+
+- `endpoint_404_when_no_token_configured` — when
+  `GRADIENT_METRICS_TOKEN_FILE` is unset, the route is not mounted and
+  the global 404 fallback handles the request.
+- `endpoint_401_when_no_authorization_header` /
+  `endpoint_401_when_bearer_mismatch` — the bearer-token middleware
+  rejects unauthenticated requests with 401 and a wrong token never
+  reaches the handler.
+- `endpoint_200_when_bearer_matches` — a valid token returns 200 with
+  `Content-Type: text/plain; version=0.0.4` and the body advertises
+  every base metric family (`gradient_info`, `gradient_uptime_seconds`,
+  `gradient_workers_connected`, `gradient_jobs_pending`,
+  `gradient_jobs_active`, `gradient_cache_bytes`).
+- `endpoint_reflects_seeded_counts` — the collector renders DB-derived
+  counters and gauges with the expected `status` labels (e.g.
+  `gradient_builds_total{status="Completed"} 7`).
+- `endpoint_rate_limited` — five requests succeed in burst, the sixth
+  returns 429 (same tier as `auth_sensitive`).
+
+The metric encoder itself is exercised by a unit test
+(`web::endpoints::metrics::tests::render_emits_expected_metric_names_and_help`)
+that drives `render` with a fixed `Observations` struct and asserts the
+resulting `# HELP` / `# TYPE` lines and value formatting.
