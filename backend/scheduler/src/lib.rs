@@ -110,4 +110,12 @@ impl Scheduler {
     pub fn start(self: &Arc<Self>) {
         dispatch::start_dispatch_loops(Arc::clone(self));
     }
+
+    /// Snapshot of in-memory scheduler counts used by the metrics endpoint.
+    /// Returns `(workers_connected, jobs_pending, jobs_active)`.
+    pub async fn metrics_snapshot(&self) -> (usize, usize, usize) {
+        let workers = self.worker_pool.read().await.worker_count();
+        let tracker = self.job_tracker.read().await;
+        (workers, tracker.pending_count(), tracker.active_count())
+    }
 }

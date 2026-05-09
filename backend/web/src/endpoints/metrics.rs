@@ -11,11 +11,26 @@
 //! mounted when a metrics token is configured (`MetricsConfig::token`);
 //! when absent, callers fall through to the global 404 handler.
 
+use std::sync::Arc;
+
+use chrono::Utc;
+use gradient_core::types::ServerState;
 use prometheus::{
     Encoder, Gauge, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Opts, Registry, TextEncoder,
 };
+use scheduler::Scheduler;
+use sea_orm::{DatabaseBackend, FromQueryResult, Statement};
+
+use crate::error::{WebError, WebResult};
 
 pub(crate) const PROMETHEUS_CONTENT_TYPE: &str = "text/plain; version=0.0.4";
+
+#[derive(Debug, FromQueryResult)]
+struct CountRow {
+    kind: String,
+    label: Option<String>,
+    value: i64,
+}
 
 /// Snapshot of values to render. Exposed to the rendering function so unit
 /// tests can drive it directly without spinning up a DB or scheduler.
@@ -176,6 +191,159 @@ fn register_labelled_gauge(
         gv.with_label_values(&[label]).set(*value);
     }
     registry.register(Box::new(gv)).expect("register");
+}
+
+/// Collect metrics by querying the DB and scheduler in-memory state.
+///
+/// Errors propagate as `WebError`; the handler converts those into 500.
+/// We intentionally never serve a partial response — Prometheus would
+/// treat a 200 with missing series as authoritative and corrupt counters.
+pub(crate) async fn collect(
+    state: &Arc<ServerState>,
+    scheduler: &Scheduler,
+) -> WebResult<Observations> {
+    // Single CTE-style query returning typed rows for every counter we need.
+    // Statuses are mapped to text via CASE so values survive numeric reshuffles
+    // in `BuildStatus` / `EvaluationStatus` ordering.
+    let sql = r#"
+        SELECT 'build_total'::text AS kind,
+               CASE status
+                 WHEN 3 THEN 'Completed'
+                 WHEN 4 THEN 'Failed'
+                 WHEN 5 THEN 'Aborted'
+                 WHEN 6 THEN 'DependencyFailed'
+                 WHEN 7 THEN 'Substituted'
+                 ELSE NULL
+               END AS label,
+               COUNT(*)::bigint AS value
+        FROM build
+        WHERE status IN (3,4,5,6,7)
+        GROUP BY status
+
+        UNION ALL
+
+        SELECT 'build_in_state'::text,
+               CASE status
+                 WHEN 0 THEN 'Created'
+                 WHEN 1 THEN 'Queued'
+                 WHEN 2 THEN 'Building'
+                 ELSE NULL
+               END,
+               COUNT(*)::bigint
+        FROM build
+        WHERE status IN (0,1,2)
+        GROUP BY status
+
+        UNION ALL
+
+        SELECT 'evaluation_total'::text,
+               CASE status
+                 WHEN 5 THEN 'Completed'
+                 WHEN 6 THEN 'Failed'
+                 WHEN 7 THEN 'Aborted'
+                 ELSE NULL
+               END,
+               COUNT(*)::bigint
+        FROM evaluation
+        WHERE status IN (5,6,7)
+        GROUP BY status
+
+        UNION ALL
+
+        SELECT 'evaluation_in_state'::text,
+               CASE status
+                 WHEN 0 THEN 'Queued'
+                 WHEN 1 THEN 'EvaluatingFlake'
+                 WHEN 2 THEN 'EvaluatingDerivation'
+                 WHEN 3 THEN 'Building'
+                 WHEN 4 THEN 'Waiting'
+                 WHEN 8 THEN 'Fetching'
+                 ELSE NULL
+               END,
+               COUNT(*)::bigint
+        FROM evaluation
+        WHERE status IN (0,1,2,3,4,8)
+        GROUP BY status
+
+        UNION ALL
+
+        SELECT 'cache_bytes'::text, NULL::text, COALESCE(SUM(file_size), 0)::bigint
+        FROM cached_path
+
+        UNION ALL
+
+        SELECT 'cache_nar_bytes'::text, NULL::text, COALESCE(SUM(nar_size), 0)::bigint
+        FROM cached_path
+
+        UNION ALL
+
+        SELECT 'cache_packages'::text, NULL::text, COUNT(*)::bigint
+        FROM cached_path_signature
+
+        UNION ALL
+
+        SELECT 'cache_nar_bytes_sent_total'::text, NULL::text,
+               COALESCE(SUM(bytes_sent), 0)::bigint
+        FROM cache_metric
+
+        UNION ALL
+
+        SELECT 'cache_nar_requests_total'::text, NULL::text,
+               COALESCE(SUM(nar_count)::bigint, 0)
+        FROM cache_metric
+    "#;
+
+    let rows: Vec<CountRow> = CountRow::find_by_statement(Statement::from_string(
+        DatabaseBackend::Postgres,
+        sql,
+    ))
+    .all(&state.web_db)
+    .await
+    .map_err(WebError::from)?;
+
+    let mut obs = Observations {
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        uptime_seconds: (Utc::now() - state.started_at).num_milliseconds() as f64 / 1000.0,
+        ..Default::default()
+    };
+
+    for row in rows {
+        match row.kind.as_str() {
+            "build_total" => {
+                if let Some(l) = row.label {
+                    obs.builds_total.push((l, row.value));
+                }
+            }
+            "build_in_state" => {
+                if let Some(l) = row.label {
+                    obs.builds_in_state.push((l, row.value));
+                }
+            }
+            "evaluation_total" => {
+                if let Some(l) = row.label {
+                    obs.evaluations_total.push((l, row.value));
+                }
+            }
+            "evaluation_in_state" => {
+                if let Some(l) = row.label {
+                    obs.evaluations_in_state.push((l, row.value));
+                }
+            }
+            "cache_bytes" => obs.cache_bytes = row.value,
+            "cache_nar_bytes" => obs.cache_nar_bytes = row.value,
+            "cache_packages" => obs.cache_packages = row.value,
+            "cache_nar_bytes_sent_total" => obs.cache_nar_bytes_sent_total = row.value,
+            "cache_nar_requests_total" => obs.cache_nar_requests_total = row.value,
+            _ => {}
+        }
+    }
+
+    let (workers, pending, active) = scheduler.metrics_snapshot().await;
+    obs.workers_connected = workers as i64;
+    obs.jobs_pending = pending as i64;
+    obs.jobs_active = active as i64;
+
+    Ok(obs)
 }
 
 #[cfg(test)]
