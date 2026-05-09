@@ -1317,6 +1317,45 @@ Tests (`cargo test -p cache --tests cacher::cleanup`):
   NAR is preserved while the orphan-files pass exercises the new
   cleanup branch.
 
+## Worker recovers build outputs when the daemon drops them on the wire
+
+`harmonia_protocol::BuildResult` deserializes `built_outputs` only when
+the negotiated protocol advertises the `realisation-with-path-not-hash`
+feature; on a daemon old enough to predate that feature, harmonia drains
+the legacy `StringMap` form and returns an empty `BTreeMap`. The
+worker's `ParsedDerivation::realize`
+(`backend/worker/src/executor/build.rs`) consumed `s.built_outputs`
+directly, so a successful local build against such a daemon produced
+`Vec<BuildOutput>::new()` — the worker reported
+`BuildOutput { outputs: [] }`, the server's `handle_build_output` had
+nothing to iterate, no `derivation_output` was updated with `nar_size`,
+no `build_product` rows were written, and the `/builds/{id}/downloads`
+endpoint came back empty even though `nix-support/hydra-build-products`
+existed on disk under the realised output path.
+
+Recovery now happens in
+`output_pairs_from_built_or_drv`: when `built_outputs` is empty, fall
+back to the parsed `.drv`'s declared outputs (input-addressed drvs
+already carry the exact paths nix will produce). Outputs whose `.drv`
+entry has an empty `path` (content-addressed / deferred) are skipped —
+those genuinely require the daemon's response. The fallback emits a
+`warn!` so an old-daemon environment is visible in the worker log
+instead of failing silently.
+
+Tests (`cargo test -p worker --tests output_pairs`):
+
+- `output_pairs_use_built_outputs_when_daemon_returned_them` — modern
+  protocol path: when `built_outputs` is non-empty, the helper passes
+  it through and ignores the `.drv` (whose path may be stale for
+  CA-derivations).
+- `output_pairs_fall_back_to_drv_when_daemon_dropped_built_outputs` —
+  regression: empty `built_outputs` plus a multi-output `.drv` yields
+  one pair per declared output. Locks in the recovery path so a future
+  refactor doesn't re-introduce the silent empty-report.
+- `output_pairs_skip_drv_outputs_with_empty_path` — CA / deferred
+  outputs in the `.drv` (empty `path` field) are dropped from the
+  fallback rather than producing malformed `/nix/store/` strings.
+
 ## Pull-mode CacheQuery surfaces unsatisfiable paths explicitly
 
 The `query` handler in `backend/proto/src/handler/cache.rs` previously
