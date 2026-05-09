@@ -123,6 +123,16 @@ in {
         type = lib.types.path;
       };
 
+      metricsTokenFile = lib.mkOption {
+        description = ''
+          Path to a file containing the bearer token required to scrape
+          `GET /metrics`. When null, the metrics endpoint is disabled
+          (404).
+        '';
+        type = lib.types.nullOr lib.types.path;
+        default = null;
+      };
+
       databaseUrl = lib.mkOption {
         description = "URL of the database to use";
         type = lib.types.str;
@@ -470,7 +480,9 @@ in {
         ] ++ lib.optionals cfg.githubApp.enable [
           "gradient_github_app_private_key:${cfg.githubApp.privateKeyFile}"
           "gradient_github_app_webhook_secret:${cfg.githubApp.webhookSecretFile}"
-        ] ++ userPasswordFiles ++ orgPrivateKeyFiles ++ cacheSigningKeyFiles ++ apiKeyFiles
+        ] ++ lib.optional (cfg.metricsTokenFile != null)
+          "gradient_metrics_token:${cfg.metricsTokenFile}"
+        ++ userPasswordFiles ++ orgPrivateKeyFiles ++ cacheSigningKeyFiles ++ apiKeyFiles
           ++ workerTokenFiles ++ integrationSecretFiles ++ integrationTokenFiles;
       };
 
@@ -547,6 +559,8 @@ in {
         GRADIENT_GITHUB_APP_ID = toString cfg.githubApp.appId;
         GRADIENT_GITHUB_APP_PRIVATE_KEY_FILE = "%d/gradient_github_app_private_key";
         GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE = "%d/gradient_github_app_webhook_secret";
+      } // lib.optionalAttrs (cfg.metricsTokenFile != null) {
+        GRADIENT_METRICS_TOKEN_FILE = "%d/gradient_metrics_token";
       };
     };
 
