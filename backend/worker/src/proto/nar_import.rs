@@ -106,7 +106,7 @@ impl<'a> InputPrefetcher<'a> {
 
         let (by_url, by_request) = self.query_and_split(vec![self.drv_path.to_owned()]).await?;
         let mut batch = self.fetch_by_request(by_request).await?;
-        batch.extend(self.download_by_url(by_url).await);
+        batch.extend(self.download_by_url(by_url).await?);
 
         if batch.is_empty() {
             return Err(anyhow::anyhow!(
@@ -273,9 +273,16 @@ impl<'a> InputPrefetcher<'a> {
     }
 
     /// Stage 4b — download NARs from presigned S3 URLs (S3-backed cache).
-    async fn download_by_url(&self, by_url: Vec<CachedPath>) -> Vec<(String, Vec<u8>, CachedPath)> {
+    ///
+    /// A failed download is fatal: silently dropping it would let the build
+    /// proceed with a missing input or output and surface later as an opaque
+    /// "No such file or directory" when we try to NAR-pack the absent path.
+    async fn download_by_url(
+        &self,
+        by_url: Vec<CachedPath>,
+    ) -> Result<Vec<(String, Vec<u8>, CachedPath)>> {
         if by_url.is_empty() {
-            return vec![];
+            return Ok(vec![]);
         }
 
         let http = crate::http::client();
@@ -303,14 +310,9 @@ impl<'a> InputPrefetcher<'a> {
 
         let mut results = Vec::new();
         while let Some(r) = futs.next().await {
-            match r {
-                Ok(triple) => results.push(triple),
-                Err(e) => {
-                    warn!(error = %e, "presigned NAR download failed; build may need to refetch")
-                }
-            }
+            results.push(r.context("presigned NAR download failed")?);
         }
-        results
+        Ok(results)
     }
 
     /// Stage 5 — import every downloaded NAR into the local nix-daemon in
@@ -484,7 +486,7 @@ impl<'a> InputPrefetcher<'a> {
 
             let (by_url, by_request) = self.query_and_split(to_query).await?;
             let mut batch = self.fetch_by_request(by_request).await?;
-            batch.extend(self.download_by_url(by_url).await);
+            batch.extend(self.download_by_url(by_url).await?);
 
             // Collect any references from this batch that we haven't yet
             // queried and that aren't already in the local store.
@@ -659,6 +661,22 @@ pub async fn fetch_external_cached_outputs(
         .await?;
     if !missing.is_empty() {
         prefetcher.fetch_closure(missing).await?;
+    }
+
+    // Belt-and-suspenders: the daemon can return `is_valid_path=true` for paths
+    // whose registry entry exists but whose on-disk NAR is gone (manual
+    // deletion, interrupted import, GC race), and our own fetch could leave a
+    // path unimported despite returning Ok. Either way, an absent file means
+    // the upcoming NAR-pack step will fail with an opaque IO error — bail now
+    // so the caller can fall back to a real build.
+    for (_, path) in &outputs {
+        if !tokio::fs::try_exists(path).await.unwrap_or(false) {
+            anyhow::bail!(
+                "external_cached output {} is registered but not present on disk; \
+                 cache is missing the NAR or the path was removed locally",
+                path
+            );
+        }
     }
     Ok(outputs)
 }
