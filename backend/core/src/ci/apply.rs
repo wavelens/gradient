@@ -17,6 +17,7 @@ use entity::evaluation::EvaluationStatus;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum ApplyOutcome {
     Created {
         evaluation: MEvaluation,

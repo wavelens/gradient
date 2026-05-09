@@ -119,11 +119,11 @@ async fn load_org_role(
         .await?
         .or_not_found("Role")?;
 
-    if let Some(owner) = role.organization {
-        if owner != org_id {
-            // Treat cross-org access as not-found to avoid leaking ids.
-            return Err(WebError::not_found("Role"));
-        }
+    if let Some(owner) = role.organization
+        && owner != org_id
+    {
+        // Treat cross-org access as not-found to avoid leaking ids.
+        return Err(WebError::not_found("Role"));
     }
 
     Ok(role)

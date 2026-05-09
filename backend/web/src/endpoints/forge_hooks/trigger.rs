@@ -184,6 +184,7 @@ pub(super) async fn trigger_push_for_integration(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn trigger_pr_for_integration(
     state: &Arc<ServerState>,
     scheduler: &Arc<Scheduler>,
@@ -264,6 +265,7 @@ enum FilterResult {
     Skip,
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn fan_out_triggers<F>(
     state: &Arc<ServerState>,
     scheduler: &Arc<Scheduler>,
