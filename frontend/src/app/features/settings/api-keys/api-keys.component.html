@@ -44,15 +44,36 @@
                     <span class="badge badge-revoked">Revoked</span>
                   }
                 </div>
-                <div class="key-id text-secondary">
-                  Last used: {{ key.last_used_at ? (key.last_used_at | date: 'medium') : 'never' }}
+                <div class="key-meta text-secondary">
+                  <span
+                    class="badge badge-info"
+                    [pTooltip]="permissionTooltip(key)"
+                    tooltipPosition="top"
+                  >
+                    {{ key.permissions.length }} permission{{ key.permissions.length === 1 ? '' : 's' }}
+                  </span>
+                  <span class="badge badge-org">
+                    {{ key.organization ?? 'Any org' }}
+                  </span>
+                  <span>
+                    Last used: {{ key.last_used_at ? (key.last_used_at | date: 'medium') : 'never' }}
+                  </span>
                   @if (key.expires_at) {
-                    · Expires: {{ key.expires_at | date: 'medium' }}
+                    <span>· Expires: {{ key.expires_at | date: 'medium' }}</span>
                   }
                 </div>
               </div>
             </div>
             <div class="key-actions">
+              @if (!key.managed && !key.revoked_at) {
+                <button
+                  pButton
+                  label="Edit"
+                  icon="pi pi-pencil"
+                  severity="secondary"
+                  (click)="openEditDialog(key)"
+                ></button>
+              }
               @if (!key.revoked_at) {
                 <button
                   pButton
@@ -81,14 +102,14 @@
   }
 </div>
 
-<!-- Create Key Dialog -->
+<!-- Create / Edit Dialog -->
 <p-dialog
-  header="Create API Key"
-  [(visible)]="showCreateDialog"
+  [(visible)]="showDialog"
   [modal]="true"
-  [style]="{ width: '400px' }"
+  [style]="{ width: '520px' }"
   [draggable]="false"
   [resizable]="false"
+  [header]="editingKey() ? 'Edit API Key' : 'Create API Key'"
 >
   @if (errorMessage()) {
     <div class="dialog-error">
@@ -96,17 +117,83 @@
       {{ errorMessage() }}
     </div>
   }
+
   <div class="form-group">
-    <label for="key-name">Key Name</label>
-    <input pInputText id="key-name" [(ngModel)]="newKeyName" placeholder="e.g. CI/CD Pipeline" class="w-full" />
+    <label for="key-name">Name</label>
+    <input
+      pInputText
+      id="key-name"
+      [(ngModel)]="formName"
+      placeholder="e.g. CI/CD Pipeline"
+      class="w-full"
+    />
   </div>
+
+  @if (!editingKey()) {
+    <div class="form-group">
+      <label for="key-expires">Expires in (days)</label>
+      <input
+        pInputText
+        id="key-expires"
+        type="number"
+        min="1"
+        [(ngModel)]="formExpiresInDays"
+        placeholder="Leave blank for no expiry"
+        class="w-full"
+      />
+    </div>
+  }
+
+  <p-divider />
+
   <div class="form-group">
-    <label for="key-expires">Expires in (days)</label>
-    <input pInputText id="key-expires" type="number" min="1" [(ngModel)]="newKeyExpiresInDays" placeholder="Leave blank for no expiry" class="w-full" />
+    <label for="key-organization">Organization</label>
+    <p-select
+      inputId="key-organization"
+      [options]="orgOptions()"
+      optionLabel="label"
+      optionValue="value"
+      [(ngModel)]="formOrganization"
+      placeholder="Any organization"
+      appendTo="body"
+      styleClass="w-full"
+    />
   </div>
+
+  <p-divider />
+
+  <div class="form-group">
+    <label>Permissions</label>
+    <div class="permission-grid">
+      @for (p of availablePermissions(); track p.id) {
+        <div class="permission-row">
+          <p-checkbox
+            [(ngModel)]="formPermissions[p.id]"
+            [binary]="true"
+            [inputId]="'perm-' + p.id"
+          />
+          <label [for]="'perm-' + p.id">{{ p.id }}</label>
+        </div>
+      }
+    </div>
+  </div>
+
   <ng-template pTemplate="footer">
-    <button pButton label="Cancel" severity="secondary" (click)="showCreateDialog.set(false)" [disabled]="creating()"></button>
-    <button pButton label="Create" icon="pi pi-plus" (click)="createKey()" [loading]="creating()" [disabled]="creating() || !newKeyName.trim()"></button>
+    <button
+      pButton
+      label="Cancel"
+      severity="secondary"
+      (click)="showDialog.set(false)"
+      [disabled]="creating() || saving()"
+    ></button>
+    <button
+      pButton
+      [label]="editingKey() ? 'Save' : 'Create'"
+      [icon]="editingKey() ? 'pi pi-check' : 'pi pi-plus'"
+      (click)="saveKey()"
+      [loading]="creating() || saving()"
+      [disabled]="creating() || saving() || !formName.trim()"
+    ></button>
   </ng-template>
 </p-dialog>
 

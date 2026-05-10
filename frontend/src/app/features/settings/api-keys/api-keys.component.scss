@@ -132,3 +132,52 @@
     word-break: break-all;
   }
 }
+
+.key-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: $spacing-sm;
+  font-size: $font-size-xs;
+  margin-top: $spacing-xs;
+}
+
+.badge-info {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 1px 6px;
+  border-radius: $border-radius-sm;
+  background: rgba($color-info, 0.15);
+  color: $color-info;
+  text-transform: uppercase;
+  cursor: help;
+}
+
+.badge-org {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: $border-radius-sm;
+  background: $color-quaternary;
+  color: $text-secondary;
+}
+
+.permission-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: $spacing-xs $spacing-md;
+}
+
+.permission-row {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  padding: 2px 0;
+
+  label {
+    font-family: $font-family-mono;
+    font-size: $font-size-sm;
+    cursor: pointer;
+  }
+}
