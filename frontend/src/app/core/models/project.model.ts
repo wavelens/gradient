@@ -68,6 +68,7 @@ export interface ProjectDetail {
   keep_evaluations: number;
   last_evaluations: EvaluationSummary[];
   can_edit: boolean;
+  managed: boolean;
 }
 
 export interface EvaluationMessage {
