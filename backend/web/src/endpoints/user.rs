@@ -278,6 +278,8 @@ pub async fn post_keys(
         managed: Set(false),
         expires_at: Set(expires_at),
         revoked_at: Set(None),
+        permission: Set(gradient_core::permissions::admin_mask()),
+        organization: Set(None),
     };
 
     let inserted = api_key.insert(&state.web_db).await?;

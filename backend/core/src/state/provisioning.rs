@@ -685,6 +685,8 @@ impl<'a> StateApplicator<'a> {
                     managed: Set(true),
                     expires_at: Set(None),
                     revoked_at: Set(None),
+                    permission: Set(crate::permissions::admin_mask()),
+                    organization: Set(None),
                 };
                 api_key_model.insert(self.db).await?;
                 tracing::info!(name = %state_api_key.name, "Created managed API key");
