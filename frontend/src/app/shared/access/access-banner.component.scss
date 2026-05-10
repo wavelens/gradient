@@ -1,0 +1,37 @@
+.access-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+  margin-bottom: 1rem;
+  font-size: 0.875rem;
+  width: 100%;
+
+  &__icon {
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+
+  &__text {
+    flex: 1;
+  }
+
+  &--managed {
+    background: var(--color-info-bg, #eef4ff);
+    color: var(--color-info-fg, #1e3a8a);
+    border: 1px solid var(--color-info-border, #c7d8ff);
+  }
+
+  &--readonly {
+    background: var(--color-warning-bg, #fff7ed);
+    color: var(--color-warning-fg, #9a3412);
+    border: 1px solid var(--color-warning-border, #fed7aa);
+  }
+
+  &--managed-readonly {
+    background: var(--color-info-bg, #eef4ff);
+    color: var(--color-info-fg, #1e3a8a);
+    border: 1px solid var(--color-info-border, #c7d8ff);
+  }
+}
