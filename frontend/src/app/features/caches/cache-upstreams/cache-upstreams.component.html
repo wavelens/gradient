@@ -19,7 +19,14 @@
       <h1>Upstream Caches</h1>
       <p class="text-secondary">External and internal caches this cache pulls through from</p>
     </div>
-    <button pButton label="Add Upstream" icon="pi pi-plus" (click)="openAddDialog()"></button>
+    <button
+      *appWritable="access()"
+      pButton
+      label="Add Upstream"
+      icon="pi pi-plus"
+      (click)="openAddDialog()"
+      [appManagedDisable]="access()"
+    ></button>
   </div>
 
   @if (loading()) {
@@ -30,7 +37,14 @@
         <span class="material-symbols-outlined">cloud_download</span>
         <h3>No upstream caches</h3>
         <p class="text-secondary">Add an upstream to enable pull-through caching from another cache.</p>
-        <button pButton label="Add Upstream" icon="pi pi-plus" (click)="openAddDialog()"></button>
+        <button
+          *appWritable="access()"
+          pButton
+          label="Add Upstream"
+          icon="pi pi-plus"
+          (click)="openAddDialog()"
+          [appManagedDisable]="access()"
+        ></button>
       </div>
     } @else {
       <div class="upstreams-list">
@@ -49,18 +63,20 @@
             </div>
             <div class="upstream-actions">
               <button
+                *appWritable="access()"
                 pButton
                 icon="pi pi-pencil"
                 severity="secondary"
-                [disabled]="removingUpstreamId() !== null"
+                [disabled]="rowDisabled()"
                 (click)="openEditDialog(u)"
               ></button>
               <button
+                *appWritable="access()"
                 pButton
                 icon="pi pi-trash"
                 severity="danger"
                 [loading]="removingUpstreamId() === u.id"
-                [disabled]="removingUpstreamId() !== null"
+                [disabled]="rowDisabled()"
                 (click)="removeUpstream(u.id)"
               ></button>
             </div>

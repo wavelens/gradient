@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnInit, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -13,6 +13,8 @@ import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { CachesService, UpstreamCache, CacheSubscriptionMode } from '@core/services/caches.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
+import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
+import { injectCacheAccess } from '@core/resolvers/inject-access';
 
 @Component({
   selector: 'app-cache-upstreams',
@@ -25,6 +27,8 @@ import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/load
     ButtonModule,
     InputTextModule,
     LoadingSpinnerComponent,
+    WritableDirective,
+    ManagedDisableDirective,
   ],
   templateUrl: './cache-upstreams.component.html',
   styleUrl: './cache-upstreams.component.scss',
@@ -32,6 +36,15 @@ import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/load
 export class CacheUpstreamsComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private cachesService = inject(CachesService);
+  private accessSvc = inject(AccessService);
+
+  access = injectCacheAccess();
+
+  rowDisabled = computed(
+    () =>
+      this.removingUpstreamId() !== null ||
+      this.accessSvc.shouldDisableInput(this.access()),
+  );
 
   loading = signal(true);
   addingUpstream = signal(false);
