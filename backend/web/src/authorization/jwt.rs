@@ -4,11 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::api_key::{ApiKeyContext, DecodedRequest};
 use axum::extract::State;
 use axum::http::StatusCode;
 use chrono::{Duration, Utc};
 use gradient_core::types::*;
-use jsonwebtoken::{DecodingKey, EncodingKey, Header, TokenData, Validation, decode, encode};
+use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use rand::distr::{Alphanumeric, SampleString};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
@@ -119,7 +120,7 @@ pub async fn create_session_and_token(
 pub async fn decode_jwt(
     state: State<Arc<ServerState>>,
     jwt: String,
-) -> Result<TokenData<Cliams>, StatusCode> {
+) -> Result<DecodedRequest, StatusCode> {
     if let Some(raw) = jwt.strip_prefix("GRAD") {
         return decode_api_key(state, raw).await;
     }
@@ -149,13 +150,15 @@ pub async fn decode_jwt(
     active.last_used_at = Set(now);
     let _ = active.update(&state.web_db).await;
 
-    Ok(token_data)
+    Ok(DecodedRequest::Session {
+        user_id: token_data.claims.id,
+    })
 }
 
 async fn decode_api_key(
     state: State<Arc<ServerState>>,
     raw: &str,
-) -> Result<TokenData<Cliams>, StatusCode> {
+) -> Result<DecodedRequest, StatusCode> {
     let key_hash = hash_api_key(raw);
     let api_key = EApi::find()
         .filter(CApi::Key.eq(key_hash))
@@ -174,22 +177,21 @@ async fn decode_api_key(
         return Err(StatusCode::UNAUTHORIZED);
     }
 
-    let mut aapi_key: AApi = api_key.clone().into();
+    let context = ApiKeyContext {
+        api_id: api_key.id,
+        mask: api_key.permission,
+        organization: api_key.organization,
+    };
+    let user_id = api_key.owned_by;
+
+    let mut aapi_key: AApi = api_key.into();
     aapi_key.last_used_at = Set(now);
     aapi_key
         .save(&state.web_db)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    Ok(TokenData {
-        claims: Cliams {
-            exp: 0,
-            iat: api_key.created_at.and_utc().timestamp() as usize,
-            id: api_key.owned_by,
-            jti: SessionId::nil(),
-        },
-        header: Default::default(),
-    })
+    Ok(DecodedRequest::ApiKey { user_id, context })
 }
 
 pub fn encode_download_token(
