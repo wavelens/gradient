@@ -661,6 +661,83 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /user/keys/permissions:
+    get:
+      tags: [user]
+      summary: List API-key permission catalogue
+      description: |-
+        Returns the full set of capabilities a user-managed API key may grant.
+        Used by the create / edit dialog to populate the permission checkbox list.
+      operationId: getUserKeyPermissions
+      responses:
+        '200':
+          description: Permission catalogue
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: object
+                        required: [available_permissions]
+                        properties:
+                          available_permissions:
+                            type: array
+                            items:
+                              type: object
+                              required: [id, mutating]
+                              properties:
+                                id: { type: string }
+                                mutating: { type: boolean }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /user/keys/{api_id}:
+    patch:
+      tags: [user]
+      summary: Update an API key's configurable options
+      description: |-
+        Edit the key's name, permission set, or organization pin in place.
+        Permissions replace the existing set wholesale. State-managed keys
+        cannot be edited. Cannot be called from an API-key-authenticated
+        request — sessions only.
+      operationId: patchUserKey
+      parameters:
+        - name: api_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchApiKeyRequest'
+      responses:
+        '200':
+          description: Updated key
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/ApiKeyInfo'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
   /user/keys/{api_id}/revoke:
     post:
       tags: [user]
@@ -4656,7 +4733,7 @@ components:
 
     CreateApiKeyRequest:
       type: object
-      required: [name]
+      required: [name, permissions]
       properties:
         name:
           type: string
@@ -4668,15 +4745,40 @@ components:
           nullable: true
           description: |-
             Optional lifetime in days. Omit (or `null`) for a key that never
-            auto-expires. The server stamps `expires_at = now + N days`.
+            auto-expires.
+        permissions:
+          type: array
+          items: { type: string }
+          minItems: 1
+          description: |-
+            Capability identifiers (matching `Permission::as_wire_name`) the
+            new key should grant. The full catalogue is at
+            `GET /user/keys/permissions`.
+          example: [triggerEvaluation, viewOrg]
+        organization:
+          type: string
+          nullable: true
+          description: |-
+            Optional organization name to pin the key to. When set, the key is
+            rejected for any other organization.
 
     ApiKeyInfo:
       type: object
-      required: [id, name, managed, created_at]
+      required: [id, name, managed, permissions, created_at]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
         managed: { type: boolean }
+        permissions:
+          type: array
+          items: { type: string }
+          description: Capability identifiers granted by this key
+        organization:
+          type: string
+          nullable: true
+          description: |-
+            Organization name this key is pinned to, or `null` if the key is
+            unscoped.
         created_at: { type: string, format: date-time }
         last_used_at:
           type: string
@@ -4691,6 +4793,23 @@ components:
           type: string
           format: date-time
           nullable: true
+
+    PatchApiKeyRequest:
+      type: object
+      properties:
+        name: { type: string }
+        permissions:
+          type: array
+          items: { type: string }
+          minItems: 1
+          description: |-
+            When present, replaces the key's permission set wholesale.
+        organization:
+          type: string
+          nullable: true
+          description: |-
+            Tri-state: omit to leave the pin unchanged; `null` to unpin;
+            string to pin to a specific organization.
 
     SessionInfo:
       type: object
@@ -4716,8 +4835,8 @@ components:
           type: string
           description: |-
             One of: `login.success`, `login.failure`, `logout`, `register`,
-            `user.delete`, `api_key.create`, `api_key.revoke`,
-            `api_key.delete`, `session.revoke`, `auth.deny`,
+            `user.delete`, `api_key.create`, `api_key.update`,
+            `api_key.revoke`, `api_key.delete`, `session.revoke`, `auth.deny`,
             `organization.delete`, `organization.member.add`,
             `organization.member.remove`, `organization.member.role_change`,
             `project.delete`, `cache.delete`.
@@ -4799,7 +4918,7 @@ components:
 
     RoleResponse:
       type: object
-      required: [id, name, organization, builtin, permissions]
+      required: [id, name, builtin, managed, permissions]
       properties:
         id:
           type: string
@@ -4819,6 +4938,11 @@ components:
           description: |
             True for the three immutable system roles (Admin/Write/View).
             Built-in roles cannot be edited or deleted via the API.
+        managed:
+          type: boolean
+          description: |
+            True for state-managed custom roles defined in the NixOS state
+            file. Managed roles cannot be modified or deleted via the API.
         permissions:
           type: array
           items:

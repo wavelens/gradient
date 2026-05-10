@@ -266,13 +266,45 @@ server, worker, or CLI talks to) carry the user-agent
 `Gradient/<version> (+https://github.com/wavelens/gradient)`, so cache operators
 can attribute traffic and build allowlists or per-client metrics around it.
 
+## Roles
+
+State files can declare custom org-scoped roles via the `roles` attribute.
+Each role targets one organization and grants a fixed permission set:
+
+```nix
+services.gradient.state.roles = {
+  releaser = {
+    organization = "acme";
+    permissions  = [ "viewOrg" "triggerEvaluation" ];
+  };
+};
+```
+
+Managed roles are immutable through the role-management API: `PATCH` and
+`DELETE` return `403 Forbidden`. Removing the entry from the state file
+unmarks the role (or deletes it, when `settings.deleteState = true`).
+
+Role names must not collide with the built-in roles (`Admin`, `Write`,
+`View`) or with another state-managed role in the same organization —
+startup fails on collision.
+
+### Role options
+
+| Option | Default | Description |
+|---|---|---|
+| `name` | `<attrset key>` | Role name. Must be unique within the organization and must not collide with a built-in role |
+| `organization` | — | Owning organization name (required) |
+| `permissions` | — | List of capability identifiers granted by the role (required, see `GET /user/keys/permissions` for the catalogue) |
+
 ## API Keys
 
 ```nix
 services.gradient.state.api_keys = {
-  ci-token = {
-    key_file = "/run/secrets/ci-api-key";
-    owned_by = "alice";
+  ci-runner = {
+    key_file     = "/run/secrets/ci-api-key";
+    owned_by     = "alice";
+    permissions  = [ "viewOrg" "triggerEvaluation" ];
+    organization = "acme";        # optional — omit for an unscoped key
   };
 };
 ```
@@ -290,6 +322,10 @@ printf %s "$TOKEN" | sha256sum | cut -d' ' -f1 > /run/secrets/ci-api-key
 Hand `GRAD$TOKEN` to the user/CI pipeline; the server will hash it on the way
 in and compare against the digest in `key_file`.
 
+The `permissions` list is **required** — there is no safe default. When
+`organization` is set, the key is rejected for every other org (404, so org
+existence isn't leaked).
+
 ### API-key options
 
 | Option | Default | Description |
@@ -297,6 +333,8 @@ in and compare against the digest in `key_file`.
 | `name` | `<attrset key>` | Unique key name |
 | `key_file` | — | Path to a file containing the lowercase 64-char SHA-256 hex digest of the token (required) |
 | `owned_by` | — | Username that owns the key (required) |
+| `permissions` | — | Capability identifiers the key grants (required, non-empty). See `GET /user/keys/permissions` for the catalogue |
+| `organization` | `null` | Organization name to pin the key to. Omit for an unscoped key |
 
 ## Workers
 

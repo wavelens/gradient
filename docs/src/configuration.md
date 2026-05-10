@@ -299,4 +299,29 @@ The token must be the 48-byte random secret returned by the registration API (ge
 
 ## Declarative State
 
-Users, organizations, projects, integrations, caches, API keys, and workers can be declared in `services.gradient.state` and reconciled on every startup. See [Declarative State](usage/state.md) for the full options reference.
+Users, organizations, projects, integrations, caches, API keys, custom roles, and workers can be declared in `services.gradient.state` and reconciled on every startup. See [Declarative State](usage/state.md) for the full options reference.
+
+### API keys
+
+State-managed API keys are declared under `state.api_keys.<name>`:
+
+- `key_file` (required, path): file containing the lowercase 64-char SHA-256
+  hex digest of the token (without the `GRAD` prefix).
+- `owned_by` (required, string): username that owns the key.
+- `permissions` (required, list of strings): permission identifiers the key
+  grants. See `gradient_core::permissions::Permission` (or
+  `GET /user/keys/permissions`) for the full list.
+- `organization` (optional, string): organization name to pin the key to.
+  Omit for an unscoped key.
+
+### Roles
+
+State-managed custom roles are declared under `state.roles.<name>`:
+
+- `name` (defaults to attrset key): role name. Must be unique within the
+  organization and must not collide with built-in role names
+  (`Admin`, `Write`, `View`).
+- `organization` (required, string): the organization this role belongs to.
+- `permissions` (required, list of strings): the capabilities the role grants.
+
+Managed roles cannot be modified or deleted via the API.

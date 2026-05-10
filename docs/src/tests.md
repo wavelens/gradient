@@ -1881,3 +1881,16 @@ The closure walker is exercised end-to-end by the
 builds derivations referencing locally-created sources). Live-daemon
 unit coverage isn't worth the harness cost — the BFS is a few lines
 and the failure mode is loud.
+
+## Configurable API-key options
+
+`backend/web/tests/auth_hardening.rs` (full HTTP via `axum_test`):
+
+- `api_key_with_only_view_cannot_trigger_evaluation` — a key whose mask is
+  `[viewOrg]` returns 403 from the project evaluate endpoint, even when the
+  owning user is admin.
+- `api_key_pinned_to_other_org_is_invisible` — a key pinned to a different
+  org returns 404 (not 403, not 401) on `GET /api/v1/orgs/{name}` so org
+  existence isn't leaked.
+- `api_key_cannot_create_api_keys` — `POST /api/v1/user/keys` from an
+  API-key-authenticated request returns 403 (the self-management guard).
