@@ -19,6 +19,7 @@
 //! - Caches: [`load_cache`] with [`CacheAccess`] (owner-scoped, not org-scoped).
 //! - Org-scoped children: [`load_webhook_in_org`], [`load_integration_in_org`].
 
+use crate::authorization::ApiKeyContext;
 use crate::error::{WebError, WebResult};
 use crate::helpers::OptionExt;
 use crate::permissions::{Permission, PermissionMask, mask_grants};
@@ -110,6 +111,7 @@ pub enum CacheAccess {
 pub async fn load_org(
     state: &Arc<ServerState>,
     caller: Caller<'_>,
+    api_key: Option<&ApiKeyContext>,
     org_name: String,
     access: OrgAccess,
 ) -> WebResult<MOrganization> {
@@ -126,7 +128,7 @@ pub async fn load_org(
         OrgAccess::Readable { .. } => {
             if !org.public {
                 let visible = match caller.user_id() {
-                    Some(uid) => is_org_member(state, uid, org.id).await?,
+                    Some(uid) => is_org_member(state, uid, org.id, api_key).await?,
                     None => false,
                 };
                 if !visible {
@@ -136,7 +138,7 @@ pub async fn load_org(
         }
         OrgAccess::Member { reject_managed } => {
             let uid = caller.user_id().ok_or_else(|| WebError::not_found(label))?;
-            if !is_org_member(state, uid, org.id).await? {
+            if !is_org_member(state, uid, org.id, api_key).await? {
                 return Err(WebError::not_found(label));
             }
             if reject_managed {
@@ -148,7 +150,7 @@ pub async fn load_org(
             reject_managed,
         } => {
             let uid = caller.user_id().ok_or_else(|| WebError::not_found(label))?;
-            require_org_permission(state, uid, org.id, permission, label).await?;
+            require_org_permission(state, uid, org.id, permission, label, api_key).await?;
             if reject_managed {
                 reject_managed_org(&org)?;
             }
@@ -163,11 +165,11 @@ pub async fn load_org(
 pub async fn load_project(
     state: &Arc<ServerState>,
     caller: Caller<'_>,
+    api_key: Option<&ApiKeyContext>,
     org_name: String,
     project_name: String,
     access: ProjectAccess,
 ) -> WebResult<(MOrganization, MProject)> {
-    // Project endpoints always report "Project" so org existence isn't leaked.
     let label = "Project";
 
     let (org, project) = get_any_project_by_name(Arc::clone(state), org_name, project_name)
@@ -178,7 +180,7 @@ pub async fn load_project(
         ProjectAccess::Readable => {
             if !org.public {
                 let visible = match caller.user_id() {
-                    Some(uid) => is_org_member(state, uid, org.id).await?,
+                    Some(uid) => is_org_member(state, uid, org.id, api_key).await?,
                     None => false,
                 };
                 if !visible {
@@ -188,7 +190,7 @@ pub async fn load_project(
         }
         ProjectAccess::Member => {
             let uid = caller.user_id().ok_or_else(|| WebError::not_found(label))?;
-            if !is_org_member(state, uid, org.id).await? {
+            if !is_org_member(state, uid, org.id, api_key).await? {
                 return Err(WebError::not_found(label));
             }
         }
@@ -197,7 +199,7 @@ pub async fn load_project(
             reject_managed,
         } => {
             let uid = caller.user_id().ok_or_else(|| WebError::not_found(label))?;
-            require_org_permission(state, uid, org.id, permission, label).await?;
+            require_org_permission(state, uid, org.id, permission, label, api_key).await?;
             if reject_managed && project.managed {
                 return Err(WebError::forbidden(
                     "Cannot modify state-managed project. This project is managed by configuration and cannot be edited through the API.",
@@ -268,7 +270,14 @@ pub async fn is_org_member(
     state: &Arc<ServerState>,
     user_id: UserId,
     organization_id: OrganizationId,
+    api_key: Option<&ApiKeyContext>,
 ) -> WebResult<bool> {
+    if let Some(ctx) = api_key
+        && let Some(pinned) = ctx.organization
+        && pinned != organization_id
+    {
+        return Ok(false);
+    }
     Ok(load_org_membership(state, user_id, organization_id)
         .await?
         .is_some())
@@ -280,9 +289,10 @@ pub async fn has_permission(
     user_id: UserId,
     organization_id: OrganizationId,
     permission: Permission,
+    api_key: Option<&ApiKeyContext>,
 ) -> WebResult<bool> {
     Ok(
-        match load_membership_with_permissions(state, user_id, organization_id).await? {
+        match load_membership_with_permissions(state, user_id, organization_id, api_key).await? {
             Some((_, mask)) => mask_grants(mask, permission),
             None => false,
         },
@@ -314,7 +324,14 @@ pub async fn load_membership_with_permissions(
     state: &Arc<ServerState>,
     user_id: UserId,
     organization_id: OrganizationId,
+    api_key: Option<&ApiKeyContext>,
 ) -> WebResult<Option<(MOrganizationUser, PermissionMask)>> {
+    if let Some(ctx) = api_key
+        && let Some(pinned) = ctx.organization
+        && pinned != organization_id
+    {
+        return Ok(None);
+    }
     let Some(membership) = load_org_membership(state, user_id, organization_id).await? else {
         return Ok(None);
     };
@@ -326,7 +343,11 @@ pub async fn load_membership_with_permissions(
         .await?
         .map(|r| r.permission)
         .unwrap_or(0);
-    Ok(Some((membership, mask)))
+    let effective = match api_key {
+        Some(ctx) => mask & ctx.mask,
+        None => mask,
+    };
+    Ok(Some((membership, effective)))
 }
 
 // ── Internal helpers ─────────────────────────────────────────────────────────
@@ -337,8 +358,9 @@ async fn require_org_permission(
     org_id: OrganizationId,
     permission: Permission,
     not_found_label: &str,
+    api_key: Option<&ApiKeyContext>,
 ) -> WebResult<()> {
-    let (_, mask) = load_membership_with_permissions(state, user_id, org_id)
+    let (_, mask) = load_membership_with_permissions(state, user_id, org_id, api_key)
         .await?
         .ok_or_else(|| WebError::not_found(not_found_label))?;
 
@@ -363,7 +385,9 @@ fn reject_managed_org(org: &MOrganization) -> WebResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::authorization::ApiKeyContext;
     use gradient_core::ci::WebhookClient;
+    use gradient_core::permissions::mask_from;
     use gradient_core::storage::{EmailSender, NarStore};
     use gradient_core::types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID};
     use gradient_core::types::ids::{OrganizationUserId, ProjectId, RoleId};
@@ -521,6 +545,7 @@ mod tests {
             let r = load_org(
                 &state,
                 Caller::User(&user),
+                None,
                 "test-org".into(),
                 admin_required(),
             )
@@ -542,6 +567,7 @@ mod tests {
             let err = load_org(
                 &state,
                 Caller::User(&user),
+                None,
                 "test-org".into(),
                 admin_required(),
             )
@@ -564,6 +590,7 @@ mod tests {
             let err = load_org(
                 &state,
                 Caller::User(&user),
+                None,
                 "test-org".into(),
                 admin_required(),
             )
@@ -585,6 +612,7 @@ mod tests {
             let err = load_org(
                 &state,
                 Caller::User(&user),
+                None,
                 "test-org".into(),
                 admin_required(),
             )
@@ -608,7 +636,7 @@ mod tests {
                 .append_query_results([vec![write_role_row()]])
                 .into_connection();
             let state = make_state(db);
-            let r = load_org(&state, Caller::User(&user), "test-org".into(), access).await;
+            let r = load_org(&state, Caller::User(&user), None, "test-org".into(), access).await;
             assert!(r.is_ok(), "{:?}", r.err());
         });
     }
@@ -627,7 +655,7 @@ mod tests {
                 .append_query_results([vec![view_role_row()]])
                 .into_connection();
             let state = make_state(db);
-            let err = load_org(&state, Caller::User(&user), "test-org".into(), access)
+            let err = load_org(&state, Caller::User(&user), None, "test-org".into(), access)
                 .await
                 .expect_err("view-only must be rejected");
             assert!(matches!(err, WebError::Forbidden(..)));
@@ -646,7 +674,7 @@ mod tests {
                 .append_query_results([vec![membership_fixture(BASE_ROLE_VIEW_ID)]])
                 .into_connection();
             let state = make_state(db);
-            let r = load_org(&state, Caller::User(&user), "test-org".into(), access).await;
+            let r = load_org(&state, Caller::User(&user), None, "test-org".into(), access).await;
             assert!(r.is_ok(), "{:?}", r.err());
         });
     }
@@ -661,6 +689,7 @@ mod tests {
             let r = load_org(
                 &state,
                 Caller::Anon,
+                None,
                 "test-org".into(),
                 OrgAccess::Readable {
                     label: "Organization",
@@ -681,6 +710,7 @@ mod tests {
             let err = load_org(
                 &state,
                 Caller::Anon,
+                None,
                 "test-org".into(),
                 OrgAccess::Readable {
                     label: "Organization",
@@ -710,6 +740,7 @@ mod tests {
             let r = load_project(
                 &state,
                 Caller::User(&user),
+                None,
                 "test-org".into(),
                 "test-project".into(),
                 access,
@@ -737,6 +768,7 @@ mod tests {
             let err = load_project(
                 &state,
                 Caller::User(&user),
+                None,
                 "test-org".into(),
                 "test-project".into(),
                 access,
@@ -765,6 +797,7 @@ mod tests {
             let err = load_project(
                 &state,
                 Caller::User(&user),
+                None,
                 "test-org".into(),
                 "test-project".into(),
                 access,
@@ -790,6 +823,7 @@ mod tests {
             let err = load_project(
                 &state,
                 Caller::User(&user),
+                None,
                 "test-org".into(),
                 "test-project".into(),
                 access,
@@ -800,6 +834,126 @@ mod tests {
                 WebError::NotFound(_, msg) => assert!(msg.contains("Project"), "got {}", msg),
                 other => panic!("expected NotFound, got {:?}", other),
             }
+        });
+    }
+
+    fn api_key_ctx(mask: PermissionMask, org: Option<OrganizationId>) -> ApiKeyContext {
+        ApiKeyContext {
+            api_id: entity::ids::ApiId::new(uuid!("a0000000-0000-0000-0000-000000000099")),
+            mask,
+            organization: org,
+        }
+    }
+
+    #[test]
+    fn api_key_intersection_caps_admin_user_to_view_only() {
+        run(async {
+            let user = user_fixture();
+            let key = api_key_ctx(Permission::ViewOrg.bit(), None);
+            let db = MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([vec![org_fixture(false, false)]])
+                .append_query_results([vec![membership_fixture(BASE_ROLE_ADMIN_ID)]])
+                .append_query_results([vec![admin_role_row()]])
+                .into_connection();
+            let state = make_state(db);
+            let access = OrgAccess::Require {
+                permission: Permission::ManageMembers,
+                reject_managed: true,
+            };
+            let err = load_org(
+                &state,
+                Caller::User(&user),
+                Some(&key),
+                "test-org".into(),
+                access,
+            )
+            .await
+            .expect_err("admin user must be capped by view-only key");
+            assert!(matches!(err, WebError::Forbidden(..)));
+        });
+    }
+
+    #[test]
+    fn api_key_pinned_to_other_org_returns_not_found() {
+        run(async {
+            let user = user_fixture();
+            let key = api_key_ctx(
+                mask_from(Permission::ALL),
+                Some(OrganizationId::new(uuid!(
+                    "a0000000-0000-0000-0000-0000000000ff"
+                ))),
+            );
+            let db = MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([vec![org_fixture(false, false)]])
+                .into_connection();
+            let state = make_state(db);
+            let access = OrgAccess::Member {
+                reject_managed: false,
+            };
+            let err = load_org(
+                &state,
+                Caller::User(&user),
+                Some(&key),
+                "test-org".into(),
+                access,
+            )
+            .await
+            .expect_err("pinned-elsewhere key must be invisible to this org");
+            assert!(matches!(err, WebError::NotFound(..)));
+        });
+    }
+
+    #[test]
+    fn api_key_pinned_to_matching_org_passes() {
+        run(async {
+            let user = user_fixture();
+            let key = api_key_ctx(
+                mask_from(Permission::ALL),
+                Some(OrganizationId::new(uuid!(
+                    "a0000000-0000-0000-0000-000000000001"
+                ))),
+            );
+            let db = MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([vec![org_fixture(false, false)]])
+                .append_query_results([vec![membership_fixture(BASE_ROLE_ADMIN_ID)]])
+                .append_query_results([vec![admin_role_row()]])
+                .into_connection();
+            let state = make_state(db);
+            let access = OrgAccess::Require {
+                permission: Permission::ManageMembers,
+                reject_managed: false,
+            };
+            let r = load_org(
+                &state,
+                Caller::User(&user),
+                Some(&key),
+                "test-org".into(),
+                access,
+            )
+            .await;
+            assert!(r.is_ok(), "{:?}", r.err());
+        });
+    }
+
+    #[test]
+    fn session_caller_unaffected_by_api_key_logic() {
+        run(async {
+            let user = user_fixture();
+            let db = MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([vec![org_fixture(false, false)]])
+                .append_query_results([vec![membership_fixture(BASE_ROLE_ADMIN_ID)]])
+                .append_query_results([vec![admin_role_row()]])
+                .into_connection();
+            let state = make_state(db);
+            let r = load_org(
+                &state,
+                Caller::User(&user),
+                None,
+                "test-org".into(),
+                admin_required(),
+            )
+            .await;
+            assert!(r.is_ok(), "{:?}", r.err());
         });
     }
 }
