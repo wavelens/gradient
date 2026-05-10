@@ -190,6 +190,8 @@ fn revoked_api_key_is_rejected() {
             managed: false,
             expires_at: None,
             revoked_at: Some(now),
+            permission: gradient_core::permissions::admin_mask(),
+            organization: None,
         };
 
         let s = server_with(|db| db.append_query_results([vec![key]]));
@@ -218,6 +220,8 @@ fn expired_api_key_is_rejected() {
             managed: false,
             expires_at: Some(now - chrono::Duration::seconds(1)),
             revoked_at: None,
+            permission: gradient_core::permissions::admin_mask(),
+            organization: None,
         };
 
         let s = server_with(|db| db.append_query_results([vec![key]]));
@@ -279,5 +283,175 @@ fn delete_user_with_wrong_password_is_forbidden() {
             .json(&serde_json::json!({ "password": "WrongPassword!" }))
             .await;
         res.assert_status_forbidden();
+    });
+}
+
+// ── Configurable API-key options ─────────────────────────────────────────────
+
+#[test]
+fn api_key_with_only_view_cannot_trigger_evaluation() {
+    use gradient_core::permissions::{Permission, mask_from};
+    use test_support::fixtures::{org, org_id};
+
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        let raw = "x".repeat(64);
+        let now = Utc::now().naive_utc();
+        let key = api::Model {
+            id: ApiId::now_v7(),
+            owned_by: user_id(),
+            name: "ci".into(),
+            key: hash_api_key(&raw),
+            last_used_at: now,
+            created_at: now,
+            managed: false,
+            expires_at: None,
+            revoked_at: None,
+            permission: mask_from(&[Permission::ViewOrg]),
+            organization: None,
+        };
+        let admin_membership = entity::organization_user::Model {
+            id: entity::ids::OrganizationUserId::now_v7(),
+            organization: org_id(),
+            user: user_id(),
+            role: gradient_core::types::consts::BASE_ROLE_ADMIN_ID,
+        };
+        let admin_role = entity::role::Model {
+            id: gradient_core::types::consts::BASE_ROLE_ADMIN_ID,
+            name: "Admin".into(),
+            organization: None,
+            permission: gradient_core::permissions::admin_mask(),
+        };
+
+        let s = server_with(|db| {
+            db.append_query_results([vec![key.clone()]])
+                .append_exec_results([MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 1,
+                }])
+                .append_query_results([vec![key.clone()]])
+                .append_query_results([vec![user()]])
+                .append_query_results([vec![org()]])
+                .append_query_results([vec![entity::project::Model {
+                    id: test_support::fixtures::project_id(),
+                    organization: org_id(),
+                    name: "test-project".into(),
+                    display_name: "Test".into(),
+                    description: String::new(),
+                    repository: "git@example.com:test/test.git".into(),
+                    wildcard: "*".into(),
+                    active: true,
+                    last_evaluation: None,
+                    last_check_at: chrono::NaiveDate::from_ymd_opt(2026, 1, 1)
+                        .unwrap()
+                        .and_hms_opt(0, 0, 0)
+                        .unwrap(),
+                    force_evaluation: false,
+                    created_by: user_id(),
+                    created_at: chrono::NaiveDate::from_ymd_opt(2026, 1, 1)
+                        .unwrap()
+                        .and_hms_opt(0, 0, 0)
+                        .unwrap(),
+                    managed: false,
+                    keep_evaluations: 30,
+                    concurrency: 3,
+                    sign_cache: true,
+                }]])
+                .append_query_results([vec![admin_membership]])
+                .append_query_results([vec![admin_role]])
+        });
+
+        let res = s
+            .post("/api/v1/projects/test-org/test-project/evaluate")
+            .add_header("authorization", format!("Bearer GRAD{}", raw))
+            .await;
+        res.assert_status(axum::http::StatusCode::FORBIDDEN);
+    });
+}
+
+#[test]
+fn api_key_pinned_to_other_org_is_invisible() {
+    use gradient_core::permissions::{Permission, mask_from};
+    use test_support::fixtures::org;
+
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        let raw = "y".repeat(64);
+        let now = Utc::now().naive_utc();
+        let pinned_elsewhere = entity::ids::OrganizationId::new(uuid::uuid!(
+            "ffffffff-ffff-ffff-ffff-ffffffffffff"
+        ));
+        let key = api::Model {
+            id: ApiId::now_v7(),
+            owned_by: user_id(),
+            name: "ci".into(),
+            key: hash_api_key(&raw),
+            last_used_at: now,
+            created_at: now,
+            managed: false,
+            expires_at: None,
+            revoked_at: None,
+            permission: mask_from(Permission::ALL),
+            organization: Some(pinned_elsewhere),
+        };
+
+        let s = server_with(|db| {
+            db.append_query_results([vec![key.clone()]])
+                .append_exec_results([MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 1,
+                }])
+                .append_query_results([vec![key.clone()]])
+                .append_query_results([vec![user()]])
+                .append_query_results([vec![org()]])
+        });
+
+        let res = s
+            .get("/api/v1/orgs/test-org")
+            .add_header("authorization", format!("Bearer GRAD{}", raw))
+            .await;
+        res.assert_status(axum::http::StatusCode::NOT_FOUND);
+    });
+}
+
+#[test]
+fn api_key_cannot_create_api_keys() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        let raw = "z".repeat(64);
+        let now = Utc::now().naive_utc();
+        let key = api::Model {
+            id: ApiId::now_v7(),
+            owned_by: user_id(),
+            name: "self".into(),
+            key: hash_api_key(&raw),
+            last_used_at: now,
+            created_at: now,
+            managed: false,
+            expires_at: None,
+            revoked_at: None,
+            permission: gradient_core::permissions::admin_mask(),
+            organization: None,
+        };
+
+        let s = server_with(|db| {
+            db.append_query_results([vec![key.clone()]])
+                .append_exec_results([MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 1,
+                }])
+                .append_query_results([vec![key.clone()]])
+                .append_query_results([vec![user()]])
+        });
+
+        let res = s
+            .post("/api/v1/user/keys")
+            .add_header("authorization", format!("Bearer GRAD{}", raw))
+            .json(&serde_json::json!({
+                "name": "child",
+                "permissions": ["viewOrg"],
+            }))
+            .await;
+        res.assert_status(axum::http::StatusCode::FORBIDDEN);
     });
 }
