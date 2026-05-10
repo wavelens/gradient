@@ -21,7 +21,10 @@ import {
   PermissionDescriptor,
 } from '@core/services/organizations.service';
 import { UserService } from '@core/services/user.service';
+import { OrgAccessService } from '@core/services/org-access.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
+import { AccessBannerComponent, WritableDirective, ManagedDisableDirective } from '@shared/access';
+import { AccessState } from '@core/models';
 
 interface RoleFormState {
   name: string;
@@ -42,6 +45,9 @@ interface RoleFormState {
     CheckboxModule,
     DividerModule,
     LoadingSpinnerComponent,
+    AccessBannerComponent,
+    WritableDirective,
+    ManagedDisableDirective,
   ],
   templateUrl: './members-roles.component.html',
   styleUrl: './members-roles.component.scss',
@@ -50,6 +56,9 @@ export class MembersRolesComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private organizationsService = inject(OrganizationsService);
   private userService = inject(UserService);
+  private orgAccess = inject(OrgAccessService);
+
+  access = signal<AccessState>({ managed: false, canEdit: false });
 
   orgName = '';
 
@@ -85,6 +94,7 @@ export class MembersRolesComponent implements OnInit {
 
   ngOnInit(): void {
     this.orgName = this.route.snapshot.paramMap.get('org') || '';
+    this.orgAccess.forOrg(this.orgName).then((s) => this.access.set(s));
     this.loadRoles();
     this.loadMembers();
   }
