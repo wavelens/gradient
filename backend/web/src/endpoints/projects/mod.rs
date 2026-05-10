@@ -104,4 +104,5 @@ pub struct ProjectDetailsResponse {
     pub keep_evaluations: i32,
     pub last_evaluations: Vec<EvaluationSummary>,
     pub can_edit: bool,
+    pub managed: bool,
 }

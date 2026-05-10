@@ -5202,23 +5202,51 @@ components:
 
     ProjectDetailsResponse:
       type: object
-      required: [keep_evaluations, recent_evaluations, entry_points]
+      required:
+        - id
+        - name
+        - display_name
+        - description
+        - repository
+        - wildcard
+        - active
+        - created_at
+        - keep_evaluations
+        - last_evaluations
+        - can_edit
+        - managed
       properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        display_name:
+          type: string
+        description:
+          type: string
+        repository:
+          type: string
+        wildcard:
+          type: string
+        active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
         keep_evaluations:
           type: integer
           description: Number of completed evaluations retained for metrics and history
-        latest_evaluation:
-          allOf:
-            - $ref: '#/components/schemas/EvaluationSummary'
-          nullable: true
-        recent_evaluations:
+        last_evaluations:
           type: array
           items:
             $ref: '#/components/schemas/EvaluationSummary'
-        entry_points:
-          type: array
-          items:
-            $ref: '#/components/schemas/EntryPointSummary'
+        can_edit:
+          type: boolean
+          description: True when the caller has permission to edit this project.
+        managed:
+          type: boolean
+          description: True when the project is managed by declarative Nix state and cannot be edited via the UI.
 
     ProjectMetricsResponse:
       type: object
