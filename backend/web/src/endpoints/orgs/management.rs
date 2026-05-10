@@ -6,7 +6,7 @@
 
 use crate::access::{Caller, OrgAccess, load_org};
 use crate::audit::{RequestInfo, events, record as audit_record};
-use crate::authorization::MaybeUser;
+use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::permissions::Permission;
@@ -305,11 +305,13 @@ pub async fn get_public_organizations(
 pub async fn get_organization(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path(organization): Path<String>,
 ) -> WebResult<Json<BaseResponse<OrgResponse>>> {
     let org = load_org(
         &state.0,
         Caller::from_option(&maybe_user),
+        api_key.as_ref(),
         organization,
         OrgAccess::Readable {
             label: "Organization",
@@ -354,12 +356,14 @@ pub async fn get_organization(
 pub async fn patch_organization(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path(organization): Path<String>,
     Json(body): Json<PatchOrganizationRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let organization = load_org(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         OrgAccess::Require {
             permission: Permission::ManageOrgSettings,
@@ -418,11 +422,13 @@ pub async fn delete_organization(
     state: State<Arc<ServerState>>,
     headers: HeaderMap,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path(organization): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let organization = load_org(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         OrgAccess::Require {
             permission: Permission::DeleteOrg,

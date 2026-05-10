@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::authorization::MaybeUser;
+use crate::authorization::{ApiKeyContext, MaybeApiKey, MaybeUser};
 use crate::error::WebResult;
 use crate::helpers::{OptionExt, ok_json};
 use axum::extract::{Path, State};
@@ -30,9 +30,10 @@ pub(super) fn extract_drv_name(path: &str) -> String {
 pub(super) async fn authorize_build_opt(
     state: &Arc<ServerState>,
     maybe_user: &Option<MUser>,
+    api_key: Option<&ApiKeyContext>,
     build_id: BuildId,
 ) -> WebResult<()> {
-    BuildAccessContext::load(state, build_id, maybe_user)
+    BuildAccessContext::load(state, build_id, maybe_user, api_key)
         .await
         .map(|_| ())
 }
@@ -161,9 +162,10 @@ async fn process_graph_wave(
 pub async fn get_build_dependencies(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path(build_id): Path<BuildId>,
 ) -> WebResult<Json<BaseResponse<Vec<DependencyNode>>>> {
-    authorize_build_opt(&state, &maybe_user, build_id).await?;
+    authorize_build_opt(&state, &maybe_user, api_key.as_ref(), build_id).await?;
 
     let build = EBuild::find_by_id(build_id)
         .one(&state.web_db)
@@ -211,9 +213,10 @@ pub async fn get_build_dependencies(
 pub async fn get_build_graph(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path(build_id): Path<BuildId>,
 ) -> WebResult<Json<BaseResponse<BuildGraph>>> {
-    authorize_build_opt(&state, &maybe_user, build_id).await?;
+    authorize_build_opt(&state, &maybe_user, api_key.as_ref(), build_id).await?;
 
     let root_build = EBuild::find_by_id(build_id)
         .one(&state.web_db)

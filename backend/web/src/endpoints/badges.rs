@@ -27,7 +27,7 @@ use serde::Deserialize;
 use std::sync::Arc;
 
 use crate::access::is_org_member;
-use crate::authorization::MaybeUser;
+use crate::authorization::{ApiKeyContext, MaybeApiKey, MaybeUser};
 use crate::error::WebError;
 use crate::helpers::OptionExt;
 use gradient_core::db::get_any_organization_by_name;
@@ -228,21 +228,27 @@ fn badge_for_status(status: Option<EvaluationStatus>, has_failed_builds: bool) -
 // ── Badge access helpers ──────────────────────────────────────────────────────
 
 /// Resolve the caller identity: JWT/API-key `token` overrides the session user.
+///
+/// Returns the resolved user plus any API-key context produced by decoding the
+/// token. When `token` is absent we fall back to the session user and the
+/// extension-supplied `MaybeApiKey`.
 async fn resolve_badge_user(
     state: &Arc<ServerState>,
     maybe_user: Option<MUser>,
+    api_key: MaybeApiKey,
     token: Option<String>,
-) -> Result<Option<MUser>, WebError> {
+) -> Result<(Option<MUser>, Option<ApiKeyContext>), WebError> {
     match token {
         Some(tok) => {
             let decoded = crate::authorization::decode_jwt(State(Arc::clone(state)), tok)
                 .await
                 .map_err(|_| WebError::unauthorized("Invalid token"))?;
-            Ok(EUser::find_by_id(decoded.user_id())
+            let user = EUser::find_by_id(decoded.user_id())
                 .one(&state.web_db)
-                .await?)
+                .await?;
+            Ok((user, decoded.api_key_context().copied()))
         }
-        None => Ok(maybe_user),
+        None => Ok((maybe_user, api_key.as_ref().copied())),
     }
 }
 
@@ -251,13 +257,14 @@ async fn check_badge_org_access(
     state: &Arc<ServerState>,
     org: &MOrganization,
     resolved_user: &Option<MUser>,
+    api_key: Option<&ApiKeyContext>,
 ) -> Result<(), WebError> {
     if org.public {
         return Ok(());
     }
     match resolved_user {
         Some(user) => {
-            if !is_org_member(state, user.id, org.id).await? {
+            if !is_org_member(state, user.id, org.id, api_key).await? {
                 return Err(WebError::not_found("Organization"));
             }
         }
@@ -360,6 +367,7 @@ async fn badge_status_for_latest_eval(
 pub async fn get_project_badge(
     state: State<Arc<ServerState>>,
     axum::Extension(MaybeUser(maybe_user)): axum::Extension<MaybeUser>,
+    axum::Extension(api_key): axum::Extension<MaybeApiKey>,
     Path((organization, project)): Path<(String, String)>,
     Query(params): Query<BadgeParams>,
 ) -> Result<Response, WebError> {
@@ -367,8 +375,9 @@ pub async fn get_project_badge(
         .await?
         .or_not_found("Organization")?;
 
-    let resolved_user = resolve_badge_user(&state, maybe_user, params.token).await?;
-    check_badge_org_access(&state, &organization, &resolved_user).await?;
+    let (resolved_user, resolved_key) =
+        resolve_badge_user(&state, maybe_user, api_key, params.token).await?;
+    check_badge_org_access(&state, &organization, &resolved_user, resolved_key.as_ref()).await?;
 
     let project = EProject::find()
         .filter(CProject::Organization.eq(organization.id))

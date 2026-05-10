@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::authorization::MaybeUser;
+use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use async_stream::stream;
@@ -23,9 +23,10 @@ use super::BuildAccessContext;
 pub async fn get_build_log(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path(build_id): Path<BuildId>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let ctx = BuildAccessContext::load(&state, build_id, &maybe_user).await?;
+    let ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
     let log_key = ctx.build.log_id.unwrap_or(build_id);
     let log = state.log_storage.read(log_key).await.unwrap_or_default();
 
@@ -35,9 +36,10 @@ pub async fn get_build_log(
 pub async fn post_build_log(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path(build_id): Path<BuildId>,
 ) -> Result<Response, WebError> {
-    let ctx = BuildAccessContext::load(&state, build_id, &Some(user)).await?;
+    let ctx = BuildAccessContext::load(&state, build_id, &Some(user), api_key.as_ref()).await?;
 
     // Capture current log length so the stream only delivers new content,
     // avoiding duplication of what the client already received via GET.

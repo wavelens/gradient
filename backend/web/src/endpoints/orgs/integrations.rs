@@ -16,6 +16,7 @@
 //! "has_secret" / "has_access_token" flag.
 
 use crate::access::{Caller, OrgAccess, load_integration_in_org, load_org};
+use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::permissions::Permission;
@@ -143,11 +144,13 @@ fn forge_to_str(f: i16) -> &'static str {
 pub async fn get_integrations(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path(organization): Path<String>,
 ) -> WebResult<Json<BaseResponse<Vec<IntegrationResponse>>>> {
     let org = load_org(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         OrgAccess::Require {
             permission: Permission::ManageIntegrations,
@@ -170,12 +173,14 @@ pub async fn get_integrations(
 pub async fn put_integration(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path(organization): Path<String>,
     Json(body): Json<CreateIntegrationRequest>,
 ) -> WebResult<Json<BaseResponse<IntegrationResponse>>> {
     let org = load_org(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         OrgAccess::Require {
             permission: Permission::ManageIntegrations,
@@ -266,11 +271,13 @@ pub async fn put_integration(
 pub async fn get_integration(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path((organization, integration_id)): Path<(String, IntegrationId)>,
 ) -> WebResult<Json<BaseResponse<IntegrationResponse>>> {
     let org = load_org(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         OrgAccess::Require {
             permission: Permission::ManageIntegrations,
@@ -286,12 +293,14 @@ pub async fn get_integration(
 pub async fn patch_integration(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path((organization, integration_id)): Path<(String, IntegrationId)>,
     Json(body): Json<PatchIntegrationRequest>,
 ) -> WebResult<Json<BaseResponse<IntegrationResponse>>> {
     let org = load_org(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         OrgAccess::Require {
             permission: Permission::ManageIntegrations,
@@ -393,11 +402,13 @@ pub async fn patch_integration(
 pub async fn delete_integration(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path((organization, integration_id)): Path<(String, IntegrationId)>,
 ) -> WebResult<Json<BaseResponse<bool>>> {
     let org = load_org(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         OrgAccess::Require {
             permission: Permission::ManageIntegrations,

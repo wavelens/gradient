@@ -5,6 +5,7 @@
  */
 
 use crate::access::{Caller, OrgAccess, load_org, load_webhook_in_org};
+use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::permissions::Permission;
@@ -77,11 +78,13 @@ impl From<MWebhook> for WebhookResponse {
 pub async fn get(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path(organization): Path<String>,
 ) -> WebResult<Json<BaseResponse<Vec<WebhookResponse>>>> {
     let organization = load_org(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         webhook_org_access(),
     )
@@ -101,12 +104,14 @@ pub async fn get(
 pub async fn put(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path(organization): Path<String>,
     Json(body): Json<CreateWebhookRequest>,
 ) -> WebResult<Json<BaseResponse<WebhookResponse>>> {
     let organization = load_org(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         webhook_org_access(),
     )
@@ -159,11 +164,13 @@ pub async fn put(
 pub async fn get_webhook(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path((organization, webhook_id)): Path<(String, WebhookId)>,
 ) -> WebResult<Json<BaseResponse<WebhookResponse>>> {
     let organization = load_org(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         webhook_org_access(),
     )
@@ -177,12 +184,14 @@ pub async fn get_webhook(
 pub async fn patch_webhook(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path((organization, webhook_id)): Path<(String, WebhookId)>,
     Json(body): Json<UpdateWebhookRequest>,
 ) -> WebResult<Json<BaseResponse<WebhookResponse>>> {
     let organization = load_org(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         webhook_org_access(),
     )
@@ -221,11 +230,13 @@ pub async fn patch_webhook(
 pub async fn delete_webhook(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path((organization, webhook_id)): Path<(String, WebhookId)>,
 ) -> WebResult<Json<BaseResponse<bool>>> {
     let organization = load_org(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         webhook_org_access(),
     )
@@ -253,12 +264,14 @@ pub struct WebhookDeliveryResponse {
 pub async fn get_webhook_deliveries(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path((organization, webhook_id)): Path<(String, WebhookId)>,
     axum::extract::Query(params): axum::extract::Query<PaginationParams>,
 ) -> WebResult<Json<BaseResponse<Paginated<Vec<WebhookDeliveryResponse>>>>> {
     let organization = load_org(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         webhook_org_access(),
     )
@@ -307,11 +320,13 @@ pub async fn get_webhook_deliveries(
 pub async fn post_webhook_test(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path((organization, webhook_id)): Path<(String, WebhookId)>,
 ) -> WebResult<Json<BaseResponse<bool>>> {
     let organization = load_org(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         webhook_org_access(),
     )

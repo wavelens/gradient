@@ -5,6 +5,7 @@
  */
 
 use crate::access::{Caller, OrgAccess, load_org};
+use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::permissions::Permission;
@@ -19,11 +20,13 @@ use std::sync::Arc;
 pub async fn get_organization_ssh(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path(organization): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let organization = load_org(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         OrgAccess::Member {
             reject_managed: false,
@@ -40,11 +43,13 @@ pub async fn get_organization_ssh(
 pub async fn post_organization_ssh(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path(organization): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let organization = load_org(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         OrgAccess::Require {
             permission: Permission::ManageSshKey,

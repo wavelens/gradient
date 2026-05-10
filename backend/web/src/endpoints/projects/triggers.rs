@@ -7,6 +7,7 @@
 //! CRUD endpoints for `project_trigger` plus a manual-fire endpoint.
 
 use crate::access::{Caller, ProjectAccess, load_project};
+use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::Permission;
@@ -85,11 +86,13 @@ pub struct DeletedResponse {
 pub async fn list(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<Vec<TriggerOut>>>> {
     let (_org, proj) = load_project(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         project,
         ProjectAccess::Member,
@@ -108,12 +111,14 @@ pub async fn list(
 pub async fn create(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path((organization, project)): Path<(String, String)>,
     Json(body): Json<CreateBody>,
 ) -> WebResult<Json<BaseResponse<TriggerOut>>> {
     let (_org, proj) = load_project(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         project,
         ProjectAccess::Require {
@@ -151,11 +156,13 @@ pub async fn create(
 pub async fn read(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path((organization, project, id)): Path<(String, String, ProjectTriggerId)>,
 ) -> WebResult<Json<BaseResponse<TriggerOut>>> {
     let (_org, proj) = load_project(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         project,
         ProjectAccess::Member,
@@ -176,12 +183,14 @@ pub async fn read(
 pub async fn update(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path((organization, project, id)): Path<(String, String, ProjectTriggerId)>,
     Json(body): Json<UpdateBody>,
 ) -> WebResult<Json<BaseResponse<TriggerOut>>> {
     let (_org, proj) = load_project(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         project,
         ProjectAccess::Require {
@@ -223,11 +232,13 @@ pub async fn update(
 pub async fn delete_one(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path((organization, project, id)): Path<(String, String, ProjectTriggerId)>,
 ) -> WebResult<Json<BaseResponse<DeletedResponse>>> {
     let (_org, proj) = load_project(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         project,
         ProjectAccess::Require {
@@ -254,12 +265,14 @@ pub async fn delete_one(
 pub async fn fire_now(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Path((organization, project, id)): Path<(String, String, ProjectTriggerId)>,
 ) -> WebResult<Json<BaseResponse<serde_json::Value>>> {
     let (_org, proj) = load_project(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         project,
         ProjectAccess::Require {

@@ -15,6 +15,7 @@ pub use self::query::*;
 pub use self::types::*;
 
 use crate::access::is_org_member;
+use crate::authorization::ApiKeyContext;
 use crate::error::{WebError, WebResult};
 use crate::helpers::OptionExt;
 use gradient_core::types::*;
@@ -40,6 +41,7 @@ impl EvalAccessContext {
         state: &Arc<ServerState>,
         evaluation_id: EvaluationId,
         maybe_user: &Option<MUser>,
+        api_key: Option<&ApiKeyContext>,
     ) -> WebResult<Self> {
         let evaluation = EEvaluation::find_by_id(evaluation_id)
             .one(&state.web_db)
@@ -89,7 +91,7 @@ impl EvalAccessContext {
             true
         } else {
             match maybe_user {
-                Some(user) => is_org_member(state, user.id, organization.id).await?,
+                Some(user) => is_org_member(state, user.id, organization.id, api_key).await?,
                 None => false,
             }
         };

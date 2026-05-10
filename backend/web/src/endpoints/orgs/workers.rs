@@ -5,6 +5,7 @@
  */
 
 use crate::access::{Caller, OrgAccess, load_org};
+use crate::authorization::MaybeApiKey;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use base64::Engine as _;
@@ -111,12 +112,14 @@ pub async fn post_org_worker(
     state: State<Arc<ServerState>>,
     Path(organization): Path<String>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Json(body): Json<RegisterWorkerRequest>,
 ) -> WebResult<Json<BaseResponse<RegisterWorkerResponse>>> {
     let org = load_org(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         OrgAccess::Member {
             reject_managed: false,
@@ -184,11 +187,13 @@ pub async fn get_org_workers(
     state: State<Arc<ServerState>>,
     Path(organization): Path<String>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
 ) -> WebResult<Json<BaseResponse<Vec<OrgWorkerEntry>>>> {
     let org = load_org(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         OrgAccess::Member {
             reject_managed: false,
@@ -254,12 +259,14 @@ pub async fn patch_org_worker(
     state: State<Arc<ServerState>>,
     Path((organization, worker_id)): Path<(String, String)>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Json(body): Json<PatchWorkerRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let org = load_org(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         OrgAccess::Member {
             reject_managed: false,
@@ -318,11 +325,13 @@ pub async fn delete_org_worker(
     state: State<Arc<ServerState>>,
     Path((organization, worker_id)): Path<(String, String)>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let org = load_org(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         OrgAccess::Member {
             reject_managed: false,

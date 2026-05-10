@@ -14,6 +14,7 @@
 
 use crate::access::{Caller, OrgAccess, load_org};
 use crate::audit::{RequestInfo, events, record as audit_record};
+use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::{
@@ -150,11 +151,13 @@ fn available_permissions() -> Vec<PermissionEntry> {
 pub async fn get_organization_roles(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path(organization): Path<String>,
 ) -> WebResult<Json<BaseResponse<RoleListResponse>>> {
     let org = load_org(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         OrgAccess::Member {
             reject_managed: false,
@@ -182,12 +185,14 @@ pub async fn post_organization_role(
     state: State<Arc<ServerState>>,
     headers: HeaderMap,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path(organization): Path<String>,
     Json(body): Json<CreateRoleRequest>,
 ) -> WebResult<Json<BaseResponse<RoleResponse>>> {
     let org = load_org(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         OrgAccess::Require {
             permission: Permission::ManageRoles,
@@ -249,11 +254,13 @@ pub async fn post_organization_role(
 pub async fn get_organization_role(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path((organization, role_id)): Path<(String, RoleId)>,
 ) -> WebResult<Json<BaseResponse<RoleResponse>>> {
     let org = load_org(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         OrgAccess::Member {
             reject_managed: false,
@@ -271,12 +278,14 @@ pub async fn patch_organization_role(
     state: State<Arc<ServerState>>,
     headers: HeaderMap,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path((organization, role_id)): Path<(String, RoleId)>,
     Json(body): Json<PatchRoleRequest>,
 ) -> WebResult<Json<BaseResponse<RoleResponse>>> {
     let org = load_org(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         OrgAccess::Require {
             permission: Permission::ManageRoles,
@@ -351,11 +360,13 @@ pub async fn delete_organization_role(
     state: State<Arc<ServerState>>,
     headers: HeaderMap,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path((organization, role_id)): Path<(String, RoleId)>,
 ) -> WebResult<Json<BaseResponse<bool>>> {
     let org = load_org(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         OrgAccess::Require {
             permission: Permission::ManageRoles,

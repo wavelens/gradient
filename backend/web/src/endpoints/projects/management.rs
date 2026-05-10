@@ -7,7 +7,7 @@
 use super::ProjectResponse;
 use crate::access::{Caller, OrgAccess, ProjectAccess, has_permission, load_org, load_project};
 use crate::audit::{RequestInfo, events, record as audit_record};
-use crate::authorization::MaybeUser;
+use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::Permission;
@@ -85,12 +85,15 @@ pub async fn get_project_name_available(
 pub async fn get(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path(organization): Path<String>,
     Query(params): Query<PaginationParams>,
 ) -> WebResult<Json<BaseResponse<Paginated<Vec<ProjectResponse>>>>> {
+    let api_key_ref = api_key.as_ref();
     let organization = load_org(
         &state.0,
         Caller::from_option(&maybe_user),
+        api_key_ref,
         organization,
         OrgAccess::Readable {
             label: "Organization",
@@ -102,7 +105,7 @@ pub async fn get(
     let per_page = params.per_page();
     let can_edit = match &maybe_user {
         Some(user) => {
-            has_permission(&state, user.id, organization.id, Permission::EditProject).await?
+            has_permission(&state, user.id, organization.id, Permission::EditProject, api_key_ref).await?
         }
         None => false,
     };
@@ -171,6 +174,7 @@ pub async fn get(
 pub async fn put(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path(organization): Path<String>,
     Json(body): Json<MakeProjectRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
@@ -192,6 +196,7 @@ pub async fn put(
     let organization = load_org(
         &state.0,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         OrgAccess::Require {
             permission: Permission::CreateProject,
@@ -273,11 +278,14 @@ pub async fn put(
 pub async fn get_project(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<ProjectResponse>>> {
+    let api_key_ref = api_key.as_ref();
     let (organization, project) = load_project(
         &state.0,
         Caller::from_option(&maybe_user),
+        api_key_ref,
         organization,
         project,
         ProjectAccess::Readable,
@@ -286,7 +294,7 @@ pub async fn get_project(
 
     let can_edit = match &maybe_user {
         Some(user) => {
-            has_permission(&state, user.id, organization.id, Permission::EditProject).await?
+            has_permission(&state, user.id, organization.id, Permission::EditProject, api_key_ref).await?
         }
         None => false,
     };
@@ -326,12 +334,14 @@ pub async fn get_project(
 pub async fn patch_project(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path((organization, project)): Path<(String, String)>,
     Json(body): Json<PatchProjectRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let (organization, project) = load_project(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         project,
         ProjectAccess::Require {
@@ -466,11 +476,13 @@ pub async fn delete_project(
     state: State<Arc<ServerState>>,
     headers: HeaderMap,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let (organization_row, project) = load_project(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         project,
         ProjectAccess::Require {
@@ -509,11 +521,13 @@ pub async fn delete_project(
 pub async fn post_project_active(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let (_organization, project) = load_project(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         project,
         ProjectAccess::Require {
@@ -537,11 +551,13 @@ pub async fn post_project_active(
 pub async fn delete_project_active(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let (_organization, project) = load_project(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         project,
         ProjectAccess::Require {
@@ -565,11 +581,13 @@ pub async fn delete_project_active(
 pub async fn post_project_check_repository(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let (_organization, project) = load_project(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         project,
         ProjectAccess::Require {
@@ -598,12 +616,15 @@ pub async fn post_project_check_repository(
 pub async fn post_project_transfer(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path((organization, project)): Path<(String, String)>,
     Json(body): Json<TransferOwnershipRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
+    let api_key_ref = api_key.as_ref();
     let (organization, project) = load_project(
         &state,
         Caller::User(&user),
+        api_key_ref,
         organization,
         project,
         ProjectAccess::Member,
@@ -613,7 +634,7 @@ pub async fn post_project_transfer(
     // Only an org member with EditProject permission, or the current owner,
     // may transfer ownership.
     let is_admin =
-        has_permission(&state, user.id, organization.id, Permission::EditProject).await?;
+        has_permission(&state, user.id, organization.id, Permission::EditProject, api_key_ref).await?;
     let is_owner = project.created_by == user.id;
     if !is_admin && !is_owner {
         return Err(WebError::forbidden(
@@ -630,6 +651,7 @@ pub async fn post_project_transfer(
     let new_organization = load_org(
         &state.0,
         Caller::User(&user),
+        api_key_ref,
         body.organization.clone(),
         OrgAccess::Require {
             permission: Permission::CreateProject,

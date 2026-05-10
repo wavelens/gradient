@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::authorization::{MaybeUser, decode_download_token, encode_download_token};
+use crate::authorization::{MaybeApiKey, MaybeUser, decode_download_token, encode_download_token};
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use axum::extract::{Path, Query, State};
@@ -213,9 +213,10 @@ pub struct DownloadQuery {
 pub async fn get_build_downloads(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path(build_id): Path<BuildId>,
 ) -> WebResult<Json<BaseResponse<Vec<BuildProduct>>>> {
-    let ctx = BuildAccessContext::load(&state, build_id, &maybe_user).await?;
+    let ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
 
     let build_outputs = EDerivationOutput::find()
         .filter(CDerivationOutput::Derivation.eq(ctx.build.derivation))
@@ -230,9 +231,10 @@ pub async fn get_build_downloads(
 pub async fn get_build_download_token(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path(build_id): Path<BuildId>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    BuildAccessContext::load(&state, build_id, &Some(user)).await?;
+    BuildAccessContext::load(&state, build_id, &Some(user), api_key.as_ref()).await?;
 
     let token = encode_download_token(State(Arc::clone(&state)), build_id)
         .map_err(|_| WebError::failed_to_generate_token())?;
@@ -243,6 +245,7 @@ pub async fn get_build_download_token(
 pub async fn get_build_download(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path((build_id, filename)): Path<(BuildId, String)>,
     Query(query): Query<DownloadQuery>,
 ) -> Result<Response, WebError> {
@@ -259,7 +262,7 @@ pub async fn get_build_download(
         match maybe_user {
             Some(user) => {
                 use crate::access::is_org_member;
-                if !is_org_member(&state, user.id, ctx.organization.id).await? {
+                if !is_org_member(&state, user.id, ctx.organization.id, api_key.as_ref()).await? {
                     return Err(WebError::not_found("Build"));
                 }
             }

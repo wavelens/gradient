@@ -23,6 +23,7 @@ pub use self::log::{get_build_log, post_build_log};
 pub use self::query::{BuildWithOutputs, get_build};
 
 use crate::access::is_org_member;
+use crate::authorization::ApiKeyContext;
 use crate::error::{WebError, WebResult};
 use crate::helpers::OptionExt;
 use gradient_core::types::*;
@@ -111,6 +112,7 @@ impl BuildAccessContext {
         state: &Arc<ServerState>,
         build_id: BuildId,
         maybe_user: &Option<MUser>,
+        api_key: Option<&ApiKeyContext>,
     ) -> WebResult<Self> {
         let ctx = Self::load_unguarded(state, build_id).await?;
 
@@ -118,7 +120,7 @@ impl BuildAccessContext {
             true
         } else {
             match maybe_user {
-                Some(user) => is_org_member(state, user.id, ctx.organization.id).await?,
+                Some(user) => is_org_member(state, user.id, ctx.organization.id, api_key).await?,
                 None => false,
             }
         };
