@@ -20,6 +20,8 @@ import { OrganizationsService } from '@core/services/organizations.service';
 import { ApiKey } from '@core/models';
 import { PermissionDescriptor } from '@core/models/permission.model';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
+import { ManagedDisableDirective } from '@shared/access';
+import { AccessState } from '@core/models';
 
 interface OrgOption {
   label: string;
@@ -41,6 +43,7 @@ interface OrgOption {
     SelectModule,
     TooltipModule,
     LoadingSpinnerComponent,
+    ManagedDisableDirective,
   ],
   templateUrl: './api-keys.component.html',
   styleUrl: './api-keys.component.scss',
@@ -111,7 +114,6 @@ export class ApiKeysComponent implements OnInit {
   }
 
   openEditDialog(key: ApiKey): void {
-    if (key.managed) return;
     this.editingKey.set(key);
     this.formName = key.name;
     this.formExpiresInDays = null;
@@ -214,5 +216,9 @@ export class ApiKeysComponent implements OnInit {
   permissionTooltip(key: ApiKey): string {
     if (key.permissions.length === 0) return 'No permissions';
     return key.permissions.join(', ');
+  }
+
+  rowAccess(key: ApiKey): AccessState {
+    return { managed: key.managed, canEdit: true };
   }
 }
