@@ -18,17 +18,21 @@
     </div>
   </div>
 
+  <app-access-banner [access]="access()"></app-access-banner>
+
   <!-- Members -->
   <div class="settings-section">
     <div class="section-header">
       <h2>Members</h2>
       <button
+        *appWritable="access()"
         pButton
         label="Add Member"
         icon="pi pi-plus"
         severity="secondary"
         (click)="openAddMemberDialog()"
         [disabled]="rolesLoading() || roles().length === 0"
+        [appManagedDisable]="access()"
       ></button>
     </div>
     @if (membersLoading()) {
@@ -48,6 +52,7 @@
                     class="role-select"
                     [ngModel]="member.name"
                     [disabled]="updatingRole() === member.id || removingMember() !== null || rolesLoading()"
+                    [appManagedDisable]="access()"
                     (ngModelChange)="updateMemberRole(member.id, $event)"
                   >
                     @for (role of roles(); track role.id) {
@@ -55,12 +60,14 @@
                     }
                   </select>
                   <button
+                    *appWritable="access()"
                     pButton
                     icon="pi pi-times"
                     severity="danger"
                     size="small"
                     [loading]="removingMember() === member.id"
                     [disabled]="removingMember() !== null || updatingRole() !== null"
+                    [appManagedDisable]="access()"
                     (click)="removeMember(member.id)"
                   ></button>
                 </div>
@@ -79,12 +86,14 @@
     <div class="section-header">
       <h2>Roles</h2>
       <button
+        *appWritable="access()"
         pButton
         label="New Role"
         icon="pi pi-plus"
         severity="secondary"
         (click)="openCreateRoleDialog()"
         [disabled]="rolesLoading() || availablePermissions().length === 0"
+        [appManagedDisable]="access()"
       ></button>
     </div>
     @if (rolesLoading()) {
@@ -109,20 +118,24 @@
                 <div class="role-actions">
                   @if (!role.builtin) {
                     <button
+                      *appWritable="access()"
                       pButton
                       icon="pi pi-pencil"
                       severity="secondary"
                       size="small"
                       [disabled]="savingRole() || deletingRole() !== null"
+                      [appManagedDisable]="access()"
                       (click)="openEditRoleDialog(role)"
                     ></button>
                     <button
+                      *appWritable="access()"
                       pButton
                       icon="pi pi-trash"
                       severity="danger"
                       size="small"
                       [loading]="deletingRole() === role.id"
                       [disabled]="deletingRole() !== null"
+                      [appManagedDisable]="access()"
                       (click)="deleteRole(role)"
                     ></button>
                   }
