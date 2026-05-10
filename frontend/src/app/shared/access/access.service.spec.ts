@@ -1,0 +1,67 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+import { TestBed } from '@angular/core/testing';
+import { AccessService } from './access.service';
+import { AccessState } from '@core/models/access.model';
+
+const s = (managed: boolean, canEdit: boolean): AccessState => ({ managed, canEdit });
+
+describe('AccessService', () => {
+  let svc: AccessService;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({});
+    svc = TestBed.inject(AccessService);
+  });
+
+  describe('isWritable', () => {
+    it('is true only when canEdit && !managed', () => {
+      expect(svc.isWritable(s(false, true))).toBe(true);
+      expect(svc.isWritable(s(true, true))).toBe(false);
+      expect(svc.isWritable(s(false, false))).toBe(false);
+      expect(svc.isWritable(s(true, false))).toBe(false);
+    });
+  });
+
+  describe('shouldShowWriteAction', () => {
+    it('returns canEdit (managed users still see write actions, just disabled)', () => {
+      expect(svc.shouldShowWriteAction(s(false, true))).toBe(true);
+      expect(svc.shouldShowWriteAction(s(true, true))).toBe(true);
+      expect(svc.shouldShowWriteAction(s(false, false))).toBe(false);
+      expect(svc.shouldShowWriteAction(s(true, false))).toBe(false);
+    });
+  });
+
+  describe('shouldDisableInput', () => {
+    it('disables when managed OR !canEdit', () => {
+      expect(svc.shouldDisableInput(s(false, true))).toBe(false);
+      expect(svc.shouldDisableInput(s(true, true))).toBe(true);
+      expect(svc.shouldDisableInput(s(false, false))).toBe(true);
+      expect(svc.shouldDisableInput(s(true, false))).toBe(true);
+    });
+  });
+
+  describe('bannerKind', () => {
+    it('returns the correct kind for each combination', () => {
+      expect(svc.bannerKind(s(false, true))).toBe('none');
+      expect(svc.bannerKind(s(true, true))).toBe('managed');
+      expect(svc.bannerKind(s(false, false))).toBe('readonly');
+      expect(svc.bannerKind(s(true, false))).toBe('managed-readonly');
+    });
+  });
+
+  describe('bannerMessage', () => {
+    it('returns null for kind=none', () => {
+      expect(svc.bannerMessage(s(false, true))).toBeNull();
+    });
+    it('returns a non-empty message for each non-none kind', () => {
+      expect(svc.bannerMessage(s(true, true))).toMatch(/managed/i);
+      expect(svc.bannerMessage(s(false, false))).toMatch(/read-only/i);
+      expect(svc.bannerMessage(s(true, false))).toMatch(/managed/i);
+    });
+  });
+});

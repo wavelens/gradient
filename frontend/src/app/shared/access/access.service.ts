@@ -1,0 +1,45 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+import { Injectable } from '@angular/core';
+import { AccessState } from '@core/models/access.model';
+
+export type BannerKind = 'none' | 'managed' | 'readonly' | 'managed-readonly';
+
+@Injectable({ providedIn: 'root' })
+export class AccessService {
+  isWritable(s: AccessState): boolean {
+    return s.canEdit && !s.managed;
+  }
+
+  shouldShowWriteAction(s: AccessState): boolean {
+    return s.canEdit;
+  }
+
+  shouldDisableInput(s: AccessState): boolean {
+    return s.managed || !s.canEdit;
+  }
+
+  bannerKind(s: AccessState): BannerKind {
+    if (s.managed && !s.canEdit) return 'managed-readonly';
+    if (s.managed) return 'managed';
+    if (!s.canEdit) return 'readonly';
+    return 'none';
+  }
+
+  bannerMessage(s: AccessState): string | null {
+    switch (this.bannerKind(s)) {
+      case 'managed':
+        return 'This resource is managed by Nix. Edit it through your declarative config.';
+      case 'readonly':
+        return 'You have read-only access. Contact an organization admin to make changes.';
+      case 'managed-readonly':
+        return 'This resource is managed by Nix and you have read-only access.';
+      default:
+        return null;
+    }
+  }
+}
