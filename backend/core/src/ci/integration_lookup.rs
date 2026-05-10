@@ -16,7 +16,8 @@ use super::reporter::{
 use super::webhook::decrypt_webhook_secret;
 use crate::types::*;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
-use sea_orm::EntityTrait;
+use sea_orm::ActiveValue::Set;
+use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use std::fs;
 use std::sync::Arc;
 use tracing::warn;
@@ -62,9 +63,6 @@ pub async fn resolve_outbound_reporter_for_project(
     state: &Arc<ServerState>,
     project_id: ProjectId,
 ) -> Arc<dyn CiReporter> {
-    use sea_orm::ColumnTrait;
-    use sea_orm::QueryFilter;
-
     let link = match EProjectIntegration::find_by_id(project_id)
         .one(&state.worker_db)
         .await
@@ -77,18 +75,9 @@ pub async fn resolve_outbound_reporter_for_project(
         }
     };
 
-    // GitHub App auto-detect: when the org has a stored
-    // `github_installation_id`, fall back to the server-wide App credentials
-    // regardless of whether `project_integration.outbound_integration` is
-    // populated. The presence of an installation id is the org's opt-in.
-    let outbound_id = link.as_ref().and_then(|l| l.outbound_integration);
-    if outbound_id.is_none() {
-        if let Some(reporter) = build_github_app_reporter_for_project(state, project_id).await {
-            return reporter;
-        }
+    let Some(outbound_id) = link.as_ref().and_then(|l| l.outbound_integration) else {
         return Arc::new(NoopCiReporter);
-    }
-    let outbound_id = outbound_id.unwrap();
+    };
 
     let integration = match EIntegration::find_by_id(outbound_id)
         .filter(CIntegration::Kind.eq(i16::from(IntegrationKind::Outbound)))
@@ -145,17 +134,9 @@ pub async fn resolve_outbound_reporter_for_project(
                 }
             }
         }
-        ForgeType::GitHub => {
-            // Per-integration `forge_type=github` rows are legacy/no-op:
-            // outbound GitHub credentials always come from the server-wide
-            // GitHub App via `build_github_app_reporter_for_project`, which
-            // we already attempted above when no UUID was set. Falling
-            // through to it here covers the "operator created a github
-            // outbound row before the UI removed the option" case.
-            build_github_app_reporter_for_project(state, project_id)
-                .await
-                .unwrap_or_else(|| Arc::new(NoopCiReporter))
-        }
+        ForgeType::GitHub => build_github_app_reporter_for_project(state, project_id)
+            .await
+            .unwrap_or_else(|| Arc::new(NoopCiReporter)),
         ForgeType::GitLab => {
             let Some(base_url) = integration
                 .endpoint_url
@@ -184,17 +165,13 @@ pub async fn resolve_outbound_reporter_for_project(
     }
 }
 
-/// Builds a [`GithubAppReporter`] for a project when:
-///   1. the server has the GitHub App fully configured,
-///   2. the project's organization has a stored `github_installation_id`.
+/// Builds a [`GithubAppReporter`] for a project when the server has the
+/// GitHub App fully configured and the project's organization has a stored
+/// `github_installation_id`.
 ///
-/// Returns `None` when any precondition isn't satisfied so the caller can
-/// fall back to a noop or a different reporter.
-///
-/// The project's repo URL is **not** consulted: a single GitHub App
-/// installation is scoped to one GitHub org/account, and we trust the
-/// `github_installation_id` stored on the Gradient org rather than re-deriving
-/// from URLs (which would require parsing Enterprise hosts, etc.).
+/// Returns `None` when either precondition isn't satisfied so the caller can
+/// fall back to a noop reporter. Opt-in is conveyed by the project pointing
+/// `outbound_integration` at the GitHub App row — repo URL is not consulted.
 async fn build_github_app_reporter_for_project(
     state: &Arc<ServerState>,
     project_id: ProjectId,
@@ -206,10 +183,6 @@ async fn build_github_app_reporter_for_project(
         .await
         .ok()
         .flatten()?;
-
-    if !is_github_repository_url(&project.repository) {
-        return None;
-    }
 
     let org = EOrganization::find_by_id(project.organization)
         .one(&state.worker_db)
@@ -249,95 +222,129 @@ async fn build_github_app_reporter_for_project(
     }
 }
 
-/// Returns `true` when `url` points at github.com.
+/// Stable name used for the auto-managed `forge_type=github` integration rows.
+pub const GITHUB_APP_INTEGRATION_NAME: &str = "github";
+/// Stable display name shown in dropdowns for the auto-managed GitHub App rows.
+pub const GITHUB_APP_INTEGRATION_DISPLAY_NAME: &str = "GitHub";
+
+/// Idempotently create the inbound + outbound `forge_type=github` integration
+/// rows for `org_id`. Used by the App-install hook to materialise the rows
+/// that triggers and project_integration links reference.
 ///
-/// Accepts the URL shapes that `parse_owner_repo` does (HTTPS, HTTP, git://,
-/// SCP-style SSH, and an optional `git+` prefix) plus `ssh://` URLs. The host
-/// match is exact: `github.com` and `*.github.com` only.
-fn is_github_repository_url(url: &str) -> bool {
-    let url = url.strip_prefix("git+").unwrap_or(url);
-
-    let host_and_rest = if let Some(rest) = url
-        .strip_prefix("https://")
-        .or_else(|| url.strip_prefix("http://"))
-        .or_else(|| url.strip_prefix("git://"))
-        .or_else(|| url.strip_prefix("ssh://"))
-    {
-        rest
-    } else if let Some(at_pos) = url.find('@')
-        && url[at_pos + 1..].contains(':')
-    {
-        &url[at_pos + 1..]
-    } else {
-        return false;
-    };
-
-    let host = host_and_rest.split(['/', ':']).next().unwrap_or("");
-    let host = host.rsplit('@').next().unwrap_or(host);
-
-    host.eq_ignore_ascii_case("github.com") || host.to_ascii_lowercase().ends_with(".github.com")
+/// Rows carry no per-row credentials — the App's private key and the org's
+/// `github_installation_id` are the credentials at runtime. `created_by` is
+/// set to `creator` (typically the org's `created_by`) to satisfy the FK.
+pub async fn ensure_github_app_integrations<C: ConnectionTrait>(
+    db: &C,
+    org_id: OrganizationId,
+    creator: UserId,
+) -> Result<(), sea_orm::DbErr> {
+    for kind in [IntegrationKind::Inbound, IntegrationKind::Outbound] {
+        let existing_github = EIntegration::find()
+            .filter(CIntegration::Organization.eq(org_id))
+            .filter(CIntegration::Kind.eq(i16::from(kind)))
+            .filter(CIntegration::ForgeType.eq(i16::from(ForgeType::GitHub)))
+            .one(db)
+            .await?;
+        if existing_github.is_some() {
+            continue;
+        }
+        let name_clash = EIntegration::find()
+            .filter(CIntegration::Organization.eq(org_id))
+            .filter(CIntegration::Kind.eq(i16::from(kind)))
+            .filter(CIntegration::Name.eq(GITHUB_APP_INTEGRATION_NAME))
+            .one(db)
+            .await?;
+        if name_clash.is_some() {
+            warn!(
+                %org_id,
+                kind = ?kind,
+                "Cannot seed GitHub App integration row: another integration already \
+                 uses the reserved name '{}'. Rename it to enable GitHub App support.",
+                GITHUB_APP_INTEGRATION_NAME
+            );
+            continue;
+        }
+        AIntegration {
+            id: Set(IntegrationId::now_v7()),
+            organization: Set(org_id),
+            name: Set(GITHUB_APP_INTEGRATION_NAME.into()),
+            display_name: Set(GITHUB_APP_INTEGRATION_DISPLAY_NAME.into()),
+            kind: Set(i16::from(kind)),
+            forge_type: Set(i16::from(ForgeType::GitHub)),
+            secret: Set(None),
+            endpoint_url: Set(None),
+            access_token: Set(None),
+            created_by: Set(creator),
+            created_at: Set(chrono::Utc::now().naive_utc()),
+        }
+        .insert(db)
+        .await?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
-mod tests {
-    use super::is_github_repository_url;
+mod ensure_tests {
+    use super::*;
+    use chrono::NaiveDateTime;
+    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+    use uuid::Uuid;
 
-    #[test]
-    fn github_https_is_github() {
-        assert!(is_github_repository_url(
-            "https://github.com/acme/widgets.git"
-        ));
-        assert!(is_github_repository_url("https://github.com/acme/widgets"));
+    fn org() -> OrganizationId {
+        OrganizationId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap())
+    }
+    fn user() -> UserId {
+        UserId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap())
     }
 
-    #[test]
-    fn github_ssh_scp_is_github() {
-        assert!(is_github_repository_url("git@github.com:acme/widgets.git"));
+    fn github_row(kind: IntegrationKind) -> entity::integration::Model {
+        entity::integration::Model {
+            id: IntegrationId::now_v7(),
+            organization: org(),
+            name: GITHUB_APP_INTEGRATION_NAME.into(),
+            display_name: GITHUB_APP_INTEGRATION_DISPLAY_NAME.into(),
+            kind: i16::from(kind),
+            forge_type: i16::from(ForgeType::GitHub),
+            secret: None,
+            endpoint_url: None,
+            access_token: None,
+            created_by: user(),
+            created_at: NaiveDateTime::default(),
+        }
     }
 
-    #[test]
-    fn github_git_plus_https_is_github() {
-        assert!(is_github_repository_url(
-            "git+https://github.com/acme/widgets.git"
-        ));
+    #[tokio::test]
+    async fn creates_both_rows_when_none_exist() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            // inbound: SELECT (none) → INSERT
+            .append_query_results([Vec::<entity::integration::Model>::new()])
+            .append_query_results([vec![github_row(IntegrationKind::Inbound)]])
+            // outbound: SELECT (none) → INSERT
+            .append_query_results([Vec::<entity::integration::Model>::new()])
+            .append_query_results([vec![github_row(IntegrationKind::Outbound)]])
+            .into_connection();
+
+        ensure_github_app_integrations(&db, org(), user())
+            .await
+            .expect("ensure should succeed");
     }
 
-    #[test]
-    fn github_case_insensitive() {
-        assert!(is_github_repository_url("https://GitHub.com/acme/widgets"));
-    }
+    #[tokio::test]
+    async fn skips_kinds_that_already_exist() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            // inbound: SELECT (exists) → skip insert
+            .append_query_results([vec![github_row(IntegrationKind::Inbound)]])
+            // outbound: SELECT (exists) → skip insert
+            .append_query_results([vec![github_row(IntegrationKind::Outbound)]])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 0,
+            }])
+            .into_connection();
 
-    #[test]
-    fn gitea_https_is_not_github() {
-        assert!(!is_github_repository_url(
-            "https://git.wavelens.io/Wavelens/nix-dotfiles.git"
-        ));
-    }
-
-    #[test]
-    fn gitea_ssh_scp_is_not_github() {
-        assert!(!is_github_repository_url(
-            "gitea@git.wavelens.io:Wavelens/nix-dotfiles.git"
-        ));
-    }
-
-    #[test]
-    fn gitea_ssh_url_is_not_github() {
-        // Reproduces the bug: ssh://gitea@git.wavelens.io:12/... was being
-        // routed through the GitHub App reporter.
-        assert!(!is_github_repository_url(
-            "ssh://gitea@git.wavelens.io:12/Wavelens/nix-dotfiles"
-        ));
-    }
-
-    #[test]
-    fn lookalike_host_is_not_github() {
-        assert!(!is_github_repository_url("https://github.com.evil/x/y"));
-        assert!(!is_github_repository_url("https://notgithub.com/x/y"));
-    }
-
-    #[test]
-    fn github_subdomain_is_github() {
-        assert!(is_github_repository_url("https://api.github.com/x/y"));
+        ensure_github_app_integrations(&db, org(), user())
+            .await
+            .expect("ensure should be idempotent");
     }
 }

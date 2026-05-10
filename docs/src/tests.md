@@ -1779,3 +1779,42 @@ The metric encoder itself is exercised by a unit test
 (`web::endpoints::metrics::tests::render_emits_expected_metric_names_and_help`)
 that drives `render` with a fixed `Observations` struct and asserts the
 resulting `# HELP` / `# TYPE` lines and value formatting.
+
+## GitHub App as a server-managed integration row
+
+Coverage of the explicit `outbound_integration` opt-in for GitHub status
+reporting and the protections around the auto-managed `forge_type=github`
+integration rows. Run with
+`cargo test -p web --test projects_integration` and
+`cargo test -p core --tests ensure_tests`.
+
+`backend/web/tests/projects_integration.rs`:
+
+- `put_project_integration_accepts_github_outbound_row` — linking a project
+  to the auto-managed GitHub outbound integration via its UUID succeeds.
+- `put_project_integration_accepts_non_github_outbound_row` — Gitea/GitLab
+  outbound rows continue to work the same way (regression).
+- `patch_integration_rejects_github_row` /
+  `delete_integration_rejects_github_row` — server-managed rows can't be
+  edited or deleted via the org integrations API.
+- `delete_integration_accepts_non_github_row` — non-managed rows still
+  delete normally (regression).
+- `put_integration_still_rejects_github_forge_type` — POST with
+  `forge_type=github` continues to be rejected (no manual rows).
+- `put_integration_rejects_reserved_github_name` — name `"github"` is
+  reserved for the auto-managed row; user-created integrations using it
+  are rejected with 400.
+
+`backend/core/src/ci/integration_lookup.rs::ensure_tests`:
+
+- `creates_both_rows_when_none_exist` — calling
+  `ensure_github_app_integrations` on an org with no existing rows inserts
+  the inbound and outbound GitHub rows.
+- `skips_kinds_that_already_exist` — repeated calls are idempotent; rows
+  that already exist for that org/kind are not duplicated.
+
+The resolver simplification (URL-based auto-detection removed) is
+indirectly covered by the `put_project_integration_accepts_*` tests:
+linking returns the row id and the resolver now branches purely on
+`project_integration.outbound_integration` plus the integration's
+`forge_type`.

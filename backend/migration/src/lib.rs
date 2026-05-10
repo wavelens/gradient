@@ -98,6 +98,7 @@ mod m20260507_000005_evaluation_concurrent_flag;
 mod m20260507_000006_add_subtype_to_build_product;
 mod m20260507_000007_add_sign_cache_to_project;
 mod m20260508_000000_rename_project_evaluation_wildcard;
+mod m20260510_000000_seed_github_app_integrations;
 
 pub struct Migrator;
 
@@ -197,6 +198,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260507_000006_add_subtype_to_build_product::Migration),
             Box::new(m20260507_000007_add_sign_cache_to_project::Migration),
             Box::new(m20260508_000000_rename_project_evaluation_wildcard::Migration),
+            Box::new(m20260510_000000_seed_github_app_integrations::Migration),
         ]
     }
 }

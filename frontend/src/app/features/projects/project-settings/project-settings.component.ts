@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -106,6 +106,16 @@ export class ProjectSettingsComponent implements OnInit {
   outboundIntegrationOptions = signal<{ label: string; value: string | null }[]>([
     { label: 'None', value: null },
   ]);
+
+  /// True when the project repository URL points at github.com but the org
+  /// has no GitHub App outbound integration row — surfaces an install CTA.
+  showGithubAppInstallHint = computed(() => {
+    const repo = this.project()?.repository ?? '';
+    if (!isGithubRepoUrl(repo)) return false;
+    return !this.availableIntegrations().some(
+      (i) => i.kind === 'outbound' && i.forge_type === 'github',
+    );
+  });
 
   ngOnInit(): void {
     this.orgName = this.route.snapshot.paramMap.get('org') || '';
@@ -277,4 +287,25 @@ export class ProjectSettingsComponent implements OnInit {
       },
     });
   }
+}
+
+/// Mirrors the backend's host check (drop schemes/auth, then exact-match
+/// `github.com` or `*.github.com`). Used only to decide whether to surface
+/// the GitHub App install hint in the UI.
+function isGithubRepoUrl(url: string): boolean {
+  let rest = url.startsWith('git+') ? url.slice(4) : url;
+  for (const scheme of ['https://', 'http://', 'git://', 'ssh://']) {
+    if (rest.startsWith(scheme)) {
+      rest = rest.slice(scheme.length);
+      const host = rest.split(/[/:]/, 1)[0]?.toLowerCase() ?? '';
+      return host === 'github.com' || host.endsWith('.github.com');
+    }
+  }
+  // SCP-style: user@host:path
+  const at = rest.indexOf('@');
+  if (at >= 0 && rest.slice(at + 1).includes(':')) {
+    const host = rest.slice(at + 1).split(/[/:]/, 1)[0]?.toLowerCase() ?? '';
+    return host === 'github.com' || host.endsWith('.github.com');
+  }
+  return false;
 }

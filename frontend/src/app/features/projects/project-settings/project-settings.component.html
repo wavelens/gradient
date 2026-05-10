@@ -153,6 +153,16 @@
               [disabled]="proj.managed || !proj.can_edit"
             />
             <small class="text-secondary">Status reporter used to report build results per entry point.</small>
+            @if (showGithubAppInstallHint()) {
+              <div class="message-banner info">
+                <span class="material-symbols-outlined">info</span>
+                <span>
+                  This project is on github.com but the GitHub App isn't installed on this organization yet.
+                  Install it to enable status reporting via the
+                  <a [routerLink]="['/organization', orgName, 'integrations']">org integrations page</a>.
+                </span>
+              </div>
+            }
           </div>
 
           @if (!proj.managed && proj.can_edit) {

@@ -8,7 +8,9 @@ use super::{
     StateApiKey, StateCache, StateConfiguration, StateIntegration, StateOrganization, StateProject,
     StateTrigger, StateUpstream, StateUser, StateWorker,
 };
-use crate::ci::{ForgeType, IntegrationKind, encrypt_webhook_secret};
+use crate::ci::{
+    ForgeType, GITHUB_APP_INTEGRATION_NAME, IntegrationKind, encrypt_webhook_secret,
+};
 use crate::types::consts::BASE_ROLE_ADMIN_ID;
 use crate::types::input::load_secret_bytes;
 use crate::types::triggers::TriggerConfig;
@@ -99,13 +101,6 @@ async fn resolve_integration_id(
     state_integrations: &HashMap<String, StateIntegration>,
     project_name: &str,
 ) -> Result<IntegrationId, DynError> {
-    if !state_integrations.contains_key(name) {
-        return Err(format!(
-            "Project '{}' references unknown integration '{}'",
-            project_name, name
-        )
-        .into());
-    }
     let row = integration::Entity::find()
         .filter(integration::Column::Organization.eq(org_id))
         .filter(integration::Column::Kind.eq(i16::from(kind)))
@@ -118,6 +113,17 @@ async fn resolve_integration_id(
                 name, kind, project_name
             )
         })?;
+    // Auto-managed `forge_type=github` rows aren't declarable in state — they
+    // are seeded by the App-install hook and the seeding migration. Accept
+    // references to them without requiring an explicit state.integrations entry.
+    let is_github_managed = row.forge_type == i16::from(ForgeType::GitHub);
+    if !is_github_managed && !state_integrations.contains_key(name) {
+        return Err(format!(
+            "Project '{}' references unknown integration '{}'",
+            project_name, name
+        )
+        .into());
+    }
     Ok(row.id)
 }
 
@@ -308,6 +314,19 @@ impl<'a> StateApplicator<'a> {
                 tracing::info!(name = %state_org.name, "Created managed organization");
                 org_id
             };
+
+            // Seed the auto-managed GitHub App integration rows whenever this
+            // org has (or just acquired) an installation id. Idempotent.
+            let installation_known = match organization::Entity::find_by_id(org_id)
+                .one(self.db)
+                .await?
+            {
+                Some(o) => o.github_installation_id.is_some(),
+                None => false,
+            };
+            if installation_known {
+                crate::ci::ensure_github_app_integrations(self.db, org_id, created_by_id).await?;
+            }
 
             let existing_membership = organization_user::Entity::find()
                 .filter(organization_user::Column::Organization.eq(org_id))
@@ -795,6 +814,13 @@ impl<'a> StateApplicator<'a> {
                      through the server-wide GitHub App; bind installations on the org via \
                      `github_installation_id`, not via integration rows.",
                     state_int.name
+                )
+                .into());
+            }
+            if state_int.name == GITHUB_APP_INTEGRATION_NAME {
+                return Err(format!(
+                    "Integration '{}' uses the reserved name '{}' (auto-managed GitHub App row).",
+                    state_int.name, GITHUB_APP_INTEGRATION_NAME
                 )
                 .into());
             }

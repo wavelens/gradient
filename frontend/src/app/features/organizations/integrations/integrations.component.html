@@ -80,28 +80,40 @@
                   </div>
                 </div>
                 <div class="integration-actions">
-                  <button
-                    pButton
-                    label="Edit"
-                    icon="pi pi-pencil"
-                    severity="secondary"
-                    size="small"
-                    (click)="openEditDialog(integration)"
-                  ></button>
-                  <button
-                    pButton
-                    label="Delete"
-                    icon="pi pi-trash"
-                    severity="danger"
-                    size="small"
-                    [loading]="deletingId() === integration.id"
-                    [disabled]="deletingId() !== null"
-                    (click)="deleteIntegration(integration)"
-                  ></button>
+                  @if (integration.forge_type === 'github') {
+                    <span class="status-chip status-info">Server-managed</span>
+                  } @else {
+                    <button
+                      pButton
+                      label="Edit"
+                      icon="pi pi-pencil"
+                      severity="secondary"
+                      size="small"
+                      (click)="openEditDialog(integration)"
+                    ></button>
+                    <button
+                      pButton
+                      label="Delete"
+                      icon="pi pi-trash"
+                      severity="danger"
+                      size="small"
+                      [loading]="deletingId() === integration.id"
+                      [disabled]="deletingId() !== null"
+                      (click)="deleteIntegration(integration)"
+                    ></button>
+                  }
                 </div>
               </div>
 
-              @if (integration.kind === 'inbound') {
+              @if (integration.forge_type === 'github') {
+                <div class="integration-body">
+                  <p class="text-secondary">
+                    Credentials and webhook delivery are handled by the server-wide GitHub App and this organization's installation. Reference this integration from
+                    {{ integration.kind === 'inbound' ? 'a push or pull-request trigger' : 'a project\'s outbound integration link' }}
+                    to wire it up.
+                  </p>
+                </div>
+              } @else if (integration.kind === 'inbound') {
                 <div class="integration-body">
                   <div class="form-group">
                     <label>Forge</label>

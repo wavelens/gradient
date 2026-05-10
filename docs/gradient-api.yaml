@@ -3977,6 +3977,10 @@ paths:
       description: |-
         Patch-updates an integration. Omit a field to leave it unchanged.
         Pass an empty string for `secret` or `access_token` to **clear** it.
+
+        `forge_type=github` rows are server-managed (auto-seeded when the
+        GitHub App is installed on the org) and cannot be modified — PATCH
+        rejects them with `400`.
       operationId: patchOrgIntegration
       requestBody:
         required: true
@@ -4010,6 +4014,8 @@ paths:
       description: >-
         Deletes an integration. Any project `project_integration` rows
         referencing it are cleared via `ON DELETE SET NULL`.
+        `forge_type=github` rows are server-managed and cannot be deleted —
+        the endpoint returns `400` for them.
       operationId: deleteOrgIntegration
       responses:
         '200':

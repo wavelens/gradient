@@ -19,7 +19,8 @@ In the Gradient UI:
       within the organization and kind.
     - **Kind** — *Inbound* (Gradient receives webhooks) or *Outbound*
       (Gradient calls the forge API).
-    - **Forge type** — Gitea / Forgejo / GitLab / GitHub.
+    - **Forge type** — Gitea / Forgejo / GitLab. (GitHub does not appear here:
+      its inbound + outbound rows are server-managed; see *GitHub App* below.)
 
 Then, depending on the kind:
 
@@ -29,18 +30,34 @@ Then, depending on the kind:
   between `/hooks/gitea/...`, `/hooks/forgejo/...`, and `/hooks/gitlab/...`
   from a single inbound row.
 - **Outbound**: enter the forge base URL (e.g. `https://gitea.example.com`) and
-  an API token with permission to post commit statuses. For GitHub outbound,
-  leave the token blank — credentials come from the server-configured GitHub
-  App.
+  an API token with permission to post commit statuses.
 
 Secrets and tokens are stored encrypted with the server's crypt key; the API
 never returns them again, only a boolean indicating their presence.
 
+### GitHub App rows
+
+When the GitHub App is installed on an organization, Gradient automatically
+creates two `forge_type=github` integration rows for it: one *inbound* and one
+*outbound*, both named `github`. They appear in the org Integrations list as
+**Server-managed** and cannot be edited or deleted from the UI — their
+credentials come from the server's App config and the org's installation id.
+
+The integration name `github` is reserved system-wide for these rows; user-created
+integrations cannot use it.
+
+Reference these rows from project triggers (inbound) and project
+`outbound_integration` (outbound) the same way you'd reference any other
+integration.
+
 ## 2. Link a project
 
-Open the project's **Settings** page. Two dropdowns list all inbound and
-outbound integrations for the organization; pick the ones this project should
-use (or leave at *None*).
+Open the project's **Settings** page. The **Outbound Integration** dropdown
+lists every outbound integration for the organization, including the
+auto-managed *GitHub App* row when applicable. Pick the one this project
+should use, or leave at *None* to disable status reporting. Inbound
+integrations are not linked here; they're attached per-trigger on the
+**Triggers** page.
 
 ## 3. Configure the forge webhook
 
@@ -64,13 +81,14 @@ Gradient server. There are three roles to consider:
 1. **Server operator** — once per Gradient instance, register the App and put
    its credentials into the server's config. See the
    [GitHub App setup](../development/github-app-setup.md) operator doc.
-2. **Organization admin** — once the server has the App configured, enable the
-   *GitHub App* toggle on the Integrations page for each organization that
-   wants to use it.
-3. **GitHub repository owner** — install the App on a GitHub user or
-   organization account. Gradient stores the installation ID automatically
-   when the `installation` webhook fires; deliveries from the matching
-   repositories then route to the corresponding Gradient organization.
+2. **Organization admin** — once the server has the App configured, install the
+   App on the organization's GitHub account.
+3. **GitHub repository owner** — installing the App fires the `installation`
+   webhook; Gradient stores the installation id on the matching organization
+   and seeds the `github-app` inbound + outbound integration rows. Subsequent
+   push / pull-request deliveries route to the corresponding Gradient
+   organization, and projects can link to the outbound row to enable status
+   reporting.
 
 Webhook deliveries are signed with the App's webhook secret and verified
 server-side. Build statuses are reported back via the App's installation token.

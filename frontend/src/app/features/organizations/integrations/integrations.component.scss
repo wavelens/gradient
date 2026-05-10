@@ -147,6 +147,10 @@
     background: rgba($color-warning, 0.15);
     color: $color-warning;
   }
+  &.status-info {
+    background: rgba($color-secondary, 0.15);
+    color: $text-secondary;
+  }
 }
 
 .forge-selector {

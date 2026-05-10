@@ -22,7 +22,9 @@ use crate::permissions::Permission;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 
-use gradient_core::ci::{ForgeType, IntegrationKind, encrypt_webhook_secret};
+use gradient_core::ci::{
+    ForgeType, GITHUB_APP_INTEGRATION_NAME, IntegrationKind, encrypt_webhook_secret,
+};
 use gradient_core::types::input::check_index_name;
 use gradient_core::types::*;
 use sea_orm::ActiveValue::Set;
@@ -185,6 +187,12 @@ pub async fn put_integration(
     if check_index_name(&body.name).is_err() {
         return Err(WebError::invalid_name("Integration Name"));
     }
+    if body.name == GITHUB_APP_INTEGRATION_NAME {
+        return Err(WebError::bad_request(format!(
+            "Integration name '{}' is reserved for the auto-managed GitHub App row.",
+            GITHUB_APP_INTEGRATION_NAME
+        )));
+    }
 
     let kind = parse_kind(&body.kind)?;
     let forge = parse_forge(&body.forge_type)?;
@@ -292,6 +300,11 @@ pub async fn patch_integration(
     )
     .await?;
     let integration = load_integration_in_org(&state, org.id, integration_id).await?;
+    if integration.forge_type == i16::from(ForgeType::GitHub) {
+        return Err(WebError::bad_request(
+            "GitHub App integrations are managed automatically and cannot be edited.",
+        ));
+    }
     let kind = integration.kind;
 
     let mut active: AIntegration = integration.into_active_model();
@@ -299,6 +312,12 @@ pub async fn patch_integration(
     if let Some(name) = body.name {
         if check_index_name(&name).is_err() {
             return Err(WebError::invalid_name("Integration Name"));
+        }
+        if name == GITHUB_APP_INTEGRATION_NAME {
+            return Err(WebError::bad_request(format!(
+                "Integration name '{}' is reserved for the auto-managed GitHub App row.",
+                GITHUB_APP_INTEGRATION_NAME
+            )));
         }
         let clash = EIntegration::find()
             .filter(CIntegration::Organization.eq(org.id))
@@ -387,6 +406,11 @@ pub async fn delete_integration(
     )
     .await?;
     let integration = load_integration_in_org(&state, org.id, integration_id).await?;
+    if integration.forge_type == i16::from(ForgeType::GitHub) {
+        return Err(WebError::bad_request(
+            "GitHub App integrations are managed automatically and cannot be deleted.",
+        ));
+    }
     integration
         .into_active_model()
         .delete(&state.web_db)

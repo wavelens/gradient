@@ -89,12 +89,23 @@ async fn store_installation_id(state: &Arc<ServerState>, payload: &GitHubInstall
         .await
     {
         let installation_id = payload.installation.id;
+        let org_id = org.id;
+        let creator = org.created_by;
         let mut active = org.into_active_model();
         active.github_installation_id = Set(Some(installation_id));
         if let Err(e) = active.update(&state.web_db).await {
             warn!(error = %e, installation_id, org_name = %github_login, "Failed to store github_installation_id");
-        } else {
-            info!(installation_id, org_name = %github_login, "GitHub App installed on organization");
+            return;
+        }
+        info!(installation_id, org_name = %github_login, "GitHub App installed on organization");
+        if let Err(e) = gradient_core::ci::ensure_github_app_integrations(
+            &state.web_db,
+            org_id,
+            creator,
+        )
+        .await
+        {
+            warn!(error = %e, %org_id, "Failed to materialise GitHub App integration rows");
         }
     } else {
         let sender_login = payload

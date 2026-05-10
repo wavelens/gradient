@@ -205,7 +205,9 @@
           Name of an **outbound** integration in the same organization that
           receives CI status reports for this project. Null disables status
           reporting. The integration must be declared in
-          `services.gradient.state.integrations`.
+          `services.gradient.state.integrations`, except for the auto-managed
+          GitHub App row, which is referenced as `"github"` and is seeded
+          automatically once the App is installed on the org.
         '';
       };
 
@@ -297,11 +299,16 @@
       };
 
       forge_type = mkOption {
-        type = types.enum [ "gitea" "forgejo" "gitlab" "github" ];
+        type = types.enum [ "gitea" "forgejo" "gitlab" ];
         description = ''
           Which forge this integration targets. For inbound integrations this
           is display metadata only — a single inbound row can serve
           Gitea/Forgejo/GitLab via the forge path segment of the webhook URL.
+
+          GitHub is intentionally absent: GitHub integration rows are
+          server-managed (auto-created when the App is installed on the org)
+          and referenced from `triggers` / `outbound_integration` by the name
+          `"github"`.
         '';
       };
 
@@ -357,7 +364,9 @@
           Name of an inbound integration in the same organization that backs
           this trigger. Required for `reporter_push` and `reporter_pull_request`;
           ignored for `polling` and `time`. Must be declared in
-          `services.gradient.state.integrations`.
+          `services.gradient.state.integrations`, except for the auto-managed
+          GitHub App row, which is referenced as `"github"` and is seeded
+          automatically once the App is installed on the org.
         '';
       };
 
