@@ -65,16 +65,15 @@
               </div>
             </div>
             <div class="key-actions">
-              @if (!key.managed && !key.revoked_at) {
+              @if (!key.revoked_at) {
                 <button
                   pButton
                   label="Edit"
                   icon="pi pi-pencil"
                   severity="secondary"
                   (click)="openEditDialog(key)"
+                  [appManagedDisable]="rowAccess(key)"
                 ></button>
-              }
-              @if (!key.revoked_at) {
                 <button
                   pButton
                   label="Revoke"
@@ -82,7 +81,8 @@
                   severity="warn"
                   (click)="revokeKey(key)"
                   [loading]="revokingId() === key.id"
-                  [disabled]="revokingId() !== null || key.managed"
+                  [disabled]="revokingId() !== null"
+                  [appManagedDisable]="rowAccess(key)"
                 ></button>
               }
               <button
@@ -92,7 +92,8 @@
                 severity="danger"
                 (click)="deleteKey(key)"
                 [loading]="deletingId() === key.id"
-                [disabled]="deletingId() !== null || key.managed"
+                [disabled]="deletingId() !== null"
+                [appManagedDisable]="rowAccess(key)"
               ></button>
             </div>
           </div>
