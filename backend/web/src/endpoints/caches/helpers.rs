@@ -26,13 +26,13 @@ async fn try_authenticate_basic(state: &Arc<ServerState>, headers: &HeaderMap) -
     let auth = headers.get(axum::http::header::AUTHORIZATION)?;
     let val = auth.to_str().ok()?;
     let encoded = val.strip_prefix("Basic ")?;
-    let decoded = base64::engine::general_purpose::STANDARD
+    let bytes = base64::engine::general_purpose::STANDARD
         .decode(encoded)
         .ok()?;
-    let creds = String::from_utf8(decoded).ok()?;
+    let creds = String::from_utf8(bytes).ok()?;
     let password = creds.split_once(':').map(|(_, p)| p)?.to_string();
-    let token_data = decode_jwt(State(Arc::clone(state)), password).await.ok()?;
-    EUser::find_by_id(token_data.claims.id)
+    let decoded = decode_jwt(State(Arc::clone(state)), password).await.ok()?;
+    EUser::find_by_id(decoded.user_id())
         .one(&state.web_db)
         .await
         .ok()

@@ -650,10 +650,10 @@ pub async fn get_entry_point_download(
 
     // Resolve caller identity from ?token= (API key / JWT) or existing session.
     let resolved_user: Option<MUser> = if let Some(token_str) = params.token {
-        let token_data = crate::authorization::decode_jwt(State(Arc::clone(&state)), token_str)
+        let decoded = crate::authorization::decode_jwt(State(Arc::clone(&state)), token_str)
             .await
             .map_err(|_| WebError::unauthorized("Invalid token"))?;
-        EUser::find_by_id(token_data.claims.id)
+        EUser::find_by_id(decoded.user_id())
             .one(&state.web_db)
             .await?
     } else {
