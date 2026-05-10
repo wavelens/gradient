@@ -21,31 +21,33 @@
       </div>
       <div class="header-actions">
         @if (authService.isAuthenticated()) {
-          @if (proj.can_edit) {
-            <button
-              pButton
-              label="Start Evaluation"
-              icon="pi pi-play"
-              (click)="startEvaluation()"
-              [loading]="starting()"
-              [disabled]="starting()"
-            ></button>
-            <button
-              pButton
-              label="Restart Failed Builds"
-              icon="pi pi-refresh"
-              severity="secondary"
-              (click)="restartFailedBuilds()"
-              [disabled]="starting()"
-            ></button>
-            <button
-              pButton
-              label="Settings"
-              icon="pi pi-cog"
-              severity="secondary"
-              [routerLink]="['/organization', orgName, 'project', projectName, 'settings']"
-            ></button>
-          }
+          <button
+            *appWritable="access()"
+            pButton
+            label="Start Evaluation"
+            icon="pi pi-play"
+            (click)="startEvaluation()"
+            [loading]="starting()"
+            [disabled]="starting()"
+            [appManagedDisable]="access()"
+          ></button>
+          <button
+            *appWritable="access()"
+            pButton
+            label="Restart Failed Builds"
+            icon="pi pi-refresh"
+            severity="secondary"
+            (click)="restartFailedBuilds()"
+            [disabled]="starting()"
+            [appManagedDisable]="access()"
+          ></button>
+          <button
+            pButton
+            label="Settings"
+            icon="pi pi-cog"
+            severity="secondary"
+            [routerLink]="['/organization', orgName, 'project', projectName, 'settings']"
+          ></button>
         }
         <button
           pButton
@@ -217,12 +219,14 @@
                 </span>
                 @if (isRunningStatus(evaluation.status)) {
                   <button
+                    *appWritable="access()"
                     pButton
                     label="Abort"
                     icon="pi pi-times"
                     severity="danger"
                     size="small"
                     (click)="abortEvaluation(evaluation.id)"
+                    [appManagedDisable]="access()"
                   ></button>
                 }
               </div>
@@ -233,9 +237,9 @@
         <app-empty-state
           icon="assessment"
           title="No evaluations yet"
-          [message]="proj.can_edit ? 'Start your first evaluation to begin building' : 'No evaluations have been run yet'"
-          [actionLabel]="proj.can_edit ? 'Start Evaluation' : ''"
-          (actionClick)="proj.can_edit && startEvaluation()"
+          [message]="access().canEdit ? 'Start your first evaluation to begin building' : 'No evaluations have been run yet'"
+          [actionLabel]="access().canEdit ? 'Start Evaluation' : ''"
+          (actionClick)="access().canEdit && startEvaluation()"
         />
       }
     </div>

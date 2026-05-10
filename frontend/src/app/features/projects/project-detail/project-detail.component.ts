@@ -14,6 +14,8 @@ import { OrganizationsService } from '@core/services/organizations.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { EmptyStateComponent } from '@shared/components/empty-state/empty-state.component';
+import { WritableDirective, ManagedDisableDirective } from '@shared/access';
+import { injectProjectAccess } from '@core/resolvers/inject-access';
 import { ProjectDetail, EvaluationSummary, EvaluationStatus, EntryPointSummary, BuildStatus, TriggerType } from '@core/models';
 
 @Component({
@@ -25,6 +27,8 @@ import { ProjectDetail, EvaluationSummary, EvaluationStatus, EntryPointSummary, 
     ButtonModule,
     LoadingSpinnerComponent,
     EmptyStateComponent,
+    WritableDirective,
+    ManagedDisableDirective,
   ],
   templateUrl: './project-detail.component.html',
   styleUrl: './project-detail.component.scss',
@@ -34,6 +38,8 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   protected authService = inject(AuthService);
   private orgsService = inject(OrganizationsService);
   private projectsService = inject(ProjectsService);
+
+  access = injectProjectAccess();
 
   loading = signal(true);
   project = signal<ProjectDetail | null>(null);
