@@ -93,6 +93,7 @@ fn admin_role_row() -> entity::role::Model {
         name: "Admin".into(),
         organization: None,
         permission: gradient_core::permissions::admin_mask(),
+        managed: false,
     }
 }
 

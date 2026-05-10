@@ -43,6 +43,9 @@ pub struct RoleResponse {
     pub organization: Option<OrganizationId>,
     /// True for the three immutable system roles (Admin/Write/View).
     pub builtin: bool,
+    /// True for roles provisioned from `gradient-state.nix`. Managed roles
+    /// are immutable through this API (the same way built-in roles are).
+    pub managed: bool,
     /// Capability identifiers (camelCase) granted by this role; matches the
     /// strings produced by [`Permission::as_wire_name`].
     pub permissions: Vec<&'static str>,
@@ -60,6 +63,7 @@ impl RoleResponse {
             name: role.name,
             organization: role.organization,
             builtin,
+            managed: role.managed,
             permissions,
         }
     }
@@ -198,6 +202,7 @@ pub async fn post_organization_role(
         name: Set(body.name.clone()),
         organization: Set(Some(org.id)),
         permission: Set(mask),
+        managed: Set(false),
     }
     .insert(&state.web_db)
     .await?;
@@ -269,6 +274,12 @@ pub async fn patch_organization_role(
     if is_builtin_role(role.id) {
         return Err(WebError::forbidden(
             "Built-in roles (Admin, Write, View) cannot be modified.",
+        ));
+    }
+
+    if role.managed {
+        return Err(WebError::forbidden(
+            "State-managed roles cannot be modified via the API.",
         ));
     }
 
@@ -351,6 +362,12 @@ pub async fn delete_organization_role(
     if is_builtin_role(role.id) {
         return Err(WebError::forbidden(
             "Built-in roles (Admin, Write, View) cannot be deleted.",
+        ));
+    }
+
+    if role.managed {
+        return Err(WebError::forbidden(
+            "State-managed roles cannot be deleted via the API.",
         ));
     }
 

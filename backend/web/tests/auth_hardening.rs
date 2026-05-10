@@ -321,6 +321,7 @@ fn api_key_with_only_view_cannot_trigger_evaluation() {
             name: "Admin".into(),
             organization: None,
             permission: gradient_core::permissions::admin_mask(),
+            managed: false,
         };
 
         let s = server_with(|db| {

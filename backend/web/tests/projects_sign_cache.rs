@@ -110,6 +110,7 @@ fn admin_role_row() -> role::Model {
         name: "Admin".into(),
         organization: None,
         permission: admin_mask(),
+        managed: false,
     }
 }
 
