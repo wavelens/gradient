@@ -44,24 +44,29 @@
       <div class="settings-card">
         <div class="form-group">
           <label for="username">Username</label>
-          <input pInputText id="username" [(ngModel)]="formData.username" class="w-full" [disabled]="isOidc() || isManaged()" />
+          <input pInputText id="username" [(ngModel)]="formData.username" class="w-full" [appManagedDisable]="access()" />
         </div>
 
         <div class="form-group">
           <label for="name">Full Name</label>
-          <input pInputText id="name" [(ngModel)]="formData.name" class="w-full" [disabled]="isOidc() || isManaged()" />
+          <input pInputText id="name" [(ngModel)]="formData.name" class="w-full" [appManagedDisable]="access()" />
         </div>
 
         <div class="form-group">
           <label for="email">Email</label>
-          <input pInputText id="email" type="email" [(ngModel)]="formData.email" class="w-full" [disabled]="isOidc() || isManaged()" />
+          <input pInputText id="email" type="email" [(ngModel)]="formData.email" class="w-full" [appManagedDisable]="access()" />
         </div>
 
-        @if (!isOidc() && !isManaged()) {
-          <div class="form-actions">
-            <button pButton label="Save Changes" icon="pi pi-check" (click)="saveSettings()" [loading]="saving()" [disabled]="saving()"></button>
-          </div>
-        }
+        <div class="form-actions">
+          <button
+            pButton
+            label="Save Changes"
+            icon="pi pi-check"
+            (click)="saveSettings()"
+            [loading]="saving()"
+            [appManagedDisable]="access()"
+          ></button>
+        </div>
       </div>
     </div>
 
@@ -96,7 +101,7 @@
             <h3>Delete Account</h3>
             <p class="text-secondary">Permanently delete your account and all associated data.</p>
           </div>
-          <button pButton label="Delete Account" icon="pi pi-trash" severity="danger" (click)="openDeleteDialog()" [disabled]="isManaged()"></button>
+          <button pButton label="Delete Account" icon="pi pi-trash" severity="danger" (click)="openDeleteDialog()" [appManagedDisable]="access()"></button>
         </div>
       </div>
     </div>

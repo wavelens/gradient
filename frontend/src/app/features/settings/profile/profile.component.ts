@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -15,6 +15,8 @@ import { InputTextModule } from 'primeng/inputtext';
 import { UserService } from '@core/services/user.service';
 import { AuthService } from '@core/services/auth.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
+import { ManagedDisableDirective } from '@shared/access';
+import { AccessState } from '@core/models';
 
 @Component({
   selector: 'app-profile',
@@ -28,6 +30,7 @@ import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/load
     ButtonModule,
     InputTextModule,
     LoadingSpinnerComponent,
+    ManagedDisableDirective,
   ],
   templateUrl: './profile.component.html',
   styleUrl: './profile.component.scss',
@@ -42,6 +45,14 @@ export class ProfileComponent implements OnInit {
   deleting = signal(false);
   isOidc = signal(false);
   isManaged = signal(false);
+
+  /** OIDC and Nix-managed both freeze the profile fields; the user always
+   * retains the right to edit their own account in principle, so canEdit
+   * stays true and the banner / disable behavior comes from `managed`. */
+  access = computed<AccessState>(() => ({
+    managed: this.isManaged() || this.isOidc(),
+    canEdit: true,
+  }));
 
   showDeleteDialog = signal(false);
   errorMessage = signal<string | null>(null);
