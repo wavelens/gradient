@@ -11,6 +11,7 @@
 //! operations the worker needs: path presence checks, path-info queries,
 //! and triggering builds.
 
+use std::collections::{HashSet, VecDeque};
 use std::time::Duration;
 
 use anyhow::Result;
@@ -19,6 +20,7 @@ use harmonia_protocol::types::{DaemonError, DaemonErrorKind};
 use harmonia_store_core::store_path::StorePath;
 use harmonia_store_remote::DaemonStore as _;
 use harmonia_store_remote::pool::{ConnectionPool, PoolConfig};
+use tracing::warn;
 
 use proto::traits::WorkerStore;
 
@@ -121,6 +123,91 @@ impl LocalNixStore {
     pub fn pool(&self) -> &ConnectionPool {
         &self.pool
     }
+
+    /// Query the daemon for `store_path`'s direct runtime references.
+    ///
+    /// Returns canonical `/nix/store/<hash>-<name>` strings. Missing-path or
+    /// daemon errors are surfaced as `Err`; the closure walker logs and skips
+    /// them so a single flaky path doesn't tank the whole walk.
+    async fn query_references(&self, store_path: &str) -> Result<Vec<String>> {
+        let base = strip_store_prefix(store_path);
+        let sp = StorePath::from_base_path(base)
+            .map_err(|e| anyhow::anyhow!("invalid store path {store_path}: {e}"))?;
+
+        let mut guard = self
+            .pool
+            .acquire()
+            .await
+            .map_err(|e| anyhow::anyhow!("acquire store for query_references: {e}"))?;
+
+        let info = match guard.client().query_path_info(&sp).await {
+            Ok(Some(pi)) => pi,
+            Ok(None) => {
+                return Err(anyhow::anyhow!(
+                    "query_path_info: path not in local store: {store_path}"
+                ));
+            }
+            Err(e) => {
+                let corrupt = is_connection_corrupt(&e);
+                if corrupt {
+                    guard.mark_broken();
+                }
+                return Err(anyhow::anyhow!(
+                    "query_path_info failed for {store_path}: {e}"
+                ));
+            }
+        };
+
+        Ok(info
+            .references
+            .iter()
+            .map(|r| canonicalize_store_path(&r.to_string()))
+            .collect())
+    }
+
+    /// BFS the runtime reference closure of `seeds` via `query_path_info`.
+    ///
+    /// Returns every reachable store path including the seeds themselves,
+    /// each canonicalised to `/nix/store/<hash>-<name>` form so consumers
+    /// (e.g. NAR push) see a single, well-defined string per path.
+    /// Paths that fail individual `query_references` calls (e.g. removed
+    /// between calls) are logged and skipped — the walk continues so the
+    /// caller still gets a best-effort closure for the remaining paths.
+    pub async fn collect_runtime_closure(&self, seeds: &[String]) -> HashSet<String> {
+        let mut visited: HashSet<String> = HashSet::new();
+        let mut queue: VecDeque<String> = VecDeque::new();
+        for s in seeds {
+            queue.push_back(canonicalize_store_path(s));
+        }
+        while let Some(path) = queue.pop_front() {
+            if !visited.insert(path.clone()) {
+                continue;
+            }
+            match self.query_references(&path).await {
+                Ok(refs) => {
+                    for r in refs {
+                        if !visited.contains(&r) {
+                            queue.push_back(r);
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!(path = %path, error = %e, "closure walk: skipping unreadable path");
+                }
+            }
+        }
+        visited
+    }
+}
+
+/// Normalise to absolute `/nix/store/<hash>-<name>`. Bare hash-name input is
+/// prefixed; already-absolute input is left as-is.
+fn canonicalize_store_path(path: &str) -> String {
+    if path.starts_with('/') {
+        path.to_owned()
+    } else {
+        format!("/nix/store/{}", path)
+    }
 }
 
 #[async_trait]
@@ -191,6 +278,22 @@ mod tests {
             "acquire_timeout must accommodate worst-case queue depth across \
              concurrent build jobs; got {:?}",
             cfg.acquire_timeout
+        );
+    }
+
+    #[test]
+    fn canonicalize_store_path_prefixes_bare_hash_name() {
+        assert_eq!(
+            canonicalize_store_path("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo"),
+            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo"
+        );
+    }
+
+    #[test]
+    fn canonicalize_store_path_preserves_absolute() {
+        assert_eq!(
+            canonicalize_store_path("/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo"),
+            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo"
         );
     }
 }

@@ -159,23 +159,24 @@ impl ParsedDerivation {
 
         match result.inner {
             BuildResultInner::Success(s) => {
-                info!(drv = %drv_path, "build succeeded");
-                let pairs = output_pairs_from_built_or_drv(&s.built_outputs, &self.drv);
                 if s.built_outputs.is_empty() {
-                    warn!(
-                        drv = %drv_path,
-                        recovered = pairs.len(),
-                        "daemon returned no built_outputs (legacy protocol without \
-                         `realisation-with-path-not-hash`); recovering output paths from .drv"
-                    );
+                    return Err(anyhow::anyhow!(
+                        "daemon reported build success but returned no built_outputs for {} — \
+                         the negotiated protocol predates `realisation-with-path-not-hash` \
+                         and gradient cannot record output metadata reliably; upgrade the \
+                         worker's nix-daemon",
+                        drv_path
+                    ));
                 }
-                let mut outputs = Vec::with_capacity(pairs.len());
-                for (output_name, store_path_str) in pairs {
+                info!(drv = %drv_path, "build succeeded");
+                let mut outputs = Vec::with_capacity(s.built_outputs.len());
+                for (name, real) in &s.built_outputs {
+                    let store_path_str = format!("/nix/store/{}", real.out_path);
                     let (hash, _package) = get_hash_from_path(store_path_str.clone())
                         .with_context(|| format!("parse output path: {}", store_path_str))?;
                     let products = load_products(&store_path_str).await;
                     outputs.push(BuildOutput {
-                        name: output_name,
+                        name: name.to_string(),
                         store_path: store_path_str,
                         hash,
                         nar_size: None,
@@ -193,53 +194,6 @@ impl ParsedDerivation {
             }
         }
     }
-}
-
-// ── Output recovery ───────────────────────────────────────────────────────────
-
-/// Resolve `(output_name, full_store_path)` pairs for a successful build.
-///
-/// The canonical source is the daemon's `built_outputs` map: for content-
-/// addressed or deferred-output drvs the realised path is only knowable
-/// after the build, so the daemon's report is the only authoritative answer.
-///
-/// However, harmonia's `BuildResult` deserializer **silently drops**
-/// `built_outputs` when the negotiated protocol does not advertise the
-/// `realisation-with-path-not-hash` feature: it drains the legacy
-/// `StringMap` form and returns an empty `BTreeMap` (see
-/// harmonia-protocol's `build_result.rs`). On a daemon that predates that
-/// feature, every successful build therefore produces an empty
-/// `built_outputs`. Without a fallback the worker reports
-/// `BuildOutput { outputs: [] }` and the server records no `nar_size`,
-/// no `build_product` rows, and no link from the build to the bytes that
-/// *do* exist on disk — exactly the symptom seen for input-addressed
-/// builds: `Completed` build, output present in the store, `/downloads`
-/// empty.
-///
-/// For input-addressed derivations (the common case) the `.drv` already
-/// declares the exact output paths nix will produce, so we recover them
-/// from the parsed drv when the daemon's map is empty. CA / deferred
-/// outputs in the drv carry an empty `path` and are skipped — those
-/// genuinely require the daemon's response, and the build will surface
-/// without those outputs (the same state we were already in).
-fn output_pairs_from_built_or_drv(
-    built_outputs: &BTreeMap<
-        harmonia_store_core::derived_path::OutputName,
-        harmonia_store_core::realisation::UnkeyedRealisation,
-    >,
-    drv: &gradient_core::db::Derivation,
-) -> Vec<(String, String)> {
-    if !built_outputs.is_empty() {
-        return built_outputs
-            .iter()
-            .map(|(name, real)| (name.to_string(), format!("/nix/store/{}", real.out_path)))
-            .collect();
-    }
-    drv.outputs
-        .iter()
-        .filter(|o| !o.path.is_empty())
-        .map(|o| (o.name.clone(), o.path.clone()))
-        .collect()
 }
 
 // ── Hydra product loader ──────────────────────────────────────────────────────
@@ -668,115 +622,6 @@ mod tests {
     fn ca_fixed_rejects_wrong_length_hash() {
         // sha256 needs 32 bytes (64 hex chars); pass 8 bytes (16 hex chars).
         assert!(ca_fixed_output("sha256", "deadbeefdeadbeef").is_err());
-    }
-
-    fn drv_with_outputs(outputs: Vec<(&str, &str)>) -> gradient_core::db::Derivation {
-        gradient_core::db::Derivation {
-            outputs: outputs
-                .into_iter()
-                .map(|(name, path)| gradient_core::db::DerivationOutput {
-                    name: name.to_string(),
-                    path: path.to_string(),
-                    hash_algo: String::new(),
-                    hash: String::new(),
-                })
-                .collect(),
-            input_derivations: vec![],
-            input_sources: vec![],
-            system: String::new(),
-            builder: String::new(),
-            args: vec![],
-            environment: std::collections::HashMap::new(),
-        }
-    }
-
-    fn realisation(out_path: &str) -> harmonia_store_core::realisation::UnkeyedRealisation {
-        let base = out_path.strip_prefix("/nix/store/").unwrap_or(out_path);
-        harmonia_store_core::realisation::UnkeyedRealisation {
-            out_path: harmonia_store_core::store_path::StorePath::from_base_path(base).unwrap(),
-            signatures: std::collections::BTreeSet::new(),
-        }
-    }
-
-    #[test]
-    fn output_pairs_use_built_outputs_when_daemon_returned_them() {
-        // Modern daemons that advertise `realisation-with-path-not-hash`
-        // populate `built_outputs` with the realised paths. We pass them
-        // through and ignore the .drv (which may carry stale paths for
-        // CA-derivations).
-        let mut built = BTreeMap::new();
-        built.insert(
-            "out".parse().unwrap(),
-            realisation("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo"),
-        );
-        // Drv path differs — must be ignored when built_outputs is non-empty.
-        let drv = drv_with_outputs(vec![(
-            "out",
-            "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-foo",
-        )]);
-
-        let pairs = output_pairs_from_built_or_drv(&built, &drv);
-        assert_eq!(
-            pairs,
-            vec![(
-                "out".to_string(),
-                "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string()
-            )]
-        );
-    }
-
-    #[test]
-    fn output_pairs_fall_back_to_drv_when_daemon_dropped_built_outputs() {
-        // Older nix-daemons negotiate the protocol without
-        // `realisation-with-path-not-hash`. harmonia's deserializer drains
-        // the legacy StringMap and returns an empty BTreeMap, so the
-        // worker would otherwise report an empty BuildOutput and the server
-        // would record no products / nar_size for a build that actually
-        // succeeded. Recover the paths from the .drv instead.
-        let built = BTreeMap::new();
-        let drv = drv_with_outputs(vec![
-            ("out", "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo"),
-            ("dev", "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-foo-dev"),
-        ]);
-
-        let mut pairs = output_pairs_from_built_or_drv(&built, &drv);
-        pairs.sort();
-        assert_eq!(
-            pairs,
-            vec![
-                (
-                    "dev".to_string(),
-                    "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-foo-dev".to_string()
-                ),
-                (
-                    "out".to_string(),
-                    "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string()
-                ),
-            ]
-        );
-    }
-
-    #[test]
-    fn output_pairs_skip_drv_outputs_with_empty_path() {
-        // Content-addressed / deferred outputs carry an empty `path` in the
-        // .drv — the realised path is only knowable from the daemon's
-        // response. With no built_outputs to fall back on, those entries are
-        // dropped (they would produce malformed `/nix/store/` strings) and
-        // the build surfaces with the input-addressed outputs only.
-        let built = BTreeMap::new();
-        let drv = drv_with_outputs(vec![
-            ("out", "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo"),
-            ("ca-out", ""),
-        ]);
-
-        let pairs = output_pairs_from_built_or_drv(&built, &drv);
-        assert_eq!(
-            pairs,
-            vec![(
-                "out".to_string(),
-                "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string()
-            )]
-        );
     }
 
     #[tokio::test]

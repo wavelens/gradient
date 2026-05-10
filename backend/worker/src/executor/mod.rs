@@ -64,15 +64,39 @@ async fn query_fetched_paths(updater: &mut JobUpdater, all_paths: Vec<String>) -
     }
 }
 
-/// For each `.drv` discovered during eval, push the compressed NAR.
-/// The server computes and stores narinfo signatures from the uploaded
-/// NAR metadata; the worker never signs.
-async fn push_drvs(drv_paths: &[String], updater: &mut JobUpdater, store: &LocalNixStore) {
+/// Push the runtime closure of every `.drv` produced during eval to the
+/// gradient cache.
+///
+/// Walking the closure (rather than just the `.drv` files themselves) is what
+/// keeps downstream build workers from racing the cache: a `.drv` references
+/// every `input_source` (e.g. `builtins.path`, `lib.cleanSource` outputs that
+/// landed in the eval worker's local store) and every transitive `.drv`. If
+/// we only pushed the `.drv` files, a downstream worker's `prefetch_inputs`
+/// could query the cache, find the `.drv` cached, then fail on import because
+/// a referenced source is still local-only. Walking the closure here ensures
+/// every store path needed to interpret a produced `.drv` is in the cache
+/// before this eval job's `JobCompleted` reaches the server.
+///
+/// Errors during closure expansion or individual NAR pushes are logged but
+/// not fatal — operators see them in the worker log, and downstream builds
+/// surface the missing path through their existing prefetch error path.
+async fn push_drv_closure(drv_paths: &[String], updater: &mut JobUpdater, store: &LocalNixStore) {
     if drv_paths.is_empty() {
         return;
     }
 
-    let cache_entries = query_fetched_paths(updater, drv_paths.to_vec()).await;
+    let closure = store.collect_runtime_closure(drv_paths).await;
+    if closure.is_empty() {
+        return;
+    }
+    tracing::debug!(
+        seeds = drv_paths.len(),
+        closure = closure.len(),
+        "pushing eval closure to cache"
+    );
+
+    let paths: Vec<String> = closure.into_iter().collect();
+    let cache_entries = query_fetched_paths(updater, paths).await;
     for cp in &cache_entries {
         push_one_fetched_nar(updater, cp, store).await;
     }
@@ -208,14 +232,16 @@ impl JobExecutor {
                     )
                     .await?;
 
-                    // Push each produced `.drv` to the cache so
-                    // substituters can fetch `<drv-hash>.narinfo`. Runs
+                    // Push the full runtime closure of every produced
+                    // `.drv` to the cache so substituters can fetch
+                    // `<drv-hash>.narinfo` *and* downstream builds find
+                    // every `input_source` they need on prefetch. Runs
                     // after eval so the server already has the derivation
                     // rows; ordering between the NAR and the row doesn't
                     // matter (the server keys cached_path by hash). The
                     // server computes narinfo signatures from the uploaded
                     // metadata.
-                    push_drvs(&produced_drvs, updater, &self.store).await;
+                    push_drv_closure(&produced_drvs, updater, &self.store).await;
                 }
             }
         }

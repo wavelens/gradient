@@ -1818,3 +1818,52 @@ indirectly covered by the `put_project_integration_accepts_*` tests:
 linking returns the row id and the resolver now branches purely on
 `project_integration.outbound_integration` plus the integration's
 `forge_type`.
+
+## Worker: empty `built_outputs` is a build failure, not a recovery
+
+Earlier the worker fell back to recovering output paths from the parsed
+`.drv` whenever the daemon's `BuildResult.built_outputs` came back empty
+(legacy protocol path). This silently masked daemon-version mismatches
+and produced incomplete cache state for builds whose downstream consumers
+needed the recovered paths.
+
+`worker/src/executor/build.rs::ParsedDerivation::realize` now returns
+`Err` immediately when `built_outputs.is_empty()`, so the build resolves
+to `JobFailed` with a message pointing at the daemon protocol.
+
+The recovery helper (`output_pairs_from_built_or_drv`) and its three
+unit tests were removed alongside the behaviour they covered. Other
+build-pipeline tests in the same module (`ca_fixed_*`, `load_products_*`)
+are unaffected.
+
+## Worker: eval pushes the runtime closure of every produced `.drv`
+
+Symptom: a downstream build's `prefetch_inputs` failed mid-import with
+`add_to_store_nar(...) failed: path '...' is not valid` or
+`required input path(s) are missing from local store and not available
+in the gradient cache`, even though the path appeared in the cache a
+few seconds later. Root cause: `push_drvs` flat-pushed only the `.drv`
+file paths in `produced_drvs`, never their `input_sources` (e.g.
+`builtins.path` results, `lib.cleanSource` outputs). Those source paths
+sat only in the eval worker's local store; the next eval that happened
+to produce the same hash incidentally uploaded them and made the user
+think it was a "few-seconds-later" cache propagation.
+
+Fix lives in `worker/src/nix/store.rs` and `worker/src/executor/mod.rs`:
+
+- `LocalNixStore::query_references` — returns the daemon's `references`
+  for one path; surfaces missing-path / corrupt-connection errors.
+- `LocalNixStore::collect_runtime_closure` — BFS over `query_references`,
+  visited-set deduplicated. Logs and skips individual unreadable paths
+  so one stale path doesn't tank the whole walk.
+- `push_drv_closure` (replaces `push_drvs`) — feeds the closure into
+  `query_fetched_paths` (CacheQuery Push) and pushes every uncached path
+  before `EvaluateDerivations` returns. The eval `JobCompleted` therefore
+  arrives at the server only after the cache holds every path any
+  downstream build's prefetch will resolve.
+
+The closure walker is exercised end-to-end by the
+`nix/tests/gradient/state` fixture (which evaluates a flake and then
+builds derivations referencing locally-created sources). Live-daemon
+unit coverage isn't worth the harness cost — the BFS is a few lines
+and the failure mode is loud.
