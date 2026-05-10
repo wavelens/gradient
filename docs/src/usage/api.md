@@ -60,8 +60,44 @@ On errors, `error` is `true` and `message` is a string describing the problem.
 | `GET` | `/user/keys` | List API keys |
 | `POST` | `/user/keys` | Create API key |
 | `DELETE` | `/user/keys` | Delete API key |
+| `GET` | `/user/keys/permissions` | List the permission catalogue |
+| `PATCH` | `/user/keys/{api_id}` | Update an API key's name / permissions / org pin |
 | `GET` | `/user/settings` | Get profile settings |
 | `PATCH` | `/user/settings` | Update profile settings |
+
+### Configuring API-key options
+
+Each API key carries its own permission set and an optional organization pin:
+
+```bash
+curl -X POST $API/user/keys \
+  -H "Authorization: Bearer $SESSION" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "name": "ci-runner",
+        "permissions": ["triggerEvaluation", "viewOrg"],
+        "organization": "acme",
+        "expires_in_days": 90
+      }'
+```
+
+The key's effective authority on every request is `user_role_mask & key_mask`,
+intersected with the org's role assignment for the caller. A key pinned to an
+organization 404s for every other org. The full permission catalogue is at
+`GET /user/keys/permissions`.
+
+To tighten an existing key without rotating the secret:
+
+```bash
+curl -X PATCH $API/user/keys/$KEY_ID \
+  -H "Authorization: Bearer $SESSION" \
+  -H "Content-Type: application/json" \
+  -d '{ "permissions": ["viewOrg"] }'
+```
+
+API-key-authenticated requests **cannot** create, edit, revoke, or delete API
+keys — only session-authenticated calls can. This prevents a leaked key from
+minting more powerful siblings.
 
 ### Organizations
 
