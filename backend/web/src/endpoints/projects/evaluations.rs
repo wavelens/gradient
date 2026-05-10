@@ -323,6 +323,7 @@ pub async fn get_project_details(
         keep_evaluations: project.keep_evaluations,
         last_evaluations: evaluation_summaries,
         can_edit,
+        managed: project.managed,
     };
 
     let res = BaseResponse {
