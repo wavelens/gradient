@@ -18,21 +18,16 @@
       <p class="text-secondary">Nix binary caches this organization pushes builds to</p>
     </div>
     <button
+      *appWritable="access()"
       pButton
       label="Subscribe to Cache"
       icon="pi pi-plus"
-      [disabled]="canManageSubscriptions() === false"
-      [pTooltip]="canManageSubscriptions() === false ? 'You need Write or Admin permissions to manage cache subscriptions' : ''"
+      [appManagedDisable]="access()"
       (click)="openSubscribeDialog()"
     ></button>
   </div>
 
-  @if (canManageSubscriptions() === false) {
-    <div class="permission-error">
-      <span class="material-symbols-outlined">lock</span>
-      <span>You need <strong>Write</strong> or <strong>Admin</strong> permissions in this organization to manage cache subscriptions.</span>
-    </div>
-  }
+  <app-access-banner [access]="access()"></app-access-banner>
 
   @if (loading()) {
     <app-loading-spinner message="Loading cache subscriptions..." />
@@ -43,10 +38,11 @@
         <h3>No cache subscriptions</h3>
         <p class="text-secondary">Subscribe to a Nix binary cache to have builds pushed there automatically.</p>
         <button
+          *appWritable="access()"
           pButton
           label="Subscribe to Cache"
           icon="pi pi-plus"
-          [disabled]="canManageSubscriptions() === false"
+          [appManagedDisable]="access()"
           (click)="openSubscribeDialog()"
         ></button>
       </div>
@@ -60,12 +56,14 @@
             </div>
             <div class="cache-actions">
               <button
+                *appWritable="access()"
                 pButton
                 label="Unsubscribe"
                 icon="pi pi-times"
                 severity="danger"
                 [loading]="unsubscribingId() === cache.id"
                 [disabled]="unsubscribingId() !== null"
+                [appManagedDisable]="access()"
                 (click)="unsubscribeCache(cache)"
               ></button>
             </div>

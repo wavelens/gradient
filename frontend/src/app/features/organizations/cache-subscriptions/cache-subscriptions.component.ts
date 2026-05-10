@@ -15,8 +15,10 @@ import { AutoCompleteModule } from 'primeng/autocomplete';
 import { TooltipModule } from 'primeng/tooltip';
 import { OrganizationsService } from '@core/services/organizations.service';
 import { CachesService } from '@core/services/caches.service';
-import { AuthService } from '@core/services/auth.service';
+import { OrgAccessService } from '@core/services/org-access.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
+import { AccessBannerComponent, WritableDirective, ManagedDisableDirective } from '@shared/access';
+import { AccessState } from '@core/models';
 
 @Component({
   selector: 'app-cache-subscriptions',
@@ -31,6 +33,9 @@ import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/load
     AutoCompleteModule,
     TooltipModule,
     LoadingSpinnerComponent,
+    AccessBannerComponent,
+    WritableDirective,
+    ManagedDisableDirective,
   ],
   templateUrl: './cache-subscriptions.component.html',
   styleUrl: './cache-subscriptions.component.scss',
@@ -39,14 +44,15 @@ export class CacheSubscriptionsComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private orgsService = inject(OrganizationsService);
   private cachesService = inject(CachesService);
-  private authService = inject(AuthService);
+  private orgAccess = inject(OrgAccessService);
+
+  access = signal<AccessState>({ managed: false, canEdit: false });
 
   loading = signal(true);
   subscribing = signal(false);
   unsubscribingId = signal<string | null>(null);
   showSubscribeDialog = signal(false);
   errorMessage = signal<string | null>(null);
-  canManageSubscriptions = signal<boolean | null>(null);
 
   orgName = '';
   orgDisplayName = signal('');
@@ -57,27 +63,12 @@ export class CacheSubscriptionsComponent implements OnInit {
 
   ngOnInit(): void {
     this.orgName = this.route.snapshot.paramMap.get('org') || '';
+    this.orgAccess.forOrg(this.orgName).then((s) => this.access.set(s));
     this.orgsService.getOrganization(this.orgName).subscribe({
       next: (org) => this.orgDisplayName.set(org.display_name),
       error: () => {},
     });
     this.loadCaches();
-    this.loadOrgPermission();
-  }
-
-  private loadOrgPermission(): void {
-    const currentUser = this.authService.user();
-    if (!currentUser) {
-      this.canManageSubscriptions.set(false);
-      return;
-    }
-    this.orgsService.getMembers(this.orgName).subscribe({
-      next: (members) => {
-        const me = members.find((m) => m.id === currentUser.username);
-        this.canManageSubscriptions.set(!!me && (me.name === 'Admin' || me.name === 'Write'));
-      },
-      error: () => this.canManageSubscriptions.set(false),
-    });
   }
 
   loadCaches(): void {
@@ -92,7 +83,6 @@ export class CacheSubscriptionsComponent implements OnInit {
   }
 
   openSubscribeDialog(): void {
-    if (!this.canManageSubscriptions()) return;
     this.newCacheName = '';
     this.errorMessage.set(null);
     this.cacheSuggestions.set([]);
