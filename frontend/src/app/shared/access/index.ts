@@ -5,3 +5,4 @@
  */
 
 export * from './access.service';
+export * from './writable.directive';
