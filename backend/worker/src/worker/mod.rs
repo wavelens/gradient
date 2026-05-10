@@ -135,7 +135,11 @@ impl Worker<Disconnected> {
             Ok(c) => c,
             Err(e) => return Err((e, self)),
         };
-        if let Err(e) = Self::do_reconnect_handshake(&mut conn, &self.config).await {
+        // Reuse the same handshake + capability-advertise + initial-request
+        // sequence as a fresh connect — the server has no prior state for
+        // this worker after a restart, so reconnect must re-publish
+        // architectures, system_features, and max_concurrent_builds.
+        if let Err(e) = perform_setup(&mut conn, &self.config, "reconnect").await {
             return Err((e, self));
         }
 
@@ -159,41 +163,6 @@ impl Worker<Disconnected> {
             conn_state: Connected { conn },
             _marker: PhantomData,
         })
-    }
-
-    async fn do_reconnect_handshake(
-        conn: &mut ProtoConnection,
-        config: &WorkerConfig,
-    ) -> Result<()> {
-        let peer_id = load_or_generate_id(&config.data_dir, config.worker_id.as_deref())
-            .context("failed to load persistent worker ID")?;
-        let peer_tokens = config.peer_tokens();
-        let handshake =
-            perform_handshake(conn, peer_id, peer_tokens, config.capabilities()).await?;
-        conn.set_server_version(handshake.server_version);
-        info!(
-            negotiated = ?handshake.negotiated,
-            server_version = conn.server_version(),
-            "reconnected and re-negotiated capabilities"
-        );
-        if handshake.negotiated.build {
-            conn.send(ClientMessage::WorkerCapabilities {
-                architectures: vec![],
-                system_features: vec![],
-                max_concurrent_builds: config.max_concurrent_builds,
-            })
-            .await?;
-        }
-        conn.send(ClientMessage::RequestJobList).await?;
-        conn.send(ClientMessage::RequestJob {
-            kind: JobKind::Flake,
-        })
-        .await?;
-        conn.send(ClientMessage::RequestJob {
-            kind: JobKind::Build,
-        })
-        .await?;
-        Ok(())
     }
 }
 
