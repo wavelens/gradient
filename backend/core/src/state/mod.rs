@@ -315,6 +315,17 @@ impl StateConfiguration {
                 "outbound",
             )] {
                 let Some(int_name) = binding else { continue };
+                // Auto-managed `forge_type=github` rows are seeded per-org by
+                // the App-install hook (see `ensure_github_app_integrations`)
+                // and are never declared in state.integrations. The
+                // provisioning layer accepts them without a state entry, so
+                // the validator must too — apply-time will catch the case
+                // where the org has no GitHub App installed.
+                if int_name == crate::ci::GITHUB_APP_INTEGRATION_NAME
+                    && !self.integrations.contains_key(int_name)
+                {
+                    continue;
+                }
                 match self.integrations.get(int_name) {
                     None => errors.push(ValidationError {
                         field: format!("projects.{}.{}", project.name, field_name),
