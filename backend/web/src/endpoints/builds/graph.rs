@@ -29,9 +29,9 @@ pub(super) fn extract_drv_name(path: &str) -> String {
 
 pub(super) async fn authorize_build_opt(
     state: &Arc<ServerState>,
+    build_id: BuildId,
     maybe_user: &Option<MUser>,
     api_key: Option<&ApiKeyContext>,
-    build_id: BuildId,
 ) -> WebResult<()> {
     BuildAccessContext::load(state, build_id, maybe_user, api_key)
         .await
@@ -165,7 +165,7 @@ pub async fn get_build_dependencies(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(build_id): Path<BuildId>,
 ) -> WebResult<Json<BaseResponse<Vec<DependencyNode>>>> {
-    authorize_build_opt(&state, &maybe_user, api_key.as_ref(), build_id).await?;
+    authorize_build_opt(&state, build_id, &maybe_user, api_key.as_ref()).await?;
 
     let build = EBuild::find_by_id(build_id)
         .one(&state.web_db)
@@ -216,7 +216,7 @@ pub async fn get_build_graph(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(build_id): Path<BuildId>,
 ) -> WebResult<Json<BaseResponse<BuildGraph>>> {
-    authorize_build_opt(&state, &maybe_user, api_key.as_ref(), build_id).await?;
+    authorize_build_opt(&state, build_id, &maybe_user, api_key.as_ref()).await?;
 
     let root_build = EBuild::find_by_id(build_id)
         .one(&state.web_db)
