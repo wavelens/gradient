@@ -18,7 +18,8 @@ use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::{
-    self, Permission, PermissionMask, is_builtin_role, mask_from, mask_to_vec,
+    Permission, PermissionEntry, available_permissions, is_builtin_role, mask_to_vec,
+    parse_permission_list,
 };
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
@@ -65,12 +66,6 @@ impl RoleResponse {
 }
 
 #[derive(Serialize, Debug)]
-pub struct PermissionEntry {
-    pub id: &'static str,
-    pub mutating: bool,
-}
-
-#[derive(Serialize, Debug)]
 pub struct RoleListResponse {
     /// Roles available in this org: the three built-ins plus any custom
     /// roles owned by the org.
@@ -96,20 +91,6 @@ pub struct PatchRoleRequest {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-fn parse_permissions(wire: &[String]) -> WebResult<PermissionMask> {
-    let mut perms = Vec::with_capacity(wire.len());
-    for w in wire {
-        let parsed = Permission::from_wire_name(w).ok_or_else(|| {
-            WebError::bad_request(format!(
-                "Unknown permission '{}'. See GET /orgs/{{organization}}/roles for the catalogue.",
-                w
-            ))
-        })?;
-        perms.push(parsed);
-    }
-    Ok(mask_from(&perms))
-}
-
 async fn load_org_role(
     state: &Arc<ServerState>,
     org_id: OrganizationId,
@@ -128,17 +109,6 @@ async fn load_org_role(
     }
 
     Ok(role)
-}
-
-fn available_permissions() -> Vec<PermissionEntry> {
-    Permission::ALL
-        .iter()
-        .copied()
-        .map(|p| PermissionEntry {
-            id: p.as_wire_name(),
-            mutating: permissions::is_mutating(p),
-        })
-        .collect()
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
@@ -205,7 +175,7 @@ pub async fn post_organization_role(
         return Err(WebError::invalid_name("Role Name"));
     }
 
-    let mask = parse_permissions(&body.permissions)?;
+    let mask = parse_permission_list(&body.permissions, "GET /orgs/{organization}/roles")?;
 
     // Names must be unique within (org_id, name) and must not collide with a
     // built-in role's name (Admin/Write/View) — otherwise membership lookup
@@ -327,7 +297,8 @@ pub async fn patch_organization_role(
     }
 
     if let Some(perms) = body.permissions {
-        active.permission = Set(parse_permissions(&perms)?);
+        active.permission =
+            Set(parse_permission_list(&perms, "GET /orgs/{organization}/roles")?);
     }
 
     let updated = active.update(&state.web_db).await?;

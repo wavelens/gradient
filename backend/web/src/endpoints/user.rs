@@ -8,7 +8,9 @@ use crate::audit::{RequestInfo, events, record as audit_record};
 use crate::authorization::{MaybeApiKey, generate_api_key, hash_api_key};
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
-use crate::permissions::{self, Permission, PermissionMask, mask_from, mask_to_vec};
+use crate::permissions::{
+    PermissionEntry, available_permissions, mask_to_vec, parse_permission_list,
+};
 use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
 use axum::{Extension, Json};
@@ -89,12 +91,6 @@ pub struct ApiKeyInfo {
     pub last_used_at: Option<String>,
     pub expires_at: Option<String>,
     pub revoked_at: Option<String>,
-}
-
-#[derive(Serialize, Debug)]
-pub struct PermissionEntry {
-    pub id: &'static str,
-    pub mutating: bool,
 }
 
 #[derive(Serialize, Debug)]
@@ -261,25 +257,6 @@ fn last_used_or_none(dt: chrono::NaiveDateTime) -> Option<String> {
     }
 }
 
-fn parse_permissions(wire: &[String]) -> WebResult<PermissionMask> {
-    let mut perms = Vec::with_capacity(wire.len());
-    for w in wire {
-        let parsed = Permission::from_wire_name(w).ok_or_else(|| {
-            WebError::bad_request(format!(
-                "Unknown permission '{}'. See GET /user/keys/permissions for the catalogue.",
-                w
-            ))
-        })?;
-        perms.push(parsed);
-    }
-    if perms.is_empty() {
-        return Err(WebError::bad_request(
-            "At least one permission is required for an API key.",
-        ));
-    }
-    Ok(mask_from(&perms))
-}
-
 async fn resolve_org_pin(
     state: &Arc<ServerState>,
     user_id: UserId,
@@ -292,15 +269,18 @@ async fn resolve_org_pin(
     if trimmed.is_empty() {
         return Ok(None);
     }
+    let unknown = || {
+        WebError::bad_request(format!(
+            "Unknown organization or not a member: '{}'.",
+            trimmed
+        ))
+    };
     let org = get_any_organization_by_name(Arc::clone(state), trimmed.into())
         .await?
-        .ok_or_else(|| WebError::bad_request(format!("Unknown organization '{}'", trimmed)))?;
+        .ok_or_else(unknown)?;
     let is_member = crate::access::is_org_member(state, user_id, org.id, None).await?;
     if !is_member {
-        return Err(WebError::bad_request(format!(
-            "You are not a member of organization '{}'.",
-            trimmed
-        )));
+        return Err(unknown());
     }
     Ok(Some(org.id))
 }
@@ -350,16 +330,8 @@ fn api_key_info(
 
 pub async fn get_key_permissions()
 -> WebResult<Json<BaseResponse<ApiKeyPermissionsResponse>>> {
-    let available_permissions = Permission::ALL
-        .iter()
-        .copied()
-        .map(|p| PermissionEntry {
-            id: p.as_wire_name(),
-            mutating: permissions::is_mutating(p),
-        })
-        .collect();
     Ok(ok_json(ApiKeyPermissionsResponse {
-        available_permissions,
+        available_permissions: available_permissions(),
     }))
 }
 
@@ -393,7 +365,12 @@ pub async fn post_keys(
 ) -> WebResult<Json<BaseResponse<String>>> {
     forbid_via_api_key(&api_key_caller)?;
 
-    let mask = parse_permissions(&body.permissions)?;
+    let mask = parse_permission_list(&body.permissions, "GET /user/keys/permissions")?;
+    if mask == 0 {
+        return Err(WebError::bad_request(
+            "At least one permission is required for an API key.",
+        ));
+    }
     let org_pin = resolve_org_pin(&state, user.id, body.organization.clone()).await?;
 
     let existing_api_key = EApi::find()
@@ -475,14 +452,34 @@ pub async fn patch_key(
 
     let previous_mask = api_key.permission;
     let previous_org = api_key.organization;
+    let previous_name = api_key.name.clone();
     let mut active: AApi = api_key.into_active_model();
 
     if let Some(name) = body.name {
+        if name != previous_name {
+            let clash = EApi::find()
+                .filter(
+                    Condition::all()
+                        .add(CApi::OwnedBy.eq(user.id))
+                        .add(CApi::Name.eq(name.clone()))
+                        .add(CApi::Id.ne(api_id)),
+                )
+                .one(&state.web_db)
+                .await?;
+            if clash.is_some() {
+                return Err(WebError::already_exists("API-Key Name"));
+            }
+        }
         active.name = Set(name);
     }
     let mut new_mask = previous_mask;
     if let Some(perms) = body.permissions {
-        new_mask = parse_permissions(&perms)?;
+        new_mask = parse_permission_list(&perms, "GET /user/keys/permissions")?;
+        if new_mask == 0 {
+            return Err(WebError::bad_request(
+                "At least one permission is required for an API key.",
+            ));
+        }
         active.permission = Set(new_mask);
     }
     let mut new_org = previous_org;
@@ -501,6 +498,8 @@ pub async fn patch_key(
         &request_info,
         Some(serde_json::json!({
             "api_key_id": api_id.to_string(),
+            "previous_name": previous_name,
+            "new_name": updated.name,
             "previous_permissions_mask": previous_mask,
             "new_permissions_mask": new_mask,
             "previous_organization_id": previous_org.map(|i| i.to_string()),
