@@ -14,6 +14,7 @@ import {
   Session,
   UserSettings,
 } from '@core/models';
+import { PermissionDescriptor } from '@core/models/permission.model';
 
 @Injectable({ providedIn: 'root' })
 export class UserService {
@@ -35,12 +36,39 @@ export class UserService {
     return this.api.get<ApiKey[]>('user/keys');
   }
 
-  createApiKey(name: string, expiresInDays?: number | null): Observable<string> {
-    const body: { name: string; expires_in_days?: number } = { name };
+  createApiKey(
+    name: string,
+    expiresInDays?: number | null,
+    permissions: string[] = ['viewOrg'],
+    organization: string | null = null,
+  ): Observable<string> {
+    const body: {
+      name: string;
+      expires_in_days?: number;
+      permissions: string[];
+      organization: string | null;
+    } = { name, permissions, organization };
     if (expiresInDays !== null && expiresInDays !== undefined) {
       body.expires_in_days = expiresInDays;
     }
     return this.api.post<string>('user/keys', body);
+  }
+
+  updateApiKey(
+    apiId: string,
+    body: {
+      name?: string;
+      permissions?: string[];
+      organization?: string | null;
+    },
+  ): Observable<ApiKey> {
+    return this.api.patch<ApiKey>(`user/keys/${apiId}`, body);
+  }
+
+  getApiKeyPermissions(): Observable<{ available_permissions: PermissionDescriptor[] }> {
+    return this.api.get<{ available_permissions: PermissionDescriptor[] }>(
+      'user/keys/permissions',
+    );
   }
 
   deleteApiKey(name: string): Observable<string> {

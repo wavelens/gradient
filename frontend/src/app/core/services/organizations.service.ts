@@ -8,6 +8,7 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { ApiService } from './api.service';
 import { Organization, Paginated } from '@core/models';
+import { PermissionDescriptor } from '@core/models/permission.model';
 
 export interface OrgMember {
   id: string;   // username
@@ -22,10 +23,7 @@ export interface OrgRole {
   permissions: string[];
 }
 
-export interface PermissionDescriptor {
-  id: string;
-  mutating: boolean;
-}
+export type { PermissionDescriptor };
 
 export interface RoleListResponse {
   roles: OrgRole[];
