@@ -38,17 +38,6 @@
     <!-- General Settings -->
     <div class="settings-section">
       <h2>General</h2>
-      @if (proj.managed) {
-        <div class="message-banner info">
-          <span class="material-symbols-outlined">info</span>
-          This project is managed declaratively and cannot be edited here.
-        </div>
-      } @else if (!proj.can_edit) {
-        <div class="message-banner info">
-          <span class="material-symbols-outlined">info</span>
-          You have read-only access to this project.
-        </div>
-      }
       <div class="settings-card">
         <div class="form-group">
           <label for="proj-name">Name</label>
@@ -58,17 +47,17 @@
 
         <div class="form-group">
           <label for="proj-display">Display Name</label>
-          <input pInputText id="proj-display" [(ngModel)]="formData.display_name" class="w-full" [disabled]="proj.managed || !proj.can_edit" />
+          <input pInputText id="proj-display" [(ngModel)]="formData.display_name" class="w-full" [appManagedDisable]="access()" />
         </div>
 
         <div class="form-group">
           <label for="proj-desc">Description</label>
-          <textarea pInputTextarea id="proj-desc" [(ngModel)]="formData.description" rows="3" class="w-full" [disabled]="proj.managed || !proj.can_edit"></textarea>
+          <textarea pInputTextarea id="proj-desc" [(ngModel)]="formData.description" rows="3" class="w-full" [appManagedDisable]="access()"></textarea>
         </div>
 
         <div class="form-group">
           <label for="proj-repo">Repository URL</label>
-          <input pInputText id="proj-repo" [(ngModel)]="formData.repository" class="w-full" [disabled]="proj.managed || !proj.can_edit" />
+          <input pInputText id="proj-repo" [(ngModel)]="formData.repository" class="w-full" [appManagedDisable]="access()" />
         </div>
 
         <div class="form-group">
@@ -78,13 +67,13 @@
               <span class="material-symbols-outlined">help</span>
             </a>
           </label>
-          <input pInputText id="proj-wildcard" [(ngModel)]="formData.wildcard" class="w-full" [disabled]="proj.managed || !proj.can_edit" />
+          <input pInputText id="proj-wildcard" [(ngModel)]="formData.wildcard" class="w-full" [appManagedDisable]="access()" />
           <small class="text-secondary">Pattern for selecting which outputs to evaluate</small>
         </div>
 
         <div class="form-group">
           <label for="proj-keep">Keep Evaluations</label>
-          <input pInputText id="proj-keep" type="number" min="1" [(ngModel)]="formData.keep_evaluations" class="w-full" [disabled]="proj.managed || !proj.can_edit" />
+          <input pInputText id="proj-keep" type="number" min="1" [(ngModel)]="formData.keep_evaluations" class="w-full" [appManagedDisable]="access()" />
           <small class="text-secondary">Number of completed evaluations to retain for metrics and history</small>
         </div>
 
@@ -98,7 +87,7 @@
             optionValue="value"
             optionDisabled="disabled"
             styleClass="w-full"
-            [disabled]="proj.managed || !proj.can_edit"
+            [appManagedDisable]="access()"
           />
           <small class="text-secondary">Determines how this project handles a new trigger event when an evaluation is already running.</small>
         </div>
@@ -108,17 +97,23 @@
             inputId="proj-sign-cache"
             [(ngModel)]="formData.sign_cache"
             [binary]="true"
-            [disabled]="proj.managed || !proj.can_edit"
+            [appManagedDisable]="access()"
           />
           <label for="proj-sign-cache">Sign cache (allow public access to build outputs)</label>
           <small class="text-secondary">When off, build outputs are still cached for Gradient itself but narinfos remain unsigned, keeping the project's paths private to external Nix clients even when the cache is public.</small>
         </div>
 
-        @if (!proj.managed && proj.can_edit) {
-          <div class="form-actions">
-            <button pButton label="Save Changes" icon="pi pi-check" (click)="saveSettings()" [loading]="saving()" [disabled]="saving()"></button>
-          </div>
-        }
+        <div class="form-actions">
+          <button
+            *appWritable="access()"
+            pButton
+            label="Save Changes"
+            icon="pi pi-check"
+            (click)="saveSettings()"
+            [loading]="saving()"
+            [appManagedDisable]="access()"
+          ></button>
+        </div>
       </div>
     </div>
 
@@ -150,7 +145,7 @@
               optionLabel="label"
               optionValue="value"
               styleClass="w-full"
-              [disabled]="proj.managed || !proj.can_edit"
+              [appManagedDisable]="access()"
             />
             <small class="text-secondary">Status reporter used to report build results per entry point.</small>
             @if (showGithubAppInstallHint()) {
@@ -165,12 +160,18 @@
             }
           </div>
 
-          @if (!proj.managed && proj.can_edit) {
-            <div class="form-actions">
-              <button pButton label="Save Integrations" icon="pi pi-check" (click)="saveIntegrationLink()" [loading]="savingIntegration()" [disabled]="savingIntegration()"></button>
-              <a pButton label="Manage Integrations" icon="pi pi-external-link" severity="secondary" [routerLink]="['/organization', orgName, 'integrations']"></a>
-            </div>
-          }
+          <div class="form-actions">
+            <button
+              *appWritable="access()"
+              pButton
+              label="Save Integrations"
+              icon="pi pi-check"
+              (click)="saveIntegrationLink()"
+              [loading]="savingIntegration()"
+              [appManagedDisable]="access()"
+            ></button>
+            <a pButton label="Manage Integrations" icon="pi pi-external-link" severity="secondary" [routerLink]="['/organization', orgName, 'integrations']"></a>
+          </div>
         }
       </div>
     </div>
@@ -198,19 +199,20 @@
             <p class="text-secondary">{{ proj.active ? 'The project is currently evaluating and building.' : 'The project is paused and not evaluating.' }}</p>
           </div>
           <button
+            *appWritable="access()"
             pButton
             [label]="proj.active ? 'Deactivate' : 'Activate'"
             [icon]="proj.active ? 'pi pi-pause' : 'pi pi-play'"
             [severity]="proj.active ? 'warn' : 'success'"
             (click)="toggleActive()"
             [loading]="toggling()"
-            [disabled]="toggling() || proj.managed || !proj.can_edit"
+            [appManagedDisable]="access()"
           ></button>
         </div>
       </div>
     </div>
 
-    @if (!proj.managed && proj.can_edit) {
+    @if (access().canEdit) {
       <!-- Danger Zone -->
       <div class="settings-section danger-section">
         <h2>Danger Zone</h2>
@@ -226,6 +228,7 @@
               icon="pi pi-send"
               severity="warn"
               (click)="showTransferDialog.set(true)"
+              [appManagedDisable]="access()"
             ></button>
           </div>
           <div class="danger-divider"></div>
@@ -234,7 +237,14 @@
               <h3>Delete Project</h3>
               <p class="text-secondary">Permanently delete this project and all its evaluations.</p>
             </div>
-            <button pButton label="Delete Project" icon="pi pi-trash" severity="danger" (click)="showDeleteDialog.set(true)"></button>
+            <button
+              pButton
+              label="Delete Project"
+              icon="pi pi-trash"
+              severity="danger"
+              (click)="showDeleteDialog.set(true)"
+              [appManagedDisable]="access()"
+            ></button>
           </div>
         </div>
       </div>
