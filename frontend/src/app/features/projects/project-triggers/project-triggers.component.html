@@ -17,7 +17,14 @@
       <h1>Triggers</h1>
       <p class="text-secondary">Conditions that automatically start an evaluation</p>
     </div>
-    <button pButton label="New Trigger" icon="pi pi-plus" (click)="startCreate()"></button>
+    <button
+      *appWritable="access()"
+      pButton
+      label="New Trigger"
+      icon="pi pi-plus"
+      (click)="startCreate()"
+      [appManagedDisable]="access()"
+    ></button>
   </div>
 
   @if (loading()) {
@@ -28,7 +35,14 @@
         <span class="material-symbols-outlined">schedule_send</span>
         <h3>No triggers configured</h3>
         <p class="text-secondary">Create a trigger to automatically start evaluations on a schedule, push event, or pull request.</p>
-        <button pButton label="New Trigger" icon="pi pi-plus" (click)="startCreate()"></button>
+        <button
+          *appWritable="access()"
+          pButton
+          label="New Trigger"
+          icon="pi pi-plus"
+          (click)="startCreate()"
+          [appManagedDisable]="access()"
+        ></button>
       </div>
     } @else {
       <div class="triggers-list">
@@ -55,32 +69,35 @@
               </div>
               <div class="trigger-actions">
                 <button
+                  *appWritable="access()"
                   pButton
                   label="Fire Now"
                   icon="pi pi-play"
                   severity="secondary"
                   size="small"
                   [loading]="firingId() === trigger.id"
-                  [disabled]="firingId() !== null || deletingId() !== null"
+                  [disabled]="rowDisabled()"
                   (click)="fireNow(trigger.id)"
                 ></button>
                 <button
+                  *appWritable="access()"
                   pButton
                   label="Edit"
                   icon="pi pi-pencil"
                   severity="secondary"
                   size="small"
-                  [disabled]="firingId() !== null || deletingId() !== null"
+                  [disabled]="rowDisabled()"
                   (click)="startEdit(trigger)"
                 ></button>
                 <button
+                  *appWritable="access()"
                   pButton
                   label="Delete"
                   icon="pi pi-trash"
                   severity="danger"
                   size="small"
                   [loading]="deletingId() === trigger.id"
-                  [disabled]="deletingId() !== null || firingId() !== null"
+                  [disabled]="rowDisabled()"
                   (click)="deleteTrigger(trigger.id)"
                 ></button>
               </div>
