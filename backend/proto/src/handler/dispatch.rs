@@ -6,7 +6,7 @@
 
 //! Per-connection message dispatch context and all `ClientMessage` handlers.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 use gradient_core::types::ids::{DerivationId, OrganizationId};
@@ -27,11 +27,32 @@ use super::socket::{
 
 // ── Per-session inbound NAR buffer (issue #109) ──────────────────────────────
 
+/// Outcome of [`NarBuffers::append`].
+pub(super) enum AppendOutcome {
+    /// Chunk was appended.
+    Ok,
+    /// Chunk would have exceeded the session budget. The path is now poisoned
+    /// and any partial buffer for it has been dropped — the caller must abort
+    /// the job and refuse the eventual `NarUploaded` for the same path.
+    Overflow,
+    /// Chunk arrived for a path the session has already poisoned. Drop it.
+    Poisoned,
+}
+
 /// Bounded buffer pool for inbound `NarPush` chunks. Tracks total queued bytes
 /// and rejects pushes that would exceed `max_bytes` so a rogue worker cannot
 /// pin unbounded RAM by opening many concurrent uploads with no `is_final`.
+///
+/// Once a path overflows the budget it is added to a per-session **poison
+/// set**. Any further chunks for that path are dropped, and the eventual
+/// `NarUploaded` for it must be rejected — otherwise the server would write a
+/// `cached_path` row with metadata for bytes that were never persisted to
+/// `nar_storage`, and downstream builds would later fail with
+/// "NAR not found in cache" for a path the DB swears is cached.
 pub(super) struct NarBuffers {
     inner: HashMap<String, Vec<u8>>,
+    /// Paths whose upload was rejected and must not be committed.
+    poisoned: BTreeSet<String>,
     total_bytes: usize,
     max_bytes: usize,
 }
@@ -40,32 +61,66 @@ impl NarBuffers {
     pub(super) fn new(max_bytes: usize) -> Self {
         Self {
             inner: HashMap::new(),
+            poisoned: BTreeSet::new(),
             total_bytes: 0,
             max_bytes,
         }
     }
 
-    /// Append `data` to the buffer for `store_path`. Returns `Err(())` when
-    /// the cumulative session budget would be exceeded — the caller should
-    /// abort the job and stop accepting further chunks for this path.
-    pub(super) fn append(&mut self, store_path: &str, data: &[u8]) -> Result<(), ()> {
+    /// Append `data` to the buffer for `store_path`.
+    ///
+    /// Returns:
+    /// - [`AppendOutcome::Ok`] if the chunk was appended.
+    /// - [`AppendOutcome::Overflow`] if the chunk would have exceeded the
+    ///   session budget. The path is now poisoned and any partial buffer for
+    ///   it has been dropped.
+    /// - [`AppendOutcome::Poisoned`] if the path has already been poisoned by
+    ///   a prior overflow.
+    pub(super) fn append(&mut self, store_path: &str, data: &[u8]) -> AppendOutcome {
+        if self.poisoned.contains(store_path) {
+            return AppendOutcome::Poisoned;
+        }
         if self.total_bytes.saturating_add(data.len()) > self.max_bytes {
-            return Err(());
+            self.discard(store_path);
+            self.poisoned.insert(store_path.to_owned());
+            return AppendOutcome::Overflow;
         }
         self.inner
             .entry(store_path.to_owned())
             .or_default()
             .extend_from_slice(data);
         self.total_bytes += data.len();
-        Ok(())
+        AppendOutcome::Ok
     }
 
     /// Pop the assembled buffer for `store_path`. Returns `None` if no chunks
     /// were ever buffered (e.g. presigned-S3 path that bypassed `NarPush`).
+    /// Poisoned paths return `None` here too — callers must check
+    /// [`Self::is_poisoned`] before treating `None` as "S3 mode, accept the
+    /// metadata".
     pub(super) fn take(&mut self, store_path: &str) -> Option<Vec<u8>> {
         let buf = self.inner.remove(store_path)?;
         self.total_bytes = self.total_bytes.saturating_sub(buf.len());
         Some(buf)
+    }
+
+    /// Drop the partial buffer for `store_path` without consuming it.
+    fn discard(&mut self, store_path: &str) {
+        if let Some(buf) = self.inner.remove(store_path) {
+            self.total_bytes = self.total_bytes.saturating_sub(buf.len());
+        }
+    }
+
+    /// Has this path been poisoned by a prior overflow on the same session?
+    pub(super) fn is_poisoned(&self, store_path: &str) -> bool {
+        self.poisoned.contains(store_path)
+    }
+
+    /// Forget the poison flag for `store_path`. Called after the server has
+    /// rejected the upload so a later, well-formed retry of the same path
+    /// (e.g. on a fresh job) can proceed.
+    pub(super) fn clear_poison(&mut self, store_path: &str) {
+        self.poisoned.remove(store_path);
     }
 
     pub(super) fn total_bytes(&self) -> usize {
@@ -538,16 +593,25 @@ impl<'a> DispatchContext<'a> {
         nar_buffers: &mut NarBuffers,
     ) {
         debug!(peer_id = %self.peer_id, %job_id, %store_path, offset, is_final, bytes = data.len(), "NarPush");
-        if !data.is_empty() && nar_buffers.append(&store_path, &data).is_err() {
-            let reason = format!(
-                "session NAR upload buffer would exceed {} bytes (current {} + {} = {})",
-                nar_buffers.max_bytes(),
-                nar_buffers.total_bytes(),
-                data.len(),
-                nar_buffers.total_bytes().saturating_add(data.len()),
-            );
-            warn!(peer_id = %self.peer_id, %job_id, %store_path, %reason, "session NAR upload buffer would exceed limit");
-            self.abort_job(&job_id, reason).await;
+        if data.is_empty() {
+            return;
+        }
+        match nar_buffers.append(&store_path, &data) {
+            AppendOutcome::Ok => {}
+            AppendOutcome::Overflow => {
+                let reason = format!(
+                    "session NAR upload buffer would exceed {} bytes (current {} + {} = {})",
+                    nar_buffers.max_bytes(),
+                    nar_buffers.total_bytes(),
+                    data.len(),
+                    nar_buffers.total_bytes().saturating_add(data.len()),
+                );
+                warn!(peer_id = %self.peer_id, %job_id, %store_path, %reason, "session NAR upload buffer would exceed limit; poisoning path");
+                self.abort_job(&job_id, reason).await;
+            }
+            AppendOutcome::Poisoned => {
+                debug!(peer_id = %self.peer_id, %job_id, %store_path, "discarding NarPush chunk for poisoned path");
+            }
         }
         // The buffer is held until `on_nar_uploaded` arrives; that handler
         // commits it to `nar_storage` and records the metadata atomically so
@@ -581,6 +645,24 @@ impl<'a> DispatchContext<'a> {
         nar_buffers: &mut NarBuffers,
     ) {
         debug!(peer_id = %self.peer_id, %job_id, %store_path, %file_hash, file_size, nar_size, %nar_hash, ?deriver, "NarUploaded");
+
+        // Reject any NarUploaded for a path whose chunked transfer was
+        // rejected mid-stream. Without this guard `nar_buffers.take()` would
+        // return `None` (the buffer was discarded on overflow), the local-
+        // mode commit block would be skipped, and `mark_nar_stored` would
+        // record a `cached_path` row whose bytes never reached `nar_storage`
+        // — leaving the path "cached" in the DB and undeliverable on the
+        // next download.
+        if nar_buffers.is_poisoned(&store_path) {
+            nar_buffers.clear_poison(&store_path);
+            let reason = format!(
+                "NarUploaded for {store_path} rejected: prior NarPush chunk \
+                 exceeded the session buffer budget"
+            );
+            warn!(peer_id = %self.peer_id, %job_id, %store_path, %reason, "rejecting NarUploaded for poisoned path");
+            self.abort_job(&job_id, reason).await;
+            return;
+        }
 
         // Local-mode commit: if we buffered NarPush chunks for this path,
         // validate + write them to nar_storage atomically with the metadata.
@@ -734,39 +816,58 @@ impl<'a> DispatchContext<'a> {
 
 #[cfg(test)]
 mod nar_buffers_tests {
-    use super::NarBuffers;
+    use super::{AppendOutcome, NarBuffers};
+
+    fn assert_ok(o: AppendOutcome) {
+        assert!(matches!(o, AppendOutcome::Ok), "expected Ok");
+    }
 
     #[test]
     fn append_below_budget_succeeds_and_tracks_total() {
         let mut nb = NarBuffers::new(1024);
-        nb.append("/nix/store/a", &vec![0u8; 256]).unwrap();
-        nb.append("/nix/store/a", &vec![1u8; 256]).unwrap();
-        nb.append("/nix/store/b", &vec![2u8; 256]).unwrap();
+        assert_ok(nb.append("/nix/store/a", &vec![0u8; 256]));
+        assert_ok(nb.append("/nix/store/a", &vec![1u8; 256]));
+        assert_ok(nb.append("/nix/store/b", &vec![2u8; 256]));
         assert_eq!(nb.total_bytes(), 768);
     }
 
     #[test]
-    fn append_overflow_returns_err_and_does_not_mutate() {
+    fn append_overflow_drops_partial_buffer_and_poisons_path() {
         let mut nb = NarBuffers::new(1024);
-        nb.append("/nix/store/a", &vec![0u8; 1000]).unwrap();
-        let res = nb.append("/nix/store/a", &[0u8; 100]);
-        assert!(res.is_err(), "must reject pushes that exceed the budget");
+        assert_ok(nb.append("/nix/store/a", &vec![0u8; 1000]));
+        // Second chunk would exceed budget — overflow drops the partial
+        // buffer for /a and marks it poisoned so the eventual NarUploaded is
+        // rejected.
+        assert!(matches!(
+            nb.append("/nix/store/a", &[0u8; 100]),
+            AppendOutcome::Overflow
+        ));
+        assert!(nb.is_poisoned("/nix/store/a"));
         assert_eq!(
             nb.total_bytes(),
-            1000,
-            "rejected append must not have appended any bytes"
+            0,
+            "overflow must release the partial buffer's bytes back to the budget"
+        );
+        // Subsequent chunks for the same path are dropped silently.
+        assert!(matches!(
+            nb.append("/nix/store/a", &[0u8; 50]),
+            AppendOutcome::Poisoned
+        ));
+        assert!(
+            nb.take("/nix/store/a").is_none(),
+            "take() must not return a buffer for a poisoned path"
         );
     }
 
     #[test]
     fn take_releases_budget() {
         let mut nb = NarBuffers::new(1024);
-        nb.append("/nix/store/a", &vec![0u8; 500]).unwrap();
-        nb.append("/nix/store/b", &vec![1u8; 500]).unwrap();
+        assert_ok(nb.append("/nix/store/a", &vec![0u8; 500]));
+        assert_ok(nb.append("/nix/store/b", &vec![1u8; 500]));
         let buf_a = nb.take("/nix/store/a").expect("a was buffered");
         assert_eq!(buf_a.len(), 500);
         assert_eq!(nb.total_bytes(), 500);
-        nb.append("/nix/store/c", &vec![2u8; 400]).unwrap();
+        assert_ok(nb.append("/nix/store/c", &vec![2u8; 400]));
     }
 
     #[test]
@@ -778,9 +879,25 @@ mod nar_buffers_tests {
     #[test]
     fn append_overflow_across_keys_is_caught() {
         let mut nb = NarBuffers::new(800);
-        nb.append("/nix/store/a", &vec![0u8; 400]).unwrap();
-        nb.append("/nix/store/b", &vec![0u8; 400]).unwrap();
-        let res = nb.append("/nix/store/c", &[42u8]);
-        assert!(res.is_err());
+        assert_ok(nb.append("/nix/store/a", &vec![0u8; 400]));
+        assert_ok(nb.append("/nix/store/b", &vec![0u8; 400]));
+        assert!(matches!(
+            nb.append("/nix/store/c", &[42u8]),
+            AppendOutcome::Overflow
+        ));
+        assert!(nb.is_poisoned("/nix/store/c"));
+    }
+
+    #[test]
+    fn clear_poison_allows_retry() {
+        let mut nb = NarBuffers::new(100);
+        assert!(matches!(
+            nb.append("/nix/store/a", &vec![0u8; 200]),
+            AppendOutcome::Overflow
+        ));
+        assert!(nb.is_poisoned("/nix/store/a"));
+        nb.clear_poison("/nix/store/a");
+        assert!(!nb.is_poisoned("/nix/store/a"));
+        assert_ok(nb.append("/nix/store/a", &vec![0u8; 50]));
     }
 }

@@ -56,33 +56,63 @@ pub struct NarReceiver {
     inner: Arc<Mutex<Inner>>,
 }
 
+/// Outstanding waiter handle returned by [`NarReceiver::register`]. Callers
+/// register all paths in a batch *before* sending `NarRequest` on the wire,
+/// then await each pending resolution via [`NarReceiver::await_pending`].
+/// This guarantees a live waiter is in place by the time any server response
+/// arrives — otherwise late `NarPush` / `NarUnavailable` frames would surface
+/// as "no waiter — discarding" warnings.
+pub struct PendingNar {
+    job_id: String,
+    store_path: String,
+    rx: oneshot::Receiver<Result<Vec<u8>, String>>,
+}
+
+impl PendingNar {
+    pub fn store_path(&self) -> &str {
+        &self.store_path
+    }
+}
+
 impl NarReceiver {
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Register a waiter for `(job_id, store_path)`. The returned oneshot
-    /// resolves with the assembled NAR bytes on `is_final`, or with an error
-    /// if the server signals `NarUnavailable` / `NarAbort`. Wraps the wait
-    /// in [`NAR_RECV_TIMEOUT`] as a last-resort backstop.
-    pub async fn wait_for(&self, job_id: &str, store_path: &str) -> Result<Vec<u8>> {
+    /// Synchronously install a waiter for `(job_id, store_path)`.
+    ///
+    /// The dispatch loop will resolve the returned [`PendingNar`] on the
+    /// first matching `NarPush { is_final: true }` (success), or on
+    /// `NarUnavailable` / `NarAbort` (failure). Replacing an existing waiter
+    /// for the same key drops the old sender and that receiver reports
+    /// `RecvError`.
+    pub fn register(&self, job_id: &str, store_path: &str) -> PendingNar {
         let key = (job_id.to_owned(), store_path.to_owned());
         let (tx, rx) = oneshot::channel();
-        // Replacing an existing waiter for the same key drops the old sender;
-        // its receiver will see `RecvError` and bail out instead of hanging.
-        self.inner.lock().unwrap().waiters.insert(key.clone(), tx);
+        self.inner.lock().unwrap().waiters.insert(key, tx);
+        PendingNar {
+            job_id: job_id.to_owned(),
+            store_path: store_path.to_owned(),
+            rx,
+        }
+    }
 
+    /// Await a previously [`Self::register`]ed waiter, bounded by
+    /// [`NAR_RECV_TIMEOUT`] as a last-resort backstop.
+    pub async fn await_pending(&self, pending: PendingNar) -> Result<Vec<u8>> {
+        let PendingNar {
+            job_id,
+            store_path,
+            rx,
+        } = pending;
+        let key = (job_id.clone(), store_path.clone());
         match tokio::time::timeout(NAR_RECV_TIMEOUT, rx).await {
             Ok(Ok(Ok(bytes))) => Ok(bytes),
-            Ok(Ok(Err(reason))) => {
-                // Server-signalled failure. Buffer was already cleared in
-                // `fail()`.
-                Err(anyhow::anyhow!(
-                    "NAR transfer for {} failed: {}",
-                    store_path,
-                    reason
-                ))
-            }
+            Ok(Ok(Err(reason))) => Err(anyhow::anyhow!(
+                "NAR transfer for {} failed: {}",
+                store_path,
+                reason
+            )),
             Ok(Err(_)) => Err(anyhow::anyhow!(
                 "NarPush waiter dropped for {}/{} — connection closed or superseded?",
                 job_id,
@@ -103,6 +133,15 @@ impl NarReceiver {
                 ))
             }
         }
+    }
+
+    /// Convenience: register + await in one step. Prefer
+    /// [`Self::register`] + [`Self::await_pending`] when waiting on a batch
+    /// so that all waiters are in place before any server response arrives.
+    #[cfg(test)]
+    pub async fn wait_for(&self, job_id: &str, store_path: &str) -> Result<Vec<u8>> {
+        let pending = self.register(job_id, store_path);
+        self.await_pending(pending).await
     }
 
     /// Append a `NarPush` chunk. When `is_final` is true the assembled buffer
@@ -239,6 +278,30 @@ mod tests {
         r.fail("j", "/nix/store/x", "not in nar_storage".into());
         let err = task.await.unwrap().unwrap_err().to_string();
         assert!(err.contains("not in nar_storage"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn register_synchronously_installs_waiter_before_response() {
+        // Regression: a batched `NarRequest` registered every waiter
+        // synchronously before the request went on the wire. Server
+        // responses that arrived before the caller awaited the batch must
+        // still find a live waiter — otherwise late `NarUnavailable` frames
+        // surface as "no waiter — discarding" warnings and the caller
+        // hangs on the timeout.
+        let r = NarReceiver::new();
+        let p1 = r.register("job", "/nix/store/a");
+        let p2 = r.register("job", "/nix/store/b");
+
+        // Server delivers responses *before* the caller awaits.
+        r.fail("job", "/nix/store/a", "missing".into());
+        r.accept_chunk("job", "/nix/store/b", b"hello".to_vec(), true);
+
+        let r1 = r.await_pending(p1).await;
+        assert!(r1.is_err(), "registered waiter should see the failure");
+        assert!(r1.unwrap_err().to_string().contains("missing"));
+
+        let r2 = r.await_pending(p2).await;
+        assert_eq!(r2.unwrap(), b"hello");
     }
 
     #[tokio::test]

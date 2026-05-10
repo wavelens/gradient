@@ -419,7 +419,7 @@ in {
             server (issue #109).
           '';
           type = lib.types.ints.positive;
-          default = 256 * 1024 * 1024;
+          default = 10 * 1024 * 1024 * 1024;
         };
       };
     };

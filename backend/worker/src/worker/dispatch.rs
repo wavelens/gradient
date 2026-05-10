@@ -659,7 +659,7 @@ async fn run_job(
         }
         Job::Build(build_job) => {
             executor
-                .execute_build_job(build_job, updater, credentials)
+                .execute_build_job(build_job, updater, credentials, abort)
                 .await
         }
     }

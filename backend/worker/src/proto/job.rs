@@ -87,24 +87,66 @@ impl JobUpdater {
         cache_query_with_timeout(&self.job_id, &self.writer, &self.cache_waiters, paths, mode).await
     }
 
-    /// Send `NarRequest { paths }` and wait for every requested path to arrive
-    /// via chunked `NarPush` frames. Returns the assembled (still
+    /// Send `NarRequest { paths }` and wait for every requested path to
+    /// arrive via chunked `NarPush` frames. Returns the assembled (still
     /// zstd-compressed) NAR bytes per path in the order requested. Each path
     /// has its own [`NAR_RECV_TIMEOUT`].
+    ///
+    /// All waiters are registered **before** the `NarRequest` goes on the
+    /// wire so every server response (`NarPush` / `NarUnavailable` /
+    /// `NarAbort`) finds a live waiter — otherwise the server's late
+    /// responses for paths whose siblings already failed would land in the
+    /// dispatch loop with no destination and surface as
+    /// "received NarUnavailable/NarAbort with no waiter — discarding"
+    /// log spam.
+    ///
+    /// On the first failure all in-flight waiters are dropped (their
+    /// receivers report `RecvError` as the dispatcher discards them) and the
+    /// error is returned.
     pub async fn request_nars(&self, paths: Vec<String>) -> Result<Vec<(String, Vec<u8>)>> {
+        use futures::future::join_all;
+
         if paths.is_empty() {
             return Ok(Vec::new());
         }
-        // Send the bulk request, then await each path concurrently so a slow
-        // one doesn't serialize the rest.
+
+        // Register all waiters synchronously before the request goes on the
+        // wire so the dispatch loop has somewhere to deliver every server
+        // response, even one that races ahead of the next path's await.
+        let pendings: Vec<_> = paths
+            .iter()
+            .map(|p| self.nar_recv.register(&self.job_id, p))
+            .collect();
+
         self.writer.send(ClientMessage::NarRequest {
             job_id: self.job_id.clone(),
             paths: paths.clone(),
         })?;
-        let mut out = Vec::with_capacity(paths.len());
-        for p in paths {
-            let bytes = self.nar_recv.wait_for(&self.job_id, &p).await?;
-            out.push((p, bytes));
+
+        let waits = pendings.into_iter().map(|pending| {
+            let recv = self.nar_recv.clone();
+            async move {
+                let path = pending.store_path().to_owned();
+                let res = recv.await_pending(pending).await;
+                (path, res)
+            }
+        });
+
+        let results = join_all(waits).await;
+        let mut out = Vec::with_capacity(results.len());
+        let mut first_err: Option<anyhow::Error> = None;
+        for (path, res) in results {
+            match res {
+                Ok(bytes) => out.push((path, bytes)),
+                Err(e) => {
+                    if first_err.is_none() {
+                        first_err = Some(e);
+                    }
+                }
+            }
+        }
+        if let Some(e) = first_err {
+            return Err(e);
         }
         Ok(out)
     }

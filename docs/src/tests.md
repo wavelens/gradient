@@ -1289,6 +1289,56 @@ Tests (`cargo test -p proto`):
   inbound buffer happened to land at a non-16-byte-aligned allocator
   address.
 
+## NAR upload integrity — buffer-overflow poisoning, abort propagation, self-heal
+
+Four interlocking bugs let a session-buffer overflow produce a build that the
+server marked `Completed` while the path's NAR was never persisted:
+
+- `proto/src/handler/dispatch.rs` (`NarBuffers::append`) returned an error on
+  overflow but **did not poison the path** — subsequent chunks for the same
+  path could land in the buffer if the budget freed up, the partial buffer was
+  retained, and `on_nar_uploaded` would still call `mark_nar_stored` because
+  `nar_buffers.take()` returned the (now bogus) bytes or `None` (treated as
+  S3 mode).
+- `worker/src/executor/mod.rs` `execute_build_job` did not receive the
+  per-job `abort_rx` watch, so a server-side `AbortJob` had no path through
+  the build / compress / push loop. The worker silently kept streaming and
+  ended with `JobCompleted`.
+- `worker/src/proto/job.rs` `request_nars` registered each path's waiter
+  inside its `await` rather than synchronously before sending `NarRequest`,
+  so any server response that raced ahead found no waiter and surfaced as a
+  *"received NarUnavailable/NarAbort with no waiter — discarding"* warning.
+- `proto/src/handler/socket.rs` `serve_nar_request` left lying `cached_path`
+  rows behind when `nar_storage.get_stream(hash)` reported the NAR missing,
+  so the next worker requested the same missing path forever.
+
+Tests:
+
+- `proto::handler::dispatch::nar_buffers_tests::append_overflow_drops_partial_buffer_and_poisons_path`
+  (`cargo test -p proto`) — first overflowing chunk drops the partial buffer,
+  releases bytes back to the budget, marks the path poisoned, and any further
+  chunks return `AppendOutcome::Poisoned`.
+- `proto::handler::dispatch::nar_buffers_tests::clear_poison_allows_retry`
+  — a retry on a fresh job/path key clears the flag.
+- `proto::nar_recv::tests::register_synchronously_installs_waiter_before_response`
+  (`cargo test -p worker`) — every path in a batched `NarRequest` has a
+  live waiter at the time the server's first response arrives, including
+  paths whose siblings already failed.
+- `executor::compress::tests::check_abort_returns_err_after_signal`
+  (`cargo test -p worker`) — once the dispatch loop signals `abort_tx`,
+  `compress_and_push_paths` propagates the abort as an `Err`, which becomes
+  a `ClientMessage::JobFailed` instead of `JobCompleted`.
+
+`serve_nar_request`'s self-heal demote (`invalidate_cached_path`) is
+exercised end-to-end whenever an integration test routes through the
+`NarRequest` path with a missing NAR — the row is updated to
+`file_hash = NULL` so `Model::is_fully_cached()` returns `false` and the
+next `CacheQuery` no longer reports the path as cached. We deliberately
+demote rather than delete: `derivation_output.cached_path` is `ON DELETE
+SET NULL`, so a delete would silently drop the link plus the
+`cached_path_signature` placeholders, while a demote keeps the row's
+identity and lets a subsequent successful upload re-fill the metadata.
+
 ## Cache GC — guard shared-hash NARs and purge zombie cached_path rows
 
 Two bugs together inflated cache stats and over-deleted shared NARs:

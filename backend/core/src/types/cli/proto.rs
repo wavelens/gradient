@@ -70,7 +70,7 @@ pub struct ProtoArgs {
     #[arg(
         long,
         env = "GRADIENT_MAX_NAR_BUFFER_BYTES",
-        default_value_t = 256 * 1024 * 1024
+        default_value_t = 10 * 1024 * 1024 * 1024
     )]
     pub max_nar_buffer_bytes: usize,
 }
@@ -86,7 +86,7 @@ impl Default for ProtoArgs {
             nar_storage_open_timeout_secs: 60,
             nar_send_chunk_timeout_secs: 30,
             max_concurrent_nar_serves: 8,
-            max_nar_buffer_bytes: 256 * 1024 * 1024,
+            max_nar_buffer_bytes: 10 * 1024 * 1024 * 1024,
         }
     }
 }

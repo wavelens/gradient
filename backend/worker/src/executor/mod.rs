@@ -236,9 +236,11 @@ impl JobExecutor {
         job: BuildJob,
         updater: &mut JobUpdater,
         _credentials: &CredentialStore,
+        mut abort: watch::Receiver<bool>,
     ) -> Result<()> {
         let mut all_output_paths: Vec<String> = Vec::new();
         for (index, build_task) in job.builds.iter().enumerate() {
+            check_abort(&mut abort)?;
             // Move the build to `Building` on the server *before* anything
             // that can fail. The state machine only allows
             // `Building → Failed`; if we let prefetch (or anything before
@@ -316,9 +318,22 @@ impl JobExecutor {
 
         // Always compress+push every realised output. The worker is the sole
         // producer of compressed NARs; the server stores them and computes
-        // narinfo signatures from the uploaded metadata.
-        compress::compress_and_push_paths(&self.store, &all_output_paths, updater).await?;
+        // narinfo signatures from the uploaded metadata. Honours `abort`
+        // between paths so an `AbortJob` from the server (e.g. session NAR
+        // buffer exceeded) terminates the upload loop and surfaces as a
+        // `JobFailed`.
+        compress::compress_and_push_paths(&self.store, &all_output_paths, updater, &mut abort)
+            .await?;
 
         Ok(())
     }
+}
+
+/// Propagate a server-side `AbortJob` as an error so the surrounding job
+/// resolves to `JobFailed` instead of `JobCompleted`.
+pub(crate) fn check_abort(abort: &mut watch::Receiver<bool>) -> Result<()> {
+    if *abort.borrow() {
+        anyhow::bail!("job aborted by server");
+    }
+    Ok(())
 }

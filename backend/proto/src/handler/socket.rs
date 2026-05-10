@@ -21,7 +21,7 @@ use futures::{SinkExt, StreamExt};
 use gradient_core::types::ids::OrganizationId;
 use gradient_core::types::*;
 use rkyv::rancor::Error as RkyvError;
-use sea_orm::EntityTrait;
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio_tungstenite::{
@@ -376,6 +376,12 @@ pub(super) async fn serve_nar_request(
     let mut stream = match opened {
         Ok(Ok(Some((_size, s)))) => s,
         Ok(Ok(None)) => {
+            // The DB claims this path is cached but the storage layer
+            // disagrees. Demote the `cached_path` row so subsequent
+            // `CacheQuery`s no longer report it as cached and the next
+            // worker rebuilds (or substitutes) the path instead of
+            // requesting the same missing NAR forever.
+            invalidate_cached_path(state, hash, store_path).await;
             let reason = format!("NAR not found in cache for {store_path}");
             send_nar_unavailable(writer, job_id, store_path, reason.clone()).await;
             return Err(anyhow::anyhow!(reason));
@@ -519,6 +525,71 @@ pub(super) async fn serve_nar_request(
 
     debug!(%store_path, bytes = total, chunks = chunks_sent, "NarRequest served (streaming)");
     Ok(())
+}
+
+/// Demote a `cached_path` row whose NAR is no longer in `nar_storage`.
+///
+/// Sets `file_hash` / `nar_hash` / `file_size` / `nar_size` to NULL so
+/// `Model::is_fully_cached()` flips to `false` and the next `CacheQuery`
+/// stops claiming the path is available — letting the next build either
+/// rebuild from source or pick the path up from a configured upstream.
+///
+/// We deliberately do **not** delete the row: `derivation_output.cached_path`
+/// is an `ON DELETE SET NULL` FK, and dropping it would also reset every
+/// dependent `derivation_output.is_cached`. Demoting keeps the link intact
+/// while making the row honest about what's actually persisted.
+///
+/// Also flips every `derivation_output.is_cached` that points at this row
+/// back to `false` so the cache query path's `IsCached.eq(true)` filter
+/// stops matching it.
+async fn invalidate_cached_path(state: &Arc<ServerState>, hash: &str, store_path: &str) {
+    let row = match ECachedPath::find()
+        .filter(CCachedPath::Hash.eq(hash))
+        .one(&state.worker_db)
+        .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return,
+        Err(e) => {
+            warn!(%hash, %store_path, error = %e, "self-heal: cached_path lookup failed");
+            return;
+        }
+    };
+    let cached_path_id = row.id;
+    let mut active: ACachedPath = row.into();
+    active.file_hash = Set(None);
+    active.nar_hash = Set(None);
+    active.file_size = Set(None);
+    active.nar_size = Set(None);
+    if let Err(e) = active.update(&state.worker_db).await {
+        warn!(%hash, %store_path, error = %e, "self-heal: failed to demote cached_path row");
+        return;
+    }
+
+    let outputs = match EDerivationOutput::find()
+        .filter(CDerivationOutput::CachedPath.eq(cached_path_id))
+        .all(&state.worker_db)
+        .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            warn!(%hash, %store_path, error = %e, "self-heal: derivation_output lookup failed");
+            return;
+        }
+    };
+    for o in outputs {
+        let mut active: ADerivationOutput = o.into();
+        active.is_cached = Set(false);
+        if let Err(e) = active.update(&state.worker_db).await {
+            warn!(%hash, %store_path, error = %e, "self-heal: failed to clear derivation_output.is_cached");
+        }
+    }
+
+    warn!(
+        %hash,
+        %store_path,
+        "self-heal: NAR missing from storage; cached_path demoted so the path will be rebuilt"
+    );
 }
 
 async fn send_nar_unavailable(

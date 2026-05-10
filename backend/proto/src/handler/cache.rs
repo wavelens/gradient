@@ -9,7 +9,8 @@ use std::sync::Arc;
 
 use gradient_core::types::ids::{CacheId, CachedPathId, CachedPathSignatureId, OrganizationId};
 use gradient_core::types::*;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::sea_query::OnConflict;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use tracing::{error, warn};
 
 async fn build_local_cache_map(
@@ -89,33 +90,51 @@ async fn ensure_push_signatures(
     org_id: OrganizationId,
     cached_path_rows: &[entity::cached_path::Model],
 ) {
+    if cached_path_rows.is_empty() {
+        return;
+    }
+
     let org_caches = EOrganizationCache::find()
         .filter(COrganizationCache::Organization.eq(org_id))
         .all(&state.worker_db)
         .await
         .unwrap_or_default();
+    if org_caches.is_empty() {
+        return;
+    }
 
-    for cp in cached_path_rows {
-        for oc in &org_caches {
-            let exists = ECachedPathSignature::find()
-                .filter(CCachedPathSignature::CachedPath.eq(cp.id))
-                .filter(CCachedPathSignature::Cache.eq(oc.cache))
-                .one(&state.worker_db)
-                .await
-                .unwrap_or(None)
-                .is_some();
+    let now = gradient_core::types::now();
+    let rows: Vec<ACachedPathSignature> = cached_path_rows
+        .iter()
+        .flat_map(|cp| {
+            org_caches.iter().map(move |oc| ACachedPathSignature {
+                id: sea_orm::ActiveValue::Set(CachedPathSignatureId::now_v7()),
+                cached_path: sea_orm::ActiveValue::Set(cp.id),
+                cache: sea_orm::ActiveValue::Set(oc.cache),
+                signature: sea_orm::ActiveValue::Set(None),
+                created_at: sea_orm::ActiveValue::Set(now),
+            })
+        })
+        .collect();
 
-            if !exists {
-                let sig_row = ACachedPathSignature {
-                    id: sea_orm::ActiveValue::Set(CachedPathSignatureId::now_v7()),
-                    cached_path: sea_orm::ActiveValue::Set(cp.id),
-                    cache: sea_orm::ActiveValue::Set(oc.cache),
-                    signature: sea_orm::ActiveValue::Set(None),
-                    created_at: sea_orm::ActiveValue::Set(gradient_core::types::now()),
-                };
-                let _ = sig_row.insert(&state.worker_db).await;
-            }
-        }
+    let result = ECachedPathSignature::insert_many(rows)
+        .on_conflict(
+            OnConflict::columns([
+                CCachedPathSignature::CachedPath,
+                CCachedPathSignature::Cache,
+            ])
+            .do_nothing()
+            .to_owned(),
+        )
+        .do_nothing()
+        .exec(&state.worker_db)
+        .await;
+    if let Err(e) = result {
+        warn!(
+            %org_id,
+            error = %e,
+            "failed to insert cached_path_signature placeholders (Push mode)"
+        );
     }
 }
 

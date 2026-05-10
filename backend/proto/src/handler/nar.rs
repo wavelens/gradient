@@ -9,6 +9,7 @@ use gradient_core::nix_hash::normalize_nar_hash;
 use gradient_core::types::ids::{CacheId, CacheMetricId, CachedPathId, CachedPathSignatureId};
 use gradient_core::types::*;
 use scheduler::Scheduler;
+use sea_orm::sea_query::OnConflict;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
 use tracing::{info, warn};
 
@@ -239,32 +240,38 @@ async fn ensure_signature_placeholders(
         }
     };
 
-    for oc in org_caches {
-        let exists = ECachedPathSignature::find()
-            .filter(CCachedPathSignature::CachedPath.eq(cached_path_row.id))
-            .filter(CCachedPathSignature::Cache.eq(oc.cache))
-            .one(&state.worker_db)
-            .await
-            .unwrap_or(None)
-            .is_some();
-        if exists {
-            continue;
-        }
+    if org_caches.is_empty() {
+        return;
+    }
 
-        let am = ACachedPathSignature {
+    let rows: Vec<ACachedPathSignature> = org_caches
+        .into_iter()
+        .map(|oc| ACachedPathSignature {
             id: Set(CachedPathSignatureId::now_v7()),
             cached_path: Set(cached_path_row.id),
             cache: Set(oc.cache),
             signature: Set(None),
             created_at: Set(now),
-        };
-        if let Err(e) = am.insert(&state.worker_db).await {
-            warn!(
-                store_path = %cached_path_row.store_path,
-                cache = %oc.cache,
-                error = %e,
-                "failed to insert cached_path_signature placeholder"
-            );
-        }
+        })
+        .collect();
+
+    let result = ECachedPathSignature::insert_many(rows)
+        .on_conflict(
+            OnConflict::columns([
+                CCachedPathSignature::CachedPath,
+                CCachedPathSignature::Cache,
+            ])
+            .do_nothing()
+            .to_owned(),
+        )
+        .do_nothing()
+        .exec(&state.worker_db)
+        .await;
+    if let Err(e) = result {
+        warn!(
+            store_path = %cached_path_row.store_path,
+            error = %e,
+            "failed to insert cached_path_signature placeholders"
+        );
     }
 }
