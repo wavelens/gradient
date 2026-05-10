@@ -21,7 +21,9 @@ import { AutoCompleteModule } from 'primeng/autocomplete';
 import { SelectModule } from 'primeng/select';
 import { CheckboxModule } from 'primeng/checkbox';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
+import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { ConcurrencyPolicy, Integration, Project, ProjectIntegrationLink } from '@core/models';
+import { injectProjectAccess } from '@core/resolvers/inject-access';
 
 @Component({
   selector: 'app-project-settings',
@@ -38,6 +40,8 @@ import { ConcurrencyPolicy, Integration, Project, ProjectIntegrationLink } from 
     SelectModule,
     CheckboxModule,
     LoadingSpinnerComponent,
+    WritableDirective,
+    ManagedDisableDirective,
   ],
   templateUrl: './project-settings.component.html',
   styleUrl: './project-settings.component.scss',
@@ -48,6 +52,8 @@ export class ProjectSettingsComponent implements OnInit {
   private projectsService = inject(ProjectsService);
   private orgsService = inject(OrganizationsService);
   private integrationsService = inject(IntegrationsService);
+
+  access = injectProjectAccess();
 
   loading = signal(true);
   saving = signal(false);
