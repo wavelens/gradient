@@ -17,6 +17,8 @@ import { TriggersService } from '@core/services/triggers.service';
 import { IntegrationsService } from '@core/services/integrations.service';
 import { OrganizationsService } from '@core/services/organizations.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
+import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
+import { injectProjectAccess } from '@core/resolvers/inject-access';
 import {
   ProjectTrigger,
   TriggerType,
@@ -71,6 +73,8 @@ const DEFAULT_FORM: TriggerFormState = {
     SelectModule,
     CheckboxModule,
     LoadingSpinnerComponent,
+    WritableDirective,
+    ManagedDisableDirective,
   ],
   templateUrl: './project-triggers.component.html',
   styleUrl: './project-triggers.component.scss',
@@ -80,6 +84,16 @@ export class ProjectTriggersComponent implements OnInit {
   private triggersService = inject(TriggersService);
   private integrationsService = inject(IntegrationsService);
   private orgsService = inject(OrganizationsService);
+  private accessSvc = inject(AccessService);
+
+  access = injectProjectAccess();
+
+  rowDisabled = computed(
+    () =>
+      this.firingId() !== null ||
+      this.deletingId() !== null ||
+      this.accessSvc.shouldDisableInput(this.access()),
+  );
 
   loading = signal(true);
   saving = signal(false);
