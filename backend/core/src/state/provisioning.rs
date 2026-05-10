@@ -6,7 +6,7 @@
 
 use super::{
     StateApiKey, StateCache, StateConfiguration, StateIntegration, StateOrganization, StateProject,
-    StateTrigger, StateUpstream, StateUser, StateWorker,
+    StateRole, StateTrigger, StateUpstream, StateUser, StateWorker,
 };
 use crate::ci::{
     ForgeType, GITHUB_APP_INTEGRATION_NAME, IntegrationKind, encrypt_webhook_secret,
@@ -46,6 +46,7 @@ pub(super) async fn apply_state_to_database(
 
     app.apply_users(&config.users).await?;
     app.apply_organizations(&config.organizations).await?;
+    app.apply_roles(&config.roles).await?;
     app.apply_projects(&config.projects).await?;
     app.apply_integrations(&config.integrations).await?;
     app.apply_project_integration_links(&config.projects, &config.integrations)
@@ -638,6 +639,64 @@ impl<'a> StateApplicator<'a> {
         Ok(())
     }
 
+    // ── apply_roles ───────────────────────────────────────────────────────────
+
+    async fn apply_roles(
+        &self,
+        state_roles: &HashMap<String, StateRole>,
+    ) -> Result<(), DynError> {
+        let org_lookup = self.org_lookup().await?;
+
+        for state_role in state_roles.values() {
+            let org_id = lookup_id(&org_lookup, &state_role.organization, "Organization")?;
+
+            let mut perms = Vec::with_capacity(state_role.permissions.len());
+            for wire in &state_role.permissions {
+                let p = crate::permissions::Permission::from_wire_name(wire).ok_or_else(|| {
+                    format!(
+                        "Role '{}' references unknown permission '{}'",
+                        state_role.name, wire
+                    )
+                })?;
+                perms.push(p);
+            }
+            if perms.is_empty() {
+                return Err(format!(
+                    "Role '{}' must declare at least one permission",
+                    state_role.name
+                )
+                .into());
+            }
+            let mask = crate::permissions::mask_from(&perms);
+
+            let existing = role::Entity::find()
+                .filter(role::Column::Name.eq(&state_role.name))
+                .filter(role::Column::Organization.eq(org_id))
+                .one(self.db)
+                .await?;
+
+            if let Some(existing) = existing {
+                let mut active: role::ActiveModel = existing.into();
+                active.permission = Set(mask);
+                active.managed = Set(true);
+                active.update(self.db).await?;
+                tracing::info!(name = %state_role.name, "Updated managed role");
+            } else {
+                let active = role::ActiveModel {
+                    id: Set(RoleId::now_v7()),
+                    name: Set(state_role.name.clone()),
+                    organization: Set(Some(org_id)),
+                    permission: Set(mask),
+                    managed: Set(true),
+                };
+                active.insert(self.db).await?;
+                tracing::info!(name = %state_role.name, "Created managed role");
+            }
+        }
+
+        Ok(())
+    }
+
     // ── apply_api_keys ────────────────────────────────────────────────────────
 
     async fn apply_api_keys(
@@ -645,6 +704,7 @@ impl<'a> StateApplicator<'a> {
         state_api_keys: &HashMap<String, StateApiKey>,
     ) -> Result<(), DynError> {
         let user_lookup = self.user_lookup().await?;
+        let org_lookup = self.org_lookup().await?;
         let now = now();
 
         for state_api_key in state_api_keys.values() {
@@ -657,6 +717,35 @@ impl<'a> StateApplicator<'a> {
                         state_api_key.owned_by, state_api_key.name
                     )
                 })?;
+
+            let mut perms = Vec::with_capacity(state_api_key.permissions.len());
+            for wire in &state_api_key.permissions {
+                let p = crate::permissions::Permission::from_wire_name(wire).ok_or_else(|| {
+                    format!(
+                        "API key '{}' references unknown permission '{}'",
+                        state_api_key.name, wire
+                    )
+                })?;
+                perms.push(p);
+            }
+            if perms.is_empty() {
+                return Err(format!(
+                    "API key '{}' must declare at least one permission",
+                    state_api_key.name
+                )
+                .into());
+            }
+            let mask = crate::permissions::mask_from(&perms);
+
+            let pinned_org = match &state_api_key.organization {
+                None => None,
+                Some(name) => Some(org_lookup.get(name).copied().ok_or_else(|| {
+                    format!(
+                        "Organization '{}' referenced by API key '{}' not found",
+                        name, state_api_key.name
+                    )
+                })?),
+            };
 
             let (key_value, key_path) =
                 read_credential("api", &state_api_key.name, "key", "API key file")?;
@@ -672,6 +761,8 @@ impl<'a> StateApplicator<'a> {
                 let mut api_key: api::ActiveModel = api_key_model.into();
                 api_key.key = Set(key_hash);
                 api_key.managed = Set(true);
+                api_key.permission = Set(mask);
+                api_key.organization = Set(pinned_org);
                 api_key.update(self.db).await?;
                 tracing::info!(name = %state_api_key.name, "Updated managed API key");
             } else {
@@ -685,8 +776,8 @@ impl<'a> StateApplicator<'a> {
                     managed: Set(true),
                     expires_at: Set(None),
                     revoked_at: Set(None),
-                    permission: Set(crate::permissions::admin_mask()),
-                    organization: Set(None),
+                    permission: Set(mask),
+                    organization: Set(pinned_org),
                 };
                 api_key_model.insert(self.db).await?;
                 tracing::info!(name = %state_api_key.name, "Created managed API key");
@@ -1004,6 +1095,48 @@ impl<'a> StateApplicator<'a> {
         unmark_managed!(db, project, project_names, name, delete_state, "project");
         unmark_managed!(db, cache, cache_names, name, delete_state, "cache");
         unmark_managed!(db, api, api_key_names, name, delete_state, "API key");
+
+        // Roles: identified by (organization, name) so we can't use the
+        // single-column `unmark_managed!` helper.
+        let role_keys: HashSet<(String, String)> = config
+            .roles
+            .values()
+            .map(|r| (r.organization.clone(), r.name.clone()))
+            .collect();
+        let org_lookup = self.org_lookup().await?;
+        let mut org_name_by_id: HashMap<OrganizationId, String> = HashMap::new();
+        for (name, id) in &org_lookup {
+            org_name_by_id.insert(*id, name.clone());
+        }
+        let managed_roles = role::Entity::find()
+            .filter(role::Column::Managed.eq(true))
+            .all(db)
+            .await?;
+        for managed in managed_roles {
+            let owner_org = match managed.organization {
+                Some(id) => id,
+                None => continue,
+            };
+            let owner_name = match org_name_by_id.get(&owner_org) {
+                Some(n) => n.clone(),
+                None => continue,
+            };
+            let key = (owner_name, managed.name.clone());
+            if role_keys.contains(&key) {
+                continue;
+            }
+            let role_id = managed.id;
+            let role_name = managed.name.clone();
+            if delete_state {
+                role::Entity::delete_by_id(role_id).exec(db).await?;
+                tracing::info!(role = %role_name, "Deleted managed role");
+            } else {
+                let mut active: role::ActiveModel = managed.into();
+                active.managed = Set(false);
+                active.update(db).await?;
+                tracing::info!(role = %role_name, "Unmarked managed role");
+            }
+        }
 
         let managed_workers = worker_registration::Entity::find()
             .filter(worker_registration::Column::Managed.eq(true))

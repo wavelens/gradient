@@ -174,6 +174,23 @@ pub struct StateApiKey {
     pub name: String,
     pub key_file: String,
     pub owned_by: String,
+    /// Capability identifiers (matching `Permission::as_wire_name`) the key
+    /// should grant. Required — there is no safe default.
+    pub permissions: Vec<String>,
+    /// Optional organization name to pin the key to. `None` = unscoped.
+    #[serde(default)]
+    pub organization: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StateRole {
+    pub name: String,
+    /// Organization the role belongs to. State-managed roles are always
+    /// org-scoped — there is no way to define a global state-managed role.
+    pub organization: String,
+    /// Capability identifiers (matching `Permission::as_wire_name`) the role
+    /// grants. Required — there is no safe default.
+    pub permissions: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -207,6 +224,8 @@ pub struct StateConfiguration {
     pub projects: HashMap<String, StateProject>,
     #[serde(default)]
     pub caches: HashMap<String, StateCache>,
+    #[serde(default)]
+    pub roles: HashMap<String, StateRole>,
     #[serde(default)]
     pub api_keys: HashMap<String, StateApiKey>,
     #[serde(default)]
@@ -379,11 +398,77 @@ impl StateConfiguration {
             }
         }
 
+        let mut role_keys_seen_per_org: std::collections::HashSet<(String, String)> =
+            std::collections::HashSet::new();
+        for role in self.roles.values() {
+            if !self.organizations.contains_key(&role.organization) {
+                errors.push(ValidationError {
+                    field: format!("roles.{}.organization", role.name),
+                    message: format!("Organization '{}' does not exist", role.organization),
+                });
+            }
+            if role.permissions.is_empty() {
+                errors.push(ValidationError {
+                    field: format!("roles.{}.permissions", role.name),
+                    message: "At least one permission must be declared.".into(),
+                });
+            }
+            for wire in &role.permissions {
+                if crate::permissions::Permission::from_wire_name(wire).is_none() {
+                    errors.push(ValidationError {
+                        field: format!("roles.{}.permissions", role.name),
+                        message: format!("Unknown permission '{}'", wire),
+                    });
+                }
+            }
+            if matches!(role.name.as_str(), "Admin" | "Write" | "View") {
+                errors.push(ValidationError {
+                    field: format!("roles.{}.name", role.name),
+                    message: format!(
+                        "Role name '{}' collides with a built-in role; pick a different name.",
+                        role.name
+                    ),
+                });
+            }
+            let key = (role.organization.clone(), role.name.clone());
+            if !role_keys_seen_per_org.insert(key) {
+                errors.push(ValidationError {
+                    field: format!("roles.{}.name", role.name),
+                    message: format!(
+                        "Duplicate role '{}' in organization '{}'",
+                        role.name, role.organization
+                    ),
+                });
+            }
+        }
+
         for api_key in self.api_keys.values() {
             if !self.users.contains_key(&api_key.owned_by) {
                 errors.push(ValidationError {
                     field: format!("api_keys.{}.owned_by", api_key.name),
                     message: format!("User '{}' does not exist", api_key.owned_by),
+                });
+            }
+            if api_key.permissions.is_empty() {
+                errors.push(ValidationError {
+                    field: format!("api_keys.{}.permissions", api_key.name),
+                    message: "At least one permission must be declared.".into(),
+                });
+            }
+            for wire in &api_key.permissions {
+                if crate::permissions::Permission::from_wire_name(wire).is_none() {
+                    errors.push(ValidationError {
+                        field: format!("api_keys.{}.permissions", api_key.name),
+                        message: format!("Unknown permission '{}'", wire),
+                    });
+                }
+            }
+            if let Some(org) = &api_key.organization
+                && !self.organizations.contains_key(org)
+            {
+                errors.push(ValidationError {
+                    field: format!("api_keys.{}.organization", api_key.name),
+                    message: format!("Organization '{}' does not exist", org),
                 });
             }
         }
