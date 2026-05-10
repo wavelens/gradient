@@ -5,14 +5,16 @@
  */
 
 use crate::audit::{RequestInfo, events, record as audit_record};
-use crate::authorization::{generate_api_key, hash_api_key};
+use crate::authorization::{MaybeApiKey, generate_api_key, hash_api_key};
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
+use crate::permissions::{self, Permission, PermissionMask, mask_from, mask_to_vec};
 use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
 use axum::{Extension, Json};
 
 use chrono::Duration;
+use gradient_core::db::get_any_organization_by_name;
 use gradient_core::types::consts::*;
 use gradient_core::types::input::{validate_display_name, validate_username};
 use gradient_core::types::*;
@@ -43,9 +45,36 @@ pub struct ApiKeyRequest {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct CreateApiKeyRequest {
     pub name: String,
-    /// Lifetime in days. `None` means the key never expires (legacy behaviour).
+    /// Lifetime in days. `None` means the key never expires.
     #[serde(default)]
     pub expires_in_days: Option<u32>,
+    /// Capability identifiers (matching `Permission::as_wire_name`) the new
+    /// key should grant. Must be non-empty.
+    pub permissions: Vec<String>,
+    /// Optional organization name to pin the key to. `None` = key works in
+    /// every org the owning user belongs to (legacy behavior).
+    #[serde(default)]
+    pub organization: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct PatchApiKeyRequest {
+    pub name: Option<String>,
+    /// Wholesale replacement of the key's permission set. Omit to leave the
+    /// existing mask alone.
+    pub permissions: Option<Vec<String>>,
+    /// Patch semantics for the org pin: omit to leave alone, `Some(name)` to
+    /// pin, `Some(null)` (i.e. JSON null) to unpin.
+    #[serde(default, deserialize_with = "deserialize_optional_field")]
+    pub organization: Option<Option<String>>,
+}
+
+fn deserialize_optional_field<'de, T, D>(de: D) -> Result<Option<Option<T>>, D::Error>
+where
+    T: serde::Deserialize<'de>,
+    D: serde::Deserializer<'de>,
+{
+    Ok(Some(Option::<T>::deserialize(de)?))
 }
 
 #[derive(Serialize, Debug)]
@@ -53,10 +82,24 @@ pub struct ApiKeyInfo {
     pub id: String,
     pub name: String,
     pub managed: bool,
+    pub permissions: Vec<&'static str>,
+    /// Org name (resolved from the pinned org id at response time), or `null`.
+    pub organization: Option<String>,
     pub created_at: String,
     pub last_used_at: Option<String>,
     pub expires_at: Option<String>,
     pub revoked_at: Option<String>,
+}
+
+#[derive(Serialize, Debug)]
+pub struct PermissionEntry {
+    pub id: &'static str,
+    pub mutating: bool,
+}
+
+#[derive(Serialize, Debug)]
+pub struct ApiKeyPermissionsResponse {
+    pub available_permissions: Vec<PermissionEntry>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -218,6 +261,108 @@ fn last_used_or_none(dt: chrono::NaiveDateTime) -> Option<String> {
     }
 }
 
+fn parse_permissions(wire: &[String]) -> WebResult<PermissionMask> {
+    let mut perms = Vec::with_capacity(wire.len());
+    for w in wire {
+        let parsed = Permission::from_wire_name(w).ok_or_else(|| {
+            WebError::bad_request(format!(
+                "Unknown permission '{}'. See GET /user/keys/permissions for the catalogue.",
+                w
+            ))
+        })?;
+        perms.push(parsed);
+    }
+    if perms.is_empty() {
+        return Err(WebError::bad_request(
+            "At least one permission is required for an API key.",
+        ));
+    }
+    Ok(mask_from(&perms))
+}
+
+async fn resolve_org_pin(
+    state: &Arc<ServerState>,
+    user_id: UserId,
+    name: Option<String>,
+) -> WebResult<Option<OrganizationId>> {
+    let Some(name) = name else {
+        return Ok(None);
+    };
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    let org = get_any_organization_by_name(Arc::clone(state), trimmed.into())
+        .await?
+        .ok_or_else(|| WebError::bad_request(format!("Unknown organization '{}'", trimmed)))?;
+    let is_member = crate::access::is_org_member(state, user_id, org.id, None).await?;
+    if !is_member {
+        return Err(WebError::bad_request(format!(
+            "You are not a member of organization '{}'.",
+            trimmed
+        )));
+    }
+    Ok(Some(org.id))
+}
+
+fn forbid_via_api_key(api_key: &MaybeApiKey) -> WebResult<()> {
+    if api_key.as_ref().is_some() {
+        return Err(WebError::forbidden(
+            "API keys cannot manage API keys. Use a session token.",
+        ));
+    }
+    Ok(())
+}
+
+async fn org_name_lookup(
+    state: &Arc<ServerState>,
+    org_ids: &[OrganizationId],
+) -> WebResult<std::collections::HashMap<OrganizationId, String>> {
+    if org_ids.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+    let rows = EOrganization::find()
+        .filter(COrganization::Id.is_in(org_ids.to_vec()))
+        .all(&state.web_db)
+        .await?;
+    Ok(rows.into_iter().map(|o| (o.id, o.name)).collect())
+}
+
+fn api_key_info(
+    key: entity::api::Model,
+    org_names: &std::collections::HashMap<OrganizationId, String>,
+) -> ApiKeyInfo {
+    ApiKeyInfo {
+        id: key.id.to_string(),
+        name: key.name,
+        managed: key.managed,
+        permissions: mask_to_vec(key.permission)
+            .into_iter()
+            .map(|p| p.as_wire_name())
+            .collect(),
+        organization: key.organization.and_then(|id| org_names.get(&id).cloned()),
+        created_at: fmt_dt(key.created_at),
+        last_used_at: last_used_or_none(key.last_used_at),
+        expires_at: fmt_opt_dt(key.expires_at),
+        revoked_at: fmt_opt_dt(key.revoked_at),
+    }
+}
+
+pub async fn get_key_permissions()
+-> WebResult<Json<BaseResponse<ApiKeyPermissionsResponse>>> {
+    let available_permissions = Permission::ALL
+        .iter()
+        .copied()
+        .map(|p| PermissionEntry {
+            id: p.as_wire_name(),
+            mutating: permissions::is_mutating(p),
+        })
+        .collect();
+    Ok(ok_json(ApiKeyPermissionsResponse {
+        available_permissions,
+    }))
+}
+
 pub async fn get_keys(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -228,28 +373,29 @@ pub async fn get_keys(
         .all(&state.web_db)
         .await?;
 
-    let api_keys: Vec<ApiKeyInfo> = api_keys
+    let pinned: Vec<OrganizationId> = api_keys.iter().filter_map(|k| k.organization).collect();
+    let org_names = org_name_lookup(&state, &pinned).await?;
+
+    let infos: Vec<ApiKeyInfo> = api_keys
         .into_iter()
-        .map(|k| ApiKeyInfo {
-            id: k.id.to_string(),
-            name: k.name,
-            managed: k.managed,
-            created_at: fmt_dt(k.created_at),
-            last_used_at: last_used_or_none(k.last_used_at),
-            expires_at: fmt_opt_dt(k.expires_at),
-            revoked_at: fmt_opt_dt(k.revoked_at),
-        })
+        .map(|k| api_key_info(k, &org_names))
         .collect();
 
-    Ok(ok_json(api_keys))
+    Ok(ok_json(infos))
 }
 
 pub async fn post_keys(
     state: State<Arc<ServerState>>,
     headers: HeaderMap,
     Extension(user): Extension<MUser>,
+    Extension(api_key_caller): Extension<MaybeApiKey>,
     Json(body): Json<CreateApiKeyRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
+    forbid_via_api_key(&api_key_caller)?;
+
+    let mask = parse_permissions(&body.permissions)?;
+    let org_pin = resolve_org_pin(&state, user.id, body.organization.clone()).await?;
+
     let existing_api_key = EApi::find()
         .filter(
             Condition::all()
@@ -258,7 +404,6 @@ pub async fn post_keys(
         )
         .one(&state.web_db)
         .await?;
-
     if existing_api_key.is_some() {
         return Err(WebError::already_exists("API-Key Name"));
     }
@@ -278,10 +423,9 @@ pub async fn post_keys(
         managed: Set(false),
         expires_at: Set(expires_at),
         revoked_at: Set(None),
-        permission: Set(gradient_core::permissions::admin_mask()),
-        organization: Set(None),
+        permission: Set(mask),
+        organization: Set(org_pin),
     };
-
     let inserted = api_key.insert(&state.web_db).await?;
 
     let info = RequestInfo::from_headers(&headers);
@@ -294,24 +438,90 @@ pub async fn post_keys(
             "api_key_id": inserted.id.to_string(),
             "name": body.name,
             "expires_in_days": body.expires_in_days,
+            "permissions_mask": mask,
+            "organization_id": org_pin.map(|id| id.to_string()),
         })),
     )
     .await;
 
-    let res = BaseResponse {
+    Ok(Json(BaseResponse {
         error: false,
         message: format!("GRAD{}", raw_key),
-    };
+    }))
+}
 
-    Ok(Json(res))
+pub async fn patch_key(
+    state: State<Arc<ServerState>>,
+    headers: HeaderMap,
+    Extension(user): Extension<MUser>,
+    Extension(api_key_caller): Extension<MaybeApiKey>,
+    Path(api_id): Path<ApiId>,
+    Json(body): Json<PatchApiKeyRequest>,
+) -> WebResult<Json<BaseResponse<ApiKeyInfo>>> {
+    forbid_via_api_key(&api_key_caller)?;
+
+    let api_key = EApi::find_by_id(api_id)
+        .one(&state.web_db)
+        .await?
+        .or_not_found("API-Key")?;
+    if api_key.owned_by != user.id {
+        return Err(WebError::not_found("API-Key"));
+    }
+    if api_key.managed {
+        return Err(WebError::forbidden(
+            "Cannot modify a state-managed API key.",
+        ));
+    }
+
+    let previous_mask = api_key.permission;
+    let previous_org = api_key.organization;
+    let mut active: AApi = api_key.into_active_model();
+
+    if let Some(name) = body.name {
+        active.name = Set(name);
+    }
+    let mut new_mask = previous_mask;
+    if let Some(perms) = body.permissions {
+        new_mask = parse_permissions(&perms)?;
+        active.permission = Set(new_mask);
+    }
+    let mut new_org = previous_org;
+    if let Some(maybe_name) = body.organization {
+        new_org = resolve_org_pin(&state, user.id, maybe_name).await?;
+        active.organization = Set(new_org);
+    }
+
+    let updated = active.update(&state.web_db).await?;
+
+    let request_info = RequestInfo::from_headers(&headers);
+    audit_record(
+        &state.web_db,
+        Some(user.id),
+        events::API_KEY_UPDATE,
+        &request_info,
+        Some(serde_json::json!({
+            "api_key_id": api_id.to_string(),
+            "previous_permissions_mask": previous_mask,
+            "new_permissions_mask": new_mask,
+            "previous_organization_id": previous_org.map(|i| i.to_string()),
+            "new_organization_id": new_org.map(|i| i.to_string()),
+        })),
+    )
+    .await;
+
+    let pinned: Vec<OrganizationId> = updated.organization.iter().copied().collect();
+    let org_names = org_name_lookup(&state, &pinned).await?;
+    Ok(ok_json(api_key_info(updated, &org_names)))
 }
 
 pub async fn delete_keys(
     state: State<Arc<ServerState>>,
     headers: HeaderMap,
     Extension(user): Extension<MUser>,
+    Extension(api_key_caller): Extension<MaybeApiKey>,
     Json(body): Json<ApiKeyRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
+    forbid_via_api_key(&api_key_caller)?;
     let api_key = EApi::find()
         .filter(
             Condition::all()
@@ -358,8 +568,10 @@ pub async fn post_key_revoke(
     state: State<Arc<ServerState>>,
     headers: HeaderMap,
     Extension(user): Extension<MUser>,
+    Extension(api_key_caller): Extension<MaybeApiKey>,
     Path(api_id): Path<ApiId>,
 ) -> WebResult<Json<BaseResponse<String>>> {
+    forbid_via_api_key(&api_key_caller)?;
     let api_key = EApi::find_by_id(api_id)
         .one(&state.web_db)
         .await?

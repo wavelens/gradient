@@ -25,6 +25,7 @@ pub mod events {
     pub const REGISTER: &str = "register";
     pub const USER_DELETE: &str = "user.delete";
     pub const API_KEY_CREATE: &str = "api_key.create";
+    pub const API_KEY_UPDATE: &str = "api_key.update";
     pub const API_KEY_REVOKE: &str = "api_key.revoke";
     pub const API_KEY_DELETE: &str = "api_key.delete";
     pub const SESSION_REVOKE: &str = "session.revoke";

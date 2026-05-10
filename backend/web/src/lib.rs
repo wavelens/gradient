@@ -337,6 +337,8 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
                 .post(user::post_keys)
                 .delete(user::delete_keys),
         )
+        .route("/user/keys/permissions", get(user::get_key_permissions))
+        .route("/user/keys/{api_id}", patch(user::patch_key))
         .route("/user/keys/{api_id}/revoke", post(user::post_key_revoke))
         .route("/user/sessions", get(user::get_sessions))
         .route(
