@@ -235,10 +235,10 @@ async fn resolve_badge_user(
 ) -> Result<Option<MUser>, WebError> {
     match token {
         Some(tok) => {
-            let token_data = crate::authorization::decode_jwt(State(Arc::clone(state)), tok)
+            let decoded = crate::authorization::decode_jwt(State(Arc::clone(state)), tok)
                 .await
                 .map_err(|_| WebError::unauthorized("Invalid token"))?;
-            Ok(EUser::find_by_id(token_data.claims.id)
+            Ok(EUser::find_by_id(decoded.user_id())
                 .one(&state.web_db)
                 .await?)
         }

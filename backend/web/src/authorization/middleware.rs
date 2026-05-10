@@ -14,6 +14,7 @@ use gradient_core::types::*;
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
 use std::sync::Arc;
 
+use super::api_key::MaybeApiKey;
 use super::jwt::{decode_jwt, extract_bearer_or_cookie, token_from_cookie};
 use crate::audit::{RequestInfo, events, record as audit_record};
 use crate::error::{WebError, WebResult};
@@ -106,7 +107,7 @@ pub async fn authorize(
         return Err(WebError::forbidden("Authorization header not found"));
     };
 
-    let token_data = match decode_jwt(state.clone(), token_str).await {
+    let decoded = match decode_jwt(state.clone(), token_str).await {
         Ok(t) => t,
         Err(_) => {
             audit_deny(&state, None, info, method, path, "Unable to decode token").await;
@@ -114,26 +115,22 @@ pub async fn authorize(
         }
     };
 
-    let current_user = match EUser::find_by_id(token_data.claims.id)
-        .one(&state.web_db)
-        .await?
-    {
+    let user_id = decoded.user_id();
+    let api_key_extension = match decoded.api_key_context() {
+        Some(ctx) => MaybeApiKey::from_key(*ctx),
+        None => MaybeApiKey::none(),
+    };
+
+    let current_user = match EUser::find_by_id(user_id).one(&state.web_db).await? {
         Some(u) => u,
         None => {
-            audit_deny(
-                &state,
-                Some(token_data.claims.id),
-                info,
-                method,
-                path,
-                "User not found",
-            )
-            .await;
+            audit_deny(&state, Some(user_id), info, method, path, "User not found").await;
             return Err(WebError::unauthorized("User not found"));
         }
     };
 
     req.extensions_mut().insert(current_user);
+    req.extensions_mut().insert(api_key_extension);
     Ok(next.run(req).await)
 }
 
@@ -146,20 +143,24 @@ pub async fn authorize_optional(
     mut req: Request,
     next: Next,
 ) -> Response<Body> {
-    let maybe_user = if let Some(token_str) = extract_bearer_or_cookie(req.headers()) {
-        if let Ok(token_data) = decode_jwt(State(Arc::clone(&state)), token_str).await {
-            EUser::find_by_id(token_data.claims.id)
-                .one(&state.web_db)
-                .await
-                .ok()
-                .flatten()
-        } else {
-            None
+    let mut maybe_user: Option<MUser> = None;
+    let mut maybe_api_key = MaybeApiKey::none();
+
+    if let Some(token_str) = extract_bearer_or_cookie(req.headers())
+        && let Ok(decoded) = decode_jwt(State(Arc::clone(&state)), token_str).await
+    {
+        if let Some(ctx) = decoded.api_key_context() {
+            maybe_api_key = MaybeApiKey::from_key(*ctx);
         }
-    } else {
-        None
-    };
+        maybe_user = EUser::find_by_id(decoded.user_id())
+            .one(&state.web_db)
+            .await
+            .ok()
+            .flatten();
+    }
+
     req.extensions_mut().insert(MaybeUser(maybe_user));
+    req.extensions_mut().insert(maybe_api_key);
     next.run(req).await
 }
 
