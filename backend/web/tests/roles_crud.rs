@@ -52,6 +52,7 @@ fn admin_role_row() -> role::Model {
         name: "Admin".into(),
         organization: None,
         permission: admin_mask(),
+        managed: false,
     }
 }
 
@@ -61,6 +62,7 @@ fn view_role_row() -> role::Model {
         name: "View".into(),
         organization: None,
         permission: view_mask(),
+        managed: false,
     }
 }
 
@@ -70,6 +72,7 @@ fn write_role_row() -> role::Model {
         name: "Write".into(),
         organization: None,
         permission: write_mask(),
+        managed: false,
     }
 }
 
@@ -79,6 +82,7 @@ fn custom_role_row(id: RoleId, name: &str, permission: i64) -> role::Model {
         name: name.into(),
         organization: Some(org_id()),
         permission,
+        managed: false,
     }
 }
 
@@ -461,6 +465,7 @@ fn custom_role_with_manage_webhooks_can_list_webhooks() {
             name: "webhook-ops".into(),
             organization: Some(org_id()),
             permission: Permission::ViewOrg.bit() | Permission::ManageWebhooks.bit(),
+            managed: false,
         };
 
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
@@ -498,6 +503,7 @@ fn custom_role_without_manage_webhooks_is_rejected() {
             name: "view-only".into(),
             organization: Some(org_id()),
             permission: Permission::ViewOrg.bit(),
+            managed: false,
         };
 
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)

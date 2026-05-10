@@ -463,6 +463,7 @@ mod tests {
             name: "fixture".into(),
             organization: None,
             permission,
+            managed: false,
         }
     }
 

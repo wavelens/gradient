@@ -141,6 +141,7 @@ async fn seed_builtin_role(
                 name: Set(name.to_string()),
                 organization: Set(None),
                 permission: Set(permission),
+                managed: Set(false),
             }
             .insert(db)
             .await?;
