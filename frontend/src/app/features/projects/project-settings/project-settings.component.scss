@@ -81,6 +81,15 @@
   }
   small { display: block; margin-top: $spacing-xs; font-size: $font-size-xs; }
   &:last-child { margin-bottom: 0; }
+
+  &.checkbox-group {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: $spacing-sm;
+    label { margin: 0; font-weight: normal; }
+    small { flex-basis: 100%; margin-top: 0; }
+  }
 }
 
 .label-help {
