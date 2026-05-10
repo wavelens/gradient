@@ -7,6 +7,8 @@
 import { Routes } from '@angular/router';
 import { authGuard } from '@core/guards/auth.guard';
 import { adminGuard } from '@core/guards/admin.guard';
+import { projectAccessResolver } from '@core/resolvers/project-access.resolver';
+import { cacheAccessResolver } from '@core/resolvers/cache-access.resolver';
 
 export const routes: Routes = [
   // Authentication routes (public)
@@ -35,7 +37,7 @@ export const routes: Routes = [
     ],
   },
 
-  // Public-browsable routes (no login required, write actions hidden)
+  // Organization detail (public)
   {
     path: 'organization/:org',
     title: 'Organization',
@@ -44,30 +46,63 @@ export const routes: Routes = [
         (m) => m.OrganizationDetailComponent
       ),
   },
+
+  // Project tree with parent layout + access resolver
   {
     path: 'organization/:org/project/:project',
-    title: 'Project',
     loadComponent: () =>
-      import('./features/projects/project-detail/project-detail.component').then(
-        (m) => m.ProjectDetailComponent
+      import('./features/projects/project-layout/project-layout.component').then(
+        (m) => m.ProjectLayoutComponent,
       ),
+    resolve: { projectAccess: projectAccessResolver },
+    runGuardsAndResolvers: 'paramsChange',
+    children: [
+      {
+        path: '',
+        title: 'Project',
+        loadComponent: () =>
+          import('./features/projects/project-detail/project-detail.component').then(
+            (m) => m.ProjectDetailComponent,
+          ),
+      },
+      {
+        path: 'metrics',
+        title: 'Project Metrics',
+        loadComponent: () =>
+          import('./features/projects/project-metrics/project-metrics.component').then(
+            (m) => m.ProjectMetricsComponent,
+          ),
+      },
+      {
+        path: 'entry-point-metrics',
+        title: 'Entry Point Metrics',
+        loadComponent: () =>
+          import('./features/projects/entry-point-metrics/entry-point-metrics.component').then(
+            (m) => m.EntryPointMetricsComponent,
+          ),
+      },
+      {
+        path: 'settings',
+        title: 'Project Settings',
+        canActivate: [authGuard],
+        loadComponent: () =>
+          import('./features/projects/project-settings/project-settings.component').then(
+            (m) => m.ProjectSettingsComponent,
+          ),
+      },
+      {
+        path: 'triggers',
+        title: 'Project Triggers',
+        canActivate: [authGuard],
+        loadComponent: () =>
+          import('./features/projects/project-triggers/project-triggers.component').then(
+            (m) => m.ProjectTriggersComponent,
+          ),
+      },
+    ],
   },
-  {
-    path: 'organization/:org/project/:project/metrics',
-    title: 'Project Metrics',
-    loadComponent: () =>
-      import('./features/projects/project-metrics/project-metrics.component').then(
-        (m) => m.ProjectMetricsComponent
-      ),
-  },
-  {
-    path: 'organization/:org/project/:project/entry-point-metrics',
-    title: 'Entry Point Metrics',
-    loadComponent: () =>
-      import('./features/projects/entry-point-metrics/entry-point-metrics.component').then(
-        (m) => m.EntryPointMetricsComponent
-      ),
-  },
+
+  // Build / evaluation utility routes (no layout)
   {
     path: 'organization/:org/artefacts/:buildId',
     title: 'Build Artefacts',
@@ -104,13 +139,44 @@ export const routes: Routes = [
         (m) => m.EvaluationLogComponent
       ),
   },
+
+  // Cache tree with parent layout + access resolver
   {
     path: 'caches/:cache',
-    title: 'Cache',
     loadComponent: () =>
-      import('./features/caches/cache-detail/cache-detail.component').then(
-        (m) => m.CacheDetailComponent
+      import('./features/caches/cache-layout/cache-layout.component').then(
+        (m) => m.CacheLayoutComponent,
       ),
+    resolve: { cacheAccess: cacheAccessResolver },
+    runGuardsAndResolvers: 'paramsChange',
+    children: [
+      {
+        path: '',
+        title: 'Cache',
+        loadComponent: () =>
+          import('./features/caches/cache-detail/cache-detail.component').then(
+            (m) => m.CacheDetailComponent,
+          ),
+      },
+      {
+        path: 'settings',
+        title: 'Cache Settings',
+        canActivate: [authGuard],
+        loadComponent: () =>
+          import('./features/caches/cache-settings/cache-settings.component').then(
+            (m) => m.CacheSettingsComponent,
+          ),
+      },
+      {
+        path: 'upstreams',
+        title: 'Upstream Caches',
+        canActivate: [authGuard],
+        loadComponent: () =>
+          import('./features/caches/cache-upstreams/cache-upstreams.component').then(
+            (m) => m.CacheUpstreamsComponent,
+          ),
+      },
+    ],
   },
 
   // Public-browsable list routes
@@ -189,42 +255,6 @@ export const routes: Routes = [
         loadComponent: () =>
           import('./features/organizations/cache-subscriptions/cache-subscriptions.component').then(
             (m) => m.CacheSubscriptionsComponent
-          ),
-      },
-
-      // Projects
-      {
-        path: 'organization/:org/project/:project/settings',
-        title: 'Project Settings',
-        loadComponent: () =>
-          import('./features/projects/project-settings/project-settings.component').then(
-            (m) => m.ProjectSettingsComponent
-          ),
-      },
-      {
-        path: 'organization/:org/project/:project/triggers',
-        title: 'Project Triggers',
-        loadComponent: () =>
-          import('./features/projects/project-triggers/project-triggers.component').then(
-            (m) => m.ProjectTriggersComponent
-          ),
-      },
-
-      // Caches
-      {
-        path: 'caches/:cache/settings',
-        title: 'Cache Settings',
-        loadComponent: () =>
-          import('./features/caches/cache-settings/cache-settings.component').then(
-            (m) => m.CacheSettingsComponent
-          ),
-      },
-      {
-        path: 'caches/:cache/upstreams',
-        title: 'Upstream Caches',
-        loadComponent: () =>
-          import('./features/caches/cache-upstreams/cache-upstreams.component').then(
-            (m) => m.CacheUpstreamsComponent
           ),
       },
 
