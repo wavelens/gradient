@@ -13,14 +13,19 @@ import { of, throwError } from 'rxjs';
 import { GithubAppComponent } from './github-app.component';
 import { AdminService } from '@core/services/admin.service';
 
+type MockedAdmin = {
+  requestGithubAppManifest: ReturnType<typeof vi.fn>;
+  fetchGithubAppCredentials: ReturnType<typeof vi.fn>;
+};
+
 describe('GithubAppComponent', () => {
-  let admin: jasmine.SpyObj<AdminService>;
+  let admin: MockedAdmin;
 
   function setup(queryParams: Record<string, string> = {}) {
-    admin = jasmine.createSpyObj<AdminService>('AdminService', [
-      'requestGithubAppManifest',
-      'fetchGithubAppCredentials',
-    ]);
+    admin = {
+      requestGithubAppManifest: vi.fn(),
+      fetchGithubAppCredentials: vi.fn(),
+    };
     TestBed.configureTestingModule({
       imports: [GithubAppComponent],
       providers: [
@@ -51,7 +56,7 @@ describe('GithubAppComponent', () => {
 
   it('clicking create-button calls requestGithubAppManifest with host', () => {
     setup({});
-    admin.requestGithubAppManifest.and.returnValue(
+    admin.requestGithubAppManifest.mockReturnValue(
       of({ manifest: {}, post_url: 'https://github.com/x', state: 's' }),
     );
     const fixture = TestBed.createComponent(GithubAppComponent);
@@ -62,7 +67,7 @@ describe('GithubAppComponent', () => {
 
   it('renders credentials when ready=1 and the API returns them', async () => {
     setup({ ready: '1' });
-    admin.fetchGithubAppCredentials.and.returnValue(
+    admin.fetchGithubAppCredentials.mockReturnValue(
       of({
         id: 7,
         slug: 'gradient',
@@ -85,7 +90,7 @@ describe('GithubAppComponent', () => {
 
   it('shows a friendly error when credentials are no longer available', async () => {
     setup({ ready: '1' });
-    admin.fetchGithubAppCredentials.and.returnValue(
+    admin.fetchGithubAppCredentials.mockReturnValue(
       throwError(() => ({ status: 404 })),
     );
     const fixture = TestBed.createComponent(GithubAppComponent);
