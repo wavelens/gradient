@@ -316,6 +316,10 @@ pub async fn load_org_membership(
 
 /// Load the membership row together with the role's permission bitmask.
 ///
+/// When `api_key` is supplied, callers pinned to a different organization see
+/// `None` (the short-circuit looks identical to "not a member"); otherwise the
+/// returned mask is the role mask intersected with the key's mask.
+///
 /// Two queries are issued (membership lookup, then role lookup by id) rather
 /// than a JOIN; this keeps the mock-DB test fixtures readable and the second
 /// roundtrip is gated on the first returning a row, so the cost is paid only
