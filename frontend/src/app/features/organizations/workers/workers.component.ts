@@ -13,8 +13,10 @@ import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { WorkersService } from '@core/services/workers.service';
 import { OrganizationsService } from '@core/services/organizations.service';
-import { GradientCapabilities, Worker, WorkerRegistration } from '@core/models';
+import { OrgAccessService } from '@core/services/org-access.service';
+import { GradientCapabilities, Worker, WorkerRegistration, AccessState } from '@core/models';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
+import { AccessBannerComponent, WritableDirective, ManagedDisableDirective } from '@shared/access';
 
 @Component({
   selector: 'app-workers',
@@ -27,6 +29,9 @@ import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/load
     ButtonModule,
     InputTextModule,
     LoadingSpinnerComponent,
+    AccessBannerComponent,
+    WritableDirective,
+    ManagedDisableDirective,
   ],
   templateUrl: './workers.component.html',
   styleUrl: './workers.component.scss',
@@ -35,6 +40,13 @@ export class WorkersComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private workersService = inject(WorkersService);
   private orgsService = inject(OrganizationsService);
+  private orgAccess = inject(OrgAccessService);
+
+  access = signal<AccessState>({ managed: false, canEdit: false });
+
+  rowAccess(worker: Worker): AccessState {
+    return { managed: worker.managed || this.access().managed, canEdit: this.access().canEdit };
+  }
 
   readonly capLabels: { key: keyof GradientCapabilities; label: string }[] = [
     { key: 'federate', label: 'federate' },
@@ -80,6 +92,7 @@ export class WorkersComponent implements OnInit {
 
   ngOnInit(): void {
     this.orgName = this.route.snapshot.paramMap.get('org') || '';
+    this.orgAccess.forOrg(this.orgName).then((s) => this.access.set(s));
     this.loadOrgId();
     this.loadWorkers();
     this.loadCacheSubscriptions();

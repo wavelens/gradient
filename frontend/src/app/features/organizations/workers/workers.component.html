@@ -17,8 +17,17 @@
       <h1>Workers</h1>
       <p class="text-secondary">Registered build workers for this organization</p>
     </div>
-    <button pButton label="Register Worker" icon="pi pi-plus" (click)="openRegisterDialog()"></button>
+    <button
+      *appWritable="access()"
+      pButton
+      label="Register Worker"
+      icon="pi pi-plus"
+      (click)="openRegisterDialog()"
+      [appManagedDisable]="access()"
+    ></button>
   </div>
+
+  <app-access-banner [access]="access()"></app-access-banner>
 
   @if (hasNoCacheSubscribed()) {
     <div class="no-cache-banner" data-testid="no-cache-banner" role="alert">
@@ -59,7 +68,14 @@
         <span class="material-symbols-outlined">construction</span>
         <h3>No workers registered</h3>
         <p class="text-secondary">Register a <code>gradient-worker</code> to run builds for this organization.</p>
-        <button pButton label="Register Worker" icon="pi pi-plus" (click)="openRegisterDialog()"></button>
+        <button
+          *appWritable="access()"
+          pButton
+          label="Register Worker"
+          icon="pi pi-plus"
+          (click)="openRegisterDialog()"
+          [appManagedDisable]="access()"
+        ></button>
       </div>
     } @else {
       <div class="workers-list">
@@ -113,34 +129,40 @@
                 {{ worker.live ? 'Connected' : 'Offline' }}
               </span>
               <button
+                *appWritable="access()"
                 pButton
                 label="Edit"
                 icon="pi pi-pencil"
                 severity="secondary"
                 size="small"
                 class="worker-action-btn"
-                [disabled]="worker.managed || deletingId() !== null || togglingId() !== null || renaming()"
+                [disabled]="deletingId() !== null || togglingId() !== null || renaming()"
+                [appManagedDisable]="rowAccess(worker)"
                 (click)="openRenameDialog(worker)"
               ></button>
               <button
+                *appWritable="access()"
                 pButton
                 [label]="worker.active ? 'Deactivate' : 'Activate'"
                 [icon]="worker.active ? 'pi pi-pause' : 'pi pi-play'"
                 [severity]="worker.active ? 'warn' : 'success'"
                 size="small"
                 class="worker-action-btn"
-                [disabled]="worker.managed || togglingId() !== null || deletingId() !== null"
+                [disabled]="togglingId() !== null || deletingId() !== null"
+                [appManagedDisable]="rowAccess(worker)"
                 [loading]="togglingId() === worker.worker_id"
                 (click)="requestToggleWorker(worker)"
               ></button>
               <button
+                *appWritable="access()"
                 pButton
                 label="Delete"
                 icon="pi pi-trash"
                 severity="danger"
                 size="small"
                 class="worker-action-btn"
-                [disabled]="worker.managed || deletingId() !== null || togglingId() !== null"
+                [disabled]="deletingId() !== null || togglingId() !== null"
+                [appManagedDisable]="rowAccess(worker)"
                 [loading]="deletingId() === worker.worker_id"
                 (click)="deleteWorker(worker)"
               ></button>
