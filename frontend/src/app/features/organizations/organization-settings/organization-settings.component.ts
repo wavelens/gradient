@@ -14,8 +14,10 @@ import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { TextareaModule } from 'primeng/textarea';
 import { OrganizationsService } from '@core/services/organizations.service';
+import { OrgAccessService } from '@core/services/org-access.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
-import { Organization } from '@core/models';
+import { AccessBannerComponent, WritableDirective, ManagedDisableDirective } from '@shared/access';
+import { Organization, AccessState } from '@core/models';
 
 @Component({
   selector: 'app-organization-settings',
@@ -30,6 +32,9 @@ import { Organization } from '@core/models';
     InputTextModule,
     TextareaModule,
     LoadingSpinnerComponent,
+    AccessBannerComponent,
+    WritableDirective,
+    ManagedDisableDirective,
   ],
   templateUrl: './organization-settings.component.html',
   styleUrl: './organization-settings.component.scss',
@@ -38,6 +43,9 @@ export class OrganizationSettingsComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private organizationsService = inject(OrganizationsService);
+  private orgAccess = inject(OrgAccessService);
+
+  access = signal<AccessState>({ managed: false, canEdit: false });
 
   loading = signal(true);
   saving = signal(false);
@@ -63,6 +71,7 @@ export class OrganizationSettingsComponent implements OnInit {
 
   ngOnInit(): void {
     this.orgName = this.route.snapshot.paramMap.get('org') || '';
+    this.orgAccess.forOrg(this.orgName).then((s) => this.access.set(s));
     this.loadOrganization();
     this.loadSSHKey();
   }
