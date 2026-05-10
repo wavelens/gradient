@@ -143,9 +143,21 @@ export class ProjectSettingsComponent implements OnInit {
       for (const i of list) {
         if (i.kind === 'outbound') outbound.push({ label: `${i.display_name} (${i.forge_type})`, value: i.id });
       }
+      // The project may point at an integration the org no longer lists
+      // (renamed, deleted, or never seeded). Surface it as a labelled option
+      // so the dropdown shows something meaningful instead of a raw UUID,
+      // and the user can switch to a known-good one without saving the
+      // unresolved value back.
+      const stored = link?.outbound_integration ?? null;
+      if (stored && !outbound.some((o) => o.value === stored)) {
+        outbound.push({
+          label: `Unknown integration (${stored.slice(0, 8)}…) — please reselect`,
+          value: stored,
+        });
+      }
       this.outboundIntegrationOptions.set(outbound);
       this.projectIntegration.set(link);
-      this.outboundSelection = link?.outbound_integration ?? null;
+      this.outboundSelection = stored;
       this.integrationsLoading.set(false);
     });
   }
