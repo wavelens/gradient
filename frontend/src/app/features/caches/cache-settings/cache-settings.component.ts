@@ -15,6 +15,8 @@ import { InputTextModule } from 'primeng/inputtext';
 import { TextareaModule } from 'primeng/textarea';
 import { CachesService } from '@core/services/caches.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
+import { WritableDirective, ManagedDisableDirective } from '@shared/access';
+import { injectCacheAccess } from '@core/resolvers/inject-access';
 import { Cache } from '@core/models';
 
 @Component({
@@ -30,6 +32,8 @@ import { Cache } from '@core/models';
     InputTextModule,
     TextareaModule,
     LoadingSpinnerComponent,
+    WritableDirective,
+    ManagedDisableDirective,
   ],
   templateUrl: './cache-settings.component.html',
   styleUrl: './cache-settings.component.scss',
@@ -38,6 +42,8 @@ export class CacheSettingsComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private cachesService = inject(CachesService);
+
+  access = injectCacheAccess();
 
   loading = signal(true);
   saving = signal(false);

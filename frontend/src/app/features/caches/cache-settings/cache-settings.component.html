@@ -24,17 +24,6 @@
     <!-- General -->
     <div class="settings-section">
       <h2>General</h2>
-      @if (c.managed) {
-        <div class="message-banner info">
-          <span class="material-symbols-outlined">info</span>
-          This cache is managed declaratively and cannot be edited here.
-        </div>
-      } @else if (!c.can_edit) {
-        <div class="message-banner info">
-          <span class="material-symbols-outlined">info</span>
-          You have read-only access to this cache.
-        </div>
-      }
       <div class="settings-card">
         <div class="form-group">
           <label for="cache-name">Name</label>
@@ -55,7 +44,7 @@
             id="display-name"
             [(ngModel)]="formData.display_name"
             class="w-full"
-            [disabled]="c.managed || !c.can_edit"
+            [appManagedDisable]="access()"
           />
         </div>
 
@@ -67,7 +56,7 @@
             [(ngModel)]="formData.description"
             rows="3"
             class="w-full"
-            [disabled]="c.managed || !c.can_edit"
+            [appManagedDisable]="access()"
           ></textarea>
         </div>
 
@@ -81,7 +70,7 @@
             class="w-full"
             min="0"
             max="255"
-            [disabled]="c.managed || !c.can_edit"
+            [appManagedDisable]="access()"
           />
           @if (priorityInvalid) {
             <small class="text-danger">Priority must be between 0 and 255</small>
@@ -92,7 +81,7 @@
 
         <div class="form-group">
           <label for="visibility">Visibility</label>
-          <select id="visibility" [(ngModel)]="formData.public" class="role-select w-full" [disabled]="c.managed || !c.can_edit">
+          <select id="visibility" [(ngModel)]="formData.public" class="role-select w-full" [appManagedDisable]="access()">
             <option [ngValue]="false">Private</option>
             <option [ngValue]="true">Public</option>
           </select>
@@ -111,18 +100,18 @@
             Changes saved.
           </div>
         }
-        @if (!c.managed && c.can_edit) {
-          <div class="form-actions">
-            <button
-              pButton
-              label="Save Changes"
-              icon="pi pi-check"
-              (click)="saveSettings()"
-              [loading]="saving()"
-              [disabled]="saving() || priorityInvalid"
-            ></button>
-          </div>
-        }
+        <div class="form-actions">
+          <button
+            *appWritable="access()"
+            pButton
+            label="Save Changes"
+            icon="pi pi-check"
+            (click)="saveSettings()"
+            [loading]="saving()"
+            [disabled]="priorityInvalid"
+            [appManagedDisable]="access()"
+          ></button>
+        </div>
       </div>
     </div>
 
@@ -135,14 +124,12 @@
             <h3>Upstream Caches</h3>
             <p class="text-secondary">External and internal caches this cache pulls through from</p>
           </div>
-          @if (!c.managed && c.can_edit) {
-            <button pButton label="Manage Upstreams" icon="pi pi-cloud-download" severity="secondary" [routerLink]="['/caches', cacheName, 'upstreams']"></button>
-          }
+          <a pButton label="Manage Upstreams" icon="pi pi-cloud-download" severity="secondary" [routerLink]="['/caches', cacheName, 'upstreams']"></a>
         </div>
       </div>
     </div>
 
-    @if (!c.managed && c.can_edit) {
+    @if (access().canEdit) {
       <!-- Danger Zone -->
       <div class="settings-section danger-section">
         <h2>Danger Zone</h2>
@@ -159,7 +146,7 @@
               [severity]="c.active ? 'danger' : 'success'"
               (click)="toggleActive()"
               [loading]="toggling()"
-              [disabled]="toggling()"
+              [appManagedDisable]="access()"
             ></button>
           </div>
           <p-divider />
@@ -174,6 +161,7 @@
               icon="pi pi-trash"
               severity="danger"
               (click)="showDeleteDialog.set(true)"
+              [appManagedDisable]="access()"
             ></button>
           </div>
         </div>
