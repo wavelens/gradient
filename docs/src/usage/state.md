@@ -8,6 +8,28 @@ When `settings.deleteState = true` (default), entities that are removed from `st
 
 Users, organizations, and caches created by the NixOS module configuration carry `managed = true`. The API rejects mutations and deletions of these records with `403 Forbidden`. This allows declarative configuration to be the source of truth without Gradient's UI overwriting it.
 
+### How the UI surfaces this
+
+Managed-resource and read-only access show up consistently across the dashboard:
+
+- **A "Managed by Nix" banner** appears at the top of any settings page or
+  subpage for a state-managed resource. Form fields remain visible but
+  disabled, and write buttons (Save, Delete, etc.) are visible but
+  greyed out — so you can see exactly what the resource looks like and
+  what actions exist, you just can't trigger them here. Update the Nix
+  config instead.
+- **A "Read-only access" banner** appears when your organization role
+  doesn't grant write permission on the resource. Form fields remain
+  visible but disabled; write buttons are **hidden entirely** — they don't
+  exist for you. Contact an organization admin to make changes.
+- **Both banners** coalesce into a single "Managed by Nix (read-only)"
+  notice when both apply.
+
+The pages themselves are always navigable. A state-managed cache's
+upstreams subpage, for example, is reachable so you can see what
+upstreams are configured — only the Add / Edit / Delete controls are
+gated.
+
 ## Users
 
 ```nix
