@@ -1819,22 +1819,36 @@ linking returns the row id and the resolver now branches purely on
 `project_integration.outbound_integration` plus the integration's
 `forge_type`.
 
-## Worker: empty `built_outputs` is a build failure, not a recovery
+## Worker: empty `built_outputs` self-heals from the parsed `.drv`
 
-Earlier the worker fell back to recovering output paths from the parsed
-`.drv` whenever the daemon's `BuildResult.built_outputs` came back empty
-(legacy protocol path). This silently masked daemon-version mismatches
-and produced incomplete cache state for builds whose downstream consumers
-needed the recovered paths.
+Modern daemons can legitimately return `BuildResult::Success` with an
+empty `built_outputs` map — fixed-output derivations whose path was
+already valid in the local store, for example, get a no-op success.
+Older daemon protocols that predate `realisation-with-path-not-hash`
+also drain the legacy map into an empty one. Both produce the same
+shape on the wire.
 
-`worker/src/executor/build.rs::ParsedDerivation::realize` now returns
-`Err` immediately when `built_outputs.is_empty()`, so the build resolves
-to `JobFailed` with a message pointing at the daemon protocol.
+`worker/src/executor/build.rs::output_pairs_from_built_or_drv` falls
+back to the parsed `.drv`'s declared output paths when `built_outputs`
+is empty. Input-addressed and FOD outputs already carry the realised
+path in the `.drv`, so the recovery is correct for them. CA / deferred
+outputs have an empty `path` until the daemon emits a realisation; if
+recovery yields no pairs at all, `realize` returns `Err` so a pure-CA
+build without a daemon realisation surfaces as `JobFailed` instead of
+being silently recorded with no metadata.
 
-The recovery helper (`output_pairs_from_built_or_drv`) and its three
-unit tests were removed alongside the behaviour they covered. Other
-build-pipeline tests in the same module (`ca_fixed_*`, `load_products_*`)
-are unaffected.
+Tests in `executor::build::tests`:
+
+- `output_pairs_use_built_outputs_when_daemon_returned_them` — non-empty
+  `built_outputs` is canonical and wins over any `.drv` paths.
+- `output_pairs_recover_from_drv_when_built_outputs_empty` — empty
+  daemon map, both outputs in the `.drv` carry paths → both recovered.
+- `output_pairs_skip_drv_outputs_with_empty_path` — mixed `.drv`
+  (one input-addressed, one CA-pending) → only the input-addressed
+  pair survives; `realize` keeps the build alive on that single output.
+- `output_pairs_returns_empty_for_pure_ca_drv_without_realisation` —
+  CA-only `.drv` with no daemon realisation → empty pairs, the caller
+  fails the build.
 
 ## Worker: eval pushes the runtime closure of every produced `.drv`
 
