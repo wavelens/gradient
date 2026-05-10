@@ -564,6 +564,63 @@
         type = types.str;
         description = "Username of the user who owns this API key";
       };
+
+      permissions = mkOption {
+        type = types.listOf types.str;
+        description = ''
+          Capability identifiers (camelCase) the API key grants. Must be
+          non-empty. The full catalogue is defined in
+          `gradient_core::permissions::Permission` and exposed at runtime via
+          `GET /user/keys/permissions`. Common identifiers include
+          `viewOrg`, `triggerEvaluation`, `editProject`, `manageMembers`.
+        '';
+        example = [ "viewOrg" "triggerEvaluation" ];
+      };
+
+      organization = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        description = ''
+          Optional organization name to pin the key to. When set, the key is
+          rejected for every other organization (the request looks identical
+          to "not a member"). When null, the key works in any org the owning
+          user is a member of.
+        '';
+      };
+    };
+  });
+
+  roleType = types.submodule ({ name, ... }: {
+    options = {
+      name = mkOption {
+        type = types.str;
+        default = name;
+        defaultText = "<attrset key>";
+        description = ''
+          Name of the role. Must not collide with the built-in role names
+          (`Admin`, `Write`, `View`) and must be unique within its
+          organization. State-managed roles cannot be modified via the
+          role-management API.
+        '';
+      };
+
+      organization = mkOption {
+        type = types.str;
+        description = ''
+          Organization the role belongs to. State-managed roles are always
+          org-scoped — there is no way to define a global state-managed
+          role.
+        '';
+      };
+
+      permissions = mkOption {
+        type = types.listOf types.str;
+        description = ''
+          Capability identifiers (camelCase) the role grants. Must be
+          non-empty. See `apiKeyType.permissions` for the catalogue.
+        '';
+        example = [ "viewOrg" "triggerEvaluation" ];
+      };
     };
   });
 
@@ -622,6 +679,17 @@
         type = types.attrsOf cacheType;
         default = { };
         description = "Attribute set of caches to create, keyed by name";
+      };
+
+      roles = mkOption {
+        type = types.attrsOf roleType;
+        default = { };
+        description = ''
+          Attribute set of state-managed custom roles, keyed by role name.
+          Each entry creates a custom role in the specified organization with
+          the given permission set. Managed roles cannot be modified or
+          deleted through the API — only this state file can change them.
+        '';
       };
 
       api_keys = mkOption {
@@ -705,6 +773,20 @@ in
               signing_key_file = "/etc/gradient/secrets/main_cache_key";
               organizations = [ "acme-corp" ];
               created_by = "alice";
+            };
+          };
+          roles = {
+            releaser = {
+              organization = "acme-corp";
+              permissions = [ "viewOrg" "triggerEvaluation" ];
+            };
+          };
+          api_keys = {
+            ci-runner = {
+              key_file = "/etc/gradient/secrets/ci-runner";
+              owned_by = "alice";
+              permissions = [ "viewOrg" "triggerEvaluation" ];
+              organization = "acme-corp";
             };
           };
         }
