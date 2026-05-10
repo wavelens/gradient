@@ -5,6 +5,7 @@
  */
 
 use crate::access::{Caller, OrgAccess, load_org};
+use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::Permission;
@@ -56,11 +57,13 @@ async fn load_subscribable_cache(
 pub async fn post_organization_public(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path(organization): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let org = load_org(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         OrgAccess::Require {
             permission: Permission::ManageOrgSettings,
@@ -78,11 +81,13 @@ pub async fn post_organization_public(
 pub async fn delete_organization_public(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path(organization): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let org = load_org(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         OrgAccess::Require {
             permission: Permission::ManageOrgSettings,
@@ -100,11 +105,13 @@ pub async fn delete_organization_public(
 pub async fn get_organization_subscribe(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path(organization): Path<String>,
 ) -> WebResult<Json<BaseResponse<Vec<CacheSubscriptionItem>>>> {
     let org = load_org(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         OrgAccess::Member {
             reject_managed: false,
@@ -134,12 +141,14 @@ pub async fn get_organization_subscribe(
 pub async fn post_organization_subscribe_cache(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path((organization, cache)): Path<(String, String)>,
     body: Option<Json<SubscribeCacheRequest>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let org = load_org(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         OrgAccess::Require {
             permission: Permission::ManageSubscriptions,
@@ -255,11 +264,13 @@ async fn enqueue_backfill_signatures(
 pub async fn delete_organization_subscribe_cache(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path((organization, cache)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let org = load_org(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         OrgAccess::Require {
             permission: Permission::ManageSubscriptions,

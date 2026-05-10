@@ -8,7 +8,7 @@ use super::{
     EntryPointSummary, EvaluationSummary, EvaluationTriggerSummary, ProjectDetailsResponse,
 };
 use crate::access::{Caller, ProjectAccess, has_permission, is_org_member, load_project};
-use crate::authorization::MaybeUser;
+use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::endpoints::content_type_for_filename;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
@@ -174,12 +174,14 @@ pub(super) async fn evaluations_to_summaries(
 pub async fn post_project_evaluate(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path((organization, project)): Path<(String, String)>,
     body: Option<Json<EvaluateRequest>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let (_organization, project) = load_project(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         project,
         ProjectAccess::Require {
@@ -250,11 +252,13 @@ pub async fn post_project_evaluate(
 pub async fn get_project_evaluations(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<Vec<EvaluationSummary>>>> {
     let (_organization, project) = load_project(
         &state,
         Caller::from_option(&maybe_user),
+        api_key.as_ref(),
         organization,
         project,
         ProjectAccess::Readable,
@@ -276,11 +280,14 @@ pub async fn get_project_evaluations(
 pub async fn get_project_details(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<ProjectDetailsResponse>>> {
+    let api_key_ref = api_key.as_ref();
     let (organization, project) = load_project(
         &state,
         Caller::from_option(&maybe_user),
+        api_key_ref,
         organization,
         project,
         ProjectAccess::Readable,
@@ -299,7 +306,7 @@ pub async fn get_project_details(
 
     let can_edit = match &maybe_user {
         Some(user) => {
-            has_permission(&state, user.id, organization.id, Permission::EditProject).await?
+            has_permission(&state, user.id, organization.id, Permission::EditProject, api_key_ref).await?
         }
         None => false,
     };
@@ -334,12 +341,14 @@ pub struct EntryPointsQuery {
 pub async fn get_project_entry_points(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path((organization, project)): Path<(String, String)>,
     Query(params): Query<EntryPointsQuery>,
 ) -> WebResult<Json<BaseResponse<Vec<EntryPointSummary>>>> {
     let (_organization, project) = load_project(
         &state,
         Caller::from_option(&maybe_user),
+        api_key.as_ref(),
         organization,
         project,
         ProjectAccess::Readable,
@@ -634,6 +643,7 @@ async fn serve_hydra_artifact(
 pub async fn get_entry_point_download(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path((organization, project)): Path<(String, String)>,
     Query(params): Query<EntryPointDownloadQuery>,
 ) -> Result<Response, WebError> {
@@ -649,21 +659,24 @@ pub async fn get_entry_point_download(
         .or_not_found("Project")?;
 
     // Resolve caller identity from ?token= (API key / JWT) or existing session.
-    let resolved_user: Option<MUser> = if let Some(token_str) = params.token {
+    // When a token is supplied it provides its own ApiKeyContext; otherwise the
+    // middleware-supplied extension applies.
+    let (resolved_user, resolved_key) = if let Some(token_str) = params.token {
         let decoded = crate::authorization::decode_jwt(State(Arc::clone(&state)), token_str)
             .await
             .map_err(|_| WebError::unauthorized("Invalid token"))?;
-        EUser::find_by_id(decoded.user_id())
+        let user = EUser::find_by_id(decoded.user_id())
             .one(&state.web_db)
-            .await?
+            .await?;
+        (user, decoded.api_key_context().copied())
     } else {
-        maybe_user
+        (maybe_user, api_key.as_ref().copied())
     };
 
     if !organization.public {
         match resolved_user {
             Some(ref user) => {
-                if !is_org_member(&state, user.id, organization.id).await? {
+                if !is_org_member(&state, user.id, organization.id, resolved_key.as_ref()).await? {
                     return Err(WebError::not_found("Project"));
                 }
             }

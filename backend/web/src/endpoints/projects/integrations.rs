@@ -7,7 +7,7 @@
 //! Link a project to named org-level integrations (inbound + outbound).
 
 use crate::access::{Caller, ProjectAccess, load_project};
-use crate::authorization::MaybeUser;
+use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::Permission;
@@ -71,12 +71,14 @@ async fn validate_integration(
 pub async fn get_project_integration(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<ProjectIntegrationResponse>>> {
     let user = maybe_user.ok_or_else(|| WebError::unauthorized("Authentication required."))?;
     let (_org, proj) = load_project(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         project,
         ProjectAccess::Member,
@@ -102,12 +104,14 @@ pub async fn get_project_integration(
 pub async fn put_project_integration(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path((organization, project)): Path<(String, String)>,
     Json(body): Json<PutProjectIntegrationRequest>,
 ) -> WebResult<Json<BaseResponse<ProjectIntegrationResponse>>> {
     let (org, proj) = load_project(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         project,
         ProjectAccess::Require {
@@ -148,11 +152,13 @@ pub async fn put_project_integration(
 pub async fn delete_project_integration(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<bool>>> {
     let (_org, proj) = load_project(
         &state,
         Caller::User(&user),
+        api_key.as_ref(),
         organization,
         project,
         ProjectAccess::Require {

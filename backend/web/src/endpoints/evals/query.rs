@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::authorization::MaybeUser;
+use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::WebResult;
 use crate::helpers::ok_json;
 use axum::extract::{Path, Query, State};
@@ -25,9 +25,10 @@ use gradient_core::types::triggers::TriggerType;
 pub async fn get_evaluation(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path(evaluation_id): Path<EvaluationId>,
 ) -> WebResult<Json<BaseResponse<EvaluationResponse>>> {
-    let ctx = EvalAccessContext::load(&state, evaluation_id, &maybe_user).await?;
+    let ctx = EvalAccessContext::load(&state, evaluation_id, &maybe_user, api_key.as_ref()).await?;
     let evaluation = ctx.evaluation;
 
     let commit_hash = ECommit::find_by_id(evaluation.commit)
@@ -142,10 +143,11 @@ pub async fn get_evaluation(
 pub async fn get_evaluation_builds(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path(evaluation_id): Path<EvaluationId>,
     Query(query): Query<BuildsQuery>,
 ) -> WebResult<Json<BaseResponse<PaginatedBuilds>>> {
-    let ctx = EvalAccessContext::load(&state, evaluation_id, &maybe_user).await?;
+    let ctx = EvalAccessContext::load(&state, evaluation_id, &maybe_user, api_key.as_ref()).await?;
     let evaluation = ctx.evaluation;
 
     let builds = EBuild::find()
@@ -261,9 +263,10 @@ pub async fn get_evaluation_builds(
 pub async fn get_evaluation_messages(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path(evaluation_id): Path<EvaluationId>,
 ) -> WebResult<Json<BaseResponse<Vec<EvaluationMessageResponse>>>> {
-    let ctx = EvalAccessContext::load(&state, evaluation_id, &maybe_user).await?;
+    let ctx = EvalAccessContext::load(&state, evaluation_id, &maybe_user, api_key.as_ref()).await?;
     let evaluation = ctx.evaluation;
 
     let messages = EEvaluationMessage::find()

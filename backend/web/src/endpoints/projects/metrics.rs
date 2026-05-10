@@ -5,7 +5,7 @@
  */
 
 use crate::access::{Caller, OrgAccess, load_org};
-use crate::authorization::MaybeUser;
+use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::WebResult;
 use crate::helpers::{OptionExt, ok_json};
 use axum::extract::{Path, Query, State};
@@ -116,11 +116,13 @@ async fn sum_output_sizes<C: sea_orm::ConnectionTrait>(
 pub async fn get_project_metrics(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<ProjectMetricsResponse>>> {
     let organization = load_org(
         &state.0,
         Caller::from_option(&maybe_user),
+        api_key.as_ref(),
         organization,
         OrgAccess::Readable { label: "Project" },
     )
@@ -232,12 +234,14 @@ pub struct EntryPointMetricsResponse {
 pub async fn get_entry_point_metrics(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path((organization, project)): Path<(String, String)>,
     Query(params): Query<EntryPointMetricsQuery>,
 ) -> WebResult<Json<BaseResponse<EntryPointMetricsResponse>>> {
     let organization = load_org(
         &state.0,
         Caller::from_option(&maybe_user),
+        api_key.as_ref(),
         organization,
         OrgAccess::Readable { label: "Project" },
     )

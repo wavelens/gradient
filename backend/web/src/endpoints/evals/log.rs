@@ -5,6 +5,7 @@
  */
 
 use crate::access::is_org_member;
+use crate::authorization::MaybeApiKey;
 use crate::error::WebError;
 use async_stream::stream;
 use axum::Extension;
@@ -22,12 +23,14 @@ use super::types::drv_display_name;
 pub async fn post_evaluation_builds(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path(evaluation_id): Path<EvaluationId>,
 ) -> Result<StreamBodyAs<'static>, WebError> {
-    let ctx = EvalAccessContext::load(&state, evaluation_id, &Some(user.clone())).await?;
+    let api_key_ref = api_key.as_ref();
+    let ctx = EvalAccessContext::load(&state, evaluation_id, &Some(user.clone()), api_key_ref).await?;
 
     // Streaming log access requires org membership (not just public read access).
-    if !is_org_member(&state, user.id, ctx.organization_id).await? {
+    if !is_org_member(&state, user.id, ctx.organization_id, api_key_ref).await? {
         return Err(WebError::not_found("Evaluation"));
     }
 
