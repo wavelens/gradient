@@ -1894,3 +1894,62 @@ and the failure mode is loud.
   existence isn't leaked.
 - `api_key_cannot_create_api_keys` — `POST /api/v1/user/keys` from an
   API-key-authenticated request returns 403 (the self-management guard).
+
+## Frontend access control — `shared/access`
+
+Two API-provided flags drive the user-visible rule that:
+
+- **State-managed** resources (`entity.managed === true`) appear with all fields
+  and write buttons visible but disabled, with a "Managed by Nix" banner.
+- **Read-only** access (`entity.can_edit === false`) hides write buttons
+  entirely and shows inputs as disabled with a "Read-only access" banner.
+
+The primitives:
+
+- `frontend/src/app/shared/access/access.service.ts` — `AccessService` with
+  pure helpers (`isWritable`, `shouldShowWriteAction`, `shouldDisableInput`,
+  `bannerKind`, `bannerMessage`). Tests cover the four flag combinations.
+- `frontend/src/app/shared/access/writable.directive.ts` — `*appWritable`
+  structural directive. Renders content iff `canEdit`. Tests cover
+  render/hide on each combination plus toggling.
+- `frontend/src/app/shared/access/managed-disable.directive.ts` —
+  `[appManagedDisable]` attribute directive. Adds `disabled` and a tooltip
+  when `managed || !canEdit`. Tests cover all four flag combinations,
+  tooltip text, and that the directive correctly clears its own state when
+  access becomes writable.
+- `frontend/src/app/shared/access/access-banner.component.ts` —
+  `<app-access-banner>` rendering nothing for full access; otherwise an info
+  bar with appropriate text and CSS class. Tests cover the four banner
+  kinds.
+- `frontend/src/app/core/resolvers/project-access.resolver.ts` and
+  `cache-access.resolver.ts` — fetch the parent entity once, expose
+  `{ entity, access }` on `route.parent.data`. Children consume via
+  `injectProjectAccess()` / `injectCacheAccess()`. Tests cover the happy
+  path and the `managed=true / can_edit=false` propagation.
+- `frontend/src/app/core/services/org-access.service.ts` — derives
+  `AccessState` from `Organization.role` and `Organization.managed` for
+  org-scoped pages without a parent entity resolver. Tests cover Admin /
+  Write / View / undefined / custom-role-name cases.
+
+Each retrofitted feature component (`project-settings`, `project-triggers`,
+`project-detail`, `cache-settings`, `cache-upstreams`,
+`organization-settings`, `workers`, `cache-subscriptions`, `members-roles`,
+`api-keys`, `profile`) carries gating tests covering at least the two
+key scenarios:
+
+- **Read-only** (`canEdit=false`): write-action buttons absent from the
+  DOM; the page itself remains visible.
+- **State-managed with permission** (`managed=true, canEdit=true`):
+  write-action buttons present in the DOM but disabled.
+
+The two reported bugs that motivated this work are covered directly:
+
+- `WorkersComponent` — Register Worker absent under view-only access;
+  present-disabled under state-managed org; per-row buttons honor each
+  worker's own `managed` flag independent of the org's access.
+- `CacheUpstreamsComponent` — Add Upstream / Edit / Delete absent under
+  view-only access (page itself remains navigable); present-disabled
+  under state-managed cache.
+
+Run command: `pnpm -C frontend test --watch=false --include='**/access*'`
+(primitives) or the full suite with `pnpm -C frontend test --watch=false`.
