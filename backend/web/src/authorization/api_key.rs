@@ -13,7 +13,7 @@
 //! to short-circuit on a pinned-org mismatch.
 
 use crate::permissions::PermissionMask;
-use gradient_core::types::{ApiId, OrganizationId};
+use gradient_core::types::{ApiId, OrganizationId, UserId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ApiKeyContext {
@@ -44,6 +44,32 @@ impl MaybeApiKey {
     }
 }
 
+/// Result of decoding a request token: a session JWT or an API key.
+#[derive(Debug, Clone)]
+pub enum DecodedRequest {
+    Session { user_id: UserId },
+    ApiKey {
+        user_id: UserId,
+        context: ApiKeyContext,
+    },
+}
+
+impl DecodedRequest {
+    pub fn user_id(&self) -> UserId {
+        match self {
+            DecodedRequest::Session { user_id } => *user_id,
+            DecodedRequest::ApiKey { user_id, .. } => *user_id,
+        }
+    }
+
+    pub fn api_key_context(&self) -> Option<&ApiKeyContext> {
+        match self {
+            DecodedRequest::Session { .. } => None,
+            DecodedRequest::ApiKey { context, .. } => Some(context),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -66,5 +92,39 @@ mod tests {
     #[test]
     fn none_returns_none_ref() {
         assert!(MaybeApiKey::none().as_ref().is_none());
+    }
+
+    #[test]
+    fn decoded_request_session_carries_no_api_key() {
+        let outcome = DecodedRequest::Session {
+            user_id: UserId::new(uuid!("a0000000-0000-0000-0000-000000000004")),
+        };
+        assert!(outcome.api_key_context().is_none());
+        assert_eq!(
+            outcome.user_id(),
+            UserId::new(uuid!("a0000000-0000-0000-0000-000000000004"))
+        );
+    }
+
+    #[test]
+    fn decoded_request_api_key_carries_context() {
+        let api_id = ApiId::new(uuid!("a0000000-0000-0000-0000-000000000011"));
+        let user_id = UserId::new(uuid!("a0000000-0000-0000-0000-000000000004"));
+        let outcome = DecodedRequest::ApiKey {
+            user_id,
+            context: ApiKeyContext {
+                api_id,
+                mask: mask_from(&[Permission::ViewOrg, Permission::TriggerEvaluation]),
+                organization: None,
+            },
+        };
+        let ctx = outcome.api_key_context().expect("present");
+        assert_eq!(ctx.api_id, api_id);
+        assert_eq!(
+            ctx.mask,
+            mask_from(&[Permission::ViewOrg, Permission::TriggerEvaluation])
+        );
+        assert!(ctx.organization.is_none());
+        assert_eq!(outcome.user_id(), user_id);
     }
 }

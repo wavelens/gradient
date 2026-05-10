@@ -9,7 +9,7 @@ mod jwt;
 mod middleware;
 mod oidc;
 
-pub use self::api_key::{ApiKeyContext, MaybeApiKey};
+pub use self::api_key::{ApiKeyContext, DecodedRequest, MaybeApiKey};
 pub use self::jwt::{
     Cliams, DownloadClaims, create_session_and_token, decode_download_token, decode_jwt,
     encode_download_token, extract_bearer_or_cookie, generate_api_key, hash_api_key,
