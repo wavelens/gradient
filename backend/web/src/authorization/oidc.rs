@@ -342,8 +342,7 @@ async fn create_or_update_user(
 
     if collision.is_some() {
         bail!(
-            "An account already exists with this username or email — \
-             contact an administrator to link it to your OIDC identity"
+            "An account already exists with this username or email."
         );
     }
 
