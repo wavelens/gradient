@@ -1080,6 +1080,11 @@ evaluation. `Aborted` is never propagated — when a leader is aborted (its
 own evaluation cancelled) `abort_evaluation` re-elects a new leader from
 the surviving followers instead of dragging unrelated evaluations down.
 
+`find_active_leaders` (now in `core::db::status`) is the single source of
+truth for the leader lookup, called both from `eval::insert_build_rows`
+(regular eval-result path) and `ci::trigger::trigger_restart_builds`
+(rerun-failed-builds path) so the two paths can't diverge.
+
 Tests:
 
 - `dispatch_tests::dispatch_skips_follower_builds` — the SQL gate keeps
@@ -1089,6 +1094,12 @@ Tests:
   `handle_build_job_failed` mock-DB suite was extended to mock the
   `propagate_to_followers` followers query, exercising the new code path
   on every terminal transition.
+- `ci::trigger::tests::restart_sets_via_when_leader_active_elsewhere` —
+  when the "rerun failed builds" path finds an in-flight leader for a
+  derivation it's about to re-queue, the new build row carries
+  `via = leader.id`. Verified by draining the MockDatabase transaction
+  log and asserting the leader's UUID appears in the INSERT's value
+  list.
 
 ## Typed entity IDs (`entity::ids`)
 

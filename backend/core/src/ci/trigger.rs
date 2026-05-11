@@ -216,6 +216,20 @@ pub async fn trigger_restart_builds<C: ConnectionTrait>(
     };
     let new_eval = aevaluation.insert(db).await?;
 
+    // Look up any in-flight leader (Created/Queued/Building) in another
+    // evaluation for the derivations we're about to rebuild. Restarting must
+    // honour the same cross-evaluation dedup as the regular eval-result path,
+    // otherwise two projects in the same organisation race for the Nix store
+    // lock when one restarts while the other is still building.
+    let queued_drv_ids: Vec<DerivationId> = prev_builds
+        .iter()
+        .filter(|b| !matches!(restart_build_status(b.status), BuildStatus::Substituted))
+        .map(|b| b.derivation)
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    let leader_for_drv = crate::db::find_active_leaders(db, &queued_drv_ids).await?;
+
     // Create new builds for the new evaluation and track old→new build ID mapping.
     let mut build_id_map: std::collections::HashMap<BuildId, BuildId> =
         std::collections::HashMap::with_capacity(prev_builds.len());
@@ -223,6 +237,11 @@ pub async fn trigger_restart_builds<C: ConnectionTrait>(
     for prev_build in &prev_builds {
         let new_status = restart_build_status(prev_build.status);
         let new_build_id = BuildId::now_v7();
+        let via = if matches!(new_status, BuildStatus::Substituted) {
+            None
+        } else {
+            leader_for_drv.get(&prev_build.derivation).copied()
+        };
         let abuild = ABuild {
             id: Set(new_build_id),
             evaluation: Set(new_eval_id),
@@ -231,7 +250,7 @@ pub async fn trigger_restart_builds<C: ConnectionTrait>(
             log_id: Set(None),
             build_time_ms: Set(None),
             worker: Set(None),
-            via: Set(None),
+            via: Set(via),
             external_cached: Set(false),
             created_at: Set(now),
             updated_at: Set(now),
@@ -531,10 +550,19 @@ mod tests {
     // ── trigger_restart_builds ───────────────────────────────────────────────
 
     fn make_build(id: BuildId, eval_id: EvaluationId, status: BuildStatus) -> entity::build::Model {
+        make_build_drv(id, eval_id, DerivationId::now_v7(), status)
+    }
+
+    fn make_build_drv(
+        id: BuildId,
+        eval_id: EvaluationId,
+        derivation: DerivationId,
+        status: BuildStatus,
+    ) -> entity::build::Model {
         entity::build::Model {
             id,
             evaluation: eval_id,
-            derivation: DerivationId::now_v7(),
+            derivation,
             status,
             log_id: None,
             build_time_ms: None,
@@ -642,6 +670,8 @@ mod tests {
             .append_query_results([vec![prev_eval]])
             .append_query_results([prev_builds])
             .append_query_results([vec![inserted_eval]])
+            // find_active_leaders for the one Queued drv → no in-flight leader.
+            .append_query_results([Vec::<entity::build::Model>::new()])
             .append_query_results([vec![make_build(
                 BuildId::now_v7(),
                 new_eval_id,
@@ -663,5 +693,92 @@ mod tests {
         let result = trigger_restart_builds(&db, &project).await;
         assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
         assert_eq!(result.unwrap().status, EvaluationStatus::Building);
+    }
+
+    /// Restarting must honour the cross-evaluation `via` dedup: if another
+    /// evaluation (typically a different project in the same organisation)
+    /// is currently building one of the drvs being restarted, the new build
+    /// row follows that leader instead of racing it. Regression for the
+    /// "rerun failed builds" path bypassing `find_active_leaders`.
+    #[tokio::test]
+    async fn restart_sets_via_when_leader_active_elsewhere() {
+        let project = make_project();
+        let prev_eval_id = EvaluationId::now_v7();
+        let prev_eval = make_eval(prev_eval_id, EvaluationStatus::Failed);
+        let new_eval_id = EvaluationId::now_v7();
+
+        let shared_drv = DerivationId::now_v7();
+        let prev_build = make_build_drv(
+            BuildId::now_v7(),
+            prev_eval_id,
+            shared_drv,
+            BuildStatus::Failed,
+        );
+
+        // Leader currently Building under a different evaluation.
+        let other_eval_id = EvaluationId::now_v7();
+        let leader = make_build_drv(
+            BuildId::now_v7(),
+            other_eval_id,
+            shared_drv,
+            BuildStatus::Building,
+        );
+        let leader_id = leader.id;
+
+        let inserted_eval = {
+            let mut e = make_eval(new_eval_id, EvaluationStatus::Building);
+            e.previous = Some(prev_eval_id);
+            e
+        };
+
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([Vec::<evaluation::Model>::new()])
+            .append_query_results([vec![prev_eval]])
+            .append_query_results([vec![prev_build]])
+            .append_query_results([vec![inserted_eval]])
+            // find_active_leaders for [shared_drv] → returns the in-flight leader.
+            .append_query_results([vec![leader]])
+            // INSERT new build (with via=leader_id).
+            .append_query_results([vec![{
+                let mut b =
+                    make_build_drv(BuildId::now_v7(), new_eval_id, shared_drv, BuildStatus::Queued);
+                b.via = Some(leader_id);
+                b
+            }]])
+            .append_query_results([Vec::<entity::entry_point::Model>::new()])
+            .append_query_results([vec![project.clone()]])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            .into_connection();
+
+        let result = trigger_restart_builds(&db, &project).await;
+        assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
+
+        // Verify the INSERT carried via=leader_id by inspecting the executed
+        // statements. MockDatabase records every statement; the build insert
+        // is the only one whose SQL mentions the `via` column.
+        let logs = db.into_transaction_log();
+        let build_insert = logs
+            .iter()
+            .flat_map(|t| t.statements())
+            .find(|s| {
+                let sql = s.sql.to_lowercase();
+                sql.contains("insert into") && sql.contains("\"build\"") && sql.contains("\"via\"")
+            })
+            .expect("expected an INSERT INTO build statement");
+        let values: Vec<String> = build_insert
+            .values
+            .as_ref()
+            .map(|v| v.0.iter().map(|val| format!("{:?}", val)).collect())
+            .unwrap_or_default();
+        let joined = values.join(", ");
+        assert!(
+            joined.contains(&leader_id.into_inner().to_string()),
+            "expected build INSERT to carry via={} (leader id), got values: {}",
+            leader_id,
+            joined,
+        );
     }
 }

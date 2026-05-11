@@ -156,7 +156,12 @@ fn get_project_includes_sign_cache() {
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
             .append_query_results([vec![org()]])
             .append_query_results([vec![project_with(false)]])
+            // is_org_member (Readable access)
             .append_query_results([vec![admin_membership()]])
+            // has_permission(EditProject): membership + role
+            .append_query_results([vec![admin_membership()]])
+            .append_query_results([vec![admin_role_row()]])
+            // has_permission(TriggerEvaluation): membership + role
             .append_query_results([vec![admin_membership()]])
             .append_query_results([vec![admin_role_row()]]);
 

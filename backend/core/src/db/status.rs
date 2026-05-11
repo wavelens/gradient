@@ -13,8 +13,10 @@ use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter,
+    ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, EntityTrait, IntoActiveModel,
+    QueryFilter,
 };
+use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 
@@ -383,4 +385,45 @@ async fn reelect_leader(state: &Arc<ServerState>, leader: &MBuild) -> Result<(),
         "re-elected build leader"
     );
     Ok(())
+}
+
+/// For each derivation in `drv_ids`, return the id of the leader build whose
+/// result a new build for that derivation should follow — i.e. the build
+/// whose `via` is NULL and whose status is non-terminal
+/// (`Created` / `Queued` / `Building`). Followers in the result set
+/// collapse to their leader so callers can never accidentally point a new
+/// build at another follower (no via chains).
+///
+/// Drvs with no active build in the result map are simply omitted; callers
+/// should treat a missing entry as "no leader, insert as a plain build".
+pub async fn find_active_leaders<C: ConnectionTrait>(
+    db: &C,
+    drv_ids: &[DerivationId],
+) -> Result<HashMap<DerivationId, BuildId>, sea_orm::DbErr> {
+    if drv_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let rows = EBuild::find()
+        .filter(CBuild::Derivation.is_in(drv_ids.to_vec()))
+        .filter(CBuild::Status.is_in(vec![
+            BuildStatus::Created,
+            BuildStatus::Queued,
+            BuildStatus::Building,
+        ]))
+        .all(db)
+        .await?;
+
+    let mut out: HashMap<DerivationId, BuildId> = HashMap::new();
+    for b in rows {
+        let head = b.via.unwrap_or(b.id);
+        out.entry(b.derivation)
+            .and_modify(|cur| {
+                if b.via.is_none() {
+                    *cur = b.id;
+                }
+            })
+            .or_insert(head);
+    }
+    Ok(out)
 }

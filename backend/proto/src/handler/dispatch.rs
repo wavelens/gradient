@@ -894,12 +894,12 @@ mod nar_buffers_tests {
     fn clear_poison_allows_retry() {
         let mut nb = NarBuffers::new(100);
         assert!(matches!(
-            nb.append("/nix/store/a", &vec![0u8; 200]),
+            nb.append("/nix/store/a", &[0u8; 200]),
             AppendOutcome::Overflow
         ));
         assert!(nb.is_poisoned("/nix/store/a"));
         nb.clear_poison("/nix/store/a");
         assert!(!nb.is_poisoned("/nix/store/a"));
-        assert_ok(nb.append("/nix/store/a", &vec![0u8; 50]));
+        assert_ok(nb.append("/nix/store/a", &[0u8; 50]));
     }
 }

@@ -14,7 +14,7 @@ use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use entity::evaluation_message::MessageLevel;
 use gradient_core::db::{
-    record_evaluation_message, update_build_status, update_evaluation_status,
+    find_active_leaders, record_evaluation_message, update_build_status, update_evaluation_status,
     update_evaluation_status_with_error,
 };
 use gradient_core::executer::strip_nix_store_prefix;
@@ -215,11 +215,12 @@ impl<'a> EvalResultProcessor<'a> {
             .filter(|id| !truly_substituted.contains(id))
             .collect();
 
-        let leader_for_drv = if buildable_drv_ids.is_empty() {
-            HashMap::new()
-        } else {
-            find_active_leaders(self.state, &buildable_drv_ids).await
-        };
+        let leader_for_drv = find_active_leaders(&self.state.worker_db, &buildable_drv_ids)
+            .await
+            .unwrap_or_else(|e| {
+                error!(error = %e, "failed to query active leaders");
+                HashMap::new()
+            });
 
         for d in derivations {
             let Some(&drv_id) = drv_path_to_id.get(&d.drv_path) else {
@@ -602,10 +603,21 @@ async fn expand_substituted_closure(
 pub async fn handle_eval_result(
     state: &Arc<ServerState>,
     job: &PendingEvalJob,
-    derivations: Vec<DiscoveredDerivation>,
+    mut derivations: Vec<DiscoveredDerivation>,
     warnings: Vec<String>,
     errors: Vec<String>,
 ) -> Result<()> {
+    // `derivation.derivation_path` stores the bare `<hash>-<name>` form
+    // (narinfo `References:` convention). Callers may pass either form;
+    // normalise once here so every downstream key (existing-rows map,
+    // insert path, build-row lookup, deferred deps) is in canonical form.
+    for d in &mut derivations {
+        d.drv_path = strip_nix_store_prefix(&d.drv_path);
+        for dep in &mut d.dependencies {
+            *dep = strip_nix_store_prefix(dep);
+        }
+    }
+
     let evaluation_id = job.evaluation_id;
     let organization_id = job.peer_id;
 
@@ -828,44 +840,3 @@ pub async fn handle_eval_job_failed(
     Ok(())
 }
 
-/// Find the in-flight leader build for each derivation in `drv_ids`.
-///
-/// A build is a leader if its `via` is NULL and its status is non-terminal
-/// (Created/Queued/Building). Returns the head of the via chain — i.e. an
-/// existing follower's `via` value, or the leader's own id. New builds for
-/// the same derivation should set `via` to this id, producing a flat fan-out
-/// (no chains).
-async fn find_active_leaders(
-    state: &Arc<ServerState>,
-    drv_ids: &[DerivationId],
-) -> HashMap<DerivationId, BuildId> {
-    let rows = match EBuild::find()
-        .filter(CBuild::Derivation.is_in(drv_ids.to_vec()))
-        .filter(CBuild::Status.is_in(vec![
-            BuildStatus::Created,
-            BuildStatus::Queued,
-            BuildStatus::Building,
-        ]))
-        .all(&state.worker_db)
-        .await
-    {
-        Ok(rs) => rs,
-        Err(e) => {
-            error!(error = %e, "failed to query active leaders");
-            return HashMap::new();
-        }
-    };
-
-    let mut out: HashMap<DerivationId, BuildId> = HashMap::new();
-    for b in rows {
-        let head = b.via.unwrap_or(b.id);
-        out.entry(b.derivation)
-            .and_modify(|cur| {
-                if b.via.is_none() {
-                    *cur = b.id;
-                }
-            })
-            .or_insert(head);
-    }
-    out
-}
