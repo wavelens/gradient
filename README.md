@@ -1,8 +1,8 @@
 # Gradient
 
 <p align="center">
-  <a href="https://gradient.wavelens.io/organization/gradient/project/gradient">
-    <img src="https://gradient.wavelens.io/api/v1/projects/gradient/gradient/badge" alt="Gradient Badge">
+  <a href="https://gradient.wavelens.io/organization/gradient/project/main">
+    <img src="https://gradient.wavelens.io/api/v1/projects/gradient/main/badge" alt="Gradient Badge">
   </a>
   <br>
   <strong>Modern Nix-CI System</strong>
