@@ -67,14 +67,14 @@ async function settled(fixture: ComponentFixture<OrganizationSettingsComponent>)
 
 describe('OrganizationSettingsComponent — access gating', () => {
   it('hides Save / Delete under read-only access', async () => {
-    const fixture = setup({ managed: false, canEdit: false });
+    const fixture = setup({ managed: false, canEdit: false, canTrigger: false });
     await settled(fixture);
     expect(findByText(fixture.nativeElement, 'save changes')).toBeNull();
     expect(findByText(fixture.nativeElement, 'delete organization')).toBeNull();
   });
 
   it('shows but disables Save / Delete under state-managed access', async () => {
-    const fixture = setup({ managed: true, canEdit: true });
+    const fixture = setup({ managed: true, canEdit: true, canTrigger: true });
     await settled(fixture);
     const save = findByText(fixture.nativeElement, 'save changes') as HTMLButtonElement | null;
     const del = findByText(fixture.nativeElement, 'delete organization') as HTMLButtonElement | null;

@@ -5,7 +5,7 @@
  */
 
 import { ApplicationConfig, APP_INITIALIZER, provideBrowserGlobalErrorListeners, inject, Injectable } from '@angular/core';
-import { provideRouter, TitleStrategy, RouterStateSnapshot } from '@angular/router';
+import { provideRouter, TitleStrategy, RouterStateSnapshot, withRouterConfig } from '@angular/router';
 import { Title } from '@angular/platform-browser';
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { provideAnimations } from '@angular/platform-browser/animations';
@@ -30,7 +30,7 @@ class GradientTitleStrategy extends TitleStrategy {
 export const appConfig: ApplicationConfig = {
   providers: [
     provideBrowserGlobalErrorListeners(),
-    provideRouter(routes),
+    provideRouter(routes, withRouterConfig({ paramsInheritanceStrategy: 'always' })),
     { provide: TitleStrategy, useClass: GradientTitleStrategy },
     provideHttpClient(
       withInterceptors([authInterceptor, errorInterceptor])

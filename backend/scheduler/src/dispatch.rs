@@ -20,6 +20,7 @@ use std::time::Duration;
 
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
+use gradient_core::executer::nix_store_path;
 use gradient_core::types::input::vec_to_hex;
 use gradient_core::types::wildcard::Wildcard;
 use gradient_core::types::*;
@@ -431,7 +432,7 @@ impl BuildDispatchMaps {
         let build_job = BuildJob {
             builds: vec![BuildTask {
                 build_id: build.id.to_string(),
-                drv_path: derivation.derivation_path.clone(),
+                drv_path: nix_store_path(&derivation.derivation_path),
                 external_cached: build.external_cached,
             }],
         };

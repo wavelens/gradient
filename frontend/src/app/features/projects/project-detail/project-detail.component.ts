@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
+import { Component, OnInit, OnDestroy, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { interval, Subscription } from 'rxjs';
@@ -14,7 +14,7 @@ import { OrganizationsService } from '@core/services/organizations.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { EmptyStateComponent } from '@shared/components/empty-state/empty-state.component';
-import { WritableDirective, ManagedDisableDirective } from '@shared/access';
+import { AccessService, WritableDirective } from '@shared/access';
 import { injectProjectAccess } from '@core/resolvers/inject-access';
 import { ProjectDetail, EvaluationSummary, EvaluationStatus, EntryPointSummary, BuildStatus, TriggerType } from '@core/models';
 
@@ -28,7 +28,6 @@ import { ProjectDetail, EvaluationSummary, EvaluationStatus, EntryPointSummary, 
     LoadingSpinnerComponent,
     EmptyStateComponent,
     WritableDirective,
-    ManagedDisableDirective,
   ],
   templateUrl: './project-detail.component.html',
   styleUrl: './project-detail.component.scss',
@@ -38,8 +37,12 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   protected authService = inject(AuthService);
   private orgsService = inject(OrganizationsService);
   private projectsService = inject(ProjectsService);
+  private accessService = inject(AccessService);
 
   access = injectProjectAccess();
+  /// Access projection for trigger-style actions (Start / Restart / Abort).
+  /// Driven by Permission::TriggerEvaluation and not gated by `managed`.
+  triggerAccess = computed(() => this.accessService.triggerAccess(this.access()));
 
   loading = signal(true);
   project = signal<ProjectDetail | null>(null);

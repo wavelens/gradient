@@ -50,7 +50,7 @@ describe('cacheAccessResolver', () => {
     const data = await runResolver(snap({ cache: 'demo' }));
     expect(getCache).toHaveBeenCalledWith('demo');
     expect(data.cache).toBe(baseCache);
-    expect(data.access).toEqual({ managed: false, canEdit: true });
+    expect(data.access).toEqual({ managed: false, canEdit: true, canTrigger: true });
   });
 
   it('propagates managed and can_edit into access', async () => {
@@ -58,6 +58,6 @@ describe('cacheAccessResolver', () => {
       of({ ...baseCache, managed: true, can_edit: false }),
     );
     const data = await runResolver(snap({ cache: 'demo' }));
-    expect(data.access).toEqual({ managed: true, canEdit: false });
+    expect(data.access).toEqual({ managed: true, canEdit: false, canTrigger: false });
   });
 });

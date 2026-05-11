@@ -60,14 +60,14 @@ async function settled(fixture: ComponentFixture<MembersRolesComponent>) {
 
 describe('MembersRolesComponent — access gating', () => {
   it('hides Add Member, New Role, per-row Remove under read-only access', async () => {
-    const fixture = setup({ managed: false, canEdit: false });
+    const fixture = setup({ managed: false, canEdit: false, canTrigger: false });
     await settled(fixture);
     expect(findByText(fixture.nativeElement, 'add member')).toBeNull();
     expect(findByText(fixture.nativeElement, 'new role')).toBeNull();
   });
 
   it('shows but disables Add Member / New Role under state-managed access', async () => {
-    const fixture = setup({ managed: true, canEdit: true });
+    const fixture = setup({ managed: true, canEdit: true, canTrigger: true });
     await settled(fixture);
     const addBtn = findByText(fixture.nativeElement, 'add member') as HTMLButtonElement | null;
     const newRoleBtn = findByText(fixture.nativeElement, 'new role') as HTMLButtonElement | null;

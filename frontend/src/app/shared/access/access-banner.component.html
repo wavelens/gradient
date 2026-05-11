@@ -1,6 +1,3 @@
 @if (kind() !== 'none' && message(); as msg) {
-  <aside [class]="klass()" role="status">
-    <span class="access-banner__icon" aria-hidden="true">!</span>
-    <span class="access-banner__text">{{ msg }}</span>
-  </aside>
+  <gr-message-banner type="info" class="access-banner" [attr.data-kind]="kind()">{{ msg }}</gr-message-banner>
 }

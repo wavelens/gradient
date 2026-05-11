@@ -16,14 +16,14 @@ import { AccessState } from '@core/models/access.model';
   template: `<app-access-banner [access]="access()"></app-access-banner>`,
 })
 class HostComponent {
-  access = signal<AccessState>({ managed: false, canEdit: true });
+  access = signal<AccessState>({ managed: false, canEdit: true, canTrigger: true });
 }
 
 describe('AccessBannerComponent', () => {
   let fixture: ComponentFixture<HostComponent>;
 
   function bannerEl(): HTMLElement | null {
-    return fixture.nativeElement.querySelector('.access-banner');
+    return fixture.nativeElement.querySelector('gr-message-banner.access-banner');
   }
 
   beforeEach(() => {
@@ -32,34 +32,37 @@ describe('AccessBannerComponent', () => {
   });
 
   it('renders nothing for full access', () => {
-    fixture.componentInstance.access.set({ managed: false, canEdit: true });
+    fixture.componentInstance.access.set({ managed: false, canEdit: true, canTrigger: true });
     fixture.detectChanges();
     expect(bannerEl()).toBeNull();
   });
 
-  it('renders a managed banner when managed and canEdit', () => {
-    fixture.componentInstance.access.set({ managed: true, canEdit: true });
+  it('renders an info banner with the managed message when managed and canEdit', () => {
+    fixture.componentInstance.access.set({ managed: true, canEdit: true, canTrigger: true });
     fixture.detectChanges();
     const el = bannerEl();
     expect(el).not.toBeNull();
+    expect(el!.getAttribute('data-kind')).toBe('managed');
     expect(el!.textContent).toMatch(/managed/i);
-    expect(el!.classList).toContain('access-banner--managed');
+    expect(el!.querySelector('.message-banner--info')).not.toBeNull();
   });
 
-  it('renders a read-only banner when !canEdit and !managed', () => {
-    fixture.componentInstance.access.set({ managed: false, canEdit: false });
+  it('renders an info banner with the read-only message when !canEdit and !managed', () => {
+    fixture.componentInstance.access.set({ managed: false, canEdit: false, canTrigger: false });
     fixture.detectChanges();
     const el = bannerEl();
     expect(el).not.toBeNull();
+    expect(el!.getAttribute('data-kind')).toBe('readonly');
     expect(el!.textContent).toMatch(/read-only/i);
-    expect(el!.classList).toContain('access-banner--readonly');
+    expect(el!.querySelector('.message-banner--info')).not.toBeNull();
   });
 
-  it('renders a managed-readonly banner when both', () => {
-    fixture.componentInstance.access.set({ managed: true, canEdit: false });
+  it('renders an info banner when both managed and read-only', () => {
+    fixture.componentInstance.access.set({ managed: true, canEdit: false, canTrigger: false });
     fixture.detectChanges();
     const el = bannerEl();
     expect(el).not.toBeNull();
-    expect(el!.classList).toContain('access-banner--managed-readonly');
+    expect(el!.getAttribute('data-kind')).toBe('managed-readonly');
+    expect(el!.querySelector('.message-banner--info')).not.toBeNull();
   });
 });

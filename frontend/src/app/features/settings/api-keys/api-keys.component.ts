@@ -219,6 +219,6 @@ export class ApiKeysComponent implements OnInit {
   }
 
   rowAccess(key: ApiKey): AccessState {
-    return { managed: key.managed, canEdit: true };
+    return { managed: key.managed, canEdit: true, canTrigger: true };
   }
 }

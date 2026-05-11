@@ -9,6 +9,7 @@ use crate::error::WebResult;
 use crate::helpers::{OptionExt, ok_json};
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
+use gradient_core::executer::nix_store_path;
 use gradient_core::types::*;
 use sea_orm::EntityTrait;
 use sea_orm::{ColumnTrait, QueryFilter};
@@ -99,7 +100,7 @@ async fn process_graph_wave(
             nodes.push(DependencyNode {
                 id: build.id,
                 name: extract_drv_name(&drv.derivation_path),
-                path: drv.derivation_path.clone(),
+                path: nix_store_path(&drv.derivation_path),
                 status: format!("{:?}", build.status),
                 created_at: build.created_at,
                 updated_at: build.updated_at,
@@ -197,7 +198,7 @@ pub async fn get_build_dependencies(
                 nodes.push(DependencyNode {
                     id: b.id,
                     name: extract_drv_name(&drv.derivation_path),
-                    path: drv.derivation_path.clone(),
+                    path: nix_store_path(&drv.derivation_path),
                     status: format!("{:?}", b.status),
                     created_at: b.created_at,
                     updated_at: b.updated_at,

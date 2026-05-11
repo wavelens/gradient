@@ -16,7 +16,7 @@ import { AccessState } from '@core/models/access.model';
   template: `<button *appWritable="access()">save</button>`,
 })
 class HostComponent {
-  access = signal<AccessState>({ managed: false, canEdit: true });
+  access = signal<AccessState>({ managed: false, canEdit: true, canTrigger: true });
 }
 
 describe('WritableDirective (*appWritable)', () => {
@@ -28,35 +28,35 @@ describe('WritableDirective (*appWritable)', () => {
   });
 
   it('renders content when canEdit is true', () => {
-    fixture.componentInstance.access.set({ managed: false, canEdit: true });
+    fixture.componentInstance.access.set({ managed: false, canEdit: true, canTrigger: true });
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('button')).not.toBeNull();
   });
 
   it('renders content when canEdit and managed are both true', () => {
-    fixture.componentInstance.access.set({ managed: true, canEdit: true });
+    fixture.componentInstance.access.set({ managed: true, canEdit: true, canTrigger: true });
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('button')).not.toBeNull();
   });
 
   it('hides content when canEdit is false', () => {
-    fixture.componentInstance.access.set({ managed: false, canEdit: false });
+    fixture.componentInstance.access.set({ managed: false, canEdit: false, canTrigger: false });
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('button')).toBeNull();
   });
 
   it('hides content when canEdit is false even if managed is true', () => {
-    fixture.componentInstance.access.set({ managed: true, canEdit: false });
+    fixture.componentInstance.access.set({ managed: true, canEdit: false, canTrigger: false });
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('button')).toBeNull();
   });
 
   it('toggles content when the input changes', () => {
-    fixture.componentInstance.access.set({ managed: false, canEdit: true });
+    fixture.componentInstance.access.set({ managed: false, canEdit: true, canTrigger: true });
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('button')).not.toBeNull();
 
-    fixture.componentInstance.access.set({ managed: false, canEdit: false });
+    fixture.componentInstance.access.set({ managed: false, canEdit: false, canTrigger: false });
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('button')).toBeNull();
   });

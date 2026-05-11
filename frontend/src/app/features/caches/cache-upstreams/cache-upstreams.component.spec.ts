@@ -71,19 +71,19 @@ function setup(access: AccessState): ComponentFixture<CacheUpstreamsComponent> {
 
 describe('CacheUpstreamsComponent — access gating', () => {
   it('renders the upstream list under read-only access', () => {
-    const fixture = setup({ managed: false, canEdit: false });
+    const fixture = setup({ managed: false, canEdit: false, canTrigger: false });
     expect(fixture.nativeElement.textContent).toContain('Upstream A');
   });
 
   it('hides Add Upstream, Edit, Delete under read-only access', () => {
-    const fixture = setup({ managed: false, canEdit: false });
+    const fixture = setup({ managed: false, canEdit: false, canTrigger: false });
     expect(findByText(fixture.nativeElement, 'add upstream')).toBeNull();
     expect(findIconButton(fixture.nativeElement, 'pi-pencil')).toBeNull();
     expect(findIconButton(fixture.nativeElement, 'pi-trash')).toBeNull();
   });
 
   it('shows but disables Add / Edit / Delete under state-managed access', () => {
-    const fixture = setup({ managed: true, canEdit: true });
+    const fixture = setup({ managed: true, canEdit: true, canTrigger: true });
     const addBtn = findByText(fixture.nativeElement, 'add upstream') as HTMLButtonElement | null;
     const editBtn = findIconButton(fixture.nativeElement, 'pi-pencil');
     const delBtn = findIconButton(fixture.nativeElement, 'pi-trash');
@@ -96,7 +96,7 @@ describe('CacheUpstreamsComponent — access gating', () => {
   });
 
   it('renders Add / Edit / Delete enabled under full access', () => {
-    const fixture = setup({ managed: false, canEdit: true });
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
     const addBtn = findByText(fixture.nativeElement, 'add upstream') as HTMLButtonElement | null;
     expect(addBtn).not.toBeNull();
     expect(addBtn!.disabled).toBe(false);

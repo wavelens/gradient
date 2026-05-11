@@ -46,7 +46,7 @@ export class CacheSubscriptionsComponent implements OnInit {
   private cachesService = inject(CachesService);
   private orgAccess = inject(OrgAccessService);
 
-  access = signal<AccessState>({ managed: false, canEdit: false });
+  access = signal<AccessState>({ managed: false, canEdit: false, canTrigger: false });
 
   loading = signal(true);
   subscribing = signal(false);

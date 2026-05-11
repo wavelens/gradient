@@ -36,31 +36,31 @@ describe('OrgAccessService', () => {
 
   it('returns canEdit=true and managed=false for Admin in unmanaged org', async () => {
     getOrganization.mockReturnValue(of(org({ role: 'Admin' })));
-    expect(await svc.forOrg('acme')).toEqual({ managed: false, canEdit: true });
+    expect(await svc.forOrg('acme')).toEqual({ managed: false, canEdit: true, canTrigger: true });
   });
 
   it('returns canEdit=true and managed=true for Admin in managed org', async () => {
     getOrganization.mockReturnValue(of(org({ role: 'Admin', managed: true })));
-    expect(await svc.forOrg('acme')).toEqual({ managed: true, canEdit: true });
+    expect(await svc.forOrg('acme')).toEqual({ managed: true, canEdit: true, canTrigger: true });
   });
 
   it('returns canEdit=true for Write role', async () => {
     getOrganization.mockReturnValue(of(org({ role: 'Write' })));
-    expect(await svc.forOrg('acme')).toEqual({ managed: false, canEdit: true });
+    expect(await svc.forOrg('acme')).toEqual({ managed: false, canEdit: true, canTrigger: true });
   });
 
   it('returns canEdit=false for View role', async () => {
     getOrganization.mockReturnValue(of(org({ role: 'View' })));
-    expect(await svc.forOrg('acme')).toEqual({ managed: false, canEdit: false });
+    expect(await svc.forOrg('acme')).toEqual({ managed: false, canEdit: false, canTrigger: false });
   });
 
   it('returns canEdit=false when role is missing (not a member)', async () => {
     getOrganization.mockReturnValue(of(org({ role: undefined })));
-    expect(await svc.forOrg('acme')).toEqual({ managed: false, canEdit: false });
+    expect(await svc.forOrg('acme')).toEqual({ managed: false, canEdit: false, canTrigger: false });
   });
 
   it('treats custom non-View role names as writable', async () => {
     getOrganization.mockReturnValue(of(org({ role: 'Maintainer' as never })));
-    expect(await svc.forOrg('acme')).toEqual({ managed: false, canEdit: true });
+    expect(await svc.forOrg('acme')).toEqual({ managed: false, canEdit: true, canTrigger: true });
   });
 });

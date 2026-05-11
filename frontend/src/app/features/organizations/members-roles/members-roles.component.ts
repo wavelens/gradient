@@ -58,7 +58,7 @@ export class MembersRolesComponent implements OnInit {
   private userService = inject(UserService);
   private orgAccess = inject(OrgAccessService);
 
-  access = signal<AccessState>({ managed: false, canEdit: false });
+  access = signal<AccessState>({ managed: false, canEdit: false, canTrigger: false });
 
   orgName = '';
 

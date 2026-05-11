@@ -14,7 +14,9 @@ import { InputTextModule } from 'primeng/inputtext';
 import { SelectModule } from 'primeng/select';
 import { IntegrationsService } from '@core/services/integrations.service';
 import { OrganizationsService } from '@core/services/organizations.service';
+import { OrgAccessService } from '@core/services/org-access.service';
 import {
+  AccessState,
   ForgeType,
   InboundForge,
   Integration,
@@ -22,6 +24,7 @@ import {
   Organization,
 } from '@core/models';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
+import { AccessBannerComponent, WritableDirective, ManagedDisableDirective } from '@shared/access';
 
 interface Option<T> {
   label: string;
@@ -40,6 +43,9 @@ interface Option<T> {
     InputTextModule,
     SelectModule,
     LoadingSpinnerComponent,
+    AccessBannerComponent,
+    WritableDirective,
+    ManagedDisableDirective,
   ],
   templateUrl: './integrations.component.html',
   styleUrl: './integrations.component.scss',
@@ -48,6 +54,9 @@ export class IntegrationsComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private integrationsService = inject(IntegrationsService);
   private orgsService = inject(OrganizationsService);
+  private orgAccess = inject(OrgAccessService);
+
+  access = signal<AccessState>({ managed: false, canEdit: false, canTrigger: false });
 
   loading = signal(true);
   saving = signal(false);
@@ -119,6 +128,7 @@ export class IntegrationsComponent implements OnInit {
 
   ngOnInit(): void {
     this.orgName = this.route.snapshot.paramMap.get('org') || '';
+    this.orgAccess.forOrg(this.orgName).then((s) => this.access.set(s));
     this.loadOrganization();
     this.loadIntegrations();
   }

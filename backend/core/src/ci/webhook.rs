@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::executer::nix_store_path;
 use crate::types::input::load_secret_bytes;
 use crate::types::*;
 use anyhow::Result;
@@ -307,7 +308,7 @@ pub async fn fire_build_webhook(state: Arc<ServerState>, build: MBuild, status: 
         .await
         .ok()
         .flatten()
-        .map(|d| d.derivation_path);
+        .map(|d| nix_store_path(&d.derivation_path));
 
     let payload = serde_json::json!({
         "build_id": build.id,

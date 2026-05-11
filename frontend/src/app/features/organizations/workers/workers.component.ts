@@ -42,10 +42,15 @@ export class WorkersComponent implements OnInit {
   private orgsService = inject(OrganizationsService);
   private orgAccess = inject(OrgAccessService);
 
-  access = signal<AccessState>({ managed: false, canEdit: false });
+  access = signal<AccessState>({ managed: false, canEdit: false, canTrigger: false });
 
   rowAccess(worker: Worker): AccessState {
-    return { managed: worker.managed || this.access().managed, canEdit: this.access().canEdit };
+    const a = this.access();
+    return {
+      managed: worker.managed || a.managed,
+      canEdit: a.canEdit,
+      canTrigger: a.canTrigger,
+    };
   }
 
   readonly capLabels: { key: keyof GradientCapabilities; label: string }[] = [

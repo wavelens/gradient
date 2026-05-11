@@ -9,6 +9,7 @@ use crate::error::WebResult;
 use crate::helpers::ok_json;
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
+use gradient_core::executer::nix_store_path;
 use gradient_core::types::input::vec_to_hex;
 use gradient_core::types::*;
 use sea_orm::{ColumnTrait, EntityTrait, Order, QueryFilter, QueryOrder};
@@ -202,7 +203,7 @@ pub async fn get_evaluation_builds(
             }
             Some(BuildItem {
                 id: b.id,
-                name: drv.derivation_path.clone(),
+                name: nix_store_path(&drv.derivation_path),
                 status: format!("{:?}", b.status.for_api()),
                 has_artefacts: *has_artefacts_map.get(&b.derivation).unwrap_or(&false),
                 updated_at: b.updated_at,

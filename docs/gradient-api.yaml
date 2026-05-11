@@ -5117,7 +5117,7 @@ components:
 
     Project:
       type: object
-      required: [id, name, display_name, organization, repository, wildcard, active, created_by, created_at]
+      required: [id, name, display_name, organization, repository, wildcard, active, created_by, created_at, managed, can_edit, can_trigger]
       properties:
         id:
           type: string
@@ -5152,6 +5152,15 @@ components:
         created_at:
           type: string
           format: date-time
+        managed:
+          type: boolean
+          description: True when the project is managed by declarative Nix state and cannot be edited via the UI.
+        can_edit:
+          type: boolean
+          description: True when the caller has Permission::EditProject — may edit project configuration.
+        can_trigger:
+          type: boolean
+          description: True when the caller has Permission::TriggerEvaluation — may start, restart, or abort evaluations. Independent of can_edit so users granted only trigger rights can act and managed projects retain trigger access.
 
     EntryPointSummary:
       type: object
@@ -5214,6 +5223,7 @@ components:
         - keep_evaluations
         - last_evaluations
         - can_edit
+        - can_trigger
         - managed
       properties:
         id:
@@ -5243,7 +5253,10 @@ components:
             $ref: '#/components/schemas/EvaluationSummary'
         can_edit:
           type: boolean
-          description: True when the caller has permission to edit this project.
+          description: True when the caller has Permission::EditProject — may edit project configuration.
+        can_trigger:
+          type: boolean
+          description: True when the caller has Permission::TriggerEvaluation — may start, restart, or abort evaluations. Independent of can_edit so users granted only trigger rights can act and managed projects retain trigger access even though their config is read-only.
         managed:
           type: boolean
           description: True when the project is managed by declarative Nix state and cannot be edited via the UI.

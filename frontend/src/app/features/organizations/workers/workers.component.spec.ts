@@ -93,7 +93,7 @@ function findAllByText(root: HTMLElement, text: string): HTMLButtonElement[] {
 
 describe('WorkersComponent — no-cache banner (existing)', () => {
   it('shows the banner when the org has no subscribed caches', async () => {
-    const fixture = setup({ access: { managed: false, canEdit: true }, workers: [], caches: [] });
+    const fixture = setup({ access: { managed: false, canEdit: true, canTrigger: true }, workers: [], caches: [] });
     await settled(fixture);
     const banner = fixture.nativeElement.querySelector('[data-testid="no-cache-banner"]');
     expect(banner, 'banner element').toBeTruthy();
@@ -101,7 +101,7 @@ describe('WorkersComponent — no-cache banner (existing)', () => {
 
   it('hides the banner when the org has at least one subscribed cache', async () => {
     const fixture = setup({
-      access: { managed: false, canEdit: true },
+      access: { managed: false, canEdit: true, canTrigger: true },
       workers: [],
       caches: [{ id: 'c', name: 'cache-1' }],
     });
@@ -113,13 +113,13 @@ describe('WorkersComponent — no-cache banner (existing)', () => {
 
 describe('WorkersComponent — access gating', () => {
   it('hides Register Worker button under read-only org access', async () => {
-    const fixture = setup({ access: { managed: false, canEdit: false }, workers: [workerUnmanaged], caches: [{ id: 'c', name: 'c' }] });
+    const fixture = setup({ access: { managed: false, canEdit: false, canTrigger: false }, workers: [workerUnmanaged], caches: [{ id: 'c', name: 'c' }] });
     await settled(fixture);
     expect(findByText(fixture.nativeElement, 'register worker')).toBeNull();
   });
 
   it('hides per-row Edit / Activate / Delete under read-only org access', async () => {
-    const fixture = setup({ access: { managed: false, canEdit: false }, workers: [workerUnmanaged], caches: [{ id: 'c', name: 'c' }] });
+    const fixture = setup({ access: { managed: false, canEdit: false, canTrigger: false }, workers: [workerUnmanaged], caches: [{ id: 'c', name: 'c' }] });
     await settled(fixture);
     expect(findByText(fixture.nativeElement, 'edit')).toBeNull();
     expect(findByText(fixture.nativeElement, 'delete')).toBeNull();
@@ -127,7 +127,7 @@ describe('WorkersComponent — access gating', () => {
   });
 
   it('shows but disables Register Worker under state-managed org', async () => {
-    const fixture = setup({ access: { managed: true, canEdit: true }, workers: [], caches: [{ id: 'c', name: 'c' }] });
+    const fixture = setup({ access: { managed: true, canEdit: true, canTrigger: true }, workers: [], caches: [{ id: 'c', name: 'c' }] });
     await settled(fixture);
     const btn = findByText(fixture.nativeElement, 'register worker') as HTMLButtonElement | null;
     expect(btn).not.toBeNull();
@@ -136,7 +136,7 @@ describe('WorkersComponent — access gating', () => {
 
   it('disables a managed worker row even in an unmanaged, writable org', async () => {
     const fixture = setup({
-      access: { managed: false, canEdit: true },
+      access: { managed: false, canEdit: true, canTrigger: true },
       workers: [workerUnmanaged, workerManaged],
       caches: [{ id: 'c', name: 'c' }],
     });

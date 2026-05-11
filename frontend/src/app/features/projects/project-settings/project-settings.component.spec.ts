@@ -15,7 +15,11 @@ import { OrganizationsService } from '@core/services/organizations.service';
 import { IntegrationsService } from '@core/services/integrations.service';
 import { AccessState } from '@core/models/access.model';
 
-type AccessCase = { managed: boolean; canEdit: boolean };
+type AccessCase = { managed: boolean; canEdit: boolean; canTrigger?: boolean };
+
+function asAccess(c: AccessCase): AccessState {
+  return { managed: c.managed, canEdit: c.canEdit, canTrigger: c.canTrigger ?? c.canEdit };
+}
 
 function projectFor(c: AccessCase) {
   return {
@@ -33,14 +37,15 @@ function projectFor(c: AccessCase) {
     sign_cache: true,
     managed: c.managed,
     can_edit: c.canEdit,
+    can_trigger: c.canTrigger ?? c.canEdit,
   };
 }
 
-function activatedRouteStub(access: AccessState): ActivatedRoute {
+function activatedRouteStub(c: AccessCase): ActivatedRoute {
   return {
     snapshot: { paramMap: convertToParamMap({ org: 'acme', project: 'demo' }) },
     data: of({}),
-    parent: { data: of({ projectAccess: { project: projectFor(access), access } }) },
+    parent: { data: of({ projectAccess: { project: projectFor(c), access: asAccess(c) } }) },
   } as unknown as ActivatedRoute;
 }
 
@@ -83,24 +88,24 @@ function setup(c: AccessCase): ComponentFixture<ProjectSettingsComponent> {
 
 describe('ProjectSettingsComponent — access gating', () => {
   it('hides Save Changes when access is read-only', () => {
-    const fixture = setup({ managed: false, canEdit: false });
+    const fixture = setup({ managed: false, canEdit: false, canTrigger: false });
     expect(findByText(fixture.nativeElement, 'save changes')).toBeNull();
   });
 
   it('shows but disables Save Changes when project is state-managed', () => {
-    const fixture = setup({ managed: true, canEdit: true });
+    const fixture = setup({ managed: true, canEdit: true, canTrigger: true });
     const btn = findByText(fixture.nativeElement, 'save changes') as HTMLButtonElement | null;
     expect(btn).not.toBeNull();
     expect(btn!.disabled).toBe(true);
   });
 
   it('hides Delete Project under read-only access', () => {
-    const fixture = setup({ managed: false, canEdit: false });
+    const fixture = setup({ managed: false, canEdit: false, canTrigger: false });
     expect(findByText(fixture.nativeElement, 'delete project')).toBeNull();
   });
 
   it('shows but disables Delete Project when managed', () => {
-    const fixture = setup({ managed: true, canEdit: true });
+    const fixture = setup({ managed: true, canEdit: true, canTrigger: true });
     const btn = findByText(fixture.nativeElement, 'delete project') as HTMLButtonElement | null;
     expect(btn).not.toBeNull();
     expect(btn!.disabled).toBe(true);

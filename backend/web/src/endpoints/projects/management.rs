@@ -103,11 +103,12 @@ pub async fn get(
 
     let page = params.page();
     let per_page = params.per_page();
-    let can_edit = match &maybe_user {
-        Some(user) => {
-            has_permission(&state, user.id, organization.id, Permission::EditProject, api_key_ref).await?
-        }
-        None => false,
+    let (can_edit, can_trigger) = match &maybe_user {
+        Some(user) => (
+            has_permission(&state, user.id, organization.id, Permission::EditProject, api_key_ref).await?,
+            has_permission(&state, user.id, organization.id, Permission::TriggerEvaluation, api_key_ref).await?,
+        ),
+        None => (false, false),
     };
 
     let paginator = EProject::find()
@@ -159,6 +160,7 @@ pub async fn get(
                 managed: p.managed,
                 sign_cache: p.sign_cache,
                 can_edit,
+                can_trigger,
             }
         })
         .collect();
@@ -292,11 +294,12 @@ pub async fn get_project(
     )
     .await?;
 
-    let can_edit = match &maybe_user {
-        Some(user) => {
-            has_permission(&state, user.id, organization.id, Permission::EditProject, api_key_ref).await?
-        }
-        None => false,
+    let (can_edit, can_trigger) = match &maybe_user {
+        Some(user) => (
+            has_permission(&state, user.id, organization.id, Permission::EditProject, api_key_ref).await?,
+            has_permission(&state, user.id, organization.id, Permission::TriggerEvaluation, api_key_ref).await?,
+        ),
+        None => (false, false),
     };
 
     let last_evaluation_status = if let Some(eval_id) = project.last_evaluation {
@@ -328,6 +331,7 @@ pub async fn get_project(
             .unwrap_or(ConcurrencyPolicy::SoftAbort),
         sign_cache: project.sign_cache,
         can_edit,
+        can_trigger,
     }))
 }
 

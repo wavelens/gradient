@@ -12,7 +12,7 @@ import { ProjectAccessData } from './project-access.resolver';
 import { CacheAccessData } from './cache-access.resolver';
 import { AccessState } from '@core/models/access.model';
 
-const DEFAULT_ACCESS: AccessState = { managed: false, canEdit: false };
+const DEFAULT_ACCESS: AccessState = { managed: false, canEdit: false, canTrigger: false };
 
 function parentDataSignal<T>(
   route: ActivatedRoute,

@@ -101,6 +101,7 @@ mod m20260508_000000_rename_project_evaluation_wildcard;
 mod m20260510_000000_seed_github_app_integrations;
 mod m20260510_000001_api_key_options;
 mod m20260510_000002_add_managed_to_role;
+mod m20260511_000000_strip_derivation_path_prefix;
 
 pub struct Migrator;
 
@@ -203,6 +204,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260510_000000_seed_github_app_integrations::Migration),
             Box::new(m20260510_000001_api_key_options::Migration),
             Box::new(m20260510_000002_add_managed_to_role::Migration),
+            Box::new(m20260511_000000_strip_derivation_path_prefix::Migration),
         ]
     }
 }

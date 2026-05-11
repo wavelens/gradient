@@ -27,6 +27,7 @@ export interface Project {
   created_at?: string;
   managed: boolean;
   can_edit: boolean;
+  can_trigger: boolean;
 }
 
 export interface EvaluationSummary {
@@ -68,6 +69,7 @@ export interface ProjectDetail {
   keep_evaluations: number;
   last_evaluations: EvaluationSummary[];
   can_edit: boolean;
+  can_trigger: boolean;
   managed: boolean;
 }
 

@@ -45,7 +45,7 @@ export class OrganizationSettingsComponent implements OnInit {
   private organizationsService = inject(OrganizationsService);
   private orgAccess = inject(OrgAccessService);
 
-  access = signal<AccessState>({ managed: false, canEdit: false });
+  access = signal<AccessState>({ managed: false, canEdit: false, canTrigger: false });
 
   loading = signal(true);
   saving = signal(false);

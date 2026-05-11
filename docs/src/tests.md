@@ -1897,18 +1897,28 @@ and the failure mode is loud.
 
 ## Frontend access control — `shared/access`
 
-Two API-provided flags drive the user-visible rule that:
+Three API-provided flags drive the user-visible rule that:
 
 - **State-managed** resources (`entity.managed === true`) appear with all fields
   and write buttons visible but disabled, with a "Managed by Nix" banner.
 - **Read-only** access (`entity.can_edit === false`) hides write buttons
   entirely and shows inputs as disabled with a "Read-only access" banner.
+- **Trigger access** (`entity.can_trigger`) gates trigger-style actions
+  (Start Evaluation, Restart Failed Builds, Abort) independently of
+  `can_edit`. `can_trigger` reflects `Permission::TriggerEvaluation` while
+  `can_edit` reflects `Permission::EditProject`. Backends without the field
+  (caches, orgs) cause `accessFromEntity` to fall back to `can_edit`, so the
+  existing single-permission model still works.
 
 The primitives:
 
 - `frontend/src/app/shared/access/access.service.ts` — `AccessService` with
   pure helpers (`isWritable`, `shouldShowWriteAction`, `shouldDisableInput`,
-  `bannerKind`, `bannerMessage`). Tests cover the four flag combinations.
+  `bannerKind`, `bannerMessage`, `triggerAccess`). Tests cover the four
+  flag combinations plus `triggerAccess` for the deeper model split:
+  it projects an AccessState onto trigger-action permissions by replacing
+  `canEdit` with `canTrigger` and forcing `managed=false` (trigger actions
+  don't mutate config, so the managed flag must not disable them).
 - `frontend/src/app/shared/access/writable.directive.ts` — `*appWritable`
   structural directive. Renders content iff `canEdit`. Tests cover
   render/hide on each combination plus toggling.
@@ -1918,14 +1928,23 @@ The primitives:
   tooltip text, and that the directive correctly clears its own state when
   access becomes writable.
 - `frontend/src/app/shared/access/access-banner.component.ts` —
-  `<app-access-banner>` rendering nothing for full access; otherwise an info
-  bar with appropriate text and CSS class. Tests cover the four banner
-  kinds.
+  `<app-access-banner>` rendering nothing for full access; otherwise
+  delegating to the shared `<gr-message-banner type="info">` (so the visual
+  shell matches every other banner in the app). The kind is exposed as a
+  `data-kind` attribute for tests and tooling. Tests cover the four banner
+  kinds and that the underlying `gr-message-banner` is rendered with the
+  info modifier.
 - `frontend/src/app/core/resolvers/project-access.resolver.ts` and
   `cache-access.resolver.ts` — fetch the parent entity once, expose
   `{ entity, access }` on `route.parent.data`. Children consume via
   `injectProjectAccess()` / `injectCacheAccess()`. Tests cover the happy
-  path and the `managed=true / can_edit=false` propagation.
+  path and the `managed=true / can_edit=false` propagation. The router is
+  configured with `paramsInheritanceStrategy: 'always'`
+  (`frontend/src/app/app.config.ts`) so child routes nested under
+  `project-layout` / `cache-layout` inherit the `:org` / `:project` /
+  `:cache` params from the parent — without it, child components reading
+  `route.snapshot.paramMap` get empty strings and the settings pages render
+  blank.
 - `frontend/src/app/core/services/org-access.service.ts` — derives
   `AccessState` from `Organization.role` and `Organization.managed` for
   org-scoped pages without a parent entity resolver. Tests cover Admin /
@@ -1934,13 +1953,28 @@ The primitives:
 Each retrofitted feature component (`project-settings`, `project-triggers`,
 `project-detail`, `cache-settings`, `cache-upstreams`,
 `organization-settings`, `workers`, `cache-subscriptions`, `members-roles`,
-`api-keys`, `profile`) carries gating tests covering at least the two
-key scenarios:
+`api-keys`, `profile`, `integrations`) carries gating tests covering at
+least the two key scenarios:
 
 - **Read-only** (`canEdit=false`): write-action buttons absent from the
   DOM; the page itself remains visible.
 - **State-managed with permission** (`managed=true, canEdit=true`):
-  write-action buttons present in the DOM but disabled.
+  config-edit buttons present in the DOM but disabled.
+
+`project-detail` is the exception for trigger-style actions: Start
+Evaluation, Restart Failed Builds, and Abort gate on `canTrigger` instead
+of `canEdit`. The component exposes a `triggerAccess` computed signal
+(`AccessService.triggerAccess(access())`) and the buttons use
+`*appWritable="triggerAccess()"` rather than `*appWritable="access()"`. The
+spec asserts three scenarios:
+
+- `{ managed=false, canEdit=false, canTrigger=false }` — all three trigger
+  buttons absent from the DOM.
+- `{ managed=true, canEdit=true, canTrigger=true }` — buttons present and
+  enabled (the managed flag does not disable them, because the backend
+  permits trigger actions on managed projects).
+- `{ managed=false, canEdit=false, canTrigger=true }` — buttons present and
+  enabled (a caller with TriggerEvaluation but not EditProject can act).
 
 The two reported bugs that motivated this work are covered directly:
 

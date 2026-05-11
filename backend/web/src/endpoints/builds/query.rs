@@ -9,6 +9,7 @@ use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
+use gradient_core::executer::nix_store_path;
 use gradient_core::types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
@@ -71,7 +72,7 @@ pub async fn get_build(
         id: build.id,
         evaluation: build.evaluation,
         status: build.status.for_api(),
-        derivation_path: derivation.derivation_path,
+        derivation_path: nix_store_path(&derivation.derivation_path),
         architecture: derivation.architecture,
         worker: build.worker,
         via: build.via,

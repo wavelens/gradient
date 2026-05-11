@@ -8,7 +8,11 @@ import { TestBed } from '@angular/core/testing';
 import { AccessService } from './access.service';
 import { AccessState } from '@core/models/access.model';
 
-const s = (managed: boolean, canEdit: boolean): AccessState => ({ managed, canEdit });
+const s = (managed: boolean, canEdit: boolean, canTrigger: boolean = canEdit): AccessState => ({
+  managed,
+  canEdit,
+  canTrigger,
+});
 
 describe('AccessService', () => {
   let svc: AccessService;
@@ -62,6 +66,27 @@ describe('AccessService', () => {
       expect(svc.bannerMessage(s(true, true))).toMatch(/managed/i);
       expect(svc.bannerMessage(s(false, false))).toMatch(/read-only/i);
       expect(svc.bannerMessage(s(true, false))).toMatch(/managed/i);
+    });
+  });
+
+  describe('triggerAccess', () => {
+    it('mirrors canTrigger into canEdit and forces managed=false', () => {
+      const out = svc.triggerAccess(s(true, false, true));
+      expect(out).toEqual({ managed: false, canEdit: true, canTrigger: true });
+    });
+
+    it('disables when canTrigger is false even if canEdit is true', () => {
+      const out = svc.triggerAccess(s(false, true, false));
+      expect(out).toEqual({ managed: false, canEdit: false, canTrigger: false });
+    });
+
+    it('keeps trigger actions open on a managed project when canTrigger is true', () => {
+      // canEdit can be true on managed projects (caller has EditProject) — the
+      // service must still strip the managed flag so [appManagedDisable] does
+      // not disable trigger buttons.
+      const out = svc.triggerAccess(s(true, true, true));
+      expect(out.managed).toBe(false);
+      expect(out.canEdit).toBe(true);
     });
   });
 });

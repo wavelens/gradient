@@ -60,14 +60,14 @@ function setup(access: AccessState): ComponentFixture<CacheSettingsComponent> {
 
 describe('CacheSettingsComponent — access gating', () => {
   it('hides Save / Delete / Toggle under read-only access', () => {
-    const fixture = setup({ managed: false, canEdit: false });
+    const fixture = setup({ managed: false, canEdit: false, canTrigger: false });
     expect(findByText(fixture.nativeElement, 'save changes')).toBeNull();
     expect(findByText(fixture.nativeElement, 'delete cache')).toBeNull();
     expect(findByText(fixture.nativeElement, 'deactivate')).toBeNull();
   });
 
   it('shows but disables Save / Delete under state-managed access', () => {
-    const fixture = setup({ managed: true, canEdit: true });
+    const fixture = setup({ managed: true, canEdit: true, canTrigger: true });
     const save = findByText(fixture.nativeElement, 'save changes') as HTMLButtonElement | null;
     const del = findByText(fixture.nativeElement, 'delete cache') as HTMLButtonElement | null;
     expect(save).not.toBeNull();
@@ -77,7 +77,7 @@ describe('CacheSettingsComponent — access gating', () => {
   });
 
   it('always shows Manage Upstreams link, even when state-managed', () => {
-    const fixture = setup({ managed: true, canEdit: true });
+    const fixture = setup({ managed: true, canEdit: true, canTrigger: true });
     const link = (Array.from(fixture.nativeElement.querySelectorAll('a')) as HTMLAnchorElement[]).find(
       (el) => (el.textContent ?? '').toLowerCase().includes('manage upstreams'),
     );

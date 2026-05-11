@@ -56,14 +56,14 @@ async function settled(fixture: ComponentFixture<CacheSubscriptionsComponent>) {
 
 describe('CacheSubscriptionsComponent — access gating', () => {
   it('hides Subscribe and Unsubscribe under read-only access', async () => {
-    const fixture = setup({ managed: false, canEdit: false });
+    const fixture = setup({ managed: false, canEdit: false, canTrigger: false });
     await settled(fixture);
     expect(findByText(fixture.nativeElement, 'subscribe to cache')).toBeNull();
     expect(findByText(fixture.nativeElement, 'unsubscribe')).toBeNull();
   });
 
   it('shows but disables Subscribe under state-managed access', async () => {
-    const fixture = setup({ managed: true, canEdit: true });
+    const fixture = setup({ managed: true, canEdit: true, canTrigger: true });
     await settled(fixture);
     const btn = findByText(fixture.nativeElement, 'subscribe to cache') as HTMLButtonElement | null;
     expect(btn).not.toBeNull();

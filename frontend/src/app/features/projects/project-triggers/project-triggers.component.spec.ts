@@ -58,7 +58,7 @@ function setup(access: AccessState): ComponentFixture<ProjectTriggersComponent> 
 
 describe('ProjectTriggersComponent — access gating', () => {
   it('hides New Trigger / Edit / Delete / Fire Now buttons under read-only', () => {
-    const fixture = setup({ managed: false, canEdit: false });
+    const fixture = setup({ managed: false, canEdit: false, canTrigger: false });
     expect(findByText(fixture.nativeElement, 'new trigger')).toBeNull();
     expect(findByText(fixture.nativeElement, 'edit')).toBeNull();
     expect(findByText(fixture.nativeElement, 'delete')).toBeNull();
@@ -66,7 +66,7 @@ describe('ProjectTriggersComponent — access gating', () => {
   });
 
   it('shows but disables write buttons under state-managed access', () => {
-    const fixture = setup({ managed: true, canEdit: true });
+    const fixture = setup({ managed: true, canEdit: true, canTrigger: true });
     const newBtn = findByText(fixture.nativeElement, 'new trigger') as HTMLButtonElement | null;
     const editBtn = findByText(fixture.nativeElement, 'edit') as HTMLButtonElement | null;
     const deleteBtn = findByText(fixture.nativeElement, 'delete') as HTMLButtonElement | null;

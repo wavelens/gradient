@@ -16,6 +16,7 @@ use sea_orm::EntityTrait;
 use sea_orm::{ActiveModelTrait, IntoActiveModel, Set};
 use tracing::{debug, error, info, warn};
 
+use gradient_core::executer::strip_nix_store_prefix;
 use gradient_core::types::proto::{
     BuildOutput, CandidateScore, DiscoveredDerivation, JobCandidate, JobKind,
 };
@@ -294,7 +295,7 @@ impl Scheduler {
     pub async fn handle_eval_result(
         &self,
         job_id: &str,
-        derivations: Vec<DiscoveredDerivation>,
+        mut derivations: Vec<DiscoveredDerivation>,
         warnings: Vec<String>,
         errors: Vec<String>,
     ) -> Result<()> {
@@ -309,6 +310,21 @@ impl Scheduler {
                 }
             }
         };
+
+        // Canonicalise every store path to its bare `<hash>-<name>` form
+        // before it reaches the DB. `derivation.derivation_path` mirrors the
+        // narinfo `References:` convention used by `cached_path`: the
+        // `/nix/store/` prefix is added back only at the worker / API
+        // boundary. Worker batches may arrive prefixed (eval), unprefixed
+        // (mixed legacy), or both, so we strip uniformly here and keep one
+        // canonical form for every downstream key (insert dedup, deferred
+        // dep edges, build dispatch lookup).
+        for d in &mut derivations {
+            d.drv_path = strip_nix_store_prefix(&d.drv_path);
+            for dep in &mut d.dependencies {
+                *dep = strip_nix_store_prefix(dep);
+            }
+        }
 
         // Accumulate dep edges to flush later (at eval-job-completed) when
         // every derivation row is guaranteed to be in the DB. The BFS walks

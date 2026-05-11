@@ -16,7 +16,7 @@ import { AccessState } from '@core/models/access.model';
   template: `<input [appManagedDisable]="access()" />`,
 })
 class HostComponent {
-  access = signal<AccessState>({ managed: false, canEdit: true });
+  access = signal<AccessState>({ managed: false, canEdit: true, canTrigger: true });
 }
 
 describe('ManagedDisableDirective ([appManagedDisable])', () => {
@@ -32,47 +32,47 @@ describe('ManagedDisableDirective ([appManagedDisable])', () => {
   });
 
   it('does not disable when canEdit && !managed', () => {
-    fixture.componentInstance.access.set({ managed: false, canEdit: true });
+    fixture.componentInstance.access.set({ managed: false, canEdit: true, canTrigger: true });
     fixture.detectChanges();
     expect(input().disabled).toBe(false);
   });
 
   it('disables when managed=true (regardless of canEdit)', () => {
-    fixture.componentInstance.access.set({ managed: true, canEdit: true });
+    fixture.componentInstance.access.set({ managed: true, canEdit: true, canTrigger: true });
     fixture.detectChanges();
     expect(input().disabled).toBe(true);
   });
 
   it('disables when canEdit=false', () => {
-    fixture.componentInstance.access.set({ managed: false, canEdit: false });
+    fixture.componentInstance.access.set({ managed: false, canEdit: false, canTrigger: false });
     fixture.detectChanges();
     expect(input().disabled).toBe(true);
   });
 
   it('disables when both managed=true and canEdit=false', () => {
-    fixture.componentInstance.access.set({ managed: true, canEdit: false });
+    fixture.componentInstance.access.set({ managed: true, canEdit: false, canTrigger: false });
     fixture.detectChanges();
     expect(input().disabled).toBe(true);
   });
 
   it('sets a tooltip mentioning "managed" when managed', () => {
-    fixture.componentInstance.access.set({ managed: true, canEdit: true });
+    fixture.componentInstance.access.set({ managed: true, canEdit: true, canTrigger: true });
     fixture.detectChanges();
     expect(input().title.toLowerCase()).toContain('managed');
   });
 
   it('sets a tooltip mentioning "read-only" when access is read-only', () => {
-    fixture.componentInstance.access.set({ managed: false, canEdit: false });
+    fixture.componentInstance.access.set({ managed: false, canEdit: false, canTrigger: false });
     fixture.detectChanges();
     expect(input().title.toLowerCase()).toContain('read-only');
   });
 
   it('removes disabled and tooltip when access becomes writable again', () => {
-    fixture.componentInstance.access.set({ managed: true, canEdit: true });
+    fixture.componentInstance.access.set({ managed: true, canEdit: true, canTrigger: true });
     fixture.detectChanges();
     expect(input().disabled).toBe(true);
 
-    fixture.componentInstance.access.set({ managed: false, canEdit: true });
+    fixture.componentInstance.access.set({ managed: false, canEdit: true, canTrigger: true });
     fixture.detectChanges();
     expect(input().disabled).toBe(false);
     expect(input().title).toBe('');

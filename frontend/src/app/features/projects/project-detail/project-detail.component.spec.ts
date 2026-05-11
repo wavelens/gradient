@@ -50,6 +50,7 @@ function projectFor(access: AccessState) {
       },
     ],
     can_edit: access.canEdit,
+    can_trigger: access.canTrigger,
     managed: access.managed,
   };
 }
@@ -86,23 +87,38 @@ function setup(access: AccessState): ComponentFixture<ProjectDetailComponent> {
 }
 
 describe('ProjectDetailComponent — access gating', () => {
-  it('hides Start Evaluation / Restart / Abort under read-only', () => {
-    const fixture = setup({ managed: false, canEdit: false });
+  it('hides Start Evaluation / Restart / Abort when canTrigger is false', () => {
+    const fixture = setup({ managed: false, canEdit: false, canTrigger: false });
     expect(findByText(fixture.nativeElement, 'start evaluation')).toBeNull();
     expect(findByText(fixture.nativeElement, 'restart failed')).toBeNull();
     expect(findByText(fixture.nativeElement, 'abort')).toBeNull();
   });
 
-  it('shows but disables write actions under state-managed access', () => {
-    const fixture = setup({ managed: true, canEdit: true });
+  it('keeps Start Evaluation / Restart / Abort enabled on state-managed projects', () => {
+    // Backend permits TriggerEvaluation on managed projects (reject_managed=false),
+    // so AccessService.triggerAccess strips the managed flag — buttons stay live.
+    const fixture = setup({ managed: true, canEdit: true, canTrigger: true });
     const startBtn = findByText(fixture.nativeElement, 'start evaluation') as HTMLButtonElement | null;
     const restartBtn = findByText(fixture.nativeElement, 'restart failed') as HTMLButtonElement | null;
     const abortBtn = findByText(fixture.nativeElement, 'abort') as HTMLButtonElement | null;
     expect(startBtn).not.toBeNull();
-    expect(startBtn!.disabled).toBe(true);
+    expect(startBtn!.disabled).toBe(false);
     expect(restartBtn).not.toBeNull();
-    expect(restartBtn!.disabled).toBe(true);
+    expect(restartBtn!.disabled).toBe(false);
     expect(abortBtn).not.toBeNull();
-    expect(abortBtn!.disabled).toBe(true);
+    expect(abortBtn!.disabled).toBe(false);
+  });
+
+  it('shows Start / Restart / Abort to a caller with TriggerEvaluation but not EditProject', () => {
+    // The model split exists so this caller can act; they should NOT see
+    // config-edit affordances (Settings appears via authService.isAuthenticated()
+    // and only navigates) but trigger buttons must render and be enabled.
+    const fixture = setup({ managed: false, canEdit: false, canTrigger: true });
+    const startBtn = findByText(fixture.nativeElement, 'start evaluation') as HTMLButtonElement | null;
+    const restartBtn = findByText(fixture.nativeElement, 'restart failed') as HTMLButtonElement | null;
+    expect(startBtn).not.toBeNull();
+    expect(startBtn!.disabled).toBe(false);
+    expect(restartBtn).not.toBeNull();
+    expect(restartBtn!.disabled).toBe(false);
   });
 });

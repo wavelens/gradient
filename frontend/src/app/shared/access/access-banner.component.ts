@@ -12,13 +12,14 @@ import {
   input,
 } from '@angular/core';
 import { AccessState } from '@core/models/access.model';
+import { MessageBannerComponent } from '@shared/components/form/message-banner/message-banner.component';
 import { AccessService } from './access.service';
 
 @Component({
   selector: 'app-access-banner',
   standalone: true,
+  imports: [MessageBannerComponent],
   templateUrl: './access-banner.component.html',
-  styleUrl: './access-banner.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class AccessBannerComponent {
@@ -35,6 +36,4 @@ export class AccessBannerComponent {
     const s = this.state();
     return s ? this.access.bannerMessage(s) : null;
   });
-
-  klass = computed(() => `access-banner access-banner--${this.kind()}`);
 }

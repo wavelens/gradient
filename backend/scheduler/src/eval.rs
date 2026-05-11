@@ -17,6 +17,7 @@ use gradient_core::db::{
     record_evaluation_message, update_build_status, update_evaluation_status,
     update_evaluation_status_with_error,
 };
+use gradient_core::executer::strip_nix_store_prefix;
 use gradient_core::sources::get_hash_from_path;
 use gradient_core::types::*;
 use sea_orm::{ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
@@ -49,7 +50,7 @@ impl DerivationInsertBatch {
     ) -> Self {
         let mut drv_path_to_id: HashMap<String, DerivationId> = existing
             .iter()
-            .map(|d| (d.derivation_path.clone(), d.id))
+            .map(|d| (strip_nix_store_prefix(&d.derivation_path), d.id))
             .collect();
 
         let now = gradient_core::types::now();

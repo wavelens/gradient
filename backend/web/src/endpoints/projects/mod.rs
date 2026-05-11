@@ -52,7 +52,13 @@ pub struct ProjectResponse {
     pub keep_evaluations: i32,
     pub concurrency: ConcurrencyPolicy,
     pub sign_cache: bool,
+    /// Caller holds `Permission::EditProject` — may edit project configuration.
     pub can_edit: bool,
+    /// Caller holds `Permission::TriggerEvaluation` — may start/restart/abort
+    /// evaluations. Distinct from `can_edit` so users granted only trigger
+    /// rights can act, and so managed projects (which reject config edits)
+    /// still expose trigger actions when the backend permits them.
+    pub can_trigger: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -104,5 +110,6 @@ pub struct ProjectDetailsResponse {
     pub keep_evaluations: i32,
     pub last_evaluations: Vec<EvaluationSummary>,
     pub can_edit: bool,
+    pub can_trigger: bool,
     pub managed: bool,
 }

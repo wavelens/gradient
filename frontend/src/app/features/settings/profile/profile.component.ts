@@ -52,6 +52,7 @@ export class ProfileComponent implements OnInit {
   access = computed<AccessState>(() => ({
     managed: this.isManaged() || this.isOidc(),
     canEdit: true,
+    canTrigger: true,
   }));
 
   showDeleteDialog = signal(false);

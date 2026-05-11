@@ -42,6 +42,7 @@ describe('projectAccessResolver', () => {
     keep_evaluations: 5,
     last_evaluations: [],
     can_edit: true,
+    can_trigger: true,
     managed: false,
   };
 
@@ -56,14 +57,22 @@ describe('projectAccessResolver', () => {
     const data = await runResolver(snap({ org: 'acme', project: 'demo' }));
     expect(getProject).toHaveBeenCalledWith('acme', 'demo');
     expect(data.project).toBe(baseProject);
-    expect(data.access).toEqual({ managed: false, canEdit: true });
+    expect(data.access).toEqual({ managed: false, canEdit: true, canTrigger: true });
   });
 
   it('propagates managed=true and can_edit=false into access', async () => {
     getProject.mockReturnValue(
-      of({ ...baseProject, managed: true, can_edit: false }),
+      of({ ...baseProject, managed: true, can_edit: false, can_trigger: false }),
     );
     const data = await runResolver(snap({ org: 'acme', project: 'demo' }));
-    expect(data.access).toEqual({ managed: true, canEdit: false });
+    expect(data.access).toEqual({ managed: true, canEdit: false, canTrigger: false });
+  });
+
+  it('propagates can_trigger independently of can_edit (TriggerEvaluation-only caller)', async () => {
+    getProject.mockReturnValue(
+      of({ ...baseProject, managed: true, can_edit: false, can_trigger: true }),
+    );
+    const data = await runResolver(snap({ org: 'acme', project: 'demo' }));
+    expect(data.access).toEqual({ managed: true, canEdit: false, canTrigger: true });
   });
 });

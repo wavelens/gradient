@@ -20,6 +20,7 @@ use axum::{Extension, Json};
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use gradient_core::db::get_any_organization_by_name;
+use gradient_core::executer::nix_store_path;
 use gradient_core::sources::check_project_updates;
 use gradient_core::storage::nar_extract::{ExtractError, Extracted, extract_path_from_nar_bytes};
 use gradient_core::types::input::vec_to_hex;
@@ -304,11 +305,12 @@ pub async fn get_project_details(
 
     let evaluation_summaries = evaluations_to_summaries(&state.0, evaluations).await?;
 
-    let can_edit = match &maybe_user {
-        Some(user) => {
-            has_permission(&state, user.id, organization.id, Permission::EditProject, api_key_ref).await?
-        }
-        None => false,
+    let (can_edit, can_trigger) = match &maybe_user {
+        Some(user) => (
+            has_permission(&state, user.id, organization.id, Permission::EditProject, api_key_ref).await?,
+            has_permission(&state, user.id, organization.id, Permission::TriggerEvaluation, api_key_ref).await?,
+        ),
+        None => (false, false),
     };
 
     let project_details = ProjectDetailsResponse {
@@ -323,6 +325,7 @@ pub async fn get_project_details(
         keep_evaluations: project.keep_evaluations,
         last_evaluations: evaluation_summaries,
         can_edit,
+        can_trigger,
         managed: project.managed,
     };
 
@@ -480,7 +483,7 @@ impl EntryPointRelatedData {
             summaries.push(EntryPointSummary {
                 id: ep.id,
                 build_id: build.id,
-                derivation_path: drv.derivation_path.clone(),
+                derivation_path: nix_store_path(&drv.derivation_path),
                 eval: ep.eval.clone(),
                 build_status: build.status.for_api(),
                 has_artefacts: *self.has_products.get(&build.derivation).unwrap_or(&false),

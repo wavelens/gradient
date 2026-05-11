@@ -17,8 +17,17 @@
       <h1>Integrations</h1>
       <p class="text-secondary">Forge webhooks and status reporters for this organization</p>
     </div>
-    <button pButton label="New Integration" icon="pi pi-plus" (click)="openCreateDialog()"></button>
+    <button
+      *appWritable="access()"
+      pButton
+      label="New Integration"
+      icon="pi pi-plus"
+      (click)="openCreateDialog()"
+      [appManagedDisable]="access()"
+    ></button>
   </div>
+
+  <app-access-banner [access]="access()"></app-access-banner>
 
   @if (loading()) {
     <app-loading-spinner message="Loading integrations..." />
@@ -56,7 +65,14 @@
           <span class="material-symbols-outlined">hub</span>
           <h3>No integrations</h3>
           <p class="text-secondary">Create an inbound integration to receive forge webhooks, or an outbound integration to report build statuses.</p>
-          <button pButton label="New Integration" icon="pi pi-plus" (click)="openCreateDialog()"></button>
+          <button
+            *appWritable="access()"
+            pButton
+            label="New Integration"
+            icon="pi pi-plus"
+            (click)="openCreateDialog()"
+            [appManagedDisable]="access()"
+          ></button>
         </div>
       } @else {
         <div class="integrations-list">
@@ -84,14 +100,17 @@
                     <span class="status-chip status-info">Server-managed</span>
                   } @else {
                     <button
+                      *appWritable="access()"
                       pButton
                       label="Edit"
                       icon="pi pi-pencil"
                       severity="secondary"
                       size="small"
                       (click)="openEditDialog(integration)"
+                      [appManagedDisable]="access()"
                     ></button>
                     <button
+                      *appWritable="access()"
                       pButton
                       label="Delete"
                       icon="pi pi-trash"
@@ -100,6 +119,7 @@
                       [loading]="deletingId() === integration.id"
                       [disabled]="deletingId() !== null"
                       (click)="deleteIntegration(integration)"
+                      [appManagedDisable]="access()"
                     ></button>
                   }
                 </div>
