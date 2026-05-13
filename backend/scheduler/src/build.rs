@@ -375,7 +375,12 @@ impl<'a> BuildStateHandler<'a> {
                     | EvaluationStatus::Fetching
                     | EvaluationStatus::EvaluatingFlake
                     | EvaluationStatus::EvaluatingDerivation
-                    | EvaluationStatus::Waiting => decide_pre_build_target(worker_caps.len()),
+                    | EvaluationStatus::Waiting => {
+                        match decide_pre_build_target(eval.status, worker_caps.len()) {
+                            Some(pair) => pair,
+                            None => continue,
+                        }
+                    }
                     _ => continue,
                 }
             } else {
@@ -429,13 +434,22 @@ impl<'a> BuildStateHandler<'a> {
     }
 }
 
-/// Picks the target status for a pre-build evaluation based on whether any
-/// worker is currently connected. When no worker is connected we surface
-/// `Waiting` with an empty `unmet` list so the frontend explains the stall;
-/// otherwise we leave it (or recover it) to `Queued` and clear any stored
-/// reason.
-fn decide_pre_build_target(connected_workers: usize) -> (EvaluationStatus, Option<WaitingReason>) {
-    if connected_workers == 0 {
+/// Decides whether a pre-build evaluation needs to be reconciled.
+///
+/// Returns `Some((target, reason))` when the evaluation should transition or
+/// have its waiting reason refreshed; `None` when it is actively progressing
+/// and must be left alone.
+///
+/// Active pre-build states (`Fetching`, `EvaluatingFlake`,
+/// `EvaluatingDerivation`) are owned by an eval worker. They may only stall
+/// into `Waiting` if every worker has disconnected — they must never be
+/// reset back to `Queued`, which the `EvalStateMachine` forbids and which
+/// would clobber the worker's in-flight progress.
+fn decide_pre_build_target(
+    current: EvaluationStatus,
+    connected_workers: usize,
+) -> Option<(EvaluationStatus, Option<WaitingReason>)> {
+    let stall = || {
         (
             EvaluationStatus::Waiting,
             Some(WaitingReason {
@@ -444,8 +458,18 @@ fn decide_pre_build_target(connected_workers: usize) -> (EvaluationStatus, Optio
                 available_architectures: Vec::new(),
             }),
         )
-    } else {
-        (EvaluationStatus::Queued, None)
+    };
+    match (current, connected_workers) {
+        (EvaluationStatus::Waiting, 0) => Some(stall()),
+        (EvaluationStatus::Waiting, _) => Some((EvaluationStatus::Queued, None)),
+        (
+            EvaluationStatus::Queued
+            | EvaluationStatus::Fetching
+            | EvaluationStatus::EvaluatingFlake
+            | EvaluationStatus::EvaluatingDerivation,
+            0,
+        ) => Some(stall()),
+        _ => None,
     }
 }
 
@@ -822,20 +846,67 @@ mod waiting_reason_tests {
     }
 
     #[test]
-    fn pre_build_target_no_workers_yields_waiting_with_empty_unmet() {
-        let (target, reason) = decide_pre_build_target(0);
+    fn pre_build_target_queued_no_workers_stalls_to_waiting() {
+        let (target, reason) = decide_pre_build_target(EvaluationStatus::Queued, 0)
+            .expect("stall must produce a transition");
         assert_eq!(target, EvaluationStatus::Waiting);
-        let reason = reason.expect("waiting target must carry a reason");
+        let reason = reason.expect("stall target must carry a reason");
         assert_eq!(reason.connected_workers, 0);
         assert!(reason.unmet.is_empty());
         assert!(reason.available_architectures.is_empty());
     }
 
     #[test]
-    fn pre_build_target_with_workers_yields_queued_and_clears_reason() {
-        let (target, reason) = decide_pre_build_target(2);
+    fn pre_build_target_waiting_with_workers_recovers_to_queued() {
+        let (target, reason) = decide_pre_build_target(EvaluationStatus::Waiting, 2)
+            .expect("recovery must produce a transition");
         assert_eq!(target, EvaluationStatus::Queued);
         assert!(reason.is_none());
+    }
+
+    #[test]
+    fn pre_build_target_waiting_no_workers_keeps_waiting() {
+        let (target, reason) = decide_pre_build_target(EvaluationStatus::Waiting, 0)
+            .expect("waiting must refresh its reason");
+        assert_eq!(target, EvaluationStatus::Waiting);
+        assert!(reason.is_some());
+    }
+
+    #[test]
+    fn pre_build_target_queued_with_workers_is_noop() {
+        assert!(decide_pre_build_target(EvaluationStatus::Queued, 1).is_none());
+    }
+
+    #[test]
+    fn pre_build_target_active_pre_build_with_workers_left_alone() {
+        // Regression: a Fetching/EvaluatingFlake/EvaluatingDerivation eval is
+        // already being processed by an eval worker. Reconcile must not push
+        // it back to Queued — that violates the state machine and would log a
+        // spurious "invalid status transition: Fetching → Queued" warning.
+        for status in [
+            EvaluationStatus::Fetching,
+            EvaluationStatus::EvaluatingFlake,
+            EvaluationStatus::EvaluatingDerivation,
+        ] {
+            assert!(
+                decide_pre_build_target(status, 1).is_none(),
+                "{status:?} with workers connected must not be reconciled"
+            );
+        }
+    }
+
+    #[test]
+    fn pre_build_target_active_pre_build_no_workers_stalls() {
+        for status in [
+            EvaluationStatus::Fetching,
+            EvaluationStatus::EvaluatingFlake,
+            EvaluationStatus::EvaluatingDerivation,
+        ] {
+            let (target, reason) = decide_pre_build_target(status, 0)
+                .unwrap_or_else(|| panic!("{status:?} with no workers must stall"));
+            assert_eq!(target, EvaluationStatus::Waiting);
+            assert!(reason.is_some());
+        }
     }
 
     #[test]

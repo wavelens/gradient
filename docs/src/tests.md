@@ -1260,15 +1260,27 @@ returned by `GET /evals/{evaluation}` is locked in:
 - `builtin_arch_satisfied_by_any_worker` — `architecture == "builtin"`
   derivations are never counted as unmet so long as any worker is
   connected.
-- `pre_build_target_no_workers_yields_waiting_with_empty_unmet` — when an
-  evaluation is in a pre-build phase (`Queued`/`Fetching`/`EvaluatingFlake`/
-  `EvaluatingDerivation`) and no worker is connected, the reconciler picks
-  `Waiting` with an empty `unmet` list so the UI can explain the stall
-  without inventing fake build requirements (issue #97).
-- `pre_build_target_with_workers_yields_queued_and_clears_reason` — once
-  any worker is connected the pre-build helper recovers the eval to
-  `Queued` and clears any stored `WaitingReason`, letting the dispatch
-  loop replay the normal progression.
+- `pre_build_target_queued_no_workers_stalls_to_waiting` — when an
+  evaluation is in `Queued` and no worker is connected, the reconciler
+  picks `Waiting` with an empty `unmet` list so the UI can explain the
+  stall without inventing fake build requirements (issue #97).
+- `pre_build_target_waiting_with_workers_recovers_to_queued` — once any
+  worker is connected, a `Waiting` eval is recovered to `Queued` so the
+  dispatch loop replays the normal progression.
+- `pre_build_target_waiting_no_workers_keeps_waiting` — a `Waiting` eval
+  with no workers stays in `Waiting` but its `WaitingReason` is
+  refreshed.
+- `pre_build_target_queued_with_workers_is_noop` — a `Queued` eval with
+  workers connected needs no reconciliation; the dispatcher will pick it
+  up.
+- `pre_build_target_active_pre_build_with_workers_left_alone` — a
+  `Fetching` / `EvaluatingFlake` / `EvaluatingDerivation` eval is owned
+  by an eval worker. The reconciler must not push it back to `Queued`,
+  which the state machine forbids and would produce a spurious
+  "invalid status transition: Fetching → Queued" warning.
+- `pre_build_target_active_pre_build_no_workers_stalls` — the same
+  active pre-build states do stall into `Waiting` when every worker has
+  disconnected.
 
 Run with `cargo test -p scheduler --tests waiting_reason_tests`.
 
