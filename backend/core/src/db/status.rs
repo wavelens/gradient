@@ -354,36 +354,115 @@ async fn abort_follower(state: &Arc<ServerState>, build: MBuild) {
     update_build_status(Arc::clone(state), reloaded, BuildStatus::Aborted).await;
 }
 
-/// Promote one follower of `leader` to be the new leader, then re-point any
-/// remaining followers at the new leader's id. Picks the oldest follower by
-/// `created_at` for stability. No-op if no followers exist.
-async fn reelect_leader(state: &Arc<ServerState>, leader: &MBuild) -> Result<(), sea_orm::DbErr> {
-    use sea_orm::QueryOrder;
+/// Promote one same-org follower of `leader` to be the new leader.
+/// Cross-org followers have their `via` cleared (made independent).
+/// No-op if no followers exist.
+pub(crate) async fn reelect_leader(
+    state: &Arc<ServerState>,
+    leader: &MBuild,
+) -> Result<(), sea_orm::DbErr> {
+    use entity::derivation::{Column as CDerivation, Entity as EDerivation};
 
-    let new_leader = EBuild::find()
-        .filter(CBuild::Via.eq(leader.id))
-        .order_by_asc(CBuild::CreatedAt)
+    let leader_org = EDerivation::find_by_id(leader.derivation)
         .one(&state.worker_db)
-        .await?;
-    let Some(new_leader) = new_leader else {
-        return Ok(());
-    };
+        .await?
+        .map(|d| d.organization);
 
-    let mut active: ABuild = new_leader.clone().into_active_model();
-    active.via = Set(None);
-    active.update(&state.worker_db).await?;
-
-    EBuild::update_many()
-        .col_expr(CBuild::Via, sea_orm::sea_query::Expr::value(new_leader.id))
+    let all_followers = EBuild::find()
         .filter(CBuild::Via.eq(leader.id))
-        .exec(&state.worker_db)
+        .all(&state.worker_db)
         .await?;
+    if all_followers.is_empty() {
+        return Ok(());
+    }
 
-    debug!(
-        old_leader = %leader.id,
-        new_leader = %new_leader.id,
-        "re-elected build leader"
-    );
+    let follower_drv_ids: Vec<DerivationId> =
+        all_followers.iter().map(|f| f.derivation).collect();
+    let drv_org: std::collections::HashMap<DerivationId, OrganizationId> =
+        EDerivation::find()
+            .filter(CDerivation::Id.is_in(follower_drv_ids))
+            .all(&state.worker_db)
+            .await?
+            .into_iter()
+            .map(|d| (d.id, d.organization))
+            .collect();
+
+    let mut same_org: Vec<MBuild> = Vec::new();
+    let mut cross_org: Vec<MBuild> = Vec::new();
+    for f in all_followers {
+        let org = drv_org.get(&f.derivation).copied();
+        if org == leader_org && org.is_some() {
+            same_org.push(f);
+        } else {
+            cross_org.push(f);
+        }
+    }
+
+    fn rank(s: BuildStatus) -> u8 {
+        match s {
+            BuildStatus::Building => 2,
+            BuildStatus::Queued => 1,
+            _ => 0,
+        }
+    }
+    same_org.sort_by(|a, b| {
+        rank(b.status)
+            .cmp(&rank(a.status))
+            .then_with(|| a.created_at.cmp(&b.created_at))
+    });
+
+    if let Some(new_leader) = same_org.first().cloned() {
+        let mut active: ABuild = new_leader.clone().into_active_model();
+        active.via = Set(None);
+        active.update(&state.worker_db).await?;
+
+        let same_org_remaining_ids: Vec<BuildId> =
+            same_org.iter().skip(1).map(|f| f.id).collect();
+        if !same_org_remaining_ids.is_empty() {
+            EBuild::update_many()
+                .col_expr(CBuild::Via, sea_orm::sea_query::Expr::value(new_leader.id))
+                .filter(CBuild::Id.is_in(same_org_remaining_ids))
+                .exec(&state.worker_db)
+                .await?;
+        }
+
+        let cross_org_ids: Vec<BuildId> = cross_org.iter().map(|f| f.id).collect();
+        if !cross_org_ids.is_empty() {
+            EBuild::update_many()
+                .col_expr(
+                    CBuild::Via,
+                    sea_orm::sea_query::Expr::value(Option::<BuildId>::None),
+                )
+                .filter(CBuild::Id.is_in(cross_org_ids))
+                .exec(&state.worker_db)
+                .await?;
+        }
+
+        debug!(
+            old_leader = %leader.id,
+            new_leader = %new_leader.id,
+            cross_org_orphaned = cross_org.len(),
+            "re-elected build leader (same-org), cross-org followers made independent"
+        );
+        return Ok(());
+    }
+
+    let cross_org_ids: Vec<BuildId> = cross_org.iter().map(|f| f.id).collect();
+    if !cross_org_ids.is_empty() {
+        EBuild::update_many()
+            .col_expr(
+                CBuild::Via,
+                sea_orm::sea_query::Expr::value(Option::<BuildId>::None),
+            )
+            .filter(CBuild::Id.is_in(cross_org_ids))
+            .exec(&state.worker_db)
+            .await?;
+        debug!(
+            old_leader = %leader.id,
+            orphaned = cross_org.len(),
+            "leader aborted with no same-org followers; cross-org followers made independent"
+        );
+    }
     Ok(())
 }
 
@@ -520,6 +599,146 @@ pub async fn find_active_leaders<C: ConnectionTrait>(
     }
 
     Ok(out)
+}
+
+#[cfg(test)]
+mod reelect_leader_tests {
+    use super::*;
+    use entity::build::{BuildStatus, Model as MBuild};
+    use entity::derivation::Model as MDerivation;
+    use sea_orm::{DatabaseBackend, MockDatabase};
+    use uuid::Uuid;
+
+    fn org(n: u8) -> OrganizationId {
+        let mut bytes = [0u8; 16];
+        bytes[15] = n;
+        OrganizationId::new(Uuid::from_bytes(bytes))
+    }
+    fn did(n: u8) -> DerivationId {
+        let mut bytes = [0u8; 16];
+        bytes[13] = n;
+        DerivationId::new(Uuid::from_bytes(bytes))
+    }
+    fn bid(n: u8) -> BuildId {
+        let mut bytes = [0u8; 16];
+        bytes[12] = n;
+        BuildId::new(Uuid::from_bytes(bytes))
+    }
+
+    fn build(id: BuildId, drv: DerivationId, via: Option<BuildId>, status: BuildStatus) -> MBuild {
+        MBuild {
+            id,
+            evaluation: EvaluationId::now_v7(),
+            derivation: drv,
+            status,
+            log_id: None,
+            build_time_ms: None,
+            worker: None,
+            via,
+            external_cached: false,
+            created_at: chrono::NaiveDateTime::default(),
+            updated_at: chrono::NaiveDateTime::default(),
+        }
+    }
+
+    fn drv_row(id: DerivationId, owner: OrganizationId) -> MDerivation {
+        MDerivation {
+            id,
+            organization: owner,
+            derivation_path: "/nix/store/x.drv".into(),
+            architecture: "x86_64-linux".into(),
+            created_at: chrono::NaiveDateTime::default(),
+        }
+    }
+
+    fn make_state(db: sea_orm::DatabaseConnection) -> std::sync::Arc<crate::types::ServerState> {
+        test_support::state::test_state(db)
+    }
+
+    fn run<F: std::future::Future>(fut: F) -> F::Output {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(fut)
+    }
+
+    /// Same-org follower is promoted to leader; cross-org follower's via is cleared.
+    #[test]
+    fn promotes_same_org_and_orphans_cross_org_follower() {
+        run(async {
+            let leader_drv = did(1);
+            let same_org_drv = did(2);
+            let cross_org_drv = did(3);
+            let leader = build(bid(10), leader_drv, None, BuildStatus::Queued);
+            let same_org_follower =
+                build(bid(11), same_org_drv, Some(leader.id), BuildStatus::Created);
+            let cross_org_follower =
+                build(bid(12), cross_org_drv, Some(leader.id), BuildStatus::Created);
+
+            // Query sequence:
+            //   1. EDerivation::find_by_id(leader.derivation) → drv with org(1)
+            //   2. EBuild::find().filter(Via = leader.id) → [same_org_follower, cross_org_follower]
+            //   3. EDerivation::find().filter(Id IN follower_drv_ids) → org map
+            //   4. active.update() for promotion (Postgres RETURNING → query_results)
+            //   5. EBuild::update_many (clear via for cross_org_follower → exec_results)
+            // No "remaining same-org" update_many: only one same-org follower → skip(1) is empty.
+            let db = MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([vec![drv_row(leader_drv, org(1))]])
+                .append_query_results([vec![
+                    same_org_follower.clone(),
+                    cross_org_follower.clone(),
+                ]])
+                .append_query_results([vec![
+                    drv_row(same_org_drv, org(1)),
+                    drv_row(cross_org_drv, org(2)),
+                ]])
+                .append_query_results([vec![same_org_follower.clone()]])
+                .append_exec_results([sea_orm::MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 1,
+                }])
+                .into_connection();
+
+            let state = make_state(db);
+            reelect_leader(&state, &leader).await.expect("reelect ok");
+        });
+    }
+
+    /// Leader has only cross-org followers: every follower's via is cleared.
+    #[test]
+    fn all_cross_org_followers_orphaned_when_no_same_org() {
+        run(async {
+            let leader_drv = did(1);
+            let foll_drv_b = did(2);
+            let foll_drv_c = did(3);
+            let leader = build(bid(20), leader_drv, None, BuildStatus::Queued);
+            let f1 = build(bid(21), foll_drv_b, Some(leader.id), BuildStatus::Created);
+            let f2 = build(bid(22), foll_drv_c, Some(leader.id), BuildStatus::Created);
+
+            // Query sequence:
+            //   1. EDerivation::find_by_id(leader.derivation) → drv with org(1)
+            //   2. EBuild::find().filter(Via = leader.id) → [f1, f2]
+            //   3. EDerivation::find().filter(Id IN follower_drv_ids) → org map (all cross-org)
+            //   4. EBuild::update_many (clear via for all cross-org → exec_results)
+            // No same-org candidates, so no active.update() promotion.
+            let db = MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([vec![drv_row(leader_drv, org(1))]])
+                .append_query_results([vec![f1.clone(), f2.clone()]])
+                .append_query_results([vec![
+                    drv_row(foll_drv_b, org(2)),
+                    drv_row(foll_drv_c, org(3)),
+                ]])
+                .append_exec_results([sea_orm::MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 2,
+                }])
+                .into_connection();
+
+            let state = make_state(db);
+            reelect_leader(&state, &leader).await.expect("reelect ok");
+        });
+    }
 }
 
 #[cfg(test)]
