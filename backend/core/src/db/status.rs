@@ -390,11 +390,10 @@ async fn reelect_leader(state: &Arc<ServerState>, leader: &MBuild) -> Result<(),
 /// For each derivation in `drv_ids`, return the id of the leader build whose
 /// result a new build for that derivation should follow.
 ///
-/// First checks for an in-flight build within `inserting_org` (the previous
-/// behavior). When no same-org candidate exists for a drv, this function
-/// will also consult cache-connected organisations via
-/// [`cache_reach::writer_orgs_reachable_from`] — that pass is added in a
-/// later task; this step only widens the signature.
+/// First checks for an in-flight build within `inserting_org`. When no
+/// same-org candidate exists for a drv, consults cache-connected organisations
+/// via [`cache_reach::writer_orgs_reachable_from`] and picks the most-advanced
+/// active build (tie-break: oldest `created_at`).
 ///
 /// Drvs with no active build are omitted from the result.
 pub async fn find_active_leaders<C: ConnectionTrait>(
@@ -402,12 +401,12 @@ pub async fn find_active_leaders<C: ConnectionTrait>(
     inserting_org: OrganizationId,
     drv_ids: &[DerivationId],
 ) -> Result<HashMap<DerivationId, BuildId>, sea_orm::DbErr> {
-    let _ = inserting_org;
     if drv_ids.is_empty() {
         return Ok(HashMap::new());
     }
 
-    let rows = EBuild::find()
+    // ── Same-org pass ────────────────────────────────────────────────────
+    let same_org_rows = EBuild::find()
         .filter(CBuild::Derivation.is_in(drv_ids.to_vec()))
         .filter(CBuild::Status.is_in(vec![
             BuildStatus::Created,
@@ -418,7 +417,7 @@ pub async fn find_active_leaders<C: ConnectionTrait>(
         .await?;
 
     let mut out: HashMap<DerivationId, BuildId> = HashMap::new();
-    for b in rows {
+    for b in same_org_rows {
         let head = b.via.unwrap_or(b.id);
         out.entry(b.derivation)
             .and_modify(|cur| {
@@ -428,5 +427,261 @@ pub async fn find_active_leaders<C: ConnectionTrait>(
             })
             .or_insert(head);
     }
+
+    let unmatched: Vec<DerivationId> = drv_ids
+        .iter()
+        .copied()
+        .filter(|d| !out.contains_key(d))
+        .collect();
+    if unmatched.is_empty() {
+        return Ok(out);
+    }
+
+    // ── Cross-org pass ───────────────────────────────────────────────────
+    use entity::derivation::{Column as CDerivation, Entity as EDerivation};
+
+    let inserting_drv_rows = EDerivation::find()
+        .filter(CDerivation::Id.is_in(unmatched.clone()))
+        .all(db)
+        .await?;
+    let mut path_to_drv: HashMap<String, DerivationId> = HashMap::new();
+    let mut drv_paths: Vec<String> = Vec::new();
+    for d in &inserting_drv_rows {
+        path_to_drv.insert(d.derivation_path.clone(), d.id);
+        drv_paths.push(d.derivation_path.clone());
+    }
+    if drv_paths.is_empty() {
+        return Ok(out);
+    }
+
+    let mut reachable =
+        crate::db::cache_reach::writer_orgs_reachable_from(db, inserting_org).await?;
+    reachable.remove(&inserting_org);
+    if reachable.is_empty() {
+        return Ok(out);
+    }
+
+    let candidate_drvs = EDerivation::find()
+        .filter(CDerivation::DerivationPath.is_in(drv_paths.clone()))
+        .filter(CDerivation::Organization.is_in(reachable.into_iter().collect::<Vec<_>>()))
+        .all(db)
+        .await?;
+    if candidate_drvs.is_empty() {
+        return Ok(out);
+    }
+    let candidate_drv_ids: Vec<DerivationId> = candidate_drvs.iter().map(|d| d.id).collect();
+    let leader_drv_to_path: HashMap<DerivationId, String> = candidate_drvs
+        .into_iter()
+        .map(|d| (d.id, d.derivation_path))
+        .collect();
+
+    let candidate_builds = EBuild::find()
+        .filter(CBuild::Derivation.is_in(candidate_drv_ids))
+        .filter(CBuild::Status.is_in(vec![
+            BuildStatus::Created,
+            BuildStatus::Queued,
+            BuildStatus::Building,
+        ]))
+        .filter(CBuild::Via.is_null())
+        .filter(CBuild::ExternalCached.eq(false))
+        .all(db)
+        .await?;
+
+    fn status_rank(s: BuildStatus) -> u8 {
+        match s {
+            BuildStatus::Building => 2,
+            BuildStatus::Queued => 1,
+            _ => 0,
+        }
+    }
+    let mut best_by_path: HashMap<String, MBuild> = HashMap::new();
+    for b in candidate_builds {
+        let Some(path) = leader_drv_to_path.get(&b.derivation).cloned() else {
+            continue;
+        };
+        match best_by_path.get(&path) {
+            Some(cur) => {
+                let cur_rank = status_rank(cur.status);
+                let new_rank = status_rank(b.status);
+                if new_rank > cur_rank || (new_rank == cur_rank && b.created_at < cur.created_at) {
+                    best_by_path.insert(path, b);
+                }
+            }
+            None => {
+                best_by_path.insert(path, b);
+            }
+        }
+    }
+
+    for (path, b) in best_by_path {
+        if let Some(&local_drv_id) = path_to_drv.get(&path) {
+            out.insert(local_drv_id, b.id);
+        }
+    }
+
     Ok(out)
+}
+
+#[cfg(test)]
+mod find_active_leaders_tests {
+    use super::*;
+    use entity::build::{BuildStatus, Model as MBuild};
+    use entity::cache_upstream::Model as MCacheUpstream;
+    use entity::derivation::Model as MDerivation;
+    use entity::ids::{BuildId, CacheId, DerivationId, OrganizationCacheId, OrganizationId};
+    use entity::organization_cache::{CacheSubscriptionMode, Model as MOrganizationCache};
+    use sea_orm::{DatabaseBackend, MockDatabase};
+    use uuid::Uuid;
+
+    fn org(n: u8) -> OrganizationId {
+        let mut bytes = [0u8; 16];
+        bytes[15] = n;
+        OrganizationId::new(Uuid::from_bytes(bytes))
+    }
+    fn cid(n: u8) -> CacheId {
+        let mut bytes = [0u8; 16];
+        bytes[14] = n;
+        CacheId::new(Uuid::from_bytes(bytes))
+    }
+    fn did(n: u8) -> DerivationId {
+        let mut bytes = [0u8; 16];
+        bytes[13] = n;
+        DerivationId::new(Uuid::from_bytes(bytes))
+    }
+    fn bid(n: u8) -> BuildId {
+        let mut bytes = [0u8; 16];
+        bytes[12] = n;
+        BuildId::new(Uuid::from_bytes(bytes))
+    }
+
+    fn build(
+        id: BuildId,
+        drv: DerivationId,
+        status: BuildStatus,
+        external_cached: bool,
+        offset_secs: i64,
+    ) -> MBuild {
+        let t = chrono::NaiveDate::from_ymd_opt(2026, 1, 1)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            + chrono::Duration::seconds(offset_secs);
+        MBuild {
+            id,
+            evaluation: entity::ids::EvaluationId::now_v7(),
+            derivation: drv,
+            status,
+            log_id: None,
+            build_time_ms: None,
+            worker: None,
+            via: None,
+            external_cached,
+            created_at: t,
+            updated_at: t,
+        }
+    }
+
+    fn drv_row(id: DerivationId, owner: OrganizationId, path: &str) -> MDerivation {
+        MDerivation {
+            id,
+            organization: owner,
+            derivation_path: path.into(),
+            architecture: "x86_64-linux".into(),
+            created_at: chrono::NaiveDateTime::default(),
+        }
+    }
+
+    fn run<F: std::future::Future>(fut: F) -> F::Output {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(fut)
+    }
+
+    #[test]
+    fn cross_org_match_when_no_same_org_candidate() {
+        run(async {
+            let drv_b = did(2);
+            let drv_a = did(1);
+            let leader_build = bid(10);
+
+            let db = MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([Vec::<MBuild>::new()])
+                .append_query_results([vec![drv_row(drv_b, org(2), "/nix/store/x.drv")]])
+                .append_query_results([vec![MOrganizationCache {
+                    id: OrganizationCacheId::now_v7(),
+                    organization: org(2),
+                    cache: cid(1),
+                    mode: CacheSubscriptionMode::ReadOnly,
+                }]])
+                .append_query_results([Vec::<MCacheUpstream>::new()])
+                .append_query_results([vec![MOrganizationCache {
+                    id: OrganizationCacheId::now_v7(),
+                    organization: org(1),
+                    cache: cid(1),
+                    mode: CacheSubscriptionMode::ReadWrite,
+                }]])
+                .append_query_results([vec![drv_row(drv_a, org(1), "/nix/store/x.drv")]])
+                .append_query_results([vec![build(
+                    leader_build,
+                    drv_a,
+                    BuildStatus::Building,
+                    false,
+                    0,
+                )]])
+                .into_connection();
+
+            let got = find_active_leaders(&db, org(2), &[drv_b]).await.unwrap();
+            assert_eq!(got.get(&drv_b), Some(&leader_build), "got: {:?}", got);
+        });
+    }
+
+    #[test]
+    fn cross_org_tie_break_most_advanced_then_oldest() {
+        run(async {
+            let drv_b = did(2);
+            let drv_a = did(1);
+            let drv_c = did(3);
+            let queued_old = bid(20);
+            let building_new = bid(21);
+
+            let db = MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([Vec::<MBuild>::new()])
+                .append_query_results([vec![drv_row(drv_b, org(2), "/nix/store/x.drv")]])
+                .append_query_results([vec![MOrganizationCache {
+                    id: OrganizationCacheId::now_v7(),
+                    organization: org(2),
+                    cache: cid(1),
+                    mode: CacheSubscriptionMode::ReadOnly,
+                }]])
+                .append_query_results([Vec::<MCacheUpstream>::new()])
+                .append_query_results([vec![
+                    MOrganizationCache {
+                        id: OrganizationCacheId::now_v7(),
+                        organization: org(1),
+                        cache: cid(1),
+                        mode: CacheSubscriptionMode::ReadWrite,
+                    },
+                    MOrganizationCache {
+                        id: OrganizationCacheId::now_v7(),
+                        organization: org(3),
+                        cache: cid(1),
+                        mode: CacheSubscriptionMode::ReadWrite,
+                    },
+                ]])
+                .append_query_results([vec![
+                    drv_row(drv_a, org(1), "/nix/store/x.drv"),
+                    drv_row(drv_c, org(3), "/nix/store/x.drv"),
+                ]])
+                .append_query_results([vec![
+                    build(queued_old, drv_a, BuildStatus::Queued, false, 0),
+                    build(building_new, drv_c, BuildStatus::Building, false, 60),
+                ]])
+                .into_connection();
+
+            let got = find_active_leaders(&db, org(2), &[drv_b]).await.unwrap();
+            assert_eq!(got.get(&drv_b), Some(&building_new), "got: {:?}", got);
+        });
+    }
 }
