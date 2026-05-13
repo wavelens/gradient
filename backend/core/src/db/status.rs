@@ -652,7 +652,76 @@ mod reelect_leader_tests {
     }
 
     fn make_state(db: sea_orm::DatabaseConnection) -> std::sync::Arc<crate::types::ServerState> {
-        test_support::state::test_state(db)
+        use crate::ci::WebhookClient;
+        use crate::storage::{EmailSender, LogStorage, NarStore};
+        use crate::types::{RuntimeConfig, SecretString, WebDb, WorkerDb};
+        use futures::future::BoxFuture;
+
+        #[derive(Debug)]
+        struct NoopLog;
+        impl LogStorage for NoopLog {
+            fn append<'a>(&'a self, _: entity::ids::BuildId, _: &'a str) -> BoxFuture<'a, anyhow::Result<()>> {
+                Box::pin(async { Ok(()) })
+            }
+            fn read<'a>(&'a self, _: entity::ids::BuildId) -> BoxFuture<'a, anyhow::Result<String>> {
+                Box::pin(async { Ok(String::new()) })
+            }
+            fn delete<'a>(&'a self, _: entity::ids::BuildId) -> BoxFuture<'a, anyhow::Result<()>> {
+                Box::pin(async { Ok(()) })
+            }
+        }
+
+        #[derive(Debug)]
+        struct NoopWebhook;
+        #[async_trait::async_trait]
+        impl WebhookClient for NoopWebhook {
+            async fn deliver(&self, _: &str, _: &str, _: &str, _: String) -> anyhow::Result<u16> {
+                Ok(200)
+            }
+        }
+
+        #[derive(Debug)]
+        struct NoopEmail;
+        #[async_trait::async_trait]
+        impl EmailSender for NoopEmail {
+            fn is_enabled(&self) -> bool { false }
+            async fn send_verification_email(&self, _: &str, _: &str, _: &str, _: &str) -> anyhow::Result<()> { Ok(()) }
+            async fn send_password_reset_email(&self, _: &str, _: &str, _: &str, _: &str) -> anyhow::Result<()> { Ok(()) }
+        }
+
+        let cli = crate::types::Cli {
+            logging: crate::types::LoggingArgs::default(),
+            server: crate::types::ServerArgs::default(),
+            database: crate::types::DatabaseArgs::default(),
+            eval: crate::types::EvalArgs::default(),
+            storage: crate::types::StorageArgs { base_path: "/tmp/gradient-test".into(), ..Default::default() },
+            secrets: crate::types::SecretsArgs { crypt_secret_file: "test-secret".into(), jwt_secret_file: "test-jwt".into() },
+            limits: crate::types::LimitsArgs::default(),
+            registration: crate::types::RegistrationArgs::default(),
+            proto: crate::types::ProtoArgs::default(),
+            oidc: crate::types::OidcArgs::default(),
+            email: crate::types::EmailArgs::default(),
+            s3: crate::types::S3Args::default(),
+            github_app: crate::types::GitHubAppArgs::default(),
+            metrics: crate::types::MetricsArgs::default(),
+        };
+        let config = std::sync::Arc::new(RuntimeConfig::from_cli(&cli));
+        let nar_storage = NarStore::local(&config.storage.base_path).expect("nar store");
+        std::sync::Arc::new(crate::types::ServerState {
+            web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
+            worker_db: WorkerDb::new(db),
+            config,
+            log_storage: std::sync::Arc::new(NoopLog),
+            webhooks: std::sync::Arc::new(NoopWebhook) as std::sync::Arc<dyn WebhookClient>,
+            email: std::sync::Arc::new(NoopEmail) as std::sync::Arc<dyn EmailSender>,
+            nar_storage,
+            manifest_state: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            pending_credentials: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            http: crate::http::build_client().expect("http client"),
+            shutdown: crate::shutdown::Shutdown::new(),
+            jwt_secret: SecretString::new("test-jwt-secret".to_string()),
+            started_at: chrono::Utc::now(),
+        })
     }
 
     fn run<F: std::future::Future>(fut: F) -> F::Output {
@@ -952,7 +1021,7 @@ mod find_active_leaders_tests {
                 .into_connection();
 
             let got = find_active_leaders(&db, org(2), &[drv_b]).await.unwrap();
-            assert!(got.get(&drv_b).is_none(), "external_cached must be skipped");
+            assert!(!got.contains_key(&drv_b), "external_cached must be skipped");
         });
     }
 }

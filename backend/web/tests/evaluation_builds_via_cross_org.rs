@@ -47,6 +47,7 @@ fn leader_org_id() -> OrganizationId {
 fn follower_org_id() -> OrganizationId {
     OrganizationId::new(Uuid::parse_str("50000000-0000-0000-0000-000000000002").unwrap())
 }
+#[allow(dead_code)]
 fn leader_project_id() -> ProjectId {
     ProjectId::new(Uuid::parse_str("50000000-0000-0000-0000-000000000003").unwrap())
 }
