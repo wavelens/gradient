@@ -148,4 +148,144 @@ mod tests {
             assert!(got.contains(&org(1)), "got: {:?}", got);
         });
     }
+
+    #[test]
+    fn transitive_internal_chain() {
+        run(async {
+            // chain: cache_a → upstream cache_b → upstream cache_c
+            // reader on a, writer on c
+            let a = cid(1);
+            let b = cid(2);
+            let c = cid(3);
+
+            let reader_rows = vec![org_cache(org(2), a, CacheSubscriptionMode::ReadOnly)];
+            let upstream_rows = vec![
+                MCacheUpstream {
+                    id: CacheUpstreamId::now_v7(),
+                    cache: a,
+                    display_name: "ab".into(),
+                    mode: CacheSubscriptionMode::ReadOnly,
+                    upstream_cache: Some(b),
+                    url: None,
+                    public_key: None,
+                },
+                MCacheUpstream {
+                    id: CacheUpstreamId::now_v7(),
+                    cache: b,
+                    display_name: "bc".into(),
+                    mode: CacheSubscriptionMode::ReadOnly,
+                    upstream_cache: Some(c),
+                    url: None,
+                    public_key: None,
+                },
+            ];
+            let writer_rows = vec![org_cache(org(1), c, CacheSubscriptionMode::ReadWrite)];
+
+            let db = MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([reader_rows])
+                .append_query_results([upstream_rows])
+                .append_query_results([writer_rows])
+                .into_connection();
+
+            let got = writer_orgs_reachable_from(&db, org(2)).await.unwrap();
+            assert!(got.contains(&org(1)), "got: {:?}", got);
+        });
+    }
+
+    #[test]
+    fn external_upstream_skipped() {
+        run(async {
+            // Reader on a; the production helper filters `upstream_cache IS NOT NULL`,
+            // so an external (URL-based) upstream row never reaches the BFS. Writer on
+            // a separate cache b is therefore unreachable.
+            let a = cid(1);
+            let b = cid(2);
+
+            let reader_rows = vec![org_cache(org(2), a, CacheSubscriptionMode::ReadOnly)];
+            let upstream_rows: Vec<MCacheUpstream> = vec![];
+            let writer_rows: Vec<MOrganizationCache> = vec![];
+
+            let db = MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([reader_rows])
+                .append_query_results([upstream_rows])
+                .append_query_results([writer_rows])
+                .into_connection();
+
+            let got = writer_orgs_reachable_from(&db, org(2)).await.unwrap();
+            assert!(
+                !got.contains(&org(1)),
+                "external upstream must not reach org 1, got: {:?}",
+                got
+            );
+            let _ = b;
+        });
+    }
+
+    #[test]
+    fn write_only_reader_excluded() {
+        run(async {
+            // Reader has WriteOnly on cache X; the production helper's mode filter
+            // (`ReadWrite`/`ReadOnly`) returns no reader rows, so the closure is
+            // empty and no writers are discovered.
+            let x = cid(1);
+            let reader_rows: Vec<MOrganizationCache> = vec![];
+            let upstream_rows: Vec<MCacheUpstream> = vec![];
+            let writer_rows: Vec<MOrganizationCache> = vec![];
+
+            let db = MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([reader_rows])
+                .append_query_results([upstream_rows])
+                .append_query_results([writer_rows])
+                .into_connection();
+
+            let got = writer_orgs_reachable_from(&db, org(2)).await.unwrap();
+            assert!(got.is_empty(), "WriteOnly reader must see nobody, got: {:?}", got);
+            let _ = x;
+        });
+    }
+
+    #[test]
+    fn cycle_tolerated() {
+        run(async {
+            // cache_a.upstream = b; cache_b.upstream = a → cycle. BFS must
+            // terminate via the visited set.
+            let a = cid(1);
+            let b = cid(2);
+
+            let reader_rows = vec![org_cache(org(2), a, CacheSubscriptionMode::ReadOnly)];
+            let upstream_rows = vec![
+                MCacheUpstream {
+                    id: CacheUpstreamId::now_v7(),
+                    cache: a,
+                    display_name: "ab".into(),
+                    mode: CacheSubscriptionMode::ReadOnly,
+                    upstream_cache: Some(b),
+                    url: None,
+                    public_key: None,
+                },
+                MCacheUpstream {
+                    id: CacheUpstreamId::now_v7(),
+                    cache: b,
+                    display_name: "ba".into(),
+                    mode: CacheSubscriptionMode::ReadOnly,
+                    upstream_cache: Some(a),
+                    url: None,
+                    public_key: None,
+                },
+            ];
+            let writer_rows = vec![
+                org_cache(org(1), b, CacheSubscriptionMode::ReadWrite),
+                org_cache(org(2), a, CacheSubscriptionMode::ReadOnly),
+            ];
+
+            let db = MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([reader_rows])
+                .append_query_results([upstream_rows])
+                .append_query_results([writer_rows])
+                .into_connection();
+
+            let got = writer_orgs_reachable_from(&db, org(2)).await.unwrap();
+            assert!(got.contains(&org(1)), "cycle must still include reachable writer, got: {:?}", got);
+        });
+    }
 }
