@@ -6,12 +6,13 @@
 
 use anyhow::{Context, Result};
 use axum::body::Body;
-use axum::extract::{Request, State};
+use axum::extract::{ConnectInfo, Request, State};
 use axum::middleware::Next;
 use axum::response::Response;
 
 use gradient_core::types::*;
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
 use super::api_key::MaybeApiKey;
@@ -52,7 +53,12 @@ pub async fn authorize(
     mut req: Request,
     next: Next,
 ) -> WebResult<Response<Body>> {
-    let info = RequestInfo::from_headers(req.headers());
+    let peer = req
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|c| c.0.ip())
+        .unwrap_or_else(|| IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+    let info = RequestInfo::from_request(req.headers(), peer, &state.config.network.trusted_proxies);
     let method = req.method().as_str().to_string();
     let path = req.uri().path().to_string();
 

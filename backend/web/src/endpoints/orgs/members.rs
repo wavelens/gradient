@@ -10,9 +10,10 @@ use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::Permission;
-use axum::extract::{Path, State};
+use axum::extract::{ConnectInfo, Path, State};
 use axum::http::HeaderMap;
 use axum::{Extension, Json};
+use std::net::SocketAddr;
 use gradient_core::types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
@@ -121,6 +122,7 @@ pub async fn get_organization_users(
 
 pub async fn post_organization_users(
     state: State<Arc<ServerState>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
@@ -168,7 +170,7 @@ pub async fn post_organization_users(
     .insert(&state.web_db)
     .await?;
 
-    let info = RequestInfo::from_headers(&headers);
+    let info = RequestInfo::from_request(&headers, addr.ip(), &state.config.network.trusted_proxies);
     audit_record(
         &state.web_db,
         Some(user.id),
@@ -187,6 +189,7 @@ pub async fn post_organization_users(
 
 pub async fn patch_organization_users(
     state: State<Arc<ServerState>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
@@ -227,7 +230,7 @@ pub async fn patch_organization_users(
     active.role = Set(role.id);
     active.update(&state.web_db).await?;
 
-    let info = RequestInfo::from_headers(&headers);
+    let info = RequestInfo::from_request(&headers, addr.ip(), &state.config.network.trusted_proxies);
     audit_record(
         &state.web_db,
         Some(user.id),
@@ -247,6 +250,7 @@ pub async fn patch_organization_users(
 
 pub async fn delete_organization_users(
     state: State<Arc<ServerState>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
@@ -273,7 +277,7 @@ pub async fn delete_organization_users(
     let active: AOrganizationUser = membership.into();
     active.delete(&state.web_db).await?;
 
-    let info = RequestInfo::from_headers(&headers);
+    let info = RequestInfo::from_request(&headers, addr.ip(), &state.config.network.trusted_proxies);
     audit_record(
         &state.web_db,
         Some(user.id),

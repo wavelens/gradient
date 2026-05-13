@@ -11,9 +11,10 @@ use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::Permission;
-use axum::extract::{Path, Query, State};
+use axum::extract::{ConnectInfo, Path, Query, State};
 use axum::http::HeaderMap;
 use axum::{Extension, Json};
+use std::net::SocketAddr;
 
 use gradient_core::db::get_any_organization_by_name;
 use gradient_core::nix::RepositoryUrl;
@@ -478,6 +479,7 @@ impl<'a> ProjectPatcher<'a> {
 
 pub async fn delete_project(
     state: State<Arc<ServerState>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
@@ -500,7 +502,7 @@ pub async fn delete_project(
     let aproject: AProject = project.into();
     aproject.delete(&state.web_db).await?;
 
-    let info = RequestInfo::from_headers(&headers);
+    let info = RequestInfo::from_request(&headers, addr.ip(), &state.config.network.trusted_proxies);
     audit_record(
         &state.web_db,
         Some(user.id),

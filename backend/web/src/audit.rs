@@ -13,6 +13,7 @@
 
 use axum::http::HeaderMap;
 use gradient_core::types::*;
+use std::net::IpAddr;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ConnectionTrait, EntityTrait};
 
@@ -51,18 +52,14 @@ pub struct RequestInfo {
 }
 
 impl RequestInfo {
-    pub fn from_headers(headers: &HeaderMap) -> Self {
-        let ip = headers
-            .get("x-forwarded-for")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|s| s.split(',').next())
-            .map(|s| s.trim().to_string())
-            .or_else(|| {
-                headers
-                    .get("x-real-ip")
-                    .and_then(|v| v.to_str().ok())
-                    .map(str::to_owned)
-            });
+    pub fn from_request(
+        headers: &HeaderMap,
+        peer: IpAddr,
+        trusted_proxies: &[ipnet::IpNet],
+    ) -> Self {
+        let ip = Some(
+            crate::client_ip::resolve_client_ip(headers, peer, trusted_proxies).to_string(),
+        );
         let user_agent = headers
             .get(axum::http::header::USER_AGENT)
             .and_then(|v| v.to_str().ok())
