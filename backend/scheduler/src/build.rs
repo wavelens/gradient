@@ -162,14 +162,17 @@ impl<'a> BuildStateHandler<'a> {
         self.check_evaluation_done(evaluation_id).await
     }
 
-    /// Copy a leader's terminal status (and `log_id`, `build_time_ms`,
-    /// `worker`) onto every build with `via = leader.id`, then run the
-    /// per-evaluation finalisation each follower needs (`DependencyFailed`
-    /// cascade on failure, `check_evaluation_done` to flip the eval).
+    /// Copy a leader's terminal status (and `log_id`, `build_time_ms`, `worker`)
+    /// onto every build with `via = leader.id`, then run the per-evaluation
+    /// finalisation each follower needs (`DependencyFailed` cascade on failure,
+    /// `check_evaluation_done` to flip the eval).
     ///
-    /// Followers always share a `derivation` row with their leader, so
-    /// `derivation_output` and `build_product` rows are already visible to
-    /// the follower's evaluation without any copy.
+    /// Same-org followers share the leader's `derivation` row, so its
+    /// `derivation_output` and `build_product` children are already visible to
+    /// the follower's evaluation without any copy. Cross-org followers (whose
+    /// `derivation` differs from the leader's — created when the leader belongs
+    /// to a cache-connected organisation) have those rows mirrored onto the
+    /// follower's `derivation`.
     ///
     /// `Aborted` is not propagated — when a leader is aborted (its eval was
     /// cancelled), callers re-elect a new leader from the followers instead.
@@ -194,6 +197,22 @@ impl<'a> BuildStateHandler<'a> {
             return Ok(());
         }
 
+        let leader_outputs = EDerivationOutput::find()
+            .filter(CDerivationOutput::Derivation.eq(leader.derivation))
+            .all(&self.state.worker_db)
+            .await
+            .context("fetch leader's derivation_output rows")?;
+        let leader_output_ids: Vec<_> = leader_outputs.iter().map(|o| o.id).collect();
+        let leader_products = if leader_output_ids.is_empty() {
+            Vec::new()
+        } else {
+            EBuildProduct::find()
+                .filter(CBuildProduct::DerivationOutput.is_in(leader_output_ids))
+                .all(&self.state.worker_db)
+                .await
+                .context("fetch leader's build_product rows")?
+        };
+
         for follower in followers {
             let evaluation_id = follower.evaluation;
             let derivation_id = follower.derivation;
@@ -214,6 +233,45 @@ impl<'a> BuildStateHandler<'a> {
                 continue;
             };
             update_build_status(Arc::clone(self.state), reloaded, leader.status).await;
+
+            if follower.derivation != leader.derivation {
+                let existing_outs = EDerivationOutput::find()
+                    .filter(CDerivationOutput::Derivation.eq(follower.derivation))
+                    .all(&self.state.worker_db)
+                    .await
+                    .context("fetch follower's existing derivation_output rows")?;
+                let existing_out_ids: Vec<_> = existing_outs.iter().map(|o| o.id).collect();
+                if !existing_out_ids.is_empty() {
+                    if let Err(e) = EBuildProduct::delete_many()
+                        .filter(CBuildProduct::DerivationOutput.is_in(existing_out_ids.clone()))
+                        .exec(&self.state.worker_db)
+                        .await
+                    {
+                        warn!(error = %e, follower_id = %follower.id, "failed to clear stale follower build_products");
+                    }
+                    if let Err(e) = EDerivationOutput::delete_many()
+                        .filter(CDerivationOutput::Id.is_in(existing_out_ids))
+                        .exec(&self.state.worker_db)
+                        .await
+                    {
+                        warn!(error = %e, follower_id = %follower.id, "failed to clear stale follower derivation_outputs");
+                    }
+                }
+
+                let (new_outputs, new_products) =
+                    build_cross_org_artefact_rows(follower.derivation, &leader_outputs, &leader_products);
+
+                for out in new_outputs {
+                    if let Err(e) = out.insert(&self.state.worker_db).await {
+                        warn!(error = %e, follower_id = %follower.id, "failed to mirror derivation_output to follower");
+                    }
+                }
+                for product in new_products {
+                    if let Err(e) = product.insert(&self.state.worker_db).await {
+                        warn!(error = %e, follower_id = %follower.id, "failed to mirror build_product to follower");
+                    }
+                }
+            }
 
             if matches!(
                 leader.status,
@@ -555,6 +613,64 @@ pub async fn reconcile_waiting_state(
     BuildStateHandler::new(state)
         .reconcile_waiting_state(worker_caps)
         .await
+}
+
+/// Build the `derivation_output` and `build_product` rows to insert under a
+/// cross-org follower's `derivation` so its evaluation can resolve artefacts
+/// without org-aware indirection. Pure: no DB, no I/O.
+///
+/// Returns `(new_outputs, new_products)`. `new_outputs[i]` has a fresh
+/// `DerivationOutputId` and `derivation = follower_derivation`; every other
+/// column is copied from the corresponding leader row. `new_products` rewrites
+/// the `derivation_output` FK to point at the matching new output id.
+pub(crate) fn build_cross_org_artefact_rows(
+    follower_derivation: DerivationId,
+    leader_outputs: &[MDerivationOutput],
+    leader_products: &[MBuildProduct],
+) -> (Vec<ADerivationOutput>, Vec<ABuildProduct>) {
+    use std::collections::HashMap;
+    use entity::ids::{BuildProductId, DerivationOutputId};
+
+    let mut old_to_new: HashMap<DerivationOutputId, DerivationOutputId> = HashMap::new();
+    let new_outputs: Vec<ADerivationOutput> = leader_outputs
+        .iter()
+        .map(|src| {
+            let new_id = DerivationOutputId::now_v7();
+            old_to_new.insert(src.id, new_id);
+            ADerivationOutput {
+                id: Set(new_id),
+                derivation: Set(follower_derivation),
+                name: Set(src.name.clone()),
+                output: Set(src.output.clone()),
+                hash: Set(src.hash.clone()),
+                package: Set(src.package.clone()),
+                ca: Set(src.ca.clone()),
+                nar_size: Set(src.nar_size),
+                is_cached: Set(src.is_cached),
+                cached_path: Set(src.cached_path),
+                created_at: Set(src.created_at),
+            }
+        })
+        .collect();
+
+    let new_products: Vec<ABuildProduct> = leader_products
+        .iter()
+        .filter_map(|src| {
+            let new_output_id = old_to_new.get(&src.derivation_output).copied()?;
+            Some(ABuildProduct {
+                id: Set(BuildProductId::now_v7()),
+                derivation_output: Set(new_output_id),
+                file_type: Set(src.file_type.clone()),
+                subtype: Set(src.subtype.clone()),
+                name: Set(src.name.clone()),
+                path: Set(src.path.clone()),
+                size: Set(src.size),
+                created_at: Set(src.created_at),
+            })
+        })
+        .collect();
+
+    (new_outputs, new_products)
 }
 
 // ---------------------------------------------------------------------------
@@ -920,5 +1036,90 @@ mod waiting_reason_tests {
         let reason = checker.compute_waiting_reason(&builds, &caps);
 
         assert!(reason.unmet.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod cross_org_mirror_tests {
+    use super::*;
+    use entity::ids::{BuildProductId, DerivationId, DerivationOutputId};
+
+    fn output_fixture(id: DerivationOutputId, derivation: DerivationId, hash: &str) -> MDerivationOutput {
+        MDerivationOutput {
+            id,
+            derivation,
+            name: "out".into(),
+            output: format!("/nix/store/{hash}-foo"),
+            hash: hash.into(),
+            package: "foo".into(),
+            ca: None,
+            nar_size: Some(1024),
+            is_cached: true,
+            cached_path: None,
+            created_at: chrono::NaiveDateTime::default(),
+        }
+    }
+
+    fn product_fixture(id: BuildProductId, output: DerivationOutputId) -> MBuildProduct {
+        MBuildProduct {
+            id,
+            derivation_output: output,
+            file_type: "file".into(),
+            subtype: "doc".into(),
+            name: "readme".into(),
+            path: "share/doc/readme".into(),
+            size: Some(512),
+            created_at: chrono::NaiveDateTime::default(),
+        }
+    }
+
+    #[test]
+    fn mirrors_outputs_and_rewrites_product_foreign_keys() {
+        let leader_drv = DerivationId::now_v7();
+        let follower_drv = DerivationId::now_v7();
+        let leader_out_id = DerivationOutputId::now_v7();
+        let leader_outputs = vec![output_fixture(leader_out_id, leader_drv, "deadbeef")];
+        let leader_products = vec![product_fixture(BuildProductId::now_v7(), leader_out_id)];
+
+        let (new_outputs, new_products) =
+            build_cross_org_artefact_rows(follower_drv, &leader_outputs, &leader_products);
+
+        assert_eq!(new_outputs.len(), 1);
+        let mirrored_out = &new_outputs[0];
+        match &mirrored_out.derivation {
+            Set(d) => assert_eq!(*d, follower_drv),
+            _ => panic!("derivation not set"),
+        }
+        match &mirrored_out.hash {
+            Set(h) => assert_eq!(h, "deadbeef"),
+            _ => panic!("hash not set"),
+        }
+        match &mirrored_out.id {
+            Set(new_id) => assert_ne!(*new_id, leader_out_id),
+            _ => panic!("id not set"),
+        }
+
+        assert_eq!(new_products.len(), 1);
+        let mirrored_product = &new_products[0];
+        match (&mirrored_out.id, &mirrored_product.derivation_output) {
+            (Set(out_id), Set(prod_out)) => assert_eq!(prod_out, out_id),
+            _ => panic!("product FK not rewritten"),
+        }
+    }
+
+    #[test]
+    fn dangling_product_without_owning_output_is_dropped() {
+        let follower_drv = DerivationId::now_v7();
+        let leader_outputs: Vec<MDerivationOutput> = vec![];
+        let leader_products = vec![product_fixture(
+            BuildProductId::now_v7(),
+            DerivationOutputId::now_v7(),
+        )];
+
+        let (new_outputs, new_products) =
+            build_cross_org_artefact_rows(follower_drv, &leader_outputs, &leader_products);
+
+        assert!(new_outputs.is_empty());
+        assert!(new_products.is_empty(), "orphan product must not be inserted");
     }
 }
