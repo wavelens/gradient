@@ -296,6 +296,44 @@ Backend (`cargo test -p worker --bins proto::nar::tests::ensure_full_store_path`
 - `ensure_full_store_path_preserves_other_absolute_paths` — unrelated absolute
   paths (e.g. test tmpdirs) are not touched.
 
+## Worker NAR upload — fatal on incomplete path metadata
+
+`push_direct` and `upload_presigned` used to swallow `gather_path_meta`
+failures (`unwrap_or_default`) and ship `NarUploaded` with empty
+`references`/`deriver`. The server's `mark_nar_stored` then persisted a
+`cached_path` row with `references = NULL`, which the upload path never
+revisits. A later build worker's prefetch closure walk relied on those
+references to discover the `.drv`'s input_sources; with them missing the
+daemon's `add_to_store_nar` parsed the `.drv` content, found the unstated
+reference, and aborted with `path '…' is not valid`. Uploads must now fail
+loudly so the cache is never seeded with an incomplete row.
+
+Backend (`cargo test -p worker --bins proto::nar::tests`):
+- `push_direct_fails_when_path_meta_unavailable` — with a store handle
+  provided, a path `gather_path_meta` cannot resolve aborts the push with
+  a "path metadata" error instead of emitting `NarUploaded` with empty
+  metadata.
+- `upload_presigned_fails_when_path_meta_unavailable` — same contract for
+  the S3 / presigned-PUT branch.
+
+## Worker prefetch — re-derive `.drv` references from content
+
+When `prefetch_inputs` fetches a `.drv` during the closure walk, it harvests
+seeds for the next iteration from the `.drv` content itself rather than
+trusting `cached_path.references` alone. Outputs (so downstream builds find
+them), input_derivations (transitive `.drv` prerequisites), and
+input_sources (plain files the daemon validates as references when
+accepting the `.drv` NAR) all enter the walk. This defends the prefetch
+against a `NULL`/stale `cached_path.references` row.
+
+Backend (`cargo test -p worker --bins proto::nar_import::tests`):
+- `drv_closure_seeds_include_outputs_inputs_and_sources` — a synthetic
+  `.drv` with one output, one input_derivation, and one input_source
+  returns all three paths from `drv_closure_seeds`.
+- `drv_closure_seeds_skip_empty_output_paths` — content-addressed /
+  deferred outputs (empty `path` field) are filtered so the closure walk
+  never queries the empty string.
+
 ## Hash column normalization (file_hash / nar_hash)
 
 The `derivation_output.file_hash`, `cached_path.file_hash`, and

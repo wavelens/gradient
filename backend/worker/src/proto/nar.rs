@@ -56,10 +56,40 @@ struct PathMeta {
     deriver: Option<String>,
 }
 
+/// Resolve the metadata an upload should attach to a NAR push.
+///
+/// When the caller passes `None` (no local store — eval-internal pushes,
+/// tests), the server is left to record whatever metadata it derives on its
+/// side; we emit an empty [`PathMeta`].
+///
+/// When a store *is* provided, [`gather_path_meta`] failure is a hard error:
+/// silently uploading with empty references stores a permanently incomplete
+/// `cached_path` row, and a later build worker's prefetch closure walk then
+/// misses references parsed straight out of the `.drv` content — the daemon
+/// rejects the import with `path '…' is not valid`. Failing here keeps the
+/// blame at the right layer and lets the caller retry instead of poisoning
+/// the cache.
+async fn resolve_path_meta(
+    store: Option<&LocalNixStore>,
+    store_path: &str,
+) -> Result<PathMeta> {
+    let Some(s) = store else {
+        return Ok(PathMeta::default());
+    };
+    gather_path_meta(s, store_path).await.ok_or_else(|| {
+        anyhow::anyhow!(
+            "path metadata unavailable for {}; refusing to push NAR with incomplete cache entry",
+            store_path
+        )
+    })
+}
+
 /// Query the local nix-daemon for `store_path`'s references and deriver.
 ///
 /// Returns `None` (and logs a warning) if the path is not found or the query
-/// fails — NAR upload continues with default metadata in that case.
+/// fails. Callers that intend to record the result in the gradient cache
+/// must go through [`resolve_path_meta`], which turns `None` into a hard
+/// error so the cache is never seeded with an incomplete row.
 async fn gather_path_meta(store: &LocalNixStore, store_path: &str) -> Option<PathMeta> {
     let base = strip_store_prefix(store_path);
     let sp = match StorePath::from_base_path(base) {
@@ -190,11 +220,7 @@ pub async fn push_direct(
     let file_hash = format!("sha256:{}", hex::encode(file_hasher.finalize()));
     let nar_hash = format!("sha256:{}", hex::encode(nar_hasher.finalize()));
 
-    let meta = if let Some(s) = store {
-        gather_path_meta(s, store_path).await.unwrap_or_default()
-    } else {
-        PathMeta::default()
-    };
+    let meta = resolve_path_meta(store, store_path).await?;
 
     // Report metadata so the server can update cache records.
     writer.send(ClientMessage::NarUploaded {
@@ -290,11 +316,7 @@ pub async fn upload_presigned(
     }
 
     // --- 3. Gather path metadata (references + deriver for narinfo) ---
-    let meta = if let Some(s) = store {
-        gather_path_meta(s, store_path).await.unwrap_or_default()
-    } else {
-        PathMeta::default()
-    };
+    let meta = resolve_path_meta(store, store_path).await?;
 
     // --- 4. Confirm to the server ---
     writer.send(ClientMessage::NarUploaded {
@@ -550,6 +572,78 @@ mod tests {
         .unwrap();
 
         server_task.await.unwrap();
+        let _ = std::fs::remove_dir_all(&store_path);
+    }
+
+    /// Regression: silently uploading with empty path metadata produced
+    /// `cached_path` rows whose `references` column was `NULL`. A later
+    /// build worker's prefetch then missed the `.drv`'s input_sources,
+    /// the daemon parsed the `.drv` content, found the unstated reference,
+    /// and aborted with `path '…' is not valid`. The upload must fail
+    /// loudly instead of poisoning the cache.
+    #[tokio::test]
+    async fn push_direct_fails_when_path_meta_unavailable() {
+        let store_path = make_temp_store_path();
+        let store_path_str = store_path.to_str().unwrap().to_owned();
+
+        let server = MockProtoServer::bind().await;
+        let url = server.url().to_owned();
+
+        // store_path is a `/tmp/...` directory, not a `/nix/store/<hash>-…`
+        // path — `gather_path_meta`'s `StorePath::from_base_path` rejects it
+        // before any daemon connection is attempted, so the socket path
+        // never matters.
+        let store = LocalNixStore::connect_at("/var/empty/gradient-nonexistent.sock", 1).unwrap();
+
+        let conn = crate::connection::ProtoConnection::open(&url)
+            .await
+            .unwrap();
+        let (writer, _reader) = conn.split();
+
+        let err = push_direct("job-meta-fail", &store_path_str, &writer, Some(&store))
+            .await
+            .expect_err("push_direct must fail when gather_path_meta returns None");
+        assert!(
+            err.to_string().contains("path metadata"),
+            "error should explain the abort reason, got: {err}"
+        );
+        let _ = std::fs::remove_dir_all(&store_path);
+    }
+
+    /// Same contract as `push_direct_fails_when_path_meta_unavailable`,
+    /// but for the S3 / presigned-PUT branch.
+    #[tokio::test]
+    async fn upload_presigned_fails_when_path_meta_unavailable() {
+        let store_path = make_temp_store_path();
+        let store_path_str = store_path.to_str().unwrap().to_owned();
+
+        let (http_url, _http_task) = one_shot_http_server().await;
+
+        let server = MockProtoServer::bind().await;
+        let url = server.url().to_owned();
+
+        let store = LocalNixStore::connect_at("/var/empty/gradient-nonexistent.sock", 1).unwrap();
+
+        let conn = crate::connection::ProtoConnection::open(&url)
+            .await
+            .unwrap();
+        let (writer, _reader) = conn.split();
+
+        let err = upload_presigned(
+            "job-meta-fail",
+            &store_path_str,
+            &http_url,
+            "PUT",
+            &[],
+            &writer,
+            Some(&store),
+        )
+        .await
+        .expect_err("upload_presigned must fail when gather_path_meta returns None");
+        assert!(
+            err.to_string().contains("path metadata"),
+            "error should explain the abort reason, got: {err}"
+        );
         let _ = std::fs::remove_dir_all(&store_path);
     }
 }

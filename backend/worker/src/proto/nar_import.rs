@@ -503,12 +503,13 @@ impl<'a> InputPrefetcher<'a> {
                 .filter(|r| !queried.contains(r))
                 .collect();
 
-            // For every `.drv` we just fetched, parse it to discover its
-            // declared output paths. A .drv's `references` only enumerate
-            // its inputs (input drvs + sources) — never its own outputs —
-            // so without this step the closure walk misses the output
-            // store paths the dependent build will ultimately need (e.g.
-            // `closure-info` produced by `closure-info.drv`).
+            // For every `.drv` we just fetched, parse it and harvest the
+            // full set of closure-walk seeds — outputs (so downstream builds
+            // find them), input_derivations (transitive `.drv` prerequisites),
+            // and input_sources (plain files the daemon validates as
+            // references when accepting the `.drv` NAR). Relying on
+            // `cached_path.references` alone is unsafe: the eval worker
+            // silently stores `NULL` when its own metadata query fails.
             for (path, bytes, meta) in &batch {
                 if !path.ends_with(".drv") {
                     continue;
@@ -518,14 +519,16 @@ impl<'a> InputPrefetcher<'a> {
                     .as_deref()
                     .map(detect_compression)
                     .unwrap_or(Compression::Zstd);
-                for out_path in drv_outputs_from_compressed_nar(bytes, compression, path).await {
-                    if !queried.contains(&out_path) {
+                for seed in
+                    drv_closure_seeds_from_compressed_nar(bytes, compression, path).await
+                {
+                    if !queried.contains(&seed) {
                         tracing::trace!(
                             drv = %path,
-                            out = %out_path,
-                            "closure walk: discovered drv output"
+                            seed = %seed,
+                            "closure walk: discovered drv-content seed"
                         );
-                        refs.insert(out_path);
+                        refs.insert(seed);
                     }
                 }
             }
@@ -933,10 +936,39 @@ async fn extract_single_file_from_nar(nar_bytes: &[u8]) -> Result<Vec<u8>> {
     }
 }
 
-/// Decompress a `.drv`'s NAR, parse it, and return its declared output store
-/// paths. Returns an empty vec on any failure — the caller proceeds with what
-/// it has so a transient parse problem does not stall the closure walk.
-async fn drv_outputs_from_compressed_nar(
+/// Every nix-store path a `.drv` lets us reach when expanding the prefetch
+/// closure: declared outputs (so downstream builds find them), input
+/// derivations (the `.drv` files this one depends on), and input sources
+/// (plain files the daemon will validate when accepting the `.drv` NAR).
+///
+/// We re-derive these from the `.drv` content rather than relying solely on
+/// `cached_path.references` because the eval worker can silently store a
+/// `NULL` references column when its `gather_path_meta` query fails —
+/// without this fallback the daemon then rejects the `.drv` import with
+/// `path '…' is not valid` for a reference parsed straight out of the
+/// `.drv` text.
+fn drv_closure_seeds(drv: &gradient_core::db::Derivation) -> Vec<String> {
+    let mut out =
+        Vec::with_capacity(drv.outputs.len() + drv.input_derivations.len() + drv.input_sources.len());
+    for o in &drv.outputs {
+        if !o.path.is_empty() {
+            out.push(o.path.clone());
+        }
+    }
+    for (drv_path, _) in &drv.input_derivations {
+        out.push(drv_path.clone());
+    }
+    for src in &drv.input_sources {
+        out.push(src.clone());
+    }
+    out
+}
+
+/// Decompress a `.drv`'s NAR, parse it, and return the closure-walk seeds
+/// (see [`drv_closure_seeds`]). Returns an empty vec on any failure — the
+/// caller proceeds with what it has so a transient parse problem does not
+/// stall the closure walk.
+async fn drv_closure_seeds_from_compressed_nar(
     compressed: &[u8],
     compression: Compression,
     drv_path: &str,
@@ -944,7 +976,7 @@ async fn drv_outputs_from_compressed_nar(
     let nar = match decompress(compressed, compression) {
         Ok(b) => b,
         Err(e) => {
-            warn!(drv = %drv_path, error = %e, "decompress failed while harvesting drv outputs");
+            warn!(drv = %drv_path, error = %e, "decompress failed while harvesting drv closure seeds");
             return Vec::new();
         }
     };
@@ -962,10 +994,7 @@ async fn drv_outputs_from_compressed_nar(
             return Vec::new();
         }
     };
-    drv.outputs
-        .into_iter()
-        .filter_map(|o| (!o.path.is_empty()).then_some(o.path))
-        .collect()
+    drv_closure_seeds(&drv)
 }
 
 fn decompress_zstd(compressed: &[u8]) -> Result<Vec<u8>> {
@@ -1305,5 +1334,55 @@ mod tests {
             ca: None,
         };
         assert!(build_unkeyed_path_info(&meta.path, &meta, 0).is_err());
+    }
+
+    /// A `.drv`'s closure seeds must include its declared outputs *and* its
+    /// inputs (input_derivations + input_sources). The prefetch closure walk
+    /// relies on this so that when a server-supplied `cached_path.references`
+    /// row is `NULL` or stale, the daemon doesn't reject the eventual
+    /// `add_to_store_nar` with `path '…' is not valid` for a reference parsed
+    /// out of the `.drv` content.
+    #[test]
+    fn drv_closure_seeds_include_outputs_inputs_and_sources() {
+        use gradient_core::db::parse_drv;
+
+        let drv_bytes = br#"Derive([("out","/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-out","","")],[("/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-dep.drv",["out"])],["/nix/store/cccccccccccccccccccccccccccccccc-src.sh"],"x86_64-linux","/nix/store/dddddddddddddddddddddddddddddddd-bash",[],[])"#;
+        let drv = parse_drv(drv_bytes).unwrap();
+        let seeds = drv_closure_seeds(&drv);
+
+        assert!(
+            seeds.contains(&"/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-out".to_string()),
+            "output path missing from seeds: {seeds:?}"
+        );
+        assert!(
+            seeds.contains(&"/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-dep.drv".to_string()),
+            "input_derivation path missing from seeds: {seeds:?}"
+        );
+        assert!(
+            seeds.contains(&"/nix/store/cccccccccccccccccccccccccccccccc-src.sh".to_string()),
+            "input_source path missing from seeds: {seeds:?}"
+        );
+    }
+
+    /// Content-addressed and "deferred" outputs are stored with an empty path
+    /// in the `.drv`. The closure walk must skip them — feeding an empty
+    /// string into the cache query produces a confusing "invalid store path"
+    /// failure several stages downstream.
+    #[test]
+    fn drv_closure_seeds_skip_empty_output_paths() {
+        use gradient_core::db::parse_drv;
+
+        let drv_bytes = br#"Derive([("out","","r:sha256","deadbeef")],[],["/nix/store/cccccccccccccccccccccccccccccccc-src"],"x86_64-linux","/nix/store/dddddddddddddddddddddddddddddddd-bash",[],[])"#;
+        let drv = parse_drv(drv_bytes).unwrap();
+        let seeds = drv_closure_seeds(&drv);
+
+        assert!(
+            !seeds.iter().any(|s| s.is_empty()),
+            "empty output path leaked into seeds: {seeds:?}"
+        );
+        assert!(
+            seeds.contains(&"/nix/store/cccccccccccccccccccccccccccccccc-src".to_string()),
+            "input_source still present: {seeds:?}"
+        );
     }
 }
