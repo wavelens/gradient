@@ -36,6 +36,8 @@ pub struct MakeCacheRequest {
     pub description: String,
     pub priority: i32,
     pub public: Option<bool>,
+    #[serde(default)]
+    pub local_priority: Option<i32>,
 }
 
 #[derive(Serialize)]
@@ -46,6 +48,7 @@ pub struct CacheResponse {
     pub description: String,
     pub active: bool,
     pub priority: i32,
+    pub local_priority: Option<i32>,
     pub public_key: String,
     pub public: bool,
     pub created_by: UserId,
@@ -60,6 +63,7 @@ pub struct PatchCacheRequest {
     pub display_name: Option<String>,
     pub description: Option<String>,
     pub priority: Option<i32>,
+    pub local_priority: Option<i32>,
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
@@ -161,7 +165,7 @@ pub async fn put(
         display_name: Set(body.display_name.trim().to_string()),
         description: Set(body.description.trim().to_string()),
         priority: Set(body.priority),
-        local_priority: Set(None),
+        local_priority: Set(body.local_priority),
         public_key: Set(public_key),
         private_key: Set(private_key),
         public: Set(body.public.unwrap_or(false)),
@@ -238,6 +242,7 @@ pub async fn get_cache(
         description: cache.description,
         active: cache.active,
         priority: cache.priority,
+        local_priority: cache.local_priority,
         public_key,
         public: cache.public,
         created_by: cache.created_by,
@@ -288,6 +293,10 @@ pub async fn patch_cache(
 
     if let Some(priority) = body.priority {
         acache.priority = Set(priority);
+    }
+
+    if let Some(local_priority) = body.local_priority {
+        acache.local_priority = Set(Some(local_priority));
     }
 
     acache
