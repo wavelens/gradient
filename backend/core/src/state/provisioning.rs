@@ -500,6 +500,7 @@ impl<'a> StateApplicator<'a> {
                 cache_model.description = Set(state_cache.description.clone().unwrap_or_default());
                 cache_model.active = Set(state_cache.active);
                 cache_model.priority = Set(state_cache.priority);
+                cache_model.local_priority = Set(state_cache.local_priority);
                 cache_model.public_key = Set(public_key.clone());
                 cache_model.private_key = Set(encrypted_signing_key.clone());
                 cache_model.created_by = Set(created_by_id);
@@ -517,7 +518,7 @@ impl<'a> StateApplicator<'a> {
                     description: Set(state_cache.description.clone().unwrap_or_default()),
                     active: Set(state_cache.active),
                     priority: Set(state_cache.priority),
-                    local_priority: Set(None),
+                    local_priority: Set(state_cache.local_priority),
                     public_key: Set(public_key),
                     private_key: Set(encrypted_signing_key),
                     public: Set(state_cache.public),
