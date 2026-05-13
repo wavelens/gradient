@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+pub mod cache_reach;
 pub mod connection;
 pub mod dependency_graph;
 pub mod derivation;
@@ -11,6 +12,7 @@ pub mod drv_output_spec;
 pub mod gc;
 pub mod status;
 
+pub use self::cache_reach::*;
 pub use self::connection::*;
 pub use self::dependency_graph::*;
 pub use self::derivation::*;
