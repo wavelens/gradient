@@ -10,6 +10,7 @@ pub mod patch;
 pub mod access;
 pub mod audit;
 pub mod authorization;
+pub(crate) mod client_ip;
 pub mod endpoints;
 pub mod error;
 pub mod helpers;
