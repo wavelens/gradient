@@ -24,10 +24,9 @@
 - **Organizations** — multiple organizations, which work independently from each other (e.g. different workers, user access)
 - **API** — provides a RESTful API with API-Key management for authentication
 - **Streaming Logs** — real-time log streaming for builds
-- **Rich Project Configuration** — flake updates, check all branches, pull requests, and tags (planned)
+- **Rich Project Configuration** — flake updates, check all branches, pull requests, and tags
 - **OAuth2 / OIDC** — integrated single-sign-on support
 - **Binary Cache** — built-in Nix store cache with S3 storage backend support
-- **Remote Evals** — evaluating and building nix derviations without having nix installed locally
 - **Proto Workers** — build and evaluate Nix derivations on distributed `gradient-worker` instances over a persistent WebSocket protocol
 - **Deployment Module** — Pull-Deployment via gradient-deploy module
 - **Dependency Graph** — interactive visualization of Nix build dependency trees
