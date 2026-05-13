@@ -12,8 +12,9 @@ use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use axum::Extension;
 use axum::Json;
-use axum::extract::{Path, Query, State};
+use axum::extract::{ConnectInfo, Path, Query, State};
 use axum::http::HeaderMap;
+use std::net::SocketAddr;
 use chrono::NaiveDateTime;
 use entity::organization_cache::CacheSubscriptionMode;
 use gradient_core::db::get_any_cache_by_name;
@@ -299,6 +300,7 @@ pub async fn patch_cache(
 
 pub async fn delete_cache(
     state: State<Arc<ServerState>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Extension(user): Extension<MUser>,
     Path(cache): Path<String>,
@@ -319,7 +321,7 @@ pub async fn delete_cache(
     let acache: ACache = cache.into();
     acache.delete(&state.web_db).await?;
 
-    let info = RequestInfo::from_headers(&headers);
+    let info = RequestInfo::from_request(&headers, addr.ip(), &state.config.network.trusted_proxies);
     audit_record(
         &state.web_db,
         Some(user.id),

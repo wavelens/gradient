@@ -11,8 +11,6 @@
 //! otherwise the peer IP is returned verbatim so an internet client can't
 //! spoof its own apparent origin by sending the header.
 
-#![allow(dead_code)]
-
 use axum::http::HeaderMap;
 use ipnet::IpNet;
 use std::net::IpAddr;
