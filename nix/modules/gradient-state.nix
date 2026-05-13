@@ -447,6 +447,16 @@
         description = "Priority of the cache (higher is more important)";
       };
 
+      local_priority = mkOption {
+        type = types.nullOr types.int;
+        default = null;
+        description = ''
+          Alternate Priority advertised in nix-cache-info to clients whose
+          IP is in `services.gradient.settings.localIps`. Null (or 0)
+          disables the override.
+        '';
+      };
+
       signing_key_file = mkOption {
         type = types.str;
         description = "Path to file containing the Nix cache signing key";
