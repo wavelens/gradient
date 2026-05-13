@@ -1348,7 +1348,7 @@ Run with `cargo test -p core --tests state_machine::eval`.
 - `core::ci::abort` — `abort_evaluation` hard vs soft, terminal eval no-op.
 - `core::ci::apply` — `apply_trigger` orchestration: same-commit dedup, time-trigger and manual bypass, project-level concurrency policies (skip / hard_abort / soft_abort / all). The `all` policy creates a new evaluation alongside a running one; the new row carries `concurrent = true`.
 - `core::state::provisioning` — trigger config builder helpers, integration name resolution, key stability.
-- `scheduler::trigger_dispatch` — `polling_due` and `cron_due` boundary conditions; `dispatch_once` no-trigger and within-interval skip cases.
+- `scheduler::trigger_dispatch` — `polling_due` and `cron_due` boundary conditions; `dispatch_once` no-trigger and within-interval skip cases; polling jitter bounded to 10% of `interval_secs`, deterministic for a `(trigger_id, last_fired_at)` pair, varies across cycles, zero when `interval_secs < 10`, and gates firing exactly at the `interval + jitter` boundary.
 - `scheduler::jobs::JobTracker::remove_job` — pending and active map removal; unknown id no-op.
 - `scheduler::Scheduler::cancel_evaluation_jobs` — drops eval and per-build entries from the tracker.
 - `web::endpoints::projects::triggers` — list/create/read/update/delete; `all` concurrency accepted (200); invalid config rejected (400).
