@@ -684,4 +684,56 @@ mod find_active_leaders_tests {
             assert_eq!(got.get(&drv_b), Some(&building_new), "got: {:?}", got);
         });
     }
+
+    #[test]
+    fn same_org_preferred_over_cross_org() {
+        run(async {
+            let drv_b = did(2);
+            let same_org_build = bid(30);
+
+            let db = MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([vec![build(
+                    same_org_build,
+                    drv_b,
+                    BuildStatus::Queued,
+                    false,
+                    0,
+                )]])
+                .into_connection();
+
+            let got = find_active_leaders(&db, org(2), &[drv_b]).await.unwrap();
+            assert_eq!(got.get(&drv_b), Some(&same_org_build));
+        });
+    }
+
+    #[test]
+    fn cross_org_external_cached_candidate_skipped() {
+        run(async {
+            let drv_b = did(2);
+            let drv_a = did(1);
+
+            let db = MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([Vec::<MBuild>::new()])
+                .append_query_results([vec![drv_row(drv_b, org(2), "/nix/store/x.drv")]])
+                .append_query_results([vec![MOrganizationCache {
+                    id: OrganizationCacheId::now_v7(),
+                    organization: org(2),
+                    cache: cid(1),
+                    mode: CacheSubscriptionMode::ReadOnly,
+                }]])
+                .append_query_results([Vec::<MCacheUpstream>::new()])
+                .append_query_results([vec![MOrganizationCache {
+                    id: OrganizationCacheId::now_v7(),
+                    organization: org(1),
+                    cache: cid(1),
+                    mode: CacheSubscriptionMode::ReadWrite,
+                }]])
+                .append_query_results([vec![drv_row(drv_a, org(1), "/nix/store/x.drv")]])
+                .append_query_results([Vec::<MBuild>::new()])
+                .into_connection();
+
+            let got = find_active_leaders(&db, org(2), &[drv_b]).await.unwrap();
+            assert!(got.get(&drv_b).is_none(), "external_cached must be skipped");
+        });
+    }
 }
