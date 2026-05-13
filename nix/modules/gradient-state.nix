@@ -192,10 +192,27 @@
         description = "Whether the project is active";
       };
 
-      force_evaluation = mkOption {
+      keep_evaluations = mkOption {
+        type = types.ints.positive;
+        default = 30;
+        description = ''
+          Number of completed evaluations to retain per project for metrics
+          and history. Older evaluations beyond this count are garbage-
+          collected. Must be at least 1; capped at runtime by the global
+          `services.gradient.settings.keepEvaluations`.
+        '';
+      };
+
+      sign_cache = mkOption {
         type = types.bool;
-        default = false;
-        description = "Whether to force evaluation on next check";
+        default = true;
+        description = ''
+          When `false`, build outputs from this project are pushed to the
+          cache but their narinfo signatures are left empty, so external
+          Nix clients won't trust them — keeping the project's outputs
+          private even when the cache itself is public. A path co-produced
+          by another `sign_cache = true` project is still signed.
+        '';
       };
 
       outbound_integration = mkOption {

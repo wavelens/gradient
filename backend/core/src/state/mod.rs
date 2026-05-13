@@ -59,13 +59,11 @@ pub struct StateProject {
     pub wildcard: String,
     #[serde(default = "default_true")]
     pub active: bool,
-    #[serde(default)]
-    pub force_evaluation: bool,
     pub created_by: String,
-    /// How many evaluations to retain per project. `None` keeps the current DB value (or the
-    /// default of 30 for new projects). Must not exceed `GRADIENT_KEEP_EVALUATIONS` if set.
-    #[serde(default)]
-    pub keep_evaluations: Option<i32>,
+    /// How many evaluations to retain per project. Must be at least 1; the
+    /// runtime `GRADIENT_KEEP_EVALUATIONS` cap further reduces it if exceeded.
+    #[serde(default = "default_keep_evaluations")]
+    pub keep_evaluations: i32,
     /// Name of an outbound integration in the same org. `None` unlinks.
     #[serde(default)]
     pub outbound_integration: Option<String>,
@@ -259,6 +257,10 @@ fn default_priority() -> i32 {
     10
 }
 
+fn default_keep_evaluations() -> i32 {
+    30
+}
+
 impl StateConfiguration {
     pub fn from_file(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let content = fs::read_to_string(path)?;
@@ -306,6 +308,13 @@ impl StateConfiguration {
                 errors.push(ValidationError {
                     field: format!("projects.{}.repository", project.name),
                     message: "Repository URL must start with http or git".to_string(),
+                });
+            }
+
+            if project.keep_evaluations < 1 {
+                errors.push(ValidationError {
+                    field: format!("projects.{}.keep_evaluations", project.name),
+                    message: "keep_evaluations must be at least 1".to_string(),
                 });
             }
 
@@ -671,6 +680,87 @@ mod tests {
         }"#;
         let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
         assert_eq!(cfg.projects["web"].wildcard, "checks.*");
+    }
+
+    #[test]
+    fn state_project_keep_evaluations_defaults_to_thirty() {
+        let json = r#"{
+            "projects": {
+                "web": {
+                    "name": "web",
+                    "organization": "acme",
+                    "display_name": "Web",
+                    "repository": "https://example.com/acme/web.git",
+                    "created_by": "alice"
+                }
+            }
+        }"#;
+        let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
+        assert_eq!(cfg.projects["web"].keep_evaluations, 30);
+    }
+
+    #[test]
+    fn state_project_keep_evaluations_zero_rejected_by_validator() {
+        let json = r#"{
+            "users": {
+                "alice": {
+                    "username": "alice",
+                    "name": "Alice",
+                    "email": "alice@example.com",
+                    "password_file": "/dev/null"
+                }
+            },
+            "organizations": {
+                "acme": {
+                    "name": "acme",
+                    "display_name": "ACME",
+                    "private_key_file": "/dev/null",
+                    "public": false,
+                    "created_by": "alice"
+                }
+            },
+            "projects": {
+                "web": {
+                    "name": "web",
+                    "organization": "acme",
+                    "display_name": "Web",
+                    "repository": "https://example.com/acme/web.git",
+                    "created_by": "alice",
+                    "keep_evaluations": 0
+                }
+            }
+        }"#;
+        let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
+        let v = cfg.validate();
+        assert!(!v.is_valid);
+        assert!(
+            v.errors
+                .iter()
+                .any(|e| e.field == "projects.web.keep_evaluations"
+                    && e.message.contains("at least 1")),
+            "expected keep_evaluations >= 1 validation error, got: {:?}",
+            v.errors
+        );
+    }
+
+    #[test]
+    fn state_project_silently_ignores_legacy_force_evaluation_field() {
+        // Old state files may still set `force_evaluation` — serde drops
+        // unknown fields by default, so parsing must keep working.
+        let json = r#"{
+            "projects": {
+                "web": {
+                    "name": "web",
+                    "organization": "acme",
+                    "display_name": "Web",
+                    "repository": "https://example.com/acme/web.git",
+                    "created_by": "alice",
+                    "force_evaluation": true
+                }
+            }
+        }"#;
+        let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
+        assert_eq!(cfg.projects["web"].name, "web");
     }
 
     #[test]

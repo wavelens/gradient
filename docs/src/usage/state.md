@@ -151,7 +151,7 @@ services.gradient.state.projects = {
 | `repository` | — | Git URL (required) |
 | `wildcard` | `packages.x86_64-linux.*` | Attr-path pattern picked up by the evaluator. The legacy name `evaluation_wildcard` is still accepted as an alias |
 | `active` | `true` | Disable to pause polling/evaluations without deleting |
-| `force_evaluation` | `false` | Re-evaluate on next poll regardless of the last commit hash |
+| `keep_evaluations` | `30` | Number of completed evaluations to retain per project. Must be at least 1. Capped at runtime by the global `services.gradient.settings.keepEvaluations` |
 | `concurrency` | `"skip"` | Policy for handling new trigger events while an evaluation is in flight (`hard_abort`, `soft_abort`, `skip`, `all`). Applies to all triggers on the project |
 | `sign_cache` | `true` | When `false`, build outputs from this project are pushed to the cache but their narinfo signatures are left empty. External Nix clients won't trust them, keeping the project's outputs private even when the cache itself is public. A path co-produced by another `sign_cache=true` project is still signed |
 | `outbound_integration` | `null` | Name of an `outbound` integration that receives CI status reports |

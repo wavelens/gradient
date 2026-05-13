@@ -403,6 +403,19 @@ Backend (`cargo test -p core --lib state::tests`):
   state files using `evaluation_wildcard` continue to parse via the
   serde alias, so existing `gradient-state.nix` configurations don't
   break on upgrade.
+- `state_project_keep_evaluations_defaults_to_thirty` — when a project
+  omits `keep_evaluations`, the parsed value defaults to 30 so newly
+  provisioned state-managed projects match the API-created default and
+  the GC pass keeps a meaningful history window.
+- `state_project_keep_evaluations_zero_rejected_by_validator` — the
+  configuration validator rejects `keep_evaluations < 1`, matching the
+  `types.ints.positive` constraint in `nix/modules/gradient-state.nix`
+  and the API-level `apply_keep_evaluations` check.
+- `state_project_silently_ignores_legacy_force_evaluation_field` —
+  state files written before the rename may still carry
+  `force_evaluation`; serde's default unknown-field handling drops it
+  silently so existing deployments parse cleanly after the field's
+  removal from the schema.
 
 These pin the wire contract between `nix/modules/gradient-state.nix`
 (`types.nullOr types.str` on `password_file` and the three `description`

@@ -110,7 +110,6 @@
                   repository = "https://github.com/corp/web-app.git";
                   wildcard = "package.x86_64-linux.*";
                   active = true;
-                  force_evaluation = false;
                   created_by = "alice";
                 };
                 mobile-app = {
@@ -120,7 +119,6 @@
                   repository = "https://github.com/corp/mobile-app.git";
                   wildcard = "main";
                   active = true;
-                  force_evaluation = false;
                   created_by = "bob";
                 };
               };
