@@ -40,6 +40,7 @@ fn cache_row(name: &str) -> cache::Model {
         display_name: format!("{} display", name),
         description: String::new(),
         priority: 30,
+        local_priority: None,
         public_key: String::new(),
         private_key: String::new(),
         public: false,

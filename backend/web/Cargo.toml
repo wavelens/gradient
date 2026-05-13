@@ -52,6 +52,7 @@ email_address        = { version = "0.2", default-features = false }
 governor             = { version = "0.10", default-features = false, features = ["std"] }
 http                 = { version = "1.4", default-features = false }
 http-body-util       = { version = "0.1", default-features = false }
+ipnet                = { workspace = true }
 jsonwebtoken         = { version = "10.3", default-features = false, features = ["aws_lc_rs"] }
 tower                = { version = "0.5", default-features = false }
 tower-http           = { version = "0.6", default-features = false, features = ["cors", "request-id", "trace"] }
