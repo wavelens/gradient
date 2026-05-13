@@ -2111,3 +2111,21 @@ Three cases:
 - `returns_empty_points_when_no_entry_point_matches` — when no
   `entry_point` row matches `project` + `eval`, the response is the empty
   array (the frontend's empty state is then legitimate).
+
+### Cross-cache leader/follower deduplication
+
+- `core/src/db/cache_reach.rs` unit tests cover direct overlap, transitive
+  internal chains, external-upstream skip, write-only reader exclusion, and
+  cycle tolerance for `writer_orgs_reachable_from`.
+- `core/src/db/status.rs::find_active_leaders_tests` covers the cross-org
+  match case, the most-advanced/oldest tie-break, the same-org-preferred
+  short-circuit, and the cross-org `external_cached` skip.
+- `core/src/db/status.rs::reelect_leader_tests` covers same-org promotion
+  with cross-org orphaning, and the no-same-org-everyone-orphaned case.
+- `scheduler/src/build.rs::cross_org_mirror_tests` covers the pure
+  `build_cross_org_artefact_rows` helper: FK rewrite on mirrored products
+  and orphan-product dropping.
+- `web/tests/cross_org_follower_log_visible.rs` covers cross-org log access
+  via `BuildAccessContext::load`'s follower-org fallback.
+- `web/tests/evaluation_builds_via_cross_org.rs` covers the
+  `GET /evals/{eval}/builds` leader-row swap across organisations.
