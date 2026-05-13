@@ -328,6 +328,26 @@ in {
           default = 1024 * 1024 * 1024;
         };
 
+        trustedProxies = lib.mkOption {
+          description = ''
+            CIDR allowlist of peers permitted to set `X-Forwarded-For`.
+            Defaults to loopback so a reverse-proxy on the same host is
+            trusted out of the box.
+          '';
+          type = lib.types.listOf lib.types.str;
+          default = [ "127.0.0.1/32" "::1/128" ];
+        };
+
+        localIps = lib.mkOption {
+          description = ''
+            CIDR allowlist whose resolved client IPs receive a cache's
+            `local_priority` (when set and non-zero). Defaults to the
+            RFC1918 10/8 block.
+          '';
+          type = lib.types.listOf lib.types.str;
+          default = [ "10.0.0.0/8" ];
+        };
+
         logLevel = lib.mkOption {
           default = { };
           description = ''
@@ -520,6 +540,8 @@ in {
         GRADIENT_NAR_SEND_CHUNK_TIMEOUT_SECS = toString cfg.settings.narSendChunkTimeoutSecs;
         GRADIENT_MAX_CONCURRENT_NAR_SERVES = toString cfg.settings.maxConcurrentNarServes;
         GRADIENT_MAX_NAR_BUFFER_BYTES = toString cfg.settings.maxNarBufferBytes;
+        GRADIENT_LOCAL_IPS = builtins.concatStringsSep "," cfg.settings.localIps;
+        GRADIENT_TRUSTED_PROXIES = builtins.concatStringsSep "," cfg.settings.trustedProxies;
         GRADIENT_STATE_FILE = "%d/gradient_state";
         GRADIENT_CREDENTIALS_DIR = "%d";
         RUST_LOG = cfg.settings.logLevel.default;
