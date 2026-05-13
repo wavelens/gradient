@@ -102,7 +102,7 @@ pub fn make_test_server_with(
         Some(path) => test_cli_with_crypt(path),
         None => test_cli(),
     };
-    let config = Arc::new(RuntimeConfig::from_cli(&cli));
+    let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
     let nar_storage = NarStore::local(&config.storage.base_path).expect("nar store");
     let state = Arc::new(ServerState {
         web_db: WebDb::new(db),

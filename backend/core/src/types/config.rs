@@ -17,6 +17,7 @@ use super::cli::{
     DatabaseArgs, EvalArgs, LimitsArgs, LoggingArgs, ProtoArgs, RegistrationArgs, SecretsArgs,
     ServerArgs, StorageArgs,
 };
+use ipnet::IpNet;
 
 /// OIDC configuration — only present when `oidc_enabled` is true and all
 /// required fields are configured.
@@ -70,6 +71,14 @@ pub struct GitHubAppConfig {
 pub struct MetricsConfig {
     /// Bearer token, loaded from `metrics_token_file` at startup.
     pub token: String,
+}
+
+/// Parsed network allowlists derived from `NetworkArgs`. Both lists are
+/// validated once at startup; malformed CIDR entries abort the process.
+#[derive(Debug, Clone, Default)]
+pub struct NetworkConfig {
+    pub trusted_proxies: Vec<IpNet>,
+    pub local_ips: Vec<IpNet>,
 }
 
 /// S3 / object-storage configuration — only present when `s3_bucket` is set.
@@ -138,6 +147,17 @@ impl Cli {
         })
     }
 
+    /// Returns the resolved network config, or an error string naming the
+    /// offending entry if either CIDR list fails to parse.
+    pub fn network_config(&self) -> Result<NetworkConfig, String> {
+        Ok(NetworkConfig {
+            trusted_proxies: super::cli::parse_cidr_list(&self.network.trusted_proxies)
+                .map_err(|e| format!("GRADIENT_TRUSTED_PROXIES: {e}"))?,
+            local_ips: super::cli::parse_cidr_list(&self.network.local_ips)
+                .map_err(|e| format!("GRADIENT_LOCAL_IPS: {e}"))?,
+        })
+    }
+
     /// Returns the typed metrics config when a token file path is configured
     /// and the file contains a non-empty token after trimming.
     pub fn metrics_config(&self) -> Option<MetricsConfig> {
@@ -176,13 +196,14 @@ pub struct RuntimeConfig {
     pub s3: Option<S3Config>,
     pub github_app: Option<GitHubAppConfig>,
     pub metrics: Option<MetricsConfig>,
+    pub network: NetworkConfig,
 }
 
 impl RuntimeConfig {
     /// Resolve a parsed [`Cli`] into a runtime configuration. Optional
     /// features collapse to `None` exactly when their accessor methods do.
-    pub fn from_cli(cli: &Cli) -> Self {
-        Self {
+    pub fn from_cli(cli: &Cli) -> Result<Self, String> {
+        Ok(Self {
             logging: cli.logging.clone(),
             server: cli.server.clone(),
             database: cli.database.clone(),
@@ -197,7 +218,8 @@ impl RuntimeConfig {
             s3: cli.s3_config(),
             github_app: cli.github_app_config(),
             metrics: cli.metrics_config(),
-        }
+            network: cli.network_config()?,
+        })
     }
 }
 
@@ -354,7 +376,7 @@ mod tests {
 
     #[test]
     fn runtime_config_from_default_cli_has_no_optional_features() {
-        let runtime = RuntimeConfig::from_cli(&base_cli());
+        let runtime = RuntimeConfig::from_cli(&base_cli()).expect("valid");
         assert!(runtime.oidc.is_none());
         assert!(runtime.email.is_none());
         assert!(runtime.s3.is_none());
@@ -381,13 +403,38 @@ mod tests {
         cli.github_app.github_app_private_key_file = Some("/k".into());
         cli.github_app.github_app_webhook_secret_file = Some("/w".into());
 
-        let runtime = RuntimeConfig::from_cli(&cli);
+        let runtime = RuntimeConfig::from_cli(&cli).expect("valid");
         let oidc = runtime.oidc.expect("oidc populated");
         assert!(oidc.required);
         let email = runtime.email.expect("email populated");
         assert!(email.require_verification);
         assert!(runtime.s3.is_some());
         assert!(runtime.github_app.is_some());
+    }
+
+    #[test]
+    fn network_config_defaults_parse() {
+        let cli = base_cli();
+        let cfg = cli.network_config().expect("default CIDR lists parse");
+        assert_eq!(cfg.trusted_proxies.len(), 2); // 127.0.0.1/32 + ::1/128
+        assert_eq!(cfg.local_ips.len(), 1);       // 10.0.0.0/8
+    }
+
+    #[test]
+    fn network_config_invalid_trusted_proxies_returns_err() {
+        let mut cli = base_cli();
+        cli.network.trusted_proxies = "not-a-cidr".into();
+        let err = cli.network_config().unwrap_err();
+        assert!(err.contains("GRADIENT_TRUSTED_PROXIES"));
+    }
+
+    #[test]
+    fn network_config_invalid_local_ips_returns_err() {
+        let mut cli = base_cli();
+        cli.network.local_ips = "10.0.0.0/8, banana".into();
+        let err = cli.network_config().unwrap_err();
+        assert!(err.contains("GRADIENT_LOCAL_IPS"));
+        assert!(err.contains("banana"));
     }
 
     #[test]
@@ -431,7 +478,7 @@ mod tests {
 
         let mut cli = base_cli();
         cli.metrics.metrics_token_file = Some(path);
-        let runtime = RuntimeConfig::from_cli(&cli);
+        let runtime = RuntimeConfig::from_cli(&cli).expect("valid");
         assert!(runtime.metrics.is_some());
     }
 }

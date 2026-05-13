@@ -47,7 +47,7 @@ fn server_with_broken_oidc() -> TestServer {
         oidc_discovery_url: Some("http://127.0.0.1:1/oidc".into()),
     };
 
-    let config = Arc::new(RuntimeConfig::from_cli(&cli));
+    let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
     let nar_storage = NarStore::local(&config.storage.base_path).expect("create test NarStore");
     let state = Arc::new(ServerState {
         web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),

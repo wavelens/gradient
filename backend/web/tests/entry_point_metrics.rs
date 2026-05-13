@@ -155,7 +155,7 @@ fn make_state(db: sea_orm::DatabaseConnection) -> Arc<ServerState> {
     Arc::new(ServerState {
         web_db: WebDb::new(db),
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
-        config: Arc::new(gradient_core::types::RuntimeConfig::from_cli(&cli)),
+        config: Arc::new(gradient_core::types::RuntimeConfig::from_cli(&cli).expect("valid test config")),
         log_storage: Arc::new(NoopLogStorage),
         webhooks: Arc::new(RecordingWebhookClient::new()) as Arc<dyn WebhookClient>,
         email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,

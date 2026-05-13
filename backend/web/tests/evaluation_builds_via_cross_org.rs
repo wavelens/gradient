@@ -193,7 +193,7 @@ fn follower_org_membership() -> entity::organization_user::Model {
 
 fn make_server(db: sea_orm::DatabaseConnection) -> TestServer {
     let cli = test_support::cli::test_cli();
-    let config = Arc::new(RuntimeConfig::from_cli(&cli));
+    let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
     let nar_storage = NarStore::local(&config.storage.base_path).expect("nar store");
     let state = Arc::new(ServerState {
         web_db: WebDb::new(db),
