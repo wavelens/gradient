@@ -6,12 +6,13 @@
 
 use super::helpers::{CacheContext, get_nar_by_hash};
 use crate::error::{WebError, WebResult};
-use axum::extract::{Path, State};
+use axum::extract::{ConnectInfo, Path, State};
 use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::Response;
 use gradient_core::sources::{get_hash_from_url, verify_narinfo_signature};
 use gradient_core::types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use tracing::warn;
 
@@ -28,15 +29,22 @@ fn text_response(content_type: &'static str, body: String) -> WebResult<Response
 
 pub async fn nix_cache_info(
     state: State<Arc<ServerState>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Path(cache): Path<String>,
 ) -> WebResult<Response<String>> {
     let ctx = CacheContext::load(&state, &headers, cache).await?;
 
+    let client_ip = crate::client_ip::resolve_client_ip(&headers, addr.ip(), &state.config.network.trusted_proxies);
+    let priority = match ctx.cache.local_priority {
+        Some(p) if p != 0 && in_any(client_ip, &state.config.network.local_ips) => p,
+        _ => ctx.cache.priority,
+    };
+
     let res = NixCacheInfo {
         want_mass_query: true,
         store_dir: "/nix/store".to_string(),
-        priority: ctx.cache.priority,
+        priority,
     };
 
     text_response("text/x-nix-cache-info", res.to_nix_string())
