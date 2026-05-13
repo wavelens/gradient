@@ -2369,6 +2369,14 @@ paths:
         (Building → Queued → Failed → Aborted/DependencyFailed → Completed/Substituted),
         then by display name. Supports optional `limit` and `offset` query parameters
         for pagination.
+
+        Follower builds — those with a non-null `via` pointing at a leader build
+        in another evaluation that's doing the actual work — are returned as the
+        **leader's row**, not the follower's stand-in. The frontend should treat
+        each item's `id` as the canonical build id (used for log, downloads, and
+        dependency graph endpoints); for follower placements that id will resolve
+        to the leader's evaluation. The leader is always in the same organization
+        as the evaluation being queried.
       operationId: listEvaluationBuilds
       parameters:
         - name: limit

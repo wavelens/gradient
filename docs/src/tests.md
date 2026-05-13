@@ -475,6 +475,25 @@ covered by the compile-checked MockDatabase fixtures in
 `cargo test --workspace --tests` — any `entity::build::Model` literal
 that forgot the new field would fail to compile.
 
+## Evaluation builds list — follower → leader substitution
+
+`GET /evals/{evaluation}/builds` is the build list rendered alongside logs on
+the evaluation page. A follower build (`build.via` set) is a placeholder waiting
+on a leader build in another evaluation that's doing the actual work — until
+`propagate_to_followers` runs, the follower's `status`, `updated_at`,
+`build_time_ms` and `log_id` are stale stand-ins. The handler resolves
+followers to their leader row so the client sees the live build it can act on
+(log endpoint, downloads, dependency graph all key off `id`).
+
+Tests (`backend/web/tests/evaluation_builds_via.rs`):
+- `follower_build_is_replaced_with_leader_row` — a follower with
+  `via=Some(leader_id)` produces a list item carrying the leader's `id`,
+  `status`, and `updated_at`; the shared derivation path keeps `name`
+  unchanged.
+- `plain_build_returns_own_row_without_extra_query` — a build with `via=None`
+  short-circuits the leader-resolution query (no extra `SELECT builds`) and
+  returns its own row.
+
 ## EvalMessage — worker-surfaced evaluation messages
 
 Backend (`cargo test -p scheduler --tests scheduler_tests::record_eval_message`):

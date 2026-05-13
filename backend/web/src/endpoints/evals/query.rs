@@ -151,10 +151,37 @@ pub async fn get_evaluation_builds(
     let ctx = EvalAccessContext::load(&state, evaluation_id, &maybe_user, api_key.as_ref()).await?;
     let evaluation = ctx.evaluation;
 
-    let builds = EBuild::find()
+    let raw_builds = EBuild::find()
         .filter(CBuild::Evaluation.eq(evaluation.id))
         .all(&state.web_db)
         .await?;
+
+    // Followers (`via IS NOT NULL`) are stand-ins for a leader build in another
+    // evaluation that's doing the actual work. The follower's own `status`,
+    // `updated_at`, `build_time_ms` and even `id` are uninteresting until the
+    // leader finishes — surface the leader's row in this list instead so the
+    // frontend renders the live build and log endpoints resolve to the right
+    // build id. Same-org invariant (see `entity::build::Model::via`) means no
+    // cross-org leak.
+    let leader_ids: Vec<BuildId> = raw_builds.iter().filter_map(|b| b.via).collect();
+    let leaders: HashMap<BuildId, MBuild> = if leader_ids.is_empty() {
+        HashMap::new()
+    } else {
+        EBuild::find()
+            .filter(CBuild::Id.is_in(leader_ids))
+            .all(&state.web_db)
+            .await?
+            .into_iter()
+            .map(|b| (b.id, b))
+            .collect()
+    };
+    let builds: Vec<MBuild> = raw_builds
+        .into_iter()
+        .map(|b| match b.via.and_then(|id| leaders.get(&id)) {
+            Some(leader) => leader.clone(),
+            None => b,
+        })
+        .collect();
 
     let drv_ids: Vec<DerivationId> = builds.iter().map(|b| b.derivation).collect();
 
