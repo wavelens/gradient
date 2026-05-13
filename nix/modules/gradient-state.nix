@@ -194,7 +194,7 @@
 
       keep_evaluations = mkOption {
         type = types.ints.positive;
-        default = 30;
+        default = 1;
         description = ''
           Number of completed evaluations to retain per project for metrics
           and history. Older evaluations beyond this count are garbage-
