@@ -8,7 +8,11 @@
 //! you can write `assert_eq!(body["name"], "test-org")` instead of chasing
 //! a random `Uuid`.
 
-use entity::ids::{CommitId, EvaluationId, OrganizationId, ProjectId, UserId};
+use entity::ids::{
+    CacheId, CacheUpstreamId, CommitId, EvaluationId, OrganizationCacheId, OrganizationId,
+    ProjectId, UserId,
+};
+use entity::organization_cache::CacheSubscriptionMode;
 use entity::*;
 use uuid::Uuid;
 
@@ -64,6 +68,81 @@ pub fn user() -> user::Model {
         superuser: false,
         oidc_issuer: None,
         oidc_subject: None,
+    }
+}
+
+pub fn org_with_id(id: OrganizationId, slug: &str) -> organization::Model {
+    organization::Model {
+        id,
+        name: slug.into(),
+        display_name: slug.into(),
+        description: String::new(),
+        public_key: "ssh-ed25519 AAAA test".into(),
+        private_key: "encrypted".into(),
+        public: false,
+        created_by: user_id(),
+        created_at: test_date(),
+        managed: false,
+        github_installation_id: None,
+    }
+}
+
+pub fn cache_with_id(id: CacheId, slug: &str, owner: UserId) -> cache::Model {
+    cache::Model {
+        id,
+        name: slug.into(),
+        display_name: slug.into(),
+        description: String::new(),
+        active: true,
+        priority: 30,
+        public_key: "ssh-ed25519 AAAA test".into(),
+        private_key: "encrypted".into(),
+        public: false,
+        created_by: owner,
+        created_at: test_date(),
+        managed: false,
+    }
+}
+
+pub fn org_cache_link(
+    id: OrganizationCacheId,
+    org: OrganizationId,
+    cache: CacheId,
+    mode: CacheSubscriptionMode,
+) -> organization_cache::Model {
+    organization_cache::Model { id, organization: org, cache, mode }
+}
+
+pub fn internal_upstream(
+    id: CacheUpstreamId,
+    cache: CacheId,
+    upstream: CacheId,
+) -> cache_upstream::Model {
+    cache_upstream::Model {
+        id,
+        cache,
+        display_name: "internal".into(),
+        mode: CacheSubscriptionMode::ReadOnly,
+        upstream_cache: Some(upstream),
+        url: None,
+        public_key: None,
+    }
+}
+
+pub fn external_upstream(
+    id: CacheUpstreamId,
+    cache: CacheId,
+    url: &str,
+    public_key: &str,
+) -> cache_upstream::Model {
+    cache_upstream::Model {
+        id,
+        cache,
+        display_name: "external".into(),
+        mode: CacheSubscriptionMode::ReadOnly,
+        upstream_cache: None,
+        url: Some(url.into()),
+        public_key: Some(public_key.into()),
     }
 }
 
