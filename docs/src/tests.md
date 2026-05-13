@@ -2087,3 +2087,27 @@ The two reported bugs that motivated this work are covered directly:
 
 Run command: `pnpm -C frontend test --watch=false --include='**/access*'`
 (primitives) or the full suite with `pnpm -C frontend test --watch=false`.
+
+## Entry-point metrics — surface in-progress evaluations (`web/tests/entry_point_metrics.rs`)
+
+Integration tests for `GET /projects/{org}/{project}/entry-point-metrics`
+guarding against the regression where the metrics page renders the empty
+state ("No completed evaluations found for this entry point.") even though
+the entry-point's build is in a terminal state. The endpoint must filter
+only by `project` and `eval`, never by `evaluation.status`, because the
+chart's data point is the build's wall-clock — completed builds are
+meaningful even while the owning evaluation is still mid-flight.
+
+Three cases:
+
+- `returns_point_when_eval_is_in_progress_but_build_is_completed` — the
+  evaluation is `Building` but the entry-point's build is `Completed`. The
+  response carries one point with the build's `build_time_ms` and a
+  `build_status` of `Completed`.
+- `returns_point_when_eval_is_in_progress_but_build_is_substituted` —
+  same shape with a substituted build (`build_time_ms = null`). Locks in
+  the fix from #119 so a future regression that filters Substituted out
+  again is caught.
+- `returns_empty_points_when_no_entry_point_matches` — when no
+  `entry_point` row matches `project` + `eval`, the response is the empty
+  array (the frontend's empty state is then legitimate).
