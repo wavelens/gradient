@@ -10,9 +10,13 @@ incremental = true
 # blew past 16 GiB on common dev hardware, so this is pinned to 1.
 jobs = 1
 
-[target.x86_64-unknown-linux-gnu]
-# Optimize for current CPU when running tests locally
-rustflags = ["-C", "target-cpu=native"]
+# Note: do NOT set `target-cpu=native` here. This file is read by every cargo
+# invocation, including release builds packaged via Nix. A binary compiled with
+# native targeting on a host that has AES-NI / AVX2 / PCLMULQDQ will SIGILL on
+# a deploy host that lacks them, crashing inside `aes_gcm_siv` (e.g. server
+# startup state encryption). Developers who want native optimisation for local
+# benchmarking should set it in their personal `~/.cargo/config.toml` or via
+# `CARGO_BUILD_RUSTFLAGS="-C target-cpu=native"` in their shell.
 
 [alias]
 # Custom aliases for common tasks
