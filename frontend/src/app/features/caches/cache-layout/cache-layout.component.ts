@@ -6,17 +6,13 @@
 
 import { ChangeDetectionStrategy, Component } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
-import { AccessBannerComponent } from '@shared/access';
-import { injectCacheAccess } from '@core/resolvers/inject-access';
 
 @Component({
   selector: 'app-cache-layout',
   standalone: true,
-  imports: [RouterOutlet, AccessBannerComponent],
+  imports: [RouterOutlet],
   templateUrl: './cache-layout.component.html',
   styleUrl: './cache-layout.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class CacheLayoutComponent {
-  access = injectCacheAccess();
-}
+export class CacheLayoutComponent {}

@@ -24,7 +24,7 @@ import {
   Organization,
 } from '@core/models';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
-import { AccessBannerComponent, WritableDirective, ManagedDisableDirective } from '@shared/access';
+import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 
 interface Option<T> {
   label: string;
@@ -43,7 +43,6 @@ interface Option<T> {
     InputTextModule,
     SelectModule,
     LoadingSpinnerComponent,
-    AccessBannerComponent,
     WritableDirective,
     ManagedDisableDirective,
   ],

@@ -16,7 +16,7 @@ import { TextareaModule } from 'primeng/textarea';
 import { OrganizationsService } from '@core/services/organizations.service';
 import { OrgAccessService } from '@core/services/org-access.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
-import { AccessBannerComponent, WritableDirective, ManagedDisableDirective } from '@shared/access';
+import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { Organization, AccessState } from '@core/models';
 
 @Component({
@@ -32,7 +32,6 @@ import { Organization, AccessState } from '@core/models';
     InputTextModule,
     TextareaModule,
     LoadingSpinnerComponent,
-    AccessBannerComponent,
     WritableDirective,
     ManagedDisableDirective,
   ],

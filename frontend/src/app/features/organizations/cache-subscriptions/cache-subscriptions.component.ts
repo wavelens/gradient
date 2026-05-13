@@ -17,7 +17,7 @@ import { OrganizationsService } from '@core/services/organizations.service';
 import { CachesService } from '@core/services/caches.service';
 import { OrgAccessService } from '@core/services/org-access.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
-import { AccessBannerComponent, WritableDirective, ManagedDisableDirective } from '@shared/access';
+import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { AccessState } from '@core/models';
 
 @Component({
@@ -33,7 +33,6 @@ import { AccessState } from '@core/models';
     AutoCompleteModule,
     TooltipModule,
     LoadingSpinnerComponent,
-    AccessBannerComponent,
     WritableDirective,
     ManagedDisableDirective,
   ],

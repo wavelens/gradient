@@ -16,7 +16,7 @@ import { OrganizationsService } from '@core/services/organizations.service';
 import { OrgAccessService } from '@core/services/org-access.service';
 import { GradientCapabilities, Worker, WorkerRegistration, AccessState } from '@core/models';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
-import { AccessBannerComponent, WritableDirective, ManagedDisableDirective } from '@shared/access';
+import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 
 @Component({
   selector: 'app-workers',
@@ -29,7 +29,6 @@ import { AccessBannerComponent, WritableDirective, ManagedDisableDirective } fro
     ButtonModule,
     InputTextModule,
     LoadingSpinnerComponent,
-    AccessBannerComponent,
     WritableDirective,
     ManagedDisableDirective,
   ],

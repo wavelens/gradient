@@ -49,26 +49,6 @@ describe('AccessService', () => {
     });
   });
 
-  describe('bannerKind', () => {
-    it('returns the correct kind for each combination', () => {
-      expect(svc.bannerKind(s(false, true))).toBe('none');
-      expect(svc.bannerKind(s(true, true))).toBe('managed');
-      expect(svc.bannerKind(s(false, false))).toBe('readonly');
-      expect(svc.bannerKind(s(true, false))).toBe('managed-readonly');
-    });
-  });
-
-  describe('bannerMessage', () => {
-    it('returns null for kind=none', () => {
-      expect(svc.bannerMessage(s(false, true))).toBeNull();
-    });
-    it('returns a non-empty message for each non-none kind', () => {
-      expect(svc.bannerMessage(s(true, true))).toMatch(/managed/i);
-      expect(svc.bannerMessage(s(false, false))).toMatch(/read-only/i);
-      expect(svc.bannerMessage(s(true, false))).toMatch(/managed/i);
-    });
-  });
-
   describe('triggerAccess', () => {
     it('mirrors canTrigger into canEdit and forces managed=false', () => {
       const out = svc.triggerAccess(s(true, false, true));

@@ -1910,10 +1910,12 @@ and the failure mode is loud.
 
 Three API-provided flags drive the user-visible rule that:
 
-- **State-managed** resources (`entity.managed === true`) appear with all fields
-  and write buttons visible but disabled, with a "Managed by Nix" banner.
+- **State-managed** resources (`entity.managed === true`) appear with all
+  fields and write buttons visible but disabled, with a hover tooltip
+  ("Managed by Nix — edit via declarative config").
 - **Read-only** access (`entity.can_edit === false`) hides write buttons
-  entirely and shows inputs as disabled with a "Read-only access" banner.
+  entirely and shows inputs as disabled with a "You have read-only access"
+  hover tooltip.
 - **Trigger access** (`entity.can_trigger`) gates trigger-style actions
   (Start Evaluation, Restart Failed Builds, Abort) independently of
   `can_edit`. `can_trigger` reflects `Permission::TriggerEvaluation` while
@@ -1925,11 +1927,11 @@ The primitives:
 
 - `frontend/src/app/shared/access/access.service.ts` — `AccessService` with
   pure helpers (`isWritable`, `shouldShowWriteAction`, `shouldDisableInput`,
-  `bannerKind`, `bannerMessage`, `triggerAccess`). Tests cover the four
-  flag combinations plus `triggerAccess` for the deeper model split:
-  it projects an AccessState onto trigger-action permissions by replacing
-  `canEdit` with `canTrigger` and forcing `managed=false` (trigger actions
-  don't mutate config, so the managed flag must not disable them).
+  `triggerAccess`). Tests cover the four flag combinations plus
+  `triggerAccess` for the deeper model split: it projects an AccessState
+  onto trigger-action permissions by replacing `canEdit` with `canTrigger`
+  and forcing `managed=false` (trigger actions don't mutate config, so the
+  managed flag must not disable them).
 - `frontend/src/app/shared/access/writable.directive.ts` — `*appWritable`
   structural directive. Renders content iff `canEdit`. Tests cover
   render/hide on each combination plus toggling.
@@ -1938,13 +1940,6 @@ The primitives:
   when `managed || !canEdit`. Tests cover all four flag combinations,
   tooltip text, and that the directive correctly clears its own state when
   access becomes writable.
-- `frontend/src/app/shared/access/access-banner.component.ts` —
-  `<app-access-banner>` rendering nothing for full access; otherwise
-  delegating to the shared `<gr-message-banner type="info">` (so the visual
-  shell matches every other banner in the app). The kind is exposed as a
-  `data-kind` attribute for tests and tooling. Tests cover the four banner
-  kinds and that the underlying `gr-message-banner` is rendered with the
-  info modifier.
 - `frontend/src/app/core/resolvers/project-access.resolver.ts` and
   `cache-access.resolver.ts` — fetch the parent entity once, expose
   `{ entity, access }` on `route.parent.data`. Children consume via

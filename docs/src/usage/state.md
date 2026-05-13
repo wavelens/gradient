@@ -12,18 +12,15 @@ Users, organizations, and caches created by the NixOS module configuration carry
 
 Managed-resource and read-only access show up consistently across the dashboard:
 
-- **A "Managed by Nix" banner** appears at the top of any settings page or
-  subpage for a state-managed resource. Form fields remain visible but
-  disabled, and write buttons (Save, Delete, etc.) are visible but
-  greyed out — so you can see exactly what the resource looks like and
-  what actions exist, you just can't trigger them here. Update the Nix
-  config instead.
-- **A "Read-only access" banner** appears when your organization role
-  doesn't grant write permission on the resource. Form fields remain
-  visible but disabled; write buttons are **hidden entirely** — they don't
+- **State-managed resources** show form fields and write buttons (Save,
+  Delete, etc.) as visible but disabled, with a hover tooltip ("Managed
+  by Nix — edit via declarative config") so you can see what the
+  resource looks like and what actions exist, you just can't trigger
+  them here. Update the Nix config instead.
+- **Read-only access** (your organization role doesn't grant write
+  permission) shows form fields as disabled with a "You have read-only
+  access" tooltip; write buttons are **hidden entirely** — they don't
   exist for you. Contact an organization admin to make changes.
-- **Both banners** coalesce into a single "Managed by Nix (read-only)"
-  notice when both apply.
 
 The pages themselves are always navigable. A state-managed cache's
 upstreams subpage, for example, is reachable so you can see what

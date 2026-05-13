@@ -136,6 +136,8 @@ a {
   }
 
   &:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
     pointer-events: none;
   }
 }
@@ -148,6 +150,17 @@ a {
   &:focus {
     border-color: $text-secondary;
   }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+}
+
+select:disabled,
+textarea:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .p-dialog {
