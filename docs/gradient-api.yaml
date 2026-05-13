@@ -2561,7 +2561,10 @@ paths:
     get:
       tags: [builds]
       summary: Get build
-      description: Returns full build details including status, derivation path, architecture, assigned server, and output store paths.
+      description: |-
+        Returns full build details including status, derivation path, architecture, assigned server, and output store paths.
+
+        **Access:** Accessible to members of the build's organization. Additionally, when this build is the leader of a follower build in a cache-connected organization, members of that follower organization are granted read access. See `docs/src/scheduler.md#cross-cache-deduplication`.
       operationId: getBuild
       responses:
         '200':
@@ -2586,7 +2589,10 @@ paths:
     get:
       tags: [builds]
       summary: Get build log
-      description: Returns the complete build log as a single string. Empty string if no log is available yet.
+      description: |-
+        Returns the complete build log as a single string. Empty string if no log is available yet.
+
+        **Access:** Accessible to members of the build's organization. Additionally, when this build is the leader of a follower build in a cache-connected organization, members of that follower organization are granted read access. See `docs/src/scheduler.md#cross-cache-deduplication`.
       operationId: getBuildLog
       responses:
         '200':
@@ -2629,6 +2635,8 @@ paths:
         Returns the full transitive dependency graph rooted at the given build via BFS,
         capped at 500 nodes. Each edge `source → target` means `source` must be built
         before `target`.
+
+        **Access:** Accessible to members of the build's organization. Additionally, when this build is the leader of a follower build in a cache-connected organization, members of that follower organization are granted read access. See `docs/src/scheduler.md#cross-cache-deduplication`.
       operationId: getBuildGraph
       responses:
         '200':
@@ -2686,6 +2694,8 @@ paths:
         filename, Nix store path, and file size in bytes.
 
         Accessible without authentication when the owning organisation is public.
+
+        **Access:** Accessible to members of the build's organization. Additionally, when this build is the leader of a follower build in a cache-connected organization, members of that follower organization are granted read access. See `docs/src/scheduler.md#cross-cache-deduplication`.
       operationId: getBuildDownloads
       responses:
         '200':
