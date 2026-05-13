@@ -37,7 +37,9 @@
     } @else {
       <div class="header-user">
         <a routerLink="/account/login" class="user-link">Login</a>
-        <a routerLink="/account/register" class="user-link">Register</a>
+        @if (!registrationDisabled) {
+          <a routerLink="/account/register" class="user-link">Register</a>
+        }
       </div>
     }
   </div>

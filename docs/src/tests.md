@@ -584,6 +584,10 @@ Specs (vitest + jsdom):
   validator covers length + character class requirements; cross-field
   `confirm()` validates against the named control.
   (`shared/components/form/form-fields-builder.spec.ts`)
+- `HeaderComponent` — Register link is rendered when registration is
+  enabled and hidden when `ConfigService.registrationDisabled` is true,
+  matching the server `/config` response. Direct regression for #218.
+  (`shared/components/header/header.component.spec.ts`)
 
 ## CI check names — org/project context
 

@@ -8,6 +8,7 @@ import { Component, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { AuthService } from '@core/services/auth.service';
+import { ConfigService } from '@core/services/config.service';
 
 @Component({
   selector: 'app-header',
@@ -18,6 +19,9 @@ import { AuthService } from '@core/services/auth.service';
 })
 export class HeaderComponent {
   authService = inject(AuthService);
+  private config = inject(ConfigService);
+
+  get registrationDisabled() { return this.config.registrationDisabled; }
 
   logout(): void {
     this.authService.logout().subscribe();
