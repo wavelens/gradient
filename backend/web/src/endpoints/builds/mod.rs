@@ -27,7 +27,7 @@ use crate::authorization::ApiKeyContext;
 use crate::error::{WebError, WebResult};
 use crate::helpers::OptionExt;
 use gradient_core::types::*;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
 
 /// Resolved access context for a build.
@@ -145,16 +145,16 @@ async fn follower_orgs_accessible(
     api_key: Option<&ApiKeyContext>,
     leader_build_id: BuildId,
 ) -> WebResult<bool> {
-    let follower_eval_ids: Vec<EvaluationId> = EBuild::find()
+    let follower_builds: Vec<MBuild> = EBuild::find()
         .filter(CBuild::Via.eq(leader_build_id))
-        .select_only()
-        .column(CBuild::Evaluation)
-        .into_tuple()
         .all(&state.web_db)
         .await?;
-    if follower_eval_ids.is_empty() {
+    if follower_builds.is_empty() {
         return Ok(false);
     }
+
+    let follower_eval_ids: Vec<EvaluationId> =
+        follower_builds.into_iter().map(|b| b.evaluation).collect();
 
     let evals = EEvaluation::find()
         .filter(CEvaluation::Id.is_in(follower_eval_ids))

@@ -24,7 +24,7 @@
 //!   Direct membership check (private org → is_org_member → load_org_membership):
 //!     8. SELECT organization_user (leader org × user → empty → not a direct member)
 //!   follower_orgs_accessible:
-//!     9. SELECT build.evaluation  (WHERE via = leader_build_id, into_tuple)
+//!     9. SELECT build             (WHERE via = leader_build_id)
 //!    10. SELECT evaluation        (WHERE id IN [follower_eval_id])
 //!    11. SELECT project           (follower evaluation's project)
 //!    12. SELECT organization_user (follower org × user → Some → access granted)
@@ -160,6 +160,22 @@ fn leader_build_row() -> entity::build::Model {
     }
 }
 
+fn follower_build_row() -> entity::build::Model {
+    entity::build::Model {
+        id: follower_build_id(),
+        evaluation: follower_eval_id(),
+        derivation: DerivationId::now_v7(),
+        status: BuildStatus::Completed,
+        log_id: None,
+        build_time_ms: Some(1000),
+        worker: None,
+        via: Some(leader_build_id()),
+        external_cached: false,
+        created_at: test_date(),
+        updated_at: test_date(),
+    }
+}
+
 fn follower_org_membership() -> entity::organization_user::Model {
     entity::organization_user::Model {
         id: follower_membership_id(),
@@ -214,10 +230,6 @@ fn follower_org_member_gets_leader_log() {
 
     run(async {
         let follower_eval = evaluation_row(follower_eval_id(), follower_project_id());
-        // into_tuple SELECT returns (EvaluationId,) tuples — MockDatabase
-        // matches by the concrete type returned, which for `into_tuple()` on a
-        // single column is just the column's type itself.
-        let follower_eval_id_tuple: EvaluationId = follower_eval_id();
 
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             // Auth prefix (authorize_optional)
@@ -232,8 +244,8 @@ fn follower_org_member_gets_leader_log() {
             // Direct membership check → not a member of leader-org
             .append_query_results([Vec::<entity::organization_user::Model>::new()]) // 8. SELECT organization_user (empty)
             // follower_orgs_accessible
-            .append_query_results([vec![follower_eval_id_tuple]]) // 9. SELECT build.evaluation WHERE via=leader
-            .append_query_results([vec![follower_eval]])           // 10. SELECT evaluation WHERE id IN [...]
+            .append_query_results([vec![follower_build_row()]]) // 9. SELECT build WHERE via=leader
+            .append_query_results([vec![follower_eval]])         // 10. SELECT evaluation WHERE id IN [...]
             .append_query_results([vec![project_row(follower_project_id(), follower_org_id())]]) // 11. SELECT project
             .append_query_results([vec![follower_org_membership()]]) // 12. SELECT organization_user (member of follower-org)
             .into_connection();
@@ -275,7 +287,7 @@ fn unrelated_org_member_cannot_read_leader_log() {
             // Direct membership check → not a member of leader-org
             .append_query_results([Vec::<entity::organization_user::Model>::new()]) // 8. SELECT organization_user (empty)
             // follower_orgs_accessible → no followers → short-circuit
-            .append_query_results([Vec::<EvaluationId>::new()]) // 9. SELECT build.evaluation WHERE via=leader (empty)
+            .append_query_results([Vec::<entity::build::Model>::new()]) // 9. SELECT build WHERE via=leader (empty)
             .into_connection();
 
         let server = make_server(db);
