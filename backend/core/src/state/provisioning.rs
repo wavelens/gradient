@@ -517,6 +517,7 @@ impl<'a> StateApplicator<'a> {
                     description: Set(state_cache.description.clone().unwrap_or_default()),
                     active: Set(state_cache.active),
                     priority: Set(state_cache.priority),
+                    local_priority: Set(None),
                     public_key: Set(public_key),
                     private_key: Set(encrypted_signing_key),
                     public: Set(state_cache.public),

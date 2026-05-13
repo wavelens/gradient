@@ -98,6 +98,7 @@ nix-bindings = { git = "https://github.com/NotAShelf/nix-bindings", default-feat
 
 # Shared utilities promoted from member crates
 git-url-parse = { version = "0.6" }
+ipnet         = "2.10"
 password-auth = { version = "1.0", default-features = false, features = ["argon2"] }
 prometheus    = { version = "0.14", default-features = false }
 rustls        = { version = "0.23", default-features = false, features = ["std", "aws-lc-rs", "tls12"] }

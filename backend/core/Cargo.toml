@@ -37,6 +37,7 @@ harmonia-store-remote = { workspace = true }
 harmonia-utils-hash   = { workspace = true }
 hex                   = { workspace = true }
 hmac                  = { workspace = true }
+ipnet                 = { workspace = true }
 libc                  = { workspace = true }
 nix-bindings          = { workspace = true }
 num_enum              = { workspace = true }

@@ -312,6 +312,7 @@ mod tests {
             description: String::new(),
             active: true,
             priority: 0,
+            local_priority: None,
             public_key: public_key.to_string(),
             private_key: private_key.to_string(),
             public: false,

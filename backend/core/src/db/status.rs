@@ -704,6 +704,7 @@ mod reelect_leader_tests {
             s3: crate::types::S3Args::default(),
             github_app: crate::types::GitHubAppArgs::default(),
             metrics: crate::types::MetricsArgs::default(),
+            network: crate::types::NetworkArgs::default(),
         };
         let config = std::sync::Arc::new(RuntimeConfig::from_cli(&cli));
         let nar_storage = NarStore::local(&config.storage.base_path).expect("nar store");
