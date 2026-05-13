@@ -15,14 +15,15 @@ use axum::extract::{Path, State};
 use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
 use chrono::Utc;
-use gradient_core::ci::{ApplyInput, ApplyOutcome, apply_trigger};
+use gradient_core::ci::{ApplyInput, ApplyOutcome, ForgeType, apply_trigger};
 use gradient_core::sources::resolve_head;
 use gradient_core::types::triggers::{TriggerConfig, TriggerType};
 use gradient_core::types::*;
 use scheduler::Scheduler;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 pub fn router() -> Router<Arc<ServerState>> {
@@ -30,6 +31,38 @@ pub fn router() -> Router<Arc<ServerState>> {
         .route("/", get(list).post(create))
         .route("/{id}", get(read).patch(update).delete(delete_one))
         .route("/{id}/test", post(fire_now))
+}
+
+/// Slim integration handle inlined into reporter trigger responses so the
+/// trigger list is renderable without a second (admin-gated) call to the
+/// integrations endpoint.
+#[derive(Serialize, Debug)]
+pub struct TriggerIntegrationSummary {
+    pub id: IntegrationId,
+    pub name: String,
+    pub display_name: String,
+    pub forge_type: String,
+}
+
+impl TriggerIntegrationSummary {
+    fn from_model(m: &MIntegration) -> Self {
+        Self {
+            id: m.id,
+            name: m.name.clone(),
+            display_name: m.display_name.clone(),
+            forge_type: forge_to_str(m.forge_type).to_string(),
+        }
+    }
+}
+
+fn forge_to_str(f: i16) -> &'static str {
+    match ForgeType::try_from(f) {
+        Ok(ForgeType::Gitea) => "gitea",
+        Ok(ForgeType::Forgejo) => "forgejo",
+        Ok(ForgeType::GitLab) => "gitlab",
+        Ok(ForgeType::GitHub) => "github",
+        Err(_) => "unknown",
+    }
 }
 
 #[derive(Serialize, Debug)]
@@ -43,10 +76,18 @@ pub struct TriggerOut {
     pub last_fired_at: Option<chrono::NaiveDateTime>,
     pub created_at: chrono::NaiveDateTime,
     pub updated_at: chrono::NaiveDateTime,
+    /// Populated for `reporter_push` / `reporter_pull_request` triggers when
+    /// the referenced integration row still exists. `null` for polling/time
+    /// triggers and for orphaned references (integration deleted out from
+    /// under the trigger).
+    pub integration: Option<TriggerIntegrationSummary>,
 }
 
-impl From<MProjectTrigger> for TriggerOut {
-    fn from(m: MProjectTrigger) -> Self {
+impl TriggerOut {
+    fn build(m: MProjectTrigger, integrations: &HashMap<IntegrationId, MIntegration>) -> Self {
+        let integration = trigger_integration_id(m.trigger_type, &m.config)
+            .and_then(|id| integrations.get(&id))
+            .map(TriggerIntegrationSummary::from_model);
         Self {
             id: m.id,
             project: m.project,
@@ -56,8 +97,37 @@ impl From<MProjectTrigger> for TriggerOut {
             last_fired_at: m.last_fired_at,
             created_at: m.created_at,
             updated_at: m.updated_at,
+            integration,
         }
     }
+}
+
+fn trigger_integration_id(trigger_type: i16, config: &serde_json::Value) -> Option<IntegrationId> {
+    TriggerConfig::parse_row(trigger_type, config)
+        .ok()
+        .and_then(|cfg| match cfg {
+            TriggerConfig::ReporterPush { integration_id, .. }
+            | TriggerConfig::ReporterPullRequest { integration_id, .. } => Some(integration_id),
+            _ => None,
+        })
+}
+
+async fn load_integrations_for_triggers<C: ConnectionTrait>(
+    db: &C,
+    rows: &[MProjectTrigger],
+) -> WebResult<HashMap<IntegrationId, MIntegration>> {
+    let ids: Vec<IntegrationId> = rows
+        .iter()
+        .filter_map(|t| trigger_integration_id(t.trigger_type, &t.config))
+        .collect();
+    if ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let integrations = EIntegration::find()
+        .filter(CIntegration::Id.is_in(ids))
+        .all(db)
+        .await?;
+    Ok(integrations.into_iter().map(|i| (i.id, i)).collect())
 }
 
 #[derive(Deserialize, Debug)]
@@ -104,7 +174,13 @@ pub async fn list(
         .all(&state.web_db)
         .await?;
 
-    Ok(ok_json(rows.into_iter().map(TriggerOut::from).collect()))
+    let integrations = load_integrations_for_triggers(&state.web_db, &rows).await?;
+
+    Ok(ok_json(
+        rows.into_iter()
+            .map(|r| TriggerOut::build(r, &integrations))
+            .collect(),
+    ))
 }
 
 /// `POST /projects/{org}/{project}/triggers` — create a new trigger.
@@ -149,7 +225,8 @@ pub async fn create(
     .insert(&state.web_db)
     .await?;
 
-    Ok(ok_json(TriggerOut::from(row)))
+    let integrations = load_integrations_for_triggers(&state.web_db, std::slice::from_ref(&row)).await?;
+    Ok(ok_json(TriggerOut::build(row, &integrations)))
 }
 
 /// `GET /projects/{org}/{project}/triggers/{id}` — fetch one trigger.
@@ -176,7 +253,8 @@ pub async fn read(
         .await?
         .or_not_found("Trigger")?;
 
-    Ok(ok_json(TriggerOut::from(row)))
+    let integrations = load_integrations_for_triggers(&state.web_db, std::slice::from_ref(&row)).await?;
+    Ok(ok_json(TriggerOut::build(row, &integrations)))
 }
 
 /// `PATCH /projects/{org}/{project}/triggers/{id}` — update a trigger.
@@ -225,7 +303,8 @@ pub async fn update(
 
     let updated = active.update(&state.web_db).await?;
 
-    Ok(ok_json(TriggerOut::from(updated)))
+    let integrations = load_integrations_for_triggers(&state.web_db, std::slice::from_ref(&updated)).await?;
+    Ok(ok_json(TriggerOut::build(updated, &integrations)))
 }
 
 /// `DELETE /projects/{org}/{project}/triggers/{id}` — hard delete the trigger.

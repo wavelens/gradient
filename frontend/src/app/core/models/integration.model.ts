@@ -22,6 +22,16 @@ export interface Integration {
   created_at: string;
 }
 
+/** Credential-free integration handle returned by the org-member summary
+ *  endpoint and inlined into reporter trigger responses. */
+export interface IntegrationSummary {
+  id: string;
+  name: string;
+  display_name: string;
+  kind: IntegrationKind;
+  forge_type: ForgeType;
+}
+
 export interface CreateIntegrationRequest {
   name: string;
   display_name?: string;

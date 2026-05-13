@@ -1279,6 +1279,8 @@ Run with `cargo test -p core --tests state_machine::eval`.
 - `scheduler::jobs::JobTracker::remove_job` — pending and active map removal; unknown id no-op.
 - `scheduler::Scheduler::cancel_evaluation_jobs` — drops eval and per-build entries from the tracker.
 - `web::endpoints::projects::triggers` — list/create/read/update/delete; `all` concurrency accepted (200); invalid config rejected (400).
+- `web::endpoints::projects::triggers` — **integration enrichment**: list/get responses for `reporter_push`/`reporter_pull_request` include an inlined `integration` object (`id`, `name`, `display_name`, `forge_type`); polling triggers return `integration: null` and skip the integration SELECT (`list_polling_trigger_has_null_integration_and_skips_lookup`); orphaned references (integration row deleted) degrade to `integration: null` (`list_reporter_trigger_with_missing_integration_returns_null`).
+- `web::endpoints::orgs::integrations` — **summaries endpoint** (`GET /orgs/{org}/integrations/summary`): any org member can list summaries (no `ManageIntegrations` required); response excludes `secret`, `endpoint_url`, `access_token`, `has_secret`, `has_access_token` so non-admins cannot probe credential state; non-members get 404 (consistent with org loader's hide-existence policy).
 - `web::endpoints::projects::evaluations` — response includes nullable `trigger` summary, populated for evaluations created by a trigger.
 - `web::endpoints::forge_hooks::events` — PR (github/gitea/gitlab) and release (github/gitea/gitlab) parsers; GitLab action mapping; tag-ref support on push parsers.
 - `web::endpoints::forge_hooks` integration — push fans out to matching trigger row; branch glob filter skip; PR action filter; release fires only `releases_only` triggers; GitHub App push by installation_id.
@@ -2003,6 +2005,12 @@ The two reported bugs that motivated this work are covered directly:
 - `CacheUpstreamsComponent` — Add Upstream / Edit / Delete absent under
   view-only access (page itself remains navigable); present-disabled
   under state-managed cache.
+- `ProjectTriggersComponent` — reporter trigger renders integration
+  display name from the inlined `trigger.integration` field (so the
+  trigger row shows "from GitHub" rather than the raw `integration_id`
+  UUID, even when the caller lacks `ManageIntegrations`); orphaned
+  references (`trigger.integration === null`) render "from deleted
+  integration".
 
 Run command: `pnpm -C frontend test --watch=false --include='**/access*'`
 (primitives) or the full suite with `pnpm -C frontend test --watch=false`.

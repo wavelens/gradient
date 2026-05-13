@@ -86,6 +86,31 @@ pub struct CreateIntegrationRequest {
     pub access_token: Option<String>,
 }
 
+/// Credential-free integration handle. Returned by the summaries endpoint
+/// (`GET /orgs/{org}/integrations/summary`) so non-admin org members can
+/// render integration names in the trigger UI without learning whether a
+/// secret/token is stored or what endpoint URL is configured.
+#[derive(Serialize, Debug)]
+pub struct IntegrationSummaryResponse {
+    pub id: IntegrationId,
+    pub name: String,
+    pub display_name: String,
+    pub kind: String,
+    pub forge_type: String,
+}
+
+impl From<MIntegration> for IntegrationSummaryResponse {
+    fn from(m: MIntegration) -> Self {
+        Self {
+            id: m.id,
+            name: m.name,
+            display_name: m.display_name,
+            kind: kind_to_str(m.kind).to_string(),
+            forge_type: forge_to_str(m.forge_type).to_string(),
+        }
+    }
+}
+
 #[derive(Deserialize, Debug)]
 pub struct PatchIntegrationRequest {
     pub name: Option<String>,
@@ -166,6 +191,41 @@ pub async fn get_integrations(
 
     Ok(ok_json(
         rows.into_iter().map(IntegrationResponse::from).collect(),
+    ))
+}
+
+/// `GET /orgs/{organization}/integrations/summary` — list integrations as
+/// credential-free summaries. Available to any org member; the full listing
+/// remains gated on `ManageIntegrations` because it exposes `has_secret`,
+/// `has_access_token`, and `endpoint_url`. Used by the trigger UI to render
+/// integration names and populate the create/edit dropdown for users with
+/// `EditProject` who do not also hold `ManageIntegrations`.
+pub async fn get_integration_summaries(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
+    Path(organization): Path<String>,
+) -> WebResult<Json<BaseResponse<Vec<IntegrationSummaryResponse>>>> {
+    let org = load_org(
+        &state,
+        Caller::User(&user),
+        api_key.as_ref(),
+        organization,
+        OrgAccess::Member {
+            reject_managed: false,
+        },
+    )
+    .await?;
+
+    let rows = EIntegration::find()
+        .filter(CIntegration::Organization.eq(org.id))
+        .all(&state.web_db)
+        .await?;
+
+    Ok(ok_json(
+        rows.into_iter()
+            .map(IntegrationSummaryResponse::from)
+            .collect(),
     ))
 }
 

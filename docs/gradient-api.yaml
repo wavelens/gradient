@@ -4018,6 +4018,43 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /orgs/{organization}/integrations/summary:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationSlug'
+    get:
+      tags: [integrations]
+      summary: List integration summaries (credential-free)
+      description: |-
+        List integrations as credential-free summaries. Available to **any
+        org member**, in contrast to the full listing which requires
+        `ManageIntegrations`.
+
+        The response excludes `secret`, `endpoint_url`, `access_token`, and
+        the `has_secret` / `has_access_token` booleans so non-admin members
+        cannot fingerprint credential state. Intended for UIs that only need
+        an integration's name and forge type — e.g. populating the trigger
+        create/edit dropdown for users who hold `EditProject` but not
+        `ManageIntegrations`.
+      operationId: listOrgIntegrationSummaries
+      responses:
+        '200':
+          description: List of integration summaries
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/IntegrationSummary'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /orgs/{organization}/integrations/{id}:
     parameters:
       - $ref: '#/components/parameters/OrganizationSlug'
@@ -6069,6 +6106,30 @@ components:
           type: string
           format: date-time
 
+    IntegrationSummary:
+      type: object
+      description: >-
+        Credential-free integration handle returned by
+        `GET /orgs/{org}/integrations/summary`. Available to any org member;
+        excludes `endpoint_url`, `has_secret`, and `has_access_token` so
+        non-admins cannot fingerprint credential state.
+      required: [id, name, display_name, kind, forge_type]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9-]*[a-z0-9]$'
+        display_name:
+          type: string
+        kind:
+          type: string
+          enum: [inbound, outbound]
+        forge_type:
+          type: string
+          enum: [gitea, forgejo, gitlab, github]
+
     CreateIntegrationRequest:
       type: object
       required: [name, kind, forge_type]
@@ -6226,6 +6287,25 @@ components:
         - $ref: '#/components/schemas/ReporterPullRequestTriggerConfig'
         - $ref: '#/components/schemas/TimeTriggerConfig'
 
+    TriggerIntegrationSummary:
+      type: object
+      description: >-
+        Slim integration handle inlined into reporter trigger responses so
+        the trigger UI can render an integration's name without a separate
+        admin-gated call to `/orgs/{org}/integrations`.
+      required: [id, name, display_name, forge_type]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        display_name:
+          type: string
+        forge_type:
+          type: string
+          enum: [gitea, forgejo, gitlab, github]
+
     ProjectTrigger:
       type: object
       required: [id, project, type, config, active, created_at, updated_at]
@@ -6252,6 +6332,14 @@ components:
         updated_at:
           type: string
           format: date-time
+        integration:
+          allOf:
+            - $ref: '#/components/schemas/TriggerIntegrationSummary'
+          nullable: true
+          description: >-
+            Populated for `reporter_push` and `reporter_pull_request` triggers
+            when the referenced integration row still exists. `null` for
+            polling/time triggers and for orphaned references.
 
     EvaluationTriggerSummary:
       type: object

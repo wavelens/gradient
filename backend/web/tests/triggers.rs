@@ -20,7 +20,7 @@
 //!   5. SELECT project (by org + name)
 //!   6. SELECT org_user membership (permission check)
 
-use entity::{ids::*, organization_user, project, project_trigger};
+use entity::{ids::*, integration, organization_user, project, project_trigger};
 use gradient_core::types::SessionId;
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 use serde_json::Value;
@@ -83,6 +83,44 @@ fn polling_trigger_row() -> project_trigger::Model {
         project: project_id(),
         trigger_type: 0, // Polling
         config: serde_json::json!({"interval_secs": 60}),
+        active: true,
+        last_fired_at: None,
+        created_at: test_date(),
+        updated_at: test_date(),
+    }
+}
+
+fn github_integration_id() -> IntegrationId {
+    IntegrationId::new(Uuid::parse_str("019e16b2-e958-7652-ad97-67cd7b0fea61").unwrap())
+}
+
+fn github_inbound_integration_row() -> integration::Model {
+    integration::Model {
+        id: github_integration_id(),
+        organization: org_id(),
+        name: "github".into(),
+        display_name: "GitHub".into(),
+        kind: 0,       // Inbound
+        forge_type: 3, // GitHub
+        secret: None,
+        endpoint_url: None,
+        access_token: None,
+        created_by: user_id(),
+        created_at: test_date(),
+    }
+}
+
+fn reporter_push_trigger_row() -> project_trigger::Model {
+    project_trigger::Model {
+        id: trigger_id(),
+        project: project_id(),
+        trigger_type: 1, // ReporterPush
+        config: serde_json::json!({
+            "integration_id": github_integration_id().to_string(),
+            "branches": ["main"],
+            "tags": [],
+            "releases_only": false,
+        }),
         active: true,
         last_fired_at: None,
         created_at: test_date(),
@@ -770,5 +808,142 @@ fn patch_project_all_concurrency_returns_ok() {
         res.assert_status_ok();
         let body: Value = res.json();
         assert_eq!(body["error"], false);
+    });
+}
+
+// ── Integration enrichment tests ──────────────────────────────────────────────
+//
+// Regression coverage: reporter triggers must surface the referenced
+// integration's name/display_name/forge_type alongside the raw `integration_id`,
+// so the trigger UI can render "from GitHub" instead of falling back to a UUID.
+// Polling triggers must keep `integration: null` (no extra DB round-trip).
+
+#[test]
+fn list_reporter_trigger_includes_integration_metadata() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let session_id = SessionId::now_v7();
+        let token = make_token(session_id);
+
+        let db = with_project_member(with_auth(
+            MockDatabase::new(DatabaseBackend::Postgres),
+            session_id,
+        ))
+        .append_query_results([vec![reporter_push_trigger_row()]])
+        .append_query_results([vec![github_inbound_integration_row()]]);
+
+        let server = make_test_server(db.into_connection());
+        let res = server
+            .get(BASE_URL)
+            .add_header("authorization", format!("Bearer {}", token))
+            .await;
+
+        res.assert_status_ok();
+        let body: Value = res.json();
+        let item = &body["message"][0];
+        assert_eq!(item["type"], "reporter_push");
+        assert_eq!(item["integration"]["id"], github_integration_id().to_string());
+        assert_eq!(item["integration"]["name"], "github");
+        assert_eq!(item["integration"]["display_name"], "GitHub");
+        assert_eq!(item["integration"]["forge_type"], "github");
+    });
+}
+
+#[test]
+fn list_reporter_trigger_with_missing_integration_returns_null() {
+    // Trigger row references an integration ID that no longer exists in the
+    // org (row was deleted). Response keeps the trigger but sets
+    // `integration: null` so the UI can degrade gracefully.
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let session_id = SessionId::now_v7();
+        let token = make_token(session_id);
+
+        let db = with_project_member(with_auth(
+            MockDatabase::new(DatabaseBackend::Postgres),
+            session_id,
+        ))
+        .append_query_results([vec![reporter_push_trigger_row()]])
+        .append_query_results([Vec::<integration::Model>::new()]);
+
+        let server = make_test_server(db.into_connection());
+        let res = server
+            .get(BASE_URL)
+            .add_header("authorization", format!("Bearer {}", token))
+            .await;
+
+        res.assert_status_ok();
+        let body: Value = res.json();
+        assert_eq!(body["message"][0]["type"], "reporter_push");
+        assert!(body["message"][0]["integration"].is_null());
+    });
+}
+
+#[test]
+fn list_polling_trigger_has_null_integration_and_skips_lookup() {
+    // No reporter triggers in the list — handler must NOT issue an integration
+    // SELECT. MockDatabase panics on unexpected queries, which is the assertion.
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let session_id = SessionId::now_v7();
+        let token = make_token(session_id);
+
+        let db = with_project_member(with_auth(
+            MockDatabase::new(DatabaseBackend::Postgres),
+            session_id,
+        ))
+        .append_query_results([vec![polling_trigger_row()]]);
+
+        let server = make_test_server(db.into_connection());
+        let res = server
+            .get(BASE_URL)
+            .add_header("authorization", format!("Bearer {}", token))
+            .await;
+
+        res.assert_status_ok();
+        let body: Value = res.json();
+        assert_eq!(body["message"][0]["type"], "polling");
+        assert!(body["message"][0]["integration"].is_null());
+    });
+}
+
+#[test]
+fn get_reporter_trigger_includes_integration_metadata() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let session_id = SessionId::now_v7();
+        let token = make_token(session_id);
+        let tid = trigger_id();
+
+        let db = with_project_member(with_auth(
+            MockDatabase::new(DatabaseBackend::Postgres),
+            session_id,
+        ))
+        .append_query_results([vec![reporter_push_trigger_row()]])
+        .append_query_results([vec![github_inbound_integration_row()]]);
+
+        let server = make_test_server(db.into_connection());
+        let res = server
+            .get(&format!("{}/{}", BASE_URL, tid))
+            .add_header("authorization", format!("Bearer {}", token))
+            .await;
+
+        res.assert_status_ok();
+        let body: Value = res.json();
+        assert_eq!(body["message"]["type"], "reporter_push");
+        assert_eq!(body["message"]["integration"]["display_name"], "GitHub");
+        assert_eq!(body["message"]["integration"]["forge_type"], "github");
     });
 }

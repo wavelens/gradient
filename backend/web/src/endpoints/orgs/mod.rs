@@ -13,8 +13,9 @@ pub mod ssh;
 pub mod workers;
 
 pub use self::integrations::{
-    CreateIntegrationRequest, IntegrationResponse, PatchIntegrationRequest, delete_integration,
-    get_integration, get_integrations, patch_integration, put_integration,
+    CreateIntegrationRequest, IntegrationResponse, IntegrationSummaryResponse,
+    PatchIntegrationRequest, delete_integration, get_integration, get_integration_summaries,
+    get_integrations, patch_integration, put_integration,
 };
 pub use self::management::{
     MakeOrganizationRequest, OrgResponse, OrganizationSummary, PatchOrganizationRequest,

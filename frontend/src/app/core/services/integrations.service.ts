@@ -10,6 +10,7 @@ import { ApiService } from './api.service';
 import {
   CreateIntegrationRequest,
   Integration,
+  IntegrationSummary,
   PatchIntegrationRequest,
   ProjectIntegrationLink,
   SetProjectIntegrationRequest,
@@ -21,6 +22,13 @@ export class IntegrationsService {
 
   listOrgIntegrations(org: string): Observable<Integration[]> {
     return this.api.get<Integration[]>(`orgs/${org}/integrations`);
+  }
+
+  /** Credential-free integration list available to any org member.
+   *  Use this for UIs that only need name/forge_type — e.g. populating the
+   *  trigger create/edit dropdown — instead of the admin-gated full list. */
+  listOrgIntegrationSummaries(org: string): Observable<IntegrationSummary[]> {
+    return this.api.get<IntegrationSummary[]>(`orgs/${org}/integrations/summary`);
   }
 
   createOrgIntegration(org: string, body: CreateIntegrationRequest): Observable<Integration> {

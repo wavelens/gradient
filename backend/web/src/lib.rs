@@ -246,6 +246,10 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             get(orgs::get_integrations).put(orgs::put_integration),
         )
         .route(
+            "/orgs/{organization}/integrations/summary",
+            get(orgs::get_integration_summaries),
+        )
+        .route(
             "/orgs/{organization}/integrations/{id}",
             get(orgs::get_integration)
                 .patch(orgs::patch_integration)

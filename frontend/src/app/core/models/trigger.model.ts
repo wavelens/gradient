@@ -4,8 +4,20 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+import { ForgeType } from './integration.model';
+
 export type TriggerType = 'polling' | 'reporter_push' | 'reporter_pull_request' | 'time';
 export type ConcurrencyPolicy = 'hard_abort' | 'soft_abort' | 'all' | 'skip';
+
+/** Inlined integration handle on reporter trigger responses. Mirrors the
+ *  backend `TriggerIntegrationSummary` — `null` for polling/time triggers
+ *  and for orphaned references (integration row deleted). */
+export interface TriggerIntegrationRef {
+  id: string;
+  name: string;
+  display_name: string;
+  forge_type: ForgeType;
+}
 
 export interface PollingTriggerConfig {
   type: 'polling';
@@ -49,6 +61,9 @@ export interface ProjectTrigger {
   last_fired_at: string | null;
   created_at: string;
   updated_at: string;
+  /** Populated by the backend for `reporter_push` / `reporter_pull_request`
+   *  triggers when the referenced integration still exists. */
+  integration: TriggerIntegrationRef | null;
 }
 
 export interface CreateTriggerBody {

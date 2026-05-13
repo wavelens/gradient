@@ -36,9 +36,13 @@ const trigger = {
   active: true,
   config: { type: 'polling', interval_secs: 300, branch: null },
   last_fired_at: null,
+  integration: null,
 };
 
-function setup(access: AccessState): ComponentFixture<ProjectTriggersComponent> {
+function setup(
+  access: AccessState,
+  triggers: any[] = [trigger],
+): ComponentFixture<ProjectTriggersComponent> {
   TestBed.configureTestingModule({
     imports: [ProjectTriggersComponent],
     providers: [
@@ -46,8 +50,8 @@ function setup(access: AccessState): ComponentFixture<ProjectTriggersComponent> 
       provideHttpClient(),
       provideHttpClientTesting(),
       { provide: ActivatedRoute, useValue: activatedRouteStub(access) },
-      { provide: TriggersService, useValue: { list: () => of([trigger]) } },
-      { provide: IntegrationsService, useValue: { listOrgIntegrations: () => of([]) } },
+      { provide: TriggersService, useValue: { list: () => of(triggers) } },
+      { provide: IntegrationsService, useValue: { listOrgIntegrationSummaries: () => of([]) } },
       { provide: OrganizationsService, useValue: { getOrganization: () => of({ display_name: 'Acme' }) } },
     ],
   });
@@ -63,6 +67,49 @@ describe('ProjectTriggersComponent — access gating', () => {
     expect(findByText(fixture.nativeElement, 'edit')).toBeNull();
     expect(findByText(fixture.nativeElement, 'delete')).toBeNull();
     expect(findByText(fixture.nativeElement, 'fire now')).toBeNull();
+  });
+
+  it('renders reporter trigger using inlined integration display_name (not raw UUID)', () => {
+    const reporterTrigger = {
+      id: 't2',
+      type: 'reporter_push' as const,
+      active: true,
+      config: {
+        type: 'reporter_push',
+        integration_id: '019e16b2-e958-7652-ad97-67cd7b0fea61',
+        branches: ['main'],
+      },
+      last_fired_at: null,
+      integration: {
+        id: '019e16b2-e958-7652-ad97-67cd7b0fea61',
+        name: 'github',
+        display_name: 'GitHub',
+        forge_type: 'github',
+      },
+    };
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [reporterTrigger]);
+    const text = fixture.nativeElement.textContent ?? '';
+    expect(text).toContain('from GitHub');
+    expect(text).not.toContain('019e16b2-e958-7652-ad97-67cd7b0fea61');
+  });
+
+  it('falls back gracefully when reporter trigger references a deleted integration', () => {
+    const orphan = {
+      id: 't3',
+      type: 'reporter_push' as const,
+      active: true,
+      config: {
+        type: 'reporter_push',
+        integration_id: '019e16b2-e958-7652-ad97-67cd7b0fea61',
+        branches: ['main'],
+      },
+      last_fired_at: null,
+      integration: null,
+    };
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [orphan]);
+    const text = fixture.nativeElement.textContent ?? '';
+    expect(text).toContain('from deleted integration');
+    expect(text).not.toContain('019e16b2-e958-7652-ad97-67cd7b0fea61');
   });
 
   it('shows but disables write buttons under state-managed access', () => {

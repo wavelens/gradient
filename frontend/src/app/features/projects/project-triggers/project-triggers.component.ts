@@ -25,7 +25,7 @@ import {
   PollingTriggerConfig,
   CreateTriggerBody,
   UpdateTriggerBody,
-  Integration,
+  IntegrationSummary,
 } from '@core/models';
 
 interface Option<T> {
@@ -111,7 +111,7 @@ export class ProjectTriggersComponent implements OnInit {
   showEditDialog = signal(false);
   error = signal<string | null>(null);
 
-  inboundIntegrations = signal<Integration[]>([]);
+  inboundIntegrations = signal<IntegrationSummary[]>([]);
 
   form: TriggerFormState = { ...DEFAULT_FORM };
 
@@ -153,7 +153,7 @@ export class ProjectTriggersComponent implements OnInit {
   }
 
   private loadIntegrations(): void {
-    this.integrationsService.listOrgIntegrations(this.orgName).subscribe({
+    this.integrationsService.listOrgIntegrationSummaries(this.orgName).subscribe({
       next: (list) => this.inboundIntegrations.set(list.filter((i) => i.kind === 'inbound')),
       error: () => {},
     });
@@ -311,18 +311,14 @@ export class ProjectTriggersComponent implements OnInit {
         return summary;
       }
       case 'reporter_push': {
-        const integration = this.inboundIntegrations().find((i) => i.id === cfg.integration_id);
-        const name = integration ? (integration.display_name || integration.name) : cfg.integration_id;
-        const parts: string[] = [`from ${name}`];
+        const parts: string[] = [`from ${this.integrationLabel(trigger)}`];
         if (cfg.branches?.length) parts.push(`branches: ${cfg.branches.join(', ')}`);
         if (cfg.tags?.length) parts.push(`tags: ${cfg.tags.join(', ')}`);
         if (cfg.releases_only) parts.push('releases only');
         return parts.join(' / ');
       }
       case 'reporter_pull_request': {
-        const integration = this.inboundIntegrations().find((i) => i.id === cfg.integration_id);
-        const name = integration ? (integration.display_name || integration.name) : cfg.integration_id;
-        const parts: string[] = [`from ${name}`];
+        const parts: string[] = [`from ${this.integrationLabel(trigger)}`];
         if (cfg.branches?.length) parts.push(`branches: ${cfg.branches.join(', ')}`);
         if (cfg.actions?.length) parts.push(`actions: ${cfg.actions.join(', ')}`);
         return parts.join(' / ');
@@ -330,6 +326,13 @@ export class ProjectTriggersComponent implements OnInit {
       case 'time':
         return cfg.cron ?? '';
     }
+  }
+
+  private integrationLabel(trigger: ProjectTrigger): string {
+    if (trigger.integration) {
+      return trigger.integration.display_name || trigger.integration.name;
+    }
+    return 'deleted integration';
   }
 
   relativeTime(isoString: string | null): string {
