@@ -228,7 +228,8 @@ pub async fn trigger_restart_builds<C: ConnectionTrait>(
         .collect::<std::collections::HashSet<_>>()
         .into_iter()
         .collect();
-    let leader_for_drv = crate::db::find_active_leaders(db, &queued_drv_ids).await?;
+    let leader_for_drv =
+        crate::db::find_active_leaders(db, project.organization, &queued_drv_ids).await?;
 
     // Create new builds for the new evaluation and track old→new build ID mapping.
     let mut build_id_map: std::collections::HashMap<BuildId, BuildId> =

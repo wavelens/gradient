@@ -388,18 +388,21 @@ async fn reelect_leader(state: &Arc<ServerState>, leader: &MBuild) -> Result<(),
 }
 
 /// For each derivation in `drv_ids`, return the id of the leader build whose
-/// result a new build for that derivation should follow — i.e. the build
-/// whose `via` is NULL and whose status is non-terminal
-/// (`Created` / `Queued` / `Building`). Followers in the result set
-/// collapse to their leader so callers can never accidentally point a new
-/// build at another follower (no via chains).
+/// result a new build for that derivation should follow.
 ///
-/// Drvs with no active build in the result map are simply omitted; callers
-/// should treat a missing entry as "no leader, insert as a plain build".
+/// First checks for an in-flight build within `inserting_org` (the previous
+/// behavior). When no same-org candidate exists for a drv, this function
+/// will also consult cache-connected organisations via
+/// [`cache_reach::writer_orgs_reachable_from`] — that pass is added in a
+/// later task; this step only widens the signature.
+///
+/// Drvs with no active build are omitted from the result.
 pub async fn find_active_leaders<C: ConnectionTrait>(
     db: &C,
+    inserting_org: OrganizationId,
     drv_ids: &[DerivationId],
 ) -> Result<HashMap<DerivationId, BuildId>, sea_orm::DbErr> {
+    let _ = inserting_org;
     if drv_ids.is_empty() {
         return Ok(HashMap::new());
     }
