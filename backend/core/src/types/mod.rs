@@ -30,7 +30,7 @@ pub use self::cli::{
     StorageArgs, in_any, parse_cidr_list,
 };
 pub use self::config::{
-    EmailConfig, GitHubAppConfig, MetricsConfig, OidcConfig, RuntimeConfig, S3Config,
+    EmailConfig, GitHubAppConfig, MetricsConfig, NetworkConfig, OidcConfig, RuntimeConfig, S3Config,
 };
 pub use self::consts::*;
 pub use self::db::{WebDb, WorkerDb};

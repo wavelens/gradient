@@ -345,7 +345,7 @@ mod tests {
         Arc::new(ServerState {
             web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
             worker_db: WorkerDb::new(db),
-            config: Arc::new(RuntimeConfig::from_cli(&test_cli())),
+            config: Arc::new(RuntimeConfig::from_cli(&test_cli()).expect("valid test config")),
             log_storage: Arc::new(NoopLogStorage),
             webhooks: Arc::new(RecordingWebhookClient::new()),
             email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
@@ -431,7 +431,7 @@ mod tests {
             .into_connection();
         let mut cli = test_cli();
         cli.storage.nar_ttl_hours = 24;
-        let config = Arc::new(RuntimeConfig::from_cli(&cli));
+        let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
         let state = Arc::new(ServerState {
             web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
             worker_db: WorkerDb::new(db),
@@ -526,7 +526,7 @@ mod tests {
         let state = Arc::new(ServerState {
             web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
             worker_db: WorkerDb::new(db),
-            config: Arc::new(RuntimeConfig::from_cli(&test_cli())),
+            config: Arc::new(RuntimeConfig::from_cli(&test_cli()).expect("valid test config")),
             log_storage: Arc::new(NoopLogStorage),
             webhooks: Arc::new(RecordingWebhookClient::new()),
             email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,

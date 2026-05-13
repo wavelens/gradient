@@ -706,7 +706,7 @@ mod reelect_leader_tests {
             metrics: crate::types::MetricsArgs::default(),
             network: crate::types::NetworkArgs::default(),
         };
-        let config = std::sync::Arc::new(RuntimeConfig::from_cli(&cli));
+        let config = std::sync::Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
         let nar_storage = NarStore::local(&config.storage.base_path).expect("nar store");
         std::sync::Arc::new(crate::types::ServerState {
             web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),

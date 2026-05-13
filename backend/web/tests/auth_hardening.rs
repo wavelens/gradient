@@ -70,7 +70,7 @@ fn hash_api_key(raw: &str) -> String {
 
 fn server_with(web_db_setup: impl FnOnce(MockDatabase) -> MockDatabase) -> TestServer {
     let cli = test_cli();
-    let config = Arc::new(RuntimeConfig::from_cli(&cli));
+    let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
     let nar_storage = NarStore::local(&config.storage.base_path).expect("create test NarStore");
     let db = web_db_setup(MockDatabase::new(DatabaseBackend::Postgres));
     let state = Arc::new(ServerState {

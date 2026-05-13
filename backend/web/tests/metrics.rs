@@ -46,7 +46,7 @@ fn count_row(kind: &str, label: Option<&str>, value: i64) -> BTreeMap<&'static s
 
 fn state_with_metrics(enabled: bool, db: DatabaseConnection) -> Arc<ServerState> {
     let cli = test_cli();
-    let mut runtime = RuntimeConfig::from_cli(&cli);
+    let mut runtime = RuntimeConfig::from_cli(&cli).expect("valid test config");
     runtime.metrics = enabled.then(|| MetricsConfig {
         token: TOKEN.to_string(),
     });

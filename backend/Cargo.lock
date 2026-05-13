@@ -980,6 +980,7 @@ dependencies = [
  "harmonia-utils-hash",
  "hex",
  "hmac 0.13.0",
+ "ipnet",
  "lettre",
  "libc",
  "migration",

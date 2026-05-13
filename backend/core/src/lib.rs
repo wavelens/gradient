@@ -42,7 +42,10 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
         "Starting Gradient server bootstrap",
     );
 
-    let config = Arc::new(RuntimeConfig::from_cli(&cli));
+    let config = Arc::new(RuntimeConfig::from_cli(&cli).unwrap_or_else(|e| {
+        tracing::error!(error = %e, "invalid network config");
+        std::process::exit(1);
+    }));
 
     let db = match connect_db(&cli).await {
         Ok(db) => db,
