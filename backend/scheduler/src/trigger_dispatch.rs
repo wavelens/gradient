@@ -13,18 +13,55 @@
 
 use chrono::{NaiveDateTime, Utc};
 
+use gradient_core::types::ProjectTriggerId;
+
+/// Upper bound of the jitter added to each polling cycle, expressed as a
+/// percentage of `interval_secs`. Spreads concurrently-created triggers out
+/// over time so they don't all hit the upstream at the same moment.
+const POLLING_JITTER_PCT: u32 = 10;
+
 /// `true` if a polling trigger with the given `interval_secs` should fire
 /// at `now`, given that it last fired at `last_fired_at`. A trigger that has
 /// never fired (`None`) is always due.
+///
+/// The effective wait is `interval_secs + jitter`, where jitter is in
+/// `[0, interval_secs * POLLING_JITTER_PCT / 100]` and is derived
+/// deterministically from `(trigger_id, last_fired_at)`. Keeping the jitter
+/// stable within a cycle means the firing decision doesn't oscillate; a fresh
+/// value is drawn after each fire because `last_fired_at` advances.
 pub(crate) fn polling_due(
+    trigger_id: ProjectTriggerId,
     last_fired_at: Option<NaiveDateTime>,
     interval_secs: u32,
     now: NaiveDateTime,
 ) -> bool {
     match last_fired_at {
         None => true,
-        Some(t) => (now - t).num_seconds() >= interval_secs as i64,
+        Some(t) => {
+            let jitter = polling_jitter_secs(trigger_id, t, interval_secs);
+            (now - t).num_seconds() >= interval_secs as i64 + jitter as i64
+        }
     }
+}
+
+/// Deterministic jitter in `[0, interval_secs * POLLING_JITTER_PCT / 100]`
+/// for a single polling cycle.
+fn polling_jitter_secs(
+    trigger_id: ProjectTriggerId,
+    last_fired_at: NaiveDateTime,
+    interval_secs: u32,
+) -> u32 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let max = interval_secs / (100 / POLLING_JITTER_PCT);
+    if max == 0 {
+        return 0;
+    }
+    let mut hasher = DefaultHasher::new();
+    trigger_id.hash(&mut hasher);
+    last_fired_at.hash(&mut hasher);
+    (hasher.finish() % (max as u64 + 1)) as u32
 }
 
 /// `true` if a six-field cron expression (sec min hour dom mon dow) has a
@@ -136,7 +173,7 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
         };
         let due = match &cfg {
             TriggerConfig::Polling { interval_secs, .. } => {
-                polling_due(trig.last_fired_at, *interval_secs, now)
+                polling_due(trig.id, trig.last_fired_at, *interval_secs, now)
             }
             TriggerConfig::Time { cron } => cron_due(cron, trig.last_fired_at, now),
             _ => false,
@@ -226,14 +263,19 @@ mod tests {
         NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S").unwrap()
     }
 
+    fn tid() -> ProjectTriggerId {
+        ProjectTriggerId::now_v7()
+    }
+
     #[test]
     fn polling_no_prior_fires_now() {
-        assert!(polling_due(None, 60, dt("2026-05-06 10:00:00")));
+        assert!(polling_due(tid(), None, 60, dt("2026-05-06 10:00:00")));
     }
 
     #[test]
     fn polling_under_interval_does_not_fire() {
         assert!(!polling_due(
+            tid(),
             Some(dt("2026-05-06 10:00:00")),
             60,
             dt("2026-05-06 10:00:30")
@@ -241,17 +283,71 @@ mod tests {
     }
 
     #[test]
-    fn polling_at_or_past_interval_fires() {
+    fn polling_well_past_interval_plus_max_jitter_fires() {
+        // 60s interval + max 10% jitter (6s) = at most 66s — 90s is past that.
+        let id = tid();
         assert!(polling_due(
-            Some(dt("2026-05-06 10:00:00")),
-            60,
-            dt("2026-05-06 10:01:00")
-        ));
-        assert!(polling_due(
+            id,
             Some(dt("2026-05-06 10:00:00")),
             60,
             dt("2026-05-06 10:01:30")
         ));
+    }
+
+    #[test]
+    fn polling_jitter_within_ten_percent_bound() {
+        // Sweep many trigger IDs at the same cycle and confirm none exceed 10%.
+        let last = dt("2026-05-06 10:00:00");
+        let interval = 600;
+        let max = interval / 10;
+        for _ in 0..1000 {
+            let j = polling_jitter_secs(tid(), last, interval);
+            assert!(j <= max, "jitter {j} exceeded 10% bound {max}");
+        }
+    }
+
+    #[test]
+    fn polling_jitter_is_deterministic_per_cycle() {
+        let id = tid();
+        let last = dt("2026-05-06 10:00:00");
+        let a = polling_jitter_secs(id, last, 600);
+        let b = polling_jitter_secs(id, last, 600);
+        assert_eq!(a, b, "same (trigger_id, last_fired_at) must yield same jitter");
+    }
+
+    #[test]
+    fn polling_jitter_changes_between_cycles() {
+        // Different last_fired_at on the same trigger should produce different
+        // jitter for at least one of two adjacent cycles (probabilistic, but
+        // the hash collision rate makes a false negative astronomically rare).
+        let id = tid();
+        let a = polling_jitter_secs(id, dt("2026-05-06 10:00:00"), 600);
+        let b = polling_jitter_secs(id, dt("2026-05-06 10:11:00"), 600);
+        let c = polling_jitter_secs(id, dt("2026-05-06 10:22:00"), 600);
+        assert!(a != b || a != c, "jitter must vary across cycles");
+    }
+
+    #[test]
+    fn polling_jitter_zero_when_interval_below_threshold() {
+        // 10% of 9 is 0 with integer floor — jitter must be 0.
+        assert_eq!(polling_jitter_secs(tid(), dt("2026-05-06 10:00:00"), 9), 0);
+    }
+
+    #[test]
+    fn polling_does_not_fire_before_interval_plus_jitter() {
+        // Pick an interval/timing such that the boundary lies inside the
+        // jitter window: interval=100, max jitter=10. At now = last + 100s,
+        // the trigger must still wait if its own jitter > 0.
+        let id = ProjectTriggerId::now_v7();
+        let last = dt("2026-05-06 10:00:00");
+        let jitter = polling_jitter_secs(id, last, 100);
+        if jitter == 0 {
+            return; // boundary case validated by other tests
+        }
+        let just_before = last + chrono::Duration::seconds(100 + jitter as i64 - 1);
+        let exactly_at = last + chrono::Duration::seconds(100 + jitter as i64);
+        assert!(!polling_due(id, Some(last), 100, just_before));
+        assert!(polling_due(id, Some(last), 100, exactly_at));
     }
 
     #[test]
