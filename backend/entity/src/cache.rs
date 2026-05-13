@@ -22,6 +22,7 @@ pub struct Model {
     pub description: String,
     pub active: bool,
     pub priority: i32,
+    pub local_priority: Option<i32>,
     pub public_key: String,
     #[serde(skip_serializing)]
     pub private_key: String,
@@ -40,6 +41,7 @@ impl std::fmt::Debug for Model {
             .field("description", &self.description)
             .field("active", &self.active)
             .field("priority", &self.priority)
+            .field("local_priority", &self.local_priority)
             .field("public_key", &self.public_key)
             .field("private_key", &"[redacted]")
             .field("public", &self.public)

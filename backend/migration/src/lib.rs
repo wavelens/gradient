@@ -102,6 +102,7 @@ mod m20260510_000000_seed_github_app_integrations;
 mod m20260510_000001_api_key_options;
 mod m20260510_000002_add_managed_to_role;
 mod m20260511_000000_strip_derivation_path_prefix;
+mod m20260513_000000_add_local_priority_to_cache;
 
 pub struct Migrator;
 
@@ -205,6 +206,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260510_000001_api_key_options::Migration),
             Box::new(m20260510_000002_add_managed_to_role::Migration),
             Box::new(m20260511_000000_strip_derivation_path_prefix::Migration),
+            Box::new(m20260513_000000_add_local_priority_to_cache::Migration),
         ]
     }
 }
