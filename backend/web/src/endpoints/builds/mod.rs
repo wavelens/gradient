@@ -27,7 +27,7 @@ use crate::authorization::ApiKeyContext;
 use crate::error::{WebError, WebResult};
 use crate::helpers::OptionExt;
 use gradient_core::types::*;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
 use std::sync::Arc;
 
 /// Resolved access context for a build.
@@ -107,7 +107,8 @@ impl BuildAccessContext {
     /// Load build + organization and enforce public/member access.
     ///
     /// Returns `not_found("Build")` when the build does not exist, the
-    /// organization is private, and `maybe_user` is not a member.
+    /// organization is private, and `maybe_user` is neither a direct member
+    /// nor a member of any follower-org that points at this build via `via`.
     pub(super) async fn load(
         state: &Arc<ServerState>,
         build_id: BuildId,
@@ -116,7 +117,7 @@ impl BuildAccessContext {
     ) -> WebResult<Self> {
         let ctx = Self::load_unguarded(state, build_id).await?;
 
-        let can_access = if ctx.organization.public {
+        let direct_access = if ctx.organization.public {
             true
         } else {
             match maybe_user {
@@ -124,10 +125,66 @@ impl BuildAccessContext {
                 None => false,
             }
         };
-        if !can_access {
-            return Err(WebError::not_found("Build"));
+        if direct_access {
+            return Ok(ctx);
         }
 
-        Ok(ctx)
+        if let Some(user) = maybe_user
+            && follower_orgs_accessible(state, user, api_key, build_id).await?
+        {
+            return Ok(ctx);
+        }
+
+        Err(WebError::not_found("Build"))
     }
+}
+
+async fn follower_orgs_accessible(
+    state: &Arc<ServerState>,
+    user: &MUser,
+    api_key: Option<&ApiKeyContext>,
+    leader_build_id: BuildId,
+) -> WebResult<bool> {
+    let follower_eval_ids: Vec<EvaluationId> = EBuild::find()
+        .filter(CBuild::Via.eq(leader_build_id))
+        .select_only()
+        .column(CBuild::Evaluation)
+        .into_tuple()
+        .all(&state.web_db)
+        .await?;
+    if follower_eval_ids.is_empty() {
+        return Ok(false);
+    }
+
+    let evals = EEvaluation::find()
+        .filter(CEvaluation::Id.is_in(follower_eval_ids))
+        .all(&state.web_db)
+        .await?;
+
+    let mut org_ids: std::collections::HashSet<OrganizationId> =
+        std::collections::HashSet::new();
+    for ev in evals {
+        let org = if let Some(project_id) = ev.project {
+            EProject::find_by_id(project_id)
+                .one(&state.web_db)
+                .await?
+                .map(|p| p.organization)
+        } else {
+            EDirectBuild::find()
+                .filter(CDirectBuild::Evaluation.eq(ev.id))
+                .one(&state.web_db)
+                .await?
+                .map(|d| d.organization)
+        };
+        if let Some(o) = org {
+            org_ids.insert(o);
+        }
+    }
+
+    for org_id in org_ids {
+        if is_org_member(state, user.id, org_id, api_key).await? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
