@@ -215,12 +215,13 @@ impl<'a> EvalResultProcessor<'a> {
             .filter(|id| !truly_substituted.contains(id))
             .collect();
 
-        let leader_for_drv = find_active_leaders(&self.state.worker_db, &buildable_drv_ids)
-            .await
-            .unwrap_or_else(|e| {
-                error!(error = %e, "failed to query active leaders");
-                HashMap::new()
-            });
+        let leader_for_drv =
+            find_active_leaders(&self.state.worker_db, self.organization_id, &buildable_drv_ids)
+                .await
+                .unwrap_or_else(|e| {
+                    error!(error = %e, "failed to query active leaders");
+                    HashMap::new()
+                });
 
         for d in derivations {
             let Some(&drv_id) = drv_path_to_id.get(&d.drv_path) else {
