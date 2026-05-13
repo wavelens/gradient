@@ -95,6 +95,7 @@ pub fn cache_with_id(id: CacheId, slug: &str, owner: UserId) -> cache::Model {
         description: String::new(),
         active: true,
         priority: 30,
+        local_priority: None,
         public_key: "ssh-ed25519 AAAA test".into(),
         private_key: "encrypted".into(),
         public: false,

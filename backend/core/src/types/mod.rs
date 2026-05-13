@@ -26,7 +26,8 @@ pub use self::build_output_metadata::BuildOutputMetadata;
 pub use self::cached_path_info::CachedPathInfo;
 pub use self::cli::{
     DatabaseArgs, EmailArgs, EvalArgs, GitHubAppArgs, LimitsArgs, LoggingArgs, MetricsArgs,
-    OidcArgs, ProtoArgs, RegistrationArgs, S3Args, SecretsArgs, ServerArgs, StorageArgs,
+    NetworkArgs, OidcArgs, ProtoArgs, RegistrationArgs, S3Args, SecretsArgs, ServerArgs,
+    StorageArgs, in_any, parse_cidr_list,
 };
 pub use self::config::{
     EmailConfig, GitHubAppConfig, MetricsConfig, OidcConfig, RuntimeConfig, S3Config,
@@ -92,6 +93,8 @@ pub struct Cli {
     pub github_app: GitHubAppArgs,
     #[command(flatten)]
     pub metrics: MetricsArgs,
+    #[command(flatten)]
+    pub network: NetworkArgs,
 }
 
 #[derive(Debug)]

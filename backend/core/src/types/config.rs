@@ -253,6 +253,7 @@ mod tests {
             s3: S3Args::default(),
             github_app: GitHubAppArgs::default(),
             metrics: MetricsArgs::default(),
+            network: NetworkArgs::default(),
         }
     }
 

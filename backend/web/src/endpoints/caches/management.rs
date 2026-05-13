@@ -160,6 +160,7 @@ pub async fn put(
         display_name: Set(body.display_name.trim().to_string()),
         description: Set(body.description.trim().to_string()),
         priority: Set(body.priority),
+        local_priority: Set(None),
         public_key: Set(public_key),
         private_key: Set(private_key),
         public: Set(body.public.unwrap_or(false)),
