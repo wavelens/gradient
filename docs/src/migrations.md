@@ -20,7 +20,7 @@ A migration pair `add_X` / `drop_X` may be removed once **both** of these are tr
 
 ### Existing installs
 
-Removing a pair leaves orphan rows in the `seaql_migrations` table on installs that already ran the deleted migrations. SeaORM 1.1's validator rejects this state with "Applied migrations not found in migration list", so Gradient prunes the affected rows at startup, before `Migrator::up`, via `prune_removed_migrations` in `backend/core/src/db/connection.rs`. **When retiring a pair, append its `MigrationName::name()` strings to `REMOVED_MIGRATION_NAMES` in the same patch** — otherwise existing installs will refuse to start.
+Removing a pair leaves orphan rows in the `seaql_migrations` table on installs that already ran the deleted migrations. SeaORM 1.1's validator rejects this state with "Applied migrations not found in migration list", so Gradient prunes any row whose `version` is no longer in `Migrator::migrations()` at startup, before `Migrator::up`, via `prune_removed_migrations` in `backend/core/src/db/connection.rs`. The pruned versions are emitted at `info` so the cleanup is auditable. No per-retirement bookkeeping is required: deleting a migration file and dropping its entry from `migrator/src/lib.rs` is the complete change.
 
 ### What is out of scope
 

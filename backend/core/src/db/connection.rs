@@ -74,35 +74,38 @@ pub async fn connect_db(cli: &Cli) -> Result<DatabaseConnection> {
     Ok(db)
 }
 
-/// Migration names removed from the registry. Their `seaql_migrations` rows
-/// must be purged at startup or sea-orm's validator aborts with
-/// "Applied migrations not found in migration list". When retiring a
-/// migration (see `docs/src/migrations.md`), append its name here.
-const REMOVED_MIGRATION_NAMES: &[&str] = &[
-    "m20260330_000000_add_has_artefacts_to_build_output",
-    "m20260408_000000_add_github_app_enabled_to_organization",
-    "m20260504_000000_drop_has_artefacts_from_derivation_output",
-    "m20260507_000000_drop_github_app_enabled_from_organization",
-];
-
+/// Purge `seaql_migrations` rows whose `version` is no longer in the
+/// registered migration list. Without this, sea-orm's validator aborts with
+/// "Applied migrations not found in migration list" on installs that ran
+/// migrations later removed from the codebase. The set of registered names is
+/// derived from `Migrator::migrations()` so it cannot drift from reality.
 async fn prune_removed_migrations(db: &DatabaseConnection) -> Result<()> {
-    if REMOVED_MIGRATION_NAMES.is_empty() {
+    let known: Vec<Value> = Migrator::migrations()
+        .iter()
+        .map(|m| Value::from(m.name().to_string()))
+        .collect();
+    if known.is_empty() {
         return Ok(());
     }
-    let placeholders: Vec<String> = (1..=REMOVED_MIGRATION_NAMES.len())
-        .map(|i| format!("${i}"))
-        .collect();
+    let placeholders: Vec<String> = (1..=known.len()).map(|i| format!("${i}")).collect();
     let sql = format!(
-        "DELETE FROM seaql_migrations WHERE version IN ({})",
+        "DELETE FROM seaql_migrations WHERE version NOT IN ({}) RETURNING version",
         placeholders.join(", ")
     );
-    let values: Vec<Value> = REMOVED_MIGRATION_NAMES.iter().map(|v| (*v).into()).collect();
-    db.execute(Statement::from_sql_and_values(
-        DatabaseBackend::Postgres,
-        sql,
-        values,
-    ))
-    .await?;
+    let rows = db
+        .query_all(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            sql,
+            known,
+        ))
+        .await?;
+    if !rows.is_empty() {
+        let pruned: Vec<String> = rows
+            .iter()
+            .filter_map(|r| r.try_get::<String>("", "version").ok())
+            .collect();
+        tracing::info!(?pruned, "pruned orphan seaql_migrations rows");
+    }
     Ok(())
 }
 
