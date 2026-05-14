@@ -260,6 +260,7 @@ mod tests {
             registration: RegistrationArgs {
                 enable_registration: false,
                 report_errors: false,
+                sentry_dsn: None,
             },
             proto: ProtoArgs {
                 max_proto_connections: 16,

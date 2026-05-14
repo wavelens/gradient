@@ -2137,3 +2137,10 @@ Three cases:
 - `core::types::config::network_config` — defaults parse; bad `trusted_proxies` and `local_ips` each return errors naming the env var.
 - `web::client_ip::resolve_client_ip` — untrusted peer with/without XFF returns peer; trusted peer returns single XFF / first-untrusted-from-right / leftmost-when-all-trusted; malformed XFF entries skipped; all-malformed XFF returns peer; IPv6 happy path; IPv4-mapped IPv6 peer matches IPv4 CIDRs.
 - `web::endpoints::caches::narinfo` integration (`cache_local_priority.rs`) — local_priority swapped for matching XFF, not swapped for non-local XFF, ignored when NULL, ignored when 0, ignored when peer untrusted.
+
+## Sentry DSN — operator-overridable reporting target (issue #106)
+
+Tests in `backend/core/src/types/cli/registration.rs` cover the DSN override helper:
+
+- `effective_sentry_dsn_returns_default_when_none` — when `RegistrationArgs::sentry_dsn` is `None`, the helper returns `DEFAULT_SENTRY_DSN` (the upstream Wavelens DSN).
+- `effective_sentry_dsn_returns_override_when_some` — when an operator sets `GRADIENT_SENTRY_DSN` / `settings.sentryDsn`, the helper returns the override string, and the three Sentry init call-sites (`backend/src/main.rs`, `cache_loop`, `sign_sweep_loop`) route reports there instead.

@@ -79,10 +79,9 @@ async fn run() -> std::io::Result<()> {
     );
 
     let _guard = if state.config.registration.report_errors {
-        info!("Error reporting enabled - initializing Sentry");
-        Some(sentry::init(
-            "https://5895e5a5d35f4dbebbcc47d5a722c402@reports.wavelens.io/1",
-        ))
+        let dsn = gradient_core::types::cli::effective_sentry_dsn(&state.config.registration);
+        info!(dsn, "Error reporting enabled - initializing Sentry");
+        Some(sentry::init(dsn.to_string()))
     } else {
         info!("Error reporting disabled");
         None
