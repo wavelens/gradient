@@ -672,7 +672,10 @@ mod tests {
             .append_query_results([prev_builds])
             .append_query_results([vec![inserted_eval]])
             // find_active_leaders for the one Queued drv → no in-flight leader.
+            //   same-org pass: empty
+            //   cross-org pass: empty derivation lookup short-circuits
             .append_query_results([Vec::<entity::build::Model>::new()])
+            .append_query_results([Vec::<entity::derivation::Model>::new()])
             .append_query_results([vec![make_build(
                 BuildId::now_v7(),
                 new_eval_id,
