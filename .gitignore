@@ -2,6 +2,8 @@
 backend/test-store
 .nixos-test-history
 
+/proxy/
+
 # ---> Python
 # Byte-compiled / optimized / DLL files
 __pycache__/
