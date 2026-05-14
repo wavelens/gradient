@@ -5785,6 +5785,14 @@ components:
           description: Nix substituter priority (lower number = higher priority; typical range 1–100)
           default: 40
           example: 40
+        local_priority:
+          type: integer
+          format: int32
+          nullable: true
+          description: |
+            Alternate Priority returned in nix-cache-info when the client
+            IP is in the server's local_ips list. Null or 0 disables the
+            override.
 
     PatchCacheRequest:
       type: object
@@ -5797,6 +5805,14 @@ components:
           type: string
         priority:
           type: integer
+        local_priority:
+          type: integer
+          format: int32
+          nullable: true
+          description: |
+            Alternate Priority returned in nix-cache-info when the client
+            IP is in the server's local_ips list. Null or 0 disables the
+            override.
 
     Cache:
       type: object
@@ -5813,6 +5829,14 @@ components:
           type: string
         priority:
           type: integer
+        local_priority:
+          type: integer
+          format: int32
+          nullable: true
+          description: |
+            Alternate Priority returned in nix-cache-info when the client
+            IP is in the server's local_ips list. Null or 0 disables the
+            override.
         active:
           type: boolean
           description: Whether the cache is publicly accessible

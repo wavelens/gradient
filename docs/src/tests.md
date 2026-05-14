@@ -2129,3 +2129,11 @@ Three cases:
   via `BuildAccessContext::load`'s follower-org fallback.
 - `web/tests/evaluation_builds_via_cross_org.rs` covers the
   `GET /evals/{eval}/builds` leader-row swap across organisations.
+
+## Cache local-priority (issue #222)
+
+- `core::types::cli::network::parse_cidr_list` — empty, single IPv4, single IPv6, mixed-with-whitespace, malformed (`banana`), malformed mid-list.
+- `core::types::cli::network::in_any` — IPv4 hit, IPv4 miss, IPv6 hit.
+- `core::types::config::network_config` — defaults parse; bad `trusted_proxies` and `local_ips` each return errors naming the env var.
+- `web::client_ip::resolve_client_ip` — untrusted peer with/without XFF returns peer; trusted peer returns single XFF / first-untrusted-from-right / leftmost-when-all-trusted; malformed XFF entries skipped; all-malformed XFF returns peer; IPv6 happy path; IPv4-mapped IPv6 peer matches IPv4 CIDRs.
+- `web::endpoints::caches::narinfo` integration (`cache_local_priority.rs`) — local_priority swapped for matching XFF, not swapped for non-local XFF, ignored when NULL, ignored when 0, ignored when peer untrusted.
