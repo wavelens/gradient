@@ -25,6 +25,7 @@ nav:
   - Development:
     - Architecture: development/architecture.md
     - Internals: development/internals.md
+    - Migrations: migrations.md
     - Proto: development/proto.md
     - Tests: development/tests.md
     - GitHub App setup: development/github-app-setup.md
