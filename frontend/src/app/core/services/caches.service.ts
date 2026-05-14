@@ -72,6 +72,7 @@ export class CachesService {
     description: string;
     priority: number;
     public?: boolean;
+    local_priority?: number | null;
   }): Observable<Cache> {
     return this.api.put<Cache>('caches', data);
   }

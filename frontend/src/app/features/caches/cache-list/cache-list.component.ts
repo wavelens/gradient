@@ -49,11 +49,19 @@ export class CacheListComponent implements OnInit, OnDestroy {
   createError = signal<string | null>(null);
   nameCheckState = signal<'idle' | 'invalid' | 'checking' | 'available' | 'taken'>('idle');
 
-  newCache = {
+  newCache: {
+    name: string;
+    display_name: string;
+    description: string;
+    priority: number;
+    local_priority: number | null;
+    public: boolean;
+  } = {
     name: '',
     display_name: '',
     description: '',
     priority: 50,
+    local_priority: null,
     public: false,
   };
 
@@ -112,7 +120,7 @@ export class CacheListComponent implements OnInit, OnDestroy {
   }
 
   openCreateDialog(): void {
-    this.newCache = { name: '', display_name: '', description: '', priority: 50, public: false };
+    this.newCache = { name: '', display_name: '', description: '', priority: 50, local_priority: null, public: false };
     this.cacheNameEditedByUser = false;
     this.nameCheckState.set('idle');
     this.createError.set(null);

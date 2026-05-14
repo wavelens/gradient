@@ -217,6 +217,20 @@
     </div>
 
     <div class="form-group">
+      <label for="cache-local-priority">Local Priority</label>
+      <input
+        type="number"
+        id="cache-local-priority"
+        [(ngModel)]="newCache.local_priority"
+        class="w-full"
+      />
+      <small class="text-secondary">
+        Advertised to clients in the server's local-IPs allowlist.
+        Leave empty (or set 0) to always advertise the default priority.
+      </small>
+    </div>
+
+    <div class="form-group">
       <label for="cache-visibility">Visibility</label>
       <select id="cache-visibility" [(ngModel)]="newCache.public" class="visibility-select w-full">
         <option [ngValue]="false">Private</option>

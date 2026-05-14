@@ -80,6 +80,21 @@
         </div>
 
         <div class="form-group">
+          <label for="local-priority">Local Priority</label>
+          <input
+            type="number"
+            id="local-priority"
+            [(ngModel)]="formData.local_priority"
+            class="w-full"
+            [appManagedDisable]="access()"
+          />
+          <small class="text-secondary">
+            Advertised to clients whose IP matches the server's local-IPs allowlist.
+            Leave empty (or set 0) to always advertise the default priority.
+          </small>
+        </div>
+
+        <div class="form-group">
           <label for="visibility">Visibility</label>
           <select id="visibility" [(ngModel)]="formData.public" class="role-select w-full" [appManagedDisable]="access()">
             <option [ngValue]="false">Private</option>
