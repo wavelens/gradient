@@ -36,7 +36,6 @@ mod m20260326_000001_add_public_to_cache;
 mod m20260328_000000_add_max_concurrent_builds_to_server;
 mod m20260328_000001_split_cache_signing_key;
 mod m20260329_000000_create_table_webhook;
-mod m20260330_000000_add_has_artefacts_to_build_output;
 mod m20260401_000000_create_table_cache_metric;
 mod m20260401_000001_add_mode_to_organization_cache;
 mod m20260401_000002_create_table_cache_upstream;
@@ -64,17 +63,14 @@ mod m20260418_000000_rename_feature_add_kind;
 mod m20260418_000001_add_name_to_worker_registration;
 mod m20260420_000000_add_flake_source_to_evaluation;
 mod m20260421_000000_create_table_integration;
-mod m20260421_000001_add_github_app_enabled_to_organization;
 mod m20260421_000002_drop_use_nix_store_from_organization;
 mod m20260421_000003_create_table_build_product;
-mod m20260421_000004_drop_has_artefacts_from_derivation_output;
 mod m20260422_000000_rename_worker_name_and_add_created_by;
 mod m20260422_000001_add_display_name_to_integration;
 mod m20260422_000002_add_enable_caps_to_worker_registration;
 mod m20260422_000003_add_deriver_to_cached_path;
 mod m20260425_000000_replace_build_server_with_worker;
 mod m20260430_000000_normalize_hash_columns;
-mod m20260501_000000_drop_github_app_enabled_from_organization;
 mod m20260501_000001_add_repo_check_id;
 mod m20260502_000000_hash_api_keys;
 mod m20260502_000001_drop_file_columns_from_derivation_output;
@@ -140,7 +136,6 @@ impl MigratorTrait for Migrator {
             Box::new(m20260328_000000_add_max_concurrent_builds_to_server::Migration),
             Box::new(m20260328_000001_split_cache_signing_key::Migration),
             Box::new(m20260329_000000_create_table_webhook::Migration),
-            Box::new(m20260330_000000_add_has_artefacts_to_build_output::Migration),
             Box::new(m20260401_000000_create_table_cache_metric::Migration),
             Box::new(m20260401_000001_add_mode_to_organization_cache::Migration),
             Box::new(m20260401_000002_create_table_cache_upstream::Migration),
@@ -168,17 +163,14 @@ impl MigratorTrait for Migrator {
             Box::new(m20260418_000001_add_name_to_worker_registration::Migration),
             Box::new(m20260420_000000_add_flake_source_to_evaluation::Migration),
             Box::new(m20260421_000000_create_table_integration::Migration),
-            Box::new(m20260421_000001_add_github_app_enabled_to_organization::Migration),
             Box::new(m20260421_000002_drop_use_nix_store_from_organization::Migration),
             Box::new(m20260421_000003_create_table_build_product::Migration),
-            Box::new(m20260421_000004_drop_has_artefacts_from_derivation_output::Migration),
             Box::new(m20260422_000000_rename_worker_name_and_add_created_by::Migration),
             Box::new(m20260422_000001_add_display_name_to_integration::Migration),
             Box::new(m20260422_000002_add_enable_caps_to_worker_registration::Migration),
             Box::new(m20260422_000003_add_deriver_to_cached_path::Migration),
             Box::new(m20260425_000000_replace_build_server_with_worker::Migration),
             Box::new(m20260430_000000_normalize_hash_columns::Migration),
-            Box::new(m20260501_000000_drop_github_app_enabled_from_organization::Migration),
             Box::new(m20260501_000001_add_repo_check_id::Migration),
             Box::new(m20260502_000000_hash_api_keys::Migration),
             Box::new(m20260502_000001_drop_file_columns_from_derivation_output::Migration),

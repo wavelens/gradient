@@ -170,12 +170,6 @@ impl MigrationTrait for Migration {
                             .default(false),
                     )
                     .col(
-                        ColumnDef::new(DerivationOutput::HasArtefacts)
-                            .boolean()
-                            .not_null()
-                            .default(false),
-                    )
-                    .col(
                         ColumnDef::new(DerivationOutput::CreatedAt)
                             .date_time()
                             .not_null(),
@@ -496,7 +490,6 @@ enum DerivationOutput {
     FileSize,
     NarSize,
     IsCached,
-    HasArtefacts,
     CreatedAt,
 }
 
