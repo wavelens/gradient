@@ -11,11 +11,15 @@
 //! monitor the warning log for missing audit rows; user-facing endpoints
 //! never see a 5xx because of an audit write.
 
+use axum::extract::{ConnectInfo, FromRequestParts};
 use axum::http::HeaderMap;
+use axum::http::request::Parts;
 use gradient_core::types::*;
-use std::net::IpAddr;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ConnectionTrait, EntityTrait};
+use std::convert::Infallible;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::Arc;
 
 /// Audit event identifiers. Stored as plain strings so adding new variants
 /// never requires a DB migration.
@@ -65,6 +69,31 @@ impl RequestInfo {
             .and_then(|v| v.to_str().ok())
             .map(str::to_owned);
         Self { ip, user_agent }
+    }
+}
+
+/// Axum extractor: resolves the caller's IP from `ConnectInfo + X-Forwarded-For`
+/// against the configured trusted-proxy CIDR set. Falls back to `0.0.0.0` when
+/// the runtime has no peer socket (e.g. `axum_test::TestServer` without
+/// `into_make_service_with_connect_info`), mirroring the auth middleware so a
+/// missing `ConnectInfo` never turns a 4xx into a 500.
+impl FromRequestParts<Arc<ServerState>> for RequestInfo {
+    type Rejection = Infallible;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &Arc<ServerState>,
+    ) -> Result<Self, Self::Rejection> {
+        let peer = parts
+            .extensions
+            .get::<ConnectInfo<SocketAddr>>()
+            .map(|c| c.0.ip())
+            .unwrap_or_else(|| IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+        Ok(Self::from_request(
+            &parts.headers,
+            peer,
+            &state.config.network.trusted_proxies,
+        ))
     }
 }
 

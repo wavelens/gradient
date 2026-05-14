@@ -10,10 +10,8 @@ use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::permissions::Permission;
-use axum::extract::{ConnectInfo, Path, Query, State};
-use axum::http::HeaderMap;
+use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
-use std::net::SocketAddr;
 
 use gradient_core::sources::generate_ssh_key;
 use gradient_core::types::consts::BASE_ROLE_ADMIN_ID;
@@ -421,8 +419,7 @@ pub async fn patch_organization(
 
 pub async fn delete_organization(
     state: State<Arc<ServerState>>,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
+    info: RequestInfo,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
     Path(organization): Path<String>,
@@ -443,7 +440,6 @@ pub async fn delete_organization(
     let aorganization: AOrganization = organization.into();
     aorganization.delete(&state.web_db).await?;
 
-    let info = RequestInfo::from_request(&headers, addr.ip(), &state.config.network.trusted_proxies);
     audit_record(
         &state.web_db,
         Some(user.id),

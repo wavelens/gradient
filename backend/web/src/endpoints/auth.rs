@@ -12,9 +12,8 @@ use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use axum::Json;
 use axum::body::Body;
-use axum::extract::{ConnectInfo, Query, State};
+use axum::extract::{Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
-use std::net::SocketAddr;
 use axum::response::{IntoResponse, Response};
 
 use email_address::EmailAddress;
@@ -54,8 +53,7 @@ pub struct CheckUsernameRequest {
 
 pub async fn post_basic_register(
     state: State<Arc<ServerState>>,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
+    info: RequestInfo,
     Json(body): Json<MakeUserRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     if !state.config.registration.enable_registration
@@ -128,7 +126,6 @@ pub async fn post_basic_register(
         .await
         .map_err(|e| WebError::from_db_err(e, "User"))?;
 
-    let info = RequestInfo::from_request(&headers, addr.ip(), &state.config.network.trusted_proxies);
     audit_record(
         &state.web_db,
         Some(user.id),
@@ -181,15 +178,12 @@ pub async fn post_basic_register(
 
 pub async fn post_basic_login(
     state: State<Arc<ServerState>>,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
+    info: RequestInfo,
     Json(body): Json<MakeLoginRequest>,
 ) -> WebResult<Response> {
     if state.config.oidc.as_ref().is_some_and(|o| o.required) {
         return Err(WebError::oauth_required());
     }
-
-    let info = RequestInfo::from_request(&headers, addr.ip(), &state.config.network.trusted_proxies);
 
     let user = match EUser::find()
         .filter(
@@ -317,7 +311,7 @@ fn oidc_failure(stage: &'static str) -> impl FnOnce(anyhow::Error) -> WebError {
 
 pub async fn get_oauth_authorize(
     state: State<Arc<ServerState>>,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    info: RequestInfo,
     headers: axum::http::HeaderMap,
     Query(query): Query<HashMap<String, String>>,
 ) -> WebResult<Response> {
@@ -342,7 +336,6 @@ pub async fn get_oauth_authorize(
     .await
     .map_err(oidc_failure("oauth_authorize_callback"))?;
 
-    let info = RequestInfo::from_request(&headers, addr.ip(), &state.config.network.trusted_proxies);
     let (_session_id, token) = create_session_and_token(
         state.clone(),
         user.id,
@@ -428,7 +421,7 @@ pub async fn get_oidc_login(
 
 pub async fn get_oidc_callback(
     state: State<Arc<ServerState>>,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    info: RequestInfo,
     headers: axum::http::HeaderMap,
     Query(query): Query<HashMap<String, String>>,
 ) -> WebResult<Response> {
@@ -449,7 +442,6 @@ pub async fn get_oidc_callback(
     .await
     .map_err(oidc_failure("oidc_callback"))?;
 
-    let info = RequestInfo::from_request(&headers, addr.ip(), &state.config.network.trusted_proxies);
     let (_session_id, token) = create_session_and_token(
         state.clone(),
         user.id,
@@ -486,7 +478,7 @@ pub async fn get_oidc_callback(
 
 pub async fn post_logout(
     state: State<Arc<ServerState>>,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    info: RequestInfo,
     headers: HeaderMap,
 ) -> WebResult<Response> {
     let secure = if state.config.server.use_tls {
@@ -515,7 +507,6 @@ pub async fn post_logout(
             let _ = active.update(&state.web_db).await;
         }
 
-        let info = RequestInfo::from_request(&headers, addr.ip(), &state.config.network.trusted_proxies);
         audit_record(
             &state.web_db,
             Some(user_id),

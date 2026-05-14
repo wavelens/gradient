@@ -11,10 +11,9 @@ use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::{
     PermissionEntry, available_permissions, mask_to_vec, parse_permission_list,
 };
-use axum::extract::{ConnectInfo, Path, Query, State};
+use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
 use axum::{Extension, Json};
-use std::net::SocketAddr;
 
 use chrono::Duration;
 use gradient_core::db::get_any_organization_by_name;
@@ -199,8 +198,7 @@ pub async fn get(
 
 pub async fn delete(
     state: State<Arc<ServerState>>,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
+    info: RequestInfo,
     Extension(user): Extension<MUser>,
     Json(body): Json<DeleteUserRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
@@ -221,7 +219,6 @@ pub async fn delete(
         }
     }
 
-    let info = RequestInfo::from_request(&headers, addr.ip(), &state.config.network.trusted_proxies);
     let user_id = user.id;
     let auser: AUser = user.into();
     auser.delete(&state.web_db).await?;
@@ -360,8 +357,7 @@ pub async fn get_keys(
 
 pub async fn post_keys(
     state: State<Arc<ServerState>>,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
+    info: RequestInfo,
     Extension(user): Extension<MUser>,
     Extension(api_key_caller): Extension<MaybeApiKey>,
     Json(body): Json<CreateApiKeyRequest>,
@@ -408,7 +404,6 @@ pub async fn post_keys(
     };
     let inserted = api_key.insert(&state.web_db).await?;
 
-    let info = RequestInfo::from_request(&headers, addr.ip(), &state.config.network.trusted_proxies);
     audit_record(
         &state.web_db,
         Some(user.id),
@@ -432,8 +427,7 @@ pub async fn post_keys(
 
 pub async fn patch_key(
     state: State<Arc<ServerState>>,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
+    request_info: RequestInfo,
     Extension(user): Extension<MUser>,
     Extension(api_key_caller): Extension<MaybeApiKey>,
     Path(api_id): Path<ApiId>,
@@ -494,7 +488,6 @@ pub async fn patch_key(
 
     let updated = active.update(&state.web_db).await?;
 
-    let request_info = RequestInfo::from_request(&headers, addr.ip(), &state.config.network.trusted_proxies);
     audit_record(
         &state.web_db,
         Some(user.id),
@@ -519,8 +512,7 @@ pub async fn patch_key(
 
 pub async fn delete_keys(
     state: State<Arc<ServerState>>,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
+    info: RequestInfo,
     Extension(user): Extension<MUser>,
     Extension(api_key_caller): Extension<MaybeApiKey>,
     Json(body): Json<ApiKeyRequest>,
@@ -546,7 +538,6 @@ pub async fn delete_keys(
     let aapi_key: AApi = api_key.into();
     aapi_key.delete(&state.web_db).await?;
 
-    let info = RequestInfo::from_request(&headers, addr.ip(), &state.config.network.trusted_proxies);
     audit_record(
         &state.web_db,
         Some(user.id),
@@ -570,8 +561,7 @@ pub async fn delete_keys(
 /// Revoke a single API key by id without deleting it (keeps the audit trail).
 pub async fn post_key_revoke(
     state: State<Arc<ServerState>>,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
+    info: RequestInfo,
     Extension(user): Extension<MUser>,
     Extension(api_key_caller): Extension<MaybeApiKey>,
     Path(api_id): Path<ApiId>,
@@ -598,7 +588,6 @@ pub async fn post_key_revoke(
     active.revoked_at = Set(Some(gradient_core::types::now()));
     active.update(&state.web_db).await?;
 
-    let info = RequestInfo::from_request(&headers, addr.ip(), &state.config.network.trusted_proxies);
     audit_record(
         &state.web_db,
         Some(user.id),
@@ -646,8 +635,7 @@ pub async fn get_sessions(
 
 pub async fn delete_session(
     state: State<Arc<ServerState>>,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
+    info: RequestInfo,
     Extension(user): Extension<MUser>,
     Path(session_id): Path<SessionId>,
 ) -> WebResult<Json<BaseResponse<String>>> {
@@ -667,7 +655,6 @@ pub async fn delete_session(
     active.revoked_at = Set(Some(gradient_core::types::now()));
     active.update(&state.web_db).await?;
 
-    let info = RequestInfo::from_request(&headers, addr.ip(), &state.config.network.trusted_proxies);
     audit_record(
         &state.web_db,
         Some(user.id),

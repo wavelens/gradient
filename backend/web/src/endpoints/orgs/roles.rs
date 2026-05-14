@@ -21,10 +21,8 @@ use crate::permissions::{
     Permission, PermissionEntry, available_permissions, is_builtin_role, mask_to_vec,
     parse_permission_list,
 };
-use axum::extract::{ConnectInfo, Path, State};
-use axum::http::HeaderMap;
+use axum::extract::{Path, State};
 use axum::{Extension, Json};
-use std::net::SocketAddr;
 use gradient_core::types::input::check_index_name;
 use gradient_core::types::*;
 use sea_orm::ActiveValue::Set;
@@ -158,8 +156,7 @@ pub async fn get_organization_roles(
 /// `POST /orgs/{organization}/roles` — create a custom role.
 pub async fn post_organization_role(
     state: State<Arc<ServerState>>,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
+    info: RequestInfo,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
     Path(organization): Path<String>,
@@ -209,7 +206,6 @@ pub async fn post_organization_role(
     .insert(&state.web_db)
     .await?;
 
-    let info = RequestInfo::from_request(&headers, addr.ip(), &state.config.network.trusted_proxies);
     audit_record(
         &state.web_db,
         Some(user.id),
@@ -253,8 +249,7 @@ pub async fn get_organization_role(
 /// Built-in roles are immutable: attempting to mutate them returns 403.
 pub async fn patch_organization_role(
     state: State<Arc<ServerState>>,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
+    info: RequestInfo,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
     Path((organization, role_id)): Path<(String, RoleId)>,
@@ -317,7 +312,6 @@ pub async fn patch_organization_role(
 
     let updated = active.update(&state.web_db).await?;
 
-    let info = RequestInfo::from_request(&headers, addr.ip(), &state.config.network.trusted_proxies);
     audit_record(
         &state.web_db,
         Some(user.id),
@@ -343,8 +337,7 @@ pub async fn patch_organization_role(
 /// affected members first (the UI surfaces the in-use count).
 pub async fn delete_organization_role(
     state: State<Arc<ServerState>>,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
+    info: RequestInfo,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
     Path((organization, role_id)): Path<(String, RoleId)>,
@@ -390,7 +383,6 @@ pub async fn delete_organization_role(
     let role_name = role.name.clone();
     role.into_active_model().delete(&state.web_db).await?;
 
-    let info = RequestInfo::from_request(&headers, addr.ip(), &state.config.network.trusted_proxies);
     audit_record(
         &state.web_db,
         Some(user.id),
