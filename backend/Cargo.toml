@@ -85,7 +85,7 @@ libc         = { version = "0.2", default-features = false }
 object_store = { version = "0.13", default-features = false, features = ["aws", "fs"] }
 
 # Harmonia (git deps)
-harmonia-nar           = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
+harmonia-file-nar      = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
 harmonia-protocol      = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
 harmonia-store-core    = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
 harmonia-store-remote  = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
@@ -121,7 +121,7 @@ mockall = { version = "0.14", default-features = false }
 debug = "line-tables-only"
 
 [patch.crates-io]
-harmonia-nar             = { git = "https://github.com/nix-community/harmonia.git" }
+harmonia-file-nar        = { git = "https://github.com/nix-community/harmonia.git" }
 harmonia-protocol        = { git = "https://github.com/nix-community/harmonia.git" }
 harmonia-protocol-derive = { git = "https://github.com/nix-community/harmonia.git" }
 harmonia-store-core      = { git = "https://github.com/nix-community/harmonia.git" }

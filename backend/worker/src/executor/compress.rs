@@ -6,7 +6,7 @@
 
 //! Dump store paths to NAR and compress with zstd before upload.
 //!
-//! Uses `harmonia-nar`'s `NarByteStream` for pure-Rust NAR packing (no `nix nar`
+//! Uses `harmonia-file-nar`'s `NarByteStream` for pure-Rust NAR packing (no `nix nar`
 //! subprocess). The compressed data is pushed to the server in 64 KiB chunks via
 //! [`ClientMessage::NarPush`] — delegated to [`crate::proto::nar::push_direct`].
 //!

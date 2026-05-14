@@ -14,8 +14,8 @@ extern crate core as gradient_core;
 
 use bytes::Bytes;
 use gradient_core::storage::nar_extract::{ExtractError, Extracted, extract_path_from_nar_bytes};
-use harmonia_nar::archive::test_data::{TestNarEvent, TestNarEvents};
-use harmonia_nar::archive::write_nar;
+use harmonia_file_nar::archive::test_data::{TestNarEvent, TestNarEvents};
+use harmonia_file_nar::archive::write_nar;
 use std::collections::BTreeMap;
 use std::io::Read as _;
 

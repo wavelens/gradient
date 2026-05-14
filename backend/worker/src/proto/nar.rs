@@ -162,7 +162,7 @@ pub async fn push_direct(
     let store_path = store_path.as_str();
     debug!(store_path, "NAR direct push");
 
-    let mut nar_stream = harmonia_nar::NarByteStream::new(store_path.to_owned().into());
+    let mut nar_stream = harmonia_file_nar::NarByteStream::new(store_path.to_owned().into());
     let mut encoder = zstd::stream::Encoder::new(Vec::with_capacity(NAR_CHUNK_SIZE * 2), 6)
         .context("failed to create zstd encoder")?;
     let mut file_hasher = Sha256::new();
@@ -265,7 +265,7 @@ pub async fn upload_presigned(
     debug!(store_path, method, "presigned NAR upload");
 
     // --- 1. Pack + compress the NAR into memory ---
-    let mut nar_stream = harmonia_nar::NarByteStream::new(store_path.to_owned().into());
+    let mut nar_stream = harmonia_file_nar::NarByteStream::new(store_path.to_owned().into());
     let mut encoder =
         zstd::stream::Encoder::new(Vec::new(), 6).context("failed to create zstd encoder")?;
     let mut nar_hasher = Sha256::new();

@@ -31,7 +31,7 @@ bzip2                 = { workspace = true }
 clap                  = { workspace = true }
 futures               = { workspace = true }
 git2                  = { workspace = true }
-harmonia-nar          = { workspace = true }
+harmonia-file-nar     = { workspace = true }
 harmonia-protocol     = { workspace = true }
 harmonia-store-core   = { workspace = true }
 harmonia-store-remote = { workspace = true }

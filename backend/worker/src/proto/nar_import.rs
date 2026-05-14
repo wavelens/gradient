@@ -914,7 +914,7 @@ fn decompress(compressed: &[u8], kind: Compression) -> Result<Vec<u8>> {
 /// without writing them to disk first.
 async fn extract_single_file_from_nar(nar_bytes: &[u8]) -> Result<Vec<u8>> {
     use futures::StreamExt as _;
-    use harmonia_nar::{NarEvent, parse_nar};
+    use harmonia_file_nar::{NarEvent, parse_nar};
     use tokio::io::AsyncReadExt as _;
 
     let cursor = std::io::Cursor::new(nar_bytes.to_vec());

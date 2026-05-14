@@ -59,9 +59,9 @@ tower-http           = { version = "0.6", default-features = false, features = [
 tower_governor       = { version = "0.8", default-features = false, features = ["axum"] }
 
 [dev-dependencies]
-axum-test    = { version = "20.0", default-features = false }
-harmonia-nar = { workspace = true, features = ["test"] }
-hmac         = { workspace = true }
+axum-test         = { version = "20.0", default-features = false }
+harmonia-file-nar = { workspace = true, features = ["test"] }
+hmac              = { workspace = true }
 test-support = { workspace = true }
 tokio-test   = { workspace = true }
 tower        = { version = "0.5", default-features = false }

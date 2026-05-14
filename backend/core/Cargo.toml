@@ -30,7 +30,7 @@ clap                  = { workspace = true }
 futures               = { workspace = true }
 git-url-parse         = { workspace = true }
 git2                  = { workspace = true }
-harmonia-nar          = { workspace = true }
+harmonia-file-nar     = { workspace = true }
 harmonia-protocol     = { workspace = true }
 harmonia-store-core   = { workspace = true }
 harmonia-store-remote = { workspace = true }
@@ -75,7 +75,7 @@ ssh-key           = { version = "0.6", features = ["ed25519"] }
 tar               = { version = "0.4", default-features = false }
 
 [dev-dependencies]
-harmonia-nar = { workspace = true, features = ["test"] }
+harmonia-file-nar = { workspace = true, features = ["test"] }
 mockall      = { workspace = true }
 test-support = { workspace = true }
 tokio-test   = { workspace = true }

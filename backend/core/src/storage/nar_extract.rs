@@ -17,7 +17,7 @@
 
 use async_compression::tokio::bufread::ZstdDecoder;
 use futures::StreamExt as _;
-use harmonia_nar::{NarEvent, parse_nar};
+use harmonia_file_nar::{NarEvent, parse_nar};
 use std::io;
 use thiserror::Error;
 use tokio::io::{AsyncReadExt as _, BufReader};

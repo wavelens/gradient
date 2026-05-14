@@ -589,7 +589,7 @@ fn get_basic_derivation(
 /// The `hash` field is hex-encoded (base16) raw digest bytes.
 fn ca_fixed_output(hash_algo: &str, hash_hex: &str) -> Result<DerivationOutput> {
     let (method, algo_str) = if let Some(rest) = hash_algo.strip_prefix("r:") {
-        (ContentAddressMethod::Recursive, rest)
+        (ContentAddressMethod::NixArchive, rest)
     } else if let Some(rest) = hash_algo.strip_prefix("text:") {
         (ContentAddressMethod::Text, rest)
     } else {
@@ -639,9 +639,9 @@ mod tests {
         let out = ca_fixed_output("r:sha256", h).unwrap();
         match out {
             DerivationOutput::CAFixed(ca) => {
-                assert_eq!(ca.method(), ContentAddressMethod::Recursive);
+                assert_eq!(ca.method(), ContentAddressMethod::NixArchive);
             }
-            other => panic!("expected CAFixed(Recursive), got {other:?}"),
+            other => panic!("expected CAFixed(NixArchive), got {other:?}"),
         }
     }
 
