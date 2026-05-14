@@ -37,7 +37,7 @@ pub use metrics::MetricsArgs;
 pub use network::{NetworkArgs, parse_cidr_list, in_any};
 pub use oidc::OidcArgs;
 pub use proto::ProtoArgs;
-pub use registration::RegistrationArgs;
+pub use registration::{DEFAULT_SENTRY_DSN, RegistrationArgs, effective_sentry_dsn};
 pub use s3::S3Args;
 pub use secrets::SecretsArgs;
 pub use server::ServerArgs;

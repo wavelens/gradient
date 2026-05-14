@@ -294,6 +294,17 @@ in {
 
       settings = {
         enableRegistration = lib.mkEnableOption "registration. Users must be registered via OIDC." // { default = true; };
+        sentryDsn = lib.mkOption {
+          description = ''
+            Override the Sentry DSN used when `reportErrors` is true.
+            `null` (default) ships crash reports to the upstream Wavelens
+            instance at `reports.wavelens.io`. Set this to your own Sentry
+            DSN to keep reports in-house.
+          '';
+          type = lib.types.nullOr lib.types.str;
+          default = null;
+          example = "https://your-key@your-sentry.example.com/1";
+        };
         maxProtoConnections = lib.mkOption {
           description = "Maximum number of simultaneous proto WebSocket connections";
           type = lib.types.ints.positive;
@@ -545,6 +556,8 @@ in {
         GRADIENT_STATE_FILE = "%d/gradient_state";
         GRADIENT_CREDENTIALS_DIR = "%d";
         RUST_LOG = cfg.settings.logLevel.default;
+      } // lib.optionalAttrs (cfg.settings.sentryDsn != null) {
+        GRADIENT_SENTRY_DSN = cfg.settings.sentryDsn;
       } // lib.optionalAttrs (cfg.settings.logLevel.cache != null) {
         GRADIENT_CACHE_LOG_LEVEL = cfg.settings.logLevel.cache;
       } // lib.optionalAttrs (cfg.settings.logLevel.web != null) {

@@ -58,7 +58,7 @@ echo "*:$(cat /run/secrets/gradient-worker-token)" > /run/secrets/gradient-worke
     cryptSecretFile           = "/run/secrets/gradient-crypt";
     configurePostgres         = true;
     reverseProxy.nginx.enable = true;
-    reportErrors              = true; # optional: will send crash reports to us
+    reportErrors              = true; # optional: ships crash reports to upstream Wavelens. Override via `settings.sentryDsn = "your-dsn"`.
   };
 
   services.gradient.worker = {

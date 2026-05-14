@@ -30,7 +30,8 @@ use tracing::{error, info};
 pub async fn cache_loop(state: Arc<ServerState>) {
     let _guard = if state.config.registration.report_errors {
         Some(sentry::init(
-            "https://5895e5a5d35f4dbebbcc47d5a722c402@reports.wavelens.io/1",
+            gradient_core::types::cli::effective_sentry_dsn(&state.config.registration)
+                .to_string(),
         ))
     } else {
         None
@@ -83,7 +84,8 @@ pub async fn cache_loop(state: Arc<ServerState>) {
 pub async fn sign_sweep_loop(state: Arc<ServerState>) {
     let _guard = if state.config.registration.report_errors {
         Some(sentry::init(
-            "https://5895e5a5d35f4dbebbcc47d5a722c402@reports.wavelens.io/1",
+            gradient_core::types::cli::effective_sentry_dsn(&state.config.registration)
+                .to_string(),
         ))
     } else {
         None
