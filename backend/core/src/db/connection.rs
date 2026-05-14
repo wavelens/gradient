@@ -9,8 +9,9 @@ use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use migration::Migrator;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectOptions, Database, DatabaseConnection,
-    DbErr, EntityTrait, QueryFilter, QuerySelect,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectOptions, ConnectionTrait, Database,
+    DatabaseBackend, DatabaseConnection, DbErr, EntityTrait, QueryFilter, QuerySelect, Statement,
+    Value,
 };
 use sea_orm_migration::prelude::*;
 use std::sync::Arc;
@@ -60,11 +61,49 @@ pub async fn connect_db(cli: &Cli) -> Result<DatabaseConnection> {
     let db = Database::connect(make_connect_options(cli, 100, 5)?)
         .await
         .context("Failed to connect to database")?;
+    Migrator::install(&db)
+        .await
+        .context("Failed to install seaql_migrations table")?;
+    prune_removed_migrations(&db)
+        .await
+        .context("Failed to prune removed-migration entries from seaql_migrations")?;
     Migrator::up(&db, None)
         .await
         .context("Failed to run database migrations")?;
     update_db(&db).await.context("Failed to update database")?;
     Ok(db)
+}
+
+/// Migration names removed from the registry. Their `seaql_migrations` rows
+/// must be purged at startup or sea-orm's validator aborts with
+/// "Applied migrations not found in migration list". When retiring a
+/// migration (see `docs/src/migrations.md`), append its name here.
+const REMOVED_MIGRATION_NAMES: &[&str] = &[
+    "m20260330_000000_add_has_artefacts_to_build_output",
+    "m20260408_000000_add_github_app_enabled_to_organization",
+    "m20260504_000000_drop_has_artefacts_from_derivation_output",
+    "m20260507_000000_drop_github_app_enabled_from_organization",
+];
+
+async fn prune_removed_migrations(db: &DatabaseConnection) -> Result<()> {
+    if REMOVED_MIGRATION_NAMES.is_empty() {
+        return Ok(());
+    }
+    let placeholders: Vec<String> = (1..=REMOVED_MIGRATION_NAMES.len())
+        .map(|i| format!("${i}"))
+        .collect();
+    let sql = format!(
+        "DELETE FROM seaql_migrations WHERE version IN ({})",
+        placeholders.join(", ")
+    );
+    let values: Vec<Value> = REMOVED_MIGRATION_NAMES.iter().map(|v| (*v).into()).collect();
+    db.execute(Statement::from_sql_and_values(
+        DatabaseBackend::Postgres,
+        sql,
+        values,
+    ))
+    .await?;
+    Ok(())
 }
 
 /// Open a dedicated connection pool for the web/HTTP layer so that axum
