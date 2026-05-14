@@ -61,6 +61,7 @@ export class CacheSettingsComponent implements OnInit {
     display_name: '',
     description: '',
     priority: 50,
+    local_priority: null as number | null,
     public: false,
   };
 
@@ -78,6 +79,7 @@ export class CacheSettingsComponent implements OnInit {
           display_name: cache.display_name,
           description: cache.description,
           priority: cache.priority,
+          local_priority: cache.local_priority,
           public: cache.public,
         };
         this.loading.set(false);
@@ -108,6 +110,7 @@ export class CacheSettingsComponent implements OnInit {
       display_name: this.formData.display_name,
       description: this.formData.description,
       priority: this.formData.priority,
+      local_priority: this.formData.local_priority,
     }).subscribe({
       next: () => {
         visibilityCall.subscribe({
