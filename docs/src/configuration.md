@@ -62,6 +62,8 @@ openssl rand -base64 48 > /run/secrets/gradient-crypt
 | `settings.narSendChunkTimeoutSecs` | `30` | Max seconds a single outbound `NarPush` chunk may sit in the per-connection writer queue waiting for the WebSocket sink to drain before the transfer is aborted with `NarAbort`. |
 | `settings.maxConcurrentNarServes` | `8` | Max NAR-serving tasks running concurrently per worker connection. Bounds memory and storage-backend fan-out when a worker requests many paths in a single batch. |
 | `settings.maxNarBufferBytes` | `10737418240` (10 GiB) | Max bytes a single proto session may hold in inbound `NarPush` upload buffers. Prevents a rogue worker from pinning unbounded RAM by opening many uploads without finalising them (issue #109). |
+| `settings.trustedProxies` | `127.0.0.1/32,::1/128` | Comma-separated CIDR allowlist of peers permitted to set `X-Forwarded-For` (`GRADIENT_TRUSTED_PROXIES`). |
+| `settings.localIps` | `10.0.0.0/8` | Comma-separated CIDR allowlist whose resolved client IPs receive each cache's `local_priority` value (`GRADIENT_LOCAL_IPS`). |
 
 ## Reverse Proxies
 
