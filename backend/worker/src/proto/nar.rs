@@ -162,6 +162,11 @@ pub async fn push_direct(
     let store_path = store_path.as_str();
     debug!(store_path, "NAR direct push");
 
+    // Resolved up-front: a failure here means we'd otherwise stream a NAR the
+    // server can never confirm — wasted bandwidth and a half-written upload
+    // it has to garbage-collect.
+    let meta = resolve_path_meta(store, store_path).await?;
+
     let mut nar_stream = harmonia_file_nar::NarByteStream::new(store_path.to_owned().into());
     let mut encoder = zstd::stream::Encoder::new(Vec::with_capacity(NAR_CHUNK_SIZE * 2), 6)
         .context("failed to create zstd encoder")?;
@@ -220,8 +225,6 @@ pub async fn push_direct(
     let file_hash = format!("sha256:{}", hex::encode(file_hasher.finalize()));
     let nar_hash = format!("sha256:{}", hex::encode(nar_hasher.finalize()));
 
-    let meta = resolve_path_meta(store, store_path).await?;
-
     // Report metadata so the server can update cache records.
     writer.send(ClientMessage::NarUploaded {
         job_id: job_id.to_owned(),
@@ -263,6 +266,10 @@ pub async fn upload_presigned(
     let store_path = ensure_full_store_path(store_path);
     let store_path = store_path.as_str();
     debug!(store_path, method, "presigned NAR upload");
+
+    // Resolved up-front: a failure here means we'd otherwise PUT a NAR to S3
+    // the server can never confirm — wasted bandwidth and an orphan object.
+    let meta = resolve_path_meta(store, store_path).await?;
 
     // --- 1. Pack + compress the NAR into memory ---
     let mut nar_stream = harmonia_file_nar::NarByteStream::new(store_path.to_owned().into());
@@ -315,10 +322,7 @@ pub async fn upload_presigned(
         anyhow::bail!("presigned upload returned {}: {}", status, body);
     }
 
-    // --- 3. Gather path metadata (references + deriver for narinfo) ---
-    let meta = resolve_path_meta(store, store_path).await?;
-
-    // --- 4. Confirm to the server ---
+    // --- 3. Confirm to the server ---
     writer.send(ClientMessage::NarUploaded {
         job_id: job_id.to_owned(),
         store_path: store_path.to_owned(),
@@ -588,6 +592,10 @@ mod tests {
 
         let server = MockProtoServer::bind().await;
         let url = server.url().to_owned();
+        // Drain in the background so the client's WebSocket handshake
+        // completes; push_direct is expected to fail-fast before any frame
+        // is sent, so the accepted side is never actually written to.
+        let _accept = tokio::spawn(async move { server.accept().await });
 
         // store_path is a `/tmp/...` directory, not a `/nix/store/<hash>-…`
         // path — `gather_path_meta`'s `StorePath::from_base_path` rejects it
@@ -621,6 +629,10 @@ mod tests {
 
         let server = MockProtoServer::bind().await;
         let url = server.url().to_owned();
+        // Drain in the background so the client's WebSocket handshake
+        // completes; upload_presigned is expected to fail-fast before any
+        // frame is sent, so the accepted side is never actually written to.
+        let _accept = tokio::spawn(async move { server.accept().await });
 
         let store = LocalNixStore::connect_at("/var/empty/gradient-nonexistent.sock", 1).unwrap();
 
