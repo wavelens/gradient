@@ -39,7 +39,7 @@ use std::collections::BTreeMap;
 use std::pin::{Pin, pin};
 use tracing::{debug, info, warn};
 
-use crate::nix::store::{LocalNixStore, is_connection_corrupt, strip_store_prefix};
+use crate::nix::store::{LocalNixStore, strip_store_prefix};
 use crate::proto::job::JobUpdater;
 
 // ── Type-state pipeline ───────────────────────────────────────────────────────
@@ -117,18 +117,13 @@ impl ParsedDerivation {
         opts.build_cores = 0;
 
         if let Err(e) = guard.client().set_options(&opts).await {
-            let corrupt = is_connection_corrupt(&e);
-            warn!(error = %e, corrupt, "set_options failed; build logs may be empty or substitution may be active");
-            if corrupt {
-                // Transport is desynced — don't try to build on this connection,
-                // and prevent the pool from handing it out again.
-                guard.mark_broken();
-                return Err(anyhow::anyhow!(
-                    "set_options failed with protocol-level error for {}: {}",
-                    drv_path,
-                    e
-                ));
-            }
+            warn!(error = %e, "set_options failed; discarding daemon connection");
+            guard.mark_broken();
+            return Err(anyhow::anyhow!(
+                "set_options failed for {}: {}",
+                drv_path,
+                e
+            ));
         }
 
         // `build_derivation` returns `impl ResultLog = Stream<Item=LogMessage> + Future`.
@@ -148,12 +143,12 @@ impl ParsedDerivation {
         let result = match outcome {
             Ok(r) => r,
             Err(e) => {
-                let corrupt = is_connection_corrupt(&e);
-                let err = anyhow::anyhow!("build_derivation failed for {}: {}", drv_path, e);
-                if corrupt {
-                    guard.mark_broken();
-                }
-                return Err(err);
+                guard.mark_broken();
+                return Err(anyhow::anyhow!(
+                    "build_derivation failed for {}: {}",
+                    drv_path,
+                    e
+                ));
             }
         };
 

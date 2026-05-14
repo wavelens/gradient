@@ -10,13 +10,25 @@
 //! This module wraps harmonia's `ConnectionPool` and exposes only the
 //! operations the worker needs: path presence checks, path-info queries,
 //! and triggering builds.
+//!
+//! ## Connection-poisoning policy
+//!
+//! Any daemon call that returns `Err` marks its guard with
+//! [`PooledConnectionGuard::mark_broken`] so the connection is dropped
+//! instead of recycled. Previously we tried to distinguish "clean" remote
+//! errors from transport errors and reuse the former, but in practice an
+//! errored connection sometimes leaves the protocol stream out of phase —
+//! the next acquirer then reads garbage and surfaces it as a confusing
+//! `"serialised integer N is too large for type 'j'"` or as
+//! `query_path_info` returning `Ok(None)` for a path that exists. The
+//! cost of a fresh handshake is far smaller than a poisoned pool, so the
+//! rule is now blanket: error in → connection out.
 
 use std::collections::{HashSet, VecDeque};
 use std::time::Duration;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use harmonia_protocol::types::{DaemonError, DaemonErrorKind};
 use harmonia_store_core::store_path::StorePath;
 use harmonia_store_remote::DaemonStore as _;
 use harmonia_store_remote::pool::{ConnectionPool, PoolConfig};
@@ -49,19 +61,6 @@ pub(crate) fn build_pool_config(pool_size: usize) -> PoolConfig {
         acquire_timeout: POOL_ACQUIRE_TIMEOUT,
         ..Default::default()
     }
-}
-
-/// Decide whether a daemon error leaves the pooled connection in an unusable
-/// state. Only clean server-side `Remote` errors are safe to recover from —
-/// any other variant may have left bytes in the transport buffer (or an
-/// abandoned write frame) that would corrupt the next caller's protocol
-/// stream.
-///
-/// We surface this so daemon call sites can [`PooledConnectionGuard::mark_broken`]
-/// their guard and force the pool to discard the connection instead of
-/// handing it to the next acquirer.
-pub fn is_connection_corrupt(err: &DaemonError) -> bool {
-    !matches!(err.kind(), DaemonErrorKind::Remote(_))
 }
 
 const DEFAULT_DAEMON_SOCKET: &str = "/nix/var/nix/daemon-socket/socket";
@@ -109,12 +108,8 @@ impl LocalNixStore {
         match guard.client().is_valid_path(&sp).await {
             Ok(valid) => Ok(valid),
             Err(e) => {
-                let corrupt = is_connection_corrupt(&e);
-                let err = anyhow::anyhow!("is_valid_path failed for {store_path}: {e}");
-                if corrupt {
-                    guard.mark_broken();
-                }
-                Err(err)
+                guard.mark_broken();
+                Err(anyhow::anyhow!("is_valid_path failed for {store_path}: {e}"))
             }
         }
     }
@@ -148,10 +143,7 @@ impl LocalNixStore {
                 ));
             }
             Err(e) => {
-                let corrupt = is_connection_corrupt(&e);
-                if corrupt {
-                    guard.mark_broken();
-                }
+                guard.mark_broken();
                 return Err(anyhow::anyhow!(
                     "query_path_info failed for {store_path}: {e}"
                 ));
@@ -225,42 +217,6 @@ pub(crate) fn strip_store_prefix(path: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use harmonia_protocol::log::Verbosity;
-    use harmonia_protocol::types::{DaemonInt, DaemonString, RemoteError};
-
-    fn remote_err() -> DaemonError {
-        DaemonError::from(RemoteError {
-            level: Verbosity::Error,
-            msg: DaemonString::from(b"some build failed".to_vec()),
-            exit_status: DaemonInt::default(),
-            traces: vec![],
-        })
-    }
-
-    #[test]
-    fn remote_errors_are_recoverable() {
-        // Daemon-side errors (e.g. "build failed") leave the protocol stream
-        // aligned, so the pooled connection is safe to reuse.
-        assert!(!is_connection_corrupt(&remote_err()));
-    }
-
-    #[test]
-    fn io_errors_mark_connection_corrupt() {
-        // Transport-level IO errors can leave half-written frames in the
-        // buffer — reusing the connection would desync the next caller.
-        let io = std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "broken pipe");
-        let err = DaemonError::from(io);
-        assert!(is_connection_corrupt(&err));
-    }
-
-    #[test]
-    fn custom_errors_are_treated_as_corrupt() {
-        // We can't distinguish a framing bug from anything else when the
-        // error surfaces as a custom string, so we play it safe and drop the
-        // connection.
-        let err = DaemonError::custom("parse error L, non-absolute store path \"L\"");
-        assert!(is_connection_corrupt(&err));
-    }
 
     /// Regression for the dispatch-time pool exhaustion observed in
     /// production: with `max_concurrent_builds * PREFETCH_CONCURRENCY`

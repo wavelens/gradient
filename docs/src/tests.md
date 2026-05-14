@@ -402,17 +402,18 @@ Backend (`cargo test -p proto --lib handler::cache::tests`):
 ## Worker prefetch robustness — uncached inputs and broken daemon connections
 
 Backend (`cargo test -p worker --tests`):
-- `nix::store::tests::remote_errors_are_recoverable` — `is_connection_corrupt`
-  returns `false` for daemon-side `Remote` errors (e.g. "build failed"); those
-  leave the protocol stream aligned and the pooled connection is safe to
-  reuse.
-- `nix::store::tests::io_errors_mark_connection_corrupt` — IO-level daemon
-  errors are flagged corrupt; without this a desynced pooled connection gets
-  handed to the next caller and surfaces as confusing downstream parse
-  errors (`parse error L, non-absolute store path "L"`).
-- `nix::store::tests::custom_errors_are_treated_as_corrupt` — opaque `Custom`
-  errors are conservatively flagged corrupt: we can't tell a framing bug
-  from anything else, so the connection is dropped.
+- Connection-poisoning policy: every daemon call in
+  `worker/src/{nix/store.rs, proto/nar.rs, proto/nar_import.rs, executor/build.rs}`
+  calls `PooledConnectionGuard::mark_broken()` on any `Err` from the harmonia
+  client, unconditionally. The previous split between "recoverable remote
+  errors" and "corrupt transport errors" allowed an errored-but-not-classified
+  connection to be recycled with the protocol stream out of phase; the next
+  acquirer then read garbage and surfaced it as
+  `"serialised integer N is too large for type 'j'"` or as `query_path_info`
+  returning `Ok(None)` for a path that exists. A `LocalNixStore` integration
+  test against a real daemon is not in scope here (CI does not run one); the
+  policy is enforced by code review and by the absence of `is_connection_corrupt`
+  from the worker.
 - `proto::nar_import::tests::classify_splits_cached_by_url_presence` — cached
   entries with a presigned `download_url` go to the S3 bucket, those without
   go to the WebSocket `NarRequest` bucket.

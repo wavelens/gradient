@@ -44,7 +44,7 @@ use proto::messages::{BuildTask, CachedPath, EvalMessageLevel, QueryMode};
 use sha2::{Digest as _, Sha256};
 use tracing::{debug, error, info, warn};
 
-use crate::nix::store::{LocalNixStore, is_connection_corrupt};
+use crate::nix::store::LocalNixStore;
 use crate::proto::job::JobUpdater;
 
 /// Time budget for a single HTTP NAR download (presigned-URL path). Keep in
@@ -794,13 +794,12 @@ impl<'a> NarImporter<'a> {
         match outcome {
             Ok(()) => Ok(()),
             Err(e) => {
-                let corrupt = is_connection_corrupt(&e);
-                let err =
-                    anyhow::anyhow!("daemon add_to_store_nar({}) failed: {}", self.store_path, e);
-                if corrupt {
-                    guard.mark_broken();
-                }
-                Err(err)
+                guard.mark_broken();
+                Err(anyhow::anyhow!(
+                    "daemon add_to_store_nar({}) failed: {}",
+                    self.store_path,
+                    e
+                ))
             }
         }
     }
