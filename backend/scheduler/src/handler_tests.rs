@@ -1793,8 +1793,11 @@ async fn eval_result_build_insert_fails_transitions_eval_failed() {
         )]])
         // 4a. compute_truly_substituted: load derivation_output → empty
         .append_query_results([Vec::<MDerivationOutput>::new()])
-        // 4b. find_active_leaders: empty
+        // 4b. find_active_leaders:
+        //   same-org pass: empty
+        //   cross-org pass: empty derivation lookup short-circuits
         .append_query_results([Vec::<MBuild>::new()])
+        .append_query_results([Vec::<MDerivation>::new()])
         // 5. insert_many builds → empty result → RecordNotInserted error
         .append_query_results([Vec::<MBuild>::new()])
         // 6. update_evaluation_status_with_error: insert evaluation_message
