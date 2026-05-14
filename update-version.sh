@@ -68,5 +68,11 @@ for f in "${NIX_FILES[@]}"; do
     echo "updated $f"
 done
 
+# ── OpenAPI spec ─────────────────────────────────────────────────────────────
+
+OPENAPI_SPEC="$REPO_ROOT/docs/gradient-api.yaml"
+sed -i "0,/^  version: [0-9]\+\.[0-9]\+\.[0-9]\+$/{s/^  version: [0-9]\+\.[0-9]\+\.[0-9]\+$/  version: $VERSION/}" "$OPENAPI_SPEC"
+echo "updated docs/gradient-api.yaml"
+
 echo ""
 echo "Version updated to $VERSION"
