@@ -13,16 +13,17 @@
 //!
 //! ## Connection-poisoning policy
 //!
-//! Any daemon call that returns `Err` marks its guard with
-//! [`PooledConnectionGuard::mark_broken`] so the connection is dropped
-//! instead of recycled. Previously we tried to distinguish "clean" remote
-//! errors from transport errors and reuse the former, but in practice an
-//! errored connection sometimes leaves the protocol stream out of phase —
-//! the next acquirer then reads garbage and surfaces it as a confusing
+//! Daemon access goes through [`LocalNixStore::scoped`], which returns a
+//! [`ScopedGuard`] whose default-on-drop behaviour is to *discard* the
+//! underlying connection. Callers must call [`ScopedGuard::mark_ok`]
+//! once the daemon op completes cleanly; otherwise — on an `Err` return,
+//! a panic, or a future cancellation mid-`await` — the inner harmonia
+//! guard is marked broken and the possibly-desynced connection is not
+//! handed back to the next acquirer. This inverts harmonia's default
+//! ("dropped guard returns to the pool") which silently recycled
+//! mid-protocol connections and surfaced downstream as
 //! `"serialised integer N is too large for type 'j'"` or as
-//! `query_path_info` returning `Ok(None)` for a path that exists. The
-//! cost of a fresh handshake is far smaller than a poisoned pool, so the
-//! rule is now blanket: error in → connection out.
+//! `query_path_info` returning `Ok(None)` for a path that exists.
 
 use std::collections::{HashSet, VecDeque};
 use std::time::Duration;
@@ -30,8 +31,9 @@ use std::time::Duration;
 use anyhow::Result;
 use async_trait::async_trait;
 use harmonia_store_core::store_path::StorePath;
-use harmonia_store_remote::DaemonStore as _;
-use harmonia_store_remote::pool::{ConnectionPool, PoolConfig};
+use harmonia_store_remote::pool::{ConnectionPool, PoolConfig, PooledConnectionGuard};
+use harmonia_store_remote::{DaemonClient, DaemonStore as _};
+use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 use tracing::warn;
 
 use proto::traits::WorkerStore;
@@ -84,6 +86,21 @@ impl LocalNixStore {
         })
     }
 
+    /// Acquire a [`ScopedGuard`] from the pool. The guard discards its
+    /// connection on drop unless the caller explicitly calls
+    /// [`ScopedGuard::mark_ok`]. See the module docstring for the rationale.
+    pub async fn scoped(&self) -> Result<ScopedGuard> {
+        let inner = self
+            .pool
+            .acquire()
+            .await
+            .map_err(|e| anyhow::anyhow!("acquire daemon connection: {e}"))?;
+        Ok(ScopedGuard {
+            inner: Some(inner),
+            ok: false,
+        })
+    }
+
     /// Check whether a store path is present in the local store.
     ///
     /// Uses `is_valid_path` rather than `query_path_info`. The former is the
@@ -99,24 +116,14 @@ impl LocalNixStore {
         let sp = StorePath::from_base_path(hash_name)
             .map_err(|e| anyhow::anyhow!("invalid store path {store_path}: {e}"))?;
 
-        let mut guard = self
-            .pool
-            .acquire()
-            .await
-            .map_err(|e| anyhow::anyhow!("acquire store for has_path: {e}"))?;
-
+        let mut guard = self.scoped().await?;
         match guard.client().is_valid_path(&sp).await {
-            Ok(valid) => Ok(valid),
-            Err(e) => {
-                guard.mark_broken();
-                Err(anyhow::anyhow!("is_valid_path failed for {store_path}: {e}"))
+            Ok(valid) => {
+                guard.mark_ok();
+                Ok(valid)
             }
+            Err(e) => Err(anyhow::anyhow!("is_valid_path failed for {store_path}: {e}")),
         }
-    }
-
-    /// Return the harmonia connection pool (for build execution).
-    pub fn pool(&self) -> &ConnectionPool {
-        &self.pool
     }
 
     /// Query the daemon for `store_path`'s direct runtime references.
@@ -129,21 +136,19 @@ impl LocalNixStore {
         let sp = StorePath::from_base_path(base)
             .map_err(|e| anyhow::anyhow!("invalid store path {store_path}: {e}"))?;
 
-        let mut guard = self
-            .pool
-            .acquire()
-            .await
-            .map_err(|e| anyhow::anyhow!("acquire store for query_references: {e}"))?;
-
+        let mut guard = self.scoped().await?;
         let info = match guard.client().query_path_info(&sp).await {
-            Ok(Some(pi)) => pi,
+            Ok(Some(pi)) => {
+                guard.mark_ok();
+                pi
+            }
             Ok(None) => {
+                guard.mark_ok();
                 return Err(anyhow::anyhow!(
                     "query_path_info: path not in local store: {store_path}"
                 ));
             }
             Err(e) => {
-                guard.mark_broken();
                 return Err(anyhow::anyhow!(
                     "query_path_info failed for {store_path}: {e}"
                 ));
@@ -189,6 +194,67 @@ impl LocalNixStore {
             }
         }
         visited
+    }
+}
+
+/// Owned end of a pooled daemon connection. The blanket impl for
+/// [`PooledConnectionGuard`] forwards to `mark_broken`; tests substitute
+/// a recording fake to unit-test [`ScopedGuard`]'s drop policy without
+/// needing a live nix-daemon.
+pub trait DiscardOnDrop {
+    fn discard(self);
+}
+
+impl DiscardOnDrop for PooledConnectionGuard {
+    fn discard(self) {
+        self.mark_broken();
+    }
+}
+
+/// RAII wrapper around a pooled daemon connection that defaults to
+/// discarding the connection on drop.
+///
+/// Acquired via [`LocalNixStore::scoped`]. Callers run their daemon op
+/// against [`ScopedGuard::client`] and call [`ScopedGuard::mark_ok`] *only*
+/// after a clean success. Any other drop path — `Err` early return, panic,
+/// or `await` cancellation — leaves `ok = false`, and the `Drop` impl
+/// calls `discard()` (i.e. `mark_broken`) on the inner harmonia guard so
+/// the connection (which may be mid-protocol-frame after cancellation) is
+/// not returned to the pool.
+pub struct ScopedGuard<G: DiscardOnDrop = PooledConnectionGuard> {
+    inner: Option<G>,
+    ok: bool,
+}
+
+impl ScopedGuard<PooledConnectionGuard> {
+    /// Mutable access to the underlying daemon client.
+    ///
+    /// Panics if called after the guard has been dropped (internal invariant —
+    /// the `Option` is only taken in [`Drop`]).
+    pub fn client(&mut self) -> &mut DaemonClient<OwnedReadHalf, OwnedWriteHalf> {
+        self.inner
+            .as_mut()
+            .expect("ScopedGuard inner taken before drop — bug in store wrapper")
+            .client()
+    }
+}
+
+impl<G: DiscardOnDrop> ScopedGuard<G> {
+    /// Signal that the daemon op completed cleanly. Required before drop
+    /// to allow the connection to be recycled. The default (no call) is
+    /// to poison the connection on drop.
+    pub fn mark_ok(&mut self) {
+        self.ok = true;
+    }
+}
+
+impl<G: DiscardOnDrop> Drop for ScopedGuard<G> {
+    fn drop(&mut self) {
+        if let Some(inner) = self.inner.take()
+            && !self.ok
+        {
+            inner.discard();
+        }
     }
 }
 
@@ -250,6 +316,60 @@ mod tests {
         assert_eq!(
             canonicalize_store_path("/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo"),
             "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo"
+        );
+    }
+
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    /// Recording fake for [`DiscardOnDrop`]. Drives the [`ScopedGuard`]
+    /// drop-policy tests without needing a live nix-daemon.
+    struct FakeGuard {
+        discarded: Arc<AtomicBool>,
+    }
+
+    impl DiscardOnDrop for FakeGuard {
+        fn discard(self) {
+            self.discarded.store(true, Ordering::SeqCst);
+        }
+    }
+
+    fn make_fake() -> (ScopedGuard<FakeGuard>, Arc<AtomicBool>) {
+        let discarded = Arc::new(AtomicBool::new(false));
+        let guard = ScopedGuard {
+            inner: Some(FakeGuard {
+                discarded: Arc::clone(&discarded),
+            }),
+            ok: false,
+        };
+        (guard, discarded)
+    }
+
+    /// The whole point of [`ScopedGuard`]: when a daemon op is cancelled or
+    /// returns Err, the surrounding future drops the guard *without* a
+    /// `mark_ok` call. The inner connection must then be discarded so the
+    /// pool doesn't recycle a possibly-desynced socket to the next acquirer.
+    #[test]
+    fn scoped_guard_discards_inner_when_not_marked_ok() {
+        let (guard, discarded) = make_fake();
+        drop(guard);
+        assert!(
+            discarded.load(Ordering::SeqCst),
+            "ScopedGuard must mark its inner broken when dropped without mark_ok()"
+        );
+    }
+
+    /// The success path: a daemon op that completes cleanly calls
+    /// `mark_ok()`, and the connection is returned to the pool intact so
+    /// subsequent acquires can reuse it.
+    #[test]
+    fn scoped_guard_preserves_inner_when_marked_ok() {
+        let (mut guard, discarded) = make_fake();
+        guard.mark_ok();
+        drop(guard);
+        assert!(
+            !discarded.load(Ordering::SeqCst),
+            "ScopedGuard must not discard the inner guard when mark_ok() was called"
         );
     }
 }

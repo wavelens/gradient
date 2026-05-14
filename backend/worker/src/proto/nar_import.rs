@@ -768,12 +768,7 @@ impl<'a> NarImporter<'a> {
         decompressed: &[u8],
         valid_info: &ValidPathInfo,
     ) -> Result<()> {
-        let mut guard = self
-            .store
-            .pool()
-            .acquire()
-            .await
-            .map_err(|e| anyhow::anyhow!("acquire local store for import: {}", e))?;
+        let mut guard = self.store.scoped().await?;
 
         let outcome = {
             let logs = guard.client().add_to_store_nar(
@@ -792,15 +787,15 @@ impl<'a> NarImporter<'a> {
         };
 
         match outcome {
-            Ok(()) => Ok(()),
-            Err(e) => {
-                guard.mark_broken();
-                Err(anyhow::anyhow!(
-                    "daemon add_to_store_nar({}) failed: {}",
-                    self.store_path,
-                    e
-                ))
+            Ok(()) => {
+                guard.mark_ok();
+                Ok(())
             }
+            Err(e) => Err(anyhow::anyhow!(
+                "daemon add_to_store_nar({}) failed: {}",
+                self.store_path,
+                e
+            )),
         }
     }
 

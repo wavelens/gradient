@@ -402,18 +402,19 @@ Backend (`cargo test -p proto --lib handler::cache::tests`):
 ## Worker prefetch robustness — uncached inputs and broken daemon connections
 
 Backend (`cargo test -p worker --tests`):
-- Connection-poisoning policy: every daemon call in
-  `worker/src/{nix/store.rs, proto/nar.rs, proto/nar_import.rs, executor/build.rs}`
-  calls `PooledConnectionGuard::mark_broken()` on any `Err` from the harmonia
-  client, unconditionally. The previous split between "recoverable remote
-  errors" and "corrupt transport errors" allowed an errored-but-not-classified
-  connection to be recycled with the protocol stream out of phase; the next
-  acquirer then read garbage and surfaced it as
-  `"serialised integer N is too large for type 'j'"` or as `query_path_info`
-  returning `Ok(None)` for a path that exists. A `LocalNixStore` integration
-  test against a real daemon is not in scope here (CI does not run one); the
-  policy is enforced by code review and by the absence of `is_connection_corrupt`
-  from the worker.
+- `nix::store::tests::scoped_guard_discards_inner_when_not_marked_ok` —
+  every daemon op in the worker runs against a `ScopedGuard`. If the guard
+  is dropped without an explicit `mark_ok()` call — the path taken on `Err`
+  returns, panics, and `await` cancellation (e.g. `FuturesUnordered` being
+  dropped on the first prefetch import failure) — `Drop` discards the
+  pooled connection so the next acquirer doesn't inherit a possibly
+  out-of-phase protocol stream. Without this, a cancelled `add_to_store_nar`
+  would silently recycle a mid-frame connection and the next caller would
+  surface as `"serialised integer N is too large for type 'j'"` or as
+  `query_path_info` returning `Ok(None)` on a path that exists.
+- `nix::store::tests::scoped_guard_preserves_inner_when_marked_ok` — the
+  symmetric success path: a daemon op that completes cleanly calls
+  `mark_ok()` and the connection is recycled, preserving pool warmth.
 - `proto::nar_import::tests::classify_splits_cached_by_url_presence` — cached
   entries with a presigned `download_url` go to the S3 bucket, those without
   go to the WebSocket `NarRequest` bucket.

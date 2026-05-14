@@ -100,7 +100,7 @@ async fn gather_path_meta(store: &LocalNixStore, store_path: &str) -> Option<Pat
         }
     };
 
-    let mut guard = match store.pool().acquire().await {
+    let mut guard = match store.scoped().await {
         Ok(g) => g,
         Err(e) => {
             warn!(store_path, error = %e, "gather_path_meta: could not acquire store connection");
@@ -109,8 +109,12 @@ async fn gather_path_meta(store: &LocalNixStore, store_path: &str) -> Option<Pat
     };
 
     let path_info = match guard.client().query_path_info(&sp).await {
-        Ok(Some(pi)) => pi,
+        Ok(Some(pi)) => {
+            guard.mark_ok();
+            pi
+        }
         Ok(None) => {
+            guard.mark_ok();
             warn!(
                 store_path,
                 "gather_path_meta: path not found in local store"
@@ -123,7 +127,6 @@ async fn gather_path_meta(store: &LocalNixStore, store_path: &str) -> Option<Pat
                 error = %e,
                 "gather_path_meta: query_path_info failed; discarding daemon connection"
             );
-            guard.mark_broken();
             return None;
         }
     };

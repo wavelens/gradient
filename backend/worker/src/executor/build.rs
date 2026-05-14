@@ -93,11 +93,7 @@ impl ParsedDerivation {
         updater: &mut JobUpdater,
         drv_path: &str,
     ) -> Result<Vec<BuildOutput>> {
-        let mut guard = store
-            .pool()
-            .acquire()
-            .await
-            .map_err(|e| anyhow::anyhow!("acquire local store for build: {}", e))?;
+        let mut guard = store.scoped().await?;
 
         debug!(
             drv = %drv_path,
@@ -118,7 +114,6 @@ impl ParsedDerivation {
 
         if let Err(e) = guard.client().set_options(&opts).await {
             warn!(error = %e, "set_options failed; discarding daemon connection");
-            guard.mark_broken();
             return Err(anyhow::anyhow!(
                 "set_options failed for {}: {}",
                 drv_path,
@@ -141,9 +136,11 @@ impl ParsedDerivation {
         };
 
         let result = match outcome {
-            Ok(r) => r,
+            Ok(r) => {
+                guard.mark_ok();
+                r
+            }
             Err(e) => {
-                guard.mark_broken();
                 return Err(anyhow::anyhow!(
                     "build_derivation failed for {}: {}",
                     drv_path,
