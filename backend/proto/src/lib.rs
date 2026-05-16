@@ -9,6 +9,7 @@ pub mod client;
 pub mod handler;
 pub mod messages;
 pub mod outbound;
+pub mod server;
 pub mod session;
 pub mod traits;
 
