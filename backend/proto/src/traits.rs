@@ -12,7 +12,9 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
-use crate::messages::{BuildOutput, CachedPath, DiscoveredDerivation, GradientCapabilities, QueryMode};
+use crate::messages::{
+    BuildOutput, CachedPath, DiscoveredDerivation, FailedPeer, GradientCapabilities, QueryMode,
+};
 
 // ── Store access ─────────────────────────────────────────────────────────────
 
@@ -114,6 +116,50 @@ pub trait PeerIdentity: Send + Sync {
 pub trait CapabilitiesProvider: Send + Sync {
     /// Capabilities to send in `InitConnection.capabilities` / `InitAck.capabilities`.
     async fn capabilities(&self) -> GradientCapabilities;
+}
+
+// ── Inbound-session-driver callbacks ─────────────────────────────────────────
+
+/// Resolves an incoming peer claim against the implementation's auth store
+/// and reports back which `(peer_id, token)` pairs validated successfully
+/// (and which failed). Implementations look this up in their state — sea-orm
+/// tables for gradient-server, the `authorized_peers` Postgres table for
+/// proxy.
+#[async_trait]
+pub trait PeerAuthority: Send + Sync {
+    /// Given a peer claim from `InitConnection.id`, return the list of peer
+    /// ids the server wants the client to prove control of. For
+    /// gradient-server this comes from `lookup_registered_peers` (existing).
+    /// For proxy, this is simply `vec![claimed]` if the row exists in
+    /// `authorized_peers`, or empty if the peer is unknown/revoked.
+    async fn challenge_peers(&self, claimed: &str) -> Result<Vec<String>>;
+
+    /// Validate `(peer_id, plaintext_token)` pairs against stored argon2
+    /// hashes. Returns `(authorized_peers, failed_peers)` — matching the
+    /// existing `proto::handler::auth::validate_tokens` contract.
+    async fn validate_tokens(
+        &self,
+        challenged: &[String],
+        tokens: &[(String, String)],
+    ) -> Result<(Vec<String>, Vec<FailedPeer>)>;
+
+    /// Returns the capabilities this peer is *allowed* to advertise. The
+    /// driver intersects this with the peer's advertised set during
+    /// negotiation.
+    async fn allowed_capabilities(&self, peer_id: &str) -> Result<GradientCapabilities>;
+}
+
+/// Called when an inbound session reaches `Registered`. Implementations
+/// record the peer in their session registry, start any per-session
+/// background tasks, and return a driver for the run-loop. The trait
+/// object lives for the lifetime of the session.
+#[async_trait]
+pub trait SessionFactory: Send + Sync {
+    async fn on_registered(
+        &self,
+        peer_id: String,
+        negotiated: GradientCapabilities,
+    ) -> Result<()>;
 }
 
 #[cfg(test)]
