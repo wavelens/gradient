@@ -12,7 +12,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
-use crate::messages::{BuildOutput, CachedPath, DiscoveredDerivation, QueryMode};
+use crate::messages::{BuildOutput, CachedPath, DiscoveredDerivation, GradientCapabilities, QueryMode};
 
 // ── Store access ─────────────────────────────────────────────────────────────
 
@@ -82,4 +82,86 @@ pub trait JobReporter: Send {
     ) -> Result<()>;
     async fn report_compressing(&mut self) -> Result<()>;
     async fn send_log_chunk(&mut self, task_index: u32, data: Vec<u8>) -> Result<()>;
+}
+
+// ── Role-neutral peer primitives ─────────────────────────────────────────────
+
+/// Supplies the peer's identity and the plaintext tokens used to authenticate
+/// against the peers the server lists in `AuthChallenge`.
+///
+/// Production impls:
+/// - `worker::config::WorkerConfig` — static `(peer_id, plaintext_token)` pairs from config.
+/// - `proxy-core::upstream::ProxyUpstreamIdentity` — proxy's own worker token issued by gradient-server.
+#[async_trait]
+pub trait PeerIdentity: Send + Sync {
+    /// Stable peer id advertised in `InitConnection.id`.
+    fn peer_id(&self) -> String;
+
+    /// Given the list of peers the server is asking us to prove control of,
+    /// return `(peer_id, plaintext_token)` pairs for the subset we hold tokens
+    /// for. Pairs for unknown peers are simply omitted; the server's
+    /// `validate_tokens` will then list them in `failed_peers`.
+    async fn tokens_for(&self, peers: &[String]) -> Result<Vec<(String, String)>>;
+}
+
+/// Supplies the `GradientCapabilities` advertised at handshake.
+///
+/// Production impls:
+/// - `worker::config::StaticCapabilities` — read once from config.
+/// - `proxy-core::pool::AggregatedCapabilities` — live aggregate over the
+///   connected backend pool, recomputed on join/leave.
+#[async_trait]
+pub trait CapabilitiesProvider: Send + Sync {
+    /// Capabilities to send in `InitConnection.capabilities` / `InitAck.capabilities`.
+    async fn capabilities(&self) -> GradientCapabilities;
+}
+
+#[cfg(test)]
+mod role_trait_tests {
+    use super::*;
+
+    struct FakePeer {
+        id: String,
+    }
+
+    #[async_trait]
+    impl PeerIdentity for FakePeer {
+        fn peer_id(&self) -> String {
+            self.id.clone()
+        }
+        async fn tokens_for(&self, peers: &[String]) -> Result<Vec<(String, String)>> {
+            Ok(peers
+                .iter()
+                .map(|p| (p.clone(), format!("{p}-tok")))
+                .collect())
+        }
+    }
+
+    struct FakeCaps;
+
+    #[async_trait]
+    impl CapabilitiesProvider for FakeCaps {
+        async fn capabilities(&self) -> GradientCapabilities {
+            GradientCapabilities {
+                build: true,
+                ..Default::default()
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn peer_identity_round_trip() {
+        let p = FakePeer { id: "abc".into() };
+        assert_eq!(p.peer_id(), "abc");
+        let toks = p.tokens_for(&["abc".into()]).await.unwrap();
+        assert_eq!(toks, vec![("abc".into(), "abc-tok".into())]);
+    }
+
+    #[tokio::test]
+    async fn capabilities_provider_round_trip() {
+        let c = FakeCaps;
+        let caps = c.capabilities().await;
+        assert!(caps.build);
+        assert!(!caps.eval);
+    }
 }
