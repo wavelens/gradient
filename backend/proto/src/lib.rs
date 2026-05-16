@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+pub mod cap;
 pub mod handler;
 pub mod messages;
 pub mod outbound;
