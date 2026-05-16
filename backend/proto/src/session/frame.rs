@@ -25,7 +25,7 @@ use tokio_tungstenite::{
 };
 use tracing::{debug, trace, warn};
 
-use crate::messages::{ClientMessage, ServerMessage, decode_client_message};
+use crate::messages::{ClientMessage, ServerMessage, decode_client_message, decode_server_message};
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -108,6 +108,34 @@ impl ProtoSocket {
                 .await
                 .map_err(|e| debug!(error = %e, "WebSocket send error")),
         }
+    }
+
+    /// Receive and deserialise the next [`ServerMessage`] (peer-role read).
+    /// Returns `None` on clean close or transport/deserialisation error.
+    pub async fn recv_server_msg(&mut self) -> Option<ServerMessage> {
+        let bytes = match self.recv_bytes().await? {
+            Ok(b) => b,
+            Err(()) => return None,
+        };
+        match decode_server_message(&bytes) {
+            Ok(msg) => {
+                trace!(?msg, bytes = bytes.len(), "recv ServerMessage");
+                Some(msg)
+            }
+            Err(e) => {
+                warn!(error = %e, "failed to deserialize server message");
+                None
+            }
+        }
+    }
+
+    /// Serialise and send a [`ClientMessage`] (peer-role write).
+    pub async fn send_client_msg(&mut self, msg: &ClientMessage) -> Result<(), ()> {
+        let bytes = rkyv::to_bytes::<RkyvError>(msg).map_err(|e| {
+            warn!(error = %e, "failed to serialize client message");
+        })?;
+        trace!(?msg, bytes = bytes.len(), "send ClientMessage");
+        self.send_bytes(bytes.to_vec()).await
     }
 
     /// Receive and deserialise the next [`ClientMessage`]. Returns `None` on
@@ -306,6 +334,34 @@ pub async fn send_error(writer: &ProtoWriter, code: u16, message: String) {
     let _ = writer
         .send_msg(&ServerMessage::Error { code, message })
         .await;
+}
+
+/// Peer-role helper: receive the next [`ServerMessage`] from the socket.
+/// Errors on close, deserialisation failure, or transport error.
+pub async fn recv_server_msg(socket: &mut ProtoSocket) -> anyhow::Result<ServerMessage> {
+    socket
+        .recv_server_msg()
+        .await
+        .ok_or_else(|| anyhow::anyhow!("connection closed before next ServerMessage"))
+}
+
+/// Peer-role helper: send a [`ClientMessage`] on the socket.
+pub async fn send_client_msg(
+    socket: &mut ProtoSocket,
+    msg: &ClientMessage,
+) -> anyhow::Result<()> {
+    socket
+        .send_client_msg(msg)
+        .await
+        .map_err(|_| anyhow::anyhow!("failed to send ClientMessage"))
+}
+
+/// Wrap an already-accepted tokio-tungstenite WebSocket into the unified
+/// `ProtoSocket` type. Used by the worker's inbound listener.
+pub fn accept_tungstenite(
+    ws: tokio_tungstenite::WebSocketStream<MaybeTlsStream<TcpStream>>,
+) -> ProtoSocket {
+    ProtoSocket::Tungstenite(Box::new(ws))
 }
 
 #[cfg(test)]
