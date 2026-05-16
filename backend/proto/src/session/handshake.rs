@@ -13,7 +13,9 @@
 //! gradient-server's existing session handler) feed it observed messages
 //! and act on its emitted intent.
 
-use crate::messages::{ClientMessage, GradientCapabilities, ServerMessage};
+use crate::messages::{ClientMessage, FailedPeer, GradientCapabilities, PROTO_VERSION, ServerMessage};
+use crate::session::frame::{ProtoSocket, recv_server_msg, send_client_msg};
+use crate::traits::{CapabilitiesProvider, PeerIdentity};
 
 /// State markers — zero-sized; the FSM is encoded entirely in the type.
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
@@ -102,6 +104,79 @@ pub fn to_registered(auth: Authenticated) -> Registered {
         peer_id: auth.peer_id,
         negotiated: auth.negotiated,
     }
+}
+
+/// Result returned by both handshake roles on success.
+#[derive(Debug, Clone)]
+pub struct HandshakeResult {
+    pub peer_id: String,
+    pub negotiated: GradientCapabilities,
+    pub authorized_peers: Vec<String>,
+    pub failed_peers: Vec<FailedPeer>,
+    pub server_version: u16,
+}
+
+/// Run the peer side of the handshake on an established socket.
+/// Sends `InitConnection`, receives `AuthChallenge`, sends `AuthResponse`
+/// with tokens for the challenged peers, receives `InitAck`.
+///
+/// Used by:
+/// - gradient-worker dialing gradient-server (worker→server, standard).
+/// - gradient-worker accepting from gradient-server (server→worker, discoverable mode).
+/// - gradient-proxy dialing its upstream gradient-server (proxy→server).
+pub async fn as_peer<I, C>(
+    socket: &mut ProtoSocket,
+    identity: &I,
+    capabilities: &C,
+) -> anyhow::Result<HandshakeResult>
+where
+    I: PeerIdentity + ?Sized,
+    C: CapabilitiesProvider + ?Sized,
+{
+    let caps = capabilities.capabilities().await;
+    send_client_msg(
+        socket,
+        &ClientMessage::InitConnection {
+            version: PROTO_VERSION,
+            capabilities: caps.clone(),
+            id: identity.peer_id(),
+        },
+    )
+    .await?;
+
+    let challenge = recv_server_msg(socket).await?;
+    let challenged = match challenge {
+        ServerMessage::AuthChallenge { peers } => peers,
+        ServerMessage::Reject { code, reason } => {
+            anyhow::bail!("server rejected connection (code {code}): {reason}");
+        }
+        other => anyhow::bail!("expected AuthChallenge, got: {other:?}"),
+    };
+
+    let tokens = identity.tokens_for(&challenged).await?;
+    send_client_msg(socket, &ClientMessage::AuthResponse { tokens }).await?;
+
+    let ack = recv_server_msg(socket).await?;
+    let ServerMessage::InitAck {
+        version,
+        capabilities: negotiated,
+        authorized_peers,
+        failed_peers,
+    } = ack
+    else {
+        if let ServerMessage::Reject { code, reason } = ack {
+            anyhow::bail!("server rejected connection (code {code}): {reason}");
+        }
+        anyhow::bail!("expected InitAck, got: {ack:?}");
+    };
+
+    Ok(HandshakeResult {
+        peer_id: identity.peer_id(),
+        negotiated,
+        authorized_peers,
+        failed_peers,
+        server_version: version,
+    })
 }
 
 #[cfg(test)]
