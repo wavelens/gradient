@@ -77,6 +77,33 @@ pub fn on_init_connection(
     })
 }
 
+/// Pure transition: `Greeted` on receipt of `AuthResponse`. The caller is
+/// responsible for having validated the token plaintexts against the peer's
+/// stored argon2 hash before calling this. `negotiated` is the capabilities
+/// set the caller has decided on (intersection of advertised and authorized).
+pub fn on_auth_response(
+    greeted: Greeted,
+    msg: ClientMessage,
+    negotiated: GradientCapabilities,
+) -> Result<Authenticated, Intent> {
+    let ClientMessage::AuthResponse { .. } = msg else {
+        return Err(Intent::Reject("expected AuthResponse".into()));
+    };
+    Ok(Authenticated {
+        peer_id: greeted.peer_id,
+        negotiated,
+    })
+}
+
+/// Pure transition: `Authenticated → Registered` after the driver has sent
+/// `InitAck` and recorded the peer in any session registry it maintains.
+pub fn to_registered(auth: Authenticated) -> Registered {
+    Registered {
+        peer_id: auth.peer_id,
+        negotiated: auth.negotiated,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -118,5 +145,58 @@ mod tests {
     fn opening_rejects_wrong_variant() {
         let result = on_init_connection(Opening, ClientMessage::Draining, PROTO_VERSION);
         assert!(matches!(result, Err(Intent::Reject(_))));
+    }
+
+    #[test]
+    fn greeted_to_authenticated_accepts_valid_auth_response() {
+        let greeted = Greeted {
+            peer_id: "peer-1".into(),
+            client_capabilities: GradientCapabilities {
+                build: true,
+                ..Default::default()
+            },
+        };
+        let negotiated = GradientCapabilities {
+            build: true,
+            ..Default::default()
+        };
+        let result = on_auth_response(
+            greeted.clone(),
+            ClientMessage::AuthResponse {
+                tokens: vec![("peer-1".into(), "plaintext".into())],
+            },
+            negotiated.clone(),
+        );
+        let a = result.expect("expected Authenticated");
+        assert_eq!(a.peer_id, "peer-1");
+        assert_eq!(a.negotiated, negotiated);
+    }
+
+    #[test]
+    fn greeted_rejects_wrong_message_variant() {
+        let greeted = Greeted {
+            peer_id: "peer-1".into(),
+            client_capabilities: GradientCapabilities::default(),
+        };
+        let result = on_auth_response(
+            greeted,
+            ClientMessage::Draining,
+            GradientCapabilities::default(),
+        );
+        assert!(matches!(result, Err(Intent::Reject(_))));
+    }
+
+    #[test]
+    fn authenticated_to_registered_is_idempotent_carry() {
+        let auth = Authenticated {
+            peer_id: "peer-1".into(),
+            negotiated: GradientCapabilities {
+                eval: true,
+                ..Default::default()
+            },
+        };
+        let r = to_registered(auth.clone());
+        assert_eq!(r.peer_id, auth.peer_id);
+        assert_eq!(r.negotiated, auth.negotiated);
     }
 }
