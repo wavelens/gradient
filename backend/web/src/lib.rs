@@ -553,6 +553,7 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
 
     let cache_inspect = Router::new()
         .route("/cache/{cache}/ls/{hash}", get(caches::ls))
+        .route("/cache/{cache}/serve/{hash}/{*path}", get(caches::serve))
         .route_layer(GovernorLayer::new(rl_per_second(1, 60)));
 
     app = app.merge(cache_routes).merge(cache_inspect);
