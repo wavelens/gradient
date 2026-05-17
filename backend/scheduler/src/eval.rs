@@ -223,16 +223,11 @@ impl<'a> EvalResultProcessor<'a> {
                     HashMap::new()
                 });
 
+        let mut spawn_inputs: Vec<(BuildId, DerivationId, String)> = Vec::new();
         for d in derivations {
             let Some(&drv_id) = drv_path_to_id.get(&d.drv_path) else {
                 continue;
             };
-            // Three-way classification:
-            //  - In our cache (`truly_substituted`)  → Substituted, no work
-            //  - Worker says cached but our cache lacks it → upstream-only;
-            //    Created + external_cached so the worker fetches from
-            //    upstream and pushes to our cache instead of rebuilding
-            //  - Otherwise → plain rebuild
             let (status, external_cached) = if truly_substituted.contains(&drv_id) {
                 (BuildStatus::Substituted, false)
             } else if d.substituted {
@@ -247,8 +242,13 @@ impl<'a> EvalResultProcessor<'a> {
                 leader_for_drv.get(&drv_id).copied()
             };
 
+            let build_id = BuildId::now_v7();
+            if matches!(status, BuildStatus::Substituted) {
+                spawn_inputs.push((build_id, drv_id, d.drv_path.clone()));
+            }
+
             builds.push(ABuild {
-                id: Set(BuildId::now_v7()),
+                id: Set(build_id),
                 evaluation: Set(self.evaluation_id),
                 derivation: Set(drv_id),
                 status: Set(status),
@@ -280,6 +280,19 @@ impl<'a> EvalResultProcessor<'a> {
                     return Err(e.into());
                 }
             }
+        }
+
+        for (build_id, drv_id, drv_path) in spawn_inputs {
+            let state = Arc::clone(self.state);
+            tokio::spawn(async move {
+                if let Err(e) = crate::log_substitution::substitute_log(
+                    state, build_id, drv_id, drv_path, false,
+                )
+                .await
+                {
+                    tracing::warn!(%build_id, error = %e, "substitute_log spawn failed");
+                }
+            });
         }
 
         Ok(())
