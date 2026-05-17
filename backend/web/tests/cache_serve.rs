@@ -19,7 +19,7 @@ fn serve_returns_file_bytes() {
         .unwrap();
     rt.block_on(async {
         let state = public_cache_with_nar().await;
-        let server = TestServer::new(create_router(Arc::clone(&state))).unwrap();
+        let server = TestServer::new(create_router(Arc::clone(&state)));
 
         let resp = server
             .get(&format!(
@@ -39,7 +39,7 @@ fn serve_returns_tar_zst_for_directory() {
         .unwrap();
     rt.block_on(async {
         let state = public_cache_with_nar().await;
-        let server = TestServer::new(create_router(Arc::clone(&state))).unwrap();
+        let server = TestServer::new(create_router(Arc::clone(&state)));
 
         let resp = server
             .get(&format!(
@@ -64,7 +64,7 @@ fn serve_unknown_path_returns_404() {
         .unwrap();
     rt.block_on(async {
         let state = public_cache_with_nar().await;
-        let server = TestServer::new(create_router(Arc::clone(&state))).unwrap();
+        let server = TestServer::new(create_router(Arc::clone(&state)));
 
         let resp = server
             .get(&format!(
@@ -83,7 +83,7 @@ fn private_cache_serve_requires_auth() {
         .unwrap();
     rt.block_on(async {
         let state = private_cache_with_nar().await;
-        let server = TestServer::new(create_router(Arc::clone(&state))).unwrap();
+        let server = TestServer::new(create_router(Arc::clone(&state)));
 
         let resp = server
             .get(&format!(

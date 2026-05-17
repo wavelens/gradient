@@ -21,7 +21,7 @@ fn log_returns_text_for_completed_build_in_cache() {
         .unwrap();
     rt.block_on(async {
         let (state, expected_log) = cache_with_completed_build_in_cache().await;
-        let server = TestServer::new(create_router(Arc::clone(&state))).unwrap();
+        let server = TestServer::new(create_router(Arc::clone(&state)));
 
         let resp = server
             .get(&format!(
@@ -46,7 +46,7 @@ fn log_404_when_build_not_linked_to_cache() {
         .unwrap();
     rt.block_on(async {
         let state = cache_with_completed_build_not_in_cache().await;
-        let server = TestServer::new(create_router(Arc::clone(&state))).unwrap();
+        let server = TestServer::new(create_router(Arc::clone(&state)));
 
         let resp = server
             .get(&format!(
@@ -65,7 +65,7 @@ fn log_404_when_only_failed_builds_exist() {
         .unwrap();
     rt.block_on(async {
         let state = cache_with_failed_build_only().await;
-        let server = TestServer::new(create_router(Arc::clone(&state))).unwrap();
+        let server = TestServer::new(create_router(Arc::clone(&state)));
 
         let resp = server
             .get(&format!(
@@ -84,7 +84,7 @@ fn private_cache_log_requires_auth() {
         .unwrap();
     rt.block_on(async {
         let state = private_cache_with_completed_build_in_cache().await;
-        let server = TestServer::new(create_router(Arc::clone(&state))).unwrap();
+        let server = TestServer::new(create_router(Arc::clone(&state)));
 
         let resp = server
             .get(&format!(
