@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::helpers::{CacheContext, get_nar_by_hash};
+use super::helpers::{CacheContext, JsonFlag, get_nar_by_hash};
 use crate::error::{WebError, WebResult};
-use axum::extract::{ConnectInfo, Path, State};
+use axum::extract::{ConnectInfo, Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, header};
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
 use gradient_core::sources::{get_hash_from_url, verify_narinfo_signature};
 use gradient_core::types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
@@ -32,10 +32,15 @@ pub async fn nix_cache_info(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Path(cache): Path<String>,
-) -> WebResult<Response<String>> {
+    Query(flag): Query<JsonFlag>,
+) -> WebResult<Response> {
     let ctx = CacheContext::load(&state, &headers, cache).await?;
 
-    let client_ip = crate::client_ip::resolve_client_ip(&headers, addr.ip(), &state.config.network.trusted_proxies);
+    let client_ip = crate::client_ip::resolve_client_ip(
+        &headers,
+        addr.ip(),
+        &state.config.network.trusted_proxies,
+    );
     let priority = match ctx.cache.local_priority {
         Some(p) if p != 0 && in_any(client_ip, &state.config.network.local_ips) => p,
         _ => ctx.cache.priority,
@@ -47,7 +52,11 @@ pub async fn nix_cache_info(
         priority,
     };
 
-    text_response("text/x-nix-cache-info", res.to_nix_string())
+    if flag.is_set() {
+        Ok(axum::Json(res).into_response())
+    } else {
+        Ok(text_response("text/x-nix-cache-info", res.to_nix_string())?.into_response())
+    }
 }
 
 pub async fn gradient_cache_info(

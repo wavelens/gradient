@@ -19,6 +19,7 @@
 //! }
 //! ```
 
+pub mod cache_fixture;
 pub mod cli;
 pub mod db;
 pub mod fakes;
