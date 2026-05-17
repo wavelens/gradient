@@ -48,3 +48,12 @@ follower row pointing at the targeted leader.
 On leader abort, only same-org followers are eligible for promotion to the
 new leader. Cross-org followers are made independent (`via` cleared) so the
 next dispatch cycle picks them up on their own.
+
+### Log substitution from upstream caches
+
+When a derivation's outputs are pulled from an upstream cache rather than
+built locally, Gradient also tries to retrieve the corresponding build log
+from that upstream's `/log/{drv}` endpoint (the same one the Gradient cache
+exposes). If the upstream serves the log, it is stored under the same build
+record so the build's log tab shows it just like a locally-built one. If no
+upstream serves the log, the build is recorded without one.
