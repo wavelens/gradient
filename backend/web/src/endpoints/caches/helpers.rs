@@ -393,3 +393,19 @@ impl CacheContext {
         Ok(Self { cache })
     }
 }
+
+/// Query extractor for the `?json` flag used by text-format cache endpoints
+/// (`nix-cache-info`, `gradient-cache-info`, `.narinfo`). Any presence of
+/// `?json` (with or without a value) selects the JSON response variant.
+#[derive(Debug, serde::Deserialize)]
+#[allow(dead_code)]
+pub struct JsonFlag {
+    pub json: Option<String>,
+}
+
+impl JsonFlag {
+    #[allow(dead_code)]
+    pub fn is_set(&self) -> bool {
+        self.json.is_some()
+    }
+}
