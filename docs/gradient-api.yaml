@@ -4321,7 +4321,7 @@ x-nix-cache-paths:
     |---|---|
     | `GET /cache/{cache}/ls/{hash}` | JSON tree listing of the NAR (nix-serve `.ls` v1 schema). Rate-limited at 60 req/min. |
     | `GET /cache/{cache}/serve/{hash}/{path}` | Extract a single file (bytes, Content-Type sniffed) or directory (tar.zst) from a NAR. Rate-limited at 60 req/min. |
-    | `GET /cache/{cache}/log/{drv}` | Build log for `<drv>.drv` (substituter compat — `nix log`). Rate-limited at ~300 req/min. |
+    | `GET /cache/{cache}/log/{drv}` | Build log for `<drv>.drv`, from either locally-built or upstream-substituted builds (substituter compat — `nix log`). Rate-limited at ~300 req/min. |
 
 components:
 
