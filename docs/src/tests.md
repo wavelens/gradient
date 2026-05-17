@@ -2186,7 +2186,7 @@ against a `MockDatabase` via `test-support` fixtures.
 
 Tests for when a derivation's outputs are pulled from an upstream cache, Gradient fetches the build log from that upstream as well.
 
-### log_substitution module (`scheduler/src/log_substitution/tests.rs`)
+### log_substitution module (`scheduler/src/log_substitution.rs`)
 
 - `dedup_hit_via_existing_log_id_pointer` — newly-inserted Substituted build inherits a sibling's `log_id`.
 - `no_prior_build_no_fetch_returns_ok` — without siblings and with `allow_upstream_fetch=false`, returns Ok and leaves `log_id` null.
@@ -2196,7 +2196,7 @@ Tests for when a derivation's outputs are pulled from an upstream cache, Gradien
 - `upstream_body_exceeding_cap_is_truncated` — oversize log is capped at LOG_FETCH_MAX_BYTES with a trailing marker.
 - `followers_get_log_id_via_backfill` — leader's log_id propagation includes a follower backfill UPDATE.
 
-### Upstream URL helper (`core/src/db/cache_upstream/tests.rs`)
+### Upstream URL helper (`core/src/db/cache_upstream.rs`)
 
 - `returns_urls_from_subscribed_caches` — shared upstream-URL helper.
 - `empty_when_no_org_caches` — empty result when org has no caches.
