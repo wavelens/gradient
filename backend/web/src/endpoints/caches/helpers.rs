@@ -409,3 +409,15 @@ impl JsonFlag {
         self.json.is_some()
     }
 }
+
+#[allow(dead_code)]
+pub async fn fetch_nar_bytes(state: &Arc<ServerState>, path_hash: &str) -> WebResult<Vec<u8>> {
+    let effective_hash =
+        crate::endpoints::caches::nar::resolve_effective_hash_db(&state.web_db, path_hash).await?;
+    state
+        .nar_storage
+        .get(&effective_hash)
+        .await
+        .map_err(|e| WebError::internal(format!("Failed to read NAR: {}", e)))?
+        .or_not_found("Path")
+}

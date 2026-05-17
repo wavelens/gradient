@@ -31,16 +31,8 @@ pub async fn nar(
 
     let ctx = CacheContext::load(&state, &headers, cache).await?;
 
-    // The URL uses the file hash (nix32 of compressed content).
-    // Resolve it to the store hash so we can locate the on-disk NAR or pack path.
-    let effective_hash = resolve_effective_hash(&state, &path_hash).await?;
-
-    let compressed = state
-        .nar_storage
-        .get(&effective_hash)
-        .await
-        .map_err(|e| WebError::internal(format!("Failed to read NAR: {}", e)))?
-        .or_not_found("Path")?;
+    let compressed = super::helpers::fetch_nar_bytes(&state, &path_hash).await?;
+    let effective_hash = resolve_effective_hash_db(&state.web_db, &path_hash).await?;
 
     spawn_nar_traffic_metric(Arc::clone(&state), ctx.cache.id, compressed.len() as i64);
     spawn_cache_derivation_fetch_update(Arc::clone(&state), ctx.cache.id, effective_hash);
@@ -80,16 +72,6 @@ pub async fn upstream_nar(
         )
         .body(Body::from(bytes))
         .map_err(|e| WebError::internal(format!("Failed to build response: {}", e)))
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-/// Resolve the file hash from the URL to the store hash used as the NAR
-/// storage key. Checks `derivation_output` first (build outputs), then
-/// `cached_path` (for standalone store paths such as `.drv` files).
-/// Falls back to the URL hash for legacy/direct-hash URLs.
-async fn resolve_effective_hash(state: &Arc<ServerState>, path_hash: &str) -> WebResult<String> {
-    resolve_effective_hash_db(&state.web_db, path_hash).await
 }
 
 pub(crate) async fn resolve_effective_hash_db<C: ConnectionTrait>(
