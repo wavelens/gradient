@@ -103,9 +103,14 @@ pub async fn path(
         return Ok(text_response("text/x-nix-narinfo", path_info.to_nix_string())?.into_response());
     }
 
-    // Fall back: check external upstream caches. Task 7 will add ?json support here.
     let rewritten = fetch_from_upstream(&state, &ctx.cache, &path_hash).await;
     if let Some(body) = rewritten {
+        if flag.is_set() {
+            return match gradient_core::types::parse_narinfo_body(&body) {
+                Ok(parsed) => Ok(axum::Json(parsed).into_response()),
+                Err(_) => Err(WebError::internal("Upstream narinfo malformed")),
+            };
+        }
         return Ok(text_response("text/x-nix-narinfo", body)?.into_response());
     }
 

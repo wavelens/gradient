@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct NixCacheInfo {
@@ -101,6 +104,79 @@ impl GradientCacheInfo {
             self.gradient_version, self.gradient_url
         )
     }
+}
+
+#[derive(Debug, Error)]
+pub enum NarInfoParseError {
+    #[error("missing required field: {0}")]
+    MissingField(&'static str),
+    #[error("invalid value for {field}: {value}")]
+    InvalidValue { field: &'static str, value: String },
+}
+
+/// Parse a `text/x-nix-narinfo` body into a `NixPathInfo`.
+/// Tolerates extra unknown keys and arbitrary key ordering.
+/// Multiple `Sig:` lines collapse to the first.
+pub fn parse_narinfo_body(body: &str) -> Result<NixPathInfo, NarInfoParseError> {
+    let mut kv: HashMap<&str, &str> = HashMap::new();
+    let mut sig: Option<String> = None;
+
+    for line in body.lines() {
+        let Some((k, v)) = line.split_once(':') else { continue };
+        let k = k.trim();
+        let v = v.trim();
+        if k == "Sig" {
+            sig.get_or_insert_with(|| v.to_string());
+        } else {
+            kv.insert(k, v);
+        }
+    }
+
+    let get = |k: &'static str| kv.get(k).copied().ok_or(NarInfoParseError::MissingField(k));
+
+    let store_path = get("StorePath")?.to_string();
+    let url = get("URL")?.to_string();
+    let compression = get("Compression")?.to_string();
+    let file_hash = get("FileHash")?.to_string();
+    let file_size_raw = get("FileSize")?;
+    let file_size: u32 = file_size_raw
+        .parse()
+        .map_err(|_| NarInfoParseError::InvalidValue {
+            field: "FileSize",
+            value: file_size_raw.to_string(),
+        })?;
+    let nar_hash = get("NarHash")?.to_string();
+    let nar_size_raw = get("NarSize")?;
+    let nar_size: u64 = nar_size_raw
+        .parse()
+        .map_err(|_| NarInfoParseError::InvalidValue {
+            field: "NarSize",
+            value: nar_size_raw.to_string(),
+        })?;
+    let references: Vec<String> = kv
+        .get("References")
+        .copied()
+        .unwrap_or("")
+        .split_whitespace()
+        .map(|s| s.to_string())
+        .collect();
+    let deriver = kv.get("Deriver").map(|s| s.to_string());
+    let ca = kv.get("CA").map(|s| s.to_string());
+    let sig = sig.ok_or(NarInfoParseError::MissingField("Sig"))?;
+
+    Ok(NixPathInfo {
+        store_path,
+        url,
+        compression,
+        file_hash,
+        file_size,
+        nar_hash,
+        nar_size,
+        references,
+        sig,
+        deriver,
+        ca,
+    })
 }
 
 #[cfg(test)]
@@ -220,5 +296,44 @@ mod tests {
         assert_eq!(bop.id, "out");
         assert_eq!(bop.out_path, "/nix/store/abc-hello");
         assert_eq!(bop.signatures, vec!["k:sig".to_string()]);
+    }
+
+    #[test]
+    fn parse_narinfo_body_roundtrip() {
+        let original = NixPathInfo {
+            store_path: "/nix/store/abc-foo".into(),
+            url: "nar/xyz.nar.zst".into(),
+            compression: "zstd".into(),
+            file_hash: "sha256:aaaa".into(),
+            file_size: 1234,
+            nar_hash: "sha256:bbbb".into(),
+            nar_size: 5678,
+            references: vec![
+                "/nix/store/dep1-foo".into(),
+                "/nix/store/dep2-bar".into(),
+            ],
+            sig: "cache.example:abcdef".into(),
+            deriver: Some("/nix/store/zzz-foo.drv".into()),
+            ca: None,
+        };
+        let text = original.to_nix_string();
+        let parsed = parse_narinfo_body(&text).expect("parse must succeed");
+        assert_eq!(parsed.store_path, original.store_path);
+        assert_eq!(parsed.url, original.url);
+        assert_eq!(parsed.compression, original.compression);
+        assert_eq!(parsed.file_hash, original.file_hash);
+        assert_eq!(parsed.file_size, original.file_size);
+        assert_eq!(parsed.nar_hash, original.nar_hash);
+        assert_eq!(parsed.nar_size, original.nar_size);
+        assert_eq!(parsed.references, original.references);
+        assert_eq!(parsed.sig, original.sig);
+        assert_eq!(parsed.deriver, original.deriver);
+        assert_eq!(parsed.ca, original.ca);
+    }
+
+    #[test]
+    fn parse_narinfo_body_missing_required_field() {
+        let body = "Compression: zstd\n";
+        assert!(parse_narinfo_body(body).is_err());
     }
 }
