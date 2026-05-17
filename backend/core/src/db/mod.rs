@@ -5,6 +5,7 @@
  */
 
 pub mod cache_reach;
+pub mod cache_upstream;
 pub mod connection;
 pub mod dependency_graph;
 pub mod derivation;
@@ -13,6 +14,7 @@ pub mod gc;
 pub mod status;
 
 pub use self::cache_reach::*;
+pub use self::cache_upstream::upstream_urls_for_org;
 pub use self::connection::*;
 pub use self::dependency_graph::*;
 pub use self::derivation::*;

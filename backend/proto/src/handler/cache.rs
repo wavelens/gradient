@@ -329,50 +329,17 @@ async fn extend_with_upstream_results(
     uncached_pairs: Vec<(String, String)>,
     result: &mut Vec<gradient_core::types::proto::CachedPath>,
 ) {
-    use entity::organization_cache::CacheSubscriptionMode;
     use futures::stream::{FuturesUnordered, StreamExt as _};
 
     const UPSTREAM_LOOKUP_CONCURRENCY: usize = 16;
 
-    let org_cache_rows = match EOrganizationCache::find()
-        .filter(
-            sea_orm::Condition::all()
-                .add(COrganizationCache::Organization.eq(org_id))
-                .add(COrganizationCache::Mode.ne(CacheSubscriptionMode::WriteOnly)),
-        )
-        .all(&state.worker_db)
-        .await
-    {
-        Ok(rows) => rows,
-        Err(e) => {
-            warn!(%org_id, error = %e, "CacheQuery org_cache lookup failed");
-            return;
-        }
-    };
-
-    let cache_ids: Vec<CacheId> = org_cache_rows.iter().map(|r| r.cache).collect();
-    if cache_ids.is_empty() {
-        return;
-    }
-
-    let upstream_rows = match ECacheUpstream::find()
-        .filter(
-            sea_orm::Condition::all()
-                .add(CCacheUpstream::Cache.is_in(cache_ids))
-                .add(CCacheUpstream::Url.is_not_null())
-                .add(CCacheUpstream::Mode.ne(CacheSubscriptionMode::WriteOnly)),
-        )
-        .all(&state.worker_db)
-        .await
-    {
-        Ok(rows) => rows,
+    let upstream_urls = match gradient_core::db::upstream_urls_for_org(&state.worker_db, org_id).await {
+        Ok(urls) => urls,
         Err(e) => {
             warn!(%org_id, error = %e, "CacheQuery upstream lookup failed");
             return;
         }
     };
-
-    let upstream_urls: Vec<String> = upstream_rows.into_iter().filter_map(|r| r.url).collect();
     if upstream_urls.is_empty() {
         return;
     }
