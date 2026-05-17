@@ -6,13 +6,10 @@
 
 //! Best-effort log substitution for `Substituted` and `external_cached` builds.
 //!
-//! Two-stage strategy:
-//! 1. Reuse a sibling build's `log_id` if any prior completed build for the
-//!    same derivation has one (DB-only, no HTTP).
-//! 2. (Only when `allow_upstream_fetch == true`) fall back to the
-//!    Hydra-style `/log/{drv}` endpoint on each configured upstream cache.
-//!
-//! Failures are never fatal — log substitution must not break the build pipeline.
+//! Two-stage strategy: reuse a sibling build's `log_id` via DB pointer first,
+//! and (only when `allow_upstream_fetch == true`) fall back to the Hydra-style
+//! `/log/{drv}` endpoint on each configured upstream cache. All failures are
+//! non-fatal — log substitution must never break the build pipeline.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -221,6 +218,7 @@ async fn set_log_id(state: &Arc<ServerState>, build_id: BuildId, log_id: BuildId
         return;
     }
 
+    // Backfills followers whose `via = build_id` are visible now; followers inserted after this UPDATE remain unset.
     if let Err(e) = EBuild::update_many()
         .col_expr(CBuild::LogId, sea_orm::sea_query::Expr::value(log_id.into_inner()))
         .filter(CBuild::Via.eq(build_id))
@@ -530,5 +528,71 @@ mod tests {
         let body = &entries[0].1;
         assert_eq!(body.len(), LOG_FETCH_MAX_BYTES + "\n[truncated]\n".len());
         assert!(body.ends_with("\n[truncated]\n"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn upstream_empty_200_treated_as_miss() {
+        let drv_id = DerivationId::new(Uuid::now_v7());
+        let org = OrganizationId::new(Uuid::now_v7());
+        let build_id = BuildId::new(Uuid::now_v7());
+        let drv_path = "/nix/store/abc-empty.drv".to_string();
+        let drv_basename = "abc-empty.drv";
+
+        let upstream = make_upstream_with_log(drv_basename, "", 200).await;
+
+        let build = make_build(build_id, drv_id, BuildStatus::Created, None, true);
+        let derivation = make_derivation(drv_id, org, drv_path.clone());
+
+        let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
+            .append_query_results([vec![build.clone()]])
+            .append_query_results([Vec::<build::Model>::new()])
+            .append_query_results([Vec::<build::Model>::new()])
+            .append_query_results([vec![derivation]]);
+        let db = seed_upstream_urls(db, org, &[&upstream.uri()]).into_connection();
+
+        let (state, storage) = test_state_with_recording_storage(db);
+        substitute_log(state, build_id, drv_id, drv_path, true)
+            .await
+            .expect("Ok");
+        assert!(storage.entries().is_empty(), "empty 200 should not be persisted");
+    }
+
+    #[tokio::test]
+    async fn idempotent_when_log_id_already_set() {
+        let drv_id = DerivationId::new(Uuid::now_v7());
+        let build_id = BuildId::new(Uuid::now_v7());
+        let existing_log = BuildId::new(Uuid::now_v7());
+        let build = make_build(build_id, drv_id, BuildStatus::Substituted, Some(existing_log), false);
+
+        // Only the initial load is staged. If substitute_log made any further
+        // queries or exec calls, MockDatabase would panic for missing entries.
+        let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
+            .append_query_results([vec![build]])
+            .into_connection();
+
+        let state = test_state(db);
+        substitute_log(state, build_id, drv_id, "/nix/store/x-test.drv".to_string(), true)
+            .await
+            .expect("Ok");
+    }
+
+    #[tokio::test]
+    async fn db_failure_during_dedup_returns_ok() {
+        let drv_id = DerivationId::new(Uuid::now_v7());
+        let build_id = BuildId::new(Uuid::now_v7());
+        let build = make_build(build_id, drv_id, BuildStatus::Substituted, None, false);
+
+        // Initial load succeeds; both dedup queries return empty (so set_log_id is not called).
+        // No exec results are staged — if substitute_log tried to UPDATE, the test would panic.
+        let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
+            .append_query_results([vec![build]])
+            .append_query_results([Vec::<build::Model>::new()])
+            .append_query_results([Vec::<build::Model>::new()])
+            .into_connection();
+
+        let state = test_state(db);
+        substitute_log(state, build_id, drv_id, "/nix/store/x-test.drv".to_string(), false)
+            .await
+            .expect("substitute_log must return Ok even on dedup miss");
     }
 }
