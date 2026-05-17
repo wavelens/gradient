@@ -54,6 +54,7 @@ http                 = { version = "1.4", default-features = false }
 http-body-util       = { version = "0.1", default-features = false }
 ipnet                = { workspace = true }
 jsonwebtoken         = { version = "10.3", default-features = false, features = ["aws_lc_rs"] }
+mime_guess           = { workspace = true }
 tower                = { version = "0.5", default-features = false }
 tower-http           = { version = "0.6", default-features = false, features = ["cors", "request-id", "trace"] }
 tower_governor       = { version = "0.8", default-features = false, features = ["axum"] }

@@ -110,6 +110,9 @@ webpki-roots  = { version = "1.0", default-features = false }
 # Enum primitive conversions
 num_enum = { version = "0.7", default-features = false }
 
+# MIME type detection
+mime_guess = { version = "2", default-features = false }
+
 # Test utilities
 mockall = { version = "0.14", default-features = false }
 
