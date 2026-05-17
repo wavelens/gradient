@@ -83,7 +83,8 @@ pub async fn path(
     state: State<Arc<ServerState>>,
     headers: HeaderMap,
     Path((cache, path)): Path<(String, String)>,
-) -> WebResult<Response<String>> {
+    Query(flag): Query<JsonFlag>,
+) -> WebResult<Response> {
     let path_hash =
         get_hash_from_url(path.clone()).map_err(|e| WebError::bad_request(e.to_string()))?;
 
@@ -96,13 +97,16 @@ pub async fn path(
     if let Ok(path_info) =
         get_nar_by_hash(Arc::clone(&state), ctx.cache.clone(), path_hash.clone()).await
     {
-        return text_response("text/x-nix-narinfo", path_info.to_nix_string());
+        if flag.is_set() {
+            return Ok(axum::Json(path_info).into_response());
+        }
+        return Ok(text_response("text/x-nix-narinfo", path_info.to_nix_string())?.into_response());
     }
 
-    // Fall back: check external upstream caches.
+    // Fall back: check external upstream caches. Task 7 will add ?json support here.
     let rewritten = fetch_from_upstream(&state, &ctx.cache, &path_hash).await;
     if let Some(body) = rewritten {
-        return text_response("text/x-nix-narinfo", body);
+        return Ok(text_response("text/x-nix-narinfo", body)?.into_response());
     }
 
     Err(WebError::not_found("Path"))

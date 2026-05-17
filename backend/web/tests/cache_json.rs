@@ -8,7 +8,7 @@
 use axum_test::TestServer;
 use serde_json::Value;
 use std::sync::Arc;
-use test_support::cache_fixture::{FIXTURE_CACHE_NAME, public_cache_state};
+use test_support::cache_fixture::{FIXTURE_CACHE_NAME, FIXTURE_PATH_HASH, public_cache_state, public_cache_with_narinfo};
 use web::create_router;
 
 #[test]
@@ -96,5 +96,27 @@ fn gradient_cache_info_no_json_returns_text() {
         resp.assert_status_ok();
         assert!(resp.text().contains("GradientVersion:"));
         assert!(resp.text().contains("GradientUrl:"));
+    });
+}
+
+#[test]
+fn narinfo_json_returns_object_with_pascal_case_keys() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let state = public_cache_with_narinfo().await;
+        let server = TestServer::new(create_router(Arc::clone(&state))).unwrap();
+
+        let resp = server
+            .get(&format!("/cache/{FIXTURE_CACHE_NAME}/{FIXTURE_PATH_HASH}.narinfo"))
+            .add_query_param("json", "")
+            .await;
+        resp.assert_status_ok();
+        let body: Value = resp.json();
+        assert!(body["StorePath"].as_str().unwrap().starts_with("/nix/store/"));
+        assert!(body["URL"].as_str().unwrap().starts_with("nar/"));
+        assert!(body["NarHash"].as_str().unwrap().starts_with("sha256:"));
     });
 }
