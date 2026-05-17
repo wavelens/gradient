@@ -573,31 +573,35 @@ async fn expand_substituted_closure(
     }
 
     let now = gradient_core::types::now();
-    let builds: Vec<ABuild> = rows
-        .iter()
-        .filter_map(|row| {
-            let drv_id: DerivationId = row.try_get::<uuid::Uuid>("", "drv_id").ok()?.into();
-            let kind = row.try_get::<String>("", "kind").ok()?;
-            let (status, external_cached) = if kind == "sub" {
-                (BuildStatus::Substituted, false)
-            } else {
-                (BuildStatus::Created, true)
-            };
-            Some(ABuild {
-                id: Set(BuildId::now_v7()),
-                evaluation: Set(evaluation_id),
-                derivation: Set(drv_id),
-                status: Set(status),
-                log_id: Set(None),
-                build_time_ms: Set(None),
-                worker: Set(None),
-                via: Set(None),
-                external_cached: Set(external_cached),
-                created_at: Set(now),
-                updated_at: Set(now),
-            })
-        })
-        .collect();
+    let mut builds: Vec<ABuild> = Vec::with_capacity(rows.len());
+    let mut spawn_inputs: Vec<(BuildId, DerivationId)> = Vec::new();
+    for row in &rows {
+        let Ok(drv_id_uuid) = row.try_get::<uuid::Uuid>("", "drv_id") else { continue; };
+        let drv_id: DerivationId = drv_id_uuid.into();
+        let Ok(kind) = row.try_get::<String>("", "kind") else { continue; };
+        let (status, external_cached) = if kind == "sub" {
+            (BuildStatus::Substituted, false)
+        } else {
+            (BuildStatus::Created, true)
+        };
+        let build_id = BuildId::now_v7();
+        if matches!(status, BuildStatus::Substituted) {
+            spawn_inputs.push((build_id, drv_id));
+        }
+        builds.push(ABuild {
+            id: Set(build_id),
+            evaluation: Set(evaluation_id),
+            derivation: Set(drv_id),
+            status: Set(status),
+            log_id: Set(None),
+            build_time_ms: Set(None),
+            worker: Set(None),
+            via: Set(None),
+            external_cached: Set(external_cached),
+            created_at: Set(now),
+            updated_at: Set(now),
+        });
+    }
 
     let count = builds.len();
     for chunk in builds.chunks(BATCH_SIZE) {
@@ -608,6 +612,39 @@ async fn expand_substituted_closure(
             error!(error = %e, %evaluation_id, "expand_substituted_closure: failed to insert builds");
         }
     }
+
+    if !spawn_inputs.is_empty() {
+        let drv_ids: Vec<DerivationId> = spawn_inputs.iter().map(|(_, d)| *d).collect();
+        let paths = match EDerivation::find()
+            .filter(CDerivation::Id.is_in(drv_ids))
+            .all(&state.worker_db)
+            .await
+        {
+            Ok(rows) => rows
+                .into_iter()
+                .map(|d| (d.id, d.derivation_path))
+                .collect::<std::collections::HashMap<_, _>>(),
+            Err(e) => {
+                error!(%evaluation_id, error = %e, "expand_substituted_closure: drv path lookup failed");
+                std::collections::HashMap::new()
+            }
+        };
+
+        for (build_id, drv_id) in spawn_inputs {
+            let Some(drv_path) = paths.get(&drv_id).cloned() else { continue; };
+            let state = Arc::clone(state);
+            tokio::spawn(async move {
+                if let Err(e) = crate::log_substitution::substitute_log(
+                    state, build_id, drv_id, drv_path, false,
+                )
+                .await
+                {
+                    tracing::warn!(%build_id, error = %e, "substitute_log spawn failed");
+                }
+            });
+        }
+    }
+
     info!(%evaluation_id, count, "substituted closure expanded");
     Ok(())
 }
