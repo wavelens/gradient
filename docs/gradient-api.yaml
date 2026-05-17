@@ -4304,12 +4304,24 @@ x-nix-cache-paths:
     The following Nix binary cache endpoints are served at the root of the server
     (not under `/api/v1`). They implement the Nix binary cache protocol and are
     used by `nix-store --realise`, `nixos-rebuild`, and other Nix clients.
+    Private caches require HTTP Basic Auth (any username, JWT or API key as password).
+
+    ### Substituter surface
 
     | Endpoint | Description |
     |---|---|
-    | `GET /cache/{cache}/nix-cache-info` | Cache metadata for Nix |
-    | `GET /cache/{cache}/{hash}.narinfo` | Path info for a store path |
+    | `GET /cache/{cache}/nix-cache-info` | Cache metadata for Nix. Add `?json` for JSON response (`NixCacheInfo`). |
+    | `GET /cache/{cache}/gradient-cache-info` | Gradient-specific cache metadata. Add `?json` for JSON response (`GradientCacheInfo`). |
+    | `GET /cache/{cache}/{hash}.narinfo` | Path info for a store path. Add `?json` for JSON response (`NixPathInfo`). |
     | `GET /cache/{cache}/nar/{hash}.nar.zst` | Compressed NAR archive |
+
+    ### Inspection surface
+
+    | Endpoint | Description |
+    |---|---|
+    | `GET /cache/{cache}/ls/{hash}` | JSON tree listing of the NAR (nix-serve `.ls` v1 schema). Rate-limited at 60 req/min. |
+    | `GET /cache/{cache}/serve/{hash}/{path}` | Extract a single file (bytes, Content-Type sniffed) or directory (tar.zst) from a NAR. Rate-limited at 60 req/min. |
+    | `GET /cache/{cache}/log/{drv}` | Build log for `<drv>.drv` (substituter compat — `nix log`). Rate-limited at ~300 req/min. |
 
 components:
 
@@ -6443,3 +6455,122 @@ components:
         reason:
           type: string
           enum: [already_in_progress, no_previous_evaluation, db_error]
+
+    # ── Nix binary cache schemas ──────────────────────────────────────────────
+
+    NixCacheInfo:
+      type: object
+      description: Response body for `GET /cache/{cache}/nix-cache-info?json`.
+      required: [StoreDir, WantMassQuery, Priority]
+      properties:
+        StoreDir:
+          type: string
+          example: /nix/store
+        WantMassQuery:
+          type: boolean
+        Priority:
+          type: integer
+          format: int32
+
+    GradientCacheInfo:
+      type: object
+      description: Response body for `GET /cache/{cache}/gradient-cache-info?json`.
+      required: [GradientVersion, GradientUrl]
+      properties:
+        GradientVersion:
+          type: string
+          example: "1.1.1"
+        GradientUrl:
+          type: string
+          format: uri
+          example: https://gradient.example.com
+
+    NixPathInfo:
+      type: object
+      description: >-
+        Response body for `GET /cache/{cache}/{hash}.narinfo?json`.
+        Field names use PascalCase to match the Nix narinfo text format.
+      required: [StorePath, URL, Compression, FileHash, FileSize, NarHash, NarSize, References, Sig]
+      properties:
+        StorePath:
+          type: string
+          example: /nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello-2.12
+        URL:
+          type: string
+          example: nar/0000000000000000000000000000000000000000000000000000000000000000.nar.zst
+        Compression:
+          type: string
+          example: zstd
+        FileHash:
+          type: string
+          example: sha256:0000000000000000000000000000000000000000000000000000000000000000
+        FileSize:
+          type: integer
+          format: int64
+        NarHash:
+          type: string
+          example: sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73
+        NarSize:
+          type: integer
+          format: int64
+        References:
+          type: array
+          items:
+            type: string
+        Deriver:
+          type: string
+          nullable: true
+        Sig:
+          type: string
+          example: "cache.example.com-1:AAAA..."
+        CA:
+          type: string
+          nullable: true
+
+    NarList:
+      type: object
+      description: >-
+        Response body for `GET /cache/{cache}/ls/{hash}`.
+        Follows the nix-serve `.ls` v1 schema.
+      required: [version, root]
+      properties:
+        version:
+          type: integer
+          enum: [1]
+        root:
+          $ref: '#/components/schemas/FileTree'
+
+    FileTree:
+      type: object
+      description: >-
+        A node in a NAR directory tree. `type` is `"directory"`, `"regular"`,
+        or `"symlink"`. Regular files carry `size`; directories carry `entries`;
+        symlinks carry `target`. `narOffset` is always `null` in Gradient's
+        implementation (Nix hydra-compatible but not seekable).
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [directory, regular, symlink]
+        size:
+          type: integer
+          format: int64
+          nullable: true
+          description: File size in bytes (regular files only)
+        executable:
+          type: boolean
+          nullable: true
+        narOffset:
+          type: integer
+          format: int64
+          nullable: true
+          description: Always null in Gradient's implementation
+        entries:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/FileTree'
+          description: Child entries (directories only)
+        target:
+          type: string
+          nullable: true
+          description: Symlink target (symlinks only)

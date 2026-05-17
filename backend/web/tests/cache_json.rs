@@ -8,7 +8,11 @@
 use axum_test::TestServer;
 use serde_json::Value;
 use std::sync::Arc;
-use test_support::cache_fixture::{FIXTURE_CACHE_NAME, FIXTURE_PATH_HASH, public_cache_state, public_cache_with_narinfo};
+use axum::http::StatusCode;
+use test_support::cache_fixture::{
+    FIXTURE_CACHE_NAME, FIXTURE_PATH_HASH, private_cache_state, public_cache_state,
+    public_cache_with_narinfo,
+};
 use web::create_router;
 
 #[test]
@@ -118,5 +122,38 @@ fn narinfo_json_returns_object_with_pascal_case_keys() {
         assert!(body["StorePath"].as_str().unwrap().starts_with("/nix/store/"));
         assert!(body["URL"].as_str().unwrap().starts_with("nar/"));
         assert!(body["NarHash"].as_str().unwrap().starts_with("sha256:"));
+    });
+}
+
+#[test]
+fn private_cache_requires_auth() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let state = private_cache_state().await;
+        let server = TestServer::new(create_router(Arc::clone(&state))).unwrap();
+
+        let resp = server
+            .get(&format!("/cache/{FIXTURE_CACHE_NAME}/nix-cache-info"))
+            .await;
+        resp.assert_status(StatusCode::UNAUTHORIZED);
+
+        let state = private_cache_state().await;
+        let server = TestServer::new(create_router(Arc::clone(&state))).unwrap();
+        let resp = server
+            .get(&format!("/cache/{FIXTURE_CACHE_NAME}/gradient-cache-info"))
+            .await;
+        resp.assert_status(StatusCode::UNAUTHORIZED);
+
+        let state = private_cache_state().await;
+        let server = TestServer::new(create_router(Arc::clone(&state))).unwrap();
+        let resp = server
+            .get(&format!(
+                "/cache/{FIXTURE_CACHE_NAME}/{FIXTURE_PATH_HASH}.narinfo"
+            ))
+            .await;
+        resp.assert_status(StatusCode::UNAUTHORIZED);
     });
 }

@@ -265,11 +265,26 @@ Set `GRADIENT_WORKER_PEERS_FILE` (or the NixOS `peersFile` option) to this path.
 
 ### Nix Binary Cache (root, no `/api/v1` prefix)
 
+Private caches require HTTP Basic Auth (any username, JWT or API key as password — returns `401` without credentials).
+
+**Substituter surface** (used by `nix`, `nixos-rebuild`, etc.):
+
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/cache/{cache}/nix-cache-info` | Cache metadata |
-| `GET` | `/cache/{cache}/{hash}.narinfo` | Path info |
+| `GET` | `/cache/{cache}/nix-cache-info` | Cache metadata (add `?json` for JSON) |
+| `GET` | `/cache/{cache}/gradient-cache-info` | Gradient cache metadata (add `?json` for JSON) |
+| `GET` | `/cache/{cache}/{hash}.narinfo` | Path info (add `?json` for JSON) |
 | `GET` | `/cache/{cache}/nar/{hash}.nar.zst` | NAR archive |
+
+**Inspection surface** (NAR content inspection and build logs):
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/cache/{cache}/ls/{hash}` | JSON tree listing of the NAR (nix-serve `.ls` v1 schema) |
+| `GET` | `/cache/{cache}/serve/{hash}/{path}` | Extract a single file (bytes) or directory (tar.zst) from a NAR |
+| `GET` | `/cache/{cache}/log/{drv}` | Build log for `<drv>.drv` (substituter compat — `nix log`) |
+
+The inspection endpoints (`/ls`, `/serve`) are rate-limited at 60 req/min. The `/log` endpoint follows the default cache tier (~300 req/min). All endpoints return `404` when the hash or derivation is unknown.
 
 ## Example: Trigger an Evaluation
 

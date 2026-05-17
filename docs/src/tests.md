@@ -2146,3 +2146,38 @@ Tests in `backend/core/src/types/cli/registration.rs` cover the DSN override hel
 
 - `effective_sentry_dsn_returns_default_when_none` — when `RegistrationArgs::sentry_dsn` is `None`, the helper returns `DEFAULT_SENTRY_DSN` (the upstream Wavelens DSN).
 - `effective_sentry_dsn_returns_override_when_some` — when an operator sets `GRADIENT_SENTRY_DSN` / `settings.sentryDsn`, the helper returns the override string, and the three Sentry init call-sites (`backend/src/main.rs`, `cache_loop`, `sign_sweep_loop`) route reports there instead.
+
+## Cache inspection & substituter-compat endpoints (`web/tests/cache_*.rs`)
+
+Integration tests covering the cache inspection and substituter endpoints added
+in the cache-inspection feature. All tests use `axum_test::TestServer` driven
+against a `MockDatabase` via `test-support` fixtures.
+
+### `?json` flag on text-format endpoints (`cache_json.rs`)
+
+- `nix_cache_info_json_returns_object_with_pascal_case_keys` — `?json` returns `application/json` with `StoreDir`, `WantMassQuery`, `Priority`.
+- `nix_cache_info_no_json_returns_text` — without `?json` the content-type is `text/x-nix-cache-info`.
+- `gradient_cache_info_json_returns_object` — `?json` returns `GradientVersion` and `GradientUrl` fields.
+- `gradient_cache_info_no_json_returns_text` — without `?json` returns key-value text.
+- `narinfo_json_returns_object_with_pascal_case_keys` — `?json` on `.narinfo` returns `StorePath`, `URL`, `NarHash`.
+- `private_cache_requires_auth` — unauthenticated requests to a private cache return `401` on `nix-cache-info`, `gradient-cache-info`, and `.narinfo`.
+
+### `/ls/{hash}` NAR tree listing (`cache_narlist.rs`)
+
+- `ls_returns_v1_tree_with_null_offsets` — returns `{ version: 1, root: { type: "directory", entries: { bin: { entries: { hello: { type: "regular", size: 2, narOffset: null } } } } } }`.
+- `ls_unknown_hash_returns_404` — unknown hash returns `404`.
+- `private_cache_ls_requires_auth` — unauthenticated request to a private cache returns `401`.
+
+### `/serve/{hash}/{*path}` NAR content extraction (`cache_serve.rs`)
+
+- `serve_returns_file_bytes` — `bin/hello` returns raw bytes `"hi"`.
+- `serve_returns_tar_zst_for_directory` — `bin/` returns `application/zstd` with zstd magic bytes.
+- `serve_unknown_path_returns_404` — non-existent path returns `404`.
+- `private_cache_serve_requires_auth` — unauthenticated request to a private cache returns `401`.
+
+### `/log/{drv}` build log (`cache_log.rs`)
+
+- `log_returns_text_for_completed_build_in_cache` — returns `text/plain` log body for a completed build linked to the cache.
+- `log_404_when_build_not_linked_to_cache` — `404` when no `cache_derivation` link exists.
+- `log_404_when_only_failed_builds_exist` — `404` when only failed builds are recorded.
+- `private_cache_log_requires_auth` — unauthenticated request to a private cache returns `401`.

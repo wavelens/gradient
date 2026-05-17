@@ -284,6 +284,10 @@ fn cache_derivation_id() -> CacheDerivationId {
 }
 
 fn cache_row() -> entity::cache::Model {
+    cache_row_with_visibility(true)
+}
+
+fn cache_row_with_visibility(public: bool) -> entity::cache::Model {
     entity::cache::Model {
         id: cache_id(),
         name: FIXTURE_CACHE_NAME.into(),
@@ -294,7 +298,7 @@ fn cache_row() -> entity::cache::Model {
         local_priority: None,
         public_key: "test-pub-key".into(),
         private_key: "test-priv-key".into(),
-        public: true,
+        public,
         created_by: UserId::new(org_id().into_inner()),
         created_at: test_date(),
         managed: false,
@@ -398,6 +402,81 @@ pub async fn cache_with_failed_build_only() -> Arc<ServerState> {
         .append_query_results([vec![derivation_row()]])
         .append_query_results([vec![cache_derivation_row()]])
         .append_query_results([Vec::<entity::build::Model>::new()])
+        .into_connection();
+
+    make_state(db, Arc::new(NoopLogStorage))
+}
+
+/// Private cache with no cached paths — suitable for auth-required tests on
+/// `nix-cache-info` and `gradient-cache-info`. `CacheContext::load` returns
+/// 401 Unauthorized for unauthenticated requests to private caches.
+pub async fn private_cache_state() -> Arc<ServerState> {
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![cache_row_with_visibility(false)]])
+        .into_connection();
+
+    let cli = test_cli();
+    let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
+    let nar_storage = NarStore::local(&config.storage.base_path).expect("create test NarStore");
+
+    Arc::new(ServerState {
+        web_db: WebDb::new(db),
+        worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
+        config,
+        log_storage: Arc::new(NoopLogStorage),
+        webhooks: Arc::new(RecordingWebhookClient::new()) as Arc<dyn gradient_core::ci::WebhookClient>,
+        email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
+        nar_storage,
+        manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+        pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+        http: gradient_core::http::build_client().expect("http client"),
+        shutdown: gradient_core::shutdown::Shutdown::new(),
+        jwt_secret: SecretString::new("test-jwt-secret".to_string()),
+        started_at: chrono::Utc::now(),
+    })
+}
+
+/// Private cache with a synthetic NAR — for auth-required tests on `/ls` and `/serve`.
+pub async fn private_cache_with_nar() -> Arc<ServerState> {
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![cache_row_with_visibility(false)]])
+        .append_query_results([Vec::<entity::cached_path::Model>::new()])
+        .into_connection();
+
+    let cli = test_cli();
+    let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
+    let nar_storage = NarStore::local(&config.storage.base_path).expect("create test NarStore");
+
+    let state = Arc::new(ServerState {
+        web_db: WebDb::new(db),
+        worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
+        config,
+        log_storage: Arc::new(NoopLogStorage),
+        webhooks: Arc::new(RecordingWebhookClient::new()) as Arc<dyn gradient_core::ci::WebhookClient>,
+        email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
+        nar_storage,
+        manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+        pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+        http: gradient_core::http::build_client().expect("http client"),
+        shutdown: gradient_core::shutdown::Shutdown::new(),
+        jwt_secret: SecretString::new("test-jwt-secret".to_string()),
+        started_at: chrono::Utc::now(),
+    });
+
+    let compressed = synthetic_nar_zst().await;
+    state
+        .nar_storage
+        .put(FIXTURE_PATH_HASH, compressed)
+        .await
+        .expect("put NAR into test storage");
+
+    state
+}
+
+/// Private cache + completed build in cache — for auth-required tests on `/log`.
+pub async fn private_cache_with_completed_build_in_cache() -> Arc<ServerState> {
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![cache_row_with_visibility(false)]])
         .into_connection();
 
     make_state(db, Arc::new(NoopLogStorage))

@@ -9,6 +9,7 @@ use std::sync::Arc;
 use test_support::cache_fixture::{
     FIXTURE_CACHE_NAME, FIXTURE_DRV_FILENAME, cache_with_completed_build_in_cache,
     cache_with_completed_build_not_in_cache, cache_with_failed_build_only,
+    private_cache_with_completed_build_in_cache,
 };
 use web::create_router;
 
@@ -72,5 +73,24 @@ fn log_404_when_only_failed_builds_exist() {
             ))
             .await;
         resp.assert_status(StatusCode::NOT_FOUND);
+    });
+}
+
+#[test]
+fn private_cache_log_requires_auth() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let state = private_cache_with_completed_build_in_cache().await;
+        let server = TestServer::new(create_router(Arc::clone(&state))).unwrap();
+
+        let resp = server
+            .get(&format!(
+                "/cache/{FIXTURE_CACHE_NAME}/log/{FIXTURE_DRV_FILENAME}"
+            ))
+            .await;
+        resp.assert_status(StatusCode::UNAUTHORIZED);
     });
 }

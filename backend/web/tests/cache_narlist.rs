@@ -7,7 +7,9 @@ use axum::http::StatusCode;
 use axum_test::TestServer;
 use serde_json::Value;
 use std::sync::Arc;
-use test_support::cache_fixture::{FIXTURE_CACHE_NAME, FIXTURE_PATH_HASH, public_cache_with_nar};
+use test_support::cache_fixture::{
+    FIXTURE_CACHE_NAME, FIXTURE_PATH_HASH, private_cache_with_nar, public_cache_with_nar,
+};
 use web::create_router;
 
 #[test]
@@ -52,5 +54,22 @@ fn ls_unknown_hash_returns_404() {
             .get(&format!("/cache/{FIXTURE_CACHE_NAME}/ls/{unknown}"))
             .await;
         resp.assert_status(StatusCode::NOT_FOUND);
+    });
+}
+
+#[test]
+fn private_cache_ls_requires_auth() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let state = private_cache_with_nar().await;
+        let server = TestServer::new(create_router(Arc::clone(&state))).unwrap();
+
+        let resp = server
+            .get(&format!("/cache/{FIXTURE_CACHE_NAME}/ls/{FIXTURE_PATH_HASH}"))
+            .await;
+        resp.assert_status(StatusCode::UNAUTHORIZED);
     });
 }
