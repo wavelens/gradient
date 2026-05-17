@@ -21,6 +21,8 @@ entity        = { workspace = true }
 anyhow     = { workspace = true }
 chrono     = { workspace = true }
 cron       = "0.12"
+futures    = { workspace = true }
+reqwest    = { workspace = true }
 sea-orm    = { workspace = true }
 serde      = { workspace = true }
 serde_json = { workspace = true }
@@ -29,5 +31,8 @@ tracing    = { workspace = true }
 uuid       = { workspace = true }
 
 [dev-dependencies]
-tempfile     = { workspace = true }
+entity      = { workspace = true }
+tempfile    = { workspace = true }
 test-support = { workspace = true }
+tokio       = { workspace = true, features = ["macros", "sync", "time", "rt-multi-thread"] }
+wiremock    = { workspace = true }

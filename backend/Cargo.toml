@@ -114,7 +114,8 @@ num_enum = { version = "0.7", default-features = false }
 mime_guess = { version = "2", default-features = false }
 
 # Test utilities
-mockall = { version = "0.14", default-features = false }
+mockall  = { version = "0.14", default-features = false }
+wiremock = { version = "0.6", default-features = false }
 
 # Each `tests/*.rs` file in `web` is its own binary that links the full crate
 # graph (axum + tokio + sea-orm + …); 17 of them in parallel pushes link-time
