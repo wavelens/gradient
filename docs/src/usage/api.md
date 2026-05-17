@@ -284,7 +284,7 @@ Private caches require HTTP Basic Auth (any username, JWT or API key as password
 | `GET` | `/cache/{cache}/serve/{hash}/{path}` | Extract a single file (bytes) or directory (tar.zst) from a NAR |
 | `GET` | `/cache/{cache}/log/{drv}` | Build log for `<drv>.drv` (substituter compat — `nix log`) |
 
-The inspection endpoints (`/ls`, `/serve`) are rate-limited at 60 req/min. The `/log` endpoint follows the default cache tier (~300 req/min). All endpoints return `404` when the hash or derivation is unknown.
+The inspection endpoints (`/ls`, `/serve`) are rate-limited at 60 req/min. The `/log` endpoint is rate-limited at ~300 req/min on its own tier. All endpoints return `404` when the hash or derivation is unknown.
 
 ## Example: Trigger an Evaluation
 
