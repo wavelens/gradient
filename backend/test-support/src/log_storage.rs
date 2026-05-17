@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::collections::HashMap;
 use std::sync::Mutex;
 
 use anyhow::Result;
@@ -76,6 +77,62 @@ impl LogStorage for RecordingLogStorage {
                 .lock()
                 .expect("recording log mutex")
                 .retain(|(b, _)| *b != build_id);
+            Ok(())
+        })
+    }
+}
+
+/// Pre-seeded in-memory log storage for fixture tests that need `read` to
+/// return deterministic content without going through `append`.
+#[derive(Debug, Default)]
+pub struct InMemoryLogStorage {
+    store: Mutex<HashMap<BuildId, String>>,
+}
+
+impl InMemoryLogStorage {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn seed(&self, build_id: BuildId, text: impl Into<String>) {
+        self.store
+            .lock()
+            .expect("in-memory log mutex")
+            .insert(build_id, text.into());
+    }
+}
+
+impl LogStorage for InMemoryLogStorage {
+    fn append<'a>(&'a self, build_id: BuildId, text: &'a str) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            self.store
+                .lock()
+                .expect("in-memory log mutex")
+                .entry(build_id)
+                .or_default()
+                .push_str(text);
+            Ok(())
+        })
+    }
+
+    fn read<'a>(&'a self, build_id: BuildId) -> BoxFuture<'a, Result<String>> {
+        Box::pin(async move {
+            Ok(self
+                .store
+                .lock()
+                .expect("in-memory log mutex")
+                .get(&build_id)
+                .cloned()
+                .unwrap_or_default())
+        })
+    }
+
+    fn delete<'a>(&'a self, build_id: BuildId) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            self.store
+                .lock()
+                .expect("in-memory log mutex")
+                .remove(&build_id);
             Ok(())
         })
     }

@@ -6,7 +6,7 @@
 use crate::cli::test_cli;
 use crate::fakes::email::InMemoryEmailSender;
 use crate::fakes::webhooks::RecordingWebhookClient;
-use crate::log_storage::NoopLogStorage;
+use crate::log_storage::{InMemoryLogStorage, NoopLogStorage};
 use futures::TryStreamExt as _;
 use gradient_core::ci::WebhookClient;
 use gradient_core::storage::{EmailSender, NarStore};
@@ -19,6 +19,7 @@ use uuid::Uuid;
 
 pub const FIXTURE_CACHE_NAME: &str = "test-cache";
 pub const FIXTURE_PATH_HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+pub const FIXTURE_DRV_FILENAME: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello.drv";
 
 fn cache_id() -> CacheId {
     CacheId::new(Uuid::parse_str("10000000-0000-0000-0000-000000000001").unwrap())
@@ -268,6 +269,138 @@ pub async fn public_cache_with_nar() -> Arc<ServerState> {
         .expect("put NAR into test storage");
 
     state
+}
+
+fn build_id() -> BuildId {
+    BuildId::new(Uuid::parse_str("10000000-0000-0000-0000-000000000008").unwrap())
+}
+
+fn eval_id() -> EvaluationId {
+    EvaluationId::new(Uuid::parse_str("10000000-0000-0000-0000-000000000009").unwrap())
+}
+
+fn cache_derivation_id() -> CacheDerivationId {
+    CacheDerivationId::new(Uuid::parse_str("10000000-0000-0000-0000-000000000010").unwrap())
+}
+
+fn cache_row() -> entity::cache::Model {
+    entity::cache::Model {
+        id: cache_id(),
+        name: FIXTURE_CACHE_NAME.into(),
+        display_name: "Test Cache".into(),
+        description: String::new(),
+        active: true,
+        priority: 30,
+        local_priority: None,
+        public_key: "test-pub-key".into(),
+        private_key: "test-priv-key".into(),
+        public: true,
+        created_by: UserId::new(org_id().into_inner()),
+        created_at: test_date(),
+        managed: false,
+    }
+}
+
+fn derivation_row() -> entity::derivation::Model {
+    entity::derivation::Model {
+        id: deriv_id(),
+        organization: org_id(),
+        derivation_path: format!("/nix/store/{}", FIXTURE_DRV_FILENAME),
+        architecture: "x86_64-linux".into(),
+        created_at: test_date(),
+    }
+}
+
+fn cache_derivation_row() -> entity::cache_derivation::Model {
+    entity::cache_derivation::Model {
+        id: cache_derivation_id(),
+        cache: cache_id(),
+        derivation: deriv_id(),
+        cached_at: test_date(),
+        last_fetched_at: None,
+    }
+}
+
+fn build_row(status: entity::build::BuildStatus) -> entity::build::Model {
+    entity::build::Model {
+        id: build_id(),
+        evaluation: eval_id(),
+        derivation: deriv_id(),
+        status,
+        log_id: None,
+        build_time_ms: None,
+        worker: None,
+        via: None,
+        external_cached: false,
+        created_at: test_date(),
+        updated_at: test_date(),
+    }
+}
+
+fn make_state(
+    db: sea_orm::DatabaseConnection,
+    log_storage: Arc<dyn gradient_core::storage::LogStorage>,
+) -> Arc<ServerState> {
+    let cli = test_cli();
+    let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
+    let nar_storage = NarStore::local(&config.storage.base_path).expect("create test NarStore");
+    Arc::new(ServerState {
+        web_db: WebDb::new(db),
+        worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
+        config,
+        log_storage,
+        webhooks: Arc::new(RecordingWebhookClient::new()) as Arc<dyn gradient_core::ci::WebhookClient>,
+        email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
+        nar_storage,
+        manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+        pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+        http: gradient_core::http::build_client().expect("http client"),
+        shutdown: gradient_core::shutdown::Shutdown::new(),
+        jwt_secret: SecretString::new("test-jwt-secret".to_string()),
+        started_at: chrono::Utc::now(),
+    })
+}
+
+/// Public cache + derivation linked via `cache_derivation` + completed build +
+/// log storage seeded. Returns `(state, expected_log_body)`.
+pub async fn cache_with_completed_build_in_cache() -> (Arc<ServerState>, String) {
+    let log_body = "build output line 1\nbuild output line 2\n".to_string();
+
+    let log_storage = Arc::new(InMemoryLogStorage::new());
+    log_storage.seed(build_id(), log_body.clone());
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![cache_row()]])
+        .append_query_results([vec![derivation_row()]])
+        .append_query_results([vec![cache_derivation_row()]])
+        .append_query_results([vec![build_row(entity::build::BuildStatus::Completed)]])
+        .into_connection();
+
+    (make_state(db, log_storage), log_body)
+}
+
+/// Public cache + derivation with no `cache_derivation` link — `/log` must 404.
+pub async fn cache_with_completed_build_not_in_cache() -> Arc<ServerState> {
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![cache_row()]])
+        .append_query_results([vec![derivation_row()]])
+        .append_query_results([Vec::<entity::cache_derivation::Model>::new()])
+        .into_connection();
+
+    make_state(db, Arc::new(NoopLogStorage))
+}
+
+/// Public cache + derivation linked via `cache_derivation` but only a failed
+/// build — `/log` must 404.
+pub async fn cache_with_failed_build_only() -> Arc<ServerState> {
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![cache_row()]])
+        .append_query_results([vec![derivation_row()]])
+        .append_query_results([vec![cache_derivation_row()]])
+        .append_query_results([Vec::<entity::build::Model>::new()])
+        .into_connection();
+
+    make_state(db, Arc::new(NoopLogStorage))
 }
 
 async fn synthetic_nar_zst() -> Vec<u8> {

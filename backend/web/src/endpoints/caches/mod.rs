@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+mod build_log;
 mod helpers;
 mod keys;
 mod management;
@@ -13,6 +14,7 @@ mod narlist;
 mod serve;
 mod upstreams;
 
+pub use self::build_log::log;
 pub use self::keys::{get_cache_key, get_cache_public_key};
 pub use self::management::{
     delete_cache, delete_cache_active, delete_cache_public, get, get_cache,
