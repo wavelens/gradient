@@ -17,6 +17,7 @@ pub mod ci;
 pub mod dispatch;
 pub mod eval;
 pub mod jobs;
+pub mod log_substitution;
 pub mod peer_auth;
 pub mod policy;
 pub mod worker_pool;
