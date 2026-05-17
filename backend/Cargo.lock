@@ -6355,6 +6355,7 @@ dependencies = [
  "http-body-util",
  "ipnet",
  "jsonwebtoken",
+ "mime_guess",
  "password-auth",
  "prometheus",
  "proto",
