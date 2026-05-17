@@ -218,6 +218,17 @@ async fn set_log_id(state: &Arc<ServerState>, build_id: BuildId, log_id: BuildId
     am.log_id = Set(Some(log_id));
     if let Err(e) = am.update(&state.worker_db).await {
         warn!(%build_id, error = %e, "substitute_log: failed to set log_id");
+        return;
+    }
+
+    if let Err(e) = EBuild::update_many()
+        .col_expr(CBuild::LogId, sea_orm::sea_query::Expr::value(log_id.into_inner()))
+        .filter(CBuild::Via.eq(build_id))
+        .filter(CBuild::LogId.is_null())
+        .exec(&state.worker_db)
+        .await
+    {
+        warn!(%build_id, error = %e, "substitute_log: follower backfill failed");
     }
 }
 
@@ -270,6 +281,7 @@ mod tests {
             .append_query_results([vec![new.clone()]])
             .append_exec_results([sea_orm::MockExecResult { last_insert_id: 0, rows_affected: 1 }])
             .append_query_results([vec![build::Model { log_id: Some(prior_log), ..new.clone() }]])
+            .append_exec_results([sea_orm::MockExecResult { last_insert_id: 0, rows_affected: 0 }])
             .into_connection();
 
         let state = test_state(db);
@@ -353,6 +365,31 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn followers_get_log_id_via_backfill() {
+        let drv_id = DerivationId::new(Uuid::now_v7());
+        let prior_id = BuildId::new(Uuid::now_v7());
+        let prior_log = BuildId::new(Uuid::now_v7());
+        let new_id = BuildId::new(Uuid::now_v7());
+
+        let prior = make_build(prior_id, drv_id, BuildStatus::Completed, Some(prior_log), false);
+        let new = make_build(new_id, drv_id, BuildStatus::Substituted, None, false);
+
+        let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
+            .append_query_results([vec![new.clone()]])
+            .append_query_results([vec![prior.clone()]])
+            .append_query_results([vec![new.clone()]])
+            .append_exec_results([sea_orm::MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+            .append_query_results([vec![build::Model { log_id: Some(prior_log), ..new.clone() }]])
+            .append_exec_results([sea_orm::MockExecResult { last_insert_id: 0, rows_affected: 2 }])
+            .into_connection();
+
+        let state = test_state(db);
+        substitute_log(state, new_id, drv_id, "/nix/store/x-test.drv".to_string(), false)
+            .await
+            .expect("Ok");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn upstream_fetch_persists_log_on_200() {
         let drv_id = DerivationId::new(Uuid::now_v7());
         let org = OrganizationId::new(Uuid::now_v7());
@@ -375,6 +412,7 @@ mod tests {
             .append_query_results([vec![build.clone()]])
             .append_exec_results([sea_orm::MockExecResult { last_insert_id: 0, rows_affected: 1 }])
             .append_query_results([vec![build::Model { log_id: Some(build_id), ..build.clone() }]])
+            .append_exec_results([sea_orm::MockExecResult { last_insert_id: 0, rows_affected: 0 }])
             .into_connection();
 
         let (state, storage) = test_state_with_recording_storage(db);
@@ -413,6 +451,7 @@ mod tests {
             .append_query_results([vec![build.clone()]])
             .append_exec_results([sea_orm::MockExecResult { last_insert_id: 0, rows_affected: 1 }])
             .append_query_results([vec![build::Model { log_id: Some(build_id), ..build.clone() }]])
+            .append_exec_results([sea_orm::MockExecResult { last_insert_id: 0, rows_affected: 0 }])
             .into_connection();
 
         let (state, storage) = test_state_with_recording_storage(db);
@@ -478,6 +517,7 @@ mod tests {
             .append_query_results([vec![build.clone()]])
             .append_exec_results([sea_orm::MockExecResult { last_insert_id: 0, rows_affected: 1 }])
             .append_query_results([vec![build::Model { log_id: Some(build_id), ..build.clone() }]])
+            .append_exec_results([sea_orm::MockExecResult { last_insert_id: 0, rows_affected: 0 }])
             .into_connection();
 
         let (state, storage) = test_state_with_recording_storage(db);

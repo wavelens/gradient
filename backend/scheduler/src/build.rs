@@ -119,9 +119,40 @@ impl<'a> BuildStateHandler<'a> {
             }
         };
         let evaluation_id = build.evaluation;
+        let derivation_id = build.derivation;
+        let was_external_cached = build.external_cached;
         let leader =
             update_build_status(Arc::clone(self.state), build, BuildStatus::Completed).await;
         self.propagate_to_followers(&leader).await?;
+
+        if was_external_cached {
+            let state = Arc::clone(self.state);
+            let leader_id = leader.id;
+            tokio::spawn(async move {
+                let drv_path = match EDerivation::find_by_id(derivation_id)
+                    .one(&state.worker_db)
+                    .await
+                {
+                    Ok(Some(d)) => d.derivation_path,
+                    Ok(None) => {
+                        warn!(%leader_id, %derivation_id, "substitute_log: derivation row missing");
+                        return;
+                    }
+                    Err(e) => {
+                        warn!(%leader_id, error = %e, "substitute_log: derivation lookup failed");
+                        return;
+                    }
+                };
+                if let Err(e) = crate::log_substitution::substitute_log(
+                    state, leader_id, derivation_id, drv_path, true,
+                )
+                .await
+                {
+                    warn!(%leader_id, error = %e, "substitute_log spawn failed");
+                }
+            });
+        }
+
         self.check_evaluation_done(evaluation_id).await
     }
 
