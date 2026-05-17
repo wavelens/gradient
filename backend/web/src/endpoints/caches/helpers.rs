@@ -408,7 +408,6 @@ impl JsonFlag {
     }
 }
 
-#[allow(dead_code)]
 pub async fn fetch_nar_bytes(state: &Arc<ServerState>, path_hash: &str) -> WebResult<Vec<u8>> {
     let effective_hash =
         crate::endpoints::caches::nar::resolve_effective_hash_db(&state.web_db, path_hash).await?;

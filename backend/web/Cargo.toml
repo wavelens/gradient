@@ -22,6 +22,7 @@ entity        = { workspace = true }
 
 anyhow        = { workspace = true }
 async-stream  = { workspace = true }
+futures       = { workspace = true }
 base64        = { workspace = true }
 bytes         = { workspace = true }
 chrono        = { workspace = true }
@@ -58,6 +59,7 @@ mime_guess           = { workspace = true }
 tower                = { version = "0.5", default-features = false }
 tower-http           = { version = "0.6", default-features = false, features = ["cors", "request-id", "trace"] }
 tower_governor       = { version = "0.8", default-features = false, features = ["axum"] }
+harmonia-file-nar = { workspace = true }
 
 [dev-dependencies]
 axum-test         = { version = "20.0", default-features = false }

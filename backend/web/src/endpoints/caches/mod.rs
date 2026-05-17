@@ -9,6 +9,7 @@ mod keys;
 mod management;
 mod nar;
 mod narinfo;
+mod narlist;
 mod upstreams;
 
 pub use self::keys::{get_cache_key, get_cache_public_key};
@@ -19,6 +20,7 @@ pub use self::management::{
 };
 pub use self::nar::{nar, upstream_nar};
 pub use self::narinfo::{gradient_cache_info, nix_cache_info, path};
+pub use self::narlist::ls;
 pub use self::upstreams::{
     delete_cache_upstream, get_cache_upstreams, patch_cache_upstream, put_cache_upstream,
 };

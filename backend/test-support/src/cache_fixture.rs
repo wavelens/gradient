@@ -7,10 +7,12 @@ use crate::cli::test_cli;
 use crate::fakes::email::InMemoryEmailSender;
 use crate::fakes::webhooks::RecordingWebhookClient;
 use crate::log_storage::NoopLogStorage;
+use futures::TryStreamExt as _;
 use gradient_core::ci::WebhookClient;
 use gradient_core::storage::{EmailSender, NarStore};
 use gradient_core::types::ids::*;
 use gradient_core::types::{RuntimeConfig, SecretString, ServerState, WebDb, WorkerDb};
+use harmonia_file_nar::NarByteStream;
 use sea_orm::{DatabaseBackend, MockDatabase};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -207,4 +209,78 @@ pub async fn public_cache_state() -> Arc<ServerState> {
         jwt_secret: SecretString::new("test-jwt-secret".to_string()),
         started_at: chrono::Utc::now(),
     })
+}
+
+/// Build a `ServerState` with a public cache and a synthetic NAR stored under
+/// [`FIXTURE_PATH_HASH`]. The NAR contains `bin/hello = "hi"` (2 bytes).
+///
+/// Mock query order:
+///   0. ECache::find (by name)
+///   1. ECachedPath::find (file_hash lookup — returns empty so hash falls
+///      back to FIXTURE_PATH_HASH directly)
+pub async fn public_cache_with_nar() -> Arc<ServerState> {
+    let cache_row = entity::cache::Model {
+        id: cache_id(),
+        name: FIXTURE_CACHE_NAME.into(),
+        display_name: "Test Cache".into(),
+        description: String::new(),
+        active: true,
+        priority: 30,
+        local_priority: None,
+        public_key: "test-pub-key".into(),
+        private_key: "test-priv-key".into(),
+        public: true,
+        created_by: UserId::new(org_id().into_inner()),
+        created_at: test_date(),
+        managed: false,
+    };
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![cache_row]])
+        .append_query_results([Vec::<entity::cached_path::Model>::new()])
+        .into_connection();
+
+    let cli = test_cli();
+    let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
+    let nar_storage = NarStore::local(&config.storage.base_path).expect("create test NarStore");
+
+    let state = Arc::new(ServerState {
+        web_db: WebDb::new(db),
+        worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
+        config,
+        log_storage: Arc::new(NoopLogStorage),
+        webhooks: Arc::new(RecordingWebhookClient::new()) as Arc<dyn WebhookClient>,
+        email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
+        nar_storage,
+        manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+        pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+        http: gradient_core::http::build_client().expect("http client"),
+        shutdown: gradient_core::shutdown::Shutdown::new(),
+        jwt_secret: SecretString::new("test-jwt-secret".to_string()),
+        started_at: chrono::Utc::now(),
+    });
+
+    let compressed = synthetic_nar_zst().await;
+    state
+        .nar_storage
+        .put(FIXTURE_PATH_HASH, compressed)
+        .await
+        .expect("put NAR into test storage");
+
+    state
+}
+
+async fn synthetic_nar_zst() -> Vec<u8> {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let bin = tmp.path().join("bin");
+    std::fs::create_dir(&bin).expect("create bin/");
+    std::fs::write(bin.join("hello"), b"hi").expect("write hello");
+
+    let chunks: Vec<bytes::Bytes> = NarByteStream::new(tmp.path().to_path_buf())
+        .try_collect()
+        .await
+        .expect("dump NAR");
+    let nar_bytes: Vec<u8> = chunks.into_iter().flatten().collect();
+
+    zstd::encode_all(std::io::Cursor::new(nar_bytes), 1).expect("zstd compress")
 }

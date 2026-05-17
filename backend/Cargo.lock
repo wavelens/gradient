@@ -5547,10 +5547,12 @@ dependencies = [
  "anyhow",
  "async-trait",
  "axum-test",
+ "bytes",
  "chrono",
  "core",
  "entity",
  "futures",
+ "harmonia-file-nar",
  "harmonia-store-core",
  "jsonwebtoken",
  "password-auth",
@@ -5558,10 +5560,12 @@ dependencies = [
  "rkyv",
  "sea-orm",
  "serde",
+ "tempfile",
  "tokio",
  "tokio-tungstenite",
  "uuid",
  "web",
+ "zstd",
 ]
 
 [[package]]
@@ -6346,6 +6350,7 @@ dependencies = [
  "core",
  "email_address",
  "entity",
+ "futures",
  "git-url-parse",
  "governor",
  "harmonia-file-nar",

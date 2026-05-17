@@ -551,7 +551,11 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         .route("/cache/{cache}/nar/{path}", get(caches::nar))
         .route_layer(GovernorLayer::new(rl_per_ms(60, 1000)));
 
-    app = app.merge(cache_routes);
+    let cache_inspect = Router::new()
+        .route("/cache/{cache}/ls/{hash}", get(caches::ls))
+        .route_layer(GovernorLayer::new(rl_per_second(1, 60)));
+
+    app = app.merge(cache_routes).merge(cache_inspect);
 
     // Layer order (outer → inner, i.e. last `.layer()` is outermost):
     //   SetRequestIdLayer    — assigns x-request-id on inbound requests
