@@ -76,6 +76,45 @@ fn serve_unknown_path_returns_404() {
 }
 
 #[test]
+fn serve_symlink_returns_404() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let state = public_cache_with_nar().await;
+        let server = TestServer::new(create_router(Arc::clone(&state)));
+
+        let resp = server
+            .get(&format!(
+                "/cache/{FIXTURE_CACHE_NAME}/serve/{FIXTURE_PATH_HASH}/bin/link"
+            ))
+            .await;
+        resp.assert_status(StatusCode::NOT_FOUND);
+    });
+}
+
+#[test]
+fn serve_unknown_hash_returns_404() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let state = public_cache_with_nar().await;
+        let server = TestServer::new(create_router(Arc::clone(&state)));
+
+        let unknown = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let resp = server
+            .get(&format!(
+                "/cache/{FIXTURE_CACHE_NAME}/serve/{unknown}/bin/hello"
+            ))
+            .await;
+        resp.assert_status(StatusCode::NOT_FOUND);
+    });
+}
+
+#[test]
 fn private_cache_serve_requires_auth() {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()

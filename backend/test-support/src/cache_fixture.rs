@@ -436,6 +436,34 @@ pub async fn private_cache_state() -> Arc<ServerState> {
     })
 }
 
+/// Public cache where no derivation row matches the requested `.drv` filename.
+pub async fn cache_with_unknown_derivation() -> Arc<ServerState> {
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![cache_row()]])
+        .append_query_results([Vec::<entity::derivation::Model>::new()])
+        .into_connection();
+
+    make_state(db, Arc::new(NoopLogStorage))
+}
+
+/// Public cache + two completed builds for the same derivation, where only
+/// the newer build's log is seeded. The mock DB returns the newer build row
+/// (aligned with `.order_by_desc(CreatedAt).one()`). Returns `(state, expected_log)`.
+pub async fn cache_with_two_completed_builds() -> (Arc<ServerState>, String) {
+    let newer_log = "newer build log\n".to_string();
+    let log_storage = Arc::new(InMemoryLogStorage::new());
+    log_storage.seed(build_id(), newer_log.clone());
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![cache_row()]])
+        .append_query_results([vec![derivation_row()]])
+        .append_query_results([vec![cache_derivation_row()]])
+        .append_query_results([vec![build_row(entity::build::BuildStatus::Completed)]])
+        .into_connection();
+
+    (make_state(db, log_storage), newer_log)
+}
+
 /// Private cache with a synthetic NAR — for auth-required tests on `/ls` and `/serve`.
 pub async fn private_cache_with_nar() -> Arc<ServerState> {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -487,6 +515,14 @@ async fn synthetic_nar_zst() -> Vec<u8> {
     let bin = tmp.path().join("bin");
     std::fs::create_dir(&bin).expect("create bin/");
     std::fs::write(bin.join("hello"), b"hi").expect("write hello");
+
+    let exec_path = bin.join("exec");
+    std::fs::write(&exec_path, b"ex").expect("write exec");
+    use std::os::unix::fs::PermissionsExt as _;
+    std::fs::set_permissions(&exec_path, std::fs::Permissions::from_mode(0o755))
+        .expect("chmod exec");
+
+    std::os::unix::fs::symlink("hello", bin.join("link")).expect("create symlink");
 
     let chunks: Vec<bytes::Bytes> = NarByteStream::new(tmp.path().to_path_buf())
         .try_collect()
