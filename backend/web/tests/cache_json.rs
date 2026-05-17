@@ -58,3 +58,43 @@ fn nix_cache_info_no_json_returns_text() {
         assert!(resp.text().contains("StoreDir: /nix/store"));
     });
 }
+
+#[test]
+fn gradient_cache_info_json_returns_object() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let state = public_cache_state().await;
+        let server = TestServer::new(create_router(Arc::clone(&state))).unwrap();
+
+        let resp = server
+            .get(&format!("/cache/{FIXTURE_CACHE_NAME}/gradient-cache-info"))
+            .add_query_param("json", "")
+            .await;
+        resp.assert_status_ok();
+        let body: Value = resp.json();
+        assert!(body["GradientVersion"].is_string());
+        assert!(body["GradientUrl"].is_string());
+    });
+}
+
+#[test]
+fn gradient_cache_info_no_json_returns_text() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let state = public_cache_state().await;
+        let server = TestServer::new(create_router(Arc::clone(&state))).unwrap();
+
+        let resp = server
+            .get(&format!("/cache/{FIXTURE_CACHE_NAME}/gradient-cache-info"))
+            .await;
+        resp.assert_status_ok();
+        assert!(resp.text().contains("GradientVersion:"));
+        assert!(resp.text().contains("GradientUrl:"));
+    });
+}

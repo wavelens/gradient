@@ -63,16 +63,20 @@ pub async fn gradient_cache_info(
     state: State<Arc<ServerState>>,
     headers: HeaderMap,
     Path(cache): Path<String>,
-) -> WebResult<Response<String>> {
+    Query(flag): Query<JsonFlag>,
+) -> WebResult<Response> {
     CacheContext::load(&state, &headers, cache).await?;
 
-    let body = format!(
-        "GradientVersion: {}\nGradientUrl: {}\n",
-        env!("CARGO_PKG_VERSION"),
-        state.config.server.serve_url,
-    );
+    let info = GradientCacheInfo {
+        gradient_version: env!("CARGO_PKG_VERSION").to_string(),
+        gradient_url: state.config.server.serve_url.clone(),
+    };
 
-    text_response("text/x-gradient-cache-info", body)
+    if flag.is_set() {
+        Ok(axum::Json(info).into_response())
+    } else {
+        Ok(text_response("text/x-gradient-cache-info", info.to_nix_string())?.into_response())
+    }
 }
 
 pub async fn path(

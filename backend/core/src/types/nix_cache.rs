@@ -86,6 +86,23 @@ pub struct BuildOutputPath {
     pub signatures: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct GradientCacheInfo {
+    #[serde(rename = "GradientVersion")]
+    pub gradient_version: String,
+    #[serde(rename = "GradientUrl")]
+    pub gradient_url: String,
+}
+
+impl GradientCacheInfo {
+    pub fn to_nix_string(&self) -> String {
+        format!(
+            "GradientVersion: {}\nGradientUrl: {}\n",
+            self.gradient_version, self.gradient_url
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
