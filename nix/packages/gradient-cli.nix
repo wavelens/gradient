@@ -40,7 +40,7 @@ in
 craneLib.buildPackage (commonArgs // {
   inherit cargoArtifacts;
   pname = "gradient-cli";
-  version = "1.1.1";
+  version = "1.2.0";
   separateDebugInfo = true;
 
   postInstall = lib.optionalString (stdenv.buildPlatform.canExecute stdenv.hostPlatform) ''
