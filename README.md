@@ -20,17 +20,17 @@
 
 ![Gradient](./docs/gradient.png)
 
-- **Modern UI** — clean and intuitive user interface
-- **Organizations** — multiple organizations, which work independently from each other (e.g. different workers, user access)
-- **API** — provides a RESTful API with API-Key management for authentication
-- **Streaming Logs** — real-time log streaming for builds
-- **Rich Project Configuration** — flake updates, check all branches, pull requests, and tags
-- **OAuth2 / OIDC** — integrated single-sign-on support
-- **Binary Cache** — built-in Nix store cache with S3 storage backend support
-- **Proto Workers** — build and evaluate Nix derivations on distributed `gradient-worker` instances over a persistent WebSocket protocol
-- **Deployment Module** — Pull-Deployment via gradient-deploy module
-- **Dependency Graph** — interactive visualization of Nix build dependency trees
-- **Actions Integration** — GitHub App, Gitea and Gitlab Integration
+- **Modern UI**: clean and intuitive user interface
+- **Organizations**: multiple organizations, which work independently from each other (e.g. different workers, user access)
+- **API**: provides a RESTful API with API-Key management for authentication
+- **Streaming Logs**: real-time log streaming for builds
+- **Rich Project Configuration**: flake updates, check all branches, pull requests, and tags
+- **OAuth2 / OIDC**: integrated single-sign-on support
+- **Binary Cache**: built-in Nix store cache with S3 storage backend support
+- **Proto Workers**: build and evaluate Nix derivations on distributed `gradient-worker` instances over a persistent WebSocket protocol
+- **Deployment Module**: Pull-Deployment via gradient-deploy module
+- **Dependency Graph**: interactive visualization of Nix build dependency trees
+- **Actions Integration**: GitHub App, Gitea and Gitlab Integration
 
 ## Installation
 
@@ -39,6 +39,7 @@ Add Cache for prebuilt Gradient packages (optional):
 ```
 URL: https://gradient.wavelens.io/cache/main
 Public Key: gradient.wavelens.io-main:qmxRE+saUvhNa3jqaCMWje+feVU77TjABchZrPGf7A8=
+Experimental Features: blake3-hashes
 ```
 
 Extend your `flake.nix` with Gradient module:
