@@ -78,7 +78,7 @@ sea-orm           = { version = "1.1", default-features = false, features = ["ma
 sea-orm-migration = { version = "1.1", default-features = false, features = ["cli", "runtime-tokio-rustls", "sqlx-postgres", "with-chrono", "with-json", "with-uuid"] }
 
 # HTTP / networking
-reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "form", "stream", "charset", "http2", "multipart"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "form", "stream", "charset", "http2", "multipart", "brotli", "gzip", "deflate"] }
 
 # Object store / git
 git2         = { version = "0.20", default-features = false, features = ["https", "ssh"] }
