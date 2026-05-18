@@ -6,15 +6,41 @@
 
 use super::helpers::{CacheContext, JsonFlag, get_nar_by_hash};
 use crate::error::{WebError, WebResult};
-use axum::extract::{ConnectInfo, Extension, Path, Query, State};
+use axum::extract::connect_info::MockConnectInfo;
+use axum::extract::{ConnectInfo, FromRequestParts, Path, Query, State};
+use axum::http::request::Parts;
 use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::{IntoResponse, Response};
 use gradient_core::sources::{get_hash_from_url, verify_narinfo_signature};
 use gradient_core::types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tracing::warn;
+
+/// Optional peer address — mirrors `ConnectInfo`'s real / `MockConnectInfo`
+/// fallback, but yields `None` instead of 500 when the runtime wired neither
+/// (`axum_test::TestServer` without `MockConnectInfo`, ad-hoc tower stacks).
+pub struct OptionalPeer(pub Option<SocketAddr>);
+
+impl<S: Send + Sync> FromRequestParts<S> for OptionalPeer {
+    type Rejection = Infallible;
+
+    async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Self::Rejection> {
+        let addr = parts
+            .extensions
+            .get::<ConnectInfo<SocketAddr>>()
+            .map(|c| c.0)
+            .or_else(|| {
+                parts
+                    .extensions
+                    .get::<MockConnectInfo<SocketAddr>>()
+                    .map(|m| m.0)
+            });
+        Ok(OptionalPeer(addr))
+    }
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -29,15 +55,15 @@ fn text_response(content_type: &'static str, body: String) -> WebResult<Response
 
 pub async fn nix_cache_info(
     state: State<Arc<ServerState>>,
-    connect_info: Option<Extension<ConnectInfo<SocketAddr>>>,
+    OptionalPeer(peer): OptionalPeer,
     headers: HeaderMap,
     Path(cache): Path<String>,
     Query(flag): Query<JsonFlag>,
 ) -> WebResult<Response> {
     let ctx = CacheContext::load(&state, &headers, cache).await?;
 
-    let priority = match (ctx.cache.local_priority, connect_info) {
-        (Some(p), Some(Extension(ConnectInfo(addr)))) if p != 0 => {
+    let priority = match (ctx.cache.local_priority, peer) {
+        (Some(p), Some(addr)) if p != 0 => {
             let client_ip = crate::client_ip::resolve_client_ip(
                 &headers,
                 addr.ip(),
