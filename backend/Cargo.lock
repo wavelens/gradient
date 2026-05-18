@@ -4636,6 +4636,8 @@ dependencies = [
  "core",
  "cron",
  "entity",
+ "futures",
+ "reqwest 0.13.3",
  "sea-orm",
  "serde",
  "serde_json",
@@ -4644,6 +4646,7 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+ "wiremock",
 ]
 
 [[package]]
