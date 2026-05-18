@@ -78,10 +78,13 @@ pub(crate) async fn resolve_effective_hash_db<C: ConnectionTrait>(
     db: &C,
     path_hash: &str,
 ) -> WebResult<String> {
-    let file_hash_prefixed = format!("sha256:{}", path_hash);
+    let candidates = [
+        format!("blake3:{path_hash}"),
+        format!("sha256:{path_hash}"),
+    ];
 
     let by_cached_path = ECachedPath::find()
-        .filter(CCachedPath::FileHash.eq(&file_hash_prefixed))
+        .filter(CCachedPath::FileHash.is_in(candidates))
         .one(db)
         .await?;
 
@@ -209,5 +212,24 @@ mod tests {
             .block_on(resolve_effective_hash_db(&db, FILE_HASH_NIX32))
             .expect("resolve should succeed");
         assert_eq!(effective, FILE_HASH_NIX32);
+    }
+
+    /// After issue #132 new uploads use BLAKE3-prefixed file hashes. The
+    /// URL slug carries the bare nix32 digest with no algorithm prefix, so
+    /// the resolver must look up both `blake3:` and `sha256:` to bridge
+    /// the legacy and current rows.
+    #[test]
+    fn resolve_returns_store_hash_for_blake3_file_hash() {
+        let mut row = cached_path_row();
+        row.file_hash = Some(format!("blake3:{FILE_HASH_NIX32}"));
+
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![row]])
+            .into_connection();
+
+        let effective = runtime()
+            .block_on(resolve_effective_hash_db(&db, FILE_HASH_NIX32))
+            .expect("resolve should succeed");
+        assert_eq!(effective, STORE_HASH);
     }
 }

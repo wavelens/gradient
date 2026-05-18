@@ -13,6 +13,7 @@
 //! records `cache_derivation` rows when a derivation's full closure has
 //! become cached for a given cache.
 
+use gradient_core::nix_hash::normalize_nar_hash;
 use gradient_core::sources::CacheSigner;
 use gradient_core::types::*;
 use sea_orm::{
@@ -145,7 +146,7 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
             .map(|s| s.to_owned())
             .collect();
 
-        let nar_hash_nix32 = hex_hash_to_nix32(nar_hash);
+        let nar_hash_nix32 = normalize_nar_hash(nar_hash);
 
         let sig_bytes =
             signer.sign_narinfo_raw(&cp.store_path, &nar_hash_nix32, nar_size as u64, &refs);
@@ -317,84 +318,9 @@ async fn load_producing_project_flags(
     Ok(out)
 }
 
-/// Converts a nar_hash from any common format to `sha256:<nix32>`.
-///
-/// Handles `sha256:<hex>` (from streaming workers), `sha256-<base64>` (SRI),
-/// and `sha256:<nix32>` (already correct).
-pub(crate) fn hex_hash_to_nix32(hash: &str) -> String {
-    const CHARS: &[u8] = b"0123456789abcdfghijklmnpqrsvwxyz";
-    let encode = |bytes: &[u8]| -> String {
-        let len = (bytes.len() * 8 - 1) / 5 + 1;
-        let mut out = String::with_capacity(len);
-        for n in (0..len).rev() {
-            let b = n * 5;
-            let i = b / 8;
-            let j = b % 8;
-            let b0 = bytes.get(i).copied().unwrap_or(0) as u32;
-            let b1 = bytes.get(i + 1).copied().unwrap_or(0) as u32;
-            let c = ((b0 >> j) | (b1 << (8 - j))) & 0x1f;
-            out.push(CHARS[c as usize] as char);
-        }
-        out
-    };
-
-    if let Some(rest) = hash.strip_prefix("sha256:") {
-        if rest.len() == 64
-            && rest.chars().all(|c| c.is_ascii_hexdigit())
-            && let Ok(bytes) = (0..32)
-                .map(|i| u8::from_str_radix(&rest[i * 2..i * 2 + 2], 16))
-                .collect::<Result<Vec<u8>, _>>()
-        {
-            return format!("sha256:{}", encode(&bytes));
-        }
-        return hash.to_string();
-    }
-
-    hash.to_string()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn hex_hash_to_nix32_converts_valid_hex() {
-        let hex = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
-        let out = hex_hash_to_nix32(&format!("sha256:{hex}"));
-        assert!(out.starts_with("sha256:"));
-        let suffix = out.strip_prefix("sha256:").unwrap();
-        assert_eq!(suffix.len(), 52);
-        assert!(
-            suffix
-                .chars()
-                .all(|c| "0123456789abcdfghijklmnpqrsvwxyz".contains(c))
-        );
-    }
-
-    #[test]
-    fn hex_hash_to_nix32_passthrough_non_hex() {
-        let already = "sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73";
-        assert_eq!(hex_hash_to_nix32(already), already);
-    }
-
-    #[test]
-    fn hex_hash_to_nix32_passthrough_without_sha256_prefix() {
-        assert_eq!(hex_hash_to_nix32("sha256-AAAA"), "sha256-AAAA");
-        assert_eq!(hex_hash_to_nix32("garbage"), "garbage");
-    }
-
-    #[test]
-    fn hex_hash_to_nix32_wrong_hex_length_returned_as_is() {
-        let short = "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b85";
-        assert_eq!(hex_hash_to_nix32(short), short);
-    }
-
-    #[test]
-    fn hex_hash_to_nix32_zero_digest() {
-        let zero_hex = "0".repeat(64);
-        let out = hex_hash_to_nix32(&format!("sha256:{zero_hex}"));
-        assert_eq!(out, format!("sha256:{}", "0".repeat(52)));
-    }
 
     fn cp(id: u128) -> CachedPathId {
         CachedPathId::new(uuid::Uuid::from_u128(id))

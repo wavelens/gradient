@@ -348,6 +348,7 @@ in {
         "nix-command"
         "flakes"
         "ca-derivations"
+        "blake3-hashes"
       ];
     };
 

@@ -10,7 +10,7 @@ use crate::helpers::OptionExt;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use base64::Engine;
-use gradient_core::nix_hash::normalize_nar_hash;
+use gradient_core::nix_hash::{normalize_nar_hash, strip_hash_algo};
 use gradient_core::sources::get_path_from_derivation_output;
 use gradient_core::types::*;
 use sea_orm::ActiveValue::Set;
@@ -205,7 +205,7 @@ async fn get_nar_by_hash_inner(
         .as_deref()
         .map(normalize_nar_hash)
         .or_not_found("FileHash not recorded")?;
-    let file_hash_nix32 = file_hash.trim_start_matches("sha256:").to_string();
+    let file_hash_nix32 = strip_hash_algo(&file_hash).to_string();
     let file_size = cached_path_row
         .file_size
         .or_not_found("FileSize not recorded")? as u32;
@@ -290,9 +290,7 @@ async fn get_nar_by_cached_path(
         .filter(|s| !s.is_empty())
         .map(str::to_owned)
         .collect();
-    let file_hash_nix32 = normalize_nar_hash(&file_hash)
-        .trim_start_matches("sha256:")
-        .to_string();
+    let file_hash_nix32 = strip_hash_algo(&normalize_nar_hash(&file_hash)).to_string();
 
     Ok(NixPathInfo {
         store_path: cached_path_row.store_path.clone(),
