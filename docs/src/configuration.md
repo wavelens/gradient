@@ -302,15 +302,9 @@ The token must be the 48-byte random secret returned by the registration API (ge
 
 ### Hashing
 
-Gradient hashes NARs and compressed cache files with **BLAKE3** by default. The worker module enables the `blake3-hashes` experimental feature on worker hosts automatically; no toggle is exposed and the algorithm is the same for every Gradient instance.
+Gradient hashes NARs and compressed cache files with **SHA-256** by default. No client-side experimental feature is required to substitute from a Gradient cache.
 
-**Substituting clients must also enable `blake3-hashes`**, otherwise Nix will reject narinfos served by the cache. Add the feature on every machine that lists a Gradient cache as a substituter:
-
-```nix
-nix.settings.experimental-features = [ "nix-command" "flakes" "blake3-hashes" ];
-```
-
-Nix ≥ 2.29 is required for BLAKE3 support.
+BLAKE3-prefixed (`blake3:{nix32}`) hashes are still accepted on the read path so narinfo rows uploaded while the BLAKE3 default was active (issue #132) keep resolving, and so upstream caches that advertise either algorithm interoperate cleanly.
 
 ## Declarative State
 

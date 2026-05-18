@@ -39,7 +39,6 @@ Add Cache for prebuilt Gradient packages (optional):
 ```
 URL: https://gradient.wavelens.io/cache/main
 Public Key: gradient.wavelens.io-main:qmxRE+saUvhNa3jqaCMWje+feVU77TjABchZrPGf7A8=
-Experimental Features: blake3-hashes
 ```
 
 Extend your `flake.nix` with Gradient module:

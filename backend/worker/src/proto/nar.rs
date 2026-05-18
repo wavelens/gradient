@@ -23,6 +23,7 @@ use gradient_core::nix_hash::nix32_encode;
 use harmonia_store_path::StorePath;
 use harmonia_store_remote::DaemonStore as _;
 use proto::messages::ClientMessage;
+use sha2::{Digest, Sha256};
 use tracing::{debug, info, warn};
 
 use crate::connection::ProtoWriter;
@@ -174,8 +175,8 @@ pub async fn push_direct(
     let mut nar_stream = harmonia_file_nar::NarByteStream::new(store_path.to_owned().into());
     let mut encoder = zstd::stream::Encoder::new(Vec::with_capacity(NAR_CHUNK_SIZE * 2), 6)
         .context("failed to create zstd encoder")?;
-    let mut file_hasher = blake3::Hasher::new();
-    let mut nar_hasher = blake3::Hasher::new();
+    let mut file_hasher = Sha256::new();
+    let mut nar_hasher = Sha256::new();
     let mut offset: u64 = 0;
     let mut nar_size: u64 = 0;
 
@@ -226,8 +227,8 @@ pub async fn push_direct(
         is_final: true,
     })?;
 
-    let file_hash = format!("blake3:{}", nix32_encode(file_hasher.finalize().as_bytes()));
-    let nar_hash = format!("blake3:{}", nix32_encode(nar_hasher.finalize().as_bytes()));
+    let file_hash = format!("sha256:{}", nix32_encode(&file_hasher.finalize()));
+    let nar_hash = format!("sha256:{}", nix32_encode(&nar_hasher.finalize()));
 
     // Report metadata so the server can update cache records.
     writer.send(ClientMessage::NarUploaded {
@@ -279,7 +280,7 @@ pub async fn upload_presigned(
     let mut nar_stream = harmonia_file_nar::NarByteStream::new(store_path.to_owned().into());
     let mut encoder =
         zstd::stream::Encoder::new(Vec::new(), 6).context("failed to create zstd encoder")?;
-    let mut nar_hasher = blake3::Hasher::new();
+    let mut nar_hasher = Sha256::new();
     let mut nar_size: u64 = 0;
 
     while let Some(chunk_result) = nar_stream.next().await {
@@ -293,11 +294,8 @@ pub async fn upload_presigned(
 
     let compressed = encoder.finish().context("failed to finish zstd encoder")?;
     let file_size = compressed.len() as u64;
-    let file_hash = format!(
-        "blake3:{}",
-        nix32_encode(blake3::hash(&compressed).as_bytes())
-    );
-    let nar_hash = format!("blake3:{}", nix32_encode(nar_hasher.finalize().as_bytes()));
+    let file_hash = format!("sha256:{}", nix32_encode(&Sha256::digest(&compressed)));
+    let nar_hash = format!("sha256:{}", nix32_encode(&nar_hasher.finalize()));
 
     info!(
         store_path,
@@ -554,12 +552,12 @@ mod tests {
                 assert!(file_size > 0, "file_size should be nonzero");
                 assert!(nar_size > 0, "nar_size should be nonzero");
                 assert!(
-                    file_hash.starts_with("blake3:"),
-                    "file_hash should be blake3: prefixed, got {file_hash}"
+                    file_hash.starts_with("sha256:"),
+                    "file_hash should be sha256: prefixed, got {file_hash}"
                 );
                 assert!(
-                    nar_hash.starts_with("blake3:"),
-                    "nar_hash should be blake3: prefixed, got {nar_hash}"
+                    nar_hash.starts_with("sha256:"),
+                    "nar_hash should be sha256: prefixed, got {nar_hash}"
                 );
             } else {
                 panic!("expected NarUploaded, got {msg:?}");

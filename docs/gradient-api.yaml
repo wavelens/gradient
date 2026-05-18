@@ -6504,20 +6504,19 @@ components:
         FileHash:
           type: string
           description: >-
-            Algorithm-prefixed digest. Gradient emits `blake3:{nix32}` for
-            new uploads; historic rows may still be `sha256:{nix32}`.
-            Clients substituting from a Gradient cache must enable the
-            `blake3-hashes` Nix experimental feature.
-          example: blake3:11cxppanr71mzl1xnyax8rccaj5milx2fx9vnvzk6la672nb6dv4
+            Algorithm-prefixed digest. Gradient emits `sha256:{nix32}` for
+            new uploads; `blake3:{nix32}` is also accepted on the read path
+            for rows uploaded while the BLAKE3 default was active.
+          example: sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73
         FileSize:
           type: integer
           format: int64
         NarHash:
           type: string
           description: >-
-            Algorithm-prefixed digest. `blake3:{nix32}` by default, with
-            `sha256:{nix32}` accepted on the read path for legacy entries.
-          example: blake3:11cxppanr71mzl1xnyax8rccaj5milx2fx9vnvzk6la672nb6dv4
+            Algorithm-prefixed digest. `sha256:{nix32}` by default, with
+            `blake3:{nix32}` accepted on the read path.
+          example: sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73
         NarSize:
           type: integer
           format: int64

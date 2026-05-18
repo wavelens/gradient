@@ -214,10 +214,10 @@ mod tests {
         assert_eq!(effective, FILE_HASH_NIX32);
     }
 
-    /// After issue #132 new uploads use BLAKE3-prefixed file hashes. The
-    /// URL slug carries the bare nix32 digest with no algorithm prefix, so
-    /// the resolver must look up both `blake3:` and `sha256:` to bridge
-    /// the legacy and current rows.
+    /// Rows uploaded while issue #132's BLAKE3 default was active carry
+    /// `blake3:`-prefixed file hashes. The URL slug carries the bare nix32
+    /// digest with no algorithm prefix, so the resolver must look up both
+    /// `blake3:` and `sha256:` to bridge the two generations.
     #[test]
     fn resolve_returns_store_hash_for_blake3_file_hash() {
         let mut row = cached_path_row();

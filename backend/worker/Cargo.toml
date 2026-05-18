@@ -39,7 +39,6 @@ harmonia-store-path            = { workspace = true }
 harmonia-store-remote          = { workspace = true }
 harmonia-utils-hash            = { workspace = true }
 harmonia-utils-signature       = { workspace = true }
-blake3                = { workspace = true }
 hex                   = { workspace = true }
 libc                  = { workspace = true }
 nix-bindings          = { workspace = true }

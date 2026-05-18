@@ -7038,7 +7038,6 @@ dependencies = [
  "anyhow",
  "async-trait",
  "base64",
- "blake3",
  "bytes",
  "bzip2",
  "clap",

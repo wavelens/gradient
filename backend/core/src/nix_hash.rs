@@ -6,11 +6,13 @@
 
 //! Canonical encoding helpers for narinfo hash metadata.
 //!
-//! Gradient uses BLAKE3 by default for new NAR/file hashes (issue #132).
-//! SHA-256 is still accepted on the read path so historic narinfo rows and
-//! upstream caches keep working. All on-disk DB columns hold values in
-//! `{algo}:{nix32}` form so the narinfo URL's hash slug matches the column
-//! verbatim, no re-encoding needed.
+//! Gradient uses SHA-256 by default for new NAR/file hashes. BLAKE3 is
+//! still accepted on the read path so rows uploaded while the BLAKE3
+//! default was active (issue #132) keep resolving, and so upstream
+//! caches that advertise either algorithm interoperate cleanly. All
+//! on-disk DB columns hold values in `{algo}:{nix32}` form so the
+//! narinfo URL's hash slug matches the column verbatim, no re-encoding
+//! needed.
 
 use base64::Engine as _;
 

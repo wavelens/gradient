@@ -338,12 +338,13 @@ Backend (`cargo test -p worker --bins proto::nar_import::tests`):
 
 The `derivation_output.file_hash`, `cached_path.file_hash`, and
 `cached_path.nar_hash` columns are persisted in the canonical
-`{algo}:<nix32>` form (where `algo` is `sha256` for legacy rows and `blake3`
-for new uploads after issue #132) so the URL hash extracted from a narinfo
-`URL:` field matches the column directly. Workers send the prefixed hash
-over the wire; the proto handler and scheduler call
-`gradient_core::nix_hash::normalize_nar_hash` before `Set(...)`. Migration
-`m20260430_000000_normalize_hash_columns` backfills pre-existing rows.
+`{algo}:<nix32>` form (`sha256` for new uploads; `blake3` for rows
+written while issue #132's BLAKE3 default was active) so the URL hash
+extracted from a narinfo `URL:` field matches the column directly.
+Workers send the prefixed hash over the wire; the proto handler and
+scheduler call `gradient_core::nix_hash::normalize_nar_hash` before
+`Set(...)`. Migration `m20260430_000000_normalize_hash_columns` backfills
+pre-existing rows.
 
 Backend:
 - `cargo test -p core --lib nix_hash` — round-trip and idempotency tests for
