@@ -19,7 +19,7 @@ use std::io::Write as _;
 
 use anyhow::{Context, Result};
 use futures::StreamExt;
-use harmonia_store_core::store_path::StorePath;
+use harmonia_store_path::StorePath;
 use harmonia_store_remote::DaemonStore as _;
 use proto::messages::ClientMessage;
 use sha2::{Digest, Sha256};
