@@ -6,7 +6,7 @@
 
 use anyhow::{Context, Result};
 use futures::stream::{FuturesUnordered, StreamExt};
-use harmonia_store_core::store_path::StorePath;
+use harmonia_store_path::StorePath;
 use harmonia_store_remote::DaemonStore as _;
 use harmonia_utils_hash::fmt::CommonHash as _;
 use std::collections::HashMap;
@@ -68,7 +68,7 @@ pub async fn get_missing_builds(pool: &ConnectionPool, paths: Vec<String>) -> Re
         .await
         .map_err(|e| anyhow::anyhow!("acquire store for valid paths: {}", e))?;
 
-    let store_paths: harmonia_store_core::store_path::StorePathSet = output_paths
+    let store_paths: harmonia_store_path::StorePathSet = output_paths
         .values()
         .filter_map(|p| StorePath::from_base_path(strip_store_prefix(p)).ok())
         .collect();

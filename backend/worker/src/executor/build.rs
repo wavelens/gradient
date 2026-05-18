@@ -30,8 +30,9 @@ use gradient_core::sources::get_hash_from_path;
 use harmonia_protocol::daemon_wire::types2::{BuildMode, BuildResultInner};
 use harmonia_protocol::log::{Field, LogMessage, ResultType, Verbosity};
 use harmonia_protocol::types::ClientOptions;
-use harmonia_store_core::derivation::{BasicDerivation, DerivationOutput, DerivationT};
-use harmonia_store_core::store_path::{ContentAddress, ContentAddressMethod, StorePath};
+use harmonia_store_content_address::{ContentAddress, ContentAddressMethod};
+use harmonia_store_derivation::derivation::{BasicDerivation, DerivationOutput, DerivationT};
+use harmonia_store_path::StorePath;
 use harmonia_store_remote::DaemonStore as _;
 use harmonia_utils_hash::{Algorithm, Hash};
 use proto::messages::{BuildOutput, BuildProduct, BuildTask};
@@ -214,8 +215,8 @@ impl ParsedDerivation {
 /// safely.
 fn output_pairs_from_built_or_drv(
     built_outputs: &BTreeMap<
-        harmonia_store_core::derived_path::OutputName,
-        harmonia_store_core::realisation::UnkeyedRealisation,
+        harmonia_store_derivation::derived_path::OutputName,
+        harmonia_store_derivation::realisation::UnkeyedRealisation,
     >,
     drv: &gradient_core::db::Derivation,
 ) -> Vec<(String, String)> {
@@ -486,7 +487,7 @@ fn get_basic_derivation(
     // The daemon needs all direct inputs present in the store before building.
     // input_sources are plain store paths; input_derivations map drv→outputs,
     // so we read each input .drv to resolve the concrete output paths.
-    let mut inputs: harmonia_store_core::store_path::StorePathSet = drv
+    let mut inputs: harmonia_store_path::StorePathSet = drv
         .input_sources
         .iter()
         .filter_map(|p| {
@@ -680,10 +681,10 @@ mod tests {
         }
     }
 
-    fn realisation(out_path: &str) -> harmonia_store_core::realisation::UnkeyedRealisation {
+    fn realisation(out_path: &str) -> harmonia_store_derivation::realisation::UnkeyedRealisation {
         let base = out_path.strip_prefix("/nix/store/").unwrap_or(out_path);
-        harmonia_store_core::realisation::UnkeyedRealisation {
-            out_path: harmonia_store_core::store_path::StorePath::from_base_path(base).unwrap(),
+        harmonia_store_derivation::realisation::UnkeyedRealisation {
+            out_path: harmonia_store_path::StorePath::from_base_path(base).unwrap(),
             signatures: std::collections::BTreeSet::new(),
         }
     }

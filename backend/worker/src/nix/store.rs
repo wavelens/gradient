@@ -30,7 +30,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use harmonia_store_core::store_path::StorePath;
+use harmonia_store_path::StorePath;
 use harmonia_store_remote::pool::{ConnectionPool, PoolConfig, PooledConnectionGuard};
 use harmonia_store_remote::{DaemonClient, DaemonStore as _};
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};

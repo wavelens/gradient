@@ -53,6 +53,7 @@ serde_json = { version = "1.0", default-features = false, features = ["std"] }
 
 # Crypto / encoding
 base64 = { version = "0.22", default-features = false, features = ["std"] }
+blake3 = { version = "1.5", default-features = false, features = ["std"] }
 hex    = { version = "0.4", default-features = false, features = ["std"] }
 hmac   = { version = "0.13", default-features = false }
 ring   = { version = "0.17", default-features = false }
@@ -85,13 +86,16 @@ libc         = { version = "0.2", default-features = false }
 object_store = { version = "0.13", default-features = false, features = ["aws", "fs"] }
 
 # Harmonia (git deps)
-harmonia-file-nar      = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
-harmonia-protocol      = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
-harmonia-store-core    = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
-harmonia-store-remote  = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
-harmonia-utils-base-encoding = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
-harmonia-utils-hash    = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
-harmonia-utils-io      = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
+harmonia-file-nar              = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
+harmonia-protocol              = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
+harmonia-store-content-address = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
+harmonia-store-derivation      = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
+harmonia-store-path            = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
+harmonia-store-remote          = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
+harmonia-utils-base-encoding   = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
+harmonia-utils-hash            = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
+harmonia-utils-io              = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
+harmonia-utils-signature       = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
 
 # Nix bindings
 nix-bindings = { git = "https://github.com/NotAShelf/nix-bindings", default-features = false }
@@ -125,13 +129,16 @@ wiremock = { version = "0.6", default-features = false }
 debug = "line-tables-only"
 
 [patch.crates-io]
-harmonia-file-nar        = { git = "https://github.com/nix-community/harmonia.git" }
-harmonia-protocol        = { git = "https://github.com/nix-community/harmonia.git" }
-harmonia-protocol-derive = { git = "https://github.com/nix-community/harmonia.git" }
-harmonia-store-core      = { git = "https://github.com/nix-community/harmonia.git" }
-harmonia-utils-base-encoding = { git = "https://github.com/nix-community/harmonia.git" }
-harmonia-utils-hash      = { git = "https://github.com/nix-community/harmonia.git" }
-harmonia-utils-io        = { git = "https://github.com/nix-community/harmonia.git" }
+harmonia-file-nar              = { git = "https://github.com/nix-community/harmonia.git" }
+harmonia-protocol              = { git = "https://github.com/nix-community/harmonia.git" }
+harmonia-protocol-derive       = { git = "https://github.com/nix-community/harmonia.git" }
+harmonia-store-content-address = { git = "https://github.com/nix-community/harmonia.git" }
+harmonia-store-derivation      = { git = "https://github.com/nix-community/harmonia.git" }
+harmonia-store-path            = { git = "https://github.com/nix-community/harmonia.git" }
+harmonia-utils-base-encoding   = { git = "https://github.com/nix-community/harmonia.git" }
+harmonia-utils-hash            = { git = "https://github.com/nix-community/harmonia.git" }
+harmonia-utils-io              = { git = "https://github.com/nix-community/harmonia.git" }
+harmonia-utils-signature       = { git = "https://github.com/nix-community/harmonia.git" }
 
 [package]
 name        = "gradient-server"
