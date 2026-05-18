@@ -6,7 +6,7 @@
 
 use super::helpers::{CacheContext, JsonFlag, get_nar_by_hash};
 use crate::error::{WebError, WebResult};
-use axum::extract::{ConnectInfo, Path, Query, State};
+use axum::extract::{ConnectInfo, Extension, Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::{IntoResponse, Response};
 use gradient_core::sources::{get_hash_from_url, verify_narinfo_signature};
@@ -29,20 +29,26 @@ fn text_response(content_type: &'static str, body: String) -> WebResult<Response
 
 pub async fn nix_cache_info(
     state: State<Arc<ServerState>>,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    connect_info: Option<Extension<ConnectInfo<SocketAddr>>>,
     headers: HeaderMap,
     Path(cache): Path<String>,
     Query(flag): Query<JsonFlag>,
 ) -> WebResult<Response> {
     let ctx = CacheContext::load(&state, &headers, cache).await?;
 
-    let client_ip = crate::client_ip::resolve_client_ip(
-        &headers,
-        addr.ip(),
-        &state.config.network.trusted_proxies,
-    );
-    let priority = match ctx.cache.local_priority {
-        Some(p) if p != 0 && in_any(client_ip, &state.config.network.local_ips) => p,
+    let priority = match (ctx.cache.local_priority, connect_info) {
+        (Some(p), Some(Extension(ConnectInfo(addr)))) if p != 0 => {
+            let client_ip = crate::client_ip::resolve_client_ip(
+                &headers,
+                addr.ip(),
+                &state.config.network.trusted_proxies,
+            );
+            if in_any(client_ip, &state.config.network.local_ips) {
+                p
+            } else {
+                ctx.cache.priority
+            }
+        }
         _ => ctx.cache.priority,
     };
 
