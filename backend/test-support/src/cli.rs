@@ -35,7 +35,13 @@ pub fn test_cli_with_crypt(crypt_secret_file: String) -> Cli {
             max_evaluations_per_worker: 0,
         },
         storage: StorageArgs {
-            base_path: "/tmp/gradient-test".into(),
+            base_path: tempfile::Builder::new()
+                .prefix("gradient-test-")
+                .tempdir()
+                .expect("create test base_path tempdir")
+                .keep()
+                .to_string_lossy()
+                .into_owned(),
             keep_evaluations: 30,
             ..Default::default()
         },
