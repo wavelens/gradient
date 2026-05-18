@@ -5,14 +5,19 @@
  */
 
 { lib
+, path
+, callPackage
 , fetchPnpmDeps
 , nodejs
-, pnpm
 , pnpmConfigHook
 , stdenv
-}:
-
-stdenv.mkDerivation rec {
+}: let
+  # pin pnpm version to avoid hash mismatches with differing pnpm versions in nixos stable
+  pnpm = callPackage (path + "/pkgs/development/tools/pnpm/generic.nix") {
+    version = "11.1.1";
+    hash = "sha256-BbKC0GMyKVxzbwsgyL3xhTJb8bymgske2BFUo8aFHMA=";
+  };
+in stdenv.mkDerivation rec {
   pname = "gradient-frontend";
   version = "1.2.0";
 
@@ -22,7 +27,7 @@ stdenv.mkDerivation rec {
   };
 
   pnpmDeps = fetchPnpmDeps {
-    inherit pname version src;
+    inherit pnpm pname version src;
     fetcherVersion = 3;
     hash = "sha256-EHu31lqcib3JrHk5JWHcz+0zQDfSDWAxIaZ/g+Z4Khw=";
   };

@@ -64,7 +64,7 @@ NIX_FILES=(
 
 for f in "${NIX_FILES[@]}"; do
     path="$REPO_ROOT/$f"
-    sed -i "s/version = \"[^\"]*\";/version = \"$VERSION\";/" "$path"
+    sed -i "s/^  version = \"[^\"]*\";/  version = \"$VERSION\";/" "$path"
     echo "updated $f"
 done
 
