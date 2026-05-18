@@ -300,6 +300,18 @@ The token must be the 48-byte random secret returned by the registration API (ge
 | `settings.logLevel.build` | null | Builder log level override |
 | `settings.logLevel.proto` | null | Protocol log level override |
 
+### Hashing
+
+Gradient hashes NARs and compressed cache files with **BLAKE3** by default. The worker module enables the `blake3-hashes` experimental feature on worker hosts automatically; no toggle is exposed and the algorithm is the same for every Gradient instance.
+
+**Substituting clients must also enable `blake3-hashes`**, otherwise Nix will reject narinfos served by the cache. Add the feature on every machine that lists a Gradient cache as a substituter:
+
+```nix
+nix.settings.experimental-features = [ "nix-command" "flakes" "blake3-hashes" ];
+```
+
+Nix ≥ 2.29 is required for BLAKE3 support.
+
 ## Declarative State
 
 Users, organizations, projects, integrations, caches, API keys, custom roles, and workers can be declared in `services.gradient.state` and reconciled on every startup. See [Declarative State](usage/state.md) for the full options reference.

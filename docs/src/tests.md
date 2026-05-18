@@ -337,17 +337,21 @@ Backend (`cargo test -p worker --bins proto::nar_import::tests`):
 ## Hash column normalization (file_hash / nar_hash)
 
 The `derivation_output.file_hash`, `cached_path.file_hash`, and
-`cached_path.nar_hash` columns are persisted in the canonical `sha256:<nix32>`
-form so the URL hash extracted from a narinfo `URL:` field matches the column
-directly. Workers send `sha256:<hex>` over the wire; the proto handler and
-scheduler call `gradient_core::nix_hash::normalize_nar_hash` before
-`Set(...)`. Migration `m20260430_000000_normalize_hash_columns` backfills
-pre-existing rows.
+`cached_path.nar_hash` columns are persisted in the canonical
+`{algo}:<nix32>` form (where `algo` is `sha256` for legacy rows and `blake3`
+for new uploads after issue #132) so the URL hash extracted from a narinfo
+`URL:` field matches the column directly. Workers send the prefixed hash
+over the wire; the proto handler and scheduler call
+`gradient_core::nix_hash::normalize_nar_hash` before `Set(...)`. Migration
+`m20260430_000000_normalize_hash_columns` backfills pre-existing rows.
 
 Backend:
 - `cargo test -p core --lib nix_hash` — round-trip and idempotency tests for
   `normalize_nar_hash` covering SRI, prefixed hex, prefixed nix32, bare hex,
-  and rejection of malformed inputs.
+  rejection of malformed inputs, and the BLAKE3 variants of each (test
+  vectors cross-checked against NixOS/nix PR #12379). Also covers
+  `strip_hash_algo`, the algorithm-agnostic prefix stripper used when
+  building narinfo `URL:` slugs.
 - `cargo test -p migration --lib normalize_hash_columns` — covers the
   hex→nix32 conversion helper used by the backfill migration.
 - `cargo test -p web --lib endpoints::caches::nar::tests` —
@@ -937,8 +941,11 @@ Unit tests (`cargo test -p core --lib sources::cache_key`):
   unsignable for the rest of the pass instead of repeating the
   decryption error per row.
 
-The pre-existing `cacher::sign_sweep::tests::hex_hash_to_nix32_*`
-suite continues to cover the hash-format conversion path.
+After issue #132, the dedicated `hex_hash_to_nix32` helper was removed
+and `sign_missing_signatures` calls `gradient_core::nix_hash::normalize_nar_hash`
+directly. The hash-format conversion path is now covered by the
+algorithm-aware test suite in `cargo test -p core --lib nix_hash` (see
+above), which exercises both `sha256:` and `blake3:` inputs.
 
 ## Proto WebSocket — message-size cap & handshake timeout
 
