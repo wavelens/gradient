@@ -6496,6 +6496,7 @@ dependencies = [
  "axum-test",
  "axum_typed_multipart",
  "base64",
+ "blake3",
  "bytes",
  "chrono",
  "core",

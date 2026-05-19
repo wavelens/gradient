@@ -64,6 +64,9 @@ impl ErrorCode {
     pub const CONFLICT: Self = Self("conflict");
     pub const ALREADY_EXISTS: Self = Self("already_exists");
 
+    // 410 Gone
+    pub const GONE: Self = Self("gone");
+
     // 413 Payload Too Large
     pub const PAYLOAD_TOO_LARGE: Self = Self("payload_too_large");
 
@@ -105,6 +108,8 @@ pub enum WebError {
     NotFound(ErrorCode, String),
     #[error("Conflict [{0}]: {1}")]
     Conflict(ErrorCode, String),
+    #[error("Gone [{0}]: {1}")]
+    Gone(ErrorCode, String),
     #[error("Payload Too Large [{0}]: {1}")]
     PayloadTooLarge(ErrorCode, String),
     #[error("Unprocessable Entity [{0}]: {1}")]
@@ -143,6 +148,7 @@ impl WebError {
             Self::Forbidden(..) => StatusCode::FORBIDDEN,
             Self::NotFound(..) => StatusCode::NOT_FOUND,
             Self::Conflict(..) => StatusCode::CONFLICT,
+            Self::Gone(..) => StatusCode::GONE,
             Self::PayloadTooLarge(..) => StatusCode::PAYLOAD_TOO_LARGE,
             Self::UnprocessableEntity(..) => StatusCode::UNPROCESSABLE_ENTITY,
             Self::ServiceUnavailable(..) => StatusCode::SERVICE_UNAVAILABLE,
@@ -158,6 +164,7 @@ impl WebError {
             | Self::Forbidden(c, _)
             | Self::NotFound(c, _)
             | Self::Conflict(c, _)
+            | Self::Gone(c, _)
             | Self::PayloadTooLarge(c, _)
             | Self::UnprocessableEntity(c, _)
             | Self::ServiceUnavailable(c, _) => *c,
@@ -217,6 +224,7 @@ impl IntoResponse for WebError {
             | Self::Forbidden(_, m)
             | Self::NotFound(_, m)
             | Self::Conflict(_, m)
+            | Self::Gone(_, m)
             | Self::PayloadTooLarge(_, m)
             | Self::UnprocessableEntity(_, m)
             | Self::ServiceUnavailable(_, m) => m.clone(),
@@ -261,6 +269,10 @@ impl WebError {
 
     pub fn conflict(msg: impl Into<String>) -> Self {
         Self::Conflict(ErrorCode::CONFLICT, msg.into())
+    }
+
+    pub fn gone(msg: impl Into<String>) -> Self {
+        Self::Gone(ErrorCode::GONE, msg.into())
     }
 
     pub fn payload_too_large(msg: impl Into<String>) -> Self {
