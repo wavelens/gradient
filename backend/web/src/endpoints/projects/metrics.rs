@@ -327,7 +327,6 @@ mod tests {
             id: DerivationOutputId::now_v7(),
             derivation,
             name: "out".into(),
-            output: format!("/nix/store/{hash}-foo"),
             hash: hash.into(),
             package: "foo".into(),
             ca: None,

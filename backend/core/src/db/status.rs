@@ -524,12 +524,12 @@ pub async fn find_active_leaders<C: ConnectionTrait>(
         .all(db)
         .await?;
     let mut path_to_drv: HashMap<String, DerivationId> = HashMap::new();
-    let mut drv_paths: Vec<String> = Vec::new();
+    let mut drv_hashes: Vec<String> = Vec::new();
     for d in &inserting_drv_rows {
-        path_to_drv.insert(d.derivation_path.clone(), d.id);
-        drv_paths.push(d.derivation_path.clone());
+        path_to_drv.insert(d.drv_path(), d.id);
+        drv_hashes.push(d.hash.clone());
     }
-    if drv_paths.is_empty() {
+    if drv_hashes.is_empty() {
         return Ok(out);
     }
 
@@ -541,7 +541,7 @@ pub async fn find_active_leaders<C: ConnectionTrait>(
     }
 
     let candidate_drvs = EDerivation::find()
-        .filter(CDerivation::DerivationPath.is_in(drv_paths.clone()))
+        .filter(CDerivation::Hash.is_in(drv_hashes))
         .filter(CDerivation::Organization.is_in(reachable.into_iter().collect::<Vec<_>>()))
         .all(db)
         .await?;
@@ -551,7 +551,7 @@ pub async fn find_active_leaders<C: ConnectionTrait>(
     let candidate_drv_ids: Vec<DerivationId> = candidate_drvs.iter().map(|d| d.id).collect();
     let leader_drv_to_path: HashMap<DerivationId, String> = candidate_drvs
         .into_iter()
-        .map(|d| (d.id, d.derivation_path))
+        .map(|d| (d.id, d.drv_path()))
         .collect();
 
     let candidate_builds = EBuild::find()
@@ -645,7 +645,8 @@ mod reelect_leader_tests {
         MDerivation {
             id,
             organization: owner,
-            derivation_path: "/nix/store/x.drv".into(),
+            hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+            name: "x".into(),
             architecture: "x86_64-linux".into(),
             created_at: chrono::NaiveDateTime::default(),
         }
@@ -870,11 +871,12 @@ mod find_active_leaders_tests {
         }
     }
 
-    fn drv_row(id: DerivationId, owner: OrganizationId, path: &str) -> MDerivation {
+    fn drv_row(id: DerivationId, owner: OrganizationId, _path: &str) -> MDerivation {
         MDerivation {
             id,
             organization: owner,
-            derivation_path: path.into(),
+            hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+            name: "x".into(),
             architecture: "x86_64-linux".into(),
             created_at: chrono::NaiveDateTime::default(),
         }

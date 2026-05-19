@@ -9,11 +9,10 @@ use crate::error::WebResult;
 use crate::helpers::ok_json;
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
-use gradient_core::executer::nix_store_path;
 use gradient_core::types::input::vec_to_hex;
 use gradient_core::types::*;
 use sea_orm::{ColumnTrait, EntityTrait, Order, QueryFilter, QueryOrder};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use super::EvalAccessContext;
@@ -141,6 +140,23 @@ pub async fn get_evaluation(
     Ok(Json(res))
 }
 
+/// Maximum number of values per `IN (...)` parameter list. Postgres' wire
+/// protocol limits any query to 65 535 bind parameters; 10 000 leaves room
+/// for additional filters/joins and avoids overflowing on evaluations with
+/// tens of thousands of builds (issue #237).
+const IS_IN_CHUNK: usize = 10_000;
+
+fn status_rank(status: entity::build::BuildStatus) -> u32 {
+    use entity::build::BuildStatus::*;
+    match status {
+        Building => 0,
+        Created | Queued => 1,
+        Failed => 2,
+        Aborted | DependencyFailed => 3,
+        Completed | Substituted => 4,
+    }
+}
+
 pub async fn get_evaluation_builds(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -163,18 +179,22 @@ pub async fn get_evaluation_builds(
     // frontend renders the live build and log endpoints resolve to the right
     // build id. Same-org invariant (see `entity::build::Model::via`) means no
     // cross-org leak.
-    let leader_ids: Vec<BuildId> = raw_builds.iter().filter_map(|b| b.via).collect();
-    let leaders: HashMap<BuildId, MBuild> = if leader_ids.is_empty() {
-        HashMap::new()
-    } else {
-        EBuild::find()
-            .filter(CBuild::Id.is_in(leader_ids))
+    let leader_ids: Vec<BuildId> = raw_builds
+        .iter()
+        .filter_map(|b| b.via)
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    let mut leaders: HashMap<BuildId, MBuild> = HashMap::new();
+    for chunk in leader_ids.chunks(IS_IN_CHUNK) {
+        let rows = EBuild::find()
+            .filter(CBuild::Id.is_in(chunk.to_vec()))
             .all(&state.web_db)
-            .await?
-            .into_iter()
-            .map(|b| (b.id, b))
-            .collect()
-    };
+            .await?;
+        for row in rows {
+            leaders.insert(row.id, row);
+        }
+    }
     let builds: Vec<MBuild> = raw_builds
         .into_iter()
         .map(|b| match b.via.and_then(|id| leaders.get(&id)) {
@@ -183,94 +203,92 @@ pub async fn get_evaluation_builds(
         })
         .collect();
 
-    let drv_ids: Vec<DerivationId> = builds.iter().map(|b| b.derivation).collect();
+    // Distinct derivations referenced by builds. Deduping cuts the IN-list down
+    // by the leader/follower factor (often 2–10x in large evals).
+    let drv_ids: Vec<DerivationId> = builds
+        .iter()
+        .map(|b| b.derivation)
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
 
-    let derivations: HashMap<DerivationId, MDerivation> = if drv_ids.is_empty() {
-        HashMap::new()
-    } else {
-        EDerivation::find()
-            .filter(CDerivation::Id.is_in(drv_ids.clone()))
-            .all(&state.web_db)
-            .await?
-            .into_iter()
-            .map(|d| (d.id, d))
-            .collect()
-    };
-
-    // has_artefacts is per-derivation: any output of the derivation has build_product rows.
-    let has_artefacts_map: HashMap<DerivationId, bool> = if drv_ids.is_empty() {
-        HashMap::new()
-    } else {
-        let outputs = EDerivationOutput::find()
-            .filter(CDerivationOutput::Derivation.is_in(drv_ids))
+    let mut derivations: HashMap<DerivationId, MDerivation> = HashMap::new();
+    for chunk in drv_ids.chunks(IS_IN_CHUNK) {
+        let rows = EDerivation::find()
+            .filter(CDerivation::Id.is_in(chunk.to_vec()))
             .all(&state.web_db)
             .await?;
-        let output_ids: Vec<DerivationOutputId> = outputs.iter().map(|o| o.id).collect();
-        let mut m: HashMap<DerivationId, bool> = HashMap::new();
-        if !output_ids.is_empty() {
-            for bp in EBuildProduct::find()
-                .filter(CBuildProduct::DerivationOutput.is_in(output_ids))
-                .all(&state.web_db)
-                .await?
-            {
-                if let Some(output) = outputs.iter().find(|o| o.id == bp.derivation_output) {
-                    m.insert(output.derivation, true);
-                }
-            }
+        for row in rows {
+            derivations.insert(row.id, row);
         }
-        m
-    };
+    }
 
-    let mut builds: Vec<BuildItem> = builds
+    // Sort by status (Building → Queued → Failed → Aborted/DependencyFailed →
+    // Completed/Substituted), then by derivation name. Mirrors the client-side
+    // ordering in `evaluation-log.component.ts::buildStatusOrder`.
+    let mut sorted: Vec<(u32, &str, &MBuild)> = builds
         .iter()
         .filter_map(|b| {
             let drv = derivations.get(&b.derivation)?;
-            if !drv.derivation_path.ends_with(".drv") {
-                return None;
-            }
-            Some(BuildItem {
-                id: b.id,
-                name: nix_store_path(&drv.derivation_path),
-                status: format!("{:?}", b.status.for_api()),
-                has_artefacts: *has_artefacts_map.get(&b.derivation).unwrap_or(&false),
-                updated_at: b.updated_at,
-                build_time_ms: b.build_time_ms,
-            })
+            Some((status_rank(b.status.for_api()), drv.name.as_str(), b))
         })
         .collect();
+    sorted.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(b.1)));
 
-    // Sort by status (Building → Queued → Failed → Aborted/DependencyFailed →
-    // Completed/Substituted), then by display name. Must match the client-side
-    // ordering in `evaluation-log.component.ts::buildStatusOrder`.
-    fn status_rank(status: &str) -> u32 {
-        match status {
-            "Building" => 0,
-            "Queued" => 1,
-            "Failed" => 2,
-            "Aborted" | "DependencyFailed" => 3,
-            "Completed" | "Substituted" => 4,
-            _ => 99,
+    let total = sorted.len();
+    let active_count = sorted.iter().filter(|(rank, _, _)| *rank < 4).count();
+
+    let offset = query.offset.unwrap_or(0).min(total);
+    let limit = query.limit.unwrap_or(total.saturating_sub(offset));
+    let page_slice: Vec<&(u32, &str, &MBuild)> =
+        sorted.iter().skip(offset).take(limit).collect();
+
+    // Hydrate `has_artefacts` only for the page. Bounded by `limit`, so the
+    // `IN` clause is safe regardless of evaluation size.
+    let page_drv_ids: Vec<DerivationId> = page_slice
+        .iter()
+        .map(|(_, _, b)| b.derivation)
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    let mut has_artefacts: HashSet<DerivationId> = HashSet::new();
+    if !page_drv_ids.is_empty() {
+        let outputs = EDerivationOutput::find()
+            .filter(CDerivationOutput::Derivation.is_in(page_drv_ids.clone()))
+            .all(&state.web_db)
+            .await?;
+        let output_to_drv: HashMap<DerivationOutputId, DerivationId> =
+            outputs.iter().map(|o| (o.id, o.derivation)).collect();
+        let output_ids: Vec<DerivationOutputId> = outputs.iter().map(|o| o.id).collect();
+        for chunk in output_ids.chunks(IS_IN_CHUNK) {
+            let products = EBuildProduct::find()
+                .filter(CBuildProduct::DerivationOutput.is_in(chunk.to_vec()))
+                .all(&state.web_db)
+                .await?;
+            for bp in products {
+                if let Some(&drv) = output_to_drv.get(&bp.derivation_output) {
+                    has_artefacts.insert(drv);
+                }
+            }
         }
     }
-    fn display_name(path: &str) -> &str {
-        let filename = path.rsplit('/').next().unwrap_or(path);
-        let stripped = filename.strip_suffix(".drv").unwrap_or(filename);
-        stripped
-            .split_once('-')
-            .map(|(_, rest)| rest)
-            .unwrap_or(stripped)
-    }
-    builds.sort_by(|a, b| {
-        status_rank(&a.status)
-            .cmp(&status_rank(&b.status))
-            .then_with(|| display_name(&a.name).cmp(display_name(&b.name)))
-    });
 
-    let total = builds.len();
-    let active_count = builds.iter().filter(|b| status_rank(&b.status) < 4).count();
-    let offset = query.offset.unwrap_or(0).min(total);
-    let limit = query.limit.unwrap_or(total);
-    let page = builds.into_iter().skip(offset).take(limit).collect();
+    let page: Vec<BuildItem> = page_slice
+        .into_iter()
+        .map(|(_, _, b)| {
+            let drv = derivations
+                .get(&b.derivation)
+                .expect("derivation hydrated above");
+            BuildItem {
+                id: b.id,
+                name: drv.store_path(),
+                status: format!("{:?}", b.status.for_api()),
+                has_artefacts: has_artefacts.contains(&b.derivation),
+                updated_at: b.updated_at,
+                build_time_ms: b.build_time_ms,
+            }
+        })
+        .collect();
 
     let res = BaseResponse {
         error: false,

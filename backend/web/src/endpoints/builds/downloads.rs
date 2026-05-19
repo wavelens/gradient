@@ -11,6 +11,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
+use gradient_core::sources::get_path_from_derivation_output;
 use gradient_core::storage::nar_extract::{ExtractError, Extracted, extract_path_from_nar_bytes};
 use gradient_core::types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
@@ -120,15 +121,15 @@ async fn find_and_serve_file(
             .iter()
             .find(|o| o.id == product.derivation_output);
         let output_root = match output {
-            Some(o) => &o.output,
+            Some(o) => get_path_from_derivation_output(o.clone()),
             None => {
                 tracing::warn!(%build_id, %filename, "build_product references unknown output");
                 continue;
             }
         };
 
-        let hash = store_path_hash(output_root);
-        let rel = relative_in_output(&product.path, output_root);
+        let hash = store_path_hash(&output_root);
+        let rel = relative_in_output(&product.path, &output_root);
 
         let compressed = match state.nar_storage.get(hash).await {
             Ok(Some(b)) => b,

@@ -18,7 +18,6 @@ use std::sync::Arc;
 use tracing::error;
 
 use super::EvalAccessContext;
-use super::types::drv_display_name;
 
 pub async fn post_evaluation_builds(
     state: State<Arc<ServerState>>,
@@ -56,11 +55,10 @@ pub async fn post_evaluation_builds(
         };
 
         for build in past_builds {
-            let drv_path = match EDerivation::find_by_id(build.derivation).one(&state.web_db).await {
-                Ok(Some(d)) => d.derivation_path,
+            let name = match EDerivation::find_by_id(build.derivation).one(&state.web_db).await {
+                Ok(Some(d)) => d.name,
                 _ => String::new(),
             };
-            let name = drv_display_name(&drv_path);
             let log = state.log_storage.read(build.log_id.unwrap_or(build.id)).await.unwrap_or_default();
             last_logs.insert(build.id, log.len());
 
@@ -114,11 +112,10 @@ pub async fn post_evaluation_builds(
             }
 
             for build in builds {
-                let drv_path = match EDerivation::find_by_id(build.derivation).one(&state.web_db).await {
-                    Ok(Some(d)) => d.derivation_path,
+                let name = match EDerivation::find_by_id(build.derivation).one(&state.web_db).await {
+                    Ok(Some(d)) => d.name,
                     _ => String::new(),
                 };
-                let name = drv_display_name(&drv_path);
                 let log = state.log_storage.read(build.log_id.unwrap_or(build.id)).await.unwrap_or_default();
                 let last_offset = *last_logs.get(&build.id).unwrap_or(&0);
                 let log_new = log[last_offset..].to_string();

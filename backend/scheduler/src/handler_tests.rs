@@ -91,10 +91,14 @@ fn make_build(
 }
 
 fn make_derivation(id: DerivationId, org_id: OrganizationId, path: &str) -> MDerivation {
+    let stripped = gradient_core::executer::strip_nix_store_prefix(path);
+    let (hash, name) = gradient_core::sources::parse_drv_hash_name(&stripped)
+        .unwrap_or_else(|_| ("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(), "x".into()));
     entity::derivation::Model {
         id,
         organization: org_id,
-        derivation_path: path.to_string(),
+        hash,
+        name,
         architecture: "x86_64-linux".into(),
         created_at: test_date(),
     }
@@ -115,7 +119,6 @@ fn make_drv_output(
         id,
         derivation: drv_id,
         name: name.to_string(),
-        output: path.to_string(),
         hash,
         package: name.to_string(),
         ca: None,

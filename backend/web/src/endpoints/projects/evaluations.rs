@@ -20,8 +20,7 @@ use axum::{Extension, Json};
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use gradient_core::db::get_any_organization_by_name;
-use gradient_core::executer::nix_store_path;
-use gradient_core::sources::check_project_updates;
+use gradient_core::sources::{check_project_updates, get_path_from_derivation_output};
 use gradient_core::storage::nar_extract::{ExtractError, Extracted, extract_path_from_nar_bytes};
 use gradient_core::types::input::vec_to_hex;
 use gradient_core::types::*;
@@ -483,7 +482,7 @@ impl EntryPointRelatedData {
             summaries.push(EntryPointSummary {
                 id: ep.id,
                 build_id: build.id,
-                derivation_path: nix_store_path(&drv.derivation_path),
+                derivation_path: drv.store_path(),
                 eval: ep.eval.clone(),
                 build_status: build.status.for_api(),
                 has_artefacts: *self.has_products.get(&build.derivation).unwrap_or(&false),
@@ -552,18 +551,15 @@ async fn serve_hydra_artifact(
             .iter()
             .find(|o| o.id == product.derivation_output);
         let output_root = match output {
-            Some(o) => &o.output,
+            Some(o) => get_path_from_derivation_output(o.clone()),
             None => {
                 tracing::warn!(%filename, "build_product references unknown output");
                 continue;
             }
         };
 
-        let hash = output_root
-            .strip_prefix("/nix/store/")
-            .unwrap_or(output_root)
-            .split('-')
-            .next()
+        let hash = output
+            .map(|o| o.hash.as_str())
             .unwrap_or("");
         if hash.is_empty() {
             continue;

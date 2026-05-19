@@ -58,6 +58,19 @@ pub fn get_path_from_derivation_output(output: MDerivationOutput) -> String {
     format!("/nix/store/{}-{}", output.hash, output.package)
 }
 
+/// Parses a bare `<hash>-<name>.drv` (no `/nix/store/` prefix) into its hash
+/// and name components. `name` includes everything after the first `-` minus
+/// the trailing `.drv` suffix. Returns `InvalidPath` when the input is not in
+/// `<hash>-<name>.drv` form.
+pub fn parse_drv_hash_name(drv_path: &str) -> Result<(String, String), SourceError> {
+    let (hash, rest) = drv_path.split_once('-').ok_or(SourceError::InvalidPath)?;
+    let name = rest.strip_suffix(".drv").ok_or(SourceError::InvalidPath)?;
+    if hash.is_empty() || name.is_empty() {
+        return Err(SourceError::InvalidPath);
+    }
+    Ok((hash.to_string(), name.to_string()))
+}
+
 pub fn get_cache_nar_location(base_path: String, hash: String) -> Result<String, SourceError> {
     let hash_hex = hash.as_str();
     std::fs::create_dir_all(format!("{}/nars/{}", base_path, &hash_hex[0..2])).map_err(|e| {
@@ -93,4 +106,33 @@ pub fn get_cache_nar_compressed_location(
         &hash_hex[0..2],
         &hash_hex[2..],
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_canonical_drv_form() {
+        let (h, n) =
+            parse_drv_hash_name("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello-2.12.1.drv").unwrap();
+        assert_eq!(h, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        assert_eq!(n, "hello-2.12.1");
+    }
+
+    #[test]
+    fn rejects_missing_drv_suffix() {
+        assert!(parse_drv_hash_name("abc-foo").is_err());
+    }
+
+    #[test]
+    fn rejects_missing_hash_or_name() {
+        assert!(parse_drv_hash_name("-foo.drv").is_err());
+        assert!(parse_drv_hash_name("abc-.drv").is_err());
+    }
+
+    #[test]
+    fn rejects_missing_dash() {
+        assert!(parse_drv_hash_name("abcfoo.drv").is_err());
+    }
 }

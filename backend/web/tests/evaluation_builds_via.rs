@@ -134,7 +134,8 @@ fn derivation_row() -> entity::derivation::Model {
     entity::derivation::Model {
         id: derivation_id(),
         organization: org_id(),
-        derivation_path: DRV_PATH.into(),
+        hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+        name: "hello-2.12.1".into(),
         architecture: "x86_64-linux".into(),
         created_at: test_date(),
     }

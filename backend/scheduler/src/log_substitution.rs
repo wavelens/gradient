@@ -353,10 +353,14 @@ mod tests {
     }
 
     fn make_derivation(drv_id: DerivationId, org: OrganizationId, drv_path: String) -> entity::derivation::Model {
+        let stripped = gradient_core::executer::strip_nix_store_prefix(&drv_path);
+        let (hash, name) = gradient_core::sources::parse_drv_hash_name(&stripped)
+            .unwrap_or_else(|_| ("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(), "x".into()));
         entity::derivation::Model {
             id: drv_id,
             organization: org,
-            derivation_path: drv_path,
+            hash,
+            name,
             architecture: "x86_64-linux".to_string(),
             created_at: gradient_core::types::now(),
         }

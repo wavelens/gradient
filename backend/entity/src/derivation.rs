@@ -16,9 +16,24 @@ pub struct Model {
     #[sea_orm(primary_key)]
     pub id: DerivationId,
     pub organization: OrganizationId,
-    pub derivation_path: String,
+    pub hash: String,
+    pub name: String,
     pub architecture: super::server::Architecture,
     pub created_at: NaiveDateTime,
+}
+
+impl Model {
+    /// Canonical `<hash>-<name>.drv` form (no `/nix/store/` prefix), matching
+    /// the wire shape used by workers and the cache narinfo `References:`
+    /// convention.
+    pub fn drv_path(&self) -> String {
+        format!("{}-{}.drv", self.hash, self.name)
+    }
+
+    /// Full `/nix/store/<hash>-<name>.drv` path for display + dispatch.
+    pub fn store_path(&self) -> String {
+        format!("/nix/store/{}-{}.drv", self.hash, self.name)
+    }
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
