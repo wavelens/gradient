@@ -10,6 +10,7 @@ pub mod api;
 pub mod audit_log;
 pub mod build;
 pub mod build_product;
+pub mod build_request_blob;
 pub mod cache;
 pub mod cache_derivation;
 pub mod cache_metric;
