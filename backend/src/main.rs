@@ -53,6 +53,10 @@ fn init_logging(logging: &LoggingArgs) {
 }
 
 pub fn main() -> std::io::Result<()> {
+    // Install rustls provider before any TLS handshake (postgres TLS, outbound
+    // HTTPS, …) — rustls 0.23 panics otherwise. See issue #232.
+    gradient_core::http::init_crypto_provider();
+
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .thread_stack_size(8 * 1024 * 1024)
