@@ -2216,3 +2216,33 @@ Tests for when a derivation's outputs are pulled from an upstream cache, Gradien
 
 - `returns_urls_from_subscribed_caches` — shared upstream-URL helper.
 - `empty_when_no_org_caches` — empty result when org has no caches.
+
+## Derivation path parsing (`core/src/sources/nar_path.rs`)
+
+Unit tests covering `parse_drv_hash_name`, used at scheduler insert time and
+on the `/log/{drv}` cache endpoint to split bare `<hash>-<name>.drv` strings
+into the `hash` and `name` columns now stored on `derivation` (issue #237):
+
+- `parses_canonical_drv_form` — `aaaa…aa-hello-2.12.1.drv` → (`aaaa…aa`, `hello-2.12.1`).
+- `rejects_missing_drv_suffix` — input without `.drv` returns `InvalidPath`.
+- `rejects_missing_hash_or_name` — empty hash or empty name returns `InvalidPath`.
+- `rejects_missing_dash` — input without `-` returns `InvalidPath`.
+
+## `GET /evals/{eval}/builds` parameter overflow on large evaluations (#237)
+
+The endpoint previously fetched every build in the evaluation and hydrated
+display data via `WHERE id IN ($1, …, $N)` against `derivation`,
+`derivation_output`, and `build_product`. With ~28 000 builds the combined
+parameter count reached 84 560 — over Postgres' 65 535 wire-protocol limit —
+and the endpoint returned `500`.
+
+`backend/web/src/endpoints/evals/query.rs::get_evaluation_builds` now chunks
+every `IN (…)` lookup at `IS_IN_CHUNK = 10 000` after deduplicating leader IDs
+and derivation IDs, and hydrates `has_artefacts` only for the page's
+derivations, so the largest single query is bounded by the request `limit`
+rather than the evaluation size. The existing mock-DB integration tests
+`evaluation_builds_via.rs::{follower_build_is_replaced_with_leader_row,
+plain_build_returns_own_row_without_extra_query}` and
+`evaluation_builds_via_cross_org.rs` pin the new query sequence; the
+behavioural regression for the overflow is verified at code-review time
+(every `is_in(...)` site on this hot path is now chunked).

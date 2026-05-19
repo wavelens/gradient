@@ -95,10 +95,15 @@ impl<'db> DerivationRepo<'db> {
         Ok(outputs)
     }
 
-    /// Find all outputs by store path.
+    /// Find an output by its `/nix/store/<hash>-<package>` path.
     pub async fn find_output_by_path(&self, store_path: &str) -> Result<Option<MDerivationOutput>> {
+        let bare = store_path.strip_prefix("/nix/store/").unwrap_or(store_path);
+        let Some((hash, package)) = bare.split_once('-') else {
+            return Ok(None);
+        };
         let output = EDerivationOutput::find()
-            .filter(CDerivationOutput::Output.eq(store_path))
+            .filter(CDerivationOutput::Hash.eq(hash))
+            .filter(CDerivationOutput::Package.eq(package))
             .one(self.db)
             .await?;
         Ok(output)

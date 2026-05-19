@@ -10,6 +10,7 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::Response;
 use entity::build::BuildStatus;
+use gradient_core::sources::parse_drv_hash_name;
 use gradient_core::types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use std::sync::Arc;
@@ -21,14 +22,13 @@ pub async fn log(
 ) -> WebResult<Response> {
     let ctx = CacheContext::load(&state, &headers, cache).await?;
 
-    if !drv.ends_with(".drv") {
+    let Ok((drv_hash, drv_name)) = parse_drv_hash_name(&drv) else {
         return Err(WebError::not_found("Log"));
-    }
-
-    let derivation_path = format!("/nix/store/{}", drv);
+    };
 
     let Some(derivation_row) = EDerivation::find()
-        .filter(CDerivation::DerivationPath.eq(derivation_path))
+        .filter(CDerivation::Hash.eq(drv_hash))
+        .filter(CDerivation::Name.eq(drv_name))
         .one(&state.web_db)
         .await?
     else {

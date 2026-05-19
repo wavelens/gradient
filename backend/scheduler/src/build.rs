@@ -133,7 +133,7 @@ impl<'a> BuildStateHandler<'a> {
                     .one(&state.worker_db)
                     .await
                 {
-                    Ok(Some(d)) => d.derivation_path,
+                    Ok(Some(d)) => d.drv_path(),
                     Ok(None) => {
                         warn!(%leader_id, %derivation_id, "substitute_log: derivation row missing");
                         return;
@@ -672,7 +672,6 @@ pub(crate) fn build_cross_org_artefact_rows(
                 id: Set(new_id),
                 derivation: Set(follower_derivation),
                 name: Set(src.name.clone()),
-                output: Set(src.output.clone()),
                 hash: Set(src.hash.clone()),
                 package: Set(src.package.clone()),
                 ca: Set(src.ca.clone()),
@@ -869,7 +868,8 @@ mod waiting_reason_tests {
         entity::derivation::Model {
             id,
             organization: OrganizationId::nil(),
-            derivation_path: "/nix/store/x.drv".into(),
+            hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+            name: "x".into(),
             architecture: arch.into(),
             created_at: chrono::NaiveDateTime::default(),
         }
@@ -1080,7 +1080,6 @@ mod cross_org_mirror_tests {
             id,
             derivation,
             name: "out".into(),
-            output: format!("/nix/store/{hash}-foo"),
             hash: hash.into(),
             package: "foo".into(),
             ca: None,

@@ -9,7 +9,6 @@ use crate::error::WebResult;
 use crate::helpers::{OptionExt, ok_json};
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
-use gradient_core::executer::nix_store_path;
 use gradient_core::types::*;
 use sea_orm::EntityTrait;
 use sea_orm::{ColumnTrait, QueryFilter};
@@ -20,13 +19,6 @@ use std::sync::Arc;
 use super::BuildAccessContext;
 
 // ── Dependency graph helpers ──────────────────────────────────────────────────
-
-pub(super) fn extract_drv_name(path: &str) -> String {
-    let filename = path.split('/').next_back().unwrap_or(path);
-    // Strip the nix store hash prefix (e.g. "abc123xyz-name.drv" → "name")
-    let without_hash = filename.split_once('-').map(|x| x.1).unwrap_or(filename);
-    without_hash.trim_end_matches(".drv").to_string()
-}
 
 pub(super) async fn authorize_build_opt(
     state: &Arc<ServerState>,
@@ -99,8 +91,8 @@ async fn process_graph_wave(
         if let Some(drv) = drv_by_id.get(&build.derivation) {
             nodes.push(DependencyNode {
                 id: build.id,
-                name: extract_drv_name(&drv.derivation_path),
-                path: nix_store_path(&drv.derivation_path),
+                name: drv.name.clone(),
+                path: drv.store_path(),
                 status: format!("{:?}", build.status),
                 created_at: build.created_at,
                 updated_at: build.updated_at,
@@ -197,8 +189,8 @@ pub async fn get_build_dependencies(
             if let Some(drv) = drv_by_id.get(&b.derivation) {
                 nodes.push(DependencyNode {
                     id: b.id,
-                    name: extract_drv_name(&drv.derivation_path),
-                    path: nix_store_path(&drv.derivation_path),
+                    name: drv.name.clone(),
+                    path: drv.store_path(),
                     status: format!("{:?}", b.status),
                     created_at: b.created_at,
                     updated_at: b.updated_at,

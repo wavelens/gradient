@@ -76,8 +76,6 @@ fn follower_membership_id() -> OrganizationUserId {
     OrganizationUserId::new(Uuid::parse_str("50000000-0000-0000-0000-000000000011").unwrap())
 }
 
-const DRV_PATH: &str = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello-2.12.1.drv";
-
 // ── Fixture rows ──────────────────────────────────────────────────────────────
 
 fn private_org(id: OrganizationId, slug: &str) -> entity::organization::Model {
@@ -174,7 +172,8 @@ fn leader_derivation_row() -> entity::derivation::Model {
     entity::derivation::Model {
         id: leader_drv_id(),
         organization: leader_org_id(),
-        derivation_path: DRV_PATH.into(),
+        hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+        name: "hello-2.12.1".into(),
         architecture: "x86_64-linux".into(),
         created_at: test_date(),
     }

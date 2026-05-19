@@ -26,8 +26,5 @@ pub fn strip_store_prefix(path: &str) -> &str {
 }
 
 pub fn get_derivation_paths(derivations: &[MDerivation]) -> Vec<String> {
-    derivations
-        .iter()
-        .map(|d| nix_store_path(&d.derivation_path))
-        .collect()
+    derivations.iter().map(|d| d.store_path()).collect()
 }

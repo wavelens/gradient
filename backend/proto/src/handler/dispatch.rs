@@ -9,7 +9,7 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
-use gradient_core::executer::{nix_store_path, strip_nix_store_prefix};
+use gradient_core::executer::strip_nix_store_prefix;
 use gradient_core::types::ids::{DerivationId, OrganizationId};
 use gradient_core::types::*;
 use tokio::sync::Semaphore;
@@ -761,6 +761,12 @@ impl<'a> DispatchContext<'a> {
     async fn on_query_known_derivations(&mut self, job_id: String, drv_paths: Vec<String>) -> bool {
         debug!(peer_id = %self.peer_id, %job_id, count = drv_paths.len(), "QueryKnownDerivations");
         let stripped: Vec<String> = drv_paths.iter().map(|p| strip_nix_store_prefix(p)).collect();
+        let hashes: Vec<String> = stripped
+            .iter()
+            .filter_map(|p| gradient_core::sources::parse_drv_hash_name(p).ok().map(|(h, _)| h))
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect();
         let known = match self.scheduler.peer_id_for_job(&job_id).await {
             Some(org_id) => {
                 use entity::build::BuildStatus;
@@ -769,7 +775,7 @@ impl<'a> DispatchContext<'a> {
                 // First: find derivations that exist for this org.
                 let candidates = EDerivation::find()
                     .filter(CDerivation::Organization.eq(org_id))
-                    .filter(CDerivation::DerivationPath.is_in(stripped))
+                    .filter(CDerivation::Hash.is_in(hashes))
                     .all(&self.state.worker_db)
                     .await
                     .unwrap_or_default();
@@ -797,7 +803,7 @@ impl<'a> DispatchContext<'a> {
                     candidates
                         .into_iter()
                         .filter(|d| built.contains(&d.id))
-                        .map(|d| nix_store_path(&d.derivation_path))
+                        .map(|d| d.store_path())
                         .collect()
                 }
             }

@@ -187,7 +187,6 @@ fn drv_output_row() -> entity::derivation_output::Model {
         id: drv_output_id(),
         derivation: derivation_id(),
         name: "out".into(),
-        output: STORE_PATH.into(),
         hash: FIXTURE_HASH.into(),
         package: "pkg".into(),
         ca: None,

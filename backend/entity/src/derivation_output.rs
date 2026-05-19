@@ -17,15 +17,11 @@ pub struct Model {
     pub id: DerivationOutputId,
     pub derivation: DerivationId,
     pub name: String,
-    pub output: String,
     pub hash: String,
     pub package: String,
     pub ca: Option<String>,
     pub nar_size: Option<i64>,
     pub is_cached: bool,
-    /// Link to the `cached_path` row when this output is cached.
-    /// Replaces the old `derivation_output_signature` join — the signature
-    /// lives on `cached_path` directly.
     pub cached_path: Option<CachedPathId>,
     pub created_at: NaiveDateTime,
 }

@@ -87,7 +87,6 @@ pub async fn public_cache_with_narinfo() -> Arc<ServerState> {
         id: drv_output_id(),
         derivation: deriv_id(),
         name: "out".into(),
-        output: format!("/nix/store/{}-hello", FIXTURE_PATH_HASH),
         hash: FIXTURE_PATH_HASH.into(),
         package: "hello".into(),
         ca: None,
@@ -100,7 +99,8 @@ pub async fn public_cache_with_narinfo() -> Arc<ServerState> {
     let deriv_row = entity::derivation::Model {
         id: deriv_id(),
         organization: org_id(),
-        derivation_path: format!("/nix/store/{}-hello.drv", FIXTURE_PATH_HASH),
+        hash: FIXTURE_PATH_HASH.into(),
+        name: "hello".into(),
         architecture: "x86_64-linux".into(),
         created_at: test_date(),
     };
@@ -309,7 +309,8 @@ fn derivation_row() -> entity::derivation::Model {
     entity::derivation::Model {
         id: deriv_id(),
         organization: org_id(),
-        derivation_path: format!("/nix/store/{}", FIXTURE_DRV_FILENAME),
+        hash: FIXTURE_PATH_HASH.into(),
+        name: "hello".into(),
         architecture: "x86_64-linux".into(),
         created_at: test_date(),
     }

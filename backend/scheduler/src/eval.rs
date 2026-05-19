@@ -18,7 +18,7 @@ use gradient_core::db::{
     update_evaluation_status_with_error,
 };
 use gradient_core::executer::strip_nix_store_prefix;
-use gradient_core::sources::get_hash_from_path;
+use gradient_core::sources::{get_hash_from_path, parse_drv_hash_name};
 use gradient_core::types::*;
 use sea_orm::{ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
 use tracing::{debug, error, info};
@@ -50,7 +50,7 @@ impl DerivationInsertBatch {
     ) -> Self {
         let mut drv_path_to_id: HashMap<String, DerivationId> = existing
             .iter()
-            .map(|d| (strip_nix_store_prefix(&d.derivation_path), d.id))
+            .map(|d| (d.drv_path(), d.id))
             .collect();
 
         let now = gradient_core::types::now();
@@ -63,10 +63,13 @@ impl DerivationInsertBatch {
             }
             let id = DerivationId::now_v7();
             drv_path_to_id.insert(d.drv_path.clone(), id);
+            let (drv_hash, drv_name) = parse_drv_hash_name(&d.drv_path)
+                .unwrap_or_else(|_| ("unknown".to_owned(), d.drv_path.clone()));
             new_derivations.push(ADerivation {
                 id: Set(id),
                 organization: Set(organization_id),
-                derivation_path: Set(d.drv_path.clone()),
+                hash: Set(drv_hash),
+                name: Set(drv_name),
                 architecture: Set(d.architecture.clone()),
                 created_at: Set(now),
             });
@@ -77,7 +80,6 @@ impl DerivationInsertBatch {
                     id: Set(DerivationOutputId::now_v7()),
                     derivation: Set(id),
                     name: Set(output.name.clone()),
-                    output: Set(output.path.clone()),
                     hash: Set(hash),
                     package: Set(package),
                     ca: Set(None),
@@ -167,17 +169,26 @@ impl<'a> EvalResultProcessor<'a> {
     }
 
     /// Load derivations that already exist in the DB so we don't re-insert them.
+    ///
+    /// Filters by `hash` only (Nix store hashes are content-addressed, so
+    /// `(organization, hash)` is unique in practice) to keep the IN clause
+    /// bounded by the number of distinct hashes rather than full drv paths.
     async fn load_existing_derivations(
         &self,
         derivations: &[DiscoveredDerivation],
     ) -> Result<Vec<MDerivation>> {
-        let paths: Vec<String> = derivations.iter().map(|d| d.drv_path.clone()).collect();
-        if paths.is_empty() {
+        let hashes: Vec<String> = derivations
+            .iter()
+            .filter_map(|d| parse_drv_hash_name(&d.drv_path).ok().map(|(h, _)| h))
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect();
+        if hashes.is_empty() {
             return Ok(vec![]);
         }
         EDerivation::find()
             .filter(CDerivation::Organization.eq(self.organization_id))
-            .filter(CDerivation::DerivationPath.is_in(paths))
+            .filter(CDerivation::Hash.is_in(hashes))
             .all(&self.state.worker_db)
             .await
             .context("query existing derivations")
@@ -622,7 +633,7 @@ async fn expand_substituted_closure(
         {
             Ok(rows) => rows
                 .into_iter()
-                .map(|d| (d.id, d.derivation_path))
+                .map(|d| (d.id, d.drv_path()))
                 .collect::<std::collections::HashMap<_, _>>(),
             Err(e) => {
                 error!(%evaluation_id, error = %e, "expand_substituted_closure: drv path lookup failed");
@@ -794,27 +805,32 @@ pub async fn flush_deferred_deps(
         return Ok(());
     }
 
-    // Collect every unique drv_path mentioned (both as source and as dep).
-    let all_paths: Vec<String> = {
-        let mut set = std::collections::HashSet::new();
-        for (src, deps) in &deferred {
-            set.insert(src.clone());
-            for d in deps {
-                set.insert(d.clone());
-            }
+    // Collect every unique drv_path mentioned (both as source and as dep), and
+    // derive the unique hash set we'll filter the DB on. Hashes are
+    // content-addressed (32-char nix32) so filtering by hash alone is enough to
+    // pin a row down within an organization.
+    let mut all_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for (src, deps) in &deferred {
+        all_paths.insert(src.clone());
+        for d in deps {
+            all_paths.insert(d.clone());
         }
-        set.into_iter().collect()
-    };
+    }
+    let all_hashes: Vec<String> = all_paths
+        .iter()
+        .filter_map(|p| parse_drv_hash_name(p).ok().map(|(h, _)| h))
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
 
-    // Single query to map drv_path → UUID.
     let drv_path_to_id: std::collections::HashMap<String, DerivationId> = EDerivation::find()
         .filter(CDerivation::Organization.eq(organization_id))
-        .filter(CDerivation::DerivationPath.is_in(all_paths))
+        .filter(CDerivation::Hash.is_in(all_hashes))
         .all(&state.worker_db)
         .await
         .context("flush_deferred_deps: query derivations")?
         .into_iter()
-        .map(|d| (d.derivation_path, d.id))
+        .map(|d| (d.drv_path(), d.id))
         .collect();
 
     let mut edges: Vec<ADerivationDependency> = Vec::new();
