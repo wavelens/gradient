@@ -5,6 +5,7 @@
  */
 
 pub mod ci;
+pub mod constants;
 pub mod db;
 pub mod executer;
 pub mod http;
