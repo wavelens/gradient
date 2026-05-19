@@ -1102,6 +1102,14 @@ Unit tests in `backend/core/src/http.rs`:
   can identify and contact-trace outbound calls (`#205`).
 - `user_agent_does_not_use_lowercase_brand` — regression guard against
   the previous lowercase `gradient/` format (`#205`).
+- `init_crypto_provider_is_idempotent_and_enables_tls` — regression
+  guard for `#232`: `init_crypto_provider` installs the rustls
+  `aws-lc-rs` provider, may be called repeatedly, and unblocks
+  `rustls::ClientConfig::builder()` (which otherwise panics when the
+  process-level provider has not been chosen). Worker (`worker::main`)
+  and server (`backend::main`) call it before any TLS handshake so
+  `wss://` connections through `tokio_tungstenite::connect_async`
+  succeed under TLS.
 
 ## Graceful shutdown (`#72`)
 

@@ -51,6 +51,11 @@ fn main() -> Result<()> {
         return nix::eval_worker::run_eval_worker().map_err(anyhow::Error::from);
     }
 
+    // Must precede the first TLS handshake — `connect_async` for `wss://` is
+    // the first thing the runtime does and rustls 0.23 panics if no provider
+    // is installed (see issue #232).
+    gradient_core::http::init_crypto_provider();
+
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async move {
         info!(server_url = %config.server_url, "gradient-worker starting");
