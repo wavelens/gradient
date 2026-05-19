@@ -72,11 +72,18 @@ enum MainCommands {
         #[command(subcommand)]
         cmd: cache::Commands,
     },
-    /// Build a derivation
+    /// Submit a build request from the current git repository
     Build {
-        derivation: String,
+        /// Eval target attribute path (default: project's wildcard)
+        target: Option<String>,
+        /// Target system (default: organization preference)
+        #[arg(long)]
+        system: Option<String>,
         #[arg(short, long)]
         organization: Option<String>,
+        /// Skip log streaming and exit after dispatch
+        #[arg(long)]
+        no_stream: bool,
         #[arg(short, long)]
         quiet: bool,
     },
@@ -242,10 +249,12 @@ pub async fn run_cli() -> std::io::Result<()> {
         }
 
         MainCommands::Build {
-            derivation,
+            target,
+            system,
             organization,
+            no_stream,
             quiet,
-        } => build::handle_build(derivation, organization, quiet).await,
+        } => build::handle_build(target, system, organization, no_stream, quiet).await,
         MainCommands::Download { build_id, filename } => {
             download::handle_download(build_id, filename).await
         }
