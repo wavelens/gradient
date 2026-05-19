@@ -11,6 +11,7 @@ export interface Organization {
   description: string;
   public_key?: string;
   public: boolean;
+  hide_build_requests: boolean;
   managed: boolean;
   created_by?: string;
   created_at?: string;

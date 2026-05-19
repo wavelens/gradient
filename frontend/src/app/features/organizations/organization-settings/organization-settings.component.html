@@ -67,6 +67,17 @@
           <small class="text-secondary">Public organizations are visible and readable by all users</small>
         </div>
 
+        <div class="form-group checkbox-group">
+          <p-checkbox
+            inputId="hide-build-requests"
+            [(ngModel)]="formData.hide_build_requests"
+            [binary]="true"
+            [appManagedDisable]="access()"
+          />
+          <label for="hide-build-requests">Hide Build Requests project</label>
+          <small class="text-secondary">When enabled, the auto-managed <code>build-request</code> project that receives CLI build artefacts is hidden from project listings.</small>
+        </div>
+
         @if (saveError()) {
           <div class="message-banner error">
             <span class="material-symbols-outlined">error</span>

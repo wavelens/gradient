@@ -13,6 +13,7 @@ import { DividerModule } from 'primeng/divider';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { TextareaModule } from 'primeng/textarea';
+import { CheckboxModule } from 'primeng/checkbox';
 import { OrganizationsService } from '@core/services/organizations.service';
 import { OrgAccessService } from '@core/services/org-access.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
@@ -31,6 +32,7 @@ import { Organization, AccessState } from '@core/models';
     ButtonModule,
     InputTextModule,
     TextareaModule,
+    CheckboxModule,
     LoadingSpinnerComponent,
     WritableDirective,
     ManagedDisableDirective,
@@ -66,6 +68,7 @@ export class OrganizationSettingsComponent implements OnInit {
     display_name: '',
     description: '',
     public: false,
+    hide_build_requests: false,
   };
 
   ngOnInit(): void {
@@ -84,6 +87,7 @@ export class OrganizationSettingsComponent implements OnInit {
           display_name: org.display_name,
           description: org.description,
           public: org.public,
+          hide_build_requests: org.hide_build_requests,
         };
         this.loading.set(false);
       },
@@ -119,6 +123,7 @@ export class OrganizationSettingsComponent implements OnInit {
     this.organizationsService.updateOrganization(this.orgName, {
       display_name: this.formData.display_name,
       description: this.formData.description,
+      hide_build_requests: this.formData.hide_build_requests,
     }).subscribe({
       next: () => {
         visibilityCall.subscribe({
