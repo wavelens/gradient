@@ -21,6 +21,8 @@ import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/load
 import { EmptyStateComponent } from '@shared/components/empty-state/empty-state.component';
 import { Organization, Project, EvaluationStatus } from '@core/models';
 
+const RESERVED_PROJECT_NAMES = ['build-request'];
+
 @Component({
   selector: 'app-organization-detail',
   standalone: true,
@@ -53,7 +55,7 @@ export class OrganizationDetailComponent implements OnInit, OnDestroy {
   showCreateDialog = signal(false);
   creating = signal(false);
   createError = signal<string | null>(null);
-  nameCheckState = signal<'idle' | 'invalid' | 'checking' | 'available' | 'taken'>('idle');
+  nameCheckState = signal<'idle' | 'invalid' | 'reserved' | 'checking' | 'available' | 'taken'>('idle');
 
   orgName = '';
 
@@ -137,6 +139,11 @@ export class OrganizationDetailComponent implements OnInit, OnDestroy {
       this.nameCheck$.next(''); // cancel any pending debounce without making an API call
       return;
     }
+    if (RESERVED_PROJECT_NAMES.includes(name.toLowerCase())) {
+      this.nameCheckState.set('reserved');
+      this.nameCheck$.next('');
+      return;
+    }
     this.nameCheckState.set('checking');
     this.nameCheck$.next(name);
   }
@@ -181,6 +188,10 @@ export class OrganizationDetailComponent implements OnInit, OnDestroy {
 
   createProject(): void {
     if (!this.newProject.name || !this.newProject.display_name || !this.newProject.repository) {
+      return;
+    }
+    if (RESERVED_PROJECT_NAMES.includes(this.newProject.name.trim().toLowerCase())) {
+      this.nameCheckState.set('reserved');
       return;
     }
 

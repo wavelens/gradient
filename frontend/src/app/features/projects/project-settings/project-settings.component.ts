@@ -193,6 +193,10 @@ export class ProjectSettingsComponent implements OnInit {
     this.loading.set(true);
     this.projectsService.getProjectInfo(this.orgName, this.projectName).subscribe({
       next: (project) => {
+        if (project.name === 'build-request') {
+          this.router.navigate(['/organization', this.orgName, 'project', project.name]);
+          return;
+        }
         this.project.set(project);
         this.formData = {
           display_name: project.display_name,
