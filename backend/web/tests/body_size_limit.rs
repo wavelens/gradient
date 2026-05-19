@@ -9,8 +9,8 @@
 //! webhook payload cannot exhaust server memory. The cap is configurable
 //! via `--max-request-size` (default 2 MiB) and applied as a
 //! `DefaultBodyLimit` layer on the API router; the per-route override on
-//! `POST /api/v1/builds` raises it to `--max-direct-build-size` for
-//! direct-build multipart uploads.
+//! `POST /api/v1/build-requests/{session}/blobs` raises it to
+//! `MAX_BUILD_REQUEST_SIZE` (20 MiB) for blob uploads.
 //!
 //! Uses manual Tokio runtimes because `#[tokio::test]` expands to
 //! `::gradient_core::…` which clashes with the local `core` crate name.
@@ -28,13 +28,9 @@ use test_support::prelude::test_cli;
 use uuid::Uuid;
 use web::create_router;
 
-fn make_state_with_limits(
-    max_request_size: usize,
-    max_direct_build_size: usize,
-) -> Arc<ServerState> {
+fn make_state_with_limits(max_request_size: usize) -> Arc<ServerState> {
     let mut cli = test_cli();
     cli.limits.max_request_size = max_request_size;
-    cli.limits.max_direct_build_size = max_direct_build_size;
     let nar_storage = NarStore::local(&cli.storage.base_path).expect("create test NarStore");
     Arc::new(ServerState {
         web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
@@ -63,7 +59,7 @@ fn webhook_body_over_limit_returns_413() {
         .build()
         .unwrap();
     rt.block_on(async {
-        let state = make_state_with_limits(1024, 1024 * 1024);
+        let state = make_state_with_limits(1024);
         let router = create_router(state);
         let server = TestServer::new(router);
 
@@ -95,7 +91,7 @@ fn webhook_body_within_limit_reaches_handler() {
         .build()
         .unwrap();
     rt.block_on(async {
-        let state = make_state_with_limits(1024, 1024 * 1024);
+        let state = make_state_with_limits(1024);
         let router = create_router(state);
         let server = TestServer::new(router);
 
@@ -116,28 +112,27 @@ fn webhook_body_within_limit_reaches_handler() {
     });
 }
 
-/// `POST /api/v1/builds` (direct-build multipart) gets a per-route layer
-/// raising the limit to `max_direct_build_size`, so a payload that would
+/// `POST /api/v1/build-requests/{session}/blobs` gets a per-route layer
+/// raising the limit to `MAX_BUILD_REQUEST_SIZE`, so a payload that would
 /// fail the global `max_request_size` is allowed through. We send the
 /// request unauthenticated — it will fail with 401, but the point is that
 /// a 413 response would mean the per-route override isn't in effect.
 #[test]
-fn direct_build_route_uses_higher_limit() {
+fn blob_upload_route_uses_higher_limit() {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .unwrap();
     rt.block_on(async {
-        // Global limit 1 KiB; per-route limit 1 MiB.
-        let state = make_state_with_limits(1024, 1024 * 1024);
+        let state = make_state_with_limits(1024);
         let router = create_router(state);
         let server = TestServer::new(router);
 
-        // Payload over the global limit but under the per-route limit.
         let body = vec![b'x'; 16 * 1024];
+        let session_id = Uuid::now_v7();
 
         let response = server
-            .post("/api/v1/builds")
+            .post(&format!("/api/v1/build-requests/{}/blobs", session_id))
             .add_header("Content-Type", "multipart/form-data; boundary=----abc")
             .bytes(body.into())
             .await;
@@ -145,11 +140,8 @@ fn direct_build_route_uses_higher_limit() {
         assert_ne!(
             response.status_code(),
             axum::http::StatusCode::PAYLOAD_TOO_LARGE,
-            "direct-build route must not enforce the smaller global limit, got {}",
+            "blob-upload route must not enforce the smaller global limit, got {}",
             response.status_code()
         );
-        // Auth middleware rejects unauthenticated requests; that's the
-        // expected outcome here, distinct from a body-limit rejection.
-        let _ = Uuid::nil();
     });
 }

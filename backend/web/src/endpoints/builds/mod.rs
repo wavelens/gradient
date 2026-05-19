@@ -4,15 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-pub mod direct;
 pub mod downloads;
 pub mod graph;
 pub mod log;
 pub mod query;
 
-pub use self::direct::{
-    DirectBuildInfo, DirectBuildRequest, get_recent_direct_builds, post_direct_build,
-};
 pub use self::downloads::{
     BuildProduct, DownloadQuery, get_build_download, get_build_download_token, get_build_downloads,
 };

@@ -729,38 +729,6 @@ Tests (`cargo test -p web --test rate_limit`):
 - `cache_tier_does_not_throttle_moderate_burst` — 50 successive GETs to
   `/cache/{cache}/nix-cache-info` never return `429`.
 
-## Direct-build multipart upload — filename validation
-
-`POST /api/v1/builds` accepts file uploads via standard multipart parts
-with field name `files`; the upload's relative path comes from each
-part's `Content-Disposition: filename="..."`. The endpoint is parsed via
-`axum_typed_multipart::TypedMultipart<DirectBuildForm>`, which streams
-each part into a `tempfile::NamedTempFile` (RAII cleanup on early
-return) instead of buffering the full payload in memory. Without
-sanitisation, an authenticated org-member could submit
-`filename="../../../../../etc/cron.d/owned"` and have the server write
-attacker-controlled bytes anywhere the process can reach.
-`validate_upload_filename` (in
-`backend/web/src/endpoints/builds/direct.rs`) rejects any name whose
-path components are not all `Component::Normal` — i.e. absolute paths,
-parent (`..`) and current (`.`) components, Windows path prefixes, empty
-strings, and embedded NUL bytes. The endpoint also re-checks that the
-joined target stays under the per-upload temp directory as defence in
-depth.
-
-Unit tests (`backend/web/src/endpoints/builds/direct.rs::tests`):
-
-- `accepts_simple_filenames` — `flake.nix`, `src/main.rs`, `a/b/c/d.txt`.
-- `rejects_empty` — empty string is rejected.
-- `rejects_parent_traversal` — `..`, `../etc/passwd`, deep traversal,
-  and traversals embedded inside otherwise-normal paths
-  (`foo/../../bar`, `foo/..`).
-- `rejects_absolute_paths` — `/etc/passwd`, `/`.
-- `rejects_current_dir_components` — `.`, `./foo`.
-- `rejects_null_bytes` — NUL byte inside a filename.
-
-Run with: `cargo test -p web --tests endpoints::builds::direct`
-
 ## Outgoing webhook URL — SSRF validation
 
 `validate_webhook_url` (in `backend/core/src/ci/webhook.rs`) is the gate
@@ -888,16 +856,16 @@ Tests (`backend/core/src/sources/ssh_key.rs`):
   also fails with `KeyDecryption`.
 - `generate_ssh_key_decrypts_to_openssh_pem` — properly encrypted keys
   still round-trip through decrypt.
-## Body-size limits — webhook and direct-build (#51)
+## Body-size limits — webhook and blob upload (#51)
 
 Without a body-size cap, `field.bytes().await` and the `body: Bytes`
-extractor used by `forge_hooks` and `direct_build` would buffer entire
-request bodies into memory, allowing a single 10 GB payload to OOM the
-server. `create_router` (`backend/web/src/lib.rs`) now applies an
+extractor used by `forge_hooks` would buffer entire request bodies into
+memory, allowing a single 10 GB payload to OOM the server.
+`create_router` (`backend/web/src/lib.rs`) now applies an
 `axum::extract::DefaultBodyLimit::max(cli.max_request_size)` layer to the
-whole API router (default 2 MiB) and overrides it on `POST /api/v1/builds`
-with `cli.max_direct_build_size` (default 1 GiB) for legitimate
-multi-file repository uploads.
+whole API router (default 2 MiB) and overrides it on
+`POST /api/v1/build-requests/{session}/blobs` with the fixed
+`MAX_BUILD_REQUEST_SIZE` (20 MiB) for blob uploads.
 
 Tests (`cargo test -p web --test body_size_limit`):
 
@@ -908,10 +876,17 @@ Tests (`cargo test -p web --test body_size_limit`):
 - `webhook_body_within_limit_reaches_handler` — a 256 B body under the
   same 1 KiB cap is *not* short-circuited with 413; the handler runs and
   returns its normal response.
-- `direct_build_route_uses_higher_limit` — a 16 KiB body to
-  `POST /api/v1/builds` with `max_request_size = 1024` and
-  `max_direct_build_size = 1 MiB` is *not* rejected with 413, proving
-  the per-route override is wired up.
+- `blob_upload_route_uses_higher_limit` — a 16 KiB body to
+  `POST /api/v1/build-requests/{session}/blobs` with
+  `max_request_size = 1024` is *not* rejected with 413, proving the
+  per-route override to `MAX_BUILD_REQUEST_SIZE` is wired up.
+
+Regression for the build-request rework
+(`cargo test -p web --test old_direct_build_gone`):
+
+- `post_builds_returns_404` and `get_recent_direct_builds_returns_404` —
+  the legacy `POST /api/v1/builds` and `GET /api/v1/builds/direct/recent`
+  routes are no longer registered.
 ## Cache traffic metrics — atomic UPSERT (no lost updates)
 
 `record_nar_traffic` (`backend/web/src/endpoints/stats.rs`) records bytes
