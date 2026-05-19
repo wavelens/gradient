@@ -87,17 +87,43 @@ gradient cache add
 gradient cache remove <name>
 ```
 
-### Builds
+### Build Requests
+
+`gradient build` uploads the current git repository's tracked files to the
+server and queues a Nix evaluation against them. No Nix tooling runs on the
+client — only the files git tracks are uploaded, addressed by BLAKE3 content
+hash so unchanged blobs aren't re-sent across runs. The server materialises
+`/nix/store/<hash>-source`, signs it with the org's cache key, and dispatches
+an evaluation under a per-org reserved `build-request` project.
 
 ```sh
-# Build a derivation directly (remote build)
-gradient build <derivation-path>
-gradient build <derivation-path> --organization myorg
+# Inside a git working tree
+gradient build                          # eval the project's wildcard target
+gradient build checks.x86_64-linux.foo  # eval a specific attribute path
+gradient build --system x86_64-linux    # override target system (default: org preference)
+gradient build --no-stream              # dispatch and exit without tailing logs
+```
 
-# Download evaluation artefacts (interactive picker)
+Requirements and limits:
+
+- Run from inside a git working tree (bare repos are not supported).
+- Only files git tracks are uploaded; untracked files and `.git/` are skipped.
+- Combined upload size must not exceed **20 MiB** (`MAX_BUILD_REQUEST_SIZE`).
+- The default flow streams logs from all queued builds until they complete;
+  pass `--no-stream` to return immediately after dispatch.
+
+### Downloading artefacts
+
+```sh
+# Interactive picker over the latest evaluation of the selected project
 gradient download
+
+# Skip the evaluation picker
 gradient download --evaluation <uuid>
-gradient download --project myproject --products all --out ./artefacts
+
+# Skip the product picker (comma-separated indices, ranges, or `all`)
+gradient download --products all --out ./artefacts
+gradient download --products 1,3-5 --out ./artefacts
 ```
 
 ### Utilities
