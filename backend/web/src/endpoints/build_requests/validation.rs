@@ -8,7 +8,6 @@
 //! safety (no traversal / absolute / null bytes) and BLAKE3 hex parsing.
 
 use crate::error::{WebError, WebResult};
-use std::path::{Component, Path};
 
 pub fn validate_manifest_path(path: &str) -> WebResult<()> {
     if path.is_empty() {
@@ -20,19 +19,15 @@ pub fn validate_manifest_path(path: &str) -> WebResult<()> {
             path
         )));
     }
-    let p = Path::new(path);
-    if p.is_absolute() {
+    if path.starts_with('/') {
         return Err(WebError::bad_request(format!("Absolute path: {}", path)));
     }
-    for component in p.components() {
-        match component {
-            Component::Normal(_) => {}
-            _ => {
-                return Err(WebError::bad_request(format!(
-                    "Invalid path component in: {}",
-                    path
-                )));
-            }
+    for segment in path.split('/') {
+        if segment.is_empty() || segment == "." || segment == ".." {
+            return Err(WebError::bad_request(format!(
+                "Invalid path component in: {}",
+                path
+            )));
         }
     }
     Ok(())
