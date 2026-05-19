@@ -243,12 +243,17 @@ pub async fn trigger_restart_builds<C: ConnectionTrait>(
         } else {
             leader_for_drv.get(&prev_build.derivation).copied()
         };
+        let log_id = if matches!(new_status, BuildStatus::Substituted) {
+            Some(prev_build.log_id.unwrap_or(prev_build.id))
+        } else {
+            None
+        };
         let abuild = ABuild {
             id: Set(new_build_id),
             evaluation: Set(new_eval_id),
             derivation: Set(prev_build.derivation),
             status: Set(new_status),
-            log_id: Set(None),
+            log_id: Set(log_id),
             build_time_ms: Set(None),
             worker: Set(None),
             via: Set(via),

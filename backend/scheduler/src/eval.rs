@@ -20,7 +20,7 @@ use gradient_core::db::{
 use gradient_core::executer::strip_nix_store_prefix;
 use gradient_core::sources::{get_hash_from_path, parse_drv_hash_name};
 use gradient_core::types::*;
-use sea_orm::{ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::{ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use tracing::{debug, error, info};
 
 use super::build::check_evaluation_done;
@@ -234,6 +234,10 @@ impl<'a> EvalResultProcessor<'a> {
                     HashMap::new()
                 });
 
+        let log_source_for_substituted = self
+            .find_log_sources(truly_substituted.iter().copied().collect())
+            .await;
+
         let mut spawn_inputs: Vec<(BuildId, DerivationId, String)> = Vec::new();
         for d in derivations {
             let Some(&drv_id) = drv_path_to_id.get(&d.drv_path) else {
@@ -253,6 +257,12 @@ impl<'a> EvalResultProcessor<'a> {
                 leader_for_drv.get(&drv_id).copied()
             };
 
+            let log_id = if matches!(status, BuildStatus::Substituted) {
+                log_source_for_substituted.get(&drv_id).copied()
+            } else {
+                None
+            };
+
             let build_id = BuildId::now_v7();
             if matches!(status, BuildStatus::Substituted) {
                 spawn_inputs.push((build_id, drv_id, d.drv_path.clone()));
@@ -263,7 +273,7 @@ impl<'a> EvalResultProcessor<'a> {
                 evaluation: Set(self.evaluation_id),
                 derivation: Set(drv_id),
                 status: Set(status),
-                log_id: Set(None),
+                log_id: Set(log_id),
                 build_time_ms: Set(None),
                 worker: Set(None),
                 via: Set(via),
@@ -322,6 +332,43 @@ impl<'a> EvalResultProcessor<'a> {
     /// misclassified as "needs to build" and rerun pointlessly. The
     /// worker-facing `CacheQuery` handler already merges by hash for the
     /// same reason; this brings the eval-time decision in line.
+    /// For each derivation being marked `Substituted`, find the most recent
+    /// prior build that has a usable log so the new build's `log_id` can
+    /// point at it. A new Substituted build never runs and so produces no
+    /// log of its own; without this lookup the log endpoint sees
+    /// `log_id = NULL` and falls back to the new build's id, which has no
+    /// stored log.
+    async fn find_log_sources(
+        &self,
+        drv_ids: Vec<DerivationId>,
+    ) -> HashMap<DerivationId, BuildId> {
+        let mut out: HashMap<DerivationId, BuildId> = HashMap::new();
+        if drv_ids.is_empty() {
+            return out;
+        }
+        let prior = match EBuild::find()
+            .filter(CBuild::Derivation.is_in(drv_ids))
+            .filter(
+                CBuild::Status
+                    .is_in([BuildStatus::Completed, BuildStatus::Substituted]),
+            )
+            .order_by_desc(CBuild::CreatedAt)
+            .all(&self.state.worker_db)
+            .await
+        {
+            Ok(v) => v,
+            Err(e) => {
+                error!(error = %e, "find_log_sources query failed");
+                return out;
+            }
+        };
+        for b in prior {
+            let log_key = b.log_id.unwrap_or(b.id);
+            out.entry(b.derivation).or_insert(log_key);
+        }
+        out
+    }
+
     async fn compute_truly_substituted(
         &self,
         drv_ids: &[DerivationId],

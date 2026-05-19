@@ -513,6 +513,8 @@ async fn eval_result_substituted_derivation_completes_eval() {
         }]])
         // 4b. compute_truly_substituted: load cached_path → fully cached
         .append_query_results([vec![make_fully_cached_path(cp_id, out_path)]])
+        // 4c. find_log_sources: no prior builds to inherit log from
+        .append_query_results([Vec::<MBuild>::new()])
         // 5. insert_many builds (Substituted status)
         .append_query_results([vec![make_build(
             build_id,
@@ -570,6 +572,8 @@ async fn eval_result_substitutes_when_hash_in_cached_path_without_link() {
         )]])
         // cached_path keyed by the same hash, fully uploaded.
         .append_query_results([vec![make_fully_cached_path(cp_id, out_path)]])
+        // find_log_sources: no prior builds for this drv yet.
+        .append_query_results([Vec::<MBuild>::new()])
         .append_query_results([vec![make_build(
             build_id,
             eval_id,
