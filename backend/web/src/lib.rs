@@ -318,6 +318,10 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             )),
         )
         .route(
+            "/build-requests/{session}/dispatch",
+            post(build_requests::dispatch::post_dispatch),
+        )
+        .route(
             "/builds/direct/recent",
             get(builds::get_recent_direct_builds),
         )
