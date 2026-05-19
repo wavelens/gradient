@@ -555,6 +555,29 @@ Tests (`backend/web/tests/evaluation_builds_via.rs`):
   short-circuits the leader-resolution query (no extra `SELECT builds`) and
   returns its own row.
 
+## Evaluation artefact tree
+
+`GET /evals/{evaluation}/artefacts` returns a nested tree (entry point →
+output → product) consumed by the `gradient download` CLI artefact picker.
+The handler issues a fixed number of batched queries — one per
+`entry_point` / `build` / `derivation` / `derivation_output` / `build_product`
+table — and buckets the rows in memory rather than N+1 per derivation.
+
+Tests (`backend/web/tests/evals_artefacts.rs`):
+- `empty_eval_returns_empty_tree` — evaluation with zero entry points
+  short-circuits to `entry_points: []` after the eval-access load.
+- `returns_full_tree_grouped_by_entry_point_and_output` — seeds one entry
+  point with two derivation outputs and three products; asserts grouping,
+  alphabetic ordering of outputs by `name` and products by `path`, and the
+  `type`/`subtype`/`id` serde rename mapping for `build_product.file_type`.
+- `missing_eval_returns_404` — non-existent evaluation id surfaces as
+  `404 Not Found`.
+- `public_org_allows_anonymous` — anonymous request against an evaluation
+  owned by a `public=true` organization succeeds without a Bearer token.
+- `private_org_rejects_anonymous` — anonymous request against a
+  `public=false` organization returns `404` (the same shape eval-access uses
+  to avoid distinguishing missing from forbidden).
+
 ## EvalMessage — worker-surfaced evaluation messages
 
 Backend (`cargo test -p scheduler --tests scheduler_tests::record_eval_message`):

@@ -442,6 +442,10 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             "/evals/{evaluation}/builds",
             get(evals::get_evaluation_builds),
         )
+        .route(
+            "/evals/{evaluation}/artefacts",
+            get(evals::get_artefacts),
+        )
         .route("/builds/{build}", get(builds::get_build))
         .route("/builds/{build}/log", get(builds::get_build_log))
         .route(
