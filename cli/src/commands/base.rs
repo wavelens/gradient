@@ -87,12 +87,20 @@ enum MainCommands {
         #[arg(short, long)]
         quiet: bool,
     },
-    /// Download build artifacts
+    /// Download evaluation artefacts
     Download {
-        #[arg(short, long)]
-        build_id: Option<String>,
-        #[arg(short, long)]
-        filename: Option<String>,
+        /// Skip the eval picker; use this evaluation directly
+        #[arg(long)]
+        evaluation: Option<String>,
+        /// Restrict latest-eval lookup to a project (accepts `name` or `org/name`)
+        #[arg(long)]
+        project: Option<String>,
+        /// Skip the product picker; comma-separated 1-based indices, ranges (`1-3`), or `all`
+        #[arg(long)]
+        products: Option<String>,
+        /// Write to this directory (default: current directory)
+        #[arg(long)]
+        out: Option<String>,
     },
     /// Generate project files
     Generate {
@@ -255,9 +263,12 @@ pub async fn run_cli() -> std::io::Result<()> {
             no_stream,
             quiet,
         } => build::handle_build(target, system, organization, no_stream, quiet).await,
-        MainCommands::Download { build_id, filename } => {
-            download::handle_download(build_id, filename).await
-        }
+        MainCommands::Download {
+            evaluation,
+            project,
+            products,
+            out,
+        } => download::handle_download(evaluation, project, products, out).await,
         MainCommands::Organization { cmd } => organization::handle(cmd).await,
         MainCommands::Project { cmd } => project::handle(cmd).await,
         MainCommands::Worker { cmd } => worker::handle(cmd).await,

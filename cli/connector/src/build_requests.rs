@@ -59,6 +59,7 @@ pub struct ArtefactTree {
 pub struct EntryPointArtefacts {
     pub attr: String,
     pub derivation: String,
+    pub build_id: String,
     pub outputs: Vec<OutputArtefacts>,
 }
 

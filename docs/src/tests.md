@@ -568,8 +568,11 @@ Tests (`backend/web/tests/evals_artefacts.rs`):
   short-circuits to `entry_points: []` after the eval-access load.
 - `returns_full_tree_grouped_by_entry_point_and_output` — seeds one entry
   point with two derivation outputs and three products; asserts grouping,
-  alphabetic ordering of outputs by `name` and products by `path`, and the
-  `type`/`subtype`/`id` serde rename mapping for `build_product.file_type`.
+  alphabetic ordering of outputs by `name` and products by `path`, the
+  `type`/`subtype`/`id` serde rename mapping for `build_product.file_type`,
+  and that `entry_point.build_id` is populated (used by the CLI download
+  picker to resolve `/builds/{build}/download/{filename}` without a second
+  lookup).
 - `missing_eval_returns_404` — non-existent evaluation id surfaces as
   `404 Not Found`.
 - `public_org_allows_anonymous` — anonymous request against an evaluation

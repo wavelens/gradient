@@ -304,6 +304,7 @@ fn returns_full_tree_grouped_by_entry_point_and_output() {
             ep["derivation"],
             format!("/nix/store/{}-hello-2.12.1.drv", HASH)
         );
+        assert_eq!(ep["build_id"], build_id().to_string());
 
         let outputs = ep["outputs"].as_array().unwrap();
         assert_eq!(outputs.len(), 2);

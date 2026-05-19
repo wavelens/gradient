@@ -5649,7 +5649,7 @@ components:
 
     EntryPointArtefacts:
       type: object
-      required: [attr, derivation, outputs]
+      required: [attr, derivation, build_id, outputs]
       properties:
         attr:
           type: string
@@ -5658,6 +5658,10 @@ components:
           type: string
           description: Full `.drv` store path
           example: "/nix/store/abc123-hello-2.12.1.drv"
+        build_id:
+          type: string
+          format: uuid
+          description: Build that produced the artefacts for this entry point; use as `{build}` in `/builds/{build}/download/{filename}`
         outputs:
           type: array
           items:
