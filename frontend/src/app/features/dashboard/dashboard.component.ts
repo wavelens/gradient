@@ -10,7 +10,6 @@ import { RouterModule } from '@angular/router';
 import { forkJoin } from 'rxjs';
 import { OrganizationsService } from '@core/services/organizations.service';
 import { CachesService } from '@core/services/caches.service';
-import { StatCardComponent } from '@shared/components/stat-card/stat-card.component';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { EmptyStateComponent } from '@shared/components/empty-state/empty-state.component';
 import { Organization, Cache } from '@core/models';
@@ -21,7 +20,6 @@ import { Organization, Cache } from '@core/models';
   imports: [
     CommonModule,
     RouterModule,
-    StatCardComponent,
     LoadingSpinnerComponent,
     EmptyStateComponent,
   ],

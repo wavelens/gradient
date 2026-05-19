@@ -15,16 +15,30 @@
   } @else {
     <!-- Stats Overview -->
     <div class="dashboard-stats">
-      <app-stat-card
-        icon="corporate_fare"
-        [value]="organizations().length"
-        label="Organizations"
-      />
-      <app-stat-card
-        icon="inventory_2"
-        [value]="caches().length"
-        label="Caches"
-      />
+      <a routerLink="/organizations" class="card">
+        <div class="card-icon">
+          <span class="material-symbols-outlined">corporate_fare</span>
+        </div>
+        <div class="card-content">
+          <h3>{{ organizations().length }}</h3>
+          <p class="text-secondary">Organizations</p>
+        </div>
+        <div class="card-arrow">
+          <span class="material-symbols-outlined">arrow_forward</span>
+        </div>
+      </a>
+      <a routerLink="/caches" class="card">
+        <div class="card-icon">
+          <span class="material-symbols-outlined">inventory_2</span>
+        </div>
+        <div class="card-content">
+          <h3>{{ caches().length }}</h3>
+          <p class="text-secondary">Caches</p>
+        </div>
+        <div class="card-arrow">
+          <span class="material-symbols-outlined">arrow_forward</span>
+        </div>
+      </a>
     </div>
 
     <!-- Recent Organizations -->
