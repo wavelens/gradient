@@ -320,16 +320,32 @@ Backend (`cargo test -p worker --bins proto::nar::tests`):
 
 When `prefetch_inputs` fetches a `.drv` during the closure walk, it harvests
 seeds for the next iteration from the `.drv` content itself rather than
-trusting `cached_path.references` alone. Outputs (so downstream builds find
-them), input_derivations (transitive `.drv` prerequisites), and
-input_sources (plain files the daemon validates as references when
-accepting the `.drv` NAR) all enter the walk. This defends the prefetch
-against a `NULL`/stale `cached_path.references` row.
+trusting `cached_path.references` alone. Under `ClosureMode::FollowOutputs`
+(the default for input prefetch), outputs (so downstream builds find them),
+input_derivations (transitive `.drv` prerequisites), and input_sources
+(plain files the daemon validates as references when accepting the `.drv`
+NAR) all enter the walk. This defends the prefetch against a `NULL`/stale
+`cached_path.references` row.
+
+`ensure_self_drv_present` uses `ClosureMode::InputsOnly` instead: when the
+build target's own `.drv` is fetched, the walker must NOT pull declared
+outputs, because those outputs are by definition not yet in the gradient
+cache (the worker is about to build them). Including them would surface as
+a fatal `Uncached` classification in `query_and_split` even though the
+daemon only needs the input_derivation chain to accept the `.drv` import.
+The omission is the fix for the cross-worker
+`daemon add_to_store_nar … store path '…' does not exist` failures that
+showed up when the build's `.drv` arrived without its input `.drv` chain.
 
 Backend (`cargo test -p worker --bins proto::nar_import::tests`):
 - `drv_closure_seeds_include_outputs_inputs_and_sources` — a synthetic
   `.drv` with one output, one input_derivation, and one input_source
-  returns all three paths from `drv_closure_seeds`.
+  returns all three paths from `drv_closure_seeds` under
+  `ClosureMode::FollowOutputs`.
+- `drv_closure_seeds_inputs_only_excludes_outputs` — regression for the
+  cross-worker `.drv` import failure: under `ClosureMode::InputsOnly` the
+  declared output path is dropped while input_derivation + input_source
+  remain.
 - `drv_closure_seeds_skip_empty_output_paths` — content-addressed /
   deferred outputs (empty `path` field) are filtered so the closure walk
   never queries the empty string.
