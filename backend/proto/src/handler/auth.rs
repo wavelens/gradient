@@ -507,6 +507,7 @@ mod tests {
             public_key: String::new(),
             private_key: String::new(),
             public: false,
+            hide_build_requests: false,
             created_by: gradient_core::types::ids::UserId::nil(),
             created_at: gradient_core::types::now(),
             managed: false,

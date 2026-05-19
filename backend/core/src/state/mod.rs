@@ -37,6 +37,8 @@ pub struct StateOrganization {
     pub description: Option<String>,
     pub private_key_file: String,
     pub public: bool,
+    #[serde(default)]
+    pub hide_build_requests: bool,
     /// GitHub App installation id to bind to this org. When `Some`, the
     /// state-driven provisioner writes it on every reconciliation (state wins
     /// over runtime updates). When `None`, the field is left untouched on

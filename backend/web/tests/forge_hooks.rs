@@ -154,6 +154,7 @@ fn org_row(name: &str) -> entity::organization::Model {
         public_key: "ssh-ed25519 AAAA test".into(),
         private_key: "encrypted".into(),
         public: false,
+        hide_build_requests: false,
         created_by: user_id(),
         created_at: fixture_date(),
         managed: false,

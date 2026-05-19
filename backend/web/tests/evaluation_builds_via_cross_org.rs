@@ -87,6 +87,7 @@ fn private_org(id: OrganizationId, slug: &str) -> entity::organization::Model {
         public_key: "pub".into(),
         private_key: "priv".into(),
         public: false,
+        hide_build_requests: false,
         created_by: user_id(),
         created_at: test_date(),
         managed: false,

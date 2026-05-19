@@ -70,6 +70,7 @@ fn public_org_row() -> entity::organization::Model {
         public_key: "pub".into(),
         private_key: "priv".into(),
         public: true,
+        hide_build_requests: false,
         created_by: user_id(),
         created_at: test_date(),
         managed: false,

@@ -128,6 +128,7 @@ mod tests {
             public_key: public_key.to_string(),
             private_key: String::new(),
             public: false,
+            hide_build_requests: false,
             created_by: crate::types::ids::UserId::nil(),
             created_at: NaiveDateTime::default(),
             managed: false,

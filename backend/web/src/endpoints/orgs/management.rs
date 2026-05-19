@@ -252,6 +252,7 @@ pub async fn put(
         public_key: Set(public_key),
         private_key: Set(private_key),
         public: Set(body.public.unwrap_or(false)),
+        hide_build_requests: Set(false),
         created_by: Set(user.id),
         created_at: Set(gradient_core::types::now()),
         managed: Set(false),
