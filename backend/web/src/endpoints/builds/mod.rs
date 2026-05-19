@@ -28,9 +28,9 @@ use std::sync::Arc;
 
 /// Resolved access context for a build.
 ///
-/// Walks up build → evaluation → project/direct_build → organization and
-/// enforces the access check.  Returns `not_found("Build")` on any failure
-/// so callers cannot distinguish missing from forbidden.
+/// Walks up build → evaluation → project → organization and enforces the
+/// access check. Returns `not_found("Build")` on any failure so callers
+/// cannot distinguish missing from forbidden.
 pub(super) struct BuildAccessContext {
     pub build: MBuild,
     pub organization: MOrganization,
@@ -61,30 +61,22 @@ impl BuildAccessContext {
                 WebError::data_inconsistency("Build")
             })?;
 
-        let organization_id = if let Some(project_id) = evaluation.project {
-            EProject::find_by_id(project_id)
-                .one(&state.web_db)
-                .await?
-                .ok_or_else(|| {
-                    tracing::warn!(
-                        %project_id,
-                        evaluation_id = %evaluation.id,
-                        "Project not found for evaluation",
-                    );
-                    WebError::data_inconsistency("Evaluation")
-                })?
-                .organization
-        } else {
-            EDirectBuild::find()
-                .filter(CDirectBuild::Evaluation.eq(evaluation.id))
-                .one(&state.web_db)
-                .await?
-                .ok_or_else(|| {
-                    tracing::warn!(evaluation_id = %evaluation.id, "DirectBuild not found for evaluation");
-                    WebError::data_inconsistency("Direct build")
-                })?
-                .organization
-        };
+        let project_id = evaluation.project.ok_or_else(|| {
+            tracing::warn!(evaluation_id = %evaluation.id, "evaluation has no project");
+            WebError::data_inconsistency("Evaluation")
+        })?;
+        let organization_id = EProject::find_by_id(project_id)
+            .one(&state.web_db)
+            .await?
+            .ok_or_else(|| {
+                tracing::warn!(
+                    %project_id,
+                    evaluation_id = %evaluation.id,
+                    "Project not found for evaluation",
+                );
+                WebError::data_inconsistency("Evaluation")
+            })?
+            .organization;
 
         let organization = EOrganization::find_by_id(organization_id)
             .one(&state.web_db)
@@ -160,20 +152,14 @@ async fn follower_orgs_accessible(
     let mut org_ids: std::collections::HashSet<OrganizationId> =
         std::collections::HashSet::new();
     for ev in evals {
-        let org = if let Some(project_id) = ev.project {
-            EProject::find_by_id(project_id)
-                .one(&state.web_db)
-                .await?
-                .map(|p| p.organization)
-        } else {
-            EDirectBuild::find()
-                .filter(CDirectBuild::Evaluation.eq(ev.id))
-                .one(&state.web_db)
-                .await?
-                .map(|d| d.organization)
+        let Some(project_id) = ev.project else {
+            continue;
         };
-        if let Some(o) = org {
-            org_ids.insert(o);
+        if let Some(p) = EProject::find_by_id(project_id)
+            .one(&state.web_db)
+            .await?
+        {
+            org_ids.insert(p.organization);
         }
     }
 

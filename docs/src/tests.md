@@ -1686,10 +1686,10 @@ caller — the handler held a `// TODO: Check if user has access to the
 commit` and never enforced it, allowing cross-tenant disclosure of
 commit message, hash, and author for any commit UUID an attacker could
 guess or harvest. The route now lives behind `authorize_optional` and
-the handler walks `commit → evaluation → project|direct_build →
-organization` to require either public visibility or membership; every
-other case (non-member, anonymous on private org, missing commit, no
-referencing evaluation) maps to `404` so existence isn't leaked.
+the handler walks `commit → evaluation → project → organization` to
+require either public visibility or membership; every other case
+(non-member, anonymous on private org, missing commit, no referencing
+evaluation) maps to `404` so existence isn't leaked.
 
 Tests (`cargo test -p web --test commits_authorization`):
 
@@ -1702,9 +1702,9 @@ Tests (`cargo test -p web --test commits_authorization`):
 - `non_member_cannot_read_commit` — an authenticated user who is not a
   member of any organization that owns a referencing evaluation gets
   `404`. Direct regression for #88.
-- `member_can_read_commit_referenced_via_direct_build` — when the only
-  reachable evaluation has no `project` (direct build), the handler
-  resolves the org via the `direct_build` row and grants access.
+- `commit_referenced_only_via_orphan_eval_returns_404` — when every
+  referencing evaluation has no `project` (legacy direct-build rows
+  before issue #234), no org can be resolved and the response is `404`.
 - `nonexistent_commit_returns_404` and
   `commit_without_evaluation_returns_404` — both shapes of "no path"
   return `404` without leaking which case applied.

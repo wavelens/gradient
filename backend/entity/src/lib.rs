@@ -22,7 +22,6 @@ pub mod derivation;
 pub mod derivation_dependency;
 pub mod derivation_feature;
 pub mod derivation_output;
-pub mod direct_build;
 pub mod entry_point;
 pub mod entry_point_message;
 pub mod evaluation;

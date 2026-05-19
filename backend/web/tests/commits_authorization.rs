@@ -21,10 +21,9 @@
 //!     4. SELECT commit
 //!     5. SELECT evaluations (filtered by commit)
 //!     6. SELECT projects    (only if any eval has project_id)
-//!     7. SELECT direct_builds (only if any eval has no project_id)
-//!     8. SELECT organizations (filtered by collected ids)
+//!     7. SELECT organizations (filtered by collected ids)
 //!   Then membership probe (only when no org is public AND caller is authenticated):
-//!     9. SELECT organization_user
+//!     8. SELECT organization_user
 
 use axum_test::TestServer;
 use chrono::{Duration, Utc};
@@ -103,10 +102,6 @@ fn eval_id() -> EvaluationId {
     EvaluationId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000050").unwrap())
 }
 
-fn direct_build_id() -> DirectBuildId {
-    DirectBuildId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000060").unwrap())
-}
-
 fn project_row() -> entity::project::Model {
     entity::project::Model {
         id: project_id(),
@@ -154,18 +149,6 @@ fn membership_row() -> entity::organization_user::Model {
         organization: org_id(),
         user: user_id(),
         role: gradient_core::types::consts::BASE_ROLE_VIEW_ID,
-    }
-}
-
-fn direct_build_row() -> entity::direct_build::Model {
-    entity::direct_build::Model {
-        id: direct_build_id(),
-        organization: org_id(),
-        evaluation: eval_id(),
-        derivation: "/nix/store/aaaa-pkg.drv".into(),
-        repository_path: "/nix/store/aaaa-pkg".into(),
-        created_by: user_id(),
-        created_at: test_date(),
     }
 }
 
@@ -312,36 +295,25 @@ fn non_member_cannot_read_commit() {
     });
 }
 
-/// Commit referenced only via a `direct_build` (evaluation has no project):
-/// org member must still see it.
+/// Evaluation referencing the commit has no project (legacy direct-build
+/// row before issue #234) → 404, since project is required to resolve org.
 #[test]
-fn member_can_read_commit_referenced_via_direct_build() {
+fn commit_referenced_only_via_orphan_eval_returns_404() {
     run(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-
         let direct_eval = entity::evaluation::Model {
             project: None,
             ..eval_at(eval_id(), 0)
         };
 
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![commit_row()]])
-            .append_query_results([vec![direct_eval]])
-            // No project ids → projects query is skipped.
-            .append_query_results([vec![direct_build_row()]])
-            .append_query_results([vec![org()]])
-            .append_query_results([vec![membership_row()]]);
+            .append_query_results([vec![direct_eval]]);
         let server = make_server(db.into_connection());
 
-        let res = server
-            .get(&commit_url())
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
-        res.assert_status_ok();
+        let res = server.get(&commit_url()).await;
+        res.assert_status_not_found();
         let body: Value = res.json();
-        assert_eq!(body["error"], false);
-        assert_eq!(body["message"]["id"], commit_id().to_string());
+        assert_eq!(body["error"], true);
     });
 }
 
