@@ -64,6 +64,9 @@ impl ErrorCode {
     pub const CONFLICT: Self = Self("conflict");
     pub const ALREADY_EXISTS: Self = Self("already_exists");
 
+    // 413 Payload Too Large
+    pub const PAYLOAD_TOO_LARGE: Self = Self("payload_too_large");
+
     // 422 Unprocessable Entity
     pub const UNPROCESSABLE_ENTITY: Self = Self("unprocessable_entity");
 
@@ -102,6 +105,8 @@ pub enum WebError {
     NotFound(ErrorCode, String),
     #[error("Conflict [{0}]: {1}")]
     Conflict(ErrorCode, String),
+    #[error("Payload Too Large [{0}]: {1}")]
+    PayloadTooLarge(ErrorCode, String),
     #[error("Unprocessable Entity [{0}]: {1}")]
     UnprocessableEntity(ErrorCode, String),
     #[error("Service Unavailable [{0}]: {1}")]
@@ -138,6 +143,7 @@ impl WebError {
             Self::Forbidden(..) => StatusCode::FORBIDDEN,
             Self::NotFound(..) => StatusCode::NOT_FOUND,
             Self::Conflict(..) => StatusCode::CONFLICT,
+            Self::PayloadTooLarge(..) => StatusCode::PAYLOAD_TOO_LARGE,
             Self::UnprocessableEntity(..) => StatusCode::UNPROCESSABLE_ENTITY,
             Self::ServiceUnavailable(..) => StatusCode::SERVICE_UNAVAILABLE,
             Self::DataInconsistency(_) | Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -152,6 +158,7 @@ impl WebError {
             | Self::Forbidden(c, _)
             | Self::NotFound(c, _)
             | Self::Conflict(c, _)
+            | Self::PayloadTooLarge(c, _)
             | Self::UnprocessableEntity(c, _)
             | Self::ServiceUnavailable(c, _) => *c,
             Self::DataInconsistency(_) | Self::Internal(_) => ErrorCode::INTERNAL,
@@ -210,6 +217,7 @@ impl IntoResponse for WebError {
             | Self::Forbidden(_, m)
             | Self::NotFound(_, m)
             | Self::Conflict(_, m)
+            | Self::PayloadTooLarge(_, m)
             | Self::UnprocessableEntity(_, m)
             | Self::ServiceUnavailable(_, m) => m.clone(),
         };
@@ -253,6 +261,10 @@ impl WebError {
 
     pub fn conflict(msg: impl Into<String>) -> Self {
         Self::Conflict(ErrorCode::CONFLICT, msg.into())
+    }
+
+    pub fn payload_too_large(msg: impl Into<String>) -> Self {
+        Self::PayloadTooLarge(ErrorCode::PAYLOAD_TOO_LARGE, msg.into())
     }
 
     pub fn unprocessable_entity(msg: impl Into<String>) -> Self {

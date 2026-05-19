@@ -7,6 +7,7 @@
 pub mod admin;
 pub mod auth;
 pub mod badges;
+pub mod build_requests;
 pub mod builds;
 pub mod caches;
 pub mod commits;
