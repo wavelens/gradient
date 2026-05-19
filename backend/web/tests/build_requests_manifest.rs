@@ -228,14 +228,27 @@ fn happy_path_returns_session_and_missing() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
+        let now_ts = chrono::Utc::now().naive_utc();
+        let inserted_session = entity::upload_session::Model {
+            id: UploadSessionId::now_v7(),
+            organization: test_support::fixtures::org_id(),
+            manifest: json!([]),
+            missing: json!([]),
+            total_size: 300,
+            created_at: now_ts,
+            expires_at: now_ts + chrono::Duration::hours(1),
+            dispatched_at: None,
+        };
+
         // After auth+org access, the handler runs:
         //   SELECT build_request_blob WHERE org=... AND hash IN (...) → empty
-        //   INSERT upload_session                                     → ok
+        //   INSERT upload_session  (RETURNING + rows_affected)
         let db = with_org_access(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
         .append_query_results([Vec::<entity::build_request_blob::Model>::new()])
+        .append_query_results([vec![inserted_session]])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
