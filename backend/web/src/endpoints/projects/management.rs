@@ -18,7 +18,7 @@ use gradient_core::db::get_any_organization_by_name;
 use gradient_core::nix::RepositoryUrl;
 use gradient_core::sources::check_project_updates;
 use gradient_core::types::consts::*;
-use gradient_core::types::input::{check_index_name, validate_display_name, vec_to_hex};
+use gradient_core::types::input::{check_project_name, validate_display_name, vec_to_hex};
 use gradient_core::types::triggers::{ConcurrencyPolicy, TriggerConfig, TriggerType};
 use gradient_core::types::wildcard::Wildcard;
 use gradient_core::types::*;
@@ -66,7 +66,7 @@ pub async fn get_project_name_available(
     Query(params): Query<HashMap<String, String>>,
 ) -> WebResult<Json<BaseResponse<bool>>> {
     let name = params.get("name").cloned().unwrap_or_default();
-    if check_index_name(&name).is_err() {
+    if check_project_name(&name).is_err() {
         return Ok(ok_json(false));
     }
     let org = get_any_organization_by_name(state.0.clone(), organization)
@@ -179,7 +179,7 @@ pub async fn put(
     Path(organization): Path<String>,
     Json(body): Json<MakeProjectRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    if check_index_name(body.name.clone().as_str()).is_err() {
+    if check_project_name(body.name.clone().as_str()).is_err() {
         return Err(WebError::invalid_name("Project Name"));
     }
 
@@ -400,7 +400,7 @@ impl<'a> ProjectPatcher<'a> {
     }
 
     async fn apply_name(&mut self, organization: &MOrganization, name: String) -> WebResult<()> {
-        if check_index_name(name.as_str()).is_err() {
+        if check_project_name(name.as_str()).is_err() {
             return Err(WebError::invalid_name("Project Name"));
         }
         let existing = EProject::find()
