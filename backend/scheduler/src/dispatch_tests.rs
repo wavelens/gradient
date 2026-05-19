@@ -14,15 +14,13 @@
 //! `dispatch_queued_evals`:
 //!   1. `EEvaluation::find().filter(status=Queued).all()` → Q
 //!   2. Per eval: `ECommit::find_by_id(commit_id).one()` → Q
-//!   3. `organization_id_for_eval`:
-//!      - if `eval.project` is `Some`: `EProject::find_by_id(pid).one()` → Q
-//!      - else: `EDirectBuild::find().filter(evaluation=id).one()` → Q
+//!   3. `organization_id_for_eval`: `EProject::find_by_id(pid).one()` → Q
 //!
 //! `dispatch_ready_builds`:
 //!   1. `EBuild::find().from_raw_sql(ready_builds_query).all()` → Q
 //!   2. Per build: `EDerivation::find_by_id(drv_id).one()` → Q
 //!   3. `EEvaluation::find_by_id(eval_id).one()` → Q
-//!   4. `organization_id_for_eval` (project or direct_build lookup) → Q
+//!   4. `organization_id_for_eval` (project lookup) → Q
 
 use std::sync::Arc;
 
@@ -93,22 +91,6 @@ fn make_project(id: ProjectId, org_id: OrganizationId) -> entity::project::Model
         keep_evaluations: 30,
         concurrency: 3,
         sign_cache: true,
-    }
-}
-
-fn make_direct_build(
-    id: DirectBuildId,
-    org_id: OrganizationId,
-    eval_id: EvaluationId,
-) -> entity::direct_build::Model {
-    entity::direct_build::Model {
-        id,
-        organization: org_id,
-        evaluation: eval_id,
-        derivation: "/nix/store/aaaa-test.drv".into(),
-        repository_path: "/tmp/repo".into(),
-        created_by: UserId::nil(),
-        created_at: test_date(),
     }
 }
 
@@ -243,21 +225,19 @@ async fn dispatch_queued_eval_skips_missing_commit() {
     );
 }
 
-/// When the eval has no project (direct build), org is looked up via DirectBuild.
+/// An eval with no project is skipped (every eval must belong to a project
+/// after the build-request rework removed the legacy direct-build path).
 #[tokio::test]
-async fn dispatch_queued_eval_via_direct_build_org() {
+async fn dispatch_queued_eval_without_project_is_skipped() {
     let eval_id = EvaluationId::now_v7();
     let commit_id = CommitId::now_v7();
-    let org_id = OrganizationId::now_v7();
-    let direct_build_id = DirectBuildId::now_v7();
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        // 1. find Queued evaluations — project: None (direct build)
+        // 1. find Queued evaluations — project: None
         .append_query_results([vec![make_eval_queued(eval_id, commit_id, None)]])
         // 2. find commit
         .append_query_results([vec![make_commit(commit_id)]])
-        // 3. organization_id_for_eval: no project → find DirectBuild
-        .append_query_results([vec![make_direct_build(direct_build_id, org_id, eval_id)]])
+        // No project lookup — organization_id_for_eval bails on None project
         .into_connection();
 
     let scheduler = make_scheduler(db);
@@ -267,8 +247,8 @@ async fn dispatch_queued_eval_via_direct_build_org() {
 
     assert_eq!(
         scheduler.pending_job_count().await,
-        1,
-        "direct-build org: job should be enqueued"
+        0,
+        "eval without project must not be enqueued"
     );
 }
 

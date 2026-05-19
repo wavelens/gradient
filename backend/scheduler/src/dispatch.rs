@@ -177,8 +177,6 @@ struct BuildDispatchMaps {
     evaluations: HashMap<EvaluationId, MEvaluation>,
     /// project_id → organization_id
     projects: HashMap<ProjectId, OrganizationId>,
-    /// eval_id → organization_id (used when the eval has no project)
-    direct_builds: HashMap<EvaluationId, OrganizationId>,
     features_by_drv: HashMap<DerivationId, Vec<FeatureId>>,
     feature_names: HashMap<FeatureId, String>,
     /// derivation_id → number of direct dependencies
@@ -217,7 +215,7 @@ impl BuildDispatchMaps {
             .map(|e| (e.id, e))
             .collect();
 
-        // peer_id resolution: project (preferred) or direct_build (fallback).
+        // peer_id resolution: every evaluation must belong to a project.
         let project_ids: Vec<ProjectId> = evaluations
             .values()
             .filter_map(|e| e.project)
@@ -234,24 +232,6 @@ impl BuildDispatchMaps {
                 .into_iter()
                 .map(|p| (p.id, p.organization))
                 .collect()
-        };
-        let direct_builds: HashMap<EvaluationId, OrganizationId> = {
-            let evals_without_project: Vec<EvaluationId> = evaluations
-                .values()
-                .filter(|e| e.project.is_none())
-                .map(|e| e.id)
-                .collect();
-            if evals_without_project.is_empty() {
-                HashMap::new()
-            } else {
-                EDirectBuild::find()
-                    .filter(CDirectBuild::Evaluation.is_in(evals_without_project))
-                    .all(&state.worker_db)
-                    .await?
-                    .into_iter()
-                    .map(|db| (db.evaluation, db.organization))
-                    .collect()
-            }
         };
 
         // Required features: per-derivation list of feature names.
@@ -380,7 +360,6 @@ impl BuildDispatchMaps {
             derivations,
             evaluations,
             projects,
-            direct_builds,
             features_by_drv,
             feature_names,
             dep_counts,
@@ -391,10 +370,7 @@ impl BuildDispatchMaps {
     /// Resolve the organization that owns this evaluation (used as `peer_id`
     /// to route the job only to workers registered by that org).
     fn resolve_peer_id(&self, eval: &MEvaluation) -> Option<OrganizationId> {
-        match eval.project {
-            Some(pid) => self.projects.get(&pid).copied(),
-            None => self.direct_builds.get(&eval.id).copied(),
-        }
+        eval.project.and_then(|pid| self.projects.get(&pid).copied())
     }
 
     /// Return the required Nix system features for `derivation_id`.
@@ -544,27 +520,15 @@ async fn organization_id_for_eval(
     state: &Arc<ServerState>,
     eval: &MEvaluation,
 ) -> Option<OrganizationId> {
-    if let Some(project_id) = eval.project {
-        match EProject::find_by_id(project_id).one(&state.worker_db).await {
-            Ok(Some(p)) => return Some(p.organization),
-            Ok(None) => return None,
-            Err(e) => {
-                error!(error = %e, %project_id, "failed to load project for eval");
-                return None;
-            }
-        }
-    }
-
-    // Direct build: look up DirectBuild record.
-    match EDirectBuild::find()
-        .filter(CDirectBuild::Evaluation.eq(eval.id))
-        .one(&state.worker_db)
-        .await
-    {
-        Ok(Some(db)) => Some(db.organization),
+    let project_id = eval.project.or_else(|| {
+        error!(evaluation_id = %eval.id, "evaluation has no project");
+        None
+    })?;
+    match EProject::find_by_id(project_id).one(&state.worker_db).await {
+        Ok(Some(p)) => Some(p.organization),
         Ok(None) => None,
         Err(e) => {
-            error!(error = %e, evaluation_id = %eval.id, "failed to load direct_build for eval");
+            error!(error = %e, %project_id, "failed to load project for eval");
             None
         }
     }
