@@ -887,6 +887,47 @@ Regression for the build-request rework
 - `post_builds_returns_404` and `get_recent_direct_builds_returns_404` —
   the legacy `POST /api/v1/builds` and `GET /api/v1/builds/direct/recent`
   routes are no longer registered.
+
+## Build request rework (#234)
+
+The new `gradient build` flow uploads git-tracked files via a three-step
+content-addressed pipeline (`manifest` → `blobs` → `dispatch`) and
+materialises `/nix/store/<hash>-source` server-side. The legacy
+`direct_build` table and its endpoints are gone in a clean break (no data
+migration). Tests:
+
+- `backend/web/tests/build_requests_manifest.rs` — manifest validation:
+  path syntax checks (`.` / `..` / `/absolute` / null bytes / duplicates),
+  per-file hex hash decoding, total-size cap (`MAX_BUILD_REQUEST_SIZE`,
+  20 MiB → 413), and happy-path session creation that surfaces the
+  missing-blob hex list.
+- `backend/web/tests/build_requests_blobs.rs` — multipart blob upload:
+  hash-mismatch and foreign-hash rejection (both 400), already-dispatched
+  session (409), expired session (410), session-not-found (404), and the
+  happy path verifying both `session.missing` is cleared in the DB and a
+  `build_request_blob` row exists.
+- `backend/web/tests/build_requests_dispatch.rs` — dispatch flow guards:
+  blobs-still-missing → 409, double-dispatch → 409, expired → 410,
+  session-not-found → 404, plus a smoke happy-path on the empty-manifest
+  branch (real-blob coverage runs in CI against Postgres).
+- `backend/web/tests/evals_artefacts.rs` — artefact tree response: empty
+  evaluation returns empty `entry_points`, full tree exposes
+  `entry_point → outputs → products` with alphabetic ordering and the
+  `build_id` field on each entry point, public-org evaluations allow
+  anonymous access, private-org evaluations 404 for anonymous callers.
+- `backend/web/tests/old_direct_build_gone.rs` — see the regression
+  block above.
+- `backend/core/src/storage/source_nar.rs` — in-file unit tests for
+  `materialise_source_nar`: deterministic NAR hash + store path across
+  repeat calls, `-source` suffix on the resulting `/nix/store/<hash>`,
+  and the canonical 32-char base32 hash shape.
+- `backend/cache/src/cacher/cleanup.rs` — GC sweeps for the new tables:
+  `build_request_blob_sweep_evicts_stale` and
+  `build_request_blob_sweep_disabled_when_ttl_zero` cover the blob TTL
+  (driven by the existing `nar_ttl_hours` global), and
+  `upload_session_sweep_deletes_expired_undispatched` proves that
+  expired sessions without a `dispatched_at` flip are reclaimed.
+
 ## Cache traffic metrics — atomic UPSERT (no lost updates)
 
 `record_nar_traffic` (`backend/web/src/endpoints/stats.rs`) records bytes
