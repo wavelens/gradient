@@ -21,19 +21,18 @@ use crate::authorization::ApiKeyContext;
 use crate::error::{WebError, WebResult};
 use crate::helpers::OptionExt;
 use gradient_core::types::*;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::EntityTrait;
 use std::sync::Arc;
 
 /// Resolved access context for an evaluation.
 ///
 /// Loaded once per request: fetches the evaluation row, resolves the owning
-/// organization (through project or direct_build), and enforces the access
-/// check.  Returns `not_found("Evaluation")` on any failure so callers cannot
-/// distinguish missing from forbidden.
+/// organization through the project, and enforces the access check. Returns
+/// `not_found("Evaluation")` on any failure so callers cannot distinguish
+/// missing from forbidden.
 pub(super) struct EvalAccessContext {
     pub evaluation: MEvaluation,
     pub organization_id: OrganizationId,
-    /// Only set when the eval is linked to a project (not a direct build).
     pub project_name: Option<String>,
     pub project_display_name: Option<String>,
 }
@@ -50,36 +49,24 @@ impl EvalAccessContext {
             .await?
             .or_not_found("Evaluation")?;
 
-        let (organization_id, project_name, project_display_name) =
-            if let Some(project_id) = evaluation.project {
-                let project = EProject::find_by_id(project_id)
-                    .one(&state.web_db)
-                    .await?
-                    .ok_or_else(|| {
-                        tracing::warn!(
-                            %project_id,
-                            %evaluation_id,
-                            "Project not found for evaluation",
-                        );
-                        WebError::data_inconsistency("Evaluation")
-                    })?;
-                (
-                    project.organization,
-                    Some(project.name),
-                    Some(project.display_name),
-                )
-            } else {
-                let org_id = EDirectBuild::find()
-                    .filter(CDirectBuild::Evaluation.eq(evaluation.id))
-                    .one(&state.web_db)
-                    .await?
-                    .ok_or_else(|| {
-                        tracing::warn!(%evaluation_id, "DirectBuild not found for evaluation");
-                        WebError::data_inconsistency("Direct build")
-                    })?
-                    .organization;
-                (org_id, None, None)
-            };
+        let project_id = evaluation.project.ok_or_else(|| {
+            tracing::warn!(%evaluation_id, "evaluation has no project");
+            WebError::data_inconsistency("Evaluation")
+        })?;
+        let project = EProject::find_by_id(project_id)
+            .one(&state.web_db)
+            .await?
+            .ok_or_else(|| {
+                tracing::warn!(
+                    %project_id,
+                    %evaluation_id,
+                    "Project not found for evaluation",
+                );
+                WebError::data_inconsistency("Evaluation")
+            })?;
+        let organization_id = project.organization;
+        let project_name = Some(project.name);
+        let project_display_name = Some(project.display_name);
 
         let organization = EOrganization::find_by_id(organization_id)
             .one(&state.web_db)

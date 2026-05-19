@@ -103,6 +103,7 @@ mod m20260519_000000_normalize_derivation_columns;
 mod m20260519_000001_create_build_request_blob;
 mod m20260519_000002_create_upload_session;
 mod m20260519_000003_add_organization_hide_build_requests;
+mod m20260519_000004_drop_direct_build;
 
 pub struct Migrator;
 
@@ -207,6 +208,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260519_000001_create_build_request_blob::Migration),
             Box::new(m20260519_000002_create_upload_session::Migration),
             Box::new(m20260519_000003_add_organization_hide_build_requests::Migration),
+            Box::new(m20260519_000004_drop_direct_build::Migration),
         ]
     }
 }

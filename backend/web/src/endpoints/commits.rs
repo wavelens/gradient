@@ -48,19 +48,6 @@ pub async fn get_commit(
         org_ids.extend(projects.into_iter().map(|p| p.organization));
     }
 
-    let direct_eval_ids: Vec<EvaluationId> = evaluations
-        .iter()
-        .filter(|e| e.project.is_none())
-        .map(|e| e.id)
-        .collect();
-    if !direct_eval_ids.is_empty() {
-        let direct_builds = EDirectBuild::find()
-            .filter(CDirectBuild::Evaluation.is_in(direct_eval_ids))
-            .all(&state.web_db)
-            .await?;
-        org_ids.extend(direct_builds.into_iter().map(|d| d.organization));
-    }
-
     if org_ids.is_empty() {
         return Err(WebError::not_found("Commit"));
     }
