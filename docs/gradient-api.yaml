@@ -2505,6 +2505,158 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  # ── Build Requests ───────────────────────────────────────────────────────────
+
+  /build-requests/manifest:
+    post:
+      tags: [build-requests]
+      summary: Submit a build-request file manifest
+      description: |-
+        Step 1 of the `gradient build` flow. Posts the list of git-tracked files
+        in the working tree, each addressed by BLAKE3 content hash. The server
+        returns an `UploadSession` plus the subset of hashes it does not yet
+        have on disk; the client uploads those via `POST
+        /build-requests/{session}/blobs` and then finalises with `POST
+        /build-requests/{session}/dispatch`.
+
+        The combined `size` of all files must not exceed `MAX_BUILD_REQUEST_SIZE`
+        (20 MiB). Paths must be relative, free of `.`/`..` components, free of
+        null bytes, and unique within the manifest.
+      operationId: postBuildRequestManifest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ManifestRequest'
+      responses:
+        '200':
+          description: Session created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/ManifestResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          description: Manifest total size exceeds `MAX_BUILD_REQUEST_SIZE` (20 MiB)
+
+  /build-requests/{session}/blobs:
+    parameters:
+      - name: session
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Upload session id returned by `POST /build-requests/manifest`.
+    post:
+      tags: [build-requests]
+      summary: Upload missing blobs for an upload session
+      description: |-
+        Step 2. Sends one or more blobs as multipart parts. Each part's
+        **field name** is the 64-character lowercase hex BLAKE3 hash, and the
+        part body is the raw file bytes. The server verifies each blob's hash,
+        rejects any hash that isn't in the session's `missing` set, persists
+        accepted blobs under `nar_storage`, and removes them from `missing`.
+
+        The route's body limit is `MAX_BUILD_REQUEST_SIZE` (20 MiB).
+      operationId: postBuildRequestBlobs
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              description: One part per blob. Field name = 64-char hex hash. Body = raw bytes.
+              additionalProperties:
+                type: string
+                format: binary
+      responses:
+        '200':
+          description: Blobs accepted
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/BlobsResponse'
+        '400':
+          description: Bad request — malformed part name, hash mismatch, or hash not in `session.missing`.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Session has already been dispatched.
+        '410':
+          description: Session expired.
+
+  /build-requests/{session}/dispatch:
+    parameters:
+      - name: session
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Upload session id.
+    post:
+      tags: [build-requests]
+      summary: Finalise an upload session and queue an evaluation
+      description: |-
+        Step 3. After all `missing` blobs have been uploaded, the client posts
+        here to materialise `/nix/store/<hash>-source` from the staged files,
+        sign it with the org's cache key, lazily create the per-org reserved
+        `build-request` project on first use, and queue a new evaluation
+        targeting the supplied `target` attribute path (or the project's
+        wildcard when omitted).
+      operationId: postBuildRequestDispatch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DispatchRequest'
+      responses:
+        '200':
+          description: Evaluation queued
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/DispatchResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Session already dispatched or has blobs still missing.
+        '410':
+          description: Session expired.
+
   # ── Builds ───────────────────────────────────────────────────────────────────
 
   /builds/{build}:
@@ -5644,6 +5796,105 @@ components:
           nullable: true
           format: int64
           description: File size in bytes (null when not recorded)
+
+    # ── Build Requests ────────────────────────────────────────────────────────
+
+    ManifestRequest:
+      type: object
+      required: [organization, files]
+      properties:
+        organization:
+          type: string
+          description: Organization name (slug).
+        files:
+          type: array
+          items:
+            $ref: '#/components/schemas/ManifestFile'
+
+    ManifestFile:
+      type: object
+      required: [path, hash, size]
+      properties:
+        path:
+          type: string
+          description: |-
+            Relative path of the file within the source tree. Must not begin
+            with `/`, contain `.` or `..` components, contain null bytes, or
+            be empty.
+          example: "src/main.rs"
+        hash:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: 64-character lowercase hex BLAKE3 hash of the file contents.
+        size:
+          type: integer
+          format: int64
+          minimum: 0
+          description: File size in bytes.
+
+    ManifestResponse:
+      type: object
+      required: [session, missing]
+      properties:
+        session:
+          type: string
+          format: uuid
+          description: Upload session id; reuse in the `/blobs` and `/dispatch` endpoints.
+        missing:
+          type: array
+          items:
+            type: string
+            pattern: '^[0-9a-f]{64}$'
+          description: Subset of manifest hashes the server doesn't yet have stored.
+
+    BlobsResponse:
+      type: object
+      required: [uploaded, remaining]
+      properties:
+        uploaded:
+          type: integer
+          minimum: 0
+          description: Number of blobs accepted by this request.
+        remaining:
+          type: integer
+          minimum: 0
+          description: Hashes still outstanding in the session after this request.
+
+    DispatchRequest:
+      type: object
+      properties:
+        target:
+          type: string
+          nullable: true
+          description: |-
+            Eval target attribute path (e.g. `checks.x86_64-linux.foo`).
+            When null, defaults to the `build-request` project's wildcard.
+        system:
+          type: string
+          nullable: true
+          description: |-
+            Target system (e.g. `x86_64-linux`). Accepted but currently unused
+            server-side; reserved for future cross-system scheduling.
+
+    DispatchResponse:
+      type: object
+      required: [evaluation, project, commit]
+      properties:
+        evaluation:
+          type: string
+          format: uuid
+        project:
+          type: string
+          format: uuid
+          description: |-
+            ID of the per-org reserved `build-request` project. Lazily created
+            on first dispatch and reused thereafter.
+        commit:
+          type: string
+          format: uuid
+          description: |-
+            Synthetic commit row pointing at the materialised
+            `/nix/store/<hash>-source` path. `hash` is a 20-byte zero placeholder.
 
     # ── Builds ────────────────────────────────────────────────────────────────
 
