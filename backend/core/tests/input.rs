@@ -291,6 +291,33 @@ fn index_name_space_rejected() {
     );
 }
 
+// ── check_project_name ───────────────────────────────────────────────────────
+
+#[test]
+fn project_name_rejects_build_request() {
+    use gradient_core::types::input::check_project_name;
+    let err = check_project_name("build-request").unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "This project name is reserved and cannot be used"
+    );
+}
+
+#[test]
+fn project_name_allows_similar() {
+    use gradient_core::types::input::check_project_name;
+    for name in ["build-requests", "buildrequest", "my-build-request"] {
+        check_project_name(name).unwrap();
+    }
+}
+
+#[test]
+fn project_name_inherits_index_rules() {
+    use gradient_core::types::input::{InputError, check_project_name};
+    assert_eq!(check_project_name("Build-Request"), Err(InputError::NameNotLowercase));
+    assert_eq!(check_project_name(""), Err(InputError::NameEmpty));
+}
+
 // ── validate_password ────────────────────────────────────────────────────────
 
 #[test]
