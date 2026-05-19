@@ -8,6 +8,15 @@ use crate::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
+pub struct ProjectEvaluationItem {
+    pub id: String,
+    pub commit: String,
+    pub status: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 pub struct ProjectResponse {
     pub id: String,
     pub organization: String,
@@ -210,6 +219,25 @@ pub async fn post_project_check_repository(
         config,
         format!("projects/{}/{}/check-repository", organization, project),
         RequestType::POST,
+        true,
+    )
+    .unwrap()
+    .send()
+    .await
+    .unwrap();
+
+    Ok(parse_response(res).await)
+}
+
+pub async fn get_project_evaluations(
+    config: RequestConfig,
+    organization: String,
+    project: String,
+) -> Result<BaseResponse<Vec<ProjectEvaluationItem>>, String> {
+    let res = get_client(
+        config,
+        format!("projects/{}/{}/evaluations", organization, project),
+        RequestType::GET,
         true,
     )
     .unwrap()

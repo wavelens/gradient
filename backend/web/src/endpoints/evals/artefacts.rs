@@ -38,6 +38,7 @@ pub struct ArtefactTree {
 pub struct EntryPointArtefacts {
     pub attr: String,
     pub derivation: String,
+    pub build_id: BuildId,
     pub outputs: Vec<OutputArtefacts>,
 }
 
@@ -186,6 +187,7 @@ pub async fn get_artefacts(
             Some(EntryPointArtefacts {
                 attr: ep.eval,
                 derivation: drv.store_path(),
+                build_id: build.id,
                 outputs,
             })
         })

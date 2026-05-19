@@ -94,9 +94,10 @@ gradient cache remove <name>
 gradient build <derivation-path>
 gradient build <derivation-path> --organization myorg
 
-# Download build artifacts
-gradient download --build-id <uuid>
-gradient download --build-id <uuid> --filename output.tar
+# Download evaluation artefacts (interactive picker)
+gradient download
+gradient download --evaluation <uuid>
+gradient download --project myproject --products all --out ./artefacts
 ```
 
 ### Utilities
