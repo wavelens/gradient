@@ -2473,6 +2473,38 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /evals/{evaluation}/artefacts:
+    parameters:
+      - $ref: '#/components/parameters/EvaluationId'
+    get:
+      tags: [evals]
+      summary: List evaluation artefacts
+      description: |-
+        Returns the artefact tree for an evaluation: entry points grouped by
+        derivation, derivation outputs grouped under each entry point, and
+        `build_product` rows grouped under each output. Consumed by the CLI's
+        `gradient download` picker so users can choose what to fetch without
+        first listing builds.
+
+        Entry points are sorted by `attr`, outputs by `name`, products by `path`.
+      operationId: listEvaluationArtefacts
+      responses:
+        '200':
+          description: Artefact tree
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/ArtefactTree'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   # ── Builds ───────────────────────────────────────────────────────────────────
 
   /builds:
@@ -5599,6 +5631,77 @@ components:
           type: integer
           nullable: true
           description: Measured build duration in milliseconds (null if not yet recorded)
+
+    ArtefactTree:
+      type: object
+      required: [evaluation, created_at, entry_points]
+      properties:
+        evaluation:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        entry_points:
+          type: array
+          items:
+            $ref: '#/components/schemas/EntryPointArtefacts'
+
+    EntryPointArtefacts:
+      type: object
+      required: [attr, derivation, outputs]
+      properties:
+        attr:
+          type: string
+          description: Attribute path (e.g. `checks.x86_64-linux.foo`)
+        derivation:
+          type: string
+          description: Full `.drv` store path
+          example: "/nix/store/abc123-hello-2.12.1.drv"
+        outputs:
+          type: array
+          items:
+            $ref: '#/components/schemas/OutputArtefacts'
+
+    OutputArtefacts:
+      type: object
+      required: [name, store_path, products]
+      properties:
+        name:
+          type: string
+          description: Output name (e.g. `out`, `lib`, `dev`)
+        store_path:
+          type: string
+          description: Full output store path
+          example: "/nix/store/abc123-hello-2.12.1"
+        products:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductArtefact'
+
+    ProductArtefact:
+      type: object
+      required: [id, type, subtype, name, path]
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          description: hydra-build-products file type (e.g. `doc`, `file`, `report`)
+        subtype:
+          type: string
+          description: hydra-build-products subtype (e.g. `html`, `iso`)
+        name:
+          type: string
+        path:
+          type: string
+          description: Path of the product (typically a path inside the output store path)
+        size:
+          type: integer
+          nullable: true
+          format: int64
+          description: File size in bytes (null when not recorded)
 
     # ── Builds ────────────────────────────────────────────────────────────────
 
