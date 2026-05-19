@@ -249,6 +249,51 @@ impl NarStore {
         Ok(Some(url.to_string()))
     }
 
+    /// Object-store path for a build-request blob keyed by org + BLAKE3 hash.
+    /// Layout: `<prefix>build-request-blobs/<org-uuid>/<hh>/<full-hex>`.
+    fn blob_path(&self, org: uuid::Uuid, hash: &[u8; 32]) -> Path {
+        let hex = hex::encode(hash);
+        let shard = &hex[..2];
+        Path::from(format!(
+            "{}build-request-blobs/{}/{}/{}",
+            self.prefix, org, shard, hex,
+        ))
+    }
+
+    pub async fn put_blob(
+        &self,
+        org: uuid::Uuid,
+        hash: &[u8; 32],
+        data: Vec<u8>,
+    ) -> Result<()> {
+        self.inner
+            .put(&self.blob_path(org, hash), PutPayload::from(data))
+            .await
+            .context("Failed to upload build-request blob")?;
+        Ok(())
+    }
+
+    pub async fn get_blob(&self, org: uuid::Uuid, hash: &[u8; 32]) -> Result<Option<Vec<u8>>> {
+        match self.inner.get(&self.blob_path(org, hash)).await {
+            Ok(result) => Ok(Some(
+                result
+                    .bytes()
+                    .await
+                    .context("Failed to read build-request blob bytes")?
+                    .to_vec(),
+            )),
+            Err(object_store::Error::NotFound { .. }) => Ok(None),
+            Err(e) => Err(e).context("Failed to get build-request blob"),
+        }
+    }
+
+    pub async fn delete_blob(&self, org: uuid::Uuid, hash: &[u8; 32]) -> Result<()> {
+        match self.inner.delete(&self.blob_path(org, hash)).await {
+            Ok(_) | Err(object_store::Error::NotFound { .. }) => Ok(()),
+            Err(e) => Err(e).context("Failed to delete build-request blob"),
+        }
+    }
+
     /// Lists all NAR hashes currently present in the store (both local and S3).
     /// Returns the full hash strings as stored (e.g. `"ab12cd34..."`).
     pub async fn list_hashes(&self) -> Result<Vec<String>> {
