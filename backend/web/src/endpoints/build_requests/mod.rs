@@ -13,4 +13,5 @@
 pub mod blobs;
 pub mod dispatch;
 pub mod manifest;
+pub mod types;
 mod validation;

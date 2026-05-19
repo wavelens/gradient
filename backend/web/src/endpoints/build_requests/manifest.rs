@@ -10,6 +10,7 @@
 //! an `upload_session` row, and returns the missing-hash set so the client
 //! knows exactly what to upload next.
 
+use super::types::ManifestEntry;
 use super::validation::{decode_blake3_hex, validate_manifest_path};
 use crate::access::{Caller, OrgAccess, load_org};
 use crate::authorization::MaybeApiKey;
@@ -30,13 +31,6 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, QueryFilter
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::Arc;
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ManifestEntry {
-    pub path: String,
-    pub hash: String,
-    pub size: i64,
-}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ManifestRequest {
