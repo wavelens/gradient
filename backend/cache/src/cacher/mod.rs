@@ -16,7 +16,8 @@ mod invalidate;
 mod sign_sweep;
 
 pub use self::cleanup::{
-    cleanup_old_evaluations, cleanup_orphaned_cache_files, cleanup_stale_cached_nars,
+    cleanup_expired_upload_sessions, cleanup_old_evaluations, cleanup_orphaned_cache_files,
+    cleanup_stale_build_request_blobs, cleanup_stale_cached_nars,
 };
 pub use self::invalidate::invalidate_cache_for_path;
 pub use self::sign_sweep::sign_missing_signatures;
@@ -75,6 +76,12 @@ pub async fn cache_loop(state: Arc<ServerState>) {
             && let Err(e) = cleanup_stale_cached_nars(Arc::clone(&state)).await
         {
             error!(error = ?e, "NAR TTL GC failed");
+        }
+        if let Err(e) = cleanup_stale_build_request_blobs(Arc::clone(&state)).await {
+            error!(error = ?e, "Build-request blob GC failed");
+        }
+        if let Err(e) = cleanup_expired_upload_sessions(Arc::clone(&state)).await {
+            error!(error = ?e, "Upload-session GC failed");
         }
     }
 }

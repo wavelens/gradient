@@ -16,6 +16,66 @@ use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
+/// Build-request blob TTL pass: drops `build_request_blob` rows whose
+/// `last_used_at` is older than `nar_ttl_hours` and removes the underlying
+/// payload from `nar_storage`. Disabled when `nar_ttl_hours = 0`.
+pub async fn cleanup_stale_build_request_blobs(state: Arc<ServerState>) -> Result<()> {
+    let ttl_hours = state.config.storage.nar_ttl_hours;
+    if ttl_hours == 0 {
+        return Ok(());
+    }
+
+    let cutoff = now() - chrono::Duration::hours(ttl_hours as i64);
+    let stale = EBuildRequestBlob::find()
+        .filter(CBuildRequestBlob::LastUsedAt.lt(cutoff))
+        .all(&state.worker_db)
+        .await
+        .context("Failed to query stale build_request_blob rows")?;
+
+    let mut removed = 0usize;
+    for blob in stale {
+        if blob.hash.len() != 32 {
+            warn!(blob_id = %blob.id, "skipping build_request_blob with malformed hash");
+            continue;
+        }
+        let mut hash = [0u8; 32];
+        hash.copy_from_slice(&blob.hash);
+        let blob_id = blob.id;
+        let org_id = blob.organization;
+        if let Err(e) = blob.into_active_model().delete(&state.worker_db).await {
+            warn!(error = %e, %blob_id, "failed to delete build_request_blob row");
+            continue;
+        }
+        if let Err(e) = state.nar_storage.delete_blob(org_id.into_inner(), &hash).await {
+            warn!(error = %e, %blob_id, "failed to delete build-request blob payload");
+        }
+        removed += 1;
+    }
+
+    if removed > 0 {
+        info!(count = removed, "Removed stale build-request blobs");
+    }
+    Ok(())
+}
+
+/// Upload-session GC pass: drops `upload_session` rows whose `expires_at` has
+/// passed and that were never dispatched. Dispatched sessions are kept for
+/// audit history (the dispatch endpoint already nulls their `missing` set, so
+/// they are harmless dead-weight rather than blobs).
+pub async fn cleanup_expired_upload_sessions(state: Arc<ServerState>) -> Result<()> {
+    let res = EUploadSession::delete_many()
+        .filter(CUploadSession::ExpiresAt.lt(now()))
+        .filter(CUploadSession::DispatchedAt.is_null())
+        .exec(&state.worker_db)
+        .await
+        .context("Failed to delete expired upload_session rows")?;
+
+    if res.rows_affected > 0 {
+        info!(count = res.rows_affected, "Removed expired upload sessions");
+    }
+    Ok(())
+}
+
 pub async fn cleanup_old_evaluations(state: Arc<ServerState>) -> Result<()> {
     let projects = EProject::find()
         .all(&state.worker_db)
@@ -548,5 +608,140 @@ mod tests {
         // confirms the new branch ran. If the row weren't deleted, the
         // following `Set` use would dead-code and rustc would flag it.
         let _ = Set(zombie_id);
+    }
+
+    fn state_with_worker_db(base: &Path, db: sea_orm::DatabaseConnection) -> Arc<ServerState> {
+        let nar_storage = NarStore::local(base.to_str().unwrap()).unwrap();
+        let mut cli = test_cli();
+        cli.storage.nar_ttl_hours = 24;
+        Arc::new(ServerState {
+            web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
+            worker_db: WorkerDb::new(db),
+            config: Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config")),
+            log_storage: Arc::new(NoopLogStorage),
+            webhooks: Arc::new(RecordingWebhookClient::new()),
+            email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
+            nar_storage,
+            manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            http: gradient_core::http::build_client().expect("http client"),
+            shutdown: gradient_core::shutdown::Shutdown::new(),
+            jwt_secret: gradient_core::types::SecretString::new("test-jwt-secret".to_string()),
+            started_at: chrono::Utc::now(),
+        })
+    }
+
+    /// Stale `build_request_blob` rows (older than `nar_ttl_hours`) are
+    /// deleted and the underlying NAR-storage payload is removed.
+    #[tokio::test]
+    async fn build_request_blob_sweep_evicts_stale() {
+        use entity::ids::{BuildRequestBlobId, OrganizationId};
+
+        let tmp = tempfile::tempdir().unwrap();
+        let org = OrganizationId::now_v7();
+        let hash = [0xABu8; 32];
+        let stale = entity::build_request_blob::Model {
+            id: BuildRequestBlobId::now_v7(),
+            organization: org,
+            hash: hash.to_vec(),
+            size: 1,
+            created_at: now() - chrono::Duration::days(30),
+            last_used_at: now() - chrono::Duration::days(30),
+        };
+
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![stale.clone()]])
+            .append_exec_results([sea_orm::MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            .into_connection();
+        let state = state_with_worker_db(tmp.path(), db);
+
+        state
+            .nar_storage
+            .put_blob(org.into_inner(), &hash, b"payload".to_vec())
+            .await
+            .unwrap();
+
+        cleanup_stale_build_request_blobs(Arc::clone(&state))
+            .await
+            .unwrap();
+
+        assert!(
+            state
+                .nar_storage
+                .get_blob(org.into_inner(), &hash)
+                .await
+                .unwrap()
+                .is_none(),
+            "stale blob payload must be removed from storage"
+        );
+    }
+
+    /// `nar_ttl_hours = 0` disables the sweep so the SELECT is never issued
+    /// (an empty mock DB would error otherwise).
+    #[tokio::test]
+    async fn build_request_blob_sweep_disabled_when_ttl_zero() {
+        let tmp = tempfile::tempdir().unwrap();
+        let nar_storage = NarStore::local(tmp.path().to_str().unwrap()).unwrap();
+        let state = Arc::new(ServerState {
+            web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
+            worker_db: WorkerDb::new(
+                MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
+            ),
+            config: Arc::new(RuntimeConfig::from_cli(&test_cli()).expect("valid test config")),
+            log_storage: Arc::new(NoopLogStorage),
+            webhooks: Arc::new(RecordingWebhookClient::new()),
+            email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
+            nar_storage,
+            manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            http: gradient_core::http::build_client().expect("http client"),
+            shutdown: gradient_core::shutdown::Shutdown::new(),
+            jwt_secret: gradient_core::types::SecretString::new("test-jwt-secret".to_string()),
+            started_at: chrono::Utc::now(),
+        });
+
+        cleanup_stale_build_request_blobs(state).await.unwrap();
+    }
+
+    /// Build-request blob rows with malformed hashes are skipped (logged)
+    /// rather than panicking on `copy_from_slice`.
+    #[tokio::test]
+    async fn build_request_blob_sweep_skips_malformed_hash() {
+        use entity::ids::{BuildRequestBlobId, OrganizationId};
+
+        let tmp = tempfile::tempdir().unwrap();
+        let bad = entity::build_request_blob::Model {
+            id: BuildRequestBlobId::now_v7(),
+            organization: OrganizationId::now_v7(),
+            hash: vec![1, 2, 3],
+            size: 1,
+            created_at: now() - chrono::Duration::days(30),
+            last_used_at: now() - chrono::Duration::days(30),
+        };
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![bad]])
+            .into_connection();
+        let state = state_with_worker_db(tmp.path(), db);
+
+        cleanup_stale_build_request_blobs(state).await.unwrap();
+    }
+
+    /// Expired `upload_session` rows without a `dispatched_at` are deleted in
+    /// one shot via `delete_many`.
+    #[tokio::test]
+    async fn upload_session_sweep_deletes_expired_undispatched() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results([sea_orm::MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 3,
+            }])
+            .into_connection();
+        let state = state_with_worker_db(tmp.path(), db);
+
+        cleanup_expired_upload_sessions(state).await.unwrap();
     }
 }
