@@ -308,6 +308,10 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             )),
         )
         .route(
+            "/build-requests/manifest",
+            post(build_requests::manifest::post_manifest),
+        )
+        .route(
             "/builds/direct/recent",
             get(builds::get_recent_direct_builds),
         )
