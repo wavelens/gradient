@@ -32,6 +32,7 @@ pub struct MakeOrganizationRequest {
     pub display_name: String,
     pub description: String,
     pub public: Option<bool>,
+    pub hide_build_requests: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -39,6 +40,7 @@ pub struct PatchOrganizationRequest {
     pub name: Option<String>,
     pub display_name: Option<String>,
     pub description: Option<String>,
+    pub hide_build_requests: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -49,6 +51,7 @@ pub struct OrganizationSummary {
     pub description: String,
     pub public_key: Option<String>,
     pub public: bool,
+    pub hide_build_requests: bool,
     pub managed: bool,
     pub created_by: UserId,
     pub created_at: chrono::NaiveDateTime,
@@ -64,6 +67,7 @@ pub struct OrgResponse {
     pub description: String,
     pub public_key: Option<String>,
     pub public: bool,
+    pub hide_build_requests: bool,
     pub managed: bool,
     pub created_by: UserId,
     pub created_at: chrono::NaiveDateTime,
@@ -197,6 +201,7 @@ pub async fn get(
             description: o.description,
             public_key: Some(o.public_key),
             public: o.public,
+            hide_build_requests: o.hide_build_requests,
             managed: o.managed,
             created_by: o.created_by,
             created_at: o.created_at,
@@ -252,7 +257,7 @@ pub async fn put(
         public_key: Set(public_key),
         private_key: Set(private_key),
         public: Set(body.public.unwrap_or(false)),
-        hide_build_requests: Set(false),
+        hide_build_requests: Set(body.hide_build_requests.unwrap_or(false)),
         created_by: Set(user.id),
         created_at: Set(gradient_core::types::now()),
         managed: Set(false),
@@ -344,6 +349,7 @@ pub async fn get_organization(
         description: org.description,
         public_key: Some(org.public_key),
         public: org.public,
+        hide_build_requests: org.hide_build_requests,
         managed: org.managed,
         created_by: org.created_by,
         created_at: org.created_at,
@@ -404,6 +410,8 @@ pub async fn patch_organization(
     crate::patch_field_with!(aorganization, body, description, |s: String| s
         .trim()
         .to_string());
+
+    crate::patch_field!(aorganization, body, hide_build_requests);
 
     let organization = aorganization
         .update(&state.web_db)
