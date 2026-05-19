@@ -6,10 +6,8 @@
 
 use crate::*;
 use futures::stream::StreamExt;
-use reqwest::multipart::{Form, Part};
 use reqwest_streams::JsonStreamResponse;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct BuildResponse {
@@ -29,15 +27,6 @@ pub struct BuildProduct {
     pub file_type: String,
     pub name: String,
     pub path: String,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct DirectBuildInfo {
-    pub id: String,
-    pub derivation: String,
-    pub created_at: String,
-    pub evaluation_id: String,
-    pub status: String,
 }
 
 pub async fn get_build(
@@ -79,37 +68,6 @@ pub async fn post_build(config: RequestConfig, build_id: String) -> Result<(), S
     }
 
     Ok(())
-}
-
-pub async fn post_direct_build(
-    config: RequestConfig,
-    organization: String,
-    derivation: String,
-    files: HashMap<String, Vec<u8>>,
-) -> Result<BaseResponse<String>, String> {
-    let mut form = Form::new()
-        .text("organization", organization)
-        .text("derivation", derivation);
-
-    for (filename, data) in files {
-        let part = Part::bytes(data).file_name(filename);
-        form = form.part("files", part);
-    }
-
-    let url = format!("{}/api/v1/builds", config.server_url);
-
-    let res = crate::http_client()
-        .post(&url)
-        .header(
-            "Authorization",
-            format!("Bearer {}", config.token.unwrap_or_default()),
-        )
-        .multipart(form)
-        .send()
-        .await
-        .map_err(|e| format!("Request failed: {}", e))?;
-
-    Ok(parse_response(res).await)
 }
 
 pub async fn get_build_downloads(
@@ -158,23 +116,6 @@ pub async fn download_build_file(
         .await
         .map_err(|e| format!("Failed to read response: {}", e))
         .map(|b| b.to_vec())
-}
-
-pub async fn get_recent_direct_builds(
-    config: RequestConfig,
-) -> Result<BaseResponse<Vec<DirectBuildInfo>>, String> {
-    let res = get_client(
-        config,
-        "builds/direct/recent".to_string(),
-        RequestType::GET,
-        true,
-    )
-    .unwrap()
-    .send()
-    .await
-    .unwrap();
-
-    Ok(parse_response(res).await)
 }
 
 pub async fn get_evaluation_builds(

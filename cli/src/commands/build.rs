@@ -7,19 +7,27 @@
 use crate::config::*;
 use crate::input::*;
 use connector::*;
-use std::collections::HashMap;
-use std::path::Path;
+use std::io::{BufReader, Read};
+use std::path::{Path, PathBuf};
 use std::process::exit;
 
-pub async fn handle_build(derivation: String, organization: Option<String>, quiet: bool) {
-    let organization = organization.or_else(|| {
-        set_get_value(ConfigKey::SelectedOrganization, None, true)
-    }).unwrap_or_else(|| {
-        if !quiet {
-            eprintln!("Organization must be set for build command. Use 'gradient organization select <name>' to set one.");
-        }
-        exit(1);
-    });
+pub async fn handle_build(
+    target: Option<String>,
+    system: Option<String>,
+    organization: Option<String>,
+    no_stream: bool,
+    quiet: bool,
+) {
+    let organization = organization
+        .or_else(|| set_get_value(ConfigKey::SelectedOrganization, None, true))
+        .unwrap_or_else(|| {
+            if !quiet {
+                eprintln!(
+                    "Organization must be set for build command. Use 'gradient organization select <name>' to set one."
+                );
+            }
+            exit(1);
+        });
 
     let config = get_request_config(load_config()).unwrap_or_else(|_| {
         if !quiet {
@@ -28,43 +36,29 @@ pub async fn handle_build(derivation: String, organization: Option<String>, quie
         exit(1);
     });
 
-    // Check if we're in a git repository
-    if !Path::new(".git").exists() {
+    let cwd = std::env::current_dir().unwrap_or_else(|e| {
         if !quiet {
-            eprintln!("Current directory is not a git repository.");
-        }
-        exit(1);
-    }
-
-    // Check if flake.nix exists
-    if !Path::new("flake.nix").exists() {
-        if !quiet {
-            eprintln!("No flake.nix found in current directory.");
-        }
-        exit(1);
-    }
-
-    // Parse the derivation to extract just the derivation name (after #)
-    let derivation_name = if derivation.contains('#') {
-        derivation.split('#').next_back().unwrap_or(&derivation)
-    } else {
-        &derivation
-    };
-
-    if !quiet {
-        println!(
-            "Building derivation {} in organization {}",
-            derivation_name, organization
-        );
-    }
-
-    // Get list of files tracked by git
-    let repo = git2::Repository::open(".").unwrap_or_else(|e| {
-        if !quiet {
-            eprintln!("Failed to open git repository: {}", e);
+            eprintln!("Failed to read current directory: {}", e);
         }
         exit(1);
     });
+
+    let repo = git2::Repository::discover(&cwd).unwrap_or_else(|e| {
+        if !quiet {
+            eprintln!("Not in a git repository: {}", e);
+        }
+        exit(1);
+    });
+
+    let workdir = repo
+        .workdir()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| {
+            if !quiet {
+                eprintln!("Bare repositories are not supported.");
+            }
+            exit(1);
+        });
 
     let index = repo.index().unwrap_or_else(|e| {
         if !quiet {
@@ -73,182 +67,181 @@ pub async fn handle_build(derivation: String, organization: Option<String>, quie
         exit(1);
     });
 
-    let file_list: Vec<String> = index
-        .iter()
-        .filter_map(|entry| String::from_utf8(entry.path).ok())
-        .collect();
-
-    if !quiet {
-        println!("Collecting {} files for upload...", file_list.len());
-    }
-
-    // Read files into memory
-    let mut files: HashMap<String, Vec<u8>> = HashMap::new();
-
-    for file_path in file_list {
-        if let Ok(content) = std::fs::read(&file_path) {
-            files.insert(file_path, content);
-        } else if !quiet {
-            eprintln!("Warning: Could not read file {}", file_path);
+    let mut entries: Vec<TrackedFile> = Vec::new();
+    for entry in index.iter() {
+        let path = match String::from_utf8(entry.path.clone()) {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+        let abs = workdir.join(&path);
+        if !abs.is_file() {
+            continue;
         }
-    }
-
-    if !quiet {
-        println!("Uploading {} files to server...", files.len());
-    }
-
-    // Upload files and start build
-    let build_result = builds::post_direct_build(
-        config.clone(),
-        organization,
-        derivation_name.to_string(),
-        files,
-    )
-    .await;
-
-    let evaluation_id = match build_result {
-        Ok(response) => {
-            if response.error {
+        match hash_file(&abs) {
+            Ok((hash, size)) => entries.push(TrackedFile {
+                path,
+                hash,
+                size,
+                abs,
+            }),
+            Err(e) => {
                 if !quiet {
-                    eprintln!("Failed to start build: {}", response.message);
+                    eprintln!("Failed to hash {}: {}", abs.display(), e);
                 }
                 exit(1);
             }
-            if !quiet {
-                println!("Build started successfully: {}", response.message);
-            }
-
-            // Extract evaluation ID from response message
-            // Format: "Direct build started with evaluation ID: <uuid>"
-            if let Some(eval_id) = response
-                .message
-                .strip_prefix("Direct build started with evaluation ID: ")
-            {
-                eval_id.to_string()
-            } else {
-                if !quiet {
-                    eprintln!("Warning: Could not extract evaluation ID from response");
-                }
-                return;
-            }
         }
+    }
+
+    if entries.is_empty() {
+        if !quiet {
+            eprintln!("No tracked files to upload.");
+        }
+        exit(1);
+    }
+
+    if !quiet {
+        println!("Sending manifest for {} tracked files...", entries.len());
+    }
+
+    let manifest_req = build_requests::ManifestRequest {
+        organization,
+        files: entries
+            .iter()
+            .map(|e| build_requests::ManifestFile {
+                path: e.path.clone(),
+                hash: e.hash.clone(),
+                size: e.size,
+            })
+            .collect(),
+    };
+
+    let manifest = match build_requests::post_manifest(config.clone(), manifest_req).await {
+        Ok(r) if r.error => {
+            if !quiet {
+                eprintln!("Manifest rejected by server.");
+            }
+            exit(1);
+        }
+        Ok(r) => r.message,
         Err(e) => {
             if !quiet {
-                eprintln!("Failed to start build: {}", e);
+                eprintln!("Failed to send manifest: {}", e);
             }
             exit(1);
         }
     };
 
-    // Wait for the evaluation to create builds and complete
-    if !quiet {
-        println!("Waiting for evaluation to create builds...");
-    }
-
-    let mut max_retries = 30; // Wait up to 5 minutes (30 * 10 seconds)
-
-    // First, wait for builds to be created
-    let build_ids: Vec<String> = loop {
-        if let Ok(response) =
-            builds::get_evaluation_builds(config.clone(), evaluation_id.clone()).await
-            && !response.error
-            && !response.message.builds.is_empty()
-        {
-            break response
-                .message
-                .builds
-                .iter()
-                .map(|b| b.id.clone())
-                .collect();
+    if !manifest.missing.is_empty() {
+        if !quiet {
+            println!(
+                "Uploading {} missing blob(s) to session {}...",
+                manifest.missing.len(),
+                manifest.session
+            );
         }
 
-        max_retries -= 1;
-        if max_retries <= 0 {
-            if !quiet {
-                eprintln!("Timeout waiting for builds to be created");
+        let missing: std::collections::HashSet<&str> =
+            manifest.missing.iter().map(String::as_str).collect();
+        let mut blobs: Vec<(String, Vec<u8>)> = Vec::with_capacity(missing.len());
+        for entry in &entries {
+            if !missing.contains(entry.hash.as_str()) {
+                continue;
             }
-            return;
-        }
-
-        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
-    };
-
-    if !quiet {
-        println!("Builds created. Streaming build logs...");
-    }
-
-    tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
-    // Stream logs for each build
-    for build_id in &build_ids {
-        if !quiet {
-            println!("\n=== Build {} ===", build_id);
-        }
-
-        // Stream the build log
-        if let Err(e) = builds::post_build(config.clone(), build_id.clone()).await
-            && !quiet
-        {
-            eprintln!("Failed to stream logs for build {}: {}", build_id, e);
-        }
-
-        if !quiet {
-            println!("\n=== Build {} completed ===", build_id);
-        }
-    }
-
-    // Get final build status
-    match builds::get_evaluation_builds(config, evaluation_id).await {
-        Ok(response) => {
-            if response.error {
-                if !quiet {
-                    eprintln!("Warning: Could not fetch build IDs");
-                }
-            } else if response.message.builds.is_empty() {
-                if !quiet {
-                    println!("No builds created yet. The evaluation may still be processing.");
-                }
-            } else {
-                let builds_list = &response.message.builds;
-                if quiet {
-                    // In quiet mode, only output the build IDs
-                    for build in builds_list {
-                        println!("{}", build.id);
-                    }
-                } else {
-                    println!("\nBuild IDs created:");
-                    for build in builds_list {
-                        println!("  {}", build.id);
-                    }
-
-                    if builds_list.len() == 1 {
-                        println!("\nYou can download files with:");
-                        println!("  gradient download -b {}", builds_list[0].id);
-                    } else {
-                        println!("\nYou can download files from any build with:");
-                        println!("  gradient download -b <build-id>");
-                    }
-                }
-
-                // Set the first build as selected-build for convenience
-                if let Some(first_build) = builds_list.first() {
-                    use crate::config::{ConfigKey, set_get_value};
-                    set_get_value(ConfigKey::SelectedBuild, Some(first_build.id.clone()), true);
-
+            match std::fs::read(&entry.abs) {
+                Ok(bytes) => blobs.push((entry.hash.clone(), bytes)),
+                Err(e) => {
                     if !quiet {
-                        println!("\nSelected build set to: {}", first_build.id);
-                        println!("You can now use 'gradient download' without specifying build ID");
+                        eprintln!("Failed to read {}: {}", entry.abs.display(), e);
                     }
+                    exit(1);
                 }
             }
         }
+
+        match build_requests::upload_blobs(config.clone(), manifest.session.clone(), blobs).await {
+            Ok(r) if r.error => {
+                if !quiet {
+                    eprintln!("Blob upload rejected by server.");
+                }
+                exit(1);
+            }
+            Ok(_) => {}
+            Err(e) => {
+                if !quiet {
+                    eprintln!("Failed to upload blobs: {}", e);
+                }
+                exit(1);
+            }
+        }
+    }
+
+    let dispatch_req = build_requests::DispatchRequest { target, system };
+
+    let dispatch = match build_requests::dispatch_build_request(
+        config.clone(),
+        manifest.session,
+        dispatch_req,
+    )
+    .await
+    {
+        Ok(r) if r.error => {
+            if !quiet {
+                eprintln!("Dispatch rejected by server.");
+            }
+            exit(1);
+        }
+        Ok(r) => r.message,
         Err(e) => {
             if !quiet {
-                eprintln!("Warning: Could not fetch build IDs: {}", e);
+                eprintln!("Failed to dispatch build request: {}", e);
             }
+            exit(1);
         }
+    };
+
+    if quiet {
+        println!("{}", dispatch.evaluation);
+    } else {
+        println!("Evaluation: {}", dispatch.evaluation);
+        println!("Project:    {}", dispatch.project);
+        println!("Commit:     {}", dispatch.commit);
+    }
+
+    if no_stream {
+        return;
     }
 
     if !quiet {
-        println!("\nBuild submitted successfully. Check the server for build progress.");
+        println!("Streaming evaluation logs...");
     }
+
+    if let Err(e) = evals::post_evaluation_builds(config, dispatch.evaluation).await
+        && !quiet
+    {
+        eprintln!("Failed to stream evaluation logs: {}", e);
+    }
+}
+
+struct TrackedFile {
+    path: String,
+    hash: String,
+    size: i64,
+    abs: PathBuf,
+}
+
+fn hash_file(path: &Path) -> std::io::Result<(String, i64)> {
+    let mut hasher = blake3::Hasher::new();
+    let mut reader = BufReader::new(std::fs::File::open(path)?);
+    let mut buf = [0u8; 64 * 1024];
+    let mut size: i64 = 0;
+    loop {
+        let n = reader.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+        size += n as i64;
+    }
+    Ok((hasher.finalize().to_hex().to_string(), size))
 }
