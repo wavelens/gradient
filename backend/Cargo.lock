@@ -1026,6 +1026,7 @@ dependencies = [
  "async-ssh2-lite",
  "async-trait",
  "base64",
+ "blake3",
  "bytes",
  "chrono",
  "clap",
