@@ -31,11 +31,12 @@ clap                  = { workspace = true }
 futures               = { workspace = true }
 git-url-parse         = { workspace = true }
 git2                  = { workspace = true }
-harmonia-file-nar     = { workspace = true }
-harmonia-protocol     = { workspace = true }
-harmonia-store-path   = { workspace = true }
-harmonia-store-remote = { workspace = true }
-harmonia-utils-hash   = { workspace = true }
+harmonia-file-nar              = { workspace = true }
+harmonia-protocol              = { workspace = true }
+harmonia-store-content-address = { workspace = true }
+harmonia-store-path            = { workspace = true }
+harmonia-store-remote          = { workspace = true }
+harmonia-utils-hash            = { workspace = true }
 hex                   = { workspace = true }
 hmac                  = { workspace = true }
 ipnet                 = { workspace = true }

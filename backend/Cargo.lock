@@ -1039,6 +1039,7 @@ dependencies = [
  "git2",
  "harmonia-file-nar",
  "harmonia-protocol",
+ "harmonia-store-content-address",
  "harmonia-store-path",
  "harmonia-store-remote",
  "harmonia-utils-hash",
