@@ -4909,6 +4909,17 @@ components:
         display_name:
           type: string
           example: My Organization
+        description:
+          type: string
+        public:
+          type: boolean
+        hide_build_requests:
+          type: boolean
+          description: >-
+            When `true`, the auto-managed `build-request` project is hidden
+            from project listings in the web UI. The project still exists and
+            continues to receive CLI build artefacts; this is a UI-only
+            opt-out.
 
     PatchOrganizationRequest:
       type: object
@@ -4918,6 +4929,13 @@ components:
           pattern: '^[a-z0-9][a-z0-9-]*[a-z0-9]$'
         display_name:
           type: string
+        description:
+          type: string
+        hide_build_requests:
+          type: boolean
+          description: >-
+            UI-only flag controlling whether the auto-managed `build-request`
+            project is hidden from project listings.
 
     AddUserRequest:
       type: object

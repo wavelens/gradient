@@ -122,6 +122,17 @@
         description = "Whether the organization is public (visible to all users)";
       };
 
+      hide_build_requests = mkOption {
+        type = types.bool;
+        default = false;
+        description = ''
+          When `true`, the auto-managed `build-request` project for this
+          organization is hidden from project listings in the web UI. The
+          project still exists and continues to receive evaluations from the
+          `gradient build` CLI; this is a UI-only opt-out.
+        '';
+      };
+
       github_installation_id = mkOption {
         type = types.nullOr types.int;
         default = null;
