@@ -30,12 +30,7 @@ pub struct SourceNar {
     pub nar_hash_nix32: String,
 }
 
-pub fn materialise_source_nar(staging_dir: &Path) -> Result<SourceNar> {
-    tokio::runtime::Handle::current()
-        .block_on(materialise_source_nar_async(staging_dir))
-}
-
-async fn materialise_source_nar_async(staging_dir: &Path) -> Result<SourceNar> {
+pub async fn materialise_source_nar(staging_dir: &Path) -> Result<SourceNar> {
     let mut stream = NarByteStream::new(staging_dir.to_path_buf());
     let mut nar_bytes: Vec<u8> = Vec::new();
     while let Some(chunk) = stream.next().await {
@@ -86,8 +81,8 @@ mod tests {
     #[tokio::test]
     async fn deterministic_store_path() {
         let dir = make_staging_dir();
-        let a = materialise_source_nar(dir.path()).expect("first call");
-        let b = materialise_source_nar(dir.path()).expect("second call");
+        let a = materialise_source_nar(dir.path()).await.expect("first call");
+        let b = materialise_source_nar(dir.path()).await.expect("second call");
         assert_eq!(a.store_path, b.store_path);
         assert_eq!(a.nar_hash_nix32, b.nar_hash_nix32);
     }
@@ -95,7 +90,7 @@ mod tests {
     #[tokio::test]
     async fn store_path_ends_in_source() {
         let dir = make_staging_dir();
-        let result = materialise_source_nar(dir.path()).expect("materialise");
+        let result = materialise_source_nar(dir.path()).await.expect("materialise");
         assert!(
             result.store_path.ends_with("-source"),
             "store path should end with '-source', got: {}",
@@ -106,7 +101,7 @@ mod tests {
     #[tokio::test]
     async fn store_path_shape() {
         let dir = make_staging_dir();
-        let result = materialise_source_nar(dir.path()).expect("materialise");
+        let result = materialise_source_nar(dir.path()).await.expect("materialise");
         assert!(result.store_path.starts_with("/nix/store/"));
         let base = result.store_path.strip_prefix("/nix/store/").unwrap();
         let (hash_part, name_part) = base.split_once('-').expect("store path has dash");
