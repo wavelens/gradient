@@ -101,6 +101,7 @@ mod m20260511_000000_strip_derivation_path_prefix;
 mod m20260513_000000_add_local_priority_to_cache;
 mod m20260519_000000_normalize_derivation_columns;
 mod m20260519_000001_create_build_request_blob;
+mod m20260519_000002_create_upload_session;
 mod m20260519_000003_add_organization_hide_build_requests;
 
 pub struct Migrator;
@@ -204,6 +205,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260513_000000_add_local_priority_to_cache::Migration),
             Box::new(m20260519_000000_normalize_derivation_columns::Migration),
             Box::new(m20260519_000001_create_build_request_blob::Migration),
+            Box::new(m20260519_000002_create_upload_session::Migration),
             Box::new(m20260519_000003_add_organization_hide_build_requests::Migration),
         ]
     }

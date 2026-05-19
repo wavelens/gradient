@@ -38,6 +38,7 @@ pub mod project_trigger;
 pub mod role;
 pub mod server;
 pub mod session;
+pub mod upload_session;
 pub mod user;
 pub mod webhook;
 pub mod webhook_delivery;
