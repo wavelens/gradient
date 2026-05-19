@@ -120,8 +120,8 @@ pub async fn post_dispatch(
 
     let tx = state.web_db.inner().begin().await?;
 
-    upsert_cached_path(&tx, &nar).await?;
-    queue_signature_placeholders(&tx, &nar, &session.organization).await?;
+    let cached_path = ensure_cached_path(&tx, &nar).await?;
+    queue_signature_placeholders(&tx, &cached_path, &session.organization).await?;
     let project = ensure_build_request_project(&tx, session.organization, user.id).await?;
 
     let target = body
@@ -208,7 +208,18 @@ async fn materialise_staging(
     Ok(())
 }
 
-async fn upsert_cached_path<C: ConnectionTrait>(tx: &C, nar: &SourceNar) -> WebResult<()> {
+async fn ensure_cached_path<C: ConnectionTrait>(
+    tx: &C,
+    nar: &SourceNar,
+) -> WebResult<entity::cached_path::Model> {
+    if let Some(existing) = ECachedPath::find()
+        .filter(CCachedPath::Hash.eq(nar.store_hash.clone()))
+        .one(tx)
+        .await?
+    {
+        return Ok(existing);
+    }
+
     let normalised_hash = normalize_nar_hash(&nar.nar_hash_sri);
     let row = ACachedPath {
         id: Set(CachedPathId::now_v7()),
@@ -225,33 +236,22 @@ async fn upsert_cached_path<C: ConnectionTrait>(tx: &C, nar: &SourceNar) -> WebR
         created_at: Set(now()),
     };
 
-    match ECachedPath::insert(row)
-        .on_conflict(
-            OnConflict::column(CCachedPath::Hash)
-                .do_nothing()
-                .to_owned(),
-        )
-        .do_nothing()
-        .exec(tx)
-        .await
-    {
-        Ok(_) => Ok(()),
-        Err(err) if is_unique_violation(&err) => Ok(()),
+    match row.insert(tx).await {
+        Ok(model) => Ok(model),
+        Err(err) if is_unique_violation(&err) => ECachedPath::find()
+            .filter(CCachedPath::Hash.eq(nar.store_hash.clone()))
+            .one(tx)
+            .await?
+            .ok_or_else(|| WebError::internal("cached_path row missing after race")),
         Err(err) => Err(err.into()),
     }
 }
 
 async fn queue_signature_placeholders<C: ConnectionTrait>(
     tx: &C,
-    nar: &SourceNar,
+    cached_path: &entity::cached_path::Model,
     org: &gradient_core::types::ids::OrganizationId,
 ) -> WebResult<()> {
-    let cached_path_row = ECachedPath::find()
-        .filter(CCachedPath::Hash.eq(nar.store_hash.clone()))
-        .one(tx)
-        .await?
-        .ok_or_else(|| WebError::internal("cached_path row missing after insert"))?;
-
     let org_caches = EOrganizationCache::find()
         .filter(COrganizationCache::Organization.eq(*org))
         .all(tx)
@@ -265,7 +265,7 @@ async fn queue_signature_placeholders<C: ConnectionTrait>(
         .into_iter()
         .map(|oc| ACachedPathSignature {
             id: Set(CachedPathSignatureId::now_v7()),
-            cached_path: Set(cached_path_row.id),
+            cached_path: Set(cached_path.id),
             cache: Set(oc.cache),
             signature: Set(None),
             created_at: Set(now_ts),

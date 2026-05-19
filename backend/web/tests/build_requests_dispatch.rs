@@ -270,20 +270,24 @@ fn happy_path_creates_project_commit_and_evaluation() {
             .append_query_results([vec![upload_session(upload, vec![], false, false)]])
             .append_query_results([vec![membership()]])
             .append_query_results([vec![write_role_row()]])
-            // tx: upsert_cached_path → INSERT cached_path
-            .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
-            // queue_signature_placeholders → find cached_path by hash
+            // ensure_cached_path → SELECT (None)
+            .append_query_results([Vec::<entity::cached_path::Model>::new()])
+            // ensure_cached_path → INSERT (returns row)
             .append_query_results([vec![cp_row]])
-            // queue_signature_placeholders → list org caches (empty)
+            .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+            // queue_signature_placeholders → list org caches (empty, early return)
             .append_query_results([Vec::<entity::organization_cache::Model>::new()])
             // ensure_build_request_project → SELECT existing (None)
             .append_query_results([Vec::<entity::project::Model>::new()])
             // ensure_build_request_project → INSERT project (returns row)
             .append_query_results([vec![project_model.clone()]])
+            .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
             // INSERT commit (returns row)
             .append_query_results([vec![commit_model.clone()]])
+            .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
             // INSERT evaluation (returns row)
             .append_query_results([vec![eval_model.clone()]])
+            .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
             // After tx commit: UPDATE upload_session
             .append_query_results([vec![updated]])
             .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }]);
@@ -335,13 +339,16 @@ fn happy_path_reuses_existing_build_request_project() {
             .append_query_results([vec![upload_session(upload, vec![], false, false)]])
             .append_query_results([vec![membership()]])
             .append_query_results([vec![write_role_row()]])
-            .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+            // ensure_cached_path → SELECT existing returns the row
             .append_query_results([vec![cp_row]])
+            // queue_signature_placeholders → org caches (empty)
             .append_query_results([Vec::<entity::organization_cache::Model>::new()])
             // ensure_build_request_project → SELECT existing returns the row
             .append_query_results([vec![project_model.clone()]])
             .append_query_results([vec![commit_model.clone()]])
+            .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
             .append_query_results([vec![eval_model.clone()]])
+            .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
             .append_query_results([vec![updated]])
             .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }]);
 
