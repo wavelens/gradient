@@ -286,6 +286,7 @@ impl<'a> StateApplicator<'a> {
                 org.private_key = Set(encrypted_private_key.clone());
                 org.created_by = Set(created_by_id);
                 org.public = Set(state_org.public);
+                org.hide_build_requests = Set(state_org.hide_build_requests);
                 // Only overwrite github_installation_id when state declares
                 // it; otherwise leave the existing value (likely set by the
                 // install webhook) intact.
@@ -306,6 +307,7 @@ impl<'a> StateApplicator<'a> {
                     public_key: Set(public_key),
                     private_key: Set(encrypted_private_key),
                     public: Set(state_org.public),
+                    hide_build_requests: Set(state_org.hide_build_requests),
                     created_by: Set(created_by_id),
                     created_at: Set(now),
                     managed: Set(true),

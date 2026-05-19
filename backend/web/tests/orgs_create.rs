@@ -42,6 +42,7 @@ fn org_row(name: &str) -> organization::Model {
         public_key: String::new(),
         private_key: String::new(),
         public: false,
+        hide_build_requests: false,
         created_by: user_id(),
         created_at: test_date(),
         managed: false,

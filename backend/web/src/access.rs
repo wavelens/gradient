@@ -419,6 +419,7 @@ mod tests {
             public_key: "ssh".into(),
             private_key: "enc".into(),
             public,
+            hide_build_requests: false,
             created_by: UserId::new(uuid!("a0000000-0000-0000-0000-000000000004")),
             created_at: fixture_date(),
             managed,
