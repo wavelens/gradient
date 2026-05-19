@@ -312,6 +312,12 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             post(build_requests::manifest::post_manifest),
         )
         .route(
+            "/build-requests/{session}/blobs",
+            post(build_requests::blobs::post_blobs).layer(DefaultBodyLimit::max(
+                gradient_core::constants::MAX_BUILD_REQUEST_SIZE,
+            )),
+        )
+        .route(
             "/builds/direct/recent",
             get(builds::get_recent_direct_builds),
         )
