@@ -302,12 +302,6 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             get(builds::get_build_download_token),
         )
         .route(
-            "/builds",
-            post(builds::post_direct_build).layer(DefaultBodyLimit::max(
-                state.config.limits.max_direct_build_size,
-            )),
-        )
-        .route(
             "/build-requests/manifest",
             post(build_requests::manifest::post_manifest),
         )
@@ -320,10 +314,6 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         .route(
             "/build-requests/{session}/dispatch",
             post(build_requests::dispatch::post_dispatch),
-        )
-        .route(
-            "/builds/direct/recent",
-            get(builds::get_recent_direct_builds),
         )
         .route("/caches", get(caches::get).put(caches::put))
         .route("/caches/available", get(caches::get_cache_name_available))

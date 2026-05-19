@@ -2507,86 +2507,6 @@ paths:
 
   # ── Builds ───────────────────────────────────────────────────────────────────
 
-  /builds:
-    post:
-      tags: [builds]
-      summary: Submit direct build
-      description: |-
-        Submits a Nix derivation for building without a project. The request is a
-        `multipart/form-data` upload with the following fields:
-
-        | Field | Type | Description |
-        |---|---|---|
-        | `organization` | text | Organization slug |
-        | `derivation` | text | Nix attribute path or store path to build |
-        | `files` | file (repeated) | One or more Nix expression files; the per-part `Content-Disposition: filename="..."` is treated as the path relative to a per-upload temp directory |
-
-        Filenames containing `..`, `.`, leading `/`, NUL bytes, or any other
-        non-normal path components are rejected with `400 Bad Request`.
-        Nested relative paths (e.g. `src/main.nix`) are allowed.
-
-        Returns the evaluation UUID that can be used to track progress.
-      operationId: submitDirectBuild
-      requestBody:
-        required: true
-        content:
-          multipart/form-data:
-            schema:
-              type: object
-              required: [organization, derivation, files]
-              properties:
-                organization:
-                  type: string
-                  description: Organization slug
-                derivation:
-                  type: string
-                  description: Nix derivation attribute path
-                files:
-                  type: array
-                  description: Nix expression files; each part's `Content-Disposition` filename is the relative path under the per-upload temp directory
-                  items:
-                    type: string
-                    format: binary
-      responses:
-        '200':
-          description: Direct build started
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/StringResponse'
-              example:
-                error: false
-                message: "Direct build started with evaluation ID: 3fa85f64-5717-4562-b3fc-2c963f66afa6"
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
-
-  /builds/direct/recent:
-    get:
-      tags: [builds]
-      summary: List recent direct builds
-      description: Returns up to 20 most recent direct builds across all organizations owned by the current user.
-      operationId: getRecentDirectBuilds
-      responses:
-        '200':
-          description: Recent direct builds
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/BaseResponse'
-                  - type: object
-                    properties:
-                      message:
-                        type: array
-                        items:
-                          $ref: '#/components/schemas/DirectBuildInfo'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-
   /builds/{build}:
     parameters:
       - $ref: '#/components/parameters/BuildId'
@@ -5860,28 +5780,6 @@ components:
           nullable: true
           description: File size in bytes, or null if the file could not be stat'd
           example: 734003200
-
-    DirectBuildInfo:
-      type: object
-      required: [id, derivation, created_at, evaluation_id, status]
-      properties:
-        id:
-          type: string
-          format: uuid
-          description: Direct build record UUID
-        derivation:
-          type: string
-          description: Nix derivation attribute path or store path that was submitted
-        created_at:
-          type: string
-          description: Creation timestamp (formatted as `YYYY-MM-DD HH:MM:SS`)
-        evaluation_id:
-          type: string
-          format: uuid
-          description: UUID of the evaluation spawned for this direct build
-        status:
-          type: string
-          description: Build status string
 
     # ── Caches ────────────────────────────────────────────────────────────────
 

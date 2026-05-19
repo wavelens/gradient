@@ -321,22 +321,11 @@ in {
           description = ''
             Maximum size in bytes of an HTTP request body for most endpoints.
             Caps webhook payloads, JSON bodies, etc. so an unbounded body
-            cannot exhaust server memory. The direct-build multipart upload
-            endpoint uses `maxDirectBuildSize` instead.
+            cannot exhaust server memory. The build-request blob upload
+            endpoint uses a fixed `MAX_BUILD_REQUEST_SIZE` (20 MiB) cap.
           '';
           type = lib.types.ints.positive;
           default = 2 * 1024 * 1024;
-        };
-
-        maxDirectBuildSize = lib.mkOption {
-          description = ''
-            Maximum size in bytes of a direct-build multipart upload
-            (`POST /api/v1/builds`). These uploads carry an entire
-            repository snapshot, so the limit is larger than
-            `maxRequestSize`.
-          '';
-          type = lib.types.ints.positive;
-          default = 1024 * 1024 * 1024;
         };
 
         trustedProxies = lib.mkOption {
@@ -538,7 +527,6 @@ in {
         GRADIENT_REPORT_ERRORS = lib.boolToString cfg.reportErrors;
         GRADIENT_KEEP_EVALUATIONS = toString cfg.settings.keepEvaluations;
         GRADIENT_MAX_REQUEST_SIZE = toString cfg.settings.maxRequestSize;
-        GRADIENT_MAX_DIRECT_BUILD_SIZE = toString cfg.settings.maxDirectBuildSize;
         GRADIENT_MAX_PROTO_CONNECTIONS = toString cfg.settings.maxProtoConnections;
         GRADIENT_LOG_LEVEL = cfg.settings.logLevel.default;
         GRADIENT_USE_TLS = lib.boolToString cfg.useTls;
