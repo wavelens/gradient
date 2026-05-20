@@ -49,10 +49,6 @@ impl GcRootKeeper {
         }
     }
 
-    pub fn is_enabled(&self) -> bool {
-        self.inner.dir.is_some()
-    }
-
     /// Remove every entry under the gcroots dir and recreate the dir if it
     /// doesn't exist. Stale leftovers came from a prior crashed worker.
     pub async fn purge_all(&self) -> Result<()> {
@@ -165,7 +161,6 @@ mod tests {
     async fn disabled_keeper_purge_is_noop() {
         let keeper = disabled_keeper();
         keeper.purge_all().await.unwrap();
-        assert!(!keeper.is_enabled());
     }
 
     #[tokio::test]
