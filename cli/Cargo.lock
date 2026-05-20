@@ -330,6 +330,7 @@ dependencies = [
 name = "connector"
 version = "1.2.0"
 dependencies = [
+ "bytes",
  "futures",
  "reqwest",
  "reqwest-streams",
