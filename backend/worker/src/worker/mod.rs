@@ -248,9 +248,17 @@ impl Worker<Connected> {
     async fn build_executor(config: &WorkerConfig) -> Result<(JobExecutor, JobScorer)> {
         let store = LocalNixStore::connect(config.max_nixdaemon_connections)?;
         let evaluator = WorkerEvaluator::new(config.eval_workers, config.max_evals_per_worker);
+        let gcroots = crate::nix::gcroots::GcRootKeeper::new(
+            &config.gcroots_dir,
+            std::sync::Arc::new(store.clone()),
+        );
+        if let Err(e) = gcroots.purge_all().await {
+            tracing::warn!(error = %e, "gcroot purge failed at startup; continuing");
+        }
         let executor = JobExecutor::new(
             store,
             evaluator,
+            gcroots,
             config.binpath_nix.clone(),
             config.binpath_ssh.clone(),
         );

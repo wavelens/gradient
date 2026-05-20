@@ -24,6 +24,7 @@ use tracing::instrument;
 use gradient_core::types::CachedPathInfo;
 use proto::messages::QueryMode;
 
+use crate::nix::gcroots::{GcRootHandle, GcRootKeeper};
 use crate::nix::store::LocalNixStore;
 use crate::proto::{credentials::CredentialStore, job::JobUpdater, nar};
 use proto::messages::CachedPath;
@@ -155,6 +156,7 @@ async fn push_one_fetched_nar(updater: &mut JobUpdater, cp: &CachedPath, store: 
 pub struct JobExecutor {
     pub(crate) store: Arc<LocalNixStore>,
     pub(crate) evaluator: Arc<WorkerEvaluator>,
+    pub(crate) gcroots: GcRootKeeper,
     pub(crate) binpath_nix: String,
     pub(crate) binpath_ssh: String,
 }
@@ -163,12 +165,14 @@ impl JobExecutor {
     pub fn new(
         store: LocalNixStore,
         evaluator: WorkerEvaluator,
+        gcroots: GcRootKeeper,
         binpath_nix: String,
         binpath_ssh: String,
     ) -> Self {
         Self {
             store: Arc::new(store),
             evaluator: Arc::new(evaluator),
+            gcroots,
             binpath_nix,
             binpath_ssh,
         }
@@ -265,6 +269,7 @@ impl JobExecutor {
         mut abort: watch::Receiver<bool>,
     ) -> Result<()> {
         let mut all_output_paths: Vec<String> = Vec::new();
+        let mut gc_handles: Vec<GcRootHandle> = Vec::new();
         for (index, build_task) in job.builds.iter().enumerate() {
             check_abort(&mut abort)?;
             // Move the build to `Building` on the server *before* anything
@@ -275,6 +280,12 @@ impl JobExecutor {
             // still `Queued`, the transition would be rejected, and the UI
             // would show the build hanging in `Queued` forever.
             updater.report_building(build_task.build_id.clone())?;
+
+            // Pin the .drv as an indirect GC root before prefetching its
+            // inputs. Nix's reachability walks .drv references
+            // (input_drvs + input_sources), so one root covers the entire
+            // build-time closure.
+            gc_handles.push(self.gcroots.add(&build_task.drv_path).await);
 
             if build_task.external_cached {
                 // Optimistic path: the worker reported the outputs as
@@ -308,6 +319,9 @@ impl JobExecutor {
                             });
                         }
                         updater.report_build_output(build_task.build_id.clone(), reported)?;
+                        for (_, p) in &outputs {
+                            gc_handles.push(self.gcroots.add(p).await);
+                        }
                         all_output_paths.extend(outputs.into_iter().map(|(_, p)| p));
                         continue;
                     }
@@ -339,6 +353,9 @@ impl JobExecutor {
                 })?;
             let outputs =
                 build::build_derivation(&self.store, build_task, index as u32, updater).await?;
+            for o in &outputs {
+                gc_handles.push(self.gcroots.add(&o.store_path).await);
+            }
             all_output_paths.extend(outputs.into_iter().map(|o| o.store_path));
         }
 
@@ -351,6 +368,9 @@ impl JobExecutor {
         compress::compress_and_push_paths(&self.store, &all_output_paths, updater, &mut abort)
             .await?;
 
+        // Release every indirect GC root for this job; symlinks are removed
+        // and the daemon's next GC walk is free to delete unreachable paths.
+        drop(gc_handles);
         Ok(())
     }
 }
