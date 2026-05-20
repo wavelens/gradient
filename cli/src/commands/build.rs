@@ -5,9 +5,11 @@
  */
 
 use crate::config::*;
-use crate::input::*;
-use crate::output::Output;
-use connector::*;
+use crate::input::client_from_config;
+use crate::output::{Output, to_exit_kind};
+use connector::build_requests::{BuildManifestRequest, DispatchRequest, ManifestFile};
+use futures::StreamExt;
+use futures::pin_mut;
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::exit;
@@ -31,38 +33,25 @@ pub async fn handle_build(
             exit(1);
         });
 
-    let config = get_request_config(load_config()).unwrap_or_else(|_| {
-        if !quiet {
-            out.progress("Not configured. Use 'gradient config' to set server and auth token.");
-        }
-        exit(1);
-    });
+    let client = client_from_config(out);
 
     let cwd = std::env::current_dir().unwrap_or_else(|e| {
-        if !quiet {
-            out.progress(format!("Failed to read current directory: {}", e));
-        }
+        if !quiet { out.progress(format!("Failed to read current directory: {}", e)); }
         exit(1);
     });
 
     let repo = git2::Repository::discover(&cwd).unwrap_or_else(|e| {
-        if !quiet {
-            out.progress(format!("Not in a git repository: {}", e));
-        }
+        if !quiet { out.progress(format!("Not in a git repository: {}", e)); }
         exit(1);
     });
 
     let workdir = repo.workdir().map(Path::to_path_buf).unwrap_or_else(|| {
-        if !quiet {
-            out.progress("Bare repositories are not supported.");
-        }
+        if !quiet { out.progress("Bare repositories are not supported."); }
         exit(1);
     });
 
     let index = repo.index().unwrap_or_else(|e| {
-        if !quiet {
-            out.progress(format!("Failed to read git index: {}", e));
-        }
+        if !quiet { out.progress(format!("Failed to read git index: {}", e)); }
         exit(1);
     });
 
@@ -79,18 +68,14 @@ pub async fn handle_build(
         match hash_file(&abs) {
             Ok((hash, size)) => entries.push(TrackedFile { path, hash, size, abs }),
             Err(e) => {
-                if !quiet {
-                    out.progress(format!("Failed to hash {}: {}", abs.display(), e));
-                }
+                if !quiet { out.progress(format!("Failed to hash {}: {}", abs.display(), e)); }
                 exit(1);
             }
         }
     }
 
     if entries.is_empty() {
-        if !quiet {
-            out.progress("No tracked files to upload.");
-        }
+        if !quiet { out.progress("No tracked files to upload."); }
         exit(1);
     }
 
@@ -98,30 +83,18 @@ pub async fn handle_build(
         out.human(format!("Sending manifest for {} tracked files...", entries.len()));
     }
 
-    let manifest_req = build_requests::ManifestRequest {
+    let manifest_req = BuildManifestRequest {
         organization,
         files: entries
             .iter()
-            .map(|e| build_requests::ManifestFile {
-                path: e.path.clone(),
-                hash: e.hash.clone(),
-                size: e.size,
-            })
+            .map(|e| ManifestFile { path: e.path.clone(), hash: e.hash.clone(), size: e.size })
             .collect(),
     };
 
-    let manifest = match build_requests::post_manifest(config.clone(), manifest_req).await {
-        Ok(r) if r.error => {
-            if !quiet {
-                out.progress("Manifest rejected by server.");
-            }
-            exit(1);
-        }
-        Ok(r) => r.message,
+    let manifest = match client.build_requests().submit_manifest(manifest_req).await {
+        Ok(m) => m,
         Err(e) => {
-            if !quiet {
-                out.progress(format!("Failed to send manifest: {}", e));
-            }
+            if !quiet { out.progress(format!("Manifest rejected: {}", e)); }
             exit(1);
         }
     };
@@ -137,66 +110,45 @@ pub async fn handle_build(
 
         let missing: std::collections::HashSet<&str> =
             manifest.missing.iter().map(String::as_str).collect();
-        let mut blobs: Vec<(String, Vec<u8>)> = Vec::with_capacity(missing.len());
+        let mut form = reqwest::multipart::Form::new();
         for entry in &entries {
             if !missing.contains(entry.hash.as_str()) {
                 continue;
             }
             match std::fs::read(&entry.abs) {
-                Ok(bytes) => blobs.push((entry.hash.clone(), bytes)),
+                Ok(bytes) => {
+                    let part = reqwest::multipart::Part::bytes(bytes).file_name(entry.hash.clone());
+                    form = form.part(entry.hash.clone(), part);
+                }
                 Err(e) => {
-                    if !quiet {
-                        out.progress(format!("Failed to read {}: {}", entry.abs.display(), e));
-                    }
+                    if !quiet { out.progress(format!("Failed to read {}: {}", entry.abs.display(), e)); }
                     exit(1);
                 }
             }
         }
 
-        match build_requests::upload_blobs(config.clone(), manifest.session.clone(), blobs).await {
-            Ok(r) if r.error => {
-                if !quiet {
-                    out.progress("Blob upload rejected by server.");
-                }
-                exit(1);
-            }
-            Ok(_) => {}
-            Err(e) => {
-                if !quiet {
-                    out.progress(format!("Failed to upload blobs: {}", e));
-                }
-                exit(1);
-            }
+        if let Err(e) = client.build_requests().upload_blobs(&manifest.session, form).await {
+            if !quiet { out.progress(format!("Failed to upload blobs: {}", e)); }
+            exit(1);
         }
     }
 
-    let dispatch_req = build_requests::DispatchRequest { target, system };
-
-    let dispatch = match build_requests::dispatch_build_request(
-        config.clone(),
-        manifest.session,
-        dispatch_req,
-    )
-    .await
+    let dispatch = match client
+        .build_requests()
+        .dispatch(&manifest.session, DispatchRequest { target, system })
+        .await
     {
-        Ok(r) if r.error => {
-            if !quiet {
-                out.progress("Dispatch rejected by server.");
-            }
-            exit(1);
-        }
-        Ok(r) => r.message,
+        Ok(d) => d,
         Err(e) => {
-            if !quiet {
-                out.progress(format!("Failed to dispatch build request: {}", e));
-            }
+            if !quiet { out.progress(format!("Failed to dispatch build request: {}", e)); }
             exit(1);
         }
     };
 
     if quiet {
-        out.human(format!("{}", dispatch.evaluation));
+        out.human(dispatch.evaluation.clone());
     } else {
+        out.ok(&dispatch);
         out.human(format!("Evaluation: {}", dispatch.evaluation));
         out.human(format!("Project:    {}", dispatch.project));
         out.human(format!("Commit:     {}", dispatch.commit));
@@ -210,10 +162,28 @@ pub async fn handle_build(
         out.human("Streaming evaluation logs...");
     }
 
-    if let Err(e) = evals::post_evaluation_builds(config, dispatch.evaluation).await
-        && !quiet
-    {
-        out.progress(format!("Failed to stream evaluation logs: {}", e));
+    let evals = client.evals();
+    let stream = match evals.stream_builds(&dispatch.evaluation).await {
+        Ok(s) => s,
+        Err(e) => {
+            if !quiet { out.progress(format!("Failed to stream evaluation logs: {}", e)); }
+            return;
+        }
+    };
+
+    pin_mut!(stream);
+    while let Some(item) = stream.next().await {
+        match item {
+            Ok(line) => {
+                if out.is_json() {
+                    let env = serde_json::json!({"error": false, "message": line});
+                    println!("{}", env);
+                } else {
+                    print!("{}", line);
+                }
+            }
+            Err(e) => out.err(to_exit_kind(&e), e),
+        }
     }
 }
 
