@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::commands::attr_spec;
 use crate::config::*;
 use crate::input::client_from_config;
 use crate::output::{ExitKind, Output, to_exit_kind};
@@ -13,6 +14,7 @@ use std::path::{Path, PathBuf};
 use std::process::exit;
 
 pub async fn handle_download(
+    flake_ref: Option<String>,
     evaluation: Option<String>,
     project: Option<String>,
     products: Option<String>,
@@ -39,16 +41,15 @@ pub async fn handle_download(
         return;
     }
 
-    let selection = match products {
-        Some(spec) => parse_selection_spec(&spec, flat.len()).unwrap_or_else(|e| {
-            out.err(ExitKind::Usage, e);
-        }),
-        None => {
-            if out.is_json() {
-                out.err(ExitKind::Usage, "missing argument: --products (required in --json mode)");
-            }
-            interactive_select(&flat)
-        }
+    let selection = if let Some(spec) = &flake_ref {
+        let attrs = attr_spec::parse(spec).unwrap_or_else(|e| out.err(ExitKind::Usage, e));
+        select_by_attrs(&flat, &attrs).unwrap_or_else(|e| out.err(ExitKind::Api, e))
+    } else if let Some(spec) = &products {
+        parse_selection_spec(spec, flat.len()).unwrap_or_else(|e| out.err(ExitKind::Usage, e))
+    } else if out.is_json() {
+        out.err(ExitKind::Usage, "missing argument: flake ref or --products")
+    } else {
+        interactive_select(&flat)
     };
 
     if selection.is_empty() {
