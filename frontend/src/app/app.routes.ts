@@ -9,6 +9,7 @@ import { authGuard } from '@core/guards/auth.guard';
 import { adminGuard } from '@core/guards/admin.guard';
 import { projectAccessResolver } from '@core/resolvers/project-access.resolver';
 import { cacheAccessResolver } from '@core/resolvers/cache-access.resolver';
+import { organizationAccessResolver } from '@core/resolvers/organization-access.resolver';
 
 export const routes: Routes = [
   // Authentication routes (public)
@@ -41,6 +42,7 @@ export const routes: Routes = [
   {
     path: 'organization/:org',
     title: 'Organization',
+    resolve: { organizationAccess: organizationAccessResolver },
     loadComponent: () =>
       import('./features/organizations/organization-detail/organization-detail.component').then(
         (m) => m.OrganizationDetailComponent
@@ -214,6 +216,7 @@ export const routes: Routes = [
       {
         path: 'organization/:org/settings',
         title: 'Organization Settings',
+        resolve: { organizationAccess: organizationAccessResolver },
         loadComponent: () =>
           import('./features/organizations/organization-settings/organization-settings.component').then(
             (m) => m.OrganizationSettingsComponent
@@ -222,6 +225,7 @@ export const routes: Routes = [
       {
         path: 'organization/:org/members',
         title: 'Members & Roles',
+        resolve: { organizationAccess: organizationAccessResolver },
         loadComponent: () =>
           import('./features/organizations/members-roles/members-roles.component').then(
             (m) => m.MembersRolesComponent
@@ -232,6 +236,7 @@ export const routes: Routes = [
       {
         path: 'organization/:org/workers',
         title: 'Workers',
+        resolve: { organizationAccess: organizationAccessResolver },
         loadComponent: () =>
           import('./features/organizations/workers/workers.component').then(
             (m) => m.WorkersComponent
@@ -242,6 +247,7 @@ export const routes: Routes = [
       {
         path: 'organization/:org/integrations',
         title: 'Integrations',
+        resolve: { organizationAccess: organizationAccessResolver },
         loadComponent: () =>
           import('./features/organizations/integrations/integrations.component').then(
             (m) => m.IntegrationsComponent
@@ -252,6 +258,7 @@ export const routes: Routes = [
       {
         path: 'organization/:org/caches',
         title: 'Cache Subscriptions',
+        resolve: { organizationAccess: organizationAccessResolver },
         loadComponent: () =>
           import('./features/organizations/cache-subscriptions/cache-subscriptions.component').then(
             (m) => m.CacheSubscriptionsComponent
