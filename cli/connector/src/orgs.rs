@@ -1,13 +1,8 @@
-/*
- * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
- *
- * SPDX-License-Identifier: AGPL-3.0-only
- */
-
-use crate::*;
+use crate::{Client, ConnectorError, ListResponse, PaginatedListResponse, http};
+use reqwest::Method;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct OrganizationResponse {
     pub id: String,
     pub name: String,
@@ -18,305 +13,157 @@ pub struct OrganizationResponse {
     pub created_at: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-struct MakeOrganizationRequest {
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct MakeOrganizationRequest {
     pub name: String,
     pub display_name: String,
     pub description: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-struct PatchOrganizationRequest {
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct PatchOrganizationRequest {
     pub name: Option<String>,
     pub display_name: Option<String>,
     pub description: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AddUserRequest {
     pub user: String,
     pub role: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct RemoveUserRequest {
     pub user: String,
 }
 
-pub async fn get(config: RequestConfig) -> Result<BaseResponse<PaginatedListResponse>, String> {
-    let res = get_client(config, "orgs".to_string(), RequestType::GET, true)
-        .unwrap()
-        .send()
-        .await;
-
-    let res = match res {
-        Ok(res) => res,
-        Err(e) => return Err(e.to_string()),
-    };
-
-    Ok(parse_response(res).await)
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Role {
+    pub id: String,
+    pub name: String,
+    pub permissions: Vec<String>,
 }
 
-pub async fn put(
-    config: RequestConfig,
-    name: String,
-    display_name: String,
-    description: String,
-) -> Result<BaseResponse<String>, String> {
-    let req = MakeOrganizationRequest {
-        name,
-        display_name,
-        description,
-    };
-
-    let res = get_client(config, "orgs".to_string(), RequestType::PUT, true)
-        .unwrap()
-        .json(&req)
-        .send()
-        .await
-        .unwrap();
-
-    Ok(parse_response(res).await)
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct MakeRoleRequest {
+    pub name: String,
+    pub permissions: Vec<String>,
 }
 
-pub async fn get_organization(
-    config: RequestConfig,
-    organization: String,
-) -> Result<BaseResponse<OrganizationResponse>, String> {
-    let res = get_client(
-        config,
-        format!("orgs/{}", organization),
-        RequestType::GET,
-        true,
-    )
-    .unwrap()
-    .send()
-    .await
-    .unwrap();
-
-    Ok(parse_response(res).await)
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct PatchRoleRequest {
+    pub name: Option<String>,
+    pub permissions: Option<Vec<String>>,
 }
 
-pub async fn patch_organization(
-    config: RequestConfig,
-    organization: String,
-    name: Option<String>,
-    display_name: Option<String>,
-    description: Option<String>,
-) -> Result<BaseResponse<String>, String> {
-    let req = PatchOrganizationRequest {
-        name,
-        display_name,
-        description,
-    };
+pub struct OrgsApi<'a>(pub(crate) &'a Client);
 
-    let res = get_client(
-        config,
-        format!("orgs/{}", organization),
-        RequestType::PATCH,
-        true,
-    )
-    .unwrap()
-    .json(&req)
-    .send()
-    .await
-    .unwrap();
+impl OrgsApi<'_> {
+    pub async fn list(&self) -> Result<PaginatedListResponse, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, "orgs", true)?;
+        http::decode(req.send().await?).await
+    }
 
-    Ok(parse_response(res).await)
-}
+    pub async fn available(&self) -> Result<PaginatedListResponse, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, "orgs/available", true)?;
+        http::decode(req.send().await?).await
+    }
 
-pub async fn delete_organization(
-    config: RequestConfig,
-    organization: String,
-) -> Result<BaseResponse<String>, String> {
-    let res = get_client(
-        config,
-        format!("orgs/{}", organization),
-        RequestType::DELETE,
-        true,
-    )
-    .unwrap()
-    .send()
-    .await
-    .unwrap();
+    pub async fn create(&self, body: MakeOrganizationRequest) -> Result<String, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::PUT, "orgs", true)?
+            .json(&body);
+        http::decode(req.send().await?).await
+    }
 
-    Ok(parse_response(res).await)
-}
+    pub async fn get(&self, org: &str) -> Result<OrganizationResponse, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("orgs/{org}"), true)?;
+        http::decode(req.send().await?).await
+    }
 
-pub async fn get_organization_users(
-    config: RequestConfig,
-    organization: String,
-) -> Result<BaseResponse<ListResponse>, String> {
-    let res = get_client(
-        config,
-        format!("orgs/{}/users", organization),
-        RequestType::GET,
-        true,
-    )
-    .unwrap()
-    .send()
-    .await
-    .unwrap();
+    pub async fn update(&self, org: &str, body: PatchOrganizationRequest) -> Result<String, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::PATCH, &format!("orgs/{org}"), true)?
+            .json(&body);
+        http::decode(req.send().await?).await
+    }
 
-    Ok(parse_response(res).await)
-}
+    pub async fn delete(&self, org: &str) -> Result<String, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::DELETE, &format!("orgs/{org}"), true)?;
+        http::decode(req.send().await?).await
+    }
 
-pub async fn post_organization_users(
-    config: RequestConfig,
-    organization: String,
-    user: String,
-    role: String,
-) -> Result<BaseResponse<String>, String> {
-    let req = AddUserRequest { user, role };
+    pub async fn users(&self, org: &str) -> Result<ListResponse, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("orgs/{org}/users"), true)?;
+        http::decode(req.send().await?).await
+    }
 
-    let res = get_client(
-        config,
-        format!("orgs/{}/users", organization),
-        RequestType::POST,
-        true,
-    )
-    .unwrap()
-    .json(&req)
-    .send()
-    .await
-    .unwrap();
+    pub async fn add_user(&self, org: &str, body: AddUserRequest) -> Result<String, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::POST, &format!("orgs/{org}/users"), true)?
+            .json(&body);
+        http::decode(req.send().await?).await
+    }
 
-    Ok(parse_response(res).await)
-}
+    pub async fn update_user(&self, org: &str, body: AddUserRequest) -> Result<String, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::PATCH, &format!("orgs/{org}/users"), true)?
+            .json(&body);
+        http::decode(req.send().await?).await
+    }
 
-pub async fn patch_organization_users(
-    config: RequestConfig,
-    organization: String,
-    user: String,
-    role: String,
-) -> Result<BaseResponse<String>, String> {
-    let req = AddUserRequest { user, role };
+    pub async fn remove_user(&self, org: &str, body: RemoveUserRequest) -> Result<String, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::DELETE, &format!("orgs/{org}/users"), true)?
+            .json(&body);
+        http::decode(req.send().await?).await
+    }
 
-    let res = get_client(
-        config,
-        format!("orgs/{}/users", organization),
-        RequestType::PATCH,
-        true,
-    )
-    .unwrap()
-    .json(&req)
-    .send()
-    .await
-    .unwrap();
+    pub async fn roles(&self, org: &str) -> Result<Vec<Role>, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("orgs/{org}/roles"), true)?;
+        http::decode(req.send().await?).await
+    }
 
-    Ok(parse_response(res).await)
-}
+    pub async fn create_role(&self, org: &str, body: MakeRoleRequest) -> Result<String, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::POST, &format!("orgs/{org}/roles"), true)?
+            .json(&body);
+        http::decode(req.send().await?).await
+    }
 
-pub async fn delete_organization_users(
-    config: RequestConfig,
-    organization: String,
-    user: String,
-) -> Result<BaseResponse<String>, String> {
-    let req = RemoveUserRequest { user };
+    pub async fn get_role(&self, org: &str, role_id: &str) -> Result<Role, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("orgs/{org}/roles/{role_id}"), true)?;
+        http::decode(req.send().await?).await
+    }
 
-    let res = get_client(
-        config,
-        format!("orgs/{}/users", organization),
-        RequestType::DELETE,
-        true,
-    )
-    .unwrap()
-    .json(&req)
-    .send()
-    .await
-    .unwrap();
+    pub async fn update_role(&self, org: &str, role_id: &str, body: PatchRoleRequest) -> Result<String, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::PATCH, &format!("orgs/{org}/roles/{role_id}"), true)?
+            .json(&body);
+        http::decode(req.send().await?).await
+    }
 
-    Ok(parse_response(res).await)
-}
+    pub async fn delete_role(&self, org: &str, role_id: &str) -> Result<String, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::DELETE, &format!("orgs/{org}/roles/{role_id}"), true)?;
+        http::decode(req.send().await?).await
+    }
 
-pub async fn get_organization_ssh(
-    config: RequestConfig,
-    organization: String,
-) -> Result<BaseResponse<String>, String> {
-    let res = get_client(
-        config,
-        format!("orgs/{}/ssh", organization),
-        RequestType::GET,
-        true,
-    )
-    .unwrap()
-    .send()
-    .await
-    .unwrap();
+    pub async fn ssh_key(&self, org: &str) -> Result<String, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("orgs/{org}/ssh"), true)?;
+        http::decode(req.send().await?).await
+    }
 
-    Ok(parse_response(res).await)
-}
+    pub async fn regenerate_ssh(&self, org: &str) -> Result<String, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::POST, &format!("orgs/{org}/ssh"), true)?;
+        http::decode(req.send().await?).await
+    }
 
-pub async fn post_organization_ssh(
-    config: RequestConfig,
-    organization: String,
-) -> Result<BaseResponse<String>, String> {
-    let res = get_client(
-        config,
-        format!("orgs/{}/ssh", organization),
-        RequestType::POST,
-        true,
-    )
-    .unwrap()
-    .send()
-    .await
-    .unwrap();
+    pub async fn subscriptions(&self, org: &str) -> Result<ListResponse, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("orgs/{org}/subscribe"), true)?;
+        http::decode(req.send().await?).await
+    }
 
-    Ok(parse_response(res).await)
-}
+    pub async fn subscribe(&self, org: &str, cache: &str) -> Result<String, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::POST, &format!("orgs/{org}/subscribe/{cache}"), true)?;
+        http::decode(req.send().await?).await
+    }
 
-pub async fn get_organization_subscribe(
-    config: RequestConfig,
-    organization: String,
-) -> Result<BaseResponse<ListResponse>, String> {
-    let res = get_client(
-        config,
-        format!("orgs/{}/subscribe", organization),
-        RequestType::GET,
-        true,
-    )
-    .unwrap()
-    .send()
-    .await
-    .unwrap();
-
-    Ok(parse_response(res).await)
-}
-
-pub async fn post_organization_subscribe_cache(
-    config: RequestConfig,
-    organization: String,
-    cache: String,
-) -> Result<BaseResponse<String>, String> {
-    let res = get_client(
-        config,
-        format!("orgs/{}/subscribe/{}", organization, cache),
-        RequestType::POST,
-        true,
-    )
-    .unwrap()
-    .send()
-    .await
-    .unwrap();
-
-    Ok(parse_response(res).await)
-}
-
-pub async fn delete_organization_subscribe_cache(
-    config: RequestConfig,
-    organization: String,
-    cache: String,
-) -> Result<BaseResponse<String>, String> {
-    let res = get_client(
-        config,
-        format!("orgs/{}/subscribe/{}", organization, cache),
-        RequestType::DELETE,
-        true,
-    )
-    .unwrap()
-    .send()
-    .await
-    .unwrap();
-
-    Ok(parse_response(res).await)
+    pub async fn unsubscribe(&self, org: &str, cache: &str) -> Result<String, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::DELETE, &format!("orgs/{org}/subscribe/{cache}"), true)?;
+        http::decode(req.send().await?).await
+    }
 }

@@ -2,6 +2,7 @@ pub mod error;
 pub use error::ConnectorError;
 
 pub mod auth;
+pub mod orgs;
 pub mod server;
 
 mod http;
@@ -29,6 +30,7 @@ impl Client {
     pub(crate) fn token(&self) -> Option<&str> { self.inner.token.as_deref() }
 
     pub fn auth(&self) -> auth::AuthApi<'_> { auth::AuthApi(self) }
+    pub fn orgs(&self) -> orgs::OrgsApi<'_> { orgs::OrgsApi(self) }
     pub fn server(&self) -> server::ServerApi<'_> { server::ServerApi(self) }
 
     pub async fn health(&self) -> Result<String, ConnectorError> {
