@@ -7,12 +7,11 @@
 use super::*;
 use crate::config::*;
 use crate::input::*;
-use crate::output::{ExitKind, Output};
+use crate::output::{ExitKind, Output, to_exit_kind};
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{Shell, generate};
-use connector::*;
+use connector::auth::{MakeLoginRequest, MakeUserRequest};
 use std::io;
-use std::process::exit;
 
 #[derive(Parser, Debug)]
 #[command(name = "Gradient", display_name = "Gradient", bin_name = "gradient", author = "Wavelens", version, about, long_about = None)]
@@ -45,11 +44,15 @@ enum MainCommands {
         name: Option<String>,
         #[arg(short, long)]
         email: Option<String>,
+        #[arg(short, long)]
+        password: Option<String>,
     },
     /// Login to the server
     Login {
         #[arg(short, long)]
         username: Option<String>,
+        #[arg(short, long)]
+        password: Option<String>,
     },
     /// Logout from the server
     Logout,
@@ -128,152 +131,108 @@ pub async fn run_cli() -> std::io::Result<()> {
         MainCommands::Config { key, value } => {
             set_get_value_from_string(key, value, false)
                 .map_err(|_| {
-                    exit(1);
+                    std::process::exit(1);
                 })
                 .unwrap();
         }
 
         MainCommands::Status => {
-            let config = load_config();
-            let server_url = set_get_value(ConfigKey::Server, None, true);
-            let auth_token = set_get_value(ConfigKey::AuthToken, None, true);
-
-            if server_url.is_none() {
-                out.err(
-                    ExitKind::Usage,
-                    "Server URL is not set. Use `gradient config server <url>` to set it.",
-                );
+            let client = client_from_config(out);
+            match client.health().await {
+                Ok(msg) => {
+                    out.ok(&serde_json::json!({"status": "online", "server": msg}));
+                    out.human("Server Online.");
+                }
+                Err(e) => out.err(to_exit_kind(&e), e),
             }
-
-            if auth_token.is_none() {
-                out.err(ExitKind::Unauthorized, "Not logged in. Use `gradient login` to log in.");
-            }
-
-            health(get_request_config(config).unwrap())
-                .await
-                .map_err(|e| {
-                    eprintln!("{}", e);
-                    exit(1);
-                })
-                .unwrap();
-
-            out.human("Server Online.");
         }
 
-        MainCommands::Register {
-            username,
-            name,
-            email,
-        } => {
-            let server_url = set_get_value(ConfigKey::Server, None, true);
+        MainCommands::Register { username, name, email, password } => {
+            if out.is_json() && password.is_none() {
+                out.err(ExitKind::Usage, "missing argument: --password");
+            }
 
-            if server_url.is_none() {};
+            let server_url = set_get_value(ConfigKey::Server, None, true);
+            if server_url.is_none() {
+                out.err(ExitKind::Usage, "Server URL not set. Use `gradient config server <url>`.");
+            }
 
             let input_fields = [("Username", username), ("Name", name), ("Email", email)]
                 .iter()
                 .map(|(k, v)| (k.to_string(), v.clone()))
                 .collect();
-
             let input = handle_input(input_fields, true);
 
-            let password = ask_for_password();
+            let pw = password.unwrap_or_else(ask_for_password);
 
-            let res = auth::post_basic_register(
-                get_request_config(load_config()).unwrap(),
-                input.get("Username").unwrap().clone(),
-                input.get("Name").unwrap().clone(),
-                input.get("Email").unwrap().clone(),
-                password,
-            )
-            .await
-            .map_err(|e| {
-                eprintln!("{}", e);
-                exit(1);
-            })
-            .unwrap();
-
-            if res.error {
-                eprintln!("Registration failed: {}", res.message);
-                exit(1);
+            let client = client_from_config(out);
+            match client.auth().register(MakeUserRequest {
+                username: input.get("Username").unwrap().clone(),
+                name: input.get("Name").unwrap().clone(),
+                email: input.get("Email").unwrap().clone(),
+                password: pw,
+            }).await {
+                Ok(_) => {
+                    out.ok(&serde_json::json!({"registered": true}));
+                    out.human("Registration successful. Please log in.");
+                }
+                Err(e) => out.err(to_exit_kind(&e), e),
             }
-
-            out.human("Registration successful. Please log in.");
         }
 
-        MainCommands::Login { username } => {
-            let server_url = set_get_value(ConfigKey::Server, None, true);
-
-            if server_url.is_none() {
-                set_get_value(ConfigKey::Server, Some(ask_for_input("Server URL: ")), true)
-                    .unwrap();
-            };
-
-            let username = if let Some(username) = username {
-                username
-            } else {
-                ask_for_input("Username")
-            };
-
-            let password = ask_for_password();
-
-            let res = auth::post_basic_login(
-                get_request_config(load_config()).unwrap(),
-                username,
-                password,
-            )
-            .await
-            .map_err(|e| {
-                eprintln!("{}", e);
-                exit(1);
-            })
-            .unwrap();
-
-            if res.error {
-                eprintln!("Login failed: {}", res.message);
-                exit(1);
+        MainCommands::Login { username, password } => {
+            if out.is_json() && password.is_none() {
+                out.err(ExitKind::Usage, "missing argument: --password");
             }
 
-            set_get_value(ConfigKey::AuthToken, Some(res.message), true).unwrap();
+            let server_url = set_get_value(ConfigKey::Server, None, true);
+            if server_url.is_none() {
+                set_get_value(ConfigKey::Server, Some(ask_for_input("Server URL")), true).unwrap();
+            }
+
+            let username = username.unwrap_or_else(|| ask_for_input("Username"));
+            let pw = password.unwrap_or_else(ask_for_password);
+
+            let client = client_from_config(out);
+            match client.auth().basic_login(MakeLoginRequest {
+                loginname: username,
+                password: pw,
+            }).await {
+                Ok(token) => {
+                    set_get_value(ConfigKey::AuthToken, Some(token), true).unwrap();
+                    out.ok(&serde_json::json!({"logged_in": true}));
+                    out.human("Logged in.");
+                }
+                Err(e) => out.err(to_exit_kind(&e), e),
+            }
         }
 
         MainCommands::Info => {
-            let res = user::get(get_request_config(load_config()).unwrap())
-                .await
-                .map_err(|e| {
-                    eprintln!("{}", e);
-                    exit(1);
-                })
-                .unwrap();
-
-            if res.error {
-                eprintln!("Failed to get user info.");
-                exit(1);
+            let client = client_from_config(out);
+            match client.user().get().await {
+                Ok(user) => {
+                    out.ok(&user);
+                    out.human(format!("User ID: {}", user.id));
+                    out.human(format!("Username: {}", user.username));
+                    out.human(format!("Name: {}", user.name));
+                    out.human(format!("Email: {}", user.email));
+                }
+                Err(e) => out.err(to_exit_kind(&e), e),
             }
-
-            out.human(format!("User ID: {}", res.message.id));
-            out.human(format!("Username: {}", res.message.username));
-            out.human(format!("Name: {}", res.message.name));
-            out.human(format!("Email: {}", res.message.email));
         }
 
         MainCommands::Logout => {
             set_get_value(ConfigKey::AuthToken, Some(String::new()), true).unwrap();
+            out.ok(&serde_json::json!({"logged_out": true}));
             out.human("Logged out.");
         }
 
-        MainCommands::Build {
-            target,
-            system,
-            organization,
-            no_stream,
-            quiet,
-        } => build::handle_build(target, system, organization, no_stream, quiet, out).await,
-        MainCommands::Download {
-            evaluation,
-            project,
-            products,
-            out: out_dir,
-        } => download::handle_download(evaluation, project, products, out_dir, out).await,
+        MainCommands::Build { target, system, organization, no_stream, quiet } => {
+            build::handle_build(target, system, organization, no_stream, quiet, out).await
+        }
+        MainCommands::Download { evaluation, project, products, out: out_dir } => {
+            download::handle_download(evaluation, project, products, out_dir, out).await
+        }
         MainCommands::Organization { cmd } => organization::handle(cmd, out).await,
         MainCommands::Project { cmd } => project::handle(cmd, out).await,
         MainCommands::Worker { cmd } => worker::handle(cmd, out).await,
@@ -289,5 +248,5 @@ pub async fn run_cli() -> std::io::Result<()> {
         }
     }
 
-    exit(0);
+    std::process::exit(0);
 }
