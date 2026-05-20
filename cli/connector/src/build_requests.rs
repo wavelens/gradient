@@ -1,11 +1,5 @@
-/*
- * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
- *
- * SPDX-License-Identifier: AGPL-3.0-only
- */
-
-use crate::*;
-use reqwest::multipart::{Form, Part};
+use crate::{Client, ConnectorError, http};
+use reqwest::Method;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -15,25 +9,19 @@ pub struct ManifestFile {
     pub size: i64,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct ManifestRequest {
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct BuildManifestRequest {
     pub organization: String,
     pub files: Vec<ManifestFile>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct ManifestResponse {
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct BuildSession {
     pub session: String,
     pub missing: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct BlobsResponse {
-    pub uploaded: usize,
-    pub remaining: usize,
-}
-
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct DispatchRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
@@ -41,132 +29,31 @@ pub struct DispatchRequest {
     pub system: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct DispatchResponse {
     pub evaluation: String,
     pub project: String,
     pub commit: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct ArtefactTree {
-    pub evaluation: String,
-    pub created_at: String,
-    pub entry_points: Vec<EntryPointArtefacts>,
-}
+pub struct BuildRequestsApi<'a>(pub(crate) &'a Client);
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct EntryPointArtefacts {
-    pub attr: String,
-    pub derivation: String,
-    pub build_id: String,
-    pub outputs: Vec<OutputArtefacts>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct OutputArtefacts {
-    pub name: String,
-    pub store_path: String,
-    pub products: Vec<ProductArtefact>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct ProductArtefact {
-    pub id: String,
-    #[serde(rename = "type")]
-    pub file_type: String,
-    pub subtype: String,
-    pub name: String,
-    pub path: String,
-    pub size: Option<i64>,
-}
-
-pub async fn post_manifest(
-    config: RequestConfig,
-    body: ManifestRequest,
-) -> Result<BaseResponse<ManifestResponse>, String> {
-    let res = get_client(
-        config,
-        "build-requests/manifest".to_string(),
-        RequestType::POST,
-        true,
-    )
-    .unwrap()
-    .json(&body)
-    .send()
-    .await
-    .map_err(|e| e.to_string())?;
-
-    Ok(parse_response(res).await)
-}
-
-pub async fn upload_blobs<I>(
-    config: RequestConfig,
-    session: String,
-    blobs: I,
-) -> Result<BaseResponse<BlobsResponse>, String>
-where
-    I: IntoIterator<Item = (String, Vec<u8>)>,
-{
-    let mut form = Form::new();
-    for (hash, bytes) in blobs {
-        let part = Part::bytes(bytes).file_name(hash.clone());
-        form = form.part(hash, part);
+impl BuildRequestsApi<'_> {
+    pub async fn submit_manifest(&self, body: BuildManifestRequest) -> Result<BuildSession, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::POST, "build-requests/manifest", true)?
+            .json(&body);
+        http::decode(req.send().await?).await
     }
 
-    let url = format!(
-        "{}/api/v1/build-requests/{}/blobs",
-        config.server_url, session
-    );
+    pub async fn upload_blobs(&self, session: &str, form: reqwest::multipart::Form) -> Result<String, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::POST, &format!("build-requests/{session}/blobs"), true)?
+            .multipart(form);
+        http::decode(req.send().await?).await
+    }
 
-    let res = http_client()
-        .post(&url)
-        .header(
-            "Authorization",
-            format!("Bearer {}", config.token.unwrap_or_default()),
-        )
-        .multipart(form)
-        .send()
-        .await
-        .map_err(|e| format!("Request failed: {}", e))?;
-
-    Ok(parse_response(res).await)
-}
-
-pub async fn dispatch_build_request(
-    config: RequestConfig,
-    session: String,
-    body: DispatchRequest,
-) -> Result<BaseResponse<DispatchResponse>, String> {
-    let res = get_client(
-        config,
-        format!("build-requests/{}/dispatch", session),
-        RequestType::POST,
-        true,
-    )
-    .unwrap()
-    .json(&body)
-    .send()
-    .await
-    .map_err(|e| e.to_string())?;
-
-    Ok(parse_response(res).await)
-}
-
-pub async fn get_eval_artefacts(
-    config: RequestConfig,
-    evaluation_id: String,
-) -> Result<BaseResponse<ArtefactTree>, String> {
-    let res = get_client(
-        config,
-        format!("evals/{}/artefacts", evaluation_id),
-        RequestType::GET,
-        true,
-    )
-    .unwrap()
-    .send()
-    .await
-    .map_err(|e| e.to_string())?;
-
-    Ok(parse_response(res).await)
+    pub async fn dispatch(&self, session: &str, body: DispatchRequest) -> Result<DispatchResponse, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::POST, &format!("build-requests/{session}/dispatch"), true)?
+            .json(&body);
+        http::decode(req.send().await?).await
+    }
 }
