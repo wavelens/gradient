@@ -5,11 +5,10 @@
  */
 
 use crate::config::*;
-use crate::input::*;
-use crate::output::{ExitKind, Output};
+use crate::input::{client_from_config, handle_input};
+use crate::output::{ExitKind, Output, to_exit_kind};
 use clap::Subcommand;
-use connector::*;
-use std::process::exit;
+use connector::orgs::{AddUserRequest, MakeOrganizationRequest, PatchOrganizationRequest, RemoveUserRequest};
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
@@ -76,11 +75,7 @@ pub async fn handle(cmd: Commands, out: Output) {
             out.human("Organization selected.");
         }
 
-        Commands::Create {
-            name,
-            display_name,
-            description,
-        } => {
+        Commands::Create { name, display_name, description } => {
             let input_fields = [
                 ("Name", name),
                 ("Display Name", display_name),
@@ -93,109 +88,71 @@ pub async fn handle(cmd: Commands, out: Output) {
             let input = handle_input(input_fields, true);
             let name = input.get("Name").unwrap().clone();
 
-            let res = orgs::put(
-                get_request_config(load_config()).unwrap(),
-                name.clone(),
-                input.get("Display Name").unwrap().clone(),
-                input.get("Description").unwrap().clone(),
-            )
-            .await
-            .map_err(|e| {
-                out.progress(format!("{}", e));
-                exit(1);
-            })
-            .unwrap();
-
-            if res.error {
-                out.progress(format!("Organization creation failed: {}", res.message));
-                exit(1);
+            let client = client_from_config(out);
+            match client.orgs().create(MakeOrganizationRequest {
+                name: name.clone(),
+                display_name: input.get("Display Name").unwrap().clone(),
+                description: input.get("Description").unwrap().clone(),
+            }).await {
+                Ok(_) => {
+                    set_get_value(ConfigKey::SelectedOrganization, Some(name), true);
+                    out.ok(&serde_json::json!({"created": true}));
+                    out.human("Organization created.");
+                }
+                Err(e) => out.err(to_exit_kind(&e), e),
             }
-
-            set_get_value(ConfigKey::SelectedOrganization, Some(name), true);
-            out.human("Organization created.");
         }
 
         Commands::Show => {
             let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
                 Some(id) => id,
-                None => {
-                    out.err(ExitKind::Usage, "Organization is required for command.");
-                }
+                None => out.err(ExitKind::Usage, "Organization is required for command."),
             };
 
-            let res =
-                orgs::get_organization(get_request_config(load_config()).unwrap(), organization)
-                    .await
-                    .map_err(|e| {
-                        out.progress(format!("{}", e));
-                        exit(1);
-                    })
-                    .unwrap();
-
-            if res.error {
-                out.err(ExitKind::Api, "Failed to show organization.");
+            let client = client_from_config(out);
+            match client.orgs().get(&organization).await {
+                Ok(org) => {
+                    out.ok(&org);
+                    out.human(format!("Name: {}", org.name));
+                    out.human(format!("Description: {}", org.description));
+                }
+                Err(e) => out.err(to_exit_kind(&e), e),
             }
-
-            out.human(format!("Name: {}", res.message.name));
-            out.human(format!("Description: {}", res.message.description));
         }
 
         Commands::List => {
-            let res = orgs::get(get_request_config(load_config()).unwrap())
-                .await
-                .map_err(|e| {
-                    out.progress(format!("{}", e));
-                    exit(1);
-                })
-                .unwrap();
-
-            if res.error {
-                out.err(ExitKind::Api, "Failed to list organizations");
-            }
-
-            if res.message.items.is_empty() {
-                out.human("You have no organizations.");
-            } else {
-                for org in res.message.items {
-                    out.human(format!("{}: {}", org.name, org.id));
+            let client = client_from_config(out);
+            match client.orgs().list().await {
+                Ok(res) => {
+                    out.ok(&res);
+                    if res.items.is_empty() {
+                        out.human("You have no organizations.");
+                    } else {
+                        for org in res.items {
+                            out.human(format!("{}: {}", org.name, org.id));
+                        }
+                    }
                 }
+                Err(e) => out.err(to_exit_kind(&e), e),
             }
         }
 
-        Commands::Edit {
-            new_name,
-            display_name,
-            description,
-        } => {
+        Commands::Edit { new_name, display_name, description } => {
             let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
                 Some(id) => id,
-                None => {
-                    out.err(ExitKind::Usage, "Organization is required for command.");
-                }
+                None => out.err(ExitKind::Usage, "Organization is required for command."),
             };
 
-            let current_organization = orgs::get_organization(
-                get_request_config(load_config()).unwrap(),
-                organization.clone(),
-            )
-            .await
-            .map_err(|e| {
-                out.progress(format!("{}", e));
-                exit(1);
-            })
-            .unwrap()
-            .message;
+            let client = client_from_config(out);
+            let current = match client.orgs().get(&organization).await {
+                Ok(o) => o,
+                Err(e) => out.err(to_exit_kind(&e), e),
+            };
 
             let input_fields = [
-                ("Name", Some(new_name.unwrap_or(current_organization.name))),
-                (
-                    "Display Name",
-                    Some(display_name.unwrap_or(current_organization.display_name)),
-                ),
-                (
-                    "Description",
-                    Some(description.unwrap_or(current_organization.description)),
-                ),
+                ("Name", Some(new_name.unwrap_or(current.name))),
+                ("Display Name", Some(display_name.unwrap_or(current.display_name))),
+                ("Description", Some(description.unwrap_or(current.description))),
             ]
             .iter()
             .map(|(k, v)| (k.to_string(), v.clone()))
@@ -203,132 +160,85 @@ pub async fn handle(cmd: Commands, out: Output) {
 
             let input = handle_input(input_fields, true);
 
-            let res = orgs::patch_organization(
-                get_request_config(load_config()).unwrap(),
-                organization,
-                input.get("Name").cloned(),
-                input.get("Display Name").cloned(),
-                input.get("Description").cloned(),
-            )
-            .await
-            .map_err(|e| {
-                out.progress(format!("{}", e));
-                exit(1);
-            })
-            .unwrap();
-
-            if res.error {
-                out.err(ExitKind::Api, format!("Organization update failed: {}", res.message));
+            match client.orgs().update(&organization, PatchOrganizationRequest {
+                name: input.get("Name").cloned(),
+                display_name: input.get("Display Name").cloned(),
+                description: input.get("Description").cloned(),
+            }).await {
+                Ok(_) => {
+                    out.ok(&serde_json::json!({"updated": true}));
+                    out.human("Organization updated.");
+                }
+                Err(e) => out.err(to_exit_kind(&e), e),
             }
-
-            out.human("Organization updated.");
         }
 
         Commands::Delete => {
             let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
                 Some(id) => id,
-                None => {
-                    out.err(ExitKind::Usage, "Organization is required for command.");
-                }
+                None => out.err(ExitKind::Usage, "Organization is required for command."),
             };
 
-            let res =
-                orgs::delete_organization(get_request_config(load_config()).unwrap(), organization)
-                    .await
-                    .map_err(|e| {
-                        out.progress(format!("{}", e));
-                        exit(1);
-                    })
-                    .unwrap();
-
-            if res.error {
-                out.err(ExitKind::Api, format!("Failed to delete organization: {}", res.message));
+            let client = client_from_config(out);
+            match client.orgs().delete(&organization).await {
+                Ok(_) => {
+                    out.ok(&serde_json::json!({"deleted": true}));
+                    out.human("Organization deleted.");
+                }
+                Err(e) => out.err(to_exit_kind(&e), e),
             }
-
-            out.human("Organization deleted.");
         }
 
         Commands::User { cmd } => {
             let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
                 Some(id) => id,
-                None => {
-                    out.err(ExitKind::Usage, "Organization is required for command.");
-                }
+                None => out.err(ExitKind::Usage, "Organization is required for command."),
             };
+
+            let client = client_from_config(out);
 
             match cmd {
                 UserCommands::List => {
-                    let res = orgs::get_organization_users(
-                        get_request_config(load_config()).unwrap(),
-                        organization,
-                    )
-                    .await
-                    .map_err(|e| {
-                        out.progress(format!("{}", e));
-                        exit(1);
-                    })
-                    .unwrap();
-
-                    if res.error {
-                        out.err(ExitKind::Api, "Failed to list users");
-                    }
-
-                    if res.message.is_empty() {
-                        out.human("You have no users.");
-                    } else {
-                        for user in res.message {
-                            out.human(format!("{}: {}", user.name, user.id));
+                    match client.orgs().users(&organization).await {
+                        Ok(users) => {
+                            out.ok(&users);
+                            if users.is_empty() {
+                                out.human("You have no users.");
+                            } else {
+                                for user in users {
+                                    out.human(format!("{}: {}", user.name, user.id));
+                                }
+                            }
                         }
+                        Err(e) => out.err(to_exit_kind(&e), e),
                     }
                 }
 
                 UserCommands::Add { user, role } => {
-                    if role.is_some()
-                        && role.as_ref().unwrap() != "View"
-                        && role.as_ref().unwrap() != "Write"
-                        && role.as_ref().unwrap() != "Admin"
-                    {
+                    if role.as_deref().map(|r| r != "View" && r != "Write" && r != "Admin").unwrap_or(false) {
                         out.err(ExitKind::Usage, "Role must be either 'View', 'Write' or 'Admin'.");
                     }
 
-                    let res = orgs::post_organization_users(
-                        get_request_config(load_config()).unwrap(),
-                        organization,
+                    match client.orgs().add_user(&organization, AddUserRequest {
                         user,
-                        role.unwrap_or("Write".to_string()),
-                    )
-                    .await
-                    .map_err(|e| {
-                        out.progress(format!("{}", e));
-                        exit(1);
-                    })
-                    .unwrap();
-
-                    if res.error {
-                        out.err(ExitKind::Api, format!("Failed to add user: {}", res.message));
+                        role: role.unwrap_or_else(|| "Write".to_string()),
+                    }).await {
+                        Ok(_) => {
+                            out.ok(&serde_json::json!({"added": true}));
+                            out.human("User added.");
+                        }
+                        Err(e) => out.err(to_exit_kind(&e), e),
                     }
-
-                    out.human("User added.");
                 }
 
                 UserCommands::Remove { user } => {
-                    let res = orgs::delete_organization_users(
-                        get_request_config(load_config()).unwrap(),
-                        organization,
-                        user,
-                    )
-                    .await
-                    .map_err(|e| {
-                        out.progress(format!("{}", e));
-                        exit(1);
-                    })
-                    .unwrap();
-
-                    if res.error {
-                        out.err(ExitKind::Api, format!("Failed to remove user: {}", res.message));
+                    match client.orgs().remove_user(&organization, RemoveUserRequest { user }).await {
+                        Ok(_) => {
+                            out.ok(&serde_json::json!({"removed": true}));
+                            out.human("User removed.");
+                        }
+                        Err(e) => out.err(to_exit_kind(&e), e),
                     }
-
-                    out.human("User removed.");
                 }
             }
         }
@@ -336,48 +246,30 @@ pub async fn handle(cmd: Commands, out: Output) {
         Commands::Ssh { cmd } => {
             let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
                 Some(id) => id,
-                None => {
-                    out.err(ExitKind::Usage, "Organization is required for command.");
-                }
+                None => out.err(ExitKind::Usage, "Organization is required for command."),
             };
+
+            let client = client_from_config(out);
 
             match cmd {
                 SshCommands::Show => {
-                    let res = orgs::get_organization_ssh(
-                        get_request_config(load_config()).unwrap(),
-                        organization,
-                    )
-                    .await
-                    .map_err(|e| {
-                        out.progress(format!("{}", e));
-                        exit(1);
-                    })
-                    .unwrap();
-
-                    if res.error {
-                        out.err(ExitKind::Api, format!("Failed to show SSH key: {}", res.message));
+                    match client.orgs().ssh_key(&organization).await {
+                        Ok(key) => {
+                            out.ok(&serde_json::json!({"public_key": key}));
+                            out.human(format!("Public Key: {}", key));
+                        }
+                        Err(e) => out.err(to_exit_kind(&e), e),
                     }
-
-                    out.human(format!("Public Key: {}", res.message));
                 }
 
                 SshCommands::Recreate => {
-                    let res = orgs::post_organization_ssh(
-                        get_request_config(load_config()).unwrap(),
-                        organization,
-                    )
-                    .await
-                    .map_err(|e| {
-                        out.progress(format!("{}", e));
-                        exit(1);
-                    })
-                    .unwrap();
-
-                    if res.error {
-                        out.err(ExitKind::Api, format!("Failed to recreate SSH key: {}", res.message));
+                    match client.orgs().regenerate_ssh(&organization).await {
+                        Ok(key) => {
+                            out.ok(&serde_json::json!({"public_key": key}));
+                            out.human(format!("New Public Key: {}", key));
+                        }
+                        Err(e) => out.err(to_exit_kind(&e), e),
                     }
-
-                    out.human(format!("New Public Key: {}", res.message));
                 }
             }
         }
@@ -385,75 +277,46 @@ pub async fn handle(cmd: Commands, out: Output) {
         Commands::Cache { cmd } => {
             let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
                 Some(id) => id,
-                None => {
-                    out.err(ExitKind::Usage, "Organization is required for command.");
-                }
+                None => out.err(ExitKind::Usage, "Organization is required for command."),
             };
+
+            let client = client_from_config(out);
 
             match cmd {
                 CacheCommands::List => {
-                    let res = orgs::get_organization_subscribe(
-                        get_request_config(load_config()).unwrap(),
-                        organization,
-                    )
-                    .await
-                    .map_err(|e| {
-                        out.progress(format!("{}", e));
-                        exit(1);
-                    })
-                    .unwrap();
-
-                    if res.error {
-                        out.err(ExitKind::Api, "failed to list subscribed caches");
-                    }
-
-                    if res.message.is_empty() {
-                        out.human("You have no caches subscribed.");
-                    } else {
-                        for cache in res.message {
-                            out.human(format!("{}: {}", cache.name, cache.id));
+                    match client.orgs().subscriptions(&organization).await {
+                        Ok(caches) => {
+                            out.ok(&caches);
+                            if caches.is_empty() {
+                                out.human("You have no caches subscribed.");
+                            } else {
+                                for cache in caches {
+                                    out.human(format!("{}: {}", cache.name, cache.id));
+                                }
+                            }
                         }
+                        Err(e) => out.err(to_exit_kind(&e), e),
                     }
                 }
 
                 CacheCommands::Add { cache } => {
-                    let res = orgs::post_organization_subscribe_cache(
-                        get_request_config(load_config()).unwrap(),
-                        organization,
-                        cache,
-                    )
-                    .await
-                    .map_err(|e| {
-                        out.progress(format!("{}", e));
-                        exit(1);
-                    })
-                    .unwrap();
-
-                    if res.error {
-                        out.err(ExitKind::Api, format!("Failed to subscribe to cache: {}", res.message));
+                    match client.orgs().subscribe(&organization, &cache).await {
+                        Ok(_) => {
+                            out.ok(&serde_json::json!({"subscribed": true}));
+                            out.human("Subscribed to cache.");
+                        }
+                        Err(e) => out.err(to_exit_kind(&e), e),
                     }
-
-                    out.human("Subscribed to cache.");
                 }
 
                 CacheCommands::Remove { cache } => {
-                    let res = orgs::delete_organization_subscribe_cache(
-                        get_request_config(load_config()).unwrap(),
-                        organization,
-                        cache,
-                    )
-                    .await
-                    .map_err(|e| {
-                        out.progress(format!("{}", e));
-                        exit(1);
-                    })
-                    .unwrap();
-
-                    if res.error {
-                        out.err(ExitKind::Api, format!("Failed to unsubscribe from cache: {}", res.message));
+                    match client.orgs().unsubscribe(&organization, &cache).await {
+                        Ok(_) => {
+                            out.ok(&serde_json::json!({"unsubscribed": true}));
+                            out.human("Unsubscribed from cache.");
+                        }
+                        Err(e) => out.err(to_exit_kind(&e), e),
                     }
-
-                    out.human("Unsubscribed from cache.");
                 }
             }
         }
