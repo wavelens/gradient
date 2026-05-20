@@ -7,6 +7,7 @@ pub mod builds;
 pub mod caches;
 pub mod commits;
 pub mod evals;
+pub mod integrations;
 pub mod orgs;
 pub mod projects;
 pub mod server;
@@ -44,6 +45,7 @@ impl Client {
     pub fn caches(&self) -> caches::CachesApi<'_> { caches::CachesApi(self) }
     pub fn commits(&self) -> commits::CommitsApi<'_> { commits::CommitsApi(self) }
     pub fn evals(&self) -> evals::EvalsApi<'_> { evals::EvalsApi(self) }
+    pub fn integrations(&self) -> integrations::IntegrationsApi<'_> { integrations::IntegrationsApi(self) }
     pub fn orgs(&self) -> orgs::OrgsApi<'_> { orgs::OrgsApi(self) }
     pub fn projects(&self) -> projects::ProjectsApi<'_> { projects::ProjectsApi(self) }
     pub fn server(&self) -> server::ServerApi<'_> { server::ServerApi(self) }
