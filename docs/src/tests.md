@@ -2386,6 +2386,12 @@ The `cli/connector` crate has wiremock-backed unit tests covering each sub-API
 Each file covers: happy path, server `{error: true}` envelope (→ `ConnectorError::Api`),
 401 (→ `Unauthorized`), and transport failure.
 
+`cli/connector/tests/client.rs::builder_succeeds_without_system_certs`
+guards the rustls + `webpki-roots` setup: `Client::builder().build()` must
+succeed in sandboxed environments without `/etc/ssl/certs` (Nix sandbox,
+minimal containers) by serving the Mozilla CA bundle from the binary
+instead of `rustls-platform-verifier`'s system trust-store load.
+
 CLI integration tests in `cli/tests/`:
 
 - `download_attr.rs` — `gradient download '#attr' --json` writes the right files; `--json` without args returns a structured missing-argument envelope and exits 2.

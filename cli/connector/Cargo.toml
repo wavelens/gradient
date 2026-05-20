@@ -15,8 +15,10 @@ bytes = "1"
 futures = "0.3"
 reqwest = { version = "0.13", features = ["json", "multipart"] }
 reqwest-streams = { version = "0.16", features=["json"] }
+rustls = { version = "0.23", default-features = false, features = ["std", "aws-lc-rs", "tls12"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+webpki-roots = { version = "1.0", default-features = false }
 
 [dev-dependencies]
 wiremock = "0.6"

@@ -91,16 +91,30 @@ impl ClientBuilder {
         self
     }
 
-    pub fn build(self) -> Result<Client, &'static str> {
-        let base_url = self.base_url.ok_or("base_url is required")?;
+    pub fn build(self) -> Result<Client, String> {
+        let base_url = self.base_url.ok_or_else(|| "base_url is required".to_string())?;
         let http = reqwest::Client::builder()
             .timeout(self.timeout.unwrap_or(Duration::from_secs(30)))
             .redirect(reqwest::redirect::Policy::none())
             .user_agent(concat!("gradient-cli/", env!("CARGO_PKG_VERSION")))
+            .use_preconfigured_tls(rustls_config())
             .build()
-            .map_err(|_| "failed to build HTTP client")?;
+            .map_err(|e| format!("failed to build HTTP client: {e}"))?;
         Ok(Client { inner: Arc::new(ClientInner { http, base_url, token: self.token }) })
     }
+}
+
+fn init_crypto_provider() {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+}
+
+fn rustls_config() -> rustls::ClientConfig {
+    init_crypto_provider();
+    let mut roots = rustls::RootCertStore::empty();
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    rustls::ClientConfig::builder()
+        .with_root_certificates(roots)
+        .with_no_client_auth()
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

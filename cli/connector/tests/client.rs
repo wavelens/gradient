@@ -8,6 +8,18 @@ async fn builder_requires_base_url() {
     assert!(res.is_err());
 }
 
+// Regression: `Client::builder().build()` must succeed without reading
+// platform CA certs. Mozilla roots are baked in via `webpki-roots`, so the
+// CLI works in Nix sandboxes and minimal containers that have no
+// `/etc/ssl/certs`.
+#[tokio::test]
+async fn builder_succeeds_without_system_certs() {
+    Client::builder()
+        .base_url("http://localhost")
+        .build()
+        .expect("client builds with bundled TLS roots");
+}
+
 #[tokio::test]
 async fn health_succeeds_without_token() {
     let server = MockServer::start().await;
