@@ -196,6 +196,36 @@ fn parse_selection_spec(spec: &str, total: usize) -> Result<Vec<usize>, String> 
     Ok(out.into_iter().collect())
 }
 
+fn select_by_attrs(flat: &[FlatProduct<'_>], attrs: &[String]) -> Result<Vec<usize>, String> {
+    let mut out = Vec::new();
+    let mut unmatched = Vec::new();
+    for want in attrs {
+        let mut found = false;
+        for (i, p) in flat.iter().enumerate() {
+            if p.attr == want {
+                if !out.contains(&i) {
+                    out.push(i);
+                }
+                found = true;
+            }
+        }
+        if !found {
+            unmatched.push(want.clone());
+        }
+    }
+    if !unmatched.is_empty() {
+        let mut available: Vec<&str> = flat.iter().map(|p| p.attr).collect();
+        available.sort();
+        available.dedup();
+        return Err(format!(
+            "attr not found in evaluation: {}; available: {}",
+            unmatched.join(", "),
+            available.join(", "),
+        ));
+    }
+    Ok(out)
+}
+
 fn human_size(bytes: i64) -> String {
     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
     let mut value = bytes as f64;
@@ -252,4 +282,81 @@ fn resolve_project(arg: Option<&str>, out: Output) -> (String, String) {
         ExitKind::Usage,
         "No project selected. Pass --project <name> or run 'gradient project select <name>' first.",
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use connector::evals::{ArtefactTree, EntryPointArtefacts, OutputArtefacts, ProductArtefact};
+
+    fn make_tree() -> ArtefactTree {
+        ArtefactTree {
+            evaluation: "eval-1".into(),
+            created_at: "2026-01-01T00:00:00Z".into(),
+            entry_points: vec![
+                EntryPointArtefacts {
+                    attr: "packages.x86_64-linux.my-app".into(),
+                    derivation: "/nix/store/a.drv".into(),
+                    build_id: "b1".into(),
+                    outputs: vec![OutputArtefacts {
+                        name: "out".into(),
+                        store_path: "/nix/store/a".into(),
+                        products: vec![ProductArtefact {
+                            id: "p1".into(),
+                            file_type: "file".into(),
+                            subtype: "".into(),
+                            name: "default".into(),
+                            path: "/p/my-app-1.0.tar.gz".into(),
+                            size: Some(1024),
+                        }],
+                    }],
+                },
+                EntryPointArtefacts {
+                    attr: "packages.x86_64-linux.cli".into(),
+                    derivation: "/nix/store/b.drv".into(),
+                    build_id: "b2".into(),
+                    outputs: vec![OutputArtefacts {
+                        name: "out".into(),
+                        store_path: "/nix/store/b".into(),
+                        products: vec![ProductArtefact {
+                            id: "p2".into(),
+                            file_type: "file".into(),
+                            subtype: "".into(),
+                            name: "default".into(),
+                            path: "/p/cli-2.tgz".into(),
+                            size: None,
+                        }],
+                    }],
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn select_single_attr() {
+        let tree = make_tree();
+        let flat = flatten_products(&tree);
+        let sel = select_by_attrs(&flat, &["packages.x86_64-linux.my-app".to_string()]).unwrap();
+        assert_eq!(sel, vec![0]);
+    }
+
+    #[test]
+    fn select_multiple_attrs() {
+        let tree = make_tree();
+        let flat = flatten_products(&tree);
+        let sel = select_by_attrs(&flat, &[
+            "packages.x86_64-linux.my-app".to_string(),
+            "packages.x86_64-linux.cli".to_string(),
+        ]).unwrap();
+        assert_eq!(sel, vec![0, 1]);
+    }
+
+    #[test]
+    fn select_no_match_lists_available() {
+        let tree = make_tree();
+        let flat = flatten_products(&tree);
+        let err = select_by_attrs(&flat, &["nope".to_string()]).unwrap_err();
+        assert!(err.contains("packages.x86_64-linux.my-app"));
+        assert!(err.contains("packages.x86_64-linux.cli"));
+    }
 }
