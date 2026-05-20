@@ -1,6 +1,7 @@
 pub mod error;
 pub use error::ConnectorError;
 
+pub mod admin;
 pub mod auth;
 pub mod build_requests;
 pub mod builds;
@@ -39,6 +40,7 @@ impl Client {
     pub(crate) fn base_url(&self) -> &str { &self.inner.base_url }
     pub(crate) fn token(&self) -> Option<&str> { self.inner.token.as_deref() }
 
+    pub fn admin(&self) -> admin::AdminApi<'_> { admin::AdminApi(self) }
     pub fn auth(&self) -> auth::AuthApi<'_> { auth::AuthApi(self) }
     pub fn build_requests(&self) -> build_requests::BuildRequestsApi<'_> { build_requests::BuildRequestsApi(self) }
     pub fn builds(&self) -> builds::BuildsApi<'_> { builds::BuildsApi(self) }
