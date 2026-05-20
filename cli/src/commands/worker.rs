@@ -5,11 +5,10 @@
  */
 
 use crate::config::*;
-use crate::input::get_request_config;
-use crate::output::{ExitKind, Output};
+use crate::input::client_from_config;
+use crate::output::{ExitKind, Output, to_exit_kind};
 use clap::Subcommand;
-use connector::*;
-use std::process::exit;
+use connector::workers::MakeWorkerRequest;
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
@@ -39,120 +38,90 @@ pub enum Commands {
 
 pub async fn handle(cmd: Commands, out: Output) {
     match cmd {
-        Commands::Register {
-            worker_id,
-            display_name,
-            url,
-            token,
-        } => {
+        Commands::Register { worker_id, display_name, url, token } => {
             let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
                 Some(id) => id,
-                _ => {
-                    out.err(
-                        ExitKind::Usage,
-                        "Organization is required. Use `gradient organization select <name>`.",
-                    );
-                }
+                _ => out.err(
+                    ExitKind::Usage,
+                    "Organization is required. Use `gradient organization select <name>`.",
+                ),
             };
 
             let token_provided = token.is_some();
+            let client = client_from_config(out);
 
-            let res = workers::post_org_worker(
-                get_request_config(load_config()).unwrap(),
-                organization,
+            match client.workers().create(&organization, MakeWorkerRequest {
                 worker_id,
                 display_name,
                 url,
                 token,
-            )
-            .await
-            .map_err(|e| {
-                out.progress(format!("{}", e));
-                exit(1);
-            })
-            .unwrap();
-
-            if res.error {
-                out.err(ExitKind::Api, "Worker registration failed");
-            }
-
-            out.human("Worker registered.");
-            out.human(format!("Peer ID:  {}", res.message.peer_id));
-            if let Some(token) = res.message.token {
-                out.human(format!("Token:    {}", token));
-                out.human("");
-                out.human("Store the token securely — it cannot be retrieved again.");
-            } else if token_provided {
-                out.human("Token was pre-supplied; not echoed back.");
+                enable_fetch: None,
+                enable_eval: None,
+                enable_build: None,
+            }).await {
+                Ok(resp) => {
+                    out.ok(&resp);
+                    out.human("Worker registered.");
+                    out.human(format!("Peer ID:  {}", resp.peer_id));
+                    if let Some(tok) = resp.token {
+                        out.human(format!("Token:    {}", tok));
+                        out.human("");
+                        out.human("Store the token securely — it cannot be retrieved again.");
+                    } else if token_provided {
+                        out.human("Token was pre-supplied; not echoed back.");
+                    }
+                }
+                Err(e) => out.err(to_exit_kind(&e), e),
             }
         }
 
         Commands::List => {
             let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
                 Some(id) => id,
-                _ => {
-                    out.err(
-                        ExitKind::Usage,
-                        "Organization is required. Use `gradient organization select <name>`.",
-                    );
-                }
+                _ => out.err(
+                    ExitKind::Usage,
+                    "Organization is required. Use `gradient organization select <name>`.",
+                ),
             };
 
-            let res =
-                workers::get_org_workers(get_request_config(load_config()).unwrap(), organization)
-                    .await
-                    .map_err(|e| {
-                        out.progress(format!("{}", e));
-                        exit(1);
-                    })
-                    .unwrap();
-
-            if res.error {
-                out.err(ExitKind::Api, "Failed to list workers");
-            }
-
-            if res.message.is_empty() {
-                out.human("No workers registered.");
-            } else {
-                for w in res.message {
-                    let status = if w.live.is_some() { "online" } else { "offline" };
-                    let url_part = w.url.map(|u| format!(" (url: {})", u)).unwrap_or_default();
-                    out.human(format!(
-                        "{} \"{}\": {} [{}]{}",
-                        w.worker_id, w.display_name, w.registered_at, status, url_part
-                    ));
+            let client = client_from_config(out);
+            match client.workers().list(&organization).await {
+                Ok(workers) => {
+                    out.ok(&workers);
+                    if workers.is_empty() {
+                        out.human("No workers registered.");
+                    } else {
+                        for w in workers {
+                            let status = if w.live.is_some() { "online" } else { "offline" };
+                            let url_part = w.url.map(|u| format!(" (url: {})", u)).unwrap_or_default();
+                            out.human(format!(
+                                "{} \"{}\": {} [{}]{}",
+                                w.worker_id, w.display_name, w.registered_at, status, url_part
+                            ));
+                        }
+                    }
                 }
+                Err(e) => out.err(to_exit_kind(&e), e),
             }
         }
 
         Commands::Delete { worker_id } => {
             let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
                 Some(id) => id,
-                _ => {
-                    out.err(
-                        ExitKind::Usage,
-                        "Organization is required. Use `gradient organization select <name>`.",
-                    );
-                }
+                _ => out.err(
+                    ExitKind::Usage,
+                    "Organization is required. Use `gradient organization select <name>`.",
+                ),
             };
 
-            let res = workers::delete_org_worker(
-                get_request_config(load_config()).unwrap(),
-                organization,
-                worker_id,
-            )
-            .await
-            .map_err(|e| {
-                out.progress(format!("{}", e));
-                exit(1);
-            })
-            .unwrap();
-
-            if res.error {
-                out.err(ExitKind::Api, "Worker deletion failed");
+            let client = client_from_config(out);
+            match client.workers().delete(&organization, &worker_id).await {
+                Ok(_) => {
+                    out.ok(&serde_json::json!({"deleted": true}));
+                    out.human("Worker unregistered.");
+                }
+                Err(e) => out.err(to_exit_kind(&e), e),
             }
-
-            out.human("Worker unregistered.");
         }
     }
 }
