@@ -2331,3 +2331,16 @@ crashed prior worker.
 - `create_symlink_idempotent_skips_existing` — re-adding a root for an
   existing symlink is a no-op (handles cross-build re-entry without
   clobbering the daemon's existing root).
+
+## Connector + CLI JSON
+
+The `cli/connector` crate has wiremock-backed unit tests covering each sub-API
+(`cli/connector/tests/{auth,user,orgs,projects,evals,builds,build_requests,caches,commits,workers,webhooks,integrations,admin,server}_api.rs`).
+Each file covers: happy path, server `{error: true}` envelope (→ `ConnectorError::Api`),
+401 (→ `Unauthorized`), and transport failure.
+
+CLI integration tests in `cli/tests/`:
+
+- `download_attr.rs` — `gradient download '#attr' --json` writes the right files; `--json` without args returns a structured missing-argument envelope and exits 2.
+
+Run a single connector test file with `cargo test -p connector --test <name>`; CI runs the full suite.
