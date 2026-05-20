@@ -1,178 +1,101 @@
-/*
- * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
- *
- * SPDX-License-Identifier: AGPL-3.0-only
- */
-
-use crate::*;
-use futures::stream::StreamExt;
+use crate::{Client, ConnectorError, http};
+use futures::stream::{Stream, StreamExt};
+use reqwest::Method;
 use reqwest_streams::JsonStreamResponse;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct BuildResponse {
     pub id: String,
     pub evaluation: String,
     pub status: String,
     pub derivation_path: String,
     pub architecture: String,
-    pub server: Option<String>,
-    pub output: std::collections::HashMap<String, String>,
+    pub worker: Option<String>,
+    pub output: HashMap<String, String>,
     pub created_at: String,
     pub updated_at: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct BuildProduct {
-    pub file_type: String,
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct BuildGraph {
+    pub root: String,
+    pub nodes: Vec<serde_json::Value>,
+    pub edges: Vec<serde_json::Value>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct BuildDependency {
+    pub id: String,
     pub name: String,
     pub path: String,
+    pub status: String,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
-pub async fn get_build(
-    config: RequestConfig,
-    build_id: String,
-) -> Result<BaseResponse<BuildResponse>, String> {
-    let res = get_client(
-        config,
-        format!("builds/{}", build_id),
-        RequestType::GET,
-        true,
-    )
-    .unwrap()
-    .send()
-    .await
-    .unwrap();
-
-    Ok(parse_response(res).await)
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct BuildDownload {
+    pub file_type: String,
+    pub subtype: String,
+    pub name: String,
+    pub path: String,
+    pub size: Option<i64>,
 }
 
-pub async fn post_build(config: RequestConfig, build_id: String) -> Result<(), String> {
-    let mut stream = get_client(
-        config,
-        format!("builds/{}", build_id),
-        RequestType::POST,
-        true,
-    )
-    .unwrap()
-    .send()
-    .await
-    .unwrap()
-    .json_nl_stream::<String>(1024000);
+pub struct BuildsApi<'a>(pub(crate) &'a Client);
 
-    while let Some(chunk) = stream.next().await {
-        match chunk {
-            Ok(chunk) => print!("{}", chunk),
-            Err(e) => return Err(e.to_string()),
+impl BuildsApi<'_> {
+    pub async fn get(&self, id: &str) -> Result<BuildResponse, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("builds/{id}"), true)?;
+        http::decode(req.send().await?).await
+    }
+
+    pub async fn log_stream(&self, id: &str) -> Result<impl Stream<Item = Result<String, ConnectorError>>, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("builds/{id}/log"), true)?;
+        let res = req.send().await?;
+        let status = res.status();
+        if !status.is_success() {
+            return Err(ConnectorError::Api { status, message: res.text().await? });
         }
+        Ok(res.json_nl_stream::<String>(1_024_000)
+            .map(|r| r.map_err(|e| ConnectorError::Api {
+                status: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+                message: e.to_string(),
+            })))
     }
 
-    Ok(())
-}
-
-pub async fn get_build_downloads(
-    config: RequestConfig,
-    build_id: String,
-) -> Result<BaseResponse<Vec<BuildProduct>>, String> {
-    let res = get_client(
-        config,
-        format!("builds/{}/downloads", build_id),
-        RequestType::GET,
-        true,
-    )
-    .unwrap()
-    .send()
-    .await
-    .unwrap();
-
-    Ok(parse_response(res).await)
-}
-
-pub async fn download_build_file(
-    config: RequestConfig,
-    build_id: String,
-    filename: String,
-) -> Result<Vec<u8>, String> {
-    let url = format!(
-        "{}/api/v1/builds/{}/download/{}",
-        config.server_url, build_id, filename
-    );
-
-    let res = crate::http_client()
-        .get(&url)
-        .header(
-            "Authorization",
-            format!("Bearer {}", config.token.unwrap_or_default()),
-        )
-        .send()
-        .await
-        .map_err(|e| format!("Request failed: {}", e))?;
-
-    if !res.status().is_success() {
-        return Err(format!("Download failed with status: {}", res.status()));
+    pub async fn graph(&self, id: &str) -> Result<BuildGraph, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("builds/{id}/graph"), true)?;
+        http::decode(req.send().await?).await
     }
 
-    res.bytes()
-        .await
-        .map_err(|e| format!("Failed to read response: {}", e))
-        .map(|b| b.to_vec())
-}
+    pub async fn dependencies(&self, id: &str) -> Result<Vec<BuildDependency>, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("builds/{id}/dependencies"), true)?;
+        http::decode(req.send().await?).await
+    }
 
-pub async fn get_evaluation_builds(
-    config: RequestConfig,
-    evaluation_id: String,
-) -> Result<BaseResponse<crate::evals::PaginatedBuilds>, String> {
-    let res = get_client(
-        config,
-        format!("evals/{}/builds", evaluation_id),
-        RequestType::GET,
-        true,
-    )
-    .unwrap()
-    .send()
-    .await
-    .unwrap();
+    pub async fn downloads(&self, id: &str) -> Result<Vec<BuildDownload>, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("builds/{id}/downloads"), true)?;
+        http::decode(req.send().await?).await
+    }
 
-    Ok(parse_response(res).await)
-}
+    pub async fn download_token(&self, id: &str) -> Result<String, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("builds/{id}/download-token"), true)?;
+        http::decode(req.send().await?).await
+    }
 
-pub async fn get_build_log(
-    config: RequestConfig,
-    build_id: String,
-) -> Result<BaseResponse<String>, String> {
-    let res = get_client(
-        config,
-        format!("builds/{}/log", build_id),
-        RequestType::GET,
-        true,
-    )
-    .unwrap()
-    .send()
-    .await
-    .unwrap();
-
-    Ok(parse_response(res).await)
-}
-
-pub async fn post_build_log(config: RequestConfig, build_id: String) -> Result<(), String> {
-    let mut stream = get_client(
-        config,
-        format!("builds/{}/log", build_id),
-        RequestType::POST,
-        true,
-    )
-    .unwrap()
-    .send()
-    .await
-    .unwrap()
-    .json_nl_stream::<String>(1024000);
-
-    while let Some(chunk) = stream.next().await {
-        match chunk {
-            Ok(chunk) => print!("{}", chunk),
-            Err(e) => return Err(e.to_string()),
+    pub async fn download_file(&self, build_id: &str, filename: &str) -> Result<bytes::Bytes, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("builds/{build_id}/download/{filename}"), true)?;
+        let res = req.send().await?;
+        let status = res.status();
+        if status == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(ConnectorError::Unauthorized);
         }
+        if !status.is_success() {
+            return Err(ConnectorError::Api { status, message: res.text().await.unwrap_or_default() });
+        }
+        Ok(res.bytes().await?)
     }
-
-    Ok(())
 }

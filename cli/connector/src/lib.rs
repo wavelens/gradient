@@ -2,6 +2,7 @@ pub mod error;
 pub use error::ConnectorError;
 
 pub mod auth;
+pub mod builds;
 pub mod evals;
 pub mod orgs;
 pub mod projects;
@@ -33,6 +34,7 @@ impl Client {
     pub(crate) fn token(&self) -> Option<&str> { self.inner.token.as_deref() }
 
     pub fn auth(&self) -> auth::AuthApi<'_> { auth::AuthApi(self) }
+    pub fn builds(&self) -> builds::BuildsApi<'_> { builds::BuildsApi(self) }
     pub fn evals(&self) -> evals::EvalsApi<'_> { evals::EvalsApi(self) }
     pub fn orgs(&self) -> orgs::OrgsApi<'_> { orgs::OrgsApi(self) }
     pub fn projects(&self) -> projects::ProjectsApi<'_> { projects::ProjectsApi(self) }
