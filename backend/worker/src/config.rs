@@ -54,6 +54,18 @@ pub struct WorkerConfig {
     #[arg(long, env = "GRADIENT_BINPATH_SSH", default_value = "ssh")]
     pub binpath_ssh: String,
 
+    /// Directory under which worker-held indirect GC roots are written.
+    /// One symlink per active build (drv + outputs) pins inputs and
+    /// outputs through the daemon while the build runs. Empty string
+    /// disables GC root pinning (build still works, but a concurrent
+    /// `nix-collect-garbage` may race the build).
+    #[arg(
+        long,
+        env = "GRADIENT_WORKER_GCROOTS_DIR",
+        default_value = "/nix/var/nix/gcroots/gradient"
+    )]
+    pub gcroots_dir: String,
+
     /// Re-exec as a Nix evaluator subprocess (internal — do not set manually).
     #[arg(long, env = "GRADIENT_EVAL_WORKER", hide = true)]
     pub eval_worker: bool,
@@ -282,6 +294,7 @@ mod tests {
             worker_id: None,
             binpath_nix: "nix".to_owned(),
             binpath_ssh: "ssh".to_owned(),
+            gcroots_dir: String::new(),
             eval_worker: false,
             eval_workers: 1,
             max_evals_per_worker: 1,
@@ -359,6 +372,7 @@ mod tests {
             worker_id: None,
             binpath_nix: "nix".to_owned(),
             binpath_ssh: "ssh".to_owned(),
+            gcroots_dir: String::new(),
             eval_worker: false,
             eval_workers: 1,
             max_evals_per_worker: 1,
@@ -420,6 +434,7 @@ mod tests {
             worker_id: None,
             binpath_nix: "nix".to_owned(),
             binpath_ssh: "ssh".to_owned(),
+            gcroots_dir: String::new(),
             eval_worker: false,
             eval_workers: 1,
             max_evals_per_worker: 1,
