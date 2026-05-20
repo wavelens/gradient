@@ -2304,3 +2304,30 @@ plain_build_returns_own_row_without_extra_query}` and
 `evaluation_builds_via_cross_org.rs` pin the new query sequence; the
 behavioural regression for the overflow is verified at code-review time
 (every `is_in(...)` site on this hot path is now chunked).
+
+## Worker indirect GC roots for active builds (#245)
+
+Concurrent `nix-collect-garbage` on a worker can otherwise delete a
+derivation's inputs (or its just-built outputs before compress+push
+uploads them). `GcRootKeeper` (`worker/src/nix/gcroots.rs`) writes one
+indirect-root symlink per active build to `GRADIENT_WORKER_GCROOTS_DIR`
+(default `/nix/var/nix/gcroots/gradient`); handles remove the symlinks on
+drop and the keeper purges the dir at startup to clean up after a
+crashed prior worker.
+
+### `gradient_worker::nix::gcroots::tests`
+
+- `disabled_keeper_purge_is_noop` — empty `gcroots_dir` skips startup
+  cleanup and never touches the filesystem.
+- `disabled_keeper_add_returns_inert_handle` — disabled keeper returns
+  a handle that owns no symlink.
+- `purge_all_removes_existing_entries_and_creates_missing_dir` —
+  startup wipes regular files and symlinks left by a prior crashed
+  worker.
+- `purge_all_creates_missing_dir` — first-run startup with no dir
+  present creates it instead of failing.
+- `drop_removes_symlink` — `GcRootHandle::Drop` releases the indirect
+  root by removing its symlink.
+- `create_symlink_idempotent_skips_existing` — re-adding a root for an
+  existing symlink is a no-op (handles cross-build re-entry without
+  clobbering the daemon's existing root).

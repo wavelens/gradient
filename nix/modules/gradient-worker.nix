@@ -205,6 +205,23 @@ in {
         default = 1;
       };
 
+      gcrootsDir = lib.mkOption {
+        description = ''
+          Directory under which the worker writes one indirect GC root
+          symlink per active build (drv + outputs). Pins inputs and
+          just-built outputs through the local nix-daemon so a concurrent
+          <literal>nix-collect-garbage</literal> cannot delete them
+          mid-build. A systemd-tmpfiles rule creates the directory under
+          the worker user and adds it to the unit's
+          <literal>ReadWritePaths</literal>.
+
+          Set to an empty string to disable GC root pinning (the worker
+          still builds, but a concurrent GC may race the build).
+        '';
+        type = lib.types.str;
+        default = "/nix/var/nix/gcroots/gradient";
+      };
+
       logLevel = lib.mkOption {
         default = { };
         description = ''
@@ -256,10 +273,12 @@ in {
     ];
 
     systemd = {
-      tmpfiles.settings."10-gradient"."/nix/var/nix/gcroots/gradient".d = {
-        user = "gradient-worker";
-        group = "gradient-worker";
-        mode = "0755";
+      tmpfiles.settings = lib.mkIf (cfg.settings.gcrootsDir != "") {
+        "10-gradient".${cfg.settings.gcrootsDir}.d = {
+          user = "gradient-worker";
+          group = "gradient-worker";
+          mode = "0755";
+        };
       };
 
       services.gradient-worker = {
@@ -284,7 +303,7 @@ in {
           ProtectKernelTunables = true;
           ProtectProc = "invisible";
           ProtectSystem = "strict";
-          ReadWritePaths = [ "/nix/var/nix/gcroots/gradient" ];
+          ReadWritePaths = lib.optionals (cfg.settings.gcrootsDir != "") [ cfg.settings.gcrootsDir ];
           Restart = "on-failure";
           RestartSec = 10;
           KillMode = "mixed";
@@ -321,6 +340,7 @@ in {
           GRADIENT_WORKER_EVAL_WORKERS                = toString cfg.settings.evalWorkers;
           GRADIENT_MAX_EVALUATIONS_PER_WORKER         = toString cfg.settings.maxEvaluationsPerWorker;
           GRADIENT_MAX_PROTO_CONNECTIONS              = toString cfg.settings.maxProtoConnections;
+          GRADIENT_WORKER_GCROOTS_DIR                 = cfg.settings.gcrootsDir;
         } // lib.optionalAttrs (cfg.settings.architectures != []) {
           GRADIENT_WORKER_ARCHITECTURES = lib.concatStringsSep "," cfg.settings.architectures;
         } // lib.optionalAttrs (cfg.settings.systemFeatures != []) {

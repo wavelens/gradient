@@ -294,6 +294,7 @@ The token must be the 48-byte random secret returned by the registration API (ge
 | `settings.maxEvaluationsPerWorker` | `20` | Recycle evaluator subprocess after N jobs (0 = never) |
 | `settings.maxNixdaemonConnections` | `32` | Worker's local nix-daemon connection pool size. Each in-flight NAR import holds one connection; size for `maxConcurrentBuilds * 8` plus headroom |
 | `settings.maxProtoConnections` | `16` | Max simultaneous WebSocket connections (for discoverable mode) |
+| `settings.gcrootsDir` | `/nix/var/nix/gcroots/gradient` | Directory for worker-held indirect GC roots. One symlink per active build (drv + outputs) pins inputs and just-built outputs through the daemon so a concurrent `nix-collect-garbage` cannot race the build. Empty string disables |
 | `settings.logLevel.default` | `info` | Worker log level |
 | `settings.logLevel.eval` | null | Evaluator log level override |
 | `settings.logLevel.build` | null | Builder log level override |
