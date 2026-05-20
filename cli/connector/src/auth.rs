@@ -1,189 +1,81 @@
-/*
- * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
- *
- * SPDX-License-Identifier: AGPL-3.0-only
- */
-
-use crate::*;
+use crate::{Client, ConnectorError, http};
+use reqwest::Method;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Debug)]
-struct MakeUserRequest {
-    /// Username (3-50 chars, alphanumeric/_/-, no consecutive special chars, not reserved)
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct MakeUserRequest {
     pub username: String,
-    /// Full name of the user
     pub name: String,
-    /// Valid email address
     pub email: String,
-    /// Password (8-128 chars, must contain uppercase, lowercase, digit, and special char)
     pub password: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-struct MakeLoginRequest {
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct MakeLoginRequest {
     pub loginname: String,
     pub password: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-struct CheckUsernameRequest {
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct VerifyEmailRequest {
+    pub token: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ResendRequest {
     pub username: String,
 }
 
-pub async fn post_basic_register(
-    config: RequestConfig,
-    username: String,
-    name: String,
-    email: String,
-    password: String,
-) -> Result<BaseResponse<String>, String> {
-    let req = MakeUserRequest {
-        username,
-        name,
-        email,
-        password,
-    };
-
-    let res = get_client(
-        config,
-        "auth/basic/register".to_string(),
-        RequestType::POST,
-        false,
-    )
-    .unwrap()
-    .json(&req)
-    .send()
-    .await
-    .unwrap();
-
-    Ok(parse_response(res).await)
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct OidcLoginRequest {
+    pub redirect_uri: Option<String>,
 }
 
-pub async fn post_basic_login(
-    config: RequestConfig,
-    loginname: String,
-    password: String,
-) -> Result<BaseResponse<String>, String> {
-    let req = MakeLoginRequest {
-        loginname,
-        password,
-    };
-
-    let res = get_client(
-        config,
-        "auth/basic/login".to_string(),
-        RequestType::POST,
-        false,
-    )
-    .unwrap()
-    .json(&req)
-    .send()
-    .await
-    .unwrap();
-
-    Ok(parse_response(res).await)
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct OidcRedirect {
+    pub url: String,
 }
 
-pub async fn get_oauth_authorize(config: RequestConfig) -> Result<BaseResponse<String>, String> {
-    let res = get_client(
-        config,
-        "auth/oauth/authorize".to_string(),
-        RequestType::GET,
-        false,
-    )
-    .unwrap()
-    .send()
-    .await
-    .unwrap();
+pub struct AuthApi<'a>(pub(crate) &'a Client);
 
-    Ok(parse_response(res).await)
-}
+impl AuthApi<'_> {
+    pub async fn register(&self, body: MakeUserRequest) -> Result<String, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::POST, "auth/basic/register", false)?
+            .json(&body);
+        http::decode(req.send().await?).await
+    }
 
-pub async fn post_oauth_authorize(
-    config: RequestConfig,
-    code: String,
-) -> Result<BaseResponse<String>, String> {
-    let res = get_client(
-        config,
-        "auth/oauth/authorize".to_string(),
-        RequestType::POST,
-        false,
-    )
-    .unwrap()
-    .json(&code)
-    .send()
-    .await
-    .unwrap();
+    pub async fn basic_login(&self, body: MakeLoginRequest) -> Result<String, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::POST, "auth/basic/login", false)?
+            .json(&body);
+        http::decode(req.send().await?).await
+    }
 
-    Ok(parse_response(res).await)
-}
+    pub async fn check_username(&self, username: &str) -> Result<bool, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("auth/check-username?username={}", username), false)?;
+        http::decode(req.send().await?).await
+    }
 
-pub async fn post_logout(config: RequestConfig) -> Result<BaseResponse<String>, String> {
-    let res = get_client(config, "auth/logout".to_string(), RequestType::POST, false)
-        .unwrap()
-        .send()
-        .await
-        .unwrap();
+    pub async fn verify_email(&self, body: VerifyEmailRequest) -> Result<String, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::POST, "auth/verify-email", false)?
+            .json(&body);
+        http::decode(req.send().await?).await
+    }
 
-    Ok(parse_response(res).await)
-}
+    pub async fn resend_verification(&self, body: ResendRequest) -> Result<String, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::POST, "auth/resend-verification", false)?
+            .json(&body);
+        http::decode(req.send().await?).await
+    }
 
-pub async fn post_check_username(
-    config: RequestConfig,
-    username: String,
-) -> Result<BaseResponse<String>, String> {
-    let req = CheckUsernameRequest { username };
+    pub async fn oidc_login(&self, body: OidcLoginRequest) -> Result<OidcRedirect, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::POST, "auth/oidc/login", false)?
+            .json(&body);
+        http::decode(req.send().await?).await
+    }
 
-    let res = get_client(
-        config,
-        "auth/check-username".to_string(),
-        RequestType::POST,
-        false,
-    )
-    .unwrap()
-    .json(&req)
-    .send()
-    .await
-    .unwrap();
-
-    Ok(parse_response(res).await)
-}
-
-pub async fn get_verify_email(
-    config: RequestConfig,
-    token: String,
-) -> Result<BaseResponse<String>, String> {
-    let res = get_client(
-        config,
-        format!("auth/verify-email?token={}", token),
-        RequestType::GET,
-        false,
-    )
-    .unwrap()
-    .send()
-    .await
-    .unwrap();
-
-    Ok(parse_response(res).await)
-}
-
-pub async fn post_resend_verification(
-    config: RequestConfig,
-    username: String,
-) -> Result<BaseResponse<String>, String> {
-    let req = CheckUsernameRequest { username };
-
-    let res = get_client(
-        config,
-        "auth/resend-verification".to_string(),
-        RequestType::POST,
-        false,
-    )
-    .unwrap()
-    .json(&req)
-    .send()
-    .await
-    .unwrap();
-
-    Ok(parse_response(res).await)
+    pub async fn logout(&self) -> Result<String, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::POST, "auth/logout", true)?;
+        http::decode(req.send().await?).await
+    }
 }
