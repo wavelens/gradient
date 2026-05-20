@@ -23,28 +23,18 @@ fi
 REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
 
 # ── Cargo crates ──────────────────────────────────────────────────────────────
-# All gradient crates share the same version. The legacy `backend/builder` and
-# `backend/evaluator` crates are intentionally excluded — they live on disk
-# but are not in the workspace anymore.
+# Only files that define a literal `version = "X.Y.Z"` are listed. Backend
+# sub-crates use `version.workspace = true` and inherit from backend/Cargo.toml.
 
 CARGO_FILES=(
     backend/Cargo.toml
-    backend/cache/Cargo.toml
-    backend/core/Cargo.toml
-    backend/entity/Cargo.toml
-    backend/migration/Cargo.toml
-    backend/proto/Cargo.toml
-    backend/scheduler/Cargo.toml
-    backend/test-support/Cargo.toml
-    backend/web/Cargo.toml
-    backend/worker/Cargo.toml
     cli/Cargo.toml
     cli/connector/Cargo.toml
 )
 
 for f in "${CARGO_FILES[@]}"; do
     path="$REPO_ROOT/$f"
-    sed -i "0,/^version = \"[^\"]*\"/{s/^version = \"[^\"]*\"/version = \"$VERSION\"/}" "$path"
+    sed -i -E "0,/^version[[:space:]]*=[[:space:]]*\"[^\"]*\"/{s/^(version[[:space:]]*=[[:space:]]*)\"[^\"]*\"/\\1\"$VERSION\"/}" "$path"
     echo "updated $f"
 done
 
