@@ -1,106 +1,83 @@
-/*
- * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
- *
- * SPDX-License-Identifier: AGPL-3.0-only
- */
-
-use crate::*;
+use crate::{Client, ConnectorError, http};
+use reqwest::Method;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct RegisterWorkerRequest {
-    pub worker_id: String,
-    pub display_name: String,
-    pub url: Option<String>,
-    pub token: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct RegisterWorkerResponse {
-    pub peer_id: String,
-    /// Absent when the token was supplied in the request.
-    pub token: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct WorkerLiveInfo {
     pub architectures: Vec<String>,
     pub system_features: Vec<String>,
     pub max_concurrent_builds: u32,
-    pub assigned_job_count: usize,
+    pub assigned_job_count: i32,
     pub draining: bool,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct OrgWorkerEntry {
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Worker {
     pub worker_id: String,
     pub display_name: String,
     pub registered_at: String,
+    pub active: bool,
     pub url: Option<String>,
     pub created_by: Option<String>,
+    pub enable_fetch: bool,
+    pub enable_eval: bool,
+    pub enable_build: bool,
     pub live: Option<WorkerLiveInfo>,
 }
 
-pub async fn post_org_worker(
-    config: RequestConfig,
-    organization: String,
-    worker_id: String,
-    display_name: String,
-    url: Option<String>,
-    token: Option<String>,
-) -> Result<BaseResponse<RegisterWorkerResponse>, String> {
-    let req = RegisterWorkerRequest {
-        worker_id,
-        display_name,
-        url,
-        token,
-    };
-
-    let res = get_client(
-        config,
-        format!("orgs/{}/workers", organization),
-        RequestType::POST,
-        true,
-    )?
-    .json(&req)
-    .send()
-    .await
-    .unwrap();
-
-    Ok(parse_response(res).await)
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct MakeWorkerRequest {
+    pub worker_id: String,
+    pub display_name: String,
+    pub url: Option<String>,
+    pub token: Option<String>,
+    pub enable_fetch: Option<bool>,
+    pub enable_eval: Option<bool>,
+    pub enable_build: Option<bool>,
 }
 
-pub async fn get_org_workers(
-    config: RequestConfig,
-    organization: String,
-) -> Result<BaseResponse<Vec<OrgWorkerEntry>>, String> {
-    let res = get_client(
-        config,
-        format!("orgs/{}/workers", organization),
-        RequestType::GET,
-        true,
-    )?
-    .send()
-    .await
-    .unwrap();
-
-    Ok(parse_response(res).await)
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct RegisterWorkerResponse {
+    pub peer_id: String,
+    pub token: Option<String>,
 }
 
-pub async fn delete_org_worker(
-    config: RequestConfig,
-    organization: String,
-    worker_id: String,
-) -> Result<BaseResponse<String>, String> {
-    let res = get_client(
-        config,
-        format!("orgs/{}/workers/{}", organization, worker_id),
-        RequestType::DELETE,
-        true,
-    )?
-    .send()
-    .await
-    .unwrap();
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct PatchWorkerRequest {
+    pub active: Option<bool>,
+    pub display_name: Option<String>,
+    pub enable_fetch: Option<bool>,
+    pub enable_eval: Option<bool>,
+    pub enable_build: Option<bool>,
+}
 
-    Ok(parse_response(res).await)
+pub struct WorkersApi<'a>(pub(crate) &'a Client);
+
+impl WorkersApi<'_> {
+    pub async fn list(&self, org: &str) -> Result<Vec<Worker>, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("orgs/{org}/workers"), true)?;
+        http::decode(req.send().await?).await
+    }
+
+    pub async fn create(&self, org: &str, body: MakeWorkerRequest) -> Result<RegisterWorkerResponse, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::POST, &format!("orgs/{org}/workers"), true)?
+            .json(&body);
+        http::decode(req.send().await?).await
+    }
+
+    pub async fn get(&self, org: &str, worker_id: &str) -> Result<Worker, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("orgs/{org}/workers/{worker_id}"), true)?;
+        http::decode(req.send().await?).await
+    }
+
+    pub async fn update(&self, org: &str, worker_id: &str, body: PatchWorkerRequest) -> Result<String, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::PATCH, &format!("orgs/{org}/workers/{worker_id}"), true)?
+            .json(&body);
+        http::decode(req.send().await?).await
+    }
+
+    pub async fn delete(&self, org: &str, worker_id: &str) -> Result<String, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::DELETE, &format!("orgs/{org}/workers/{worker_id}"), true)?;
+        http::decode(req.send().await?).await
+    }
 }
