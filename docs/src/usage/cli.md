@@ -124,7 +124,14 @@ gradient download --evaluation <uuid>
 # Skip the product picker (comma-separated indices, ranges, or `all`)
 gradient download --products all --out ./artefacts
 gradient download --products 1,3-5 --out ./artefacts
+
+# Filter by flake-output attribute (leading `#` is optional; comma-separate for multiple)
+gradient download '#packages.x86_64-linux.my-app'
+gradient download 'packages.x86_64-linux.my-app'
+gradient download '#a,#b,#c'
 ```
+
+The positional attribute argument matches the evaluation's artefact tree by exact `entry_points[].attr` equality. It cannot be combined with `--products`.
 
 ### Utilities
 
@@ -143,7 +150,19 @@ gradient generate <type>
 ```
 gradient --help      Show help for any command
 gradient --version   Print CLI version
+gradient --json      Emit machine-readable JSON output
 ```
+
+### `--json`
+
+Emit machine-readable JSON envelopes mirroring the server's response shape:
+
+- Success: `{"error": false, "message": <data>}`
+- Failure: `{"error": true, "message": "<reason>"}`
+
+In `--json` mode all human-readable output is suppressed on stdout (progress messages go to stderr; banners are hidden). Interactive prompts are disabled — missing inputs that would otherwise have been prompted produce an error with exit code 2. For streaming endpoints (e.g. build logs), each chunk is emitted on its own line as a JSON envelope (NDJSON).
+
+Exit codes: `0` success, `1` API/network/IO/decode error, `2` usage/missing argument, `3` unauthorized.
 
 ### Workers
 
