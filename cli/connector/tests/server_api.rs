@@ -19,7 +19,7 @@ async fn config_returns_struct() {
         .mount(&server)
         .await;
 
-    let client = Client::builder().base_url(&server.uri()).build().unwrap();
+    let client = Client::builder().base_url(server.uri()).build().unwrap();
     let cfg = client.server().get_config().await.unwrap();
     assert!(!cfg.oidc_enabled);
     assert!(cfg.registration_enabled);

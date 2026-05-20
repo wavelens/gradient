@@ -20,7 +20,7 @@ async fn get_eval_returns_response() {
         .mount(&server)
         .await;
 
-    let client = Client::builder().base_url(&server.uri()).token("t").build().unwrap();
+    let client = Client::builder().base_url(server.uri()).token("t").build().unwrap();
     let eval = client.evals().get("eval-1").await.unwrap();
     assert_eq!(eval.id, "eval-1");
 }

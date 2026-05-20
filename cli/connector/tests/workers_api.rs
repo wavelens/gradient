@@ -15,7 +15,7 @@ async fn list_workers_returns_vec() {
         .mount(&server)
         .await;
 
-    let client = Client::builder().base_url(&server.uri()).token("t").build().unwrap();
+    let client = Client::builder().base_url(server.uri()).token("t").build().unwrap();
     let workers = client.workers().list("my-org").await.unwrap();
     assert!(workers.is_empty());
 }
@@ -31,7 +31,7 @@ async fn create_worker_returns_response() {
         .mount(&server)
         .await;
 
-    let client = Client::builder().base_url(&server.uri()).token("t").build().unwrap();
+    let client = Client::builder().base_url(server.uri()).token("t").build().unwrap();
     let res = client.workers().create("my-org", connector::workers::MakeWorkerRequest {
         worker_id: "worker-1".into(),
         display_name: "My Worker".into(),

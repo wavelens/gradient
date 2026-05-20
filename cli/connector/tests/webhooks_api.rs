@@ -15,7 +15,7 @@ async fn list_webhooks_returns_vec() {
         .mount(&server)
         .await;
 
-    let client = Client::builder().base_url(&server.uri()).token("t").build().unwrap();
+    let client = Client::builder().base_url(server.uri()).token("t").build().unwrap();
     let webhooks = client.webhooks().list("my-org").await.unwrap();
     assert!(webhooks.is_empty());
 }
@@ -33,7 +33,7 @@ async fn get_webhook_returns_webhook() {
         .mount(&server)
         .await;
 
-    let client = Client::builder().base_url(&server.uri()).token("t").build().unwrap();
+    let client = Client::builder().base_url(server.uri()).token("t").build().unwrap();
     let wh = client.webhooks().get("my-org", "w1").await.unwrap();
     assert_eq!(wh.id, "w1");
 }

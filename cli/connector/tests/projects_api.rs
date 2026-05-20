@@ -18,7 +18,7 @@ async fn list_projects_returns_paginated() {
         .mount(&server)
         .await;
 
-    let client = Client::builder().base_url(&server.uri()).token("t").build().unwrap();
+    let client = Client::builder().base_url(server.uri()).token("t").build().unwrap();
     let res = client.projects().list("my-org").await.unwrap();
     assert_eq!(res.items.len(), 1);
 }
@@ -32,7 +32,7 @@ async fn badge_returns_svg_string() {
         .mount(&server)
         .await;
 
-    let client = Client::builder().base_url(&server.uri()).token("t").build().unwrap();
+    let client = Client::builder().base_url(server.uri()).token("t").build().unwrap();
     let svg = client.projects().badge("org", "proj").await.unwrap();
     assert!(svg.contains("<svg>"));
 }
