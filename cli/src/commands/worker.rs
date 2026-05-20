@@ -6,6 +6,7 @@
 
 use crate::config::*;
 use crate::input::get_request_config;
+use crate::output::{ExitKind, Output};
 use clap::Subcommand;
 use connector::*;
 use std::process::exit;
@@ -36,7 +37,7 @@ pub enum Commands {
     },
 }
 
-pub async fn handle(cmd: Commands) {
+pub async fn handle(cmd: Commands, out: Output) {
     match cmd {
         Commands::Register {
             worker_id,
@@ -47,10 +48,10 @@ pub async fn handle(cmd: Commands) {
             let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
                 Some(id) => id,
                 _ => {
-                    eprintln!(
-                        "Organization is required. Use `gradient organization select <name>`."
+                    out.err(
+                        ExitKind::Usage,
+                        "Organization is required. Use `gradient organization select <name>`.",
                     );
-                    exit(1);
                 }
             };
 
@@ -66,24 +67,23 @@ pub async fn handle(cmd: Commands) {
             )
             .await
             .map_err(|e| {
-                eprintln!("{}", e);
+                out.progress(format!("{}", e));
                 exit(1);
             })
             .unwrap();
 
             if res.error {
-                eprintln!("Worker registration failed");
-                exit(1);
+                out.err(ExitKind::Api, "Worker registration failed");
             }
 
-            println!("Worker registered.");
-            println!("Peer ID:  {}", res.message.peer_id);
+            out.human("Worker registered.");
+            out.human(format!("Peer ID:  {}", res.message.peer_id));
             if let Some(token) = res.message.token {
-                println!("Token:    {}", token);
-                println!();
-                println!("Store the token securely — it cannot be retrieved again.");
+                out.human(format!("Token:    {}", token));
+                out.human("");
+                out.human("Store the token securely — it cannot be retrieved again.");
             } else if token_provided {
-                println!("Token was pre-supplied; not echoed back.");
+                out.human("Token was pre-supplied; not echoed back.");
             }
         }
 
@@ -91,10 +91,10 @@ pub async fn handle(cmd: Commands) {
             let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
                 Some(id) => id,
                 _ => {
-                    eprintln!(
-                        "Organization is required. Use `gradient organization select <name>`."
+                    out.err(
+                        ExitKind::Usage,
+                        "Organization is required. Use `gradient organization select <name>`.",
                     );
-                    exit(1);
                 }
             };
 
@@ -102,30 +102,25 @@ pub async fn handle(cmd: Commands) {
                 workers::get_org_workers(get_request_config(load_config()).unwrap(), organization)
                     .await
                     .map_err(|e| {
-                        eprintln!("{}", e);
+                        out.progress(format!("{}", e));
                         exit(1);
                     })
                     .unwrap();
 
             if res.error {
-                eprintln!("Failed to list workers");
-                exit(1);
+                out.err(ExitKind::Api, "Failed to list workers");
             }
 
             if res.message.is_empty() {
-                println!("No workers registered.");
+                out.human("No workers registered.");
             } else {
                 for w in res.message {
-                    let status = if w.live.is_some() {
-                        "online"
-                    } else {
-                        "offline"
-                    };
+                    let status = if w.live.is_some() { "online" } else { "offline" };
                     let url_part = w.url.map(|u| format!(" (url: {})", u)).unwrap_or_default();
-                    println!(
+                    out.human(format!(
                         "{} \"{}\": {} [{}]{}",
                         w.worker_id, w.display_name, w.registered_at, status, url_part
-                    );
+                    ));
                 }
             }
         }
@@ -134,10 +129,10 @@ pub async fn handle(cmd: Commands) {
             let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
                 Some(id) => id,
                 _ => {
-                    eprintln!(
-                        "Organization is required. Use `gradient organization select <name>`."
+                    out.err(
+                        ExitKind::Usage,
+                        "Organization is required. Use `gradient organization select <name>`.",
                     );
-                    exit(1);
                 }
             };
 
@@ -148,17 +143,16 @@ pub async fn handle(cmd: Commands) {
             )
             .await
             .map_err(|e| {
-                eprintln!("{}", e);
+                out.progress(format!("{}", e));
                 exit(1);
             })
             .unwrap();
 
             if res.error {
-                eprintln!("Worker deletion failed");
-                exit(1);
+                out.err(ExitKind::Api, "Worker deletion failed");
             }
 
-            println!("Worker unregistered.");
+            out.human("Worker unregistered.");
         }
     }
 }

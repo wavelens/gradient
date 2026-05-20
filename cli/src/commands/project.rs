@@ -6,6 +6,7 @@
 
 use crate::config::*;
 use crate::input::*;
+use crate::output::{ExitKind, Output};
 use clap::Subcommand;
 use colored::*;
 use connector::*;
@@ -47,14 +48,13 @@ pub enum Commands {
     Evaluate,
 }
 
-pub async fn handle(cmd: Commands) {
+pub async fn handle(cmd: Commands, out: Output) {
     match cmd {
         Commands::Select { project } => {
             let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
                 Some(id) => id,
                 None => {
-                    eprintln!("Organization is required for command.");
-                    exit(1);
+                    out.err(ExitKind::Usage, "Organization is required for command.");
                 }
             };
 
@@ -64,7 +64,7 @@ pub async fn handle(cmd: Commands) {
                 true,
             )
             .unwrap();
-            println!("Project selected in current Organization.");
+            out.human("Project selected in current Organization.");
         }
 
         Commands::Show => {
@@ -75,8 +75,7 @@ pub async fn handle(cmd: Commands) {
                         (parts[0].to_string(), parts[1].to_string())
                     }
                     _ => {
-                        eprintln!("Project is required for command.");
-                        exit(1);
+                        out.err(ExitKind::Usage, "Project is required for command.");
                     }
                 };
 
@@ -87,26 +86,25 @@ pub async fn handle(cmd: Commands) {
             )
             .await
             .map_err(|e| {
-                eprintln!("{}", e);
+                out.progress(format!("{}", e));
                 exit(1);
             })
             .unwrap();
 
             if project.error {
-                eprintln!("Failed to show project.");
-                exit(1);
+                out.err(ExitKind::Api, "Failed to show project.");
             }
 
-            println!("===== Project =====");
-            println!("Name: {}", project.message.name);
-            println!("Description: {}", project.message.description);
-            println!("Repository: {}", project.message.repository);
-            println!("Wildcard: {}", project.message.wildcard);
-            println!("Organization ID: {}", project.message.organization);
-            println!();
+            out.human("===== Project =====");
+            out.human(format!("Name: {}", project.message.name));
+            out.human(format!("Description: {}", project.message.description));
+            out.human(format!("Repository: {}", project.message.repository));
+            out.human(format!("Wildcard: {}", project.message.wildcard));
+            out.human(format!("Organization ID: {}", project.message.organization));
+            out.human("");
 
             if project.message.last_evaluation.is_none() {
-                println!("No last evaluation.");
+                out.human("No last evaluation.");
                 exit(0);
             }
 
@@ -116,24 +114,23 @@ pub async fn handle(cmd: Commands) {
             )
             .await
             .map_err(|e| {
-                eprintln!("{}", e);
+                out.progress(format!("{}", e));
                 exit(1);
             })
             .unwrap();
 
             if evaluation.error {
-                eprintln!("Failed to show evaluation.");
-                exit(1);
+                out.err(ExitKind::Api, "Failed to show evaluation.");
             }
 
-            println!("===== Evaluation =====");
-            println!("ID: {}", evaluation.message.id);
-            println!("Status: {}", evaluation.message.status);
-            println!("Commit: {}", evaluation.message.commit);
+            out.human("===== Evaluation =====");
+            out.human(format!("ID: {}", evaluation.message.id));
+            out.human(format!("Status: {}", evaluation.message.status));
+            out.human(format!("Commit: {}", evaluation.message.commit));
             if let Some(error) = &evaluation.message.error {
-                println!("Error: {}", error);
+                out.human(format!("Error: {}", error));
             }
-            println!();
+            out.human("");
 
             let builds = evals::get_evaluation_builds(
                 get_request_config(load_config()).unwrap(),
@@ -141,24 +138,22 @@ pub async fn handle(cmd: Commands) {
             )
             .await
             .map_err(|e| {
-                eprintln!("{}", e);
+                out.progress(format!("{}", e));
                 exit(1);
             })
             .unwrap();
 
             if builds.error {
-                eprintln!("Failed to get builds.");
-                exit(1);
+                out.err(ExitKind::Api, "Failed to get builds.");
             }
 
             if builds.message.builds.is_empty() {
-                println!("No builds.");
+                out.human("No builds.");
                 exit(0);
             }
 
-            println!("===== Building =====");
+            out.human("===== Building =====");
             for build in builds.message.builds.iter() {
-                // Use status from evaluation builds response (no need for individual API calls)
                 let colored_name = match build.status.as_str() {
                     "Completed" => build.name.green(),
                     "Building" | "Running" => build.name.yellow(),
@@ -166,19 +161,19 @@ pub async fn handle(cmd: Commands) {
                     "Failed" | "Error" => build.name.red(),
                     _ => build.name.normal(),
                 };
-                println!("{}", colored_name);
+                out.human(format!("{}", colored_name));
             }
-            println!();
+            out.human("");
 
             if evaluation.message.status != "Aborted" {
-                println!("===== Log =====");
+                out.human("===== Log =====");
                 evals::post_evaluation_builds(
                     get_request_config(load_config()).unwrap(),
                     evaluation.message.id,
                 )
                 .await
                 .map_err(|e| {
-                    eprintln!("{}", e);
+                    out.progress(format!("{}", e));
                     exit(1);
                 })
                 .unwrap();
@@ -199,8 +194,7 @@ pub async fn handle(cmd: Commands) {
             let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
                 Some(id) => id,
                 _ => {
-                    eprintln!("Organization is required for command.");
-                    exit(1);
+                    out.err(ExitKind::Usage, "Organization is required for command.");
                 }
             };
 
@@ -229,14 +223,13 @@ pub async fn handle(cmd: Commands) {
             )
             .await
             .map_err(|e| {
-                eprintln!("{}", e);
+                out.progress(format!("{}", e));
                 exit(1);
             })
             .unwrap();
 
             if res.error {
-                eprintln!("Project creation failed: {}", res.message);
-                exit(1);
+                out.err(ExitKind::Api, format!("Project creation failed: {}", res.message));
             }
 
             set_get_value(
@@ -245,31 +238,30 @@ pub async fn handle(cmd: Commands) {
                 true,
             )
             .unwrap();
-            println!("Project created.");
+            out.human("Project created.");
         }
 
         Commands::List => {
             let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
                 Some(id) => id,
                 _ => {
-                    eprintln!("Organization is required for command.");
-                    exit(1);
+                    out.err(ExitKind::Usage, "Organization is required for command.");
                 }
             };
 
             let res = projects::get(get_request_config(load_config()).unwrap(), organization)
                 .await
                 .map_err(|e| {
-                    eprintln!("{}", e);
+                    out.progress(format!("{}", e));
                     exit(1);
                 })
                 .unwrap();
 
             if res.message.items.is_empty() {
-                println!("You have no projects.");
+                out.human("You have no projects.");
             } else {
                 for project in res.message.items {
-                    println!("{}: {}", project.name, project.id);
+                    out.human(format!("{}: {}", project.name, project.id));
                 }
             }
         }
@@ -288,8 +280,7 @@ pub async fn handle(cmd: Commands) {
                         (parts[0].to_string(), parts[1].to_string())
                     }
                     _ => {
-                        eprintln!("Project is required for command.");
-                        exit(1);
+                        out.err(ExitKind::Usage, "Project is required for command.");
                     }
                 };
 
@@ -300,7 +291,7 @@ pub async fn handle(cmd: Commands) {
             )
             .await
             .map_err(|e| {
-                eprintln!("{}", e);
+                out.progress(format!("{}", e));
                 exit(1);
             })
             .unwrap()
@@ -343,17 +334,16 @@ pub async fn handle(cmd: Commands) {
             )
             .await
             .map_err(|e| {
-                eprintln!("{}", e);
+                out.progress(format!("{}", e));
                 exit(1);
             })
             .unwrap();
 
             if res.error {
-                eprintln!("Project creation failed: {}", res.message);
-                exit(1);
+                out.err(ExitKind::Api, format!("Project creation failed: {}", res.message));
             }
 
-            println!("Project updated.");
+            out.human("Project updated.");
         }
 
         Commands::Delete => {
@@ -364,8 +354,7 @@ pub async fn handle(cmd: Commands) {
                         (parts[0].to_string(), parts[1].to_string())
                     }
                     _ => {
-                        eprintln!("Project is required for command.");
-                        exit(1);
+                        out.err(ExitKind::Usage, "Project is required for command.");
                     }
                 };
 
@@ -376,17 +365,16 @@ pub async fn handle(cmd: Commands) {
             )
             .await
             .map_err(|e| {
-                eprintln!("{}", e);
+                out.progress(format!("{}", e));
                 exit(1);
             })
             .unwrap();
 
             if res.error {
-                eprintln!("Failed to delete project.");
-                exit(1);
+                out.err(ExitKind::Api, "Failed to delete project.");
             }
 
-            println!("Project deleted.");
+            out.human("Project deleted.");
         }
 
         Commands::Evaluate => {
@@ -397,8 +385,7 @@ pub async fn handle(cmd: Commands) {
                         (parts[0].to_string(), parts[1].to_string())
                     }
                     _ => {
-                        eprintln!("Project is required for command.");
-                        exit(1);
+                        out.err(ExitKind::Usage, "Project is required for command.");
                     }
                 };
 
@@ -409,17 +396,16 @@ pub async fn handle(cmd: Commands) {
             )
             .await
             .map_err(|e| {
-                eprintln!("{}", e);
+                out.progress(format!("{}", e));
                 exit(1);
             })
             .unwrap();
 
             if res.error {
-                eprintln!("Failed to start project evaluation: {}", res.message);
-                exit(1);
+                out.err(ExitKind::Api, format!("Failed to start project evaluation: {}", res.message));
             }
 
-            println!("Project evaluation started.");
+            out.human("Project evaluation started.");
         }
     }
 }

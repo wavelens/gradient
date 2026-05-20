@@ -1,12 +1,13 @@
 /*
- * spdx-filecopyrighttext: 2025 wavelens ug <info@wavelens.io>
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
  *
- * spdx-license-identifier: agpl-3.0-only
+ * SPDX-License-Identifier: AGPL-3.0-only
  */
 
 use super::*;
 use crate::config::*;
 use crate::input::*;
+use crate::output::{ExitKind, Output};
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{Shell, generate};
 use connector::*;
@@ -17,11 +18,13 @@ use std::process::exit;
 #[command(name = "Gradient", display_name = "Gradient", bin_name = "gradient", author = "Wavelens", version, about, long_about = None)]
 #[command(arg_required_else_help = true, subcommand_required = true)]
 struct Cli {
+    /// Emit machine-readable JSON envelopes; disables interactive prompts.
+    #[arg(long, global = true)]
+    json: bool,
     #[command(subcommand)]
     cmd: MainCommands,
 }
 
-// TODO: check selected organization and project before running commands
 #[derive(Subcommand, Debug)]
 enum MainCommands {
     /// Generate shell completions
@@ -114,6 +117,7 @@ enum MainCommands {
 
 pub async fn run_cli() -> std::io::Result<()> {
     let cli = Cli::parse();
+    let out = Output::new(cli.json);
 
     match cli.cmd {
         MainCommands::Completion { shell } => {
@@ -135,13 +139,14 @@ pub async fn run_cli() -> std::io::Result<()> {
             let auth_token = set_get_value(ConfigKey::AuthToken, None, true);
 
             if server_url.is_none() {
-                eprintln!("Server URL is not set. Use `gradient config server <url>` to set it.");
-                std::process::exit(1);
+                out.err(
+                    ExitKind::Usage,
+                    "Server URL is not set. Use `gradient config server <url>` to set it.",
+                );
             }
 
             if auth_token.is_none() {
-                eprintln!("Not logged in. Use `gradient login` to log in.");
-                std::process::exit(1);
+                out.err(ExitKind::Unauthorized, "Not logged in. Use `gradient login` to log in.");
             }
 
             health(get_request_config(config).unwrap())
@@ -152,7 +157,7 @@ pub async fn run_cli() -> std::io::Result<()> {
                 })
                 .unwrap();
 
-            println!("Server Online.");
+            out.human("Server Online.");
         }
 
         MainCommands::Register {
@@ -192,7 +197,7 @@ pub async fn run_cli() -> std::io::Result<()> {
                 exit(1);
             }
 
-            println!("Registration successful. Please log in.");
+            out.human("Registration successful. Please log in.");
         }
 
         MainCommands::Login { username } => {
@@ -245,15 +250,15 @@ pub async fn run_cli() -> std::io::Result<()> {
                 exit(1);
             }
 
-            println!("User ID: {}", res.message.id);
-            println!("Username: {}", res.message.username);
-            println!("Name: {}", res.message.name);
-            println!("Email: {}", res.message.email);
+            out.human(format!("User ID: {}", res.message.id));
+            out.human(format!("Username: {}", res.message.username));
+            out.human(format!("Name: {}", res.message.name));
+            out.human(format!("Email: {}", res.message.email));
         }
 
         MainCommands::Logout => {
             set_get_value(ConfigKey::AuthToken, Some(String::new()), true).unwrap();
-            println!("Logged out.");
+            out.human("Logged out.");
         }
 
         MainCommands::Build {
@@ -262,24 +267,23 @@ pub async fn run_cli() -> std::io::Result<()> {
             organization,
             no_stream,
             quiet,
-        } => build::handle_build(target, system, organization, no_stream, quiet).await,
+        } => build::handle_build(target, system, organization, no_stream, quiet, out).await,
         MainCommands::Download {
             evaluation,
             project,
             products,
-            out,
-        } => download::handle_download(evaluation, project, products, out).await,
-        MainCommands::Organization { cmd } => organization::handle(cmd).await,
-        MainCommands::Project { cmd } => project::handle(cmd).await,
-        MainCommands::Worker { cmd } => worker::handle(cmd).await,
-        MainCommands::Cache { cmd } => cache::handle(cmd).await,
-        MainCommands::Generate { cmd } => generate::handle(cmd).await,
+            out: out_dir,
+        } => download::handle_download(evaluation, project, products, out_dir, out).await,
+        MainCommands::Organization { cmd } => organization::handle(cmd, out).await,
+        MainCommands::Project { cmd } => project::handle(cmd, out).await,
+        MainCommands::Worker { cmd } => worker::handle(cmd, out).await,
+        MainCommands::Cache { cmd } => cache::handle(cmd, out).await,
+        MainCommands::Generate { cmd } => generate::handle(cmd, out).await,
         MainCommands::Hash => {
             let password = ask_for_password();
             let confirm = ask_for_password();
             if password != confirm {
-                eprintln!("Passwords did not match.");
-                exit(1);
+                out.err(ExitKind::Usage, "Passwords did not match.");
             }
             println!("{}", password_auth::generate_hash(password.as_bytes()));
         }

@@ -6,6 +6,7 @@
 
 use crate::config::*;
 use crate::input::*;
+use crate::output::Output;
 use connector::*;
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
@@ -17,13 +18,14 @@ pub async fn handle_build(
     organization: Option<String>,
     no_stream: bool,
     quiet: bool,
+    out: Output,
 ) {
     let organization = organization
         .or_else(|| set_get_value(ConfigKey::SelectedOrganization, None, true))
         .unwrap_or_else(|| {
             if !quiet {
-                eprintln!(
-                    "Organization must be set for build command. Use 'gradient organization select <name>' to set one."
+                out.progress(
+                    "Organization must be set for build command. Use 'gradient organization select <name>' to set one.",
                 );
             }
             exit(1);
@@ -31,38 +33,35 @@ pub async fn handle_build(
 
     let config = get_request_config(load_config()).unwrap_or_else(|_| {
         if !quiet {
-            eprintln!("Not configured. Use 'gradient config' to set server and auth token.");
+            out.progress("Not configured. Use 'gradient config' to set server and auth token.");
         }
         exit(1);
     });
 
     let cwd = std::env::current_dir().unwrap_or_else(|e| {
         if !quiet {
-            eprintln!("Failed to read current directory: {}", e);
+            out.progress(format!("Failed to read current directory: {}", e));
         }
         exit(1);
     });
 
     let repo = git2::Repository::discover(&cwd).unwrap_or_else(|e| {
         if !quiet {
-            eprintln!("Not in a git repository: {}", e);
+            out.progress(format!("Not in a git repository: {}", e));
         }
         exit(1);
     });
 
-    let workdir = repo
-        .workdir()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| {
-            if !quiet {
-                eprintln!("Bare repositories are not supported.");
-            }
-            exit(1);
-        });
+    let workdir = repo.workdir().map(Path::to_path_buf).unwrap_or_else(|| {
+        if !quiet {
+            out.progress("Bare repositories are not supported.");
+        }
+        exit(1);
+    });
 
     let index = repo.index().unwrap_or_else(|e| {
         if !quiet {
-            eprintln!("Failed to read git index: {}", e);
+            out.progress(format!("Failed to read git index: {}", e));
         }
         exit(1);
     });
@@ -78,15 +77,10 @@ pub async fn handle_build(
             continue;
         }
         match hash_file(&abs) {
-            Ok((hash, size)) => entries.push(TrackedFile {
-                path,
-                hash,
-                size,
-                abs,
-            }),
+            Ok((hash, size)) => entries.push(TrackedFile { path, hash, size, abs }),
             Err(e) => {
                 if !quiet {
-                    eprintln!("Failed to hash {}: {}", abs.display(), e);
+                    out.progress(format!("Failed to hash {}: {}", abs.display(), e));
                 }
                 exit(1);
             }
@@ -95,13 +89,13 @@ pub async fn handle_build(
 
     if entries.is_empty() {
         if !quiet {
-            eprintln!("No tracked files to upload.");
+            out.progress("No tracked files to upload.");
         }
         exit(1);
     }
 
     if !quiet {
-        println!("Sending manifest for {} tracked files...", entries.len());
+        out.human(format!("Sending manifest for {} tracked files...", entries.len()));
     }
 
     let manifest_req = build_requests::ManifestRequest {
@@ -119,14 +113,14 @@ pub async fn handle_build(
     let manifest = match build_requests::post_manifest(config.clone(), manifest_req).await {
         Ok(r) if r.error => {
             if !quiet {
-                eprintln!("Manifest rejected by server.");
+                out.progress("Manifest rejected by server.");
             }
             exit(1);
         }
         Ok(r) => r.message,
         Err(e) => {
             if !quiet {
-                eprintln!("Failed to send manifest: {}", e);
+                out.progress(format!("Failed to send manifest: {}", e));
             }
             exit(1);
         }
@@ -134,11 +128,11 @@ pub async fn handle_build(
 
     if !manifest.missing.is_empty() {
         if !quiet {
-            println!(
+            out.human(format!(
                 "Uploading {} missing blob(s) to session {}...",
                 manifest.missing.len(),
                 manifest.session
-            );
+            ));
         }
 
         let missing: std::collections::HashSet<&str> =
@@ -152,7 +146,7 @@ pub async fn handle_build(
                 Ok(bytes) => blobs.push((entry.hash.clone(), bytes)),
                 Err(e) => {
                     if !quiet {
-                        eprintln!("Failed to read {}: {}", entry.abs.display(), e);
+                        out.progress(format!("Failed to read {}: {}", entry.abs.display(), e));
                     }
                     exit(1);
                 }
@@ -162,14 +156,14 @@ pub async fn handle_build(
         match build_requests::upload_blobs(config.clone(), manifest.session.clone(), blobs).await {
             Ok(r) if r.error => {
                 if !quiet {
-                    eprintln!("Blob upload rejected by server.");
+                    out.progress("Blob upload rejected by server.");
                 }
                 exit(1);
             }
             Ok(_) => {}
             Err(e) => {
                 if !quiet {
-                    eprintln!("Failed to upload blobs: {}", e);
+                    out.progress(format!("Failed to upload blobs: {}", e));
                 }
                 exit(1);
             }
@@ -187,25 +181,25 @@ pub async fn handle_build(
     {
         Ok(r) if r.error => {
             if !quiet {
-                eprintln!("Dispatch rejected by server.");
+                out.progress("Dispatch rejected by server.");
             }
             exit(1);
         }
         Ok(r) => r.message,
         Err(e) => {
             if !quiet {
-                eprintln!("Failed to dispatch build request: {}", e);
+                out.progress(format!("Failed to dispatch build request: {}", e));
             }
             exit(1);
         }
     };
 
     if quiet {
-        println!("{}", dispatch.evaluation);
+        out.human(format!("{}", dispatch.evaluation));
     } else {
-        println!("Evaluation: {}", dispatch.evaluation);
-        println!("Project:    {}", dispatch.project);
-        println!("Commit:     {}", dispatch.commit);
+        out.human(format!("Evaluation: {}", dispatch.evaluation));
+        out.human(format!("Project:    {}", dispatch.project));
+        out.human(format!("Commit:     {}", dispatch.commit));
     }
 
     if no_stream {
@@ -213,13 +207,13 @@ pub async fn handle_build(
     }
 
     if !quiet {
-        println!("Streaming evaluation logs...");
+        out.human("Streaming evaluation logs...");
     }
 
     if let Err(e) = evals::post_evaluation_builds(config, dispatch.evaluation).await
         && !quiet
     {
-        eprintln!("Failed to stream evaluation logs: {}", e);
+        out.progress(format!("Failed to stream evaluation logs: {}", e));
     }
 }
 
