@@ -95,6 +95,8 @@ enum MainCommands {
     },
     /// Download evaluation artefacts
     Download {
+        /// Flake-output attribute spec, e.g. '#packages.x86_64-linux.my-app'. Comma-separated for multiple.
+        flake_ref: Option<String>,
         /// Skip the eval picker; use this evaluation directly
         #[arg(long)]
         evaluation: Option<String>,
@@ -102,7 +104,7 @@ enum MainCommands {
         #[arg(long)]
         project: Option<String>,
         /// Skip the product picker; comma-separated 1-based indices, ranges (`1-3`), or `all`
-        #[arg(long)]
+        #[arg(long, conflicts_with = "flake_ref")]
         products: Option<String>,
         /// Write to this directory (default: current directory)
         #[arg(long)]
@@ -230,8 +232,8 @@ pub async fn run_cli() -> std::io::Result<()> {
         MainCommands::Build { target, system, organization, no_stream, quiet } => {
             build::handle_build(target, system, organization, no_stream, quiet, out).await
         }
-        MainCommands::Download { evaluation, project, products, out: out_dir } => {
-            download::handle_download(evaluation, project, products, out_dir, out).await
+        MainCommands::Download { flake_ref, evaluation, project, products, out: out_dir } => {
+            download::handle_download(flake_ref, evaluation, project, products, out_dir, out).await
         }
         MainCommands::Organization { cmd } => organization::handle(cmd, out).await,
         MainCommands::Project { cmd } => project::handle(cmd, out).await,
