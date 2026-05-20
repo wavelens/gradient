@@ -5,6 +5,7 @@ pub mod auth;
 pub mod build_requests;
 pub mod builds;
 pub mod caches;
+pub mod commits;
 pub mod evals;
 pub mod orgs;
 pub mod projects;
@@ -39,6 +40,7 @@ impl Client {
     pub fn build_requests(&self) -> build_requests::BuildRequestsApi<'_> { build_requests::BuildRequestsApi(self) }
     pub fn builds(&self) -> builds::BuildsApi<'_> { builds::BuildsApi(self) }
     pub fn caches(&self) -> caches::CachesApi<'_> { caches::CachesApi(self) }
+    pub fn commits(&self) -> commits::CommitsApi<'_> { commits::CommitsApi(self) }
     pub fn evals(&self) -> evals::EvalsApi<'_> { evals::EvalsApi(self) }
     pub fn orgs(&self) -> orgs::OrgsApi<'_> { orgs::OrgsApi(self) }
     pub fn projects(&self) -> projects::ProjectsApi<'_> { projects::ProjectsApi(self) }
