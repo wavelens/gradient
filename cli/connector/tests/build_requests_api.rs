@@ -17,7 +17,7 @@ async fn submit_manifest_returns_session() {
         .mount(&server)
         .await;
 
-    let client = Client::builder().base_url(&server.uri()).token("t").build().unwrap();
+    let client = Client::builder().base_url(server.uri()).token("t").build().unwrap();
     let session = client.build_requests().submit_manifest(connector::build_requests::BuildManifestRequest {
         organization: "my-org".into(),
         files: vec![],

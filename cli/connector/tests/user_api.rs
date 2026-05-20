@@ -17,7 +17,7 @@ async fn get_user_returns_info() {
         .mount(&server)
         .await;
 
-    let client = Client::builder().base_url(&server.uri()).token("t").build().unwrap();
+    let client = Client::builder().base_url(server.uri()).token("t").build().unwrap();
     let user = client.user().get().await.unwrap();
     assert_eq!(user.username, "alice");
 }
@@ -31,7 +31,7 @@ async fn list_keys_returns_vec() {
         .mount(&server)
         .await;
 
-    let client = Client::builder().base_url(&server.uri()).token("t").build().unwrap();
+    let client = Client::builder().base_url(server.uri()).token("t").build().unwrap();
     let keys = client.user().keys().await.unwrap();
     assert!(keys.is_empty());
 }

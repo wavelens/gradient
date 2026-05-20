@@ -20,7 +20,7 @@ async fn list_orgs_returns_paginated() {
         .mount(&server)
         .await;
 
-    let client = Client::builder().base_url(&server.uri()).token("t").build().unwrap();
+    let client = Client::builder().base_url(server.uri()).token("t").build().unwrap();
     let res = client.orgs().list().await.unwrap();
     assert_eq!(res.items.len(), 1);
 }
@@ -35,7 +35,7 @@ async fn create_org_sends_body() {
         .mount(&server)
         .await;
 
-    let client = Client::builder().base_url(&server.uri()).token("t").build().unwrap();
+    let client = Client::builder().base_url(server.uri()).token("t").build().unwrap();
     let id = client.orgs().create(connector::orgs::MakeOrganizationRequest {
         name: "n".into(), display_name: "d".into(), description: "x".into(),
     }).await.unwrap();

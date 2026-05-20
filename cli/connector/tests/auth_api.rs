@@ -15,7 +15,7 @@ async fn basic_login_returns_token() {
         .mount(&server)
         .await;
 
-    let client = Client::builder().base_url(&server.uri()).build().unwrap();
+    let client = Client::builder().base_url(server.uri()).build().unwrap();
     let token = client.auth().basic_login(
         connector::auth::MakeLoginRequest { loginname: "user".into(), password: "pass".into() }
     ).await.unwrap();
@@ -31,7 +31,7 @@ async fn check_username_returns_bool() {
         .mount(&server)
         .await;
 
-    let client = Client::builder().base_url(&server.uri()).build().unwrap();
+    let client = Client::builder().base_url(server.uri()).build().unwrap();
     let available = client.auth().check_username("alice").await.unwrap();
     assert!(available);
 }

@@ -18,7 +18,7 @@ async fn list_caches_returns_paginated() {
         .mount(&server)
         .await;
 
-    let client = Client::builder().base_url(&server.uri()).token("t").build().unwrap();
+    let client = Client::builder().base_url(server.uri()).token("t").build().unwrap();
     let res = client.caches().list().await.unwrap();
     assert_eq!(res.items.len(), 1);
 }
@@ -34,7 +34,7 @@ async fn get_cache_stats_returns_stats() {
         .mount(&server)
         .await;
 
-    let client = Client::builder().base_url(&server.uri()).token("t").build().unwrap();
+    let client = Client::builder().base_url(server.uri()).token("t").build().unwrap();
     let stats = client.caches().stats("my-cache").await.unwrap();
     assert_eq!(stats.hits, Some(42));
 }

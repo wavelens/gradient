@@ -17,7 +17,7 @@ async fn get_commit_returns_response() {
         .mount(&server)
         .await;
 
-    let client = Client::builder().base_url(&server.uri()).token("t").build().unwrap();
+    let client = Client::builder().base_url(server.uri()).token("t").build().unwrap();
     let commit = client.commits().get("c1").await.unwrap();
     assert_eq!(commit.id, "c1");
     assert_eq!(commit.author_name, "Alice");
