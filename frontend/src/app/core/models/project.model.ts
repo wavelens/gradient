@@ -94,6 +94,7 @@ export interface Evaluation {
   previous?: string;
   next?: string;
   created_at: string;
+  updated_at: string;
   error_count: number;
   warning_count: number;
   waiting_reason?: WaitingReason;
