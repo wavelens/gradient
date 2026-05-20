@@ -366,11 +366,11 @@ Worker registrations can be declared in state instead of using the API. This is 
 ```nix
 services.gradient.state.workers = {
   builder-1 = {
-    display_name = "Primary Build Server";  # defaults to attrset key
-    worker_id    = "550e8400-e29b-41d4-a716-446655440001";
-    organization = "acme";
-    token_file   = "/run/secrets/builder-1-token";
-    created_by   = "alice";
+    display_name  = "Primary Build Server";  # defaults to attrset key
+    worker_id     = "550e8400-e29b-41d4-a716-446655440001";
+    organizations = [ "acme" ];               # one row per (worker_id, org)
+    token_file    = "/run/secrets/builder-1-token";
+    created_by    = "alice";
 
     # Optional: have the server dial the worker instead of waiting for it.
     # url = "wss://builder-1.example.com/proto";
@@ -398,7 +398,7 @@ To ensure the worker uses the same ID that was pre-registered, set `workerId` in
 services.gradient.worker.workerId = "550e8400-e29b-41d4-a716-446655440001";
 ```
 
-State-managed worker registrations are deleted automatically when removed from `state.workers` (subject to `settings.deleteState`).
+State-managed worker registrations are deleted automatically when removed from `state.workers`, and per-(worker_id, organization) rows are deleted when an organization is dropped from `organizations` (subject to `settings.deleteState`).
 
 ### Worker options
 
@@ -406,7 +406,7 @@ State-managed worker registrations are deleted automatically when removed from `
 |---|---|---|
 | `display_name` | `<attrset key>` | Display name shown in the workers list |
 | `worker_id` | — | Persistent worker identity. Must match the worker's `GRADIENT_WORKER_ID` (required) |
-| `organization` | — | Owning organization (required) |
+| `organizations` | — | List of organizations the worker is registered under. One row per (worker_id, organization). Must contain at least one entry (required) |
 | `token_file` | — | Plaintext token file. Hashed at provision time (required) |
 | `url` | `null` | When set, the server dials the worker at this WebSocket URL instead of waiting for an inbound connection |
 | `enable_fetch` | `true` | Server-side gate for the `fetch` capability |

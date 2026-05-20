@@ -808,15 +808,7 @@ impl<'a> StateApplicator<'a> {
                 "worker token file",
             )?;
             let token_hash = password_auth::generate_hash(token.trim());
-
-            let peer_id = lookup_id(&org_map, &state_worker.organization, "Organization")?;
             let created_by_id = lookup_id(&user_map, &state_worker.created_by, "User")?;
-
-            let existing = worker_registration::Entity::find()
-                .filter(worker_registration::Column::PeerId.eq(peer_id))
-                .filter(worker_registration::Column::WorkerId.eq(&state_worker.worker_id))
-                .one(self.db)
-                .await?;
 
             let url = state_worker
                 .url
@@ -825,36 +817,54 @@ impl<'a> StateApplicator<'a> {
                 .filter(|s| !s.is_empty())
                 .map(|s| s.to_string());
 
-            if let Some(existing) = existing {
-                let mut reg: worker_registration::ActiveModel = existing.into();
-                reg.token_hash = Set(token_hash);
-                reg.managed = Set(true);
-                reg.url = Set(url);
-                reg.display_name = Set(state_worker.display_name.clone());
-                reg.enable_fetch = Set(state_worker.enable_fetch);
-                reg.enable_eval = Set(state_worker.enable_eval);
-                reg.enable_build = Set(state_worker.enable_build);
-                reg.created_by = Set(Some(created_by_id));
-                reg.update(self.db).await?;
-                tracing::info!(worker_id = %state_worker.worker_id, "Updated worker registration");
-            } else {
-                let reg = worker_registration::ActiveModel {
-                    id: Set(WorkerRegistrationId::now_v7()),
-                    peer_id: Set(peer_id),
-                    worker_id: Set(state_worker.worker_id.clone()),
-                    token_hash: Set(token_hash),
-                    managed: Set(true),
-                    url: Set(url),
-                    display_name: Set(state_worker.display_name.clone()),
-                    active: Set(true),
-                    enable_fetch: Set(state_worker.enable_fetch),
-                    enable_eval: Set(state_worker.enable_eval),
-                    enable_build: Set(state_worker.enable_build),
-                    created_by: Set(Some(created_by_id)),
-                    created_at: Set(now()),
-                };
-                reg.insert(self.db).await?;
-                tracing::info!(worker_id = %state_worker.worker_id, "Created worker registration");
+            for org_name in &state_worker.organizations {
+                let peer_id = lookup_id(&org_map, org_name, "Organization")?;
+
+                let existing = worker_registration::Entity::find()
+                    .filter(worker_registration::Column::PeerId.eq(peer_id))
+                    .filter(worker_registration::Column::WorkerId.eq(&state_worker.worker_id))
+                    .one(self.db)
+                    .await?;
+
+                if let Some(existing) = existing {
+                    let mut reg: worker_registration::ActiveModel = existing.into();
+                    reg.token_hash = Set(token_hash.clone());
+                    reg.managed = Set(true);
+                    reg.url = Set(url.clone());
+                    reg.display_name = Set(state_worker.display_name.clone());
+                    reg.enable_fetch = Set(state_worker.enable_fetch);
+                    reg.enable_eval = Set(state_worker.enable_eval);
+                    reg.enable_build = Set(state_worker.enable_build);
+                    reg.created_by = Set(Some(created_by_id));
+                    reg.update(self.db).await?;
+                    tracing::info!(
+                        worker_id = %state_worker.worker_id,
+                        organization = %org_name,
+                        "Updated worker registration"
+                    );
+                } else {
+                    let reg = worker_registration::ActiveModel {
+                        id: Set(WorkerRegistrationId::now_v7()),
+                        peer_id: Set(peer_id),
+                        worker_id: Set(state_worker.worker_id.clone()),
+                        token_hash: Set(token_hash.clone()),
+                        managed: Set(true),
+                        url: Set(url.clone()),
+                        display_name: Set(state_worker.display_name.clone()),
+                        active: Set(true),
+                        enable_fetch: Set(state_worker.enable_fetch),
+                        enable_eval: Set(state_worker.enable_eval),
+                        enable_build: Set(state_worker.enable_build),
+                        created_by: Set(Some(created_by_id)),
+                        created_at: Set(now()),
+                    };
+                    reg.insert(self.db).await?;
+                    tracing::info!(
+                        worker_id = %state_worker.worker_id,
+                        organization = %org_name,
+                        "Created worker registration"
+                    );
+                }
             }
         }
 
@@ -1083,7 +1093,18 @@ impl<'a> StateApplicator<'a> {
         let project_names: HashSet<&String> = config.projects.keys().collect();
         let cache_names: HashSet<&String> = config.caches.keys().collect();
         let api_key_names: HashSet<&String> = config.api_keys.keys().collect();
-        let worker_ids: HashSet<&String> = config.workers.values().map(|w| &w.worker_id).collect();
+        let worker_keys: HashSet<(String, OrganizationId)> = {
+            let map = self.org_lookup().await?;
+            let mut set = HashSet::new();
+            for worker in config.workers.values() {
+                for org in &worker.organizations {
+                    if let Some(peer_id) = map.get(org) {
+                        set.insert((worker.worker_id.clone(), *peer_id));
+                    }
+                }
+            }
+            set
+        };
 
         let db = self.db;
 
@@ -1147,12 +1168,18 @@ impl<'a> StateApplicator<'a> {
             .all(db)
             .await?;
         for reg in managed_workers {
-            if !worker_ids.contains(&reg.worker_id) {
+            let key = (reg.worker_id.clone(), reg.peer_id);
+            if !worker_keys.contains(&key) {
                 let worker_id = reg.worker_id.clone();
+                let peer_id = reg.peer_id;
                 worker_registration::Entity::delete_by_id(reg.id)
                     .exec(db)
                     .await?;
-                tracing::info!(worker_id, "Deleted worker registration");
+                tracing::info!(
+                    worker_id,
+                    %peer_id,
+                    "Deleted worker registration"
+                );
             }
         }
 

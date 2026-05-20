@@ -200,7 +200,11 @@ pub struct StateWorker {
     pub worker_id: String,
     #[serde(default)]
     pub url: Option<String>,
-    pub organization: String,
+    /// Organizations the worker is registered under. One
+    /// `worker_registration` row is provisioned per (worker_id, org)
+    /// pair so the same physical worker can serve builds for multiple
+    /// orgs without duplicating the declarative entry.
+    pub organizations: Vec<String>,
     pub token_file: String,
     /// Human-readable display name shown in the workers list.
     pub display_name: String,
@@ -498,11 +502,19 @@ impl StateConfiguration {
         }
 
         for worker in self.workers.values() {
-            if !self.organizations.contains_key(&worker.organization) {
+            if worker.organizations.is_empty() {
                 errors.push(ValidationError {
-                    field: format!("workers.{}.organization", worker.worker_id),
-                    message: format!("Organization '{}' does not exist", worker.organization),
+                    field: format!("workers.{}.organizations", worker.worker_id),
+                    message: "Worker must be registered under at least one organization".into(),
                 });
+            }
+            for org in &worker.organizations {
+                if !self.organizations.contains_key(org) {
+                    errors.push(ValidationError {
+                        field: format!("workers.{}.organizations", worker.worker_id),
+                        message: format!("Organization '{}' does not exist", org),
+                    });
+                }
             }
             if !self.users.contains_key(&worker.created_by) {
                 errors.push(ValidationError {
@@ -787,5 +799,86 @@ mod tests {
             ConcurrencyPolicy::HardAbort
         );
         assert_eq!(i16::from(cfg.projects["web"].concurrency), 0);
+    }
+
+    fn worker_cfg(orgs_json: &str) -> StateConfiguration {
+        let json = format!(
+            r#"{{
+                "users": {{
+                    "alice": {{
+                        "username": "alice",
+                        "name": "Alice",
+                        "email": "alice@example.com",
+                        "password_file": "/dev/null"
+                    }}
+                }},
+                "organizations": {{
+                    "acme": {{
+                        "name": "acme",
+                        "display_name": "ACME",
+                        "private_key_file": "/dev/null",
+                        "public": false,
+                        "created_by": "alice"
+                    }},
+                    "globex": {{
+                        "name": "globex",
+                        "display_name": "Globex",
+                        "private_key_file": "/dev/null",
+                        "public": false,
+                        "created_by": "alice"
+                    }}
+                }},
+                "workers": {{
+                    "builder-1": {{
+                        "worker_id": "550e8400-e29b-41d4-a716-446655440001",
+                        "organizations": {orgs_json},
+                        "token_file": "/dev/null",
+                        "display_name": "Primary Build Server",
+                        "created_by": "alice"
+                    }}
+                }}
+            }}"#
+        );
+        serde_json::from_str(&json).unwrap()
+    }
+
+    #[test]
+    fn state_worker_accepts_multiple_organizations() {
+        let cfg = worker_cfg(r#"["acme", "globex"]"#);
+        assert_eq!(
+            cfg.workers["builder-1"].organizations,
+            vec!["acme".to_owned(), "globex".to_owned()]
+        );
+        assert!(cfg.validate().is_valid);
+    }
+
+    #[test]
+    fn state_worker_rejects_empty_organizations() {
+        let cfg = worker_cfg("[]");
+        let v = cfg.validate();
+        assert!(!v.is_valid);
+        assert!(
+            v.errors
+                .iter()
+                .any(|e| e.field == "workers.550e8400-e29b-41d4-a716-446655440001.organizations"
+                    && e.message.contains("at least one")),
+            "expected at-least-one-org error, got: {:?}",
+            v.errors
+        );
+    }
+
+    #[test]
+    fn state_worker_rejects_unknown_organization_in_list() {
+        let cfg = worker_cfg(r#"["acme", "ghost"]"#);
+        let v = cfg.validate();
+        assert!(!v.is_valid);
+        assert!(
+            v.errors
+                .iter()
+                .any(|e| e.field == "workers.550e8400-e29b-41d4-a716-446655440001.organizations"
+                    && e.message.contains("'ghost'")),
+            "expected unknown-org error mentioning 'ghost', got: {:?}",
+            v.errors
+        );
     }
 }

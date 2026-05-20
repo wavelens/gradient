@@ -541,9 +541,16 @@
         example = "wss://worker.example.com/proto";
       };
 
-      organization = mkOption {
-        type = types.str;
-        description = "Name of the organization this worker is registered under";
+      organizations = mkOption {
+        type = types.listOf types.str;
+        description = ''
+          Organizations this worker is registered under. The provisioner
+          creates one <literal>worker_registration</literal> row per
+          (worker_id, organization) pair so the same physical worker can
+          serve builds for multiple organizations from a single state
+          entry. Must list at least one organization.
+        '';
+        example = [ "acme-corp" "globex" ];
       };
 
       token_file = mkOption {
@@ -750,7 +757,7 @@
           {
             builder-1 = {
               display_name = "Primary Build Server";
-              organization = "acme-corp";
+              organizations = [ "acme-corp" ];
               token_file = "/etc/gradient/secrets/builder-1-token";
               created_by = "alice";
             };
