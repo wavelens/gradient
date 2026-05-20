@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Directive, ElementRef, Input, Renderer2, inject } from '@angular/core';
+import { Directive, ElementRef, Input, OnInit, Renderer2, inject } from '@angular/core';
+import { NgControl } from '@angular/forms';
 import { AccessState } from '@core/models/access.model';
 import { AccessService } from './access.service';
 
@@ -12,26 +13,36 @@ import { AccessService } from './access.service';
   selector: '[appManagedDisable]',
   standalone: true,
 })
-export class ManagedDisableDirective {
+export class ManagedDisableDirective implements OnInit {
   private el = inject(ElementRef<HTMLElement>);
   private renderer = inject(Renderer2);
   private access = inject(AccessService);
+  private ngControl = inject(NgControl, { optional: true, self: true });
+  private state: AccessState | null | undefined;
+  private initialized = false;
 
   @Input({ required: true }) set appManagedDisable(state: AccessState | null | undefined) {
-    this.apply(state);
+    this.state = state;
+    if (this.initialized) this.apply();
   }
 
-  private apply(state: AccessState | null | undefined): void {
+  ngOnInit(): void {
+    this.initialized = true;
+    this.apply();
+  }
+
+  private apply(): void {
     const node = this.el.nativeElement;
-    if (state && this.access.shouldDisableInput(state)) {
-      this.renderer.setProperty(node, 'disabled', true);
+    const disable = !!this.state && this.access.shouldDisableInput(this.state);
+    this.renderer.setProperty(node, 'disabled', disable);
+    if (disable) {
       this.renderer.setAttribute(node, 'aria-disabled', 'true');
-      this.renderer.setAttribute(node, 'title', this.tooltip(state));
+      this.renderer.setAttribute(node, 'title', this.tooltip(this.state!));
     } else {
-      this.renderer.setProperty(node, 'disabled', false);
       this.renderer.removeAttribute(node, 'aria-disabled');
       this.renderer.removeAttribute(node, 'title');
     }
+    this.ngControl?.valueAccessor?.setDisabledState?.(disable);
   }
 
   private tooltip(state: AccessState): string {
