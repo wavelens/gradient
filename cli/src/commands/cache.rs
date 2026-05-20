@@ -4,13 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::config::*;
-use crate::input::*;
-use crate::output::{ExitKind, Output};
+use crate::input::{client_from_config, handle_input};
+use crate::output::{ExitKind, Output, to_exit_kind};
 use clap::Subcommand;
-use connector::*;
+use connector::caches::MakeCacheRequest;
 use std::fs;
-use std::process::exit;
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
@@ -62,12 +60,7 @@ pub enum Commands {
 
 pub async fn handle(cmd: Commands, out: Output) {
     match cmd {
-        Commands::Create {
-            name,
-            display_name,
-            description,
-            priority,
-        } => {
+        Commands::Create { name, display_name, description, priority } => {
             let input_fields = [
                 ("Name", name),
                 ("Display Name", display_name),
@@ -83,60 +76,42 @@ pub async fn handle(cmd: Commands, out: Output) {
 
             let priority = match input.get("Priority").unwrap().parse::<i32>() {
                 Ok(p) => p,
-                Err(_) => {
-                    out.err(ExitKind::Usage, "Priority must be an integer.");
-                }
+                Err(_) => out.err(ExitKind::Usage, "Priority must be an integer."),
             };
 
-            let res = caches::put(
-                get_request_config(load_config()).unwrap(),
+            let client = client_from_config(out);
+            match client.caches().create(MakeCacheRequest {
                 name,
-                input.get("Display Name").unwrap().clone(),
-                input.get("Description").unwrap().clone(),
+                display_name: input.get("Display Name").unwrap().clone(),
+                description: input.get("Description").unwrap().clone(),
                 priority,
-            )
-            .await
-            .map_err(|e| {
-                out.progress(format!("{}", e));
-                exit(1);
-            })
-            .unwrap();
-
-            if res.error {
-                out.err(ExitKind::Api, format!("Cache creation failed: {}", res.message));
+            }).await {
+                Ok(_) => {
+                    out.ok(&serde_json::json!({"created": true}));
+                    out.human("Cache created.");
+                }
+                Err(e) => out.err(to_exit_kind(&e), e),
             }
-
-            out.human("Cache created.");
         }
 
         Commands::List => {
-            let res = caches::get(get_request_config(load_config()).unwrap())
-                .await
-                .map_err(|e| {
-                    out.progress(format!("{}", e));
-                    exit(1);
-                })
-                .unwrap();
-
-            if res.error {
-                out.err(ExitKind::Api, "Failed to list caches");
-            }
-
-            if res.message.is_empty() {
-                out.human("You have no caches.");
-            } else {
-                for cache in res.message {
-                    out.human(format!("{}: {}", cache.name, cache.id));
+            let client = client_from_config(out);
+            match client.caches().list().await {
+                Ok(res) => {
+                    out.ok(&res);
+                    if res.items.is_empty() {
+                        out.human("You have no caches.");
+                    } else {
+                        for cache in res.items {
+                            out.human(format!("{}: {}", cache.name, cache.id));
+                        }
+                    }
                 }
+                Err(e) => out.err(to_exit_kind(&e), e),
             }
         }
 
-        Commands::Edit {
-            name,
-            display_name,
-            description,
-            priority,
-        } => {
+        Commands::Edit { name, display_name, description, priority } => {
             let input_fields = [
                 ("Display Name", display_name),
                 ("Description", description),
@@ -150,72 +125,47 @@ pub async fn handle(cmd: Commands, out: Output) {
 
             let priority = match input.get("Priority").unwrap().parse::<i32>() {
                 Ok(p) => p,
-                Err(_) => {
-                    out.err(ExitKind::Usage, "Priority must be an integer.");
-                }
+                Err(_) => out.err(ExitKind::Usage, "Priority must be an integer."),
             };
 
-            let res = caches::put(
-                get_request_config(load_config()).unwrap(),
-                name.clone(),
-                input.get("Display Name").unwrap().clone(),
-                input.get("Description").unwrap().clone(),
+            let client = client_from_config(out);
+            match client.caches().create(MakeCacheRequest {
+                name,
+                display_name: input.get("Display Name").unwrap().clone(),
+                description: input.get("Description").unwrap().clone(),
                 priority,
-            )
-            .await
-            .map_err(|e| {
-                out.progress(format!("{}", e));
-                exit(1);
-            })
-            .unwrap();
-
-            if res.error {
-                out.err(ExitKind::Api, format!("Cache creation failed: {}", res.message));
+            }).await {
+                Ok(_) => {
+                    out.ok(&serde_json::json!({"updated": true}));
+                    out.human("Cache updated.");
+                }
+                Err(e) => out.err(to_exit_kind(&e), e),
             }
-
-            out.human("Cache updated.");
         }
 
         Commands::Delete { name } => {
-            let res =
-                caches::delete_cache(get_request_config(load_config()).unwrap(), name.clone())
-                    .await
-                    .map_err(|e| {
-                        out.progress(format!("{}", e));
-                        exit(1);
-                    })
-                    .unwrap();
-
-            if res.error {
-                out.err(ExitKind::Api, format!("Cache deletion failed: {}", res.message));
+            let client = client_from_config(out);
+            match client.caches().delete(&name).await {
+                Ok(_) => {
+                    out.ok(&serde_json::json!({"deleted": true}));
+                    out.human("Cache deleted.");
+                }
+                Err(e) => out.err(to_exit_kind(&e), e),
             }
-
-            out.human("Cache deleted.");
         }
 
         Commands::Show { name } => {
-            let res =
-                caches::get_cache_key(get_request_config(load_config()).unwrap(), name.clone())
-                    .await
-                    .map_err(|e| {
-                        out.progress(format!("{}", e));
-                        exit(1);
-                    })
-                    .unwrap();
-
-            if res.error {
-                out.err(ExitKind::Api, format!("Cache Key retrieval failed: {}", res.message));
+            let client = client_from_config(out);
+            match client.caches().public_key(&name).await {
+                Ok(key) => {
+                    out.ok(&serde_json::json!({"public_key": key}));
+                    out.human(format!("Cache Public Key: {}", key));
+                }
+                Err(e) => out.err(to_exit_kind(&e), e),
             }
-
-            out.human(format!("Cache Public Key: {:?}", res.message));
         }
 
-        Commands::InstallNetrc {
-            server,
-            token,
-            cache,
-            netrc_file,
-        } => {
+        Commands::InstallNetrc { server, token, cache, netrc_file } => {
             let token = match token {
                 Some(t) if !t.is_empty() => t,
                 _ => {
