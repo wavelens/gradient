@@ -5,12 +5,13 @@
  */
 
 use crate::config::*;
-use crate::input::*;
-use crate::output::{ExitKind, Output};
+use crate::input::{client_from_config, handle_input};
+use crate::output::{ExitKind, Output, to_exit_kind};
 use clap::Subcommand;
 use colored::*;
-use connector::*;
-use std::process::exit;
+use connector::projects::{MakeProjectRequest, PatchProjectRequest};
+use futures::StreamExt;
+use futures::pin_mut;
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
@@ -53,9 +54,7 @@ pub async fn handle(cmd: Commands, out: Output) {
         Commands::Select { project } => {
             let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
                 Some(id) => id,
-                None => {
-                    out.err(ExitKind::Usage, "Organization is required for command.");
-                }
+                None => out.err(ExitKind::Usage, "Organization is required for command."),
             };
 
             set_get_value(
@@ -71,89 +70,59 @@ pub async fn handle(cmd: Commands, out: Output) {
             let (organization, project) =
                 match set_get_value(ConfigKey::SelectedProject, None, true) {
                     Some(id) => {
-                        let parts: Vec<&str> = id.split("/").collect();
+                        let parts: Vec<&str> = id.split('/').collect();
                         (parts[0].to_string(), parts[1].to_string())
                     }
-                    _ => {
-                        out.err(ExitKind::Usage, "Project is required for command.");
-                    }
+                    _ => out.err(ExitKind::Usage, "Project is required for command."),
                 };
 
-            let project = projects::get_project(
-                get_request_config(load_config()).unwrap(),
-                organization,
-                project,
-            )
-            .await
-            .map_err(|e| {
-                out.progress(format!("{}", e));
-                exit(1);
-            })
-            .unwrap();
+            let client = client_from_config(out);
 
-            if project.error {
-                out.err(ExitKind::Api, "Failed to show project.");
-            }
+            let details = match client.projects().details(&organization, &project).await {
+                Ok(d) => d,
+                Err(e) => out.err(to_exit_kind(&e), e),
+            };
 
+            out.ok(&details);
             out.human("===== Project =====");
-            out.human(format!("Name: {}", project.message.name));
-            out.human(format!("Description: {}", project.message.description));
-            out.human(format!("Repository: {}", project.message.repository));
-            out.human(format!("Wildcard: {}", project.message.wildcard));
-            out.human(format!("Organization ID: {}", project.message.organization));
+            out.human(format!("Name: {}", details.name));
+            out.human(format!("Description: {}", details.description));
+            out.human(format!("Repository: {}", details.repository));
+            out.human(format!("Wildcard: {}", details.wildcard));
             out.human("");
 
-            if project.message.last_evaluation.is_none() {
+            if details.last_evaluations.is_empty() {
                 out.human("No last evaluation.");
-                exit(0);
+                return;
             }
 
-            let evaluation = evals::get_evaluation(
-                get_request_config(load_config()).unwrap(),
-                project.message.last_evaluation.unwrap(),
-            )
-            .await
-            .map_err(|e| {
-                out.progress(format!("{}", e));
-                exit(1);
-            })
-            .unwrap();
-
-            if evaluation.error {
-                out.err(ExitKind::Api, "Failed to show evaluation.");
-            }
+            let eval_summary = &details.last_evaluations[0];
+            let eval = match client.evals().get(&eval_summary.id).await {
+                Ok(e) => e,
+                Err(e) => out.err(to_exit_kind(&e), e),
+            };
 
             out.human("===== Evaluation =====");
-            out.human(format!("ID: {}", evaluation.message.id));
-            out.human(format!("Status: {}", evaluation.message.status));
-            out.human(format!("Commit: {}", evaluation.message.commit));
-            if let Some(error) = &evaluation.message.error {
+            out.human(format!("ID: {}", eval.id));
+            out.human(format!("Status: {}", eval.status));
+            out.human(format!("Commit: {}", eval.commit));
+            if let Some(error) = &eval.error {
                 out.human(format!("Error: {}", error));
             }
             out.human("");
 
-            let builds = evals::get_evaluation_builds(
-                get_request_config(load_config()).unwrap(),
-                evaluation.message.id.clone(),
-            )
-            .await
-            .map_err(|e| {
-                out.progress(format!("{}", e));
-                exit(1);
-            })
-            .unwrap();
+            let builds = match client.evals().builds(&eval.id).await {
+                Ok(b) => b,
+                Err(e) => out.err(to_exit_kind(&e), e),
+            };
 
-            if builds.error {
-                out.err(ExitKind::Api, "Failed to get builds.");
-            }
-
-            if builds.message.builds.is_empty() {
+            if builds.builds.is_empty() {
                 out.human("No builds.");
-                exit(0);
+                return;
             }
 
             out.human("===== Building =====");
-            for build in builds.message.builds.iter() {
+            for build in &builds.builds {
                 let colored_name = match build.status.as_str() {
                     "Completed" => build.name.green(),
                     "Building" | "Running" => build.name.yellow(),
@@ -165,18 +134,27 @@ pub async fn handle(cmd: Commands, out: Output) {
             }
             out.human("");
 
-            if evaluation.message.status != "Aborted" {
+            if eval.status != "Aborted" {
                 out.human("===== Log =====");
-                evals::post_evaluation_builds(
-                    get_request_config(load_config()).unwrap(),
-                    evaluation.message.id,
-                )
-                .await
-                .map_err(|e| {
-                    out.progress(format!("{}", e));
-                    exit(1);
-                })
-                .unwrap();
+                let evals_api = client.evals();
+                match evals_api.stream_builds(&eval.id).await {
+                    Ok(stream) => {
+                        pin_mut!(stream);
+                        while let Some(item) = stream.next().await {
+                            match item {
+                                Ok(line) => {
+                                    if out.is_json() {
+                                        println!("{}", serde_json::json!({"error": false, "message": line}));
+                                    } else {
+                                        print!("{}", line);
+                                    }
+                                }
+                                Err(e) => out.err(to_exit_kind(&e), e),
+                            }
+                        }
+                    }
+                    Err(e) => out.err(to_exit_kind(&e), e),
+                }
             }
         }
 
@@ -184,18 +162,10 @@ pub async fn handle(cmd: Commands, out: Output) {
             todo!();
         }
 
-        Commands::Create {
-            name,
-            display_name,
-            description,
-            repository,
-            wildcard,
-        } => {
+        Commands::Create { name, display_name, description, repository, wildcard } => {
             let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
                 Some(id) => id,
-                _ => {
-                    out.err(ExitKind::Usage, "Organization is required for command.");
-                }
+                _ => out.err(ExitKind::Usage, "Organization is required for command."),
             };
 
             let input_fields = [
@@ -212,109 +182,72 @@ pub async fn handle(cmd: Commands, out: Output) {
             let input = handle_input(input_fields, true);
             let name = input.get("Name").unwrap().clone();
 
-            let res = projects::put(
-                get_request_config(load_config()).unwrap(),
-                organization.clone(),
-                name.clone(),
-                input.get("Display Name").unwrap().clone(),
-                input.get("Description").unwrap().clone(),
-                input.get("Repository").unwrap().clone(),
-                input.get("Wildcard").unwrap().clone(),
-            )
-            .await
-            .map_err(|e| {
-                out.progress(format!("{}", e));
-                exit(1);
-            })
-            .unwrap();
-
-            if res.error {
-                out.err(ExitKind::Api, format!("Project creation failed: {}", res.message));
+            let client = client_from_config(out);
+            match client.projects().create(&organization, &name, MakeProjectRequest {
+                name: name.clone(),
+                display_name: input.get("Display Name").unwrap().clone(),
+                description: input.get("Description").unwrap().clone(),
+                repository: input.get("Repository").unwrap().clone(),
+                wildcard: input.get("Wildcard").unwrap().clone(),
+            }).await {
+                Ok(_) => {
+                    set_get_value(
+                        ConfigKey::SelectedProject,
+                        Some(format!("{}/{}", organization, name)),
+                        true,
+                    )
+                    .unwrap();
+                    out.ok(&serde_json::json!({"created": true}));
+                    out.human("Project created.");
+                }
+                Err(e) => out.err(to_exit_kind(&e), e),
             }
-
-            set_get_value(
-                ConfigKey::SelectedProject,
-                Some(format!("{}/{}", organization, name)),
-                true,
-            )
-            .unwrap();
-            out.human("Project created.");
         }
 
         Commands::List => {
             let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
                 Some(id) => id,
-                _ => {
-                    out.err(ExitKind::Usage, "Organization is required for command.");
-                }
+                _ => out.err(ExitKind::Usage, "Organization is required for command."),
             };
 
-            let res = projects::get(get_request_config(load_config()).unwrap(), organization)
-                .await
-                .map_err(|e| {
-                    out.progress(format!("{}", e));
-                    exit(1);
-                })
-                .unwrap();
-
-            if res.message.items.is_empty() {
-                out.human("You have no projects.");
-            } else {
-                for project in res.message.items {
-                    out.human(format!("{}: {}", project.name, project.id));
+            let client = client_from_config(out);
+            match client.projects().list(&organization).await {
+                Ok(res) => {
+                    out.ok(&res);
+                    if res.items.is_empty() {
+                        out.human("You have no projects.");
+                    } else {
+                        for project in res.items {
+                            out.human(format!("{}: {}", project.name, project.id));
+                        }
+                    }
                 }
+                Err(e) => out.err(to_exit_kind(&e), e),
             }
         }
 
-        Commands::Edit {
-            new_name,
-            display_name,
-            description,
-            repository,
-            wildcard,
-        } => {
+        Commands::Edit { new_name, display_name, description, repository, wildcard } => {
             let (organization, project) =
                 match set_get_value(ConfigKey::SelectedProject, None, true) {
                     Some(id) => {
-                        let parts: Vec<&str> = id.split("/").collect();
+                        let parts: Vec<&str> = id.split('/').collect();
                         (parts[0].to_string(), parts[1].to_string())
                     }
-                    _ => {
-                        out.err(ExitKind::Usage, "Project is required for command.");
-                    }
+                    _ => out.err(ExitKind::Usage, "Project is required for command."),
                 };
 
-            let current_project = projects::get_project(
-                get_request_config(load_config()).unwrap(),
-                organization.clone(),
-                project.clone(),
-            )
-            .await
-            .map_err(|e| {
-                out.progress(format!("{}", e));
-                exit(1);
-            })
-            .unwrap()
-            .message;
+            let client = client_from_config(out);
+            let current = match client.projects().details(&organization, &project).await {
+                Ok(d) => d,
+                Err(e) => out.err(to_exit_kind(&e), e),
+            };
 
             let input_fields = [
-                ("Name", Some(new_name.unwrap_or(current_project.name))),
-                (
-                    "Display Name",
-                    Some(display_name.unwrap_or(current_project.display_name)),
-                ),
-                (
-                    "Description",
-                    Some(description.unwrap_or(current_project.description)),
-                ),
-                (
-                    "Repository",
-                    Some(repository.unwrap_or(current_project.repository)),
-                ),
-                (
-                    "Wildcard",
-                    Some(wildcard.unwrap_or(current_project.wildcard)),
-                ),
+                ("Name", Some(new_name.unwrap_or(current.name))),
+                ("Display Name", Some(display_name.unwrap_or(current.display_name))),
+                ("Description", Some(description.unwrap_or(current.description))),
+                ("Repository", Some(repository.unwrap_or(current.repository))),
+                ("Wildcard", Some(wildcard.unwrap_or(current.wildcard))),
             ]
             .iter()
             .map(|(k, v)| (k.to_string(), v.clone()))
@@ -322,90 +255,59 @@ pub async fn handle(cmd: Commands, out: Output) {
 
             let input = handle_input(input_fields, false);
 
-            let res = projects::patch_project(
-                get_request_config(load_config()).unwrap(),
-                organization,
-                project,
-                input.get("New Name").cloned(),
-                input.get("Display Name").cloned(),
-                input.get("Description").cloned(),
-                input.get("Repository").cloned(),
-                input.get("Wildcard").cloned(),
-            )
-            .await
-            .map_err(|e| {
-                out.progress(format!("{}", e));
-                exit(1);
-            })
-            .unwrap();
-
-            if res.error {
-                out.err(ExitKind::Api, format!("Project creation failed: {}", res.message));
+            match client.projects().update(&organization, &project, PatchProjectRequest {
+                name: input.get("Name").cloned(),
+                display_name: input.get("Display Name").cloned(),
+                description: input.get("Description").cloned(),
+                repository: input.get("Repository").cloned(),
+                wildcard: input.get("Wildcard").cloned(),
+            }).await {
+                Ok(_) => {
+                    out.ok(&serde_json::json!({"updated": true}));
+                    out.human("Project updated.");
+                }
+                Err(e) => out.err(to_exit_kind(&e), e),
             }
-
-            out.human("Project updated.");
         }
 
         Commands::Delete => {
             let (organization, project) =
                 match set_get_value(ConfigKey::SelectedProject, None, true) {
                     Some(id) => {
-                        let parts: Vec<&str> = id.split("/").collect();
+                        let parts: Vec<&str> = id.split('/').collect();
                         (parts[0].to_string(), parts[1].to_string())
                     }
-                    _ => {
-                        out.err(ExitKind::Usage, "Project is required for command.");
-                    }
+                    _ => out.err(ExitKind::Usage, "Project is required for command."),
                 };
 
-            let res = projects::delete_project(
-                get_request_config(load_config()).unwrap(),
-                organization,
-                project,
-            )
-            .await
-            .map_err(|e| {
-                out.progress(format!("{}", e));
-                exit(1);
-            })
-            .unwrap();
-
-            if res.error {
-                out.err(ExitKind::Api, "Failed to delete project.");
+            let client = client_from_config(out);
+            match client.projects().delete(&organization, &project).await {
+                Ok(_) => {
+                    out.ok(&serde_json::json!({"deleted": true}));
+                    out.human("Project deleted.");
+                }
+                Err(e) => out.err(to_exit_kind(&e), e),
             }
-
-            out.human("Project deleted.");
         }
 
         Commands::Evaluate => {
             let (organization, project) =
                 match set_get_value(ConfigKey::SelectedProject, None, true) {
                     Some(id) => {
-                        let parts: Vec<&str> = id.split("/").collect();
+                        let parts: Vec<&str> = id.split('/').collect();
                         (parts[0].to_string(), parts[1].to_string())
                     }
-                    _ => {
-                        out.err(ExitKind::Usage, "Project is required for command.");
-                    }
+                    _ => out.err(ExitKind::Usage, "Project is required for command."),
                 };
 
-            let res = projects::post_project_evaluate(
-                get_request_config(load_config()).unwrap(),
-                organization,
-                project,
-            )
-            .await
-            .map_err(|e| {
-                out.progress(format!("{}", e));
-                exit(1);
-            })
-            .unwrap();
-
-            if res.error {
-                out.err(ExitKind::Api, format!("Failed to start project evaluation: {}", res.message));
+            let client = client_from_config(out);
+            match client.projects().evaluate(&organization, &project).await {
+                Ok(eval_id) => {
+                    out.ok(&serde_json::json!({"evaluation_id": eval_id}));
+                    out.human("Project evaluation started.");
+                }
+                Err(e) => out.err(to_exit_kind(&e), e),
             }
-
-            out.human("Project evaluation started.");
         }
     }
 }
