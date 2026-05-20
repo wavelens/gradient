@@ -170,6 +170,28 @@ impl LocalNixStore {
     /// Paths that fail individual `query_references` calls (e.g. removed
     /// between calls) are logged and skipped — the walk continues so the
     /// caller still gets a best-effort closure for the remaining paths.
+    /// Register `gcroot_symlink` as an indirect GC root with the daemon.
+    ///
+    /// The caller must have already created the symlink on disk; the daemon
+    /// records the link and treats its target as alive for GC purposes
+    /// until the link is removed.
+    pub async fn add_indirect_root(&self, gcroot_symlink: &std::path::Path) -> Result<()> {
+        let bytes =
+            bytes::Bytes::copy_from_slice(gcroot_symlink.as_os_str().as_encoded_bytes());
+
+        let mut guard = self.scoped().await?;
+        match guard.client().add_indirect_root(&bytes).await {
+            Ok(()) => {
+                guard.mark_ok();
+                Ok(())
+            }
+            Err(e) => Err(anyhow::anyhow!(
+                "add_indirect_root failed for {}: {e}",
+                gcroot_symlink.display()
+            )),
+        }
+    }
+
     pub async fn collect_runtime_closure(&self, seeds: &[String]) -> HashSet<String> {
         let mut visited: HashSet<String> = HashSet::new();
         let mut queue: VecDeque<String> = VecDeque::new();
