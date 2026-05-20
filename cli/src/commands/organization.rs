@@ -6,6 +6,7 @@
 
 use crate::config::*;
 use crate::input::*;
+use crate::output::{ExitKind, Output};
 use clap::Subcommand;
 use connector::*;
 use std::process::exit;
@@ -68,11 +69,11 @@ pub enum CacheCommands {
     Remove { cache: String },
 }
 
-pub async fn handle(cmd: Commands) {
+pub async fn handle(cmd: Commands, out: Output) {
     match cmd {
         Commands::Select { organization } => {
             set_get_value(ConfigKey::SelectedOrganization, Some(organization), true).unwrap();
-            println!("Organization selected.");
+            out.human("Organization selected.");
         }
 
         Commands::Create {
@@ -100,26 +101,25 @@ pub async fn handle(cmd: Commands) {
             )
             .await
             .map_err(|e| {
-                eprintln!("{}", e);
+                out.progress(format!("{}", e));
                 exit(1);
             })
             .unwrap();
 
             if res.error {
-                eprintln!("Organization creation failed: {}", res.message);
+                out.progress(format!("Organization creation failed: {}", res.message));
                 exit(1);
             }
 
             set_get_value(ConfigKey::SelectedOrganization, Some(name), true);
-            println!("Organization created.");
+            out.human("Organization created.");
         }
 
         Commands::Show => {
             let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
                 Some(id) => id,
                 None => {
-                    eprintln!("Organization is required for command.");
-                    exit(1);
+                    out.err(ExitKind::Usage, "Organization is required for command.");
                 }
             };
 
@@ -127,39 +127,37 @@ pub async fn handle(cmd: Commands) {
                 orgs::get_organization(get_request_config(load_config()).unwrap(), organization)
                     .await
                     .map_err(|e| {
-                        eprintln!("{}", e);
+                        out.progress(format!("{}", e));
                         exit(1);
                     })
                     .unwrap();
 
             if res.error {
-                eprintln!("Failed to show organization.");
-                exit(1);
+                out.err(ExitKind::Api, "Failed to show organization.");
             }
 
-            println!("Name: {}", res.message.name);
-            println!("Description: {}", res.message.description);
+            out.human(format!("Name: {}", res.message.name));
+            out.human(format!("Description: {}", res.message.description));
         }
 
         Commands::List => {
             let res = orgs::get(get_request_config(load_config()).unwrap())
                 .await
                 .map_err(|e| {
-                    eprintln!("{}", e);
+                    out.progress(format!("{}", e));
                     exit(1);
                 })
                 .unwrap();
 
             if res.error {
-                eprintln!("Failed to list organizations");
-                exit(1);
+                out.err(ExitKind::Api, "Failed to list organizations");
             }
 
             if res.message.items.is_empty() {
-                println!("You have no organizations.");
+                out.human("You have no organizations.");
             } else {
                 for org in res.message.items {
-                    println!("{}: {}", org.name, org.id);
+                    out.human(format!("{}: {}", org.name, org.id));
                 }
             }
         }
@@ -172,8 +170,7 @@ pub async fn handle(cmd: Commands) {
             let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
                 Some(id) => id,
                 None => {
-                    eprintln!("Organization is required for command.");
-                    exit(1);
+                    out.err(ExitKind::Usage, "Organization is required for command.");
                 }
             };
 
@@ -183,7 +180,7 @@ pub async fn handle(cmd: Commands) {
             )
             .await
             .map_err(|e| {
-                eprintln!("{}", e);
+                out.progress(format!("{}", e));
                 exit(1);
             })
             .unwrap()
@@ -215,25 +212,23 @@ pub async fn handle(cmd: Commands) {
             )
             .await
             .map_err(|e| {
-                eprintln!("{}", e);
+                out.progress(format!("{}", e));
                 exit(1);
             })
             .unwrap();
 
             if res.error {
-                eprintln!("Organization update failed: {}", res.message);
-                exit(1);
+                out.err(ExitKind::Api, format!("Organization update failed: {}", res.message));
             }
 
-            println!("Organization updated.");
+            out.human("Organization updated.");
         }
 
         Commands::Delete => {
             let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
                 Some(id) => id,
                 None => {
-                    eprintln!("Organization is required for command.");
-                    exit(1);
+                    out.err(ExitKind::Usage, "Organization is required for command.");
                 }
             };
 
@@ -241,25 +236,23 @@ pub async fn handle(cmd: Commands) {
                 orgs::delete_organization(get_request_config(load_config()).unwrap(), organization)
                     .await
                     .map_err(|e| {
-                        eprintln!("{}", e);
+                        out.progress(format!("{}", e));
                         exit(1);
                     })
                     .unwrap();
 
             if res.error {
-                eprintln!("Failed to delete organization: {}", res.message);
-                exit(1);
+                out.err(ExitKind::Api, format!("Failed to delete organization: {}", res.message));
             }
 
-            println!("Organization deleted.");
+            out.human("Organization deleted.");
         }
 
         Commands::User { cmd } => {
             let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
                 Some(id) => id,
                 None => {
-                    eprintln!("Organization is required for command.");
-                    exit(1);
+                    out.err(ExitKind::Usage, "Organization is required for command.");
                 }
             };
 
@@ -271,21 +264,20 @@ pub async fn handle(cmd: Commands) {
                     )
                     .await
                     .map_err(|e| {
-                        eprintln!("{}", e);
+                        out.progress(format!("{}", e));
                         exit(1);
                     })
                     .unwrap();
 
                     if res.error {
-                        eprintln!("Failed to list users");
-                        exit(1);
+                        out.err(ExitKind::Api, "Failed to list users");
                     }
 
                     if res.message.is_empty() {
-                        println!("You have no users.");
+                        out.human("You have no users.");
                     } else {
                         for user in res.message {
-                            println!("{}: {}", user.name, user.id);
+                            out.human(format!("{}: {}", user.name, user.id));
                         }
                     }
                 }
@@ -296,8 +288,7 @@ pub async fn handle(cmd: Commands) {
                         && role.as_ref().unwrap() != "Write"
                         && role.as_ref().unwrap() != "Admin"
                     {
-                        eprintln!("Role must be either 'View', 'Write' or 'Admin'.");
-                        exit(1);
+                        out.err(ExitKind::Usage, "Role must be either 'View', 'Write' or 'Admin'.");
                     }
 
                     let res = orgs::post_organization_users(
@@ -308,17 +299,16 @@ pub async fn handle(cmd: Commands) {
                     )
                     .await
                     .map_err(|e| {
-                        eprintln!("{}", e);
+                        out.progress(format!("{}", e));
                         exit(1);
                     })
                     .unwrap();
 
                     if res.error {
-                        eprintln!("Failed to add user: {}", res.message);
-                        exit(1);
+                        out.err(ExitKind::Api, format!("Failed to add user: {}", res.message));
                     }
 
-                    println!("User added.");
+                    out.human("User added.");
                 }
 
                 UserCommands::Remove { user } => {
@@ -329,17 +319,16 @@ pub async fn handle(cmd: Commands) {
                     )
                     .await
                     .map_err(|e| {
-                        eprintln!("{}", e);
+                        out.progress(format!("{}", e));
                         exit(1);
                     })
                     .unwrap();
 
                     if res.error {
-                        eprintln!("Failed to remove user: {}", res.message);
-                        exit(1);
+                        out.err(ExitKind::Api, format!("Failed to remove user: {}", res.message));
                     }
 
-                    println!("User removed.");
+                    out.human("User removed.");
                 }
             }
         }
@@ -348,8 +337,7 @@ pub async fn handle(cmd: Commands) {
             let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
                 Some(id) => id,
                 None => {
-                    eprintln!("Organization is required for command.");
-                    exit(1);
+                    out.err(ExitKind::Usage, "Organization is required for command.");
                 }
             };
 
@@ -361,17 +349,16 @@ pub async fn handle(cmd: Commands) {
                     )
                     .await
                     .map_err(|e| {
-                        eprintln!("{}", e);
+                        out.progress(format!("{}", e));
                         exit(1);
                     })
                     .unwrap();
 
                     if res.error {
-                        eprintln!("Failed to show SSH key: {}", res.message);
-                        exit(1);
+                        out.err(ExitKind::Api, format!("Failed to show SSH key: {}", res.message));
                     }
 
-                    println!("Public Key: {}", res.message);
+                    out.human(format!("Public Key: {}", res.message));
                 }
 
                 SshCommands::Recreate => {
@@ -381,17 +368,16 @@ pub async fn handle(cmd: Commands) {
                     )
                     .await
                     .map_err(|e| {
-                        eprintln!("{}", e);
+                        out.progress(format!("{}", e));
                         exit(1);
                     })
                     .unwrap();
 
                     if res.error {
-                        eprintln!("Failed to recreate SSH key: {}", res.message);
-                        exit(1);
+                        out.err(ExitKind::Api, format!("Failed to recreate SSH key: {}", res.message));
                     }
 
-                    println!("New Public Key: {}", res.message);
+                    out.human(format!("New Public Key: {}", res.message));
                 }
             }
         }
@@ -400,8 +386,7 @@ pub async fn handle(cmd: Commands) {
             let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
                 Some(id) => id,
                 None => {
-                    eprintln!("Organization is required for command.");
-                    exit(1);
+                    out.err(ExitKind::Usage, "Organization is required for command.");
                 }
             };
 
@@ -413,21 +398,20 @@ pub async fn handle(cmd: Commands) {
                     )
                     .await
                     .map_err(|e| {
-                        eprintln!("{}", e);
+                        out.progress(format!("{}", e));
                         exit(1);
                     })
                     .unwrap();
 
                     if res.error {
-                        eprintln!("failed to list subscribed caches");
-                        exit(1);
+                        out.err(ExitKind::Api, "failed to list subscribed caches");
                     }
 
                     if res.message.is_empty() {
-                        println!("You have no caches subscribed.");
+                        out.human("You have no caches subscribed.");
                     } else {
                         for cache in res.message {
-                            println!("{}: {}", cache.name, cache.id);
+                            out.human(format!("{}: {}", cache.name, cache.id));
                         }
                     }
                 }
@@ -440,17 +424,16 @@ pub async fn handle(cmd: Commands) {
                     )
                     .await
                     .map_err(|e| {
-                        eprintln!("{}", e);
+                        out.progress(format!("{}", e));
                         exit(1);
                     })
                     .unwrap();
 
                     if res.error {
-                        eprintln!("Failed to subscribe to cache: {}", res.message);
-                        exit(1);
+                        out.err(ExitKind::Api, format!("Failed to subscribe to cache: {}", res.message));
                     }
 
-                    println!("Subscribed to cache.");
+                    out.human("Subscribed to cache.");
                 }
 
                 CacheCommands::Remove { cache } => {
@@ -461,17 +444,16 @@ pub async fn handle(cmd: Commands) {
                     )
                     .await
                     .map_err(|e| {
-                        eprintln!("{}", e);
+                        out.progress(format!("{}", e));
                         exit(1);
                     })
                     .unwrap();
 
                     if res.error {
-                        eprintln!("Failed to unsubscribe from cache: {}", res.message);
-                        exit(1);
+                        out.err(ExitKind::Api, format!("Failed to unsubscribe from cache: {}", res.message));
                     }
 
-                    println!("Unsubscribed from cache.");
+                    out.human("Unsubscribed from cache.");
                 }
             }
         }

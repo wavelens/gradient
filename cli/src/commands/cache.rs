@@ -6,6 +6,7 @@
 
 use crate::config::*;
 use crate::input::*;
+use crate::output::{ExitKind, Output};
 use clap::Subcommand;
 use connector::*;
 use std::fs;
@@ -59,7 +60,7 @@ pub enum Commands {
     },
 }
 
-pub async fn handle(cmd: Commands) {
+pub async fn handle(cmd: Commands, out: Output) {
     match cmd {
         Commands::Create {
             name,
@@ -83,8 +84,7 @@ pub async fn handle(cmd: Commands) {
             let priority = match input.get("Priority").unwrap().parse::<i32>() {
                 Ok(p) => p,
                 Err(_) => {
-                    eprintln!("Priority must be an integer.");
-                    exit(1);
+                    out.err(ExitKind::Usage, "Priority must be an integer.");
                 }
             };
 
@@ -97,38 +97,36 @@ pub async fn handle(cmd: Commands) {
             )
             .await
             .map_err(|e| {
-                eprintln!("{}", e);
+                out.progress(format!("{}", e));
                 exit(1);
             })
             .unwrap();
 
             if res.error {
-                eprintln!("Cache creation failed: {}", res.message);
-                exit(1);
+                out.err(ExitKind::Api, format!("Cache creation failed: {}", res.message));
             }
 
-            println!("Cache created.");
+            out.human("Cache created.");
         }
 
         Commands::List => {
             let res = caches::get(get_request_config(load_config()).unwrap())
                 .await
                 .map_err(|e| {
-                    eprintln!("{}", e);
+                    out.progress(format!("{}", e));
                     exit(1);
                 })
                 .unwrap();
 
             if res.error {
-                eprintln!("Failed to list caches");
-                exit(1);
+                out.err(ExitKind::Api, "Failed to list caches");
             }
 
             if res.message.is_empty() {
-                println!("You have no caches.");
+                out.human("You have no caches.");
             } else {
                 for cache in res.message {
-                    println!("{}: {}", cache.name, cache.id);
+                    out.human(format!("{}: {}", cache.name, cache.id));
                 }
             }
         }
@@ -153,8 +151,7 @@ pub async fn handle(cmd: Commands) {
             let priority = match input.get("Priority").unwrap().parse::<i32>() {
                 Ok(p) => p,
                 Err(_) => {
-                    eprintln!("Priority must be an integer.");
-                    exit(1);
+                    out.err(ExitKind::Usage, "Priority must be an integer.");
                 }
             };
 
@@ -167,17 +164,16 @@ pub async fn handle(cmd: Commands) {
             )
             .await
             .map_err(|e| {
-                eprintln!("{}", e);
+                out.progress(format!("{}", e));
                 exit(1);
             })
             .unwrap();
 
             if res.error {
-                eprintln!("Cache creation failed: {}", res.message);
-                exit(1);
+                out.err(ExitKind::Api, format!("Cache creation failed: {}", res.message));
             }
 
-            println!("Cache updated.");
+            out.human("Cache updated.");
         }
 
         Commands::Delete { name } => {
@@ -185,17 +181,16 @@ pub async fn handle(cmd: Commands) {
                 caches::delete_cache(get_request_config(load_config()).unwrap(), name.clone())
                     .await
                     .map_err(|e| {
-                        eprintln!("{}", e);
+                        out.progress(format!("{}", e));
                         exit(1);
                     })
                     .unwrap();
 
             if res.error {
-                eprintln!("Cache deletion failed: {}", res.message);
-                exit(1);
+                out.err(ExitKind::Api, format!("Cache deletion failed: {}", res.message));
             }
 
-            println!("Cache deleted.");
+            out.human("Cache deleted.");
         }
 
         Commands::Show { name } => {
@@ -203,17 +198,16 @@ pub async fn handle(cmd: Commands) {
                 caches::get_cache_key(get_request_config(load_config()).unwrap(), name.clone())
                     .await
                     .map_err(|e| {
-                        eprintln!("{}", e);
+                        out.progress(format!("{}", e));
                         exit(1);
                     })
                     .unwrap();
 
             if res.error {
-                eprintln!("Cache Key retrieval failed: {}", res.message);
-                exit(1);
+                out.err(ExitKind::Api, format!("Cache Key retrieval failed: {}", res.message));
             }
 
-            println!("Cache Public Key: {:?}", res.message);
+            out.human(format!("Cache Public Key: {:?}", res.message));
         }
 
         Commands::InstallNetrc {
@@ -228,12 +222,10 @@ pub async fn handle(cmd: Commands) {
                     print!("API key (GRAD…): ");
                     std::io::Write::flush(&mut std::io::stdout()).ok();
                     let entered = rpassword::read_password().unwrap_or_else(|e| {
-                        eprintln!("Failed to read token: {}", e);
-                        exit(1);
+                        out.err(ExitKind::Api, format!("Failed to read token: {}", e));
                     });
                     if entered.is_empty() {
-                        eprintln!("Token cannot be empty.");
-                        exit(1);
+                        out.err(ExitKind::Usage, "Token cannot be empty.");
                     }
                     entered
                 }
@@ -248,8 +240,7 @@ pub async fn handle(cmd: Commands) {
                 .unwrap_or("")
                 .to_string();
             if machine_host.is_empty() {
-                eprintln!("Invalid server URL: '{}'", server);
-                exit(1);
+                out.err(ExitKind::Usage, format!("Invalid server URL: '{}'", server));
             }
 
             let new_entry = format!(
@@ -269,25 +260,24 @@ pub async fn handle(cmd: Commands) {
             if let Some(parent) = std::path::Path::new(&netrc_file).parent()
                 && let Err(e) = fs::create_dir_all(parent)
             {
-                eprintln!("Failed to create directory '{}': {}", parent.display(), e);
-                exit(1);
+                out.err(
+                    ExitKind::Api,
+                    format!("Failed to create directory '{}': {}", parent.display(), e),
+                );
             }
 
             fs::write(&netrc_file, &updated).unwrap_or_else(|e| {
-                eprintln!("Failed to write '{}': {}", netrc_file, e);
-                exit(1);
+                out.err(ExitKind::Api, format!("Failed to write '{}': {}", netrc_file, e));
             });
 
-            println!(
+            out.human(format!(
                 "netrc credentials for cache '{}' (machine '{}') installed into '{}'.",
                 cache, machine_host, netrc_file
-            );
+            ));
         }
     }
 }
 
-/// Remove all lines belonging to a `machine <host>` block from a netrc file's contents.
-/// A block ends at the next `machine` line or end of file.
 fn remove_netrc_entry(contents: &str, host: &str) -> String {
     if host.is_empty() {
         return contents.to_string();

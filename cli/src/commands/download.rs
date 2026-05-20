@@ -6,6 +6,7 @@
 
 use crate::config::*;
 use crate::input::*;
+use crate::output::{ExitKind, Output};
 use connector::build_requests::{ArtefactTree, ProductArtefact};
 use connector::{RequestConfig, build_requests, builds, projects};
 use std::io::{self, Write};
@@ -16,67 +17,63 @@ pub async fn handle_download(
     evaluation: Option<String>,
     project: Option<String>,
     products: Option<String>,
-    out: Option<String>,
+    out_dir_arg: Option<String>,
+    out: Output,
 ) {
     let config = get_request_config(load_config()).unwrap_or_else(|_| {
-        eprintln!("Not configured. Use 'gradient config' to set server and auth token.");
-        exit(1);
+        out.err(ExitKind::Usage, "Not configured. Use 'gradient config' to set server and auth token.");
     });
 
     let eval_id = match evaluation {
         Some(id) => id,
-        None => pick_latest_evaluation(&config, project.as_deref()).await,
+        None => pick_latest_evaluation(&config, project.as_deref(), out).await,
     };
 
-    println!("Fetching artefact tree for evaluation {}...", eval_id);
+    out.human(format!("Fetching artefact tree for evaluation {}...", eval_id));
 
     let tree = match build_requests::get_eval_artefacts(config.clone(), eval_id).await {
         Ok(r) if r.error => {
-            eprintln!("Server rejected request for artefact tree.");
-            exit(1);
+            out.err(ExitKind::Api, "Server rejected request for artefact tree.");
         }
         Ok(r) => r.message,
         Err(e) => {
-            eprintln!("Failed to fetch artefact tree: {}", e);
-            exit(1);
+            out.err(ExitKind::Api, format!("Failed to fetch artefact tree: {}", e));
         }
     };
 
     let flat = flatten_products(&tree);
     if flat.is_empty() {
-        println!("No artefacts in this evaluation.");
+        out.human("No artefacts in this evaluation.");
         return;
     }
 
     let selection = match products {
         Some(spec) => parse_selection_spec(&spec, flat.len()).unwrap_or_else(|e| {
-            eprintln!("{}", e);
-            exit(1);
+            out.err(ExitKind::Usage, e);
         }),
         None => interactive_select(&flat),
     };
 
     if selection.is_empty() {
-        println!("No products selected.");
+        out.human("No products selected.");
         return;
     }
 
-    let out_dir = out
+    let out_dir = out_dir_arg
         .as_deref()
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().expect("read current directory"));
 
     if !out_dir.exists() {
         std::fs::create_dir_all(&out_dir).unwrap_or_else(|e| {
-            eprintln!("Failed to create {}: {}", out_dir.display(), e);
-            exit(1);
+            out.err(ExitKind::Api, format!("Failed to create {}: {}", out_dir.display(), e));
         });
     }
 
     for idx in selection {
         let p = &flat[idx];
         let display_name = product_filename(p.product);
-        println!("Downloading {}...", display_name);
+        out.human(format!("Downloading {}...", display_name));
         let bytes = match builds::download_build_file(
             config.clone(),
             p.build_id.clone(),
@@ -86,8 +83,7 @@ pub async fn handle_download(
         {
             Ok(b) => b,
             Err(e) => {
-                eprintln!("Failed to download {}: {}", display_name, e);
-                exit(1);
+                out.err(ExitKind::Api, format!("Failed to download {}: {}", display_name, e));
             }
         };
         let dest = out_dir.join(safe_relative_name(&display_name));
@@ -95,15 +91,13 @@ pub async fn handle_download(
             && !parent.as_os_str().is_empty()
         {
             std::fs::create_dir_all(parent).unwrap_or_else(|e| {
-                eprintln!("Failed to create {}: {}", parent.display(), e);
-                exit(1);
+                out.err(ExitKind::Api, format!("Failed to create {}: {}", parent.display(), e));
             });
         }
         std::fs::write(&dest, bytes).unwrap_or_else(|e| {
-            eprintln!("Failed to write {}: {}", dest.display(), e);
-            exit(1);
+            out.err(ExitKind::Api, format!("Failed to write {}: {}", dest.display(), e));
         });
-        println!("  wrote {}", dest.display());
+        out.human(format!("  wrote {}", dest.display()));
     }
 }
 
@@ -241,8 +235,8 @@ fn human_size(bytes: i64) -> String {
     }
 }
 
-async fn pick_latest_evaluation(config: &RequestConfig, project: Option<&str>) -> String {
-    let (organization, project) = resolve_project(project);
+async fn pick_latest_evaluation(config: &RequestConfig, project: Option<&str>, out: Output) -> String {
+    let (organization, project) = resolve_project(project, out);
     let evaluations = match projects::get_project_evaluations(
         config.clone(),
         organization.clone(),
@@ -251,38 +245,34 @@ async fn pick_latest_evaluation(config: &RequestConfig, project: Option<&str>) -
     .await
     {
         Ok(r) if r.error => {
-            eprintln!("Server rejected request for project evaluations.");
-            exit(1);
+            out.err(ExitKind::Api, "Server rejected request for project evaluations.");
         }
         Ok(r) => r.message,
         Err(e) => {
-            eprintln!("Failed to list project evaluations: {}", e);
-            exit(1);
+            out.err(ExitKind::Api, format!("Failed to list project evaluations: {}", e));
         }
     };
     let latest = evaluations.into_iter().next().unwrap_or_else(|| {
-        eprintln!("No evaluations found for {}/{}.", organization, project);
-        exit(1);
+        out.err(ExitKind::Api, format!("No evaluations found for {}/{}.", organization, project));
     });
-    println!(
+    out.human(format!(
         "Using latest evaluation {} for project {}/{}.",
         latest.id, organization, project
-    );
+    ));
     latest.id
 }
 
-fn resolve_project(arg: Option<&str>) -> (String, String) {
+fn resolve_project(arg: Option<&str>, out: Output) -> (String, String) {
     if let Some(spec) = arg {
         if let Some((org, proj)) = spec.split_once('/') {
             return (org.to_string(), proj.to_string());
         }
         let organization = set_get_value(ConfigKey::SelectedOrganization, None, true)
             .unwrap_or_else(|| {
-                eprintln!(
-                    "--project '{}' has no org prefix and no organization is selected.",
-                    spec
+                out.err(
+                    ExitKind::Usage,
+                    format!("--project '{}' has no org prefix and no organization is selected.", spec),
                 );
-                exit(1);
             });
         return (organization, spec.to_string());
     }
@@ -293,8 +283,8 @@ fn resolve_project(arg: Option<&str>) -> (String, String) {
         return (org.to_string(), proj.to_string());
     }
 
-    eprintln!(
-        "No project selected. Pass --project <name> or run 'gradient project select <name>' first."
+    out.err(
+        ExitKind::Usage,
+        "No project selected. Pass --project <name> or run 'gradient project select <name>' first.",
     );
-    exit(1);
 }
