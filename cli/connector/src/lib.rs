@@ -11,6 +11,7 @@ pub mod orgs;
 pub mod projects;
 pub mod server;
 pub mod user;
+pub mod workers;
 
 mod http;
 
@@ -46,6 +47,7 @@ impl Client {
     pub fn projects(&self) -> projects::ProjectsApi<'_> { projects::ProjectsApi(self) }
     pub fn server(&self) -> server::ServerApi<'_> { server::ServerApi(self) }
     pub fn user(&self) -> user::UserApi<'_> { user::UserApi(self) }
+    pub fn workers(&self) -> workers::WorkersApi<'_> { workers::WorkersApi(self) }
 
     pub async fn health(&self) -> Result<String, ConnectorError> {
         let req = http::request(
