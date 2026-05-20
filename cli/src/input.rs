@@ -5,13 +5,33 @@
  */
 
 use super::config::*;
-use connector::RequestConfig;
+use crate::output::{ExitKind, Output};
+use connector::Client;
 use rpassword::read_password;
 use std::collections::HashMap;
 use std::io::Write;
 use std::process::Command;
 use std::process::exit;
 use std::{fs, io};
+
+pub fn client_from_config(out: Output) -> Client {
+    let cfg = load_config();
+    let server = cfg
+        .get(&ConfigKey::Server)
+        .and_then(|v| v.clone())
+        .unwrap_or_else(|| {
+            out.err(ExitKind::Usage, "Server URL not set. Use `gradient config server <url>`.");
+        });
+    let token = cfg
+        .get(&ConfigKey::AuthToken)
+        .and_then(|v| v.clone())
+        .filter(|t| !t.is_empty());
+    let mut b = Client::builder().base_url(server);
+    if let Some(t) = token {
+        b = b.token(t);
+    }
+    b.build().unwrap_or_else(|e| out.err(ExitKind::Api, format!("client init failed: {}", e)))
+}
 
 pub fn handle_input(values: Vec<(String, Option<String>)>, skip: bool) -> HashMap<String, String> {
     if values.is_empty() {
@@ -32,11 +52,7 @@ pub fn handle_input(values: Vec<(String, Option<String>)>, skip: bool) -> HashMa
             format!(
                 "{}: {}\n",
                 k,
-                if let Some(val) = v {
-                    val.clone()
-                } else {
-                    "".to_string()
-                }
+                if let Some(val) = v { val.clone() } else { "".to_string() }
             )
         })
         .collect();
@@ -47,10 +63,7 @@ pub fn handle_input(values: Vec<(String, Option<String>)>, skip: bool) -> HashMa
     file.write_all(input_fields.as_bytes()).unwrap();
 
     let editor = std::env::var("EDITOR").unwrap();
-    let output = Command::new(editor.clone())
-        .arg(name.clone())
-        .status()
-        .unwrap();
+    let output = Command::new(editor.clone()).arg(name.clone()).status().unwrap();
 
     if !output.success() {
         println!("Failed to open editor {}", editor);
@@ -108,21 +121,4 @@ pub fn ask_for_input(prompt: &str) -> String {
     }
 
     inp
-}
-
-pub fn get_request_config(
-    config: HashMap<ConfigKey, Option<String>>,
-) -> Result<RequestConfig, String> {
-    let server_url: String =
-        if let Some(server_url) = config.get(&ConfigKey::Server).unwrap().clone() {
-            server_url
-        } else {
-            return Err(
-                "Server URL not set. Use `gradient config server <url>` to set it.".to_string(),
-            );
-        };
-
-    let token = set_get_value(ConfigKey::AuthToken, None, true);
-
-    Ok(RequestConfig { server_url, token })
 }

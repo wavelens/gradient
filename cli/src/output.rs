@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use connector::ConnectorError;
 use serde::Serialize;
 use std::io::{self, Write};
 use std::process::exit;
@@ -85,6 +86,13 @@ impl Output {
     pub fn render_err_to_string(&self, msg: &str) -> Result<String, serde_json::Error> {
         let env = serde_json::json!({ "error": true, "message": msg });
         serde_json::to_string(&env)
+    }
+}
+
+pub fn to_exit_kind(err: &ConnectorError) -> ExitKind {
+    match err {
+        ConnectorError::Unauthorized => ExitKind::Unauthorized,
+        _ => ExitKind::Api,
     }
 }
 
