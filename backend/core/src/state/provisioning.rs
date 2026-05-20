@@ -24,7 +24,7 @@ use sea_orm::{
     Set,
 };
 use ssh_key::PrivateKey;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 
 type DynError = Box<dyn std::error::Error>;
@@ -126,6 +126,32 @@ async fn resolve_integration_id(
         .into());
     }
     Ok(row.id)
+}
+
+// ── managed_keep_sets ─────────────────────────────────────────────────────────
+
+/// Names of state-managed rows that must remain `managed` after reconciliation.
+///
+/// Each set is built from the value's `name` (or `username`) field — the same
+/// field every `apply_*` writes to the DB row. Using the attrset key here
+/// instead would delete or unmanage rows whose Nix-side `name = "…"` was
+/// overridden away from the attrset key (e.g. `projects.foo = { name = "main"; }`).
+struct ManagedKeepSets<'a> {
+    usernames: HashSet<&'a String>,
+    org_names: HashSet<&'a String>,
+    project_names: HashSet<&'a String>,
+    cache_names: HashSet<&'a String>,
+    api_key_names: HashSet<&'a String>,
+}
+
+fn managed_keep_sets(config: &StateConfiguration) -> ManagedKeepSets<'_> {
+    ManagedKeepSets {
+        usernames: config.users.values().map(|u| &u.username).collect(),
+        org_names: config.organizations.values().map(|o| &o.name).collect(),
+        project_names: config.projects.values().map(|p| &p.name).collect(),
+        cache_names: config.caches.values().map(|c| &c.name).collect(),
+        api_key_names: config.api_keys.values().map(|k| &k.name).collect(),
+    }
 }
 
 // ── unmark_managed! macro ─────────────────────────────────────────────────────
@@ -1086,13 +1112,13 @@ impl<'a> StateApplicator<'a> {
         config: &StateConfiguration,
         delete_state: bool,
     ) -> Result<(), DynError> {
-        use std::collections::HashSet;
-
-        let usernames: HashSet<&String> = config.users.keys().collect();
-        let org_names: HashSet<&String> = config.organizations.keys().collect();
-        let project_names: HashSet<&String> = config.projects.keys().collect();
-        let cache_names: HashSet<&String> = config.caches.keys().collect();
-        let api_key_names: HashSet<&String> = config.api_keys.keys().collect();
+        let ManagedKeepSets {
+            usernames,
+            org_names,
+            project_names,
+            cache_names,
+            api_key_names,
+        } = managed_keep_sets(config);
         let worker_keys: HashSet<(String, OrganizationId)> = {
             let map = self.org_lookup().await?;
             let mut set = HashSet::new();
@@ -1700,4 +1726,89 @@ mod trigger_helper_tests {
     }
 
     // TODO: integration test for apply_project_triggers full DB round-trip (T30 smoke)
+}
+
+#[cfg(test)]
+mod keep_set_tests {
+    use super::*;
+
+    /// Regression: `gradient-state.nix` lets users override an entity's
+    /// `name`/`username` away from the attrset key. The cleanup pass must look
+    /// up DB rows by the same `name` the `apply_*` functions wrote — using the
+    /// attrset key here would unmanage or delete the row we just inserted.
+    #[test]
+    fn keep_sets_track_inner_name_not_attrset_key() {
+        let json = serde_json::json!({
+            "users": {
+                "alice-key": {
+                    "username": "alice",
+                    "name": "Alice",
+                    "email": "alice@example.com",
+                    "password_file": "/dev/null"
+                }
+            },
+            "organizations": {
+                "acme-key": {
+                    "name": "acme",
+                    "display_name": "ACME",
+                    "private_key_file": "/dev/null",
+                    "public": false,
+                    "created_by": "alice"
+                }
+            },
+            "projects": {
+                "foo-key": {
+                    "name": "main",
+                    "organization": "acme",
+                    "display_name": "Main",
+                    "repository": "https://example.com/r.git",
+                    "created_by": "alice"
+                }
+            },
+            "caches": {
+                "cache-key": {
+                    "name": "primary",
+                    "display_name": "Primary",
+                    "signing_key_file": "/dev/null",
+                    "public": false,
+                    "created_by": "alice"
+                }
+            },
+            "api_keys": {
+                "key-key": {
+                    "name": "ci-runner",
+                    "key_file": "/dev/null",
+                    "owned_by": "alice",
+                    "permissions": ["viewOrg"]
+                }
+            }
+        });
+        let cfg: StateConfiguration = serde_json::from_value(json).unwrap();
+        let sets = managed_keep_sets(&cfg);
+
+        let alice = "alice".to_string();
+        let alice_key = "alice-key".to_string();
+        assert!(sets.usernames.contains(&alice));
+        assert!(!sets.usernames.contains(&alice_key));
+
+        let acme = "acme".to_string();
+        let acme_key = "acme-key".to_string();
+        assert!(sets.org_names.contains(&acme));
+        assert!(!sets.org_names.contains(&acme_key));
+
+        let main = "main".to_string();
+        let foo_key = "foo-key".to_string();
+        assert!(sets.project_names.contains(&main));
+        assert!(!sets.project_names.contains(&foo_key));
+
+        let primary = "primary".to_string();
+        let cache_key = "cache-key".to_string();
+        assert!(sets.cache_names.contains(&primary));
+        assert!(!sets.cache_names.contains(&cache_key));
+
+        let ci_runner = "ci-runner".to_string();
+        let key_key = "key-key".to_string();
+        assert!(sets.api_key_names.contains(&ci_runner));
+        assert!(!sets.api_key_names.contains(&key_key));
+    }
 }

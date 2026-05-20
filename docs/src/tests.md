@@ -477,6 +477,15 @@ Backend (`cargo test -p core --lib state::tests`):
   `force_evaluation`; serde's default unknown-field handling drops it
   silently so existing deployments parse cleanly after the field's
   removal from the schema.
+- `keep_set_tests::keep_sets_track_inner_name_not_attrset_key`
+  (`backend/core/src/state/provisioning.rs`) — `gradient-state.nix`
+  exposes `name = mkOption { default = <attrset key>; }` on users,
+  organizations, projects, caches, and API keys, so a user may pin
+  `projects.foo = { name = "main"; … }`. Every `apply_*` writes the
+  override value to the DB row; `unmark_removed_entities` therefore must
+  also key its keep-sets on the value's `name`/`username` field, not on
+  the HashMap key, or the cleanup pass deletes (or unmarks) the row the
+  same reconciliation just inserted.
 
 These pin the wire contract between `nix/modules/gradient-state.nix`
 (`types.nullOr types.str` on `password_file` and the three `description`
