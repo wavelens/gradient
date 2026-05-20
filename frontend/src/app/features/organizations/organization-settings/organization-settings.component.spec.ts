@@ -22,6 +22,7 @@ function orgFor(access: AccessState): Organization {
     display_name: 'Acme',
     description: '',
     public: false,
+    hide_build_requests: false,
     managed: access.managed,
     role: access.canEdit ? 'Admin' : 'View',
   };

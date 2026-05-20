@@ -34,6 +34,7 @@ describe('cacheAccessResolver', () => {
     description: '',
     active: true,
     priority: 10,
+    local_priority: null,
     public: false,
     managed: false,
     can_edit: true,
