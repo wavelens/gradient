@@ -23,9 +23,10 @@ import { switchMap } from 'rxjs/operators';
 import { CdkVirtualScrollViewport, ScrollingModule } from '@angular/cdk/scrolling';
 import { EvaluationsService, BuildItem } from '@core/services/evaluations.service';
 import { OrganizationsService } from '@core/services/organizations.service';
-import { Evaluation, EvaluationMessage, WaitingReason, TriggerType } from '@core/models';
+import { Evaluation, EvaluationMessage, EvaluationStatus, WaitingReason, TriggerType } from '@core/models';
 import { AuthService } from '@core/services/auth.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
+import { formatEvaluationDuration, isRunningEvaluationStatus, parseUtcTimestamp } from '@shared/evaluation';
 import { ButtonModule } from 'primeng/button';
 import { environment } from '@environments/environment';
 
@@ -59,7 +60,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   aborting = signal(false);
   autoScroll = signal(true);
   showScrollBtn = signal(false);
-  duration = signal('0:00');
+  duration = signal('0s');
   totalBuildsCount = signal(0);
   activeBuildsCount = signal(0);
   private tick = signal(0);
@@ -347,10 +348,9 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     });
   }
 
-  startPollingIfRunning(status: string): void {
+  startPollingIfRunning(status: EvaluationStatus): void {
     this.stopPolling();
-    const running = ['Queued', 'Fetching', 'EvaluatingFlake', 'EvaluatingDerivation', 'Building', 'Waiting'];
-    if (!running.includes(status)) return;
+    if (!this.isRunningStatus(status)) return;
 
     this.pollSub = interval(5000)
       .pipe(switchMap(() => this.evalService.getEvaluation(this.evaluationId)))
@@ -358,8 +358,9 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
         next: (evaluation) => {
           this.evaluation.set(evaluation);
           this.loadBuilds();
-          if (!running.includes(evaluation.status)) {
+          if (!this.isRunningStatus(evaluation.status)) {
             this.stopPolling();
+            this.updateDuration(evaluation);
             this.stopDurationTimer();
             this.loadBuilds(); // final update
             this.loadMessages(); // pick up any messages recorded during eval
@@ -688,8 +689,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.stopDurationTimer();
     this.updateDuration(evaluation);
 
-    const running = ['Queued', 'Fetching', 'EvaluatingFlake', 'EvaluatingDerivation', 'Building', 'Waiting'];
-    if (!running.includes(evaluation.status)) return;
+    if (!this.isRunningStatus(evaluation.status)) return;
 
     this.durationInterval = setInterval(() => {
       const ev = this.evaluation();
@@ -706,21 +706,15 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   }
 
   private updateDuration(evaluation: Evaluation): void {
-    const ts = evaluation.created_at;
-    const start = new Date(
-      ts.includes('Z') || ts.includes('+') ? ts : ts + 'Z'
-    );
-    const ms = Math.max(0, new Date().getTime() - start.getTime());
-    const totalSecs = Math.floor(ms / 1000);
-    const h = Math.floor(totalSecs / 3600);
-    const m = Math.floor((totalSecs % 3600) / 60);
-    const s = totalSecs % 60;
+    const start = parseUtcTimestamp(evaluation.created_at);
+    const end = this.isRunningStatus(evaluation.status)
+      ? Date.now()
+      : parseUtcTimestamp(evaluation.updated_at);
+    this.duration.set(formatEvaluationDuration(end - start));
+  }
 
-    this.duration.set(
-      h > 0
-        ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-        : `${m}:${String(s).padStart(2, '0')}`
-    );
+  isRunningStatus(status: EvaluationStatus): boolean {
+    return isRunningEvaluationStatus(status);
   }
 
   // ── Abort ───────────────────────────────────────────────────────────────────

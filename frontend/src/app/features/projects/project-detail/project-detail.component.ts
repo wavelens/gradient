@@ -17,6 +17,7 @@ import { EmptyStateComponent } from '@shared/components/empty-state/empty-state.
 import { AccessService, WritableDirective } from '@shared/access';
 import { injectProjectAccess } from '@core/resolvers/inject-access';
 import { ProjectDetail, EvaluationSummary, EvaluationStatus, EntryPointSummary, BuildStatus, TriggerType } from '@core/models';
+import { formatEvaluationDuration, isRunningEvaluationStatus, parseUtcTimestamp } from '@shared/evaluation';
 
 @Component({
   selector: 'app-project-detail',
@@ -181,7 +182,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   }
 
   isRunningStatus(status: EvaluationStatus): boolean {
-    return status === 'Queued' || status === 'Fetching' || status === 'EvaluatingFlake' || status === 'EvaluatingDerivation' || status === 'Building' || status === 'Waiting';
+    return isRunningEvaluationStatus(status);
   }
 
   isBuildRunning(status: BuildStatus): boolean {
@@ -214,22 +215,11 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   }
 
   getEvaluationDuration(evaluation: EvaluationSummary): string {
-    const toUtc = (s: string) => new Date(s.includes('Z') || s.includes('+') ? s : s + 'Z').getTime();
-    const start = toUtc(evaluation.created_at);
+    const start = parseUtcTimestamp(evaluation.created_at);
     const end = this.isRunningStatus(evaluation.status)
       ? this.tick()
-      : toUtc(evaluation.updated_at);
-    return this.formatDuration(end - start);
-  }
-
-  private formatDuration(ms: number): string {
-    const totalSeconds = Math.max(0, Math.floor(ms / 1000));
-    const h = Math.floor(totalSeconds / 3600);
-    const m = Math.floor((totalSeconds % 3600) / 60);
-    const s = totalSeconds % 60;
-    if (h > 0) return `${h}h ${m}m ${s}s`;
-    if (m > 0) return `${m}m ${s}s`;
-    return `${s}s`;
+      : parseUtcTimestamp(evaluation.updated_at);
+    return formatEvaluationDuration(end - start);
   }
 
   formatArchitecture(arch: string | undefined): string {
