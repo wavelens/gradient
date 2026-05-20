@@ -3,6 +3,7 @@ pub use error::ConnectorError;
 
 pub mod auth;
 pub mod orgs;
+pub mod projects;
 pub mod server;
 pub mod user;
 
@@ -32,6 +33,7 @@ impl Client {
 
     pub fn auth(&self) -> auth::AuthApi<'_> { auth::AuthApi(self) }
     pub fn orgs(&self) -> orgs::OrgsApi<'_> { orgs::OrgsApi(self) }
+    pub fn projects(&self) -> projects::ProjectsApi<'_> { projects::ProjectsApi(self) }
     pub fn server(&self) -> server::ServerApi<'_> { server::ServerApi(self) }
     pub fn user(&self) -> user::UserApi<'_> { user::UserApi(self) }
 
