@@ -4,6 +4,7 @@ pub use error::ConnectorError;
 pub mod auth;
 pub mod orgs;
 pub mod server;
+pub mod user;
 
 mod http;
 
@@ -32,6 +33,7 @@ impl Client {
     pub fn auth(&self) -> auth::AuthApi<'_> { auth::AuthApi(self) }
     pub fn orgs(&self) -> orgs::OrgsApi<'_> { orgs::OrgsApi(self) }
     pub fn server(&self) -> server::ServerApi<'_> { server::ServerApi(self) }
+    pub fn user(&self) -> user::UserApi<'_> { user::UserApi(self) }
 
     pub async fn health(&self) -> Result<String, ConnectorError> {
         let req = http::request(
