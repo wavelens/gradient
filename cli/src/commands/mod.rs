@@ -4,6 +4,7 @@
  * spdx-license-identifier: agpl-3.0-only
  */
 
+pub mod attr_spec;
 pub mod base;
 pub mod build;
 pub mod cache;
