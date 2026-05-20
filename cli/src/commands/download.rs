@@ -21,6 +21,10 @@ pub async fn handle_download(
     out_dir_arg: Option<String>,
     out: Output,
 ) {
+    if out.is_json() && flake_ref.is_none() && products.is_none() {
+        out.err(ExitKind::Usage, "missing argument: flake ref or --products");
+    }
+
     let client = client_from_config(out);
 
     let eval_id = match evaluation {
