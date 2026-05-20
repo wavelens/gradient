@@ -1,6 +1,5 @@
 use crate::ConnectorError;
 use reqwest::{Method, RequestBuilder, Response};
-use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 #[derive(serde::Deserialize)]
@@ -37,9 +36,15 @@ pub(crate) fn build_url(base: &str, path: &str) -> String {
     format!("{}/api/v1/{}", base.trim_end_matches('/'), path.trim_start_matches('/'))
 }
 
-#[expect(dead_code)]
-pub(crate) fn json_body<B: Serialize + ?Sized>(rb: RequestBuilder, body: &B) -> RequestBuilder {
-    rb.json(body)
+pub(crate) async fn decode_raw_string(res: Response) -> Result<String, ConnectorError> {
+    let status = res.status();
+    if status == reqwest::StatusCode::UNAUTHORIZED {
+        return Err(ConnectorError::Unauthorized);
+    }
+    if !status.is_success() {
+        return Err(ConnectorError::Api { status, message: res.text().await.unwrap_or_default() });
+    }
+    Ok(res.text().await?)
 }
 
 pub(crate) fn request(
