@@ -2103,7 +2103,13 @@ The primitives:
   `[appManagedDisable]` attribute directive. Adds `disabled` and a tooltip
   when `managed || !canEdit`. Tests cover all four flag combinations,
   tooltip text, and that the directive correctly clears its own state when
-  access becomes writable.
+  access becomes writable. The directive also propagates the disabled state
+  through `NgControl.valueAccessor.setDisabledState`, so PrimeNG controls
+  (`p-select`, `p-checkbox`, `p-autoComplete`, …) — which only honor the
+  ControlValueAccessor hook, not raw DOM `disabled` — actually become
+  read-only when the user has no write access. A `FakePrimeNgInputDirective`
+  in the spec stands in for any `ControlValueAccessor` host and asserts the
+  propagation (issue #229).
 - `frontend/src/app/core/resolvers/project-access.resolver.ts` and
   `cache-access.resolver.ts` — fetch the parent entity once, expose
   `{ entity, access }` on `route.parent.data`. Children consume via
@@ -2331,6 +2337,47 @@ crashed prior worker.
 - `create_symlink_idempotent_skips_existing` — re-adding a root for an
   existing symlink is a no-op (handles cross-build re-entry without
   clobbering the daemon's existing root).
+
+## Frontend titles surface the entity name (issue #229)
+
+`frontend/src/app/core/title/gradient-title-strategy.ts` walks the
+`RouterStateSnapshot` for resolved `projectAccess` / `cacheAccess` /
+`organizationAccess` data and composes a title of the form
+`<entity display_name> · <route title> · Gradient`, falling back to
+`<entity> · Gradient` for the root detail pages whose static route title
+is implied by the entity itself (`Project`, `Cache`, `Organization`). The
+spec at `gradient-title-strategy.spec.ts` covers the four combinations
+(both, entity-only, route-only, neither) and the entity-not-found
+fallback that keeps the title strategy a noop when an
+`organizationAccess` resolver returns `null`.
+
+A companion `organizationAccessResolver`
+(`frontend/src/app/core/resolvers/organization-access.resolver.ts`)
+fetches the organization for every `/organization/:org/*` route that
+doesn't already have a parent resolver. The spec covers the happy path,
+the no-param case, and the network-error fallback (resolver must not
+fail navigation just because the org fetch errored).
+
+## Evaluation duration parity between project page and log page (issue #229)
+
+`frontend/src/app/shared/evaluation/duration.ts` is the single source of
+truth for "how long has this evaluation been running?". Both
+`project-detail` and `evaluation-log` now use
+`evaluationDuration(evaluation, now)` and `formatEvaluationDuration(ms)`
+so the same evaluation row shows the same `Xh Ym Zs` figure on both
+pages. The regression that motivated this — the log page kept growing
+its duration after the evaluation finished because it used
+`Date.now()` instead of `updated_at` — is covered by
+`duration.spec.ts`:
+
+- `isRunningEvaluationStatus` — the six in-flight statuses return true,
+  the three terminal statuses return false.
+- `formatEvaluationDuration` — sub-minute / sub-hour / multi-hour
+  rendering, plus the negative-clock-skew clamp.
+- `parseUtcTimestamp` — backend timestamps with explicit zone and the
+  naive form that gets treated as UTC.
+- `evaluationDuration` — terminal evaluations stop at `updated_at`;
+  running evaluations track the current time.
 
 ## Connector + CLI JSON
 
