@@ -17,6 +17,7 @@ function org(partial: Partial<Organization> = {}): Organization {
     display_name: 'Acme',
     description: '',
     public: false,
+    hide_build_requests: false,
     managed: false,
     ...partial,
   };
