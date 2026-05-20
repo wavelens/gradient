@@ -5,10 +5,9 @@
  */
 
 use crate::config::*;
-use crate::input::*;
-use crate::output::{ExitKind, Output};
-use connector::build_requests::{ArtefactTree, ProductArtefact};
-use connector::{RequestConfig, build_requests, builds, projects};
+use crate::input::client_from_config;
+use crate::output::{ExitKind, Output, to_exit_kind};
+use connector::evals::{ArtefactTree, ProductArtefact};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::exit;
@@ -20,25 +19,18 @@ pub async fn handle_download(
     out_dir_arg: Option<String>,
     out: Output,
 ) {
-    let config = get_request_config(load_config()).unwrap_or_else(|_| {
-        out.err(ExitKind::Usage, "Not configured. Use 'gradient config' to set server and auth token.");
-    });
+    let client = client_from_config(out);
 
     let eval_id = match evaluation {
         Some(id) => id,
-        None => pick_latest_evaluation(&config, project.as_deref(), out).await,
+        None => pick_latest_evaluation(&client, project.as_deref(), out).await,
     };
 
     out.human(format!("Fetching artefact tree for evaluation {}...", eval_id));
 
-    let tree = match build_requests::get_eval_artefacts(config.clone(), eval_id).await {
-        Ok(r) if r.error => {
-            out.err(ExitKind::Api, "Server rejected request for artefact tree.");
-        }
-        Ok(r) => r.message,
-        Err(e) => {
-            out.err(ExitKind::Api, format!("Failed to fetch artefact tree: {}", e));
-        }
+    let tree = match client.evals().artefacts(&eval_id).await {
+        Ok(t) => t,
+        Err(e) => out.err(to_exit_kind(&e), e),
     };
 
     let flat = flatten_products(&tree);
@@ -51,7 +43,12 @@ pub async fn handle_download(
         Some(spec) => parse_selection_spec(&spec, flat.len()).unwrap_or_else(|e| {
             out.err(ExitKind::Usage, e);
         }),
-        None => interactive_select(&flat),
+        None => {
+            if out.is_json() {
+                out.err(ExitKind::Usage, "missing argument: --products (required in --json mode)");
+            }
+            interactive_select(&flat)
+        }
     };
 
     if selection.is_empty() {
@@ -70,21 +67,15 @@ pub async fn handle_download(
         });
     }
 
+    let mut downloaded: Vec<String> = Vec::new();
+
     for idx in selection {
         let p = &flat[idx];
         let display_name = product_filename(p.product);
         out.human(format!("Downloading {}...", display_name));
-        let bytes = match builds::download_build_file(
-            config.clone(),
-            p.build_id.clone(),
-            display_name.clone(),
-        )
-        .await
-        {
+        let bytes = match client.builds().download_file(&p.build_id, &display_name).await {
             Ok(b) => b,
-            Err(e) => {
-                out.err(ExitKind::Api, format!("Failed to download {}: {}", display_name, e));
-            }
+            Err(e) => out.err(to_exit_kind(&e), format!("Failed to download {}: {}", display_name, e)),
         };
         let dest = out_dir.join(safe_relative_name(&display_name));
         if let Some(parent) = dest.parent()
@@ -98,7 +89,10 @@ pub async fn handle_download(
             out.err(ExitKind::Api, format!("Failed to write {}: {}", dest.display(), e));
         });
         out.human(format!("  wrote {}", dest.display()));
+        downloaded.push(dest.display().to_string());
     }
+
+    out.ok(&downloaded);
 }
 
 struct FlatProduct<'a> {
@@ -143,11 +137,7 @@ fn safe_relative_name(name: &str) -> PathBuf {
             _ => buf.push(comp.as_os_str()),
         }
     }
-    if buf.as_os_str().is_empty() {
-        PathBuf::from("download")
-    } else {
-        buf
-    }
+    if buf.as_os_str().is_empty() { PathBuf::from("download") } else { buf }
 }
 
 fn interactive_select(flat: &[FlatProduct<'_>]) -> Vec<usize> {
@@ -159,16 +149,10 @@ fn interactive_select(flat: &[FlatProduct<'_>]) -> Vec<usize> {
             p.attr,
             p.output_name,
             p.product.path,
-            p.product
-                .size
-                .map(|s| format!(" ({})", human_size(s)))
-                .unwrap_or_default(),
+            p.product.size.map(|s| format!(" ({})", human_size(s))).unwrap_or_default(),
         );
     }
-    print!(
-        "\nSelect products (comma-separated 1-{}, ranges like 1-3, or 'all'): ",
-        flat.len()
-    );
+    print!("\nSelect products (comma-separated 1-{}, ranges like 1-3, or 'all'): ", flat.len());
     io::stdout().flush().unwrap();
     let mut input = String::new();
     io::stdin().read_line(&mut input).unwrap();
@@ -193,14 +177,8 @@ fn parse_selection_spec(spec: &str, total: usize) -> Result<Vec<usize>, String> 
             continue;
         }
         if let Some((lo, hi)) = part.split_once('-') {
-            let lo: usize = lo
-                .trim()
-                .parse()
-                .map_err(|_| format!("invalid index '{}'", lo))?;
-            let hi: usize = hi
-                .trim()
-                .parse()
-                .map_err(|_| format!("invalid index '{}'", hi))?;
+            let lo: usize = lo.trim().parse().map_err(|_| format!("invalid index '{}'", lo))?;
+            let hi: usize = hi.trim().parse().map_err(|_| format!("invalid index '{}'", hi))?;
             if lo == 0 || hi == 0 || lo > total || hi > total || lo > hi {
                 return Err(format!("range '{}' out of bounds 1..={}", part, total));
             }
@@ -208,9 +186,7 @@ fn parse_selection_spec(spec: &str, total: usize) -> Result<Vec<usize>, String> 
                 out.insert(i - 1);
             }
         } else {
-            let n: usize = part
-                .parse()
-                .map_err(|_| format!("invalid index '{}'", part))?;
+            let n: usize = part.parse().map_err(|_| format!("invalid index '{}'", part))?;
             if n == 0 || n > total {
                 return Err(format!("index '{}' out of bounds 1..={}", n, total));
             }
@@ -228,29 +204,18 @@ fn human_size(bytes: i64) -> String {
         value /= 1024.0;
         i += 1;
     }
-    if i == 0 {
-        format!("{} {}", bytes, UNITS[0])
-    } else {
-        format!("{:.1} {}", value, UNITS[i])
-    }
+    if i == 0 { format!("{} {}", bytes, UNITS[0]) } else { format!("{:.1} {}", value, UNITS[i]) }
 }
 
-async fn pick_latest_evaluation(config: &RequestConfig, project: Option<&str>, out: Output) -> String {
+async fn pick_latest_evaluation(
+    client: &connector::Client,
+    project: Option<&str>,
+    out: Output,
+) -> String {
     let (organization, project) = resolve_project(project, out);
-    let evaluations = match projects::get_project_evaluations(
-        config.clone(),
-        organization.clone(),
-        project.clone(),
-    )
-    .await
-    {
-        Ok(r) if r.error => {
-            out.err(ExitKind::Api, "Server rejected request for project evaluations.");
-        }
-        Ok(r) => r.message,
-        Err(e) => {
-            out.err(ExitKind::Api, format!("Failed to list project evaluations: {}", e));
-        }
+    let evaluations = match client.projects().evaluations(&organization, &project).await {
+        Ok(evals) => evals,
+        Err(e) => out.err(to_exit_kind(&e), e),
     };
     let latest = evaluations.into_iter().next().unwrap_or_else(|| {
         out.err(ExitKind::Api, format!("No evaluations found for {}/{}.", organization, project));
