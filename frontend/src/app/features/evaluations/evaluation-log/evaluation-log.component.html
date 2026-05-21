@@ -218,8 +218,8 @@
           } @else if (ev.status === 'Waiting') {
             <div class="queued-hint">
               <span class="material-symbols-outlined queued-icon">pause_circle</span>
-              <span class="queued-title">Waiting for Workers</span>
-              @if (ev.waiting_reason && ev.waiting_reason.unmet.length > 0) {
+              <span class="queued-title">{{ waitingTitle(ev.waiting_reason) }}</span>
+              @if (ev.waiting_reason && ev.waiting_reason.kind === 'workers' && ev.waiting_reason.unmet.length > 0) {
                 <span class="queued-sub">{{ formatWaitingReason(ev.waiting_reason) }}</span>
                 <ul class="waiting-unmet">
                   @for (req of ev.waiting_reason.unmet; track req.architecture + ':' + req.required_features.join(',')) {
@@ -235,6 +235,8 @@
                     </li>
                   }
                 </ul>
+              } @else if (ev.waiting_reason) {
+                <span class="queued-sub">{{ formatWaitingReason(ev.waiting_reason) }}</span>
               } @else {
                 <span class="queued-sub">No build workers are currently available. Evaluation will resume when a worker connects&hellip;</span>
               }
