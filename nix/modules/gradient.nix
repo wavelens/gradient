@@ -629,16 +629,24 @@ in {
         virtualHosts."${if cfg.useTls then "" else "http://"}${cfg.domain}" = {
           inherit (cfg.reverseProxy.caddy) useACMEHost;
           extraConfig = ''
-            @backend {
-              path_regexp api ^/(api|proto|cache)(/.*)?$
+            handle /api/* {
+              reverse_proxy http://${cfg.listenAddr}:${toString cfg.port}
             }
-            reverse_proxy @backend http://${cfg.listenAddr}:${toString cfg.port}
+            handle /cache/* {
+              reverse_proxy http://${cfg.listenAddr}:${toString cfg.port}
+            }
+            handle /proto {
+              reverse_proxy http://${cfg.listenAddr}:${toString cfg.port}
+            }
 
             ${
               if cfg.frontend.enable then
                 ''
-                  root ${cfg.packages.frontend}/share/gradient-frontend
-                  file_server
+                  handle {
+                    root ${cfg.packages.frontend}/share/gradient-frontend
+                    try_files {path} index.html
+                    file_server
+                  }
                 ''
               else
                 ""
