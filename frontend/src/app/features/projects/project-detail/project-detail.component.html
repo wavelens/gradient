@@ -86,9 +86,9 @@
               <div class="evaluation-status">
                 <span
                   class="status-icon material-symbols-outlined"
-                  [class]="getBuildStatusClass(ep.build_status)"
+                  [class]="effectiveEntryStatusClass(ep)"
                 >
-                  {{ getBuildStatusIcon(ep.build_status) }}
+                  {{ effectiveEntryStatusIcon(ep) }}
                 </span>
               </div>
               <div class="evaluation-content">
@@ -98,8 +98,8 @@
                       {{ getDerivationName(ep.derivation_path) }}
                     </a>
                   </h3>
-                  <span class="status-badge" [class]="getBuildStatusClass(ep.build_status)">
-                    {{ formatBuildStatus(ep.build_status) }}
+                  <span class="status-badge" [class]="effectiveEntryStatusClass(ep)">
+                    {{ effectiveEntryStatusLabel(ep) }}
                   </span>
                   <a
                     [class.graph-icon-link]="true"
