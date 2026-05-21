@@ -5,9 +5,11 @@
  */
 
 use gradient_core::ci::{
-    CiReport, CiStatus, build_check_context, ci_status_for_build, evaluation_check_context,
-    format_check_scope, parse_owner_repo, resolve_outbound_reporter_for_project,
+    APPROVAL_ACTION_ID, CiReport, CiStatus, RequestedAction, build_check_context,
+    ci_status_for_build, evaluation_check_context, format_check_scope, parse_owner_repo,
+    resolve_outbound_reporter_for_project,
 };
+use gradient_core::types::waiting_reason::WaitingReason;
 use gradient_core::types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
@@ -134,6 +136,7 @@ pub async fn report_ci_for_entry_points(
             description: None,
             details_url: details_url.clone(),
             existing_check_id: ep.repo_check_id,
+            requested_actions: Vec::new(),
         };
 
         match reporter.report(&report).await {
@@ -171,18 +174,164 @@ pub fn spawn_pending_ci_for_eval(state: Arc<ServerState>, eval: &MEvaluation) {
     let repo = eval.repository.clone();
     let commit_id = eval.commit;
     let evaluation_id = eval.id;
+
+    let approval_info = eval
+        .waiting_reason
+        .as_ref()
+        .and_then(WaitingReason::from_json)
+        .and_then(|r| match r {
+            WaitingReason::Approval {
+                pr_number,
+                pr_author,
+            } => Some((pr_number, pr_author)),
+            _ => None,
+        });
+
     let s = Arc::clone(&state);
     state.shutdown.spawn(async move {
-        report_ci_for_evaluation(
-            s,
-            project_id,
-            commit_id,
-            &repo,
-            evaluation_id,
-            CiStatus::Pending,
-        )
-        .await;
+        if let Some((pr_number, pr_author)) = approval_info {
+            report_awaiting_approval_ci(
+                s,
+                project_id,
+                commit_id,
+                &repo,
+                evaluation_id,
+                pr_number,
+                &pr_author,
+            )
+            .await;
+        } else {
+            report_ci_for_evaluation(
+                s,
+                project_id,
+                commit_id,
+                &repo,
+                evaluation_id,
+                CiStatus::Pending,
+            )
+            .await;
+        }
     });
+}
+
+/// Posts the per-evaluation CI check in `ActionRequired` state with an
+/// "Approve and run" button (GitHub Apps) or a pending status whose
+/// description tells the maintainer to comment `/ci run` (other forges).
+///
+/// Mirrors [`report_ci_for_evaluation`] but with approval-specific framing.
+pub async fn report_awaiting_approval_ci(
+    state: Arc<ServerState>,
+    project_id: ProjectId,
+    commit_id: CommitId,
+    repository_url: &str,
+    evaluation_id: EvaluationId,
+    pr_number: u64,
+    pr_author: &str,
+) {
+    let project = match EProject::find_by_id(project_id).one(&state.worker_db).await {
+        Ok(Some(p)) => p,
+        Ok(None) => {
+            warn!(%project_id, "Project not found for approval-gate CI report");
+            return;
+        }
+        Err(e) => {
+            error!(error = %e, %project_id, "Failed to query project for approval-gate CI report");
+            return;
+        }
+    };
+
+    let reporter = resolve_outbound_reporter_for_project(&state, project_id).await;
+
+    let commit = match ECommit::find_by_id(commit_id).one(&state.worker_db).await {
+        Ok(Some(c)) => c,
+        Ok(None) => {
+            warn!(%commit_id, "Commit not found for approval-gate CI report");
+            return;
+        }
+        Err(e) => {
+            error!(error = %e, %commit_id, "Failed to query commit for approval-gate CI report");
+            return;
+        }
+    };
+
+    let sha = gradient_core::types::input::vec_to_hex(&commit.hash);
+
+    let (owner, repo) = match parse_owner_repo(repository_url) {
+        Some(pair) => pair,
+        None => {
+            warn!(
+                repository_url,
+                "Could not parse owner/repo for approval-gate CI report"
+            );
+            return;
+        }
+    };
+
+    let org_name = match EOrganization::find_by_id(project.organization)
+        .one(&state.worker_db)
+        .await
+    {
+        Ok(Some(org)) => Some(org.name),
+        _ => None,
+    };
+
+    let scope = format_check_scope(org_name.as_deref(), &project.name);
+    let details_url = org_name.as_ref().map(|org| {
+        format!(
+            "{}/organization/{}/log/{}",
+            state.config.server.frontend_url, org, evaluation_id
+        )
+    });
+
+    let description = format!(
+        "Awaiting maintainer approval for PR #{} by {} — click \"Approve and run\" or comment /ci run.",
+        pr_number, pr_author
+    );
+
+    let evaluation = match EEvaluation::find_by_id(evaluation_id)
+        .one(&state.worker_db)
+        .await
+    {
+        Ok(Some(e)) => e,
+        Ok(None) => {
+            warn!(%evaluation_id, "Evaluation not found for approval-gate CI report");
+            return;
+        }
+        Err(e) => {
+            error!(error = %e, %evaluation_id, "Failed to query evaluation for approval-gate CI report");
+            return;
+        }
+    };
+
+    let report = CiReport {
+        owner,
+        repo,
+        sha,
+        context: evaluation_check_context(&scope),
+        status: CiStatus::ActionRequired,
+        description: Some(description),
+        details_url,
+        existing_check_id: evaluation.repo_check_id,
+        requested_actions: vec![RequestedAction {
+            identifier: APPROVAL_ACTION_ID.to_string(),
+            label: "Approve and run".to_string(),
+            description: "Run CI for this PR from an external contributor.".to_string(),
+        }],
+    };
+
+    match reporter.report(&report).await {
+        Ok(Some(new_id)) => {
+            let mut a = evaluation.into_active_model();
+            a.repo_check_id = Set(Some(new_id));
+            if let Err(e) = a.update(&state.worker_db).await {
+                warn!(error = %e, %evaluation_id, "Failed to persist approval-gate check_run id");
+            }
+        }
+        Ok(None) => {}
+        Err(e) => {
+            warn!(error = format!("{e:#}"), %evaluation_id, "Approval-gate CI report failed");
+        }
+    }
 }
 
 /// Reports a single `"gradient"` top-level CI status for the whole evaluation.
@@ -281,6 +430,7 @@ pub async fn report_ci_for_evaluation(
         description: None,
         details_url,
         existing_check_id: evaluation.repo_check_id,
+        requested_actions: Vec::new(),
     };
 
     match reporter.report(&report).await {
