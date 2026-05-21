@@ -23,6 +23,8 @@ pub(super) struct GitHubPushPayload {
 pub(super) struct GitHubRepository {
     pub clone_url: String,
     pub ssh_url: String,
+    #[serde(default)]
+    pub full_name: Option<String>,
 }
 
 // ── Gitea/Forgejo push payload ─────────────────────────────────────────────
@@ -39,6 +41,8 @@ pub(super) struct GiteaPushPayload {
 pub(super) struct GiteaRepository {
     pub clone_url: String,
     pub ssh_url: Option<String>,
+    #[serde(default)]
+    pub full_name: Option<String>,
 }
 
 // ── GitLab push payload ────────────────────────────────────────────────────
@@ -55,6 +59,8 @@ pub(super) struct GitLabPushPayload {
 pub(super) struct GitLabProject {
     pub http_url: String,
     pub ssh_url: Option<String>,
+    #[serde(default)]
+    pub path_with_namespace: Option<String>,
 }
 
 // ── GitHub PR payload ──────────────────────────────────────────────────────
@@ -69,6 +75,12 @@ pub(super) struct GitHubPullRequestPayload {
 #[derive(Deserialize)]
 pub(super) struct GitHubPullRequest {
     pub head: GitHubPRRef,
+    #[serde(default)]
+    pub base: Option<GitHubPRRef>,
+    #[serde(default)]
+    pub number: Option<u64>,
+    #[serde(default)]
+    pub user: Option<GitHubUser>,
 }
 
 #[derive(Deserialize)]
@@ -76,6 +88,20 @@ pub(super) struct GitHubPRRef {
     pub sha: String,
     #[serde(rename = "ref")]
     pub branch: String,
+    #[serde(default)]
+    pub repo: Option<GitHubRepoStub>,
+}
+
+#[derive(Deserialize)]
+pub(super) struct GitHubRepoStub {
+    #[serde(default)]
+    pub full_name: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub(super) struct GitHubUser {
+    #[serde(default)]
+    pub login: Option<String>,
 }
 
 // ── GitHub release payload ─────────────────────────────────────────────────
@@ -104,6 +130,12 @@ pub(super) struct GiteaPullRequestPayload {
 #[derive(Deserialize)]
 pub(super) struct GiteaPullRequest {
     pub head: GiteaPRRef,
+    #[serde(default)]
+    pub base: Option<GiteaPRRef>,
+    #[serde(default)]
+    pub number: Option<u64>,
+    #[serde(default)]
+    pub user: Option<GiteaUser>,
 }
 
 #[derive(Deserialize)]
@@ -112,6 +144,22 @@ pub(super) struct GiteaPRRef {
     #[serde(rename = "ref")]
     pub branch: Option<String>,
     pub name: Option<String>,
+    #[serde(default)]
+    pub repo: Option<GiteaRepoStub>,
+}
+
+#[derive(Deserialize)]
+pub(super) struct GiteaRepoStub {
+    #[serde(default)]
+    pub full_name: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub(super) struct GiteaUser {
+    #[serde(default)]
+    pub username: Option<String>,
+    #[serde(default)]
+    pub login: Option<String>,
 }
 
 // ── Gitea/Forgejo release payload ─────────────────────────────────────────
@@ -135,6 +183,8 @@ pub(super) struct GiteaRelease {
 pub(super) struct GitLabMergeRequestPayload {
     pub object_attributes: GitLabMRAttributes,
     pub project: GitLabProject,
+    #[serde(default)]
+    pub user: Option<GitLabUser>,
 }
 
 #[derive(Deserialize)]
@@ -142,6 +192,18 @@ pub(super) struct GitLabMRAttributes {
     pub action: String,
     pub source_branch: String,
     pub last_commit: GitLabCommit,
+    #[serde(default)]
+    pub iid: Option<u64>,
+    #[serde(default)]
+    pub source_project_id: Option<u64>,
+    #[serde(default)]
+    pub target_project_id: Option<u64>,
+}
+
+#[derive(Deserialize)]
+pub(super) struct GitLabUser {
+    #[serde(default)]
+    pub username: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -182,6 +244,20 @@ pub(super) struct ParsedPullRequestEvent {
     pub action: String,
     /// PR head branch name (without `refs/heads/` prefix), if available.
     pub branch: Option<String>,
+    /// PR / MR number as the forge knows it (GitHub `pull_request.number`,
+    /// Gitea/Forgejo `pull_request.number`, GitLab `object_attributes.iid`).
+    /// `None` when the payload omits it.
+    pub pr_number: Option<u64>,
+    /// Login/username of the PR author.
+    pub pr_author: Option<String>,
+    /// `true` when the head repo is not the base repo (i.e. the PR comes
+    /// from a fork). `false` when same-repo. `None` when the payload lacks
+    /// enough information to decide — callers should treat as untrusted.
+    pub is_fork: Option<bool>,
+    /// Owner segment of the base repository's `full_name` (`owner/repo`).
+    pub base_owner: Option<String>,
+    /// Repo segment of the base repository's `full_name`.
+    pub base_repo: Option<String>,
 }
 
 /// Release/tag event. `commit_hash` is the SHA the tag points at.
@@ -271,6 +347,16 @@ fn gitlab_project_urls(project: &GitLabProject) -> Vec<String> {
     urls
 }
 
+/// Splits `"owner/repo"` (or `"group/subgroup/repo"` for GitLab) into
+/// `(owner_path, repo)`. Returns `None` if the string lacks a `/`.
+fn split_full_name(full_name: &str) -> Option<(String, String)> {
+    let (owner, repo) = full_name.rsplit_once('/')?;
+    if owner.is_empty() || repo.is_empty() {
+        return None;
+    }
+    Some((owner.to_string(), repo.to_string()))
+}
+
 // ── ParsedPushEvent impl ───────────────────────────────────────────────────
 
 impl ParsedPushEvent {
@@ -356,11 +442,46 @@ impl ParsedPullRequestEvent {
             "github",
             "pull_request.head.sha",
         )?;
+        let base_full = payload
+            .pull_request
+            .base
+            .as_ref()
+            .and_then(|b| b.repo.as_ref())
+            .and_then(|r| r.full_name.clone())
+            .or_else(|| payload.repository.full_name.clone());
+        let head_full = payload
+            .pull_request
+            .head
+            .repo
+            .as_ref()
+            .and_then(|r| r.full_name.clone());
+        let is_fork = match (head_full.as_deref(), base_full.as_deref()) {
+            (Some(h), Some(b)) => Some(h != b),
+            _ => None,
+        };
+        let (base_owner, base_repo) = base_full
+            .as_deref()
+            .and_then(split_full_name)
+            .map(|(o, r)| (Some(o), Some(r)))
+            .unwrap_or((None, None));
+        let pr_author = payload
+            .pull_request
+            .user
+            .as_ref()
+            .and_then(|u| u.login.clone());
         Some(Self {
             commit_hash,
-            repository_urls: vec![payload.repository.clone_url, payload.repository.ssh_url],
+            repository_urls: vec![
+                payload.repository.clone_url,
+                payload.repository.ssh_url,
+            ],
             action: payload.action,
             branch: Some(payload.pull_request.head.branch),
+            pr_number: payload.pull_request.number,
+            pr_author,
+            is_fork,
+            base_owner,
+            base_repo,
         })
     }
 
@@ -381,12 +502,45 @@ impl ParsedPullRequestEvent {
             .pull_request
             .head
             .branch
-            .or(payload.pull_request.head.name);
+            .clone()
+            .or(payload.pull_request.head.name.clone());
+        let base_full = payload
+            .pull_request
+            .base
+            .as_ref()
+            .and_then(|b| b.repo.as_ref())
+            .and_then(|r| r.full_name.clone())
+            .or_else(|| payload.repository.full_name.clone());
+        let head_full = payload
+            .pull_request
+            .head
+            .repo
+            .as_ref()
+            .and_then(|r| r.full_name.clone());
+        let is_fork = match (head_full.as_deref(), base_full.as_deref()) {
+            (Some(h), Some(b)) => Some(h != b),
+            _ => None,
+        };
+        let (base_owner, base_repo) = base_full
+            .as_deref()
+            .and_then(split_full_name)
+            .map(|(o, r)| (Some(o), Some(r)))
+            .unwrap_or((None, None));
+        let pr_author = payload
+            .pull_request
+            .user
+            .as_ref()
+            .and_then(|u| u.username.clone().or_else(|| u.login.clone()));
         Some(Self {
             commit_hash,
             repository_urls: gitea_repo_urls(&payload.repository),
             action: payload.action,
             branch,
+            pr_number: payload.pull_request.number,
+            pr_author,
+            is_fork,
+            base_owner,
+            base_repo,
         })
     }
 
@@ -404,11 +558,31 @@ impl ParsedPullRequestEvent {
             "object_attributes.last_commit.id",
         )?;
         let action = normalise_gitlab_mr_action(&payload.object_attributes.action);
+        let is_fork = match (
+            payload.object_attributes.source_project_id,
+            payload.object_attributes.target_project_id,
+        ) {
+            (Some(src), Some(tgt)) => Some(src != tgt),
+            _ => None,
+        };
+        let (base_owner, base_repo) = payload
+            .project
+            .path_with_namespace
+            .as_deref()
+            .and_then(split_full_name)
+            .map(|(o, r)| (Some(o), Some(r)))
+            .unwrap_or((None, None));
+        let pr_author = payload.user.as_ref().and_then(|u| u.username.clone());
         Some(Self {
             commit_hash,
             repository_urls: gitlab_project_urls(&payload.project),
             action,
             branch: Some(payload.object_attributes.source_branch),
+            pr_number: payload.object_attributes.iid,
+            pr_author,
+            is_fork,
+            base_owner,
+            base_repo,
         })
     }
 }
@@ -547,6 +721,98 @@ mod tests {
         assert_eq!(ev.branch, Some("feature-x".to_string()));
         assert_eq!(ev.commit_hash, hex::decode(VALID_SHA).unwrap());
         assert_eq!(ev.repository_urls.len(), 2);
+    }
+
+    #[test]
+    fn github_pr_from_fork_marks_is_fork_and_extracts_metadata() {
+        let body = format!(
+            r#"{{
+                "action": "opened",
+                "pull_request": {{
+                    "number": 42,
+                    "user": {{ "login": "external-contrib" }},
+                    "head": {{
+                        "sha": "{VALID_SHA}",
+                        "ref": "patch-1",
+                        "repo": {{ "full_name": "external-contrib/repo" }}
+                    }},
+                    "base": {{
+                        "sha": "0000000000000000000000000000000000000000",
+                        "ref": "main",
+                        "repo": {{ "full_name": "org/repo" }}
+                    }}
+                }},
+                "repository": {{
+                    "clone_url": "https://github.com/org/repo.git",
+                    "ssh_url": "git@github.com:org/repo.git",
+                    "full_name": "org/repo"
+                }}
+            }}"#
+        );
+        let ev = ParsedPullRequestEvent::from_github(body.as_bytes()).unwrap();
+        assert_eq!(ev.pr_number, Some(42));
+        assert_eq!(ev.pr_author.as_deref(), Some("external-contrib"));
+        assert_eq!(ev.is_fork, Some(true));
+        assert_eq!(ev.base_owner.as_deref(), Some("org"));
+        assert_eq!(ev.base_repo.as_deref(), Some("repo"));
+    }
+
+    #[test]
+    fn github_pr_same_repo_is_not_fork() {
+        let body = format!(
+            r#"{{
+                "action": "synchronize",
+                "pull_request": {{
+                    "number": 7,
+                    "user": {{ "login": "maintainer" }},
+                    "head": {{
+                        "sha": "{VALID_SHA}",
+                        "ref": "feature",
+                        "repo": {{ "full_name": "org/repo" }}
+                    }},
+                    "base": {{
+                        "sha": "0000000000000000000000000000000000000000",
+                        "ref": "main",
+                        "repo": {{ "full_name": "org/repo" }}
+                    }}
+                }},
+                "repository": {{
+                    "clone_url": "https://github.com/org/repo.git",
+                    "ssh_url": "git@github.com:org/repo.git",
+                    "full_name": "org/repo"
+                }}
+            }}"#
+        );
+        let ev = ParsedPullRequestEvent::from_github(body.as_bytes()).unwrap();
+        assert_eq!(ev.is_fork, Some(false));
+    }
+
+    #[test]
+    fn gitlab_mr_different_projects_marks_is_fork() {
+        let body = format!(
+            r#"{{
+                "object_attributes": {{
+                    "action": "open",
+                    "iid": 11,
+                    "source_branch": "feat",
+                    "source_project_id": 99,
+                    "target_project_id": 1,
+                    "last_commit": {{ "id": "{VALID_SHA}" }}
+                }},
+                "project": {{
+                    "http_url": "https://gitlab.example.com/group/repo.git",
+                    "ssh_url": "git@gitlab.example.com:group/repo.git",
+                    "path_with_namespace": "group/repo"
+                }},
+                "user": {{ "username": "external" }}
+            }}"#
+        );
+        let ev = ParsedPullRequestEvent::from_gitlab(body.as_bytes()).unwrap();
+        assert_eq!(ev.pr_number, Some(11));
+        assert_eq!(ev.pr_author.as_deref(), Some("external"));
+        assert_eq!(ev.is_fork, Some(true));
+        assert_eq!(ev.base_owner.as_deref(), Some("group"));
+        assert_eq!(ev.base_repo.as_deref(), Some("repo"));
     }
 
     #[test]

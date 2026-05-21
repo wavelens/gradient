@@ -138,6 +138,21 @@ pub async fn github_app_webhook(
             handle_github_installation(&state, &body).await;
             WebhookResponse::empty(&event)
         }
+        "check_run" => {
+            trigger::handle_github_check_run(&state, &scheduler, &body).await;
+            WebhookResponse::empty(&event)
+        }
+        "issue_comment" => {
+            trigger::handle_issue_comment(
+                &state,
+                &scheduler,
+                ForgeType::GitHub,
+                None,
+                &body,
+            )
+            .await;
+            WebhookResponse::empty(&event)
+        }
         other => WebhookResponse::empty(other),
     };
 
@@ -215,6 +230,7 @@ async fn dispatch_github_app_pr(
         );
         return WebhookTriggerOutcome::default();
     };
+    let approval_ctx = approval_context_from(&parsed);
     trigger_pr_for_integration(
         state,
         scheduler,
@@ -224,8 +240,19 @@ async fn dispatch_github_app_pr(
         parsed.commit_hash,
         None,
         None,
+        approval_ctx,
     )
     .await
+}
+
+fn approval_context_from(parsed: &ParsedPullRequestEvent) -> trigger::PullRequestApprovalContext {
+    trigger::PullRequestApprovalContext {
+        pr_number: parsed.pr_number,
+        pr_author: parsed.pr_author.clone(),
+        is_fork: parsed.is_fork,
+        base_owner: parsed.base_owner.clone(),
+        base_repo: parsed.base_repo.clone(),
+    }
 }
 
 async fn dispatch_github_app_release(
@@ -371,6 +398,7 @@ pub async fn forge_webhook(
                 return Err(WebError::bad_request("malformed webhook payload"));
             };
             let urls = parsed.repository_urls.clone();
+            let approval_ctx = approval_context_from(&parsed);
             let outcome = trigger_pr_for_integration(
                 &state,
                 &scheduler,
@@ -380,6 +408,7 @@ pub async fn forge_webhook(
                 parsed.commit_hash,
                 None,
                 None,
+                approval_ctx,
             )
             .await;
             WebhookResponse {
@@ -418,6 +447,17 @@ pub async fn forge_webhook(
                 skipped: outcome.skipped,
             }
         }
+        ForgeEvent::Comment => {
+            trigger::handle_issue_comment(
+                &state,
+                &scheduler,
+                forge_type,
+                Some(integration_id),
+                &body,
+            )
+            .await;
+            WebhookResponse::empty("comment")
+        }
         ForgeEvent::Unknown(name) => WebhookResponse::empty(&name),
     };
 
@@ -430,6 +470,7 @@ enum ForgeEvent {
     Push,
     PullRequest,
     Release,
+    Comment,
     Unknown(String),
 }
 
@@ -445,6 +486,7 @@ fn forge_event_type(forge: ForgeType, headers: &HeaderMap) -> ForgeEvent {
                 "push" => ForgeEvent::Push,
                 "pull_request" => ForgeEvent::PullRequest,
                 "release" => ForgeEvent::Release,
+                "issue_comment" | "pull_request_comment" => ForgeEvent::Comment,
                 other => ForgeEvent::Unknown(other.to_string()),
             }
         }
@@ -457,6 +499,7 @@ fn forge_event_type(forge: ForgeType, headers: &HeaderMap) -> ForgeEvent {
                 "Push Hook" | "Tag Push Hook" => ForgeEvent::Push,
                 "Merge Request Hook" => ForgeEvent::PullRequest,
                 "Release Hook" => ForgeEvent::Release,
+                "Note Hook" => ForgeEvent::Comment,
                 other => ForgeEvent::Unknown(other.to_string()),
             }
         }
