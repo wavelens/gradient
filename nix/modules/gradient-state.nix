@@ -406,10 +406,16 @@
 
           - `polling`: `{ interval_secs = 300; branch = "main"; }` (minimum 10 seconds; `branch` optional, defaults to remote HEAD)
           - `reporter_push`: `{ branches = [ "main" "release/*" ]; tags = [ ]; releases_only = false; }`
-          - `reporter_pull_request`: `{ branches = [ ]; actions = [ "opened" "synchronize" "reopened" ]; }`
+          - `reporter_pull_request`: `{ branches = [ ]; actions = [ "opened" "synchronize" "reopened" ]; require_approval = true; }`
           - `time`: `{ cron = "0 0 2 * * *"; }` (six-field: sec min hour dom mon dow, UTC)
 
           Empty `branches`/`tags`/`actions` lists mean "match all".
+
+          `require_approval` (PR triggers only, default `true`) parks evaluations
+          for PRs from contributors who are not repo writers on the forge until
+          a maintainer clicks "Approve and run" on the GitHub check or comments
+          `/ci run` on Gitea/Forgejo/GitLab. Set to `false` to disable the gate
+          and run every PR build automatically.
         '';
         example = literalExpression ''
           { interval_secs = 60; }

@@ -44,6 +44,7 @@ interface TriggerFormState {
   tags: string;
   releases_only: boolean;
   actions: string;
+  require_approval: boolean;
   cron: string;
 }
 
@@ -57,6 +58,7 @@ const DEFAULT_FORM: TriggerFormState = {
   tags: '',
   releases_only: false,
   actions: '',
+  require_approval: true,
   cron: '',
 };
 
@@ -177,6 +179,7 @@ export class ProjectTriggersComponent implements OnInit {
       tags: (cfg.tags ?? []).join(', '),
       releases_only: cfg.releases_only ?? false,
       actions: (cfg.actions ?? []).join(', '),
+      require_approval: cfg.require_approval ?? true,
       cron: cfg.cron ?? '',
     };
     this.error.set(null);
@@ -216,6 +219,7 @@ export class ProjectTriggersComponent implements OnInit {
         const actions = this.splitList(this.form.actions);
         if (branches.length) cfg.branches = branches;
         if (actions.length) cfg.actions = actions;
+        cfg.require_approval = this.form.require_approval !== false;
         return cfg;
       }
       case 'time':
@@ -321,6 +325,7 @@ export class ProjectTriggersComponent implements OnInit {
         const parts: string[] = [`from ${this.integrationLabel(trigger)}`];
         if (cfg.branches?.length) parts.push(`branches: ${cfg.branches.join(', ')}`);
         if (cfg.actions?.length) parts.push(`actions: ${cfg.actions.join(', ')}`);
+        if (cfg.require_approval === false) parts.push('approval gate off');
         return parts.join(' / ');
       }
       case 'time':
