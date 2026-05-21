@@ -783,13 +783,34 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   }
 
   formatWaitingReason(reason: WaitingReason): string {
-    const archs = reason.available_architectures;
-    if (reason.connected_workers === 0) {
-      return 'No workers are connected. The evaluation requires:';
+    switch (reason.kind) {
+      case 'workers': {
+        if (reason.connected_workers === 0) {
+          return 'No workers are connected. The evaluation requires:';
+        }
+        const archList = reason.available_architectures.length > 0
+          ? reason.available_architectures.join(', ')
+          : 'none';
+        const workerWord = reason.connected_workers === 1 ? 'worker' : 'workers';
+        return `${reason.connected_workers} connected ${workerWord} (${archList}) cannot satisfy:`;
+      }
+      case 'approval':
+        return `Awaiting maintainer approval for pull request #${reason.pr_number} by ${reason.pr_author}.`;
+      case 'no_cache':
+        return 'No cache is configured for this organization. Configure a cache before this evaluation can run.';
     }
-    const archList = archs.length > 0 ? archs.join(', ') : 'none';
-    const workerWord = reason.connected_workers === 1 ? 'worker' : 'workers';
-    return `${reason.connected_workers} connected ${workerWord} (${archList}) cannot satisfy:`;
+  }
+
+  waitingTitle(reason: WaitingReason | undefined): string {
+    switch (reason?.kind) {
+      case 'approval': return 'Awaiting Approval';
+      case 'no_cache': return 'No Cache Configured';
+      default: return 'Waiting for Workers';
+    }
+  }
+
+  isWorkersWaiting(reason: WaitingReason | undefined): boolean {
+    return reason?.kind === 'workers';
   }
 
   getTriggerLabel(type: TriggerType | null): string {

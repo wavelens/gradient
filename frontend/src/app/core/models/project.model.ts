@@ -101,10 +101,23 @@ export interface Evaluation {
   trigger: { id: string; type: TriggerType } | null;
 }
 
-export interface WaitingReason {
+export type WaitingReason = WorkersWaitingReason | ApprovalWaitingReason | NoCacheWaitingReason;
+
+export interface WorkersWaitingReason {
+  kind: 'workers';
   unmet: UnmetRequirement[];
   connected_workers: number;
   available_architectures: string[];
+}
+
+export interface ApprovalWaitingReason {
+  kind: 'approval';
+  pr_number: number;
+  pr_author: string;
+}
+
+export interface NoCacheWaitingReason {
+  kind: 'no_cache';
 }
 
 export interface UnmetRequirement {

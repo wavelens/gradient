@@ -541,7 +541,7 @@ fn decide_pre_build_target(
     let stall = || {
         (
             EvaluationStatus::Waiting,
-            Some(WaitingReason {
+            Some(WaitingReason::Workers {
                 unmet: Vec::new(),
                 connected_workers: 0,
                 available_architectures: Vec::new(),
@@ -852,7 +852,7 @@ impl BuildabilityChecker {
         available_architectures.sort_unstable();
         available_architectures.dedup();
 
-        WaitingReason {
+        WaitingReason::Workers {
             unmet,
             connected_workers: worker_caps.len() as u32,
             available_architectures,
@@ -863,6 +863,17 @@ impl BuildabilityChecker {
 #[cfg(test)]
 mod waiting_reason_tests {
     use super::*;
+
+    fn workers_view(r: &WaitingReason) -> (&[UnmetRequirement], u32, &[String]) {
+        match r {
+            WaitingReason::Workers {
+                unmet,
+                connected_workers,
+                available_architectures,
+            } => (unmet, *connected_workers, available_architectures),
+            other => panic!("expected Workers variant, got {other:?}"),
+        }
+    }
 
     fn drv(id: DerivationId, arch: &str) -> MDerivation {
         entity::derivation::Model {
@@ -918,19 +929,18 @@ mod waiting_reason_tests {
         let checker = checker_with(vec![d1, d2], vec![]);
 
         let reason = checker.compute_waiting_reason(&builds, &[]);
+        let (unmet, connected_workers, available_architectures) = workers_view(&reason);
 
-        assert_eq!(reason.connected_workers, 0);
-        assert!(reason.available_architectures.is_empty());
-        assert_eq!(reason.unmet.len(), 2);
+        assert_eq!(connected_workers, 0);
+        assert!(available_architectures.is_empty());
+        assert_eq!(unmet.len(), 2);
         assert!(
-            reason
-                .unmet
+            unmet
                 .iter()
                 .any(|u| u.architecture == "aarch64-linux" && u.build_count == 1)
         );
         assert!(
-            reason
-                .unmet
+            unmet
                 .iter()
                 .any(|u| u.architecture == "x86_64-linux" && u.build_count == 1)
         );
@@ -946,12 +956,13 @@ mod waiting_reason_tests {
 
         let caps: Vec<(Vec<String>, Vec<String>)> = vec![(vec!["x86_64-linux".into()], vec![])];
         let reason = checker.compute_waiting_reason(&builds, &caps);
+        let (unmet, connected_workers, available_architectures) = workers_view(&reason);
 
-        assert_eq!(reason.connected_workers, 1);
-        assert_eq!(reason.available_architectures, vec!["x86_64-linux"]);
-        assert_eq!(reason.unmet.len(), 1);
-        assert_eq!(reason.unmet[0].architecture, "aarch64-linux");
-        assert_eq!(reason.unmet[0].build_count, 1);
+        assert_eq!(connected_workers, 1);
+        assert_eq!(available_architectures, ["x86_64-linux"]);
+        assert_eq!(unmet.len(), 1);
+        assert_eq!(unmet[0].architecture, "aarch64-linux");
+        assert_eq!(unmet[0].build_count, 1);
     }
 
     #[test]
@@ -965,11 +976,12 @@ mod waiting_reason_tests {
 
         let caps: Vec<(Vec<String>, Vec<String>)> = vec![(vec!["x86_64-linux".into()], vec![])];
         let reason = checker.compute_waiting_reason(&builds, &caps);
+        let (unmet, _, _) = workers_view(&reason);
 
-        assert_eq!(reason.unmet.len(), 1);
-        assert_eq!(reason.unmet[0].architecture, "x86_64-linux");
-        assert_eq!(reason.unmet[0].required_features, vec!["kvm".to_string()]);
-        assert_eq!(reason.unmet[0].build_count, 1);
+        assert_eq!(unmet.len(), 1);
+        assert_eq!(unmet[0].architecture, "x86_64-linux");
+        assert_eq!(unmet[0].required_features, vec!["kvm".to_string()]);
+        assert_eq!(unmet[0].build_count, 1);
     }
 
     #[test]
@@ -986,10 +998,11 @@ mod waiting_reason_tests {
         let checker = checker_with(vec![d1, d2, d3], vec![]);
 
         let reason = checker.compute_waiting_reason(&builds, &[]);
+        let (unmet, _, _) = workers_view(&reason);
 
-        assert_eq!(reason.unmet.len(), 1);
-        assert_eq!(reason.unmet[0].architecture, "aarch64-linux");
-        assert_eq!(reason.unmet[0].build_count, 3);
+        assert_eq!(unmet.len(), 1);
+        assert_eq!(unmet[0].architecture, "aarch64-linux");
+        assert_eq!(unmet[0].build_count, 3);
     }
 
     #[test]
@@ -998,9 +1011,10 @@ mod waiting_reason_tests {
             .expect("stall must produce a transition");
         assert_eq!(target, EvaluationStatus::Waiting);
         let reason = reason.expect("stall target must carry a reason");
-        assert_eq!(reason.connected_workers, 0);
-        assert!(reason.unmet.is_empty());
-        assert!(reason.available_architectures.is_empty());
+        let (unmet, connected_workers, available_architectures) = workers_view(&reason);
+        assert_eq!(connected_workers, 0);
+        assert!(unmet.is_empty());
+        assert!(available_architectures.is_empty());
     }
 
     #[test]
@@ -1065,8 +1079,9 @@ mod waiting_reason_tests {
 
         let caps: Vec<(Vec<String>, Vec<String>)> = vec![(vec!["x86_64-linux".into()], vec![])];
         let reason = checker.compute_waiting_reason(&builds, &caps);
+        let (unmet, _, _) = workers_view(&reason);
 
-        assert!(reason.unmet.is_empty());
+        assert!(unmet.is_empty());
     }
 }
 
