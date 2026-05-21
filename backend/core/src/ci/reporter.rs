@@ -36,7 +36,26 @@ pub enum CiStatus {
     Failure,
     /// Completed with an infrastructure or unexpected error.
     Error,
+    /// Awaiting a maintainer action (PR approval gate). On GitHub Apps this
+    /// surfaces as the native `action_required` conclusion with a
+    /// `requested_actions` button; other forges report it as `Pending` with
+    /// the description spelling out what the maintainer needs to do.
+    ActionRequired,
 }
+
+/// A button shown on a GitHub Check Run that the maintainer clicks to fire a
+/// `check_run.requested_action` webhook back to Gradient. Only consumed by
+/// [`GithubAppReporter`]; other reporters ignore the field.
+#[derive(Debug, Clone, Serialize)]
+pub struct RequestedAction {
+    pub identifier: String,
+    pub label: String,
+    pub description: String,
+}
+
+/// Identifier we send for the "approve untrusted PR" button — and pattern-match
+/// on when the forge echoes it back via `check_run.requested_action`.
+pub const APPROVAL_ACTION_ID: &str = "approve-and-run";
 
 /// All parameters needed to report a CI status to an external provider.
 #[derive(Debug, Clone)]
@@ -60,6 +79,11 @@ pub struct CiReport {
     /// GitHub `check_run` id when an existing check run should be updated.
     /// Only used by [`GithubAppReporter`]; ignored by all other reporters.
     pub existing_check_id: Option<i64>,
+    /// `requested_actions` to attach to a GitHub Check Run. Only emitted by
+    /// [`GithubAppReporter`] when `status == ActionRequired`. Empty for
+    /// every other reporter; other forges express the same intent through
+    /// `description`.
+    pub requested_actions: Vec<RequestedAction>,
 }
 
 /// Abstraction over external CI status providers.
@@ -84,6 +108,22 @@ pub trait CiReporter: Send + Sync + std::fmt::Debug + 'static {
     /// whose id the caller should persist for future updates. All other
     /// reporters (and PATCHes against an existing check run) return `Ok(None)`.
     async fn report(&self, report: &CiReport) -> Result<Option<i64>>;
+
+    /// Returns `true` iff `username` has push (write) or admin permission on
+    /// `owner/repo`. Used by the PR approval gate to skip the maintainer-
+    /// approval requirement for trusted contributors.
+    ///
+    /// Default impl returns `Ok(false)`: implementations that cannot probe
+    /// the forge for permissions should fail closed so untrusted PRs are
+    /// always parked for approval.
+    async fn is_repo_writer(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _username: &str,
+    ) -> Result<bool> {
+        Ok(false)
+    }
 }
 
 // ── NoopCiReporter ────────────────────────────────────────────────────────────
@@ -144,7 +184,7 @@ enum GiteaState {
 impl From<&CiStatus> for GiteaState {
     fn from(s: &CiStatus) -> Self {
         match s {
-            CiStatus::Pending | CiStatus::Running => GiteaState::Pending,
+            CiStatus::Pending | CiStatus::Running | CiStatus::ActionRequired => GiteaState::Pending,
             CiStatus::Success => GiteaState::Success,
             CiStatus::Failure => GiteaState::Failure,
             CiStatus::Error => GiteaState::Error,
@@ -201,6 +241,45 @@ impl CiReporter for GiteaReporter {
 
         Ok(None)
     }
+
+    async fn is_repo_writer(
+        &self,
+        owner: &str,
+        repo: &str,
+        username: &str,
+    ) -> Result<bool> {
+        let url = format!(
+            "{}/api/v1/repos/{}/{}/collaborators/{}/permission",
+            self.base_url, owner, repo, username
+        );
+        let resp = self
+            .client
+            .get(&url)
+            .header("Authorization", format!("token {}", self.token))
+            .send()
+            .await
+            .context("Failed to query Gitea collaborator permission")?;
+        if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(false);
+        }
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("Gitea permission query returned {}: {}", status, body);
+        }
+        #[derive(Deserialize)]
+        struct PermissionResponse {
+            permission: String,
+        }
+        let parsed: PermissionResponse = resp
+            .json()
+            .await
+            .context("Failed to parse Gitea permission response")?;
+        Ok(matches!(
+            parsed.permission.as_str(),
+            "admin" | "owner" | "write"
+        ))
+    }
 }
 
 // ── GitlabReporter ────────────────────────────────────────────────────────────
@@ -253,7 +332,7 @@ enum GitlabState {
 impl From<&CiStatus> for GitlabState {
     fn from(s: &CiStatus) -> Self {
         match s {
-            CiStatus::Pending => GitlabState::Pending,
+            CiStatus::Pending | CiStatus::ActionRequired => GitlabState::Pending,
             CiStatus::Running => GitlabState::Running,
             CiStatus::Success => GitlabState::Success,
             CiStatus::Failure => GitlabState::Failed,
@@ -320,6 +399,45 @@ impl CiReporter for GitlabReporter {
 
         Ok(None)
     }
+
+    async fn is_repo_writer(
+        &self,
+        owner: &str,
+        repo: &str,
+        username: &str,
+    ) -> Result<bool> {
+        let project_id = gitlab_project_id(owner, repo);
+        let encoded_username: String =
+            url::form_urlencoded::byte_serialize(username.as_bytes()).collect();
+        let url = format!(
+            "{}/api/v4/projects/{}/members/all?query={}",
+            self.base_url, project_id, encoded_username
+        );
+        let resp = self
+            .client
+            .get(&url)
+            .header("PRIVATE-TOKEN", &self.token)
+            .send()
+            .await
+            .context("Failed to query GitLab member access level")?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("GitLab members query returned {}: {}", status, body);
+        }
+        #[derive(Deserialize)]
+        struct Member {
+            username: String,
+            access_level: i32,
+        }
+        let members: Vec<Member> = resp
+            .json()
+            .await
+            .context("Failed to parse GitLab members response")?;
+        Ok(members
+            .iter()
+            .any(|m| m.username.eq_ignore_ascii_case(username) && m.access_level >= 30))
+    }
 }
 
 // ── GithubReporter ────────────────────────────────────────────────────────────
@@ -379,7 +497,9 @@ enum GithubState {
 impl From<&CiStatus> for GithubState {
     fn from(s: &CiStatus) -> Self {
         match s {
-            CiStatus::Pending | CiStatus::Running => GithubState::Pending,
+            CiStatus::Pending | CiStatus::Running | CiStatus::ActionRequired => {
+                GithubState::Pending
+            }
             CiStatus::Success => GithubState::Success,
             CiStatus::Failure => GithubState::Failure,
             CiStatus::Error => GithubState::Error,
@@ -437,6 +557,45 @@ impl CiReporter for GithubReporter {
 
         Ok(None)
     }
+
+    async fn is_repo_writer(
+        &self,
+        owner: &str,
+        repo: &str,
+        username: &str,
+    ) -> Result<bool> {
+        let url = format!(
+            "{}/repos/{}/{}/collaborators/{}/permission",
+            self.base_url, owner, repo, username
+        );
+        let resp = self
+            .client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.token))
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .send()
+            .await
+            .context("Failed to query GitHub collaborator permission")?;
+        if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(false);
+        }
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("GitHub permission query returned {}: {}", status, body);
+        }
+        let parsed: GithubPermissionResponse = resp
+            .json()
+            .await
+            .context("Failed to parse GitHub permission response")?;
+        Ok(matches!(parsed.permission.as_str(), "admin" | "write"))
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct GithubPermissionResponse {
+    permission: String,
 }
 
 // ── GithubAppReporter ────────────────────────────────────────────────────────
@@ -524,7 +683,7 @@ fn map_ci_status(status: &CiStatus) -> (CheckRunStatus, Option<CheckRunConclusio
         CiStatus::Running => (CheckRunStatus::InProgress, None),
         CiStatus::Success => (CheckRunStatus::Completed, Some(CheckRunConclusion::Success)),
         CiStatus::Failure => (CheckRunStatus::Completed, Some(CheckRunConclusion::Failure)),
-        CiStatus::Error => (
+        CiStatus::Error | CiStatus::ActionRequired => (
             CheckRunStatus::Completed,
             Some(CheckRunConclusion::ActionRequired),
         ),
@@ -548,6 +707,8 @@ struct CreateCheckRunPayload<'a> {
     details_url: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     output: Option<CheckRunOutput<'a>>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    actions: Vec<&'a RequestedAction>,
 }
 
 #[derive(Debug, Serialize)]
@@ -559,6 +720,8 @@ struct UpdateCheckRunPayload<'a> {
     details_url: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     output: Option<CheckRunOutput<'a>>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    actions: Vec<&'a RequestedAction>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -594,6 +757,7 @@ impl CiReporter for GithubAppReporter {
                 conclusion,
                 details_url: report.details_url.as_deref(),
                 output,
+                actions: report.requested_actions.iter().collect(),
             };
             let resp = self
                 .client
@@ -630,6 +794,7 @@ impl CiReporter for GithubAppReporter {
                 conclusion,
                 details_url: report.details_url.as_deref(),
                 output,
+                actions: report.requested_actions.iter().collect(),
             };
             let resp = self
                 .client
@@ -659,6 +824,53 @@ impl CiReporter for GithubAppReporter {
                 .context("Failed to parse GitHub check-run create response")?;
             Ok(Some(parsed.id))
         }
+    }
+
+    async fn is_repo_writer(
+        &self,
+        owner: &str,
+        repo: &str,
+        username: &str,
+    ) -> Result<bool> {
+        let token = crate::ci::github_app::get_installation_token(
+            &self.client,
+            self.app_id,
+            &self.private_key_pem,
+            self.installation_id,
+        )
+        .await
+        .context("Failed to mint GitHub App installation token")?;
+
+        let url = format!(
+            "{}/repos/{}/{}/collaborators/{}/permission",
+            self.api_base_url, owner, repo, username
+        );
+        let resp = self
+            .client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", token))
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .send()
+            .await
+            .context("Failed to query GitHub collaborator permission")?;
+        if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(false);
+        }
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!(
+                "GitHub App permission query returned {}: {}",
+                status,
+                body
+            );
+        }
+        let parsed: GithubPermissionResponse = resp
+            .json()
+            .await
+            .context("Failed to parse GitHub permission response")?;
+        Ok(matches!(parsed.permission.as_str(), "admin" | "write"))
     }
 }
 

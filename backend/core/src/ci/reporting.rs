@@ -176,6 +176,7 @@ pub async fn report_build_ci(state: Arc<ServerState>, build: MBuild, status: CiS
             description: None,
             details_url: details_url.clone(),
             existing_check_id: ep.repo_check_id,
+            requested_actions: Vec::new(),
         };
         match reporter.report(&report).await {
             Ok(Some(new_id)) => {
@@ -278,6 +279,7 @@ pub async fn report_evaluation_ci(
         description: None,
         details_url,
         existing_check_id: evaluation.repo_check_id,
+        requested_actions: Vec::new(),
     };
 
     match reporter.report(&report).await {
