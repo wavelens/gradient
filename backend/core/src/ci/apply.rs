@@ -10,11 +10,14 @@
 
 use super::abort::{AbortKind, abort_evaluation};
 use super::trigger::{TriggerError, trigger_evaluation};
+use crate::db::org_has_writable_cache;
 use crate::types::triggers::{ConcurrencyPolicy, TriggerType};
+use crate::types::waiting_reason::WaitingReason;
 use crate::types::*;
 
 use entity::evaluation::EvaluationStatus;
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
+use sea_orm::ActiveValue::Set;
+use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
@@ -140,6 +143,8 @@ pub async fn apply_trigger<C: ConnectionTrait>(
         }
         Err(e) => return Err(e.into()),
     };
+
+    let eval = park_if_no_cache(db, eval, project.organization).await?;
     Ok(ApplyOutcome::Created {
         evaluation: eval,
         aborted_evaluation,
@@ -147,9 +152,33 @@ pub async fn apply_trigger<C: ConnectionTrait>(
     })
 }
 
+/// Move a freshly-created `Queued` evaluation into `Waiting` with
+/// `WaitingReason::NoCache` if the project's organisation lacks a writable
+/// cache subscription. Returns the evaluation unchanged when at least one
+/// ReadWrite/WriteOnly cache is present.
+///
+/// Callers that go through [`apply_trigger`] get this automatically; the
+/// manual `/projects/{org}/{project}/evaluate` endpoint applies it directly
+/// after calling [`trigger_evaluation`].
+pub async fn park_if_no_cache<C: ConnectionTrait>(
+    db: &C,
+    eval: MEvaluation,
+    organization: OrganizationId,
+) -> Result<MEvaluation, sea_orm::DbErr> {
+    if org_has_writable_cache(db, organization).await? {
+        return Ok(eval);
+    }
+    let mut ae: AEvaluation = eval.into();
+    ae.status = Set(EvaluationStatus::Waiting);
+    ae.waiting_reason = Set(Some(WaitingReason::NoCache.to_json()));
+    ae.updated_at = Set(crate::types::now());
+    ae.update(db).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::ids::{CacheId, OrganizationCacheId, UserId};
     use chrono::NaiveDateTime;
     use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
     use uuid::Uuid;
@@ -231,6 +260,41 @@ mod tests {
         }
     }
 
+    fn cache_row(active: bool) -> entity::cache::Model {
+        entity::cache::Model {
+            id: CacheId::now_v7(),
+            name: "cache".into(),
+            display_name: "Cache".into(),
+            description: String::new(),
+            active,
+            priority: 10,
+            local_priority: None,
+            public_key: String::new(),
+            private_key: String::new(),
+            public: false,
+            created_by: UserId::nil(),
+            created_at: NaiveDateTime::default(),
+            managed: false,
+        }
+    }
+
+    fn org_cache_row(cache: CacheId) -> entity::organization_cache::Model {
+        entity::organization_cache::Model {
+            id: OrganizationCacheId::now_v7(),
+            organization: OrganizationId::nil(),
+            cache,
+            mode: entity::organization_cache::CacheSubscriptionMode::ReadWrite,
+        }
+    }
+
+    /// Append the two queries `org_has_writable_cache` issues for the
+    /// "writable cache exists" path.
+    fn with_writable_cache(db: MockDatabase) -> MockDatabase {
+        let cache = cache_row(true);
+        db.append_query_results([vec![org_cache_row(cache.id)]])
+            .append_query_results([vec![cache]])
+    }
+
     #[tokio::test]
     async fn skips_when_same_commit_as_last_eval() {
         let prev_eval_id = EvaluationId::now_v7();
@@ -302,8 +366,8 @@ mod tests {
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 1,
-            }])
-            .into_connection();
+            }]);
+        let db = with_writable_cache(db).into_connection();
 
         let res = apply_trigger(
             &db,
@@ -419,8 +483,8 @@ mod tests {
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 1,
-            }])
-            .into_connection();
+            }]);
+        let db = with_writable_cache(db).into_connection();
 
         let res = apply_trigger(
             &db,
@@ -513,8 +577,8 @@ mod tests {
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 1,
-            }])
-            .into_connection();
+            }]);
+        let db = with_writable_cache(db).into_connection();
 
         let res = apply_trigger(
             &db,
@@ -599,8 +663,8 @@ mod tests {
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 1,
-            }])
-            .into_connection();
+            }]);
+        let db = with_writable_cache(db).into_connection();
 
         let res = apply_trigger(
             &db,
@@ -621,5 +685,84 @@ mod tests {
         assert_eq!(evaluation.id, new_eval_id);
         assert_eq!(aborted_evaluation, Some(running_eval_id));
         assert_eq!(aborted_builds, vec![active_build_id]);
+    }
+
+    /// When the project's organisation has no writable cache subscription, a
+    /// freshly-created evaluation is parked in `Waiting` with the `NoCache`
+    /// reason — no jobs are spawned and the scheduler's reconciler must leave
+    /// the row alone until the cache-create endpoint re-queues it.
+    #[tokio::test]
+    async fn no_writable_cache_parks_evaluation_in_waiting_no_cache() {
+        use crate::types::waiting_reason::WaitingReason;
+        let project = make_project_with_last_eval(None);
+        let new_eval_id = EvaluationId::now_v7();
+        let new_commit_id = CommitId::now_v7();
+        let trig = ProjectTriggerId::now_v7();
+        let new_hash = vec![1u8; 20];
+
+        let parked_eval = {
+            let mut m = make_eval(
+                new_eval_id,
+                project.id,
+                new_commit_id,
+                EvaluationStatus::Waiting,
+            );
+            m.trigger = Some(trig);
+            m.waiting_reason = Some(WaitingReason::NoCache.to_json());
+            m
+        };
+
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            // Concurrency check: no in-flight
+            .append_query_results([Vec::<entity::evaluation::Model>::new()])
+            // trigger_evaluation: in-progress guard
+            .append_query_results([Vec::<entity::evaluation::Model>::new()])
+            // trigger_evaluation: commit insert
+            .append_query_results([vec![make_commit(new_commit_id, new_hash.clone())]])
+            // trigger_evaluation: eval insert (initially Queued)
+            .append_query_results([vec![{
+                let mut m = make_eval(
+                    new_eval_id,
+                    project.id,
+                    new_commit_id,
+                    EvaluationStatus::Queued,
+                );
+                m.trigger = Some(trig);
+                m
+            }]])
+            // trigger_evaluation: project update read-back + exec
+            .append_query_results([vec![project.clone()]])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            // org_has_writable_cache: no organization_cache rows → returns false
+            .append_query_results([Vec::<entity::organization_cache::Model>::new()])
+            // Park: update eval read-back + exec, returns the parked row
+            .append_query_results([vec![parked_eval.clone()]])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            .into_connection();
+
+        let res = apply_trigger(
+            &db,
+            &project,
+            input(trig, TriggerType::Polling, new_hash, false),
+        )
+        .await
+        .unwrap();
+
+        let ApplyOutcome::Created { evaluation, .. } = res else {
+            panic!("expected Created, got {res:?}");
+        };
+        assert_eq!(evaluation.status, EvaluationStatus::Waiting);
+        let reason = evaluation
+            .waiting_reason
+            .as_ref()
+            .and_then(WaitingReason::from_json)
+            .expect("waiting_reason must be set");
+        assert!(matches!(reason, WaitingReason::NoCache));
     }
 }
