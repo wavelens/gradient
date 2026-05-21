@@ -1360,6 +1360,11 @@ fn build_trigger_config(
                         .unwrap_or_else(|| {
                             vec!["opened".into(), "synchronize".into(), "reopened".into()]
                         }),
+                    require_approval: t
+                        .config
+                        .get("require_approval")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(true),
                 }
             }
         }

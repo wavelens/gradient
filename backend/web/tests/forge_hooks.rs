@@ -316,6 +316,9 @@ fn reporter_pr_trigger(actions: Vec<&str>) -> TriggerConfig {
         integration_id: integration_id(),
         branches: vec![],
         actions: actions.into_iter().map(String::from).collect(),
+        // Existing fan-out tests don't depend on the approval gate. Keep
+        // the legacy "run anything that matches" behaviour explicit here.
+        require_approval: false,
     }
 }
 

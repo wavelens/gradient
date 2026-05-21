@@ -63,6 +63,13 @@ pub enum TriggerConfig {
         branches: Vec<String>,
         #[serde(default = "default_pr_actions")]
         actions: Vec<String>,
+        /// When true (default, secure-by-default), PRs from contributors who
+        /// are not repo writers on the forge are parked in
+        /// `WaitingReason::Approval` until a maintainer either clicks the
+        /// "Approve and Run" check-run action (GitHub) or comments `/ci run`
+        /// (Gitea/Forgejo/GitLab).
+        #[serde(default = "default_require_approval")]
+        require_approval: bool,
     },
     Time {
         cron: String,
@@ -71,6 +78,10 @@ pub enum TriggerConfig {
 
 fn default_pr_actions() -> Vec<String> {
     vec!["opened".into(), "synchronize".into(), "reopened".into()]
+}
+
+fn default_require_approval() -> bool {
+    true
 }
 
 #[derive(Debug, Error)]
@@ -243,6 +254,26 @@ mod tests {
             assert_eq!(TriggerType::try_from(n), Ok(t));
         }
         assert!(TriggerType::try_from(99).is_err());
+    }
+
+    #[test]
+    fn reporter_pull_request_require_approval_defaults_true_for_legacy_rows() {
+        // Pre-#247 rows lack `require_approval` in the stored JSON. The serde
+        // default must produce `true` on read so secure-by-default applies
+        // without a backfill migration on existing trigger rows.
+        let legacy_db = serde_json::json!({
+            "integration_id": IntegrationId::nil(),
+            "branches": [],
+            "actions": ["opened"],
+        });
+        let parsed = TriggerConfig::parse_row(2, &legacy_db).unwrap();
+        let TriggerConfig::ReporterPullRequest {
+            require_approval, ..
+        } = parsed
+        else {
+            panic!("expected ReporterPullRequest");
+        };
+        assert!(require_approval, "missing field must default to true");
     }
 
     #[test]
