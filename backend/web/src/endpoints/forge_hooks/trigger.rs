@@ -8,18 +8,32 @@
 
 use super::response::{QueuedEvaluation, SkippedProject, WebhookTriggerOutcome};
 use entity::project_trigger as ept;
-use gradient_core::ci::{ApplyInput, ApplyOutcome, apply_trigger};
+use gradient_core::ci::{
+    APPROVAL_ACTION_ID, ApplyInput, ApplyOutcome, ApprovalInfo, ForgeType, apply_trigger,
+    find_approval_gated_eval, resolve_outbound_reporter_for_project, unpark_approval,
+};
 use gradient_core::types::triggers::{TriggerConfig, TriggerType};
 use gradient_core::types::*;
 use scheduler::Scheduler;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DbBackend, EntityTrait, IntoActiveModel, QueryFilter, Statement,
-    Value,
+    ActiveModelTrait, ColumnTrait, DbBackend, EntityTrait, FromQueryResult, IntoActiveModel,
+    QueryFilter, Statement, Value,
 };
 use serde::Deserialize;
 use std::sync::Arc;
 use tracing::{info, warn};
+
+/// PR metadata extracted from the forge webhook payload, used by the approval
+/// gate to decide whether to park the evaluation pending maintainer approval.
+#[derive(Debug, Clone, Default)]
+pub(super) struct PullRequestApprovalContext {
+    pub pr_number: Option<u64>,
+    pub pr_author: Option<String>,
+    pub is_fork: Option<bool>,
+    pub base_owner: Option<String>,
+    pub base_repo: Option<String>,
+}
 
 // ── GitHub installation payload ────────────────────────────────────────────
 
@@ -201,6 +215,7 @@ pub(super) async fn trigger_push_for_integration(
             }
             _ => FilterResult::Skip,
         },
+        None,
     )
     .await
 }
@@ -215,7 +230,10 @@ pub(super) async fn trigger_pr_for_integration(
     commit_hash: Vec<u8>,
     commit_message: Option<String>,
     author_name: Option<String>,
+    approval_ctx: PullRequestApprovalContext,
 ) -> WebhookTriggerOutcome {
+    let action_owned = action.to_string();
+    let branch_owned = branch.map(str::to_string);
     fan_out_triggers(
         state,
         scheduler,
@@ -226,23 +244,28 @@ pub(super) async fn trigger_pr_for_integration(
         author_name,
         |cfg| match cfg {
             TriggerConfig::ReporterPullRequest {
-                branches, actions, ..
+                branches,
+                actions,
+                require_approval,
+                ..
             } => {
-                if !actions.iter().any(|a| a == action) {
+                if !actions.iter().any(|a| a == &action_owned) {
                     return FilterResult::SkipFilter;
                 }
-                let matches = match branch {
+                let matches = match branch_owned.as_deref() {
                     Some(b) => glob_matches(branches, b),
                     None => branches.is_empty(),
                 };
-                if matches {
-                    FilterResult::Fire
-                } else {
-                    FilterResult::SkipFilter
+                if !matches {
+                    return FilterResult::SkipFilter;
+                }
+                FilterResult::FirePr {
+                    require_approval: *require_approval,
                 }
             }
             _ => FilterResult::Skip,
         },
+        Some(approval_ctx),
     )
     .await
 }
@@ -285,6 +308,7 @@ pub(super) async fn trigger_release_for_integration(
             }
             _ => FilterResult::Skip,
         },
+        None,
     )
     .await
 }
@@ -292,8 +316,11 @@ pub(super) async fn trigger_release_for_integration(
 // ── Generic fan-out engine ─────────────────────────────────────────────────
 
 enum FilterResult {
-    /// Proceed to fire `apply_trigger`.
+    /// Proceed to fire `apply_trigger` (push / release / time / polling).
     Fire,
+    /// PR trigger matched; whether the approval gate engages depends on the
+    /// PR being from a fork and the contributor failing the writer-trust probe.
+    FirePr { require_approval: bool },
     /// Config filter did not match — add to skipped with reason "filter".
     SkipFilter,
     /// This trigger type / config shape doesn't apply at all — silently ignore.
@@ -310,6 +337,7 @@ async fn fan_out_triggers<F>(
     commit_message: Option<String>,
     author_name: Option<String>,
     filter: F,
+    approval_ctx: Option<PullRequestApprovalContext>,
 ) -> WebhookTriggerOutcome
 where
     F: Fn(&TriggerConfig) -> FilterResult,
@@ -333,7 +361,7 @@ where
             }
         };
 
-        match filter(&cfg) {
+        let pr_require_approval = match filter(&cfg) {
             FilterResult::Skip => continue,
             FilterResult::SkipFilter => {
                 let (project_name, organization) = project_identity(state, trig.project).await;
@@ -345,8 +373,9 @@ where
                 });
                 continue;
             }
-            FilterResult::Fire => {}
-        }
+            FilterResult::Fire => false,
+            FilterResult::FirePr { require_approval } => require_approval,
+        };
 
         let project = match EProject::find_by_id(trig.project).one(&state.web_db).await {
             Ok(Some(p)) => p,
@@ -365,6 +394,12 @@ where
             .await
             .unwrap_or_default();
 
+        let gate_approval = if pr_require_approval {
+            decide_pr_gate(state, project.id, approval_ctx.as_ref()).await
+        } else {
+            None
+        };
+
         match apply_trigger(
             &state.web_db,
             &project,
@@ -375,6 +410,7 @@ where
                 commit_message: commit_message.clone(),
                 author_name: author_name.clone(),
                 manual: false,
+                gate_approval,
             },
         )
         .await
@@ -430,6 +466,56 @@ where
         }
     }
     outcome
+}
+
+/// Resolves whether a PR webhook fire should be gated on maintainer approval.
+///
+/// Returns `Some(ApprovalInfo)` when the evaluation must be parked in
+/// `Waiting + Approval`; `None` when the PR can proceed immediately (same-repo
+/// PR, or the contributor is a confirmed repo writer).
+///
+/// Fail-closed semantics: when `is_fork` is unknown (the payload didn't carry
+/// enough information) or the trust probe errors / can't run for lack of
+/// metadata, the gate engages. Maintainers who hit a false positive can still
+/// approve via the forge UI / `/ci run` comment.
+async fn decide_pr_gate(
+    state: &Arc<ServerState>,
+    project_id: ProjectId,
+    ctx: Option<&PullRequestApprovalContext>,
+) -> Option<ApprovalInfo> {
+    let ctx = ctx?;
+    if matches!(ctx.is_fork, Some(false)) {
+        return None;
+    }
+    let pr_number = ctx.pr_number.unwrap_or(0);
+    let pr_author = ctx.pr_author.clone().unwrap_or_default();
+
+    if let (Some(owner), Some(repo), Some(author)) = (
+        ctx.base_owner.as_deref(),
+        ctx.base_repo.as_deref(),
+        ctx.pr_author.as_deref(),
+    ) && !author.is_empty()
+    {
+        let reporter = resolve_outbound_reporter_for_project(state, project_id).await;
+        match reporter.is_repo_writer(owner, repo, author).await {
+            Ok(true) => return None,
+            Ok(false) => {}
+            Err(e) => {
+                warn!(
+                    error = %e,
+                    %project_id,
+                    pr_number,
+                    %author,
+                    "PR trust probe failed — parking pending approval"
+                );
+            }
+        }
+    }
+
+    Some(ApprovalInfo {
+        pr_number,
+        pr_author,
+    })
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -528,10 +614,458 @@ async fn org_name_for(state: &Arc<ServerState>, org_id: OrganizationId) -> Optio
         .map(|o| o.name)
 }
 
+// ── Approval unpark: GitHub `check_run.requested_action` ───────────────────
+
+#[derive(Deserialize)]
+struct GithubCheckRunRequestedAction<'a> {
+    action: &'a str,
+    requested_action: Option<GithubRequestedAction<'a>>,
+    check_run: GithubCheckRunRef<'a>,
+    repository: GithubRepoFull<'a>,
+    sender: Option<GithubSender<'a>>,
+}
+
+#[derive(Deserialize)]
+struct GithubRequestedAction<'a> {
+    identifier: &'a str,
+}
+
+#[derive(Deserialize)]
+struct GithubCheckRunRef<'a> {
+    id: i64,
+    #[serde(rename = "pull_requests", default)]
+    _pull_requests: Vec<serde_json::Value>,
+    #[serde(default)]
+    _name: Option<&'a str>,
+}
+
+#[derive(Deserialize)]
+struct GithubRepoFull<'a> {
+    full_name: Option<&'a str>,
+}
+
+#[derive(Deserialize)]
+struct GithubSender<'a> {
+    login: &'a str,
+}
+
+/// Handle a GitHub App `check_run.requested_action` event. Verifies the sender
+/// is a repo writer via the project's reporter, then re-queues the
+/// approval-gated evaluation matched by `check_run.id` and fires a fresh
+/// pending check.
+pub(super) async fn handle_github_check_run(
+    state: &Arc<ServerState>,
+    _scheduler: &Arc<Scheduler>,
+    body: &[u8],
+) {
+    let payload: GithubCheckRunRequestedAction = match serde_json::from_slice(body) {
+        Ok(p) => p,
+        Err(e) => {
+            warn!(error = %e, "GitHub check_run: failed to parse payload");
+            return;
+        }
+    };
+    if payload.action != "requested_action" {
+        return;
+    }
+    let Some(action) = payload.requested_action else {
+        return;
+    };
+    if action.identifier != APPROVAL_ACTION_ID {
+        return;
+    }
+    let Some(sender) = payload.sender else {
+        warn!("GitHub check_run.requested_action: missing sender");
+        return;
+    };
+    let Some(full_name) = payload.repository.full_name else {
+        warn!("GitHub check_run.requested_action: missing repository.full_name");
+        return;
+    };
+    let Some((owner, repo)) = full_name.split_once('/') else {
+        warn!(full_name, "GitHub check_run.requested_action: malformed repo full_name");
+        return;
+    };
+
+    let check_id = payload.check_run.id;
+    let Some(eval) = find_eval_by_check_id(state, check_id).await else {
+        warn!(
+            check_run_id = check_id,
+            "GitHub check_run.requested_action: no evaluation with matching repo_check_id"
+        );
+        return;
+    };
+    let Some(project_id) = eval.project else {
+        return;
+    };
+
+    if !sender_is_trusted(state, project_id, owner, repo, sender.login).await {
+        warn!(
+            evaluation_id = %eval.id,
+            sender = %sender.login,
+            "Rejecting approval click — sender is not a repo writer"
+        );
+        return;
+    }
+
+    match unpark_approval(&state.web_db, eval.id).await {
+        Ok(Some(unparked)) => {
+            info!(
+                evaluation_id = %eval.id,
+                sender = %sender.login,
+                "PR approval gate cleared via GitHub action"
+            );
+            scheduler::ci::spawn_pending_ci_for_eval(Arc::clone(state), &unparked);
+        }
+        Ok(None) => {
+            warn!(
+                evaluation_id = %eval.id,
+                "Approval click but evaluation no longer in Waiting+Approval state"
+            );
+        }
+        Err(e) => warn!(error = %e, evaluation_id = %eval.id, "Failed to unpark approval gate"),
+    }
+}
+
+async fn find_eval_by_check_id(
+    state: &Arc<ServerState>,
+    check_id: i64,
+) -> Option<MEvaluation> {
+    EEvaluation::find()
+        .filter(CEvaluation::RepoCheckId.eq(check_id))
+        .one(&state.web_db)
+        .await
+        .ok()
+        .flatten()
+}
+
+async fn sender_is_trusted(
+    state: &Arc<ServerState>,
+    project_id: ProjectId,
+    owner: &str,
+    repo: &str,
+    sender: &str,
+) -> bool {
+    let reporter = resolve_outbound_reporter_for_project(state, project_id).await;
+    match reporter.is_repo_writer(owner, repo, sender).await {
+        Ok(b) => b,
+        Err(e) => {
+            warn!(
+                error = %e,
+                %project_id,
+                sender,
+                "is_repo_writer probe failed during approval unpark"
+            );
+            false
+        }
+    }
+}
+
+// ── Approval unpark: `/ci run` comment on Gitea/Forgejo/GitLab + GitHub ────
+
+#[derive(Deserialize)]
+struct CommentPayload {
+    #[serde(default)]
+    action: Option<String>,
+    #[serde(default)]
+    comment: Option<CommentBody>,
+    #[serde(default)]
+    issue: Option<CommentIssue>,
+    #[serde(default)]
+    pull_request: Option<CommentIssue>,
+    #[serde(default)]
+    sender: Option<CommentSender>,
+    #[serde(default)]
+    repository: Option<CommentRepo>,
+    /// GitLab Note Hook fields.
+    #[serde(default)]
+    object_attributes: Option<GitlabNoteAttrs>,
+    #[serde(default)]
+    user: Option<CommentSender>,
+    #[serde(default)]
+    project: Option<GitlabNoteProject>,
+    #[serde(default)]
+    merge_request: Option<GitlabNoteMr>,
+}
+
+#[derive(Deserialize, Default)]
+struct CommentBody {
+    body: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
+struct CommentIssue {
+    number: Option<u64>,
+}
+
+#[derive(Deserialize, Default)]
+struct CommentSender {
+    #[serde(default)]
+    login: Option<String>,
+    #[serde(default)]
+    username: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
+struct CommentRepo {
+    #[serde(default)]
+    full_name: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
+struct GitlabNoteAttrs {
+    #[serde(default)]
+    note: Option<String>,
+    #[serde(default)]
+    noteable_type: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
+struct GitlabNoteProject {
+    #[serde(default)]
+    path_with_namespace: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
+struct GitlabNoteMr {
+    #[serde(default)]
+    iid: Option<u64>,
+}
+
+/// Handle a `/ci run` comment on a PR. Re-queues the approval-gated
+/// evaluation when the commenter passes the writer-trust probe.
+///
+/// `integration_id` is `Some` for per-integration webhook routes (Gitea /
+/// Forgejo / GitLab) and `None` for the shared GitHub App route — for the
+/// latter we resolve the integration from `installation.id` in the body.
+pub(super) async fn handle_issue_comment(
+    state: &Arc<ServerState>,
+    _scheduler: &Arc<Scheduler>,
+    forge: ForgeType,
+    integration_id: Option<IntegrationId>,
+    body: &[u8],
+) {
+    let payload: CommentPayload = match serde_json::from_slice(body) {
+        Ok(p) => p,
+        Err(e) => {
+            warn!(error = %e, "comment webhook: failed to parse payload");
+            return;
+        }
+    };
+
+    let (comment_body, pr_number, sender_login, owner_repo) = match forge {
+        ForgeType::GitLab => {
+            let Some(attrs) = payload.object_attributes else {
+                return;
+            };
+            if attrs.noteable_type.as_deref() != Some("MergeRequest") {
+                return;
+            }
+            let comment_body = attrs.note.unwrap_or_default();
+            let pr_number = payload.merge_request.and_then(|m| m.iid);
+            let sender = payload.user.and_then(|u| u.username.or(u.login));
+            let owner_repo = payload
+                .project
+                .and_then(|p| p.path_with_namespace);
+            (comment_body, pr_number, sender, owner_repo)
+        }
+        _ => {
+            // GitHub uses `action == "created"`; Gitea uses
+            // `action == "created"` too.
+            if payload.action.as_deref() != Some("created") {
+                return;
+            }
+            let comment_body = payload
+                .comment
+                .and_then(|c| c.body)
+                .unwrap_or_default();
+            let pr_number = payload
+                .pull_request
+                .or(payload.issue)
+                .and_then(|i| i.number);
+            let sender = payload.sender.and_then(|s| s.login.or(s.username));
+            let owner_repo = payload.repository.and_then(|r| r.full_name);
+            (comment_body, pr_number, sender, owner_repo)
+        }
+    };
+
+    if !is_ci_run_command(&comment_body) {
+        return;
+    }
+    let Some(pr_number) = pr_number else {
+        warn!("comment webhook: /ci run but no PR number");
+        return;
+    };
+    let Some(sender) = sender_login else {
+        warn!("comment webhook: /ci run but no sender");
+        return;
+    };
+    let Some(owner_repo) = owner_repo else {
+        warn!("comment webhook: /ci run but no repo path");
+        return;
+    };
+    let Some((owner, repo)) = owner_repo.rsplit_once('/') else {
+        warn!(owner_repo, "comment webhook: malformed repo path");
+        return;
+    };
+
+    let integration_id = match integration_id {
+        Some(id) => id,
+        None => {
+            let installation_id = match github_installation_id_from_comment_body(body) {
+                Some(id) => id,
+                None => {
+                    warn!("comment webhook (github): no installation_id");
+                    return;
+                }
+            };
+            match resolve_github_integration_id(state, installation_id).await {
+                Some(id) => id,
+                None => {
+                    warn!(installation_id, "comment webhook (github): no integration");
+                    return;
+                }
+            }
+        }
+    };
+
+    let project_ids = match active_project_ids_for_integration(state, integration_id).await {
+        Ok(rows) => rows,
+        Err(e) => {
+            warn!(error = %e, "comment webhook: failed to load project list");
+            return;
+        }
+    };
+
+    let mut unparked_any = false;
+    for project_id in project_ids {
+        let Ok(Some(eval)) =
+            find_approval_gated_eval(&state.web_db, project_id, pr_number).await
+        else {
+            continue;
+        };
+        if !sender_is_trusted(state, project_id, owner, repo, &sender).await {
+            warn!(
+                project_id = %project_id,
+                pr_number,
+                %sender,
+                "Rejecting /ci run — sender is not a repo writer"
+            );
+            continue;
+        }
+        match unpark_approval(&state.web_db, eval.id).await {
+            Ok(Some(unparked)) => {
+                info!(
+                    evaluation_id = %eval.id,
+                    pr_number,
+                    %sender,
+                    "PR approval gate cleared via /ci run comment"
+                );
+                scheduler::ci::spawn_pending_ci_for_eval(Arc::clone(state), &unparked);
+                unparked_any = true;
+            }
+            Ok(None) => {}
+            Err(e) => warn!(error = %e, evaluation_id = %eval.id, "Failed to unpark approval gate"),
+        }
+    }
+    if !unparked_any {
+        debug_no_match(pr_number);
+    }
+}
+
+fn debug_no_match(pr_number: u64) {
+    tracing::debug!(pr_number, "/ci run comment had no matching parked evaluation");
+}
+
+/// Lifts `/ci run` (and tolerated variants) from a comment body. Matches the
+/// trimmed first non-empty line so a maintainer can quote-reply context and
+/// add the command on its own line.
+fn is_ci_run_command(body: &str) -> bool {
+    for line in body.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        return trimmed.eq_ignore_ascii_case("/ci run");
+    }
+    false
+}
+
+fn github_installation_id_from_comment_body(body: &[u8]) -> Option<i64> {
+    #[derive(Deserialize)]
+    struct WithInstallation {
+        installation: Option<InstallationId>,
+    }
+    #[derive(Deserialize)]
+    struct InstallationId {
+        id: i64,
+    }
+    serde_json::from_slice::<WithInstallation>(body)
+        .ok()
+        .and_then(|p| p.installation)
+        .map(|i| i.id)
+}
+
+async fn active_project_ids_for_integration(
+    state: &Arc<ServerState>,
+    integration_id: IntegrationId,
+) -> Result<Vec<ProjectId>, sea_orm::DbErr> {
+    let stmt = Statement::from_sql_and_values(
+        DbBackend::Postgres,
+        "SELECT DISTINCT project FROM project_trigger \
+         WHERE active = true \
+           AND trigger_type = $1 \
+           AND (config->>'integration_id')::uuid = $2"
+            .to_string(),
+        [
+            Value::SmallInt(Some(i16::from(TriggerType::ReporterPullRequest))),
+            Value::Uuid(Some(Box::new(integration_id.into_inner()))),
+        ],
+    );
+
+    #[derive(sea_orm::FromQueryResult)]
+    struct ProjectRow {
+        project: ProjectId,
+    }
+    ProjectRow::find_by_statement(stmt)
+        .all(&state.web_db)
+        .await
+        .map(|rows| rows.into_iter().map(|r| r.project).collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::WebhookTriggerOutcome;
-    use super::{glob_match_pattern, glob_matches};
+    use super::{glob_match_pattern, glob_matches, is_ci_run_command};
+
+    #[test]
+    fn ci_run_command_matches_canonical_form() {
+        assert!(is_ci_run_command("/ci run"));
+    }
+
+    #[test]
+    fn ci_run_command_matches_with_surrounding_whitespace() {
+        assert!(is_ci_run_command("   /ci run   "));
+        assert!(is_ci_run_command("\n/ci run\n"));
+    }
+
+    #[test]
+    fn ci_run_command_matches_first_non_empty_line() {
+        assert!(is_ci_run_command("\n\nquote-reply context\n\n/ci run"));
+    }
+
+    #[test]
+    fn ci_run_command_case_insensitive() {
+        assert!(is_ci_run_command("/CI Run"));
+        assert!(is_ci_run_command("/Ci RUN"));
+    }
+
+    #[test]
+    fn ci_run_command_rejects_unrelated_text() {
+        assert!(!is_ci_run_command("looks good"));
+        assert!(!is_ci_run_command("/ci run please"));
+        assert!(!is_ci_run_command("foo\n/ci run\nbar"));
+    }
 
     #[test]
     fn trigger_outcome_default_is_empty() {

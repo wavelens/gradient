@@ -217,6 +217,7 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
                 commit_message: Some(msg),
                 author_name: Some(author),
                 manual: false,
+                gate_approval: None,
             },
         )
         .await

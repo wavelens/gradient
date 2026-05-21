@@ -53,6 +53,19 @@ pub struct ApplyInput {
     /// Set true for manual UI re-runs and `/triggers/{id}/test` calls.
     /// Bypasses the same-commit dedup check.
     pub manual: bool,
+    /// Set by the PR webhook layer when the caller has determined the PR
+    /// requires maintainer approval (untrusted contributor on a require_approval
+    /// trigger). `apply_trigger` parks the resulting evaluation in
+    /// `Waiting + WaitingReason::Approval` instead of `Queued`.
+    pub gate_approval: Option<ApprovalInfo>,
+}
+
+/// Identification of the pull request a maintainer must approve before the
+/// evaluation runs. Persisted on `evaluation.waiting_reason`.
+#[derive(Debug, Clone)]
+pub struct ApprovalInfo {
+    pub pr_number: u64,
+    pub pr_author: String,
 }
 
 pub async fn apply_trigger<C: ConnectionTrait>(
@@ -144,12 +157,36 @@ pub async fn apply_trigger<C: ConnectionTrait>(
         Err(e) => return Err(e.into()),
     };
 
+    let eval = park_if_pending_approval(db, eval, input.gate_approval.as_ref()).await?;
     let eval = park_if_no_cache(db, eval, project.organization).await?;
     Ok(ApplyOutcome::Created {
         evaluation: eval,
         aborted_evaluation,
         aborted_builds,
     })
+}
+
+/// Move a freshly-created `Queued` evaluation into `Waiting` with
+/// `WaitingReason::Approval` when the caller has flagged it as gated. No-op
+/// when `info` is `None` or the evaluation is already parked.
+pub async fn park_if_pending_approval<C: ConnectionTrait>(
+    db: &C,
+    eval: MEvaluation,
+    info: Option<&ApprovalInfo>,
+) -> Result<MEvaluation, sea_orm::DbErr> {
+    let Some(info) = info else {
+        return Ok(eval);
+    };
+    if eval.status != EvaluationStatus::Queued {
+        return Ok(eval);
+    }
+    let mut ae: AEvaluation = eval.into();
+    ae.status = Set(EvaluationStatus::Waiting);
+    ae.waiting_reason = Set(Some(
+        WaitingReason::approval(info.pr_number, info.pr_author.clone()).to_json(),
+    ));
+    ae.updated_at = Set(crate::types::now());
+    ae.update(db).await
 }
 
 /// Move a freshly-created `Queued` evaluation into `Waiting` with
@@ -165,6 +202,9 @@ pub async fn park_if_no_cache<C: ConnectionTrait>(
     eval: MEvaluation,
     organization: OrganizationId,
 ) -> Result<MEvaluation, sea_orm::DbErr> {
+    if eval.status != EvaluationStatus::Queued {
+        return Ok(eval);
+    }
     if org_has_writable_cache(db, organization).await? {
         return Ok(eval);
     }
@@ -257,6 +297,7 @@ mod tests {
             commit_message: None,
             author_name: None,
             manual,
+            gate_approval: None,
         }
     }
 
@@ -685,6 +726,93 @@ mod tests {
         assert_eq!(evaluation.id, new_eval_id);
         assert_eq!(aborted_evaluation, Some(running_eval_id));
         assert_eq!(aborted_builds, vec![active_build_id]);
+    }
+
+    /// When the PR webhook layer flags a freshly-created evaluation as needing
+    /// maintainer approval, `apply_trigger` parks it in `Waiting + Approval`
+    /// before checking the cache gate. The NoCache check then early-returns
+    /// because the eval is no longer in `Queued` status.
+    #[tokio::test]
+    async fn gate_approval_parks_pr_evaluation_in_waiting_approval() {
+        use crate::types::waiting_reason::WaitingReason;
+        let project = make_project_with_last_eval(None);
+        let new_eval_id = EvaluationId::now_v7();
+        let new_commit_id = CommitId::now_v7();
+        let trig = ProjectTriggerId::now_v7();
+        let new_hash = vec![1u8; 20];
+
+        let parked_eval = {
+            let mut m = make_eval(
+                new_eval_id,
+                project.id,
+                new_commit_id,
+                EvaluationStatus::Waiting,
+            );
+            m.trigger = Some(trig);
+            m.waiting_reason = Some(WaitingReason::approval(42, "external-contrib").to_json());
+            m
+        };
+
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([Vec::<entity::evaluation::Model>::new()])
+            .append_query_results([Vec::<entity::evaluation::Model>::new()])
+            .append_query_results([vec![make_commit(new_commit_id, new_hash.clone())]])
+            .append_query_results([vec![{
+                let mut m = make_eval(
+                    new_eval_id,
+                    project.id,
+                    new_commit_id,
+                    EvaluationStatus::Queued,
+                );
+                m.trigger = Some(trig);
+                m
+            }]])
+            .append_query_results([vec![project.clone()]])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            // park_if_pending_approval: update returns the parked row
+            .append_query_results([vec![parked_eval.clone()]])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            .into_connection();
+
+        let applied = ApplyInput {
+            trigger_id: trig,
+            trigger_type: TriggerType::ReporterPullRequest,
+            commit_hash: new_hash,
+            commit_message: None,
+            author_name: None,
+            manual: false,
+            gate_approval: Some(ApprovalInfo {
+                pr_number: 42,
+                pr_author: "external-contrib".into(),
+            }),
+        };
+        let res = apply_trigger(&db, &project, applied).await.unwrap();
+
+        let ApplyOutcome::Created { evaluation, .. } = res else {
+            panic!("expected Created, got {res:?}");
+        };
+        assert_eq!(evaluation.status, EvaluationStatus::Waiting);
+        let reason = evaluation
+            .waiting_reason
+            .as_ref()
+            .and_then(WaitingReason::from_json)
+            .expect("waiting_reason must be set");
+        match reason {
+            WaitingReason::Approval {
+                pr_number,
+                pr_author,
+            } => {
+                assert_eq!(pr_number, 42);
+                assert_eq!(pr_author, "external-contrib");
+            }
+            other => panic!("expected Approval, got {other:?}"),
+        }
     }
 
     /// When the project's organisation has no writable cache subscription, a
