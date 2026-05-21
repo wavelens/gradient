@@ -977,18 +977,28 @@ fn debug_no_match(pr_number: u64) {
     tracing::debug!(pr_number, "/ci run comment had no matching parked evaluation");
 }
 
-/// Lifts `/ci run` (and tolerated variants) from a comment body. Matches the
-/// trimmed first non-empty line so a maintainer can quote-reply context and
-/// add the command on its own line.
+/// Lifts `/ci run` from a comment body. The command must appear on its own
+/// line (after trimming whitespace). Blank lines and forge quote-reply lines
+/// (`> …`) are skipped so a maintainer can quote the PR context above the
+/// command, but any other prose before or after the command disqualifies
+/// the comment — that protects against accidental unparks when a contributor
+/// quotes an earlier `/ci run` in a reply.
 fn is_ci_run_command(body: &str) -> bool {
+    let mut saw_command = false;
     for line in body.lines() {
         let trimmed = line.trim();
-        if trimmed.is_empty() {
+        if trimmed.is_empty() || trimmed.starts_with('>') {
             continue;
         }
-        return trimmed.eq_ignore_ascii_case("/ci run");
+        if saw_command {
+            return false;
+        }
+        if !trimmed.eq_ignore_ascii_case("/ci run") {
+            return false;
+        }
+        saw_command = true;
     }
-    false
+    saw_command
 }
 
 fn github_installation_id_from_comment_body(body: &[u8]) -> Option<i64> {
@@ -1050,8 +1060,10 @@ mod tests {
     }
 
     #[test]
-    fn ci_run_command_matches_first_non_empty_line() {
-        assert!(is_ci_run_command("\n\nquote-reply context\n\n/ci run"));
+    fn ci_run_command_matches_after_quote_reply() {
+        assert!(is_ci_run_command(
+            "> @maintainer asked us to retrigger\n> after rebasing main\n\n/ci run"
+        ));
     }
 
     #[test]
@@ -1065,6 +1077,10 @@ mod tests {
         assert!(!is_ci_run_command("looks good"));
         assert!(!is_ci_run_command("/ci run please"));
         assert!(!is_ci_run_command("foo\n/ci run\nbar"));
+        assert!(
+            !is_ci_run_command("quote-reply context\n\n/ci run"),
+            "non-quote prose before /ci run must reject"
+        );
     }
 
     #[test]
