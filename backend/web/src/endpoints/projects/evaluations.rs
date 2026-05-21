@@ -18,7 +18,6 @@ use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use entity::build::BuildStatus;
-use entity::evaluation::EvaluationStatus;
 use gradient_core::db::get_any_organization_by_name;
 use gradient_core::sources::{check_project_updates, get_path_from_derivation_output};
 use gradient_core::storage::nar_extract::{ExtractError, Extracted, extract_path_from_nar_bytes};
@@ -631,10 +630,9 @@ async fn serve_hydra_artifact(
     Ok(None)
 }
 
-/// Downloads the newest build output for a specific entry point.
-///
-/// Resolves the most recently completed evaluation for the project, finds the entry
-/// point matching `eval`, and serves the named file from `nix-support/hydra-build-products`.
+/// Downloads the build output for a specific entry point from the project's
+/// newest-commit evaluation (`project.last_evaluation`), finds the entry point
+/// matching `eval`, and serves the named file from `nix-support/hydra-build-products`.
 ///
 /// Authentication:
 /// - Public organisations: no credentials required.
@@ -684,11 +682,10 @@ pub async fn get_entry_point_download(
         }
     }
 
-    // Most recent completed evaluation for this project.
-    let evaluation = EEvaluation::find()
-        .filter(CEvaluation::Project.eq(project.id))
-        .filter(CEvaluation::Status.eq(EvaluationStatus::Completed))
-        .order_by_desc(CEvaluation::CreatedAt)
+    // Newest-commit evaluation — `last_evaluation` over a query avoids a stale
+    // completed run shadowing the latest one (#185).
+    let evaluation_id = project.last_evaluation.or_not_found("Evaluation")?;
+    let evaluation = EEvaluation::find_by_id(evaluation_id)
         .one(&state.web_db)
         .await?
         .or_not_found("Evaluation")?;

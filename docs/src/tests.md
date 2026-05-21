@@ -2203,6 +2203,29 @@ Three cases:
   `entry_point` row matches `project` + `eval`, the response is the empty
   array (the frontend's empty state is then legitimate).
 
+## Entry-point download — pin to newest commit (`web/tests/entry_point_download.rs`)
+
+Integration tests for `GET /projects/{org}/{project}/entry-point-downloads`
+guarding against #185: the endpoint previously selected the most recently
+*completed* evaluation by ordering on `evaluation.created_at`, so a
+retriggered run of an older commit shadowed the latest one. The handler now
+resolves against `project.last_evaluation` — the evaluation tied to the
+project's newest commit — with no fallback to older evaluations.
+
+Three cases:
+
+- `returns_404_when_project_has_no_last_evaluation` — when
+  `project.last_evaluation` is `None` the endpoint 404s instead of running a
+  broad search across all evaluations.
+- `resolves_entry_point_against_project_last_evaluation` — happy path with
+  the project pinned to a newest-commit evaluation; the handler reaches the
+  artefact-serving stage (the test stops at empty `derivation_output` rows
+  → `404 File`, sufficient to prove the pinned evaluation drove lookup).
+- `returns_404_when_entry_point_missing_from_last_evaluation` — when the
+  requested `eval` attribute doesn't exist in the newest-commit evaluation,
+  the response is 404; no fallback to older evaluations that might still
+  carry a matching entry point.
+
 ### Cross-cache leader/follower deduplication
 
 - `core/src/db/cache_reach.rs` unit tests cover direct overlap, transitive
