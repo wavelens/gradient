@@ -419,6 +419,7 @@ impl<'a> StateApplicator<'a> {
 
             let existing_project = project::Entity::find()
                 .filter(project::Column::Name.eq(&state_project.name))
+                .filter(project::Column::Organization.eq(org_id))
                 .one(self.db)
                 .await?;
 
