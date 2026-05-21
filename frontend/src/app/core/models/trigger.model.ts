@@ -39,6 +39,10 @@ export interface ReporterPullRequestTriggerConfig {
   integration_id: string;
   branches?: string[];
   actions?: string[];
+  /** When true (default), PRs from non-writer contributors are parked until
+   *  a maintainer approves them via the forge's check-run action (GitHub)
+   *  or a `/ci run` comment (Gitea/Forgejo/GitLab). */
+  require_approval?: boolean;
 }
 
 export interface TimeTriggerConfig {
