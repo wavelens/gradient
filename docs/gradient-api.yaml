@@ -1977,11 +1977,14 @@ paths:
       - $ref: '#/components/parameters/ProjectSlug'
     get:
       tags: [projects]
-      summary: Download latest entry point build output
+      summary: Download newest-commit entry point build output
       description: |-
-        Serves the named file from `nix-support/hydra-build-products` for the most recently
-        completed build of the given entry point. Designed as a stable permalink — the URL
-        always resolves to the **newest** successful build.
+        Serves the named file from `nix-support/hydra-build-products` for the build of
+        the given entry point in the project's **newest-commit evaluation**
+        (`project.last_evaluation`). Designed as a stable permalink — retriggering an
+        older commit does not shadow the latest one. Returns `404` if no evaluation
+        has been recorded yet, or if the entry point / file is missing from the
+        newest evaluation.
 
         Authentication:
         - **Public organisations** — no credentials required.
