@@ -1122,6 +1122,14 @@ Tests use `RecordingJobReporter` — no real git server or WebSocket needed.
 
 ---
 
+## `core::state::provisioning` — Inbound Integration Lookup
+
+| Test | What it checks |
+|------|---------------|
+| `inbound_integrations_lookup_sql_filters_kind_inbound` | Regression: the SELECT behind `inbound_integrations_by_name` must restrict to `kind = Inbound`. Without the filter, the auto-managed GitHub App's two `name = "github"` rows (inbound + outbound) collapse in the resulting HashMap and reporter triggers persist the outbound id, so the inbound webhook resolver never matches and triggers configured via state never fire. |
+
+---
+
 ## `core::sources::ssh_key` — SSH Key Formatting
 
 | Test | What it checks |
