@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::collections::HashSet;
+
 use anyhow::{Context, Result};
 use gradient_core::executer::strip_nix_store_prefix;
 use tracing::debug;
@@ -98,6 +100,48 @@ fn is_literal_pattern(pattern: &str) -> bool {
     !path.contains('*') && !path.contains('#')
 }
 
+/// Returns true when a pattern is a literal include (no `!`, no `*`, no `#`).
+fn is_literal_include(pattern: &str) -> bool {
+    !pattern.starts_with('!') && is_literal_pattern(pattern)
+}
+
+/// Splits a wildcard list into the two streams `discover_derivations` consumes:
+///
+/// - `literal_attrs` — fully literal include paths that bypass `eval.nix`. Any
+///   literal include also listed as an exact-path exclusion is dropped here.
+/// - `eval_patterns` — patterns forwarded to `eval.nix`: every non-literal
+///   include plus, when any such include exists, every exclusion so the
+///   evaluator can apply them during traversal. With no non-literal include
+///   this list is empty (exclusions act on `literal_attrs` only).
+fn partition_for_eval(wildcards: &[String]) -> (Vec<String>, Vec<String>) {
+    let exclusions: HashSet<&str> = wildcards
+        .iter()
+        .filter_map(|p| p.strip_prefix('!'))
+        .collect();
+
+    let has_nonliteral_include = wildcards
+        .iter()
+        .any(|p| !p.starts_with('!') && !is_literal_include(p));
+
+    let literal_attrs: Vec<String> = wildcards
+        .iter()
+        .filter(|p| is_literal_include(p) && !exclusions.contains(p.as_str()))
+        .cloned()
+        .collect();
+
+    let eval_patterns: Vec<String> = if has_nonliteral_include {
+        wildcards
+            .iter()
+            .filter(|p| !is_literal_include(p))
+            .cloned()
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    (literal_attrs, eval_patterns)
+}
+
 /// Discovers all derivation attribute paths in a flake matching the given
 /// wildcard patterns by evaluating the embedded `eval.nix` through the Nix C API.
 ///
@@ -127,25 +171,14 @@ pub(super) fn discover_derivations(
     repository: &str,
     wildcards: &[String],
 ) -> Result<Vec<String>> {
-    // Separate fully-literal include patterns from those that need eval.nix.
-    let mut attrs: Vec<String> = wildcards
-        .iter()
-        .filter(|p| !p.starts_with('!') && is_literal_pattern(p))
-        .cloned()
-        .collect();
+    let (mut attrs, eval_patterns) = partition_for_eval(wildcards);
 
-    let wildcard_patterns: Vec<String> = wildcards
-        .iter()
-        .filter(|p| !is_literal_pattern(p))
-        .cloned()
-        .collect();
-
-    if !wildcard_patterns.is_empty() {
+    if !eval_patterns.is_empty() {
         let escaped_repo = escape_nix_str(repository);
-        let wildcard_ref = build_wildcard_nix_expr(&wildcard_patterns);
+        let wildcard_ref = build_wildcard_nix_expr(&eval_patterns);
         let expr = format!("({}) \"{}\" {}", EVAL_NIX, escaped_repo, wildcard_ref);
 
-        debug!(wildcards = ?wildcard_patterns, "discovering derivations via eval.nix");
+        debug!(wildcards = ?eval_patterns, "discovering derivations via eval.nix");
 
         let json_str = evaluator
             .eval_string(&expr)
@@ -329,5 +362,69 @@ mod tests {
         // Exclude patterns with no wildcards are literal too.
         assert!(is_literal_pattern("!packages.x86_64-linux.broken"));
         assert!(!is_literal_pattern("!packages.*.broken"));
+    }
+
+    // ── partition_for_eval ────────────────────────────────────────────────────
+
+    /// Regression for the silently-dropped exclusion bug: an exact-path `!…`
+    /// alongside a `#`/`*` include must reach `eval.nix`, not vanish.
+    #[test]
+    fn partition_forwards_exact_exclusion_alongside_hash_include() {
+        let patterns = vec![
+            "packages.x86_64-linux.#".to_string(),
+            "!packages.x86_64-linux.x86_64-darwin-qemu-example".to_string(),
+            "!packages.x86_64-linux.x86_64-darwin-vfkit-example".to_string(),
+        ];
+        let (literal_attrs, eval_patterns) = partition_for_eval(&patterns);
+        assert!(literal_attrs.is_empty());
+        assert_eq!(eval_patterns, patterns);
+    }
+
+    #[test]
+    fn partition_filters_literal_include_named_in_exclusion() {
+        let patterns = vec![
+            "packages.x86_64-linux.hello".to_string(),
+            "packages.x86_64-linux.broken".to_string(),
+            "!packages.x86_64-linux.broken".to_string(),
+        ];
+        let (literal_attrs, eval_patterns) = partition_for_eval(&patterns);
+        assert_eq!(literal_attrs, vec!["packages.x86_64-linux.hello".to_string()]);
+        assert!(eval_patterns.is_empty());
+    }
+
+    #[test]
+    fn partition_pure_literal_passthrough() {
+        let patterns = vec!["packages.x86_64-linux.hello".to_string()];
+        let (literal_attrs, eval_patterns) = partition_for_eval(&patterns);
+        assert_eq!(literal_attrs, patterns);
+        assert!(eval_patterns.is_empty());
+    }
+
+    #[test]
+    fn partition_mixed_literal_and_wildcard_includes_with_exclusion() {
+        let patterns = vec![
+            "packages.x86_64-linux.hello".to_string(),
+            "packages.x86_64-linux.*".to_string(),
+            "!packages.x86_64-linux.broken".to_string(),
+        ];
+        let (literal_attrs, eval_patterns) = partition_for_eval(&patterns);
+        assert_eq!(literal_attrs, vec!["packages.x86_64-linux.hello".to_string()]);
+        assert_eq!(
+            eval_patterns,
+            vec![
+                "packages.x86_64-linux.*".to_string(),
+                "!packages.x86_64-linux.broken".to_string(),
+            ],
+        );
+    }
+
+    #[test]
+    fn partition_preserves_input_order_for_eval_patterns() {
+        let patterns = vec![
+            "!packages.x86_64-linux.broken".to_string(),
+            "packages.x86_64-linux.*".to_string(),
+        ];
+        let (_, eval_patterns) = partition_for_eval(&patterns);
+        assert_eq!(eval_patterns, patterns);
     }
 }

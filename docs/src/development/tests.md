@@ -1195,6 +1195,11 @@ Unit tests for `resolve_effective_hash_db`, which maps the file-hash embedded in
 | `build_wildcard_nix_expr_include_only` | No `!` prefix → `include` non-empty, `exclude` empty |
 | `build_wildcard_nix_expr_exclude_only` | All `!` prefix → `include` empty, `exclude` non-empty |
 | `build_wildcard_nix_expr_mixed` | Mix → both `include` and `exclude` non-empty |
+| `partition_forwards_exact_exclusion_alongside_hash_include` | Regression: `packages.X.#,!packages.X.Y` keeps the exclusion in the eval-bound stream instead of silently dropping it |
+| `partition_filters_literal_include_named_in_exclusion` | Literal-only inputs: an `!path` exclusion removes a matching literal include from the bypass list, and `eval.nix` is not called |
+| `partition_pure_literal_passthrough` | Literal-only input with no exclusions returns the include as-is and skips `eval.nix` |
+| `partition_mixed_literal_and_wildcard_includes_with_exclusion` | Literal include bypasses `eval.nix`; wildcard include + exclusion both travel to `eval.nix` together |
+| `partition_preserves_input_order_for_eval_patterns` | Eval-bound patterns retain their input order |
 
 ---
 
