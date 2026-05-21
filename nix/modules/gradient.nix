@@ -660,6 +660,7 @@ in {
       postgresql = lib.mkIf cfg.configurePostgres {
         enable = true;
         ensureDatabases = [ "gradient" ];
+        settings.max_connections = lib.mkDefault 200;
         ensureUsers = [{
           name = "gradient";
           ensureDBOwnership = true;
