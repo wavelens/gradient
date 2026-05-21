@@ -2429,3 +2429,30 @@ CLI integration tests in `cli/tests/`:
 - `download_attr.rs` — `gradient download '#attr' --json` writes the right files; `--json` without args returns a structured missing-argument envelope and exits 2.
 
 Run a single connector test file with `cargo test -p connector --test <name>`; CI runs the full suite.
+
+## PR approval gate (#247)
+
+Untrusted PRs (from forks where the contributor is not a forge repo writer)
+are parked in `Waiting + WaitingReason::Approval` instead of running
+immediately. Coverage:
+
+- `core/src/types/triggers.rs` — `reporter_pull_request_require_approval_defaults_true_for_legacy_rows`
+  asserts the secure-by-default `require_approval = true` decoding for
+  pre-#247 rows that lack the field in stored JSON.
+- `core/src/types/waiting_reason.rs` — round-trips for the
+  `workers` / `approval` / `no_cache` variants plus the legacy-row
+  decoder.
+- `core/src/ci/apply.rs::no_writable_cache_parks_evaluation_in_waiting_no_cache`
+  — `apply_trigger` parks newly-created evals as `NoCache` when the org
+  has no writable cache subscription.
+- `web/src/endpoints/forge_hooks/events.rs` — extraction of
+  `pr_number`, `pr_author`, `is_fork`, `base_owner`, `base_repo` from
+  GitHub / Gitea / GitLab payloads.
+- `web/src/endpoints/forge_hooks/trigger.rs::is_ci_run_command_*` —
+  recogniser for the `/ci run` comment unpark command (case
+  insensitive, allows leading quote-reply lines, rejects trailing
+  noise).
+- `core/src/ci/unpark.rs::unpark_approval_*` — transitions
+  `Waiting + Approval` back to `Queued` once a maintainer authorises
+  the PR; no-ops when the row's reason is something else (NoCache /
+  Workers).

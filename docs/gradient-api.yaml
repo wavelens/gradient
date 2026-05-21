@@ -5614,18 +5614,39 @@ components:
           $ref: '#/components/schemas/WaitingReason'
 
     WaitingReason:
-      type: object
       description: |
-        Populated only when `status == "Waiting"`. In the build phase, lists
-        the `(architecture, required_features)` combinations no connected
-        worker can satisfy, alongside the architectures the connected pool
-        *does* offer. In the pre-build phase, an empty `unmet` list with
-        `connected_workers == 0` indicates the evaluation is stalled simply
-        because no worker is connected at all. Refreshed whenever the
-        scheduler reconciles the evaluation against the live worker pool
-        (worker connect/disconnect, capability update, dispatch tick).
-      required: [unmet, connected_workers, available_architectures]
+        Populated only when `status == "Waiting"`. Tagged by `kind`:
+
+        - `workers`: no connected worker can satisfy the pending builds'
+          `(architecture, required_features)` combos. Refreshed whenever the
+          scheduler reconciles the evaluation against the live worker pool.
+        - `approval`: the PR comes from a contributor who is not a forge
+          repo writer, and the trigger has `require_approval = true`. The
+          evaluation stays parked until a maintainer clicks "Approve and
+          run" on the GitHub Check or comments `/ci run` on
+          Gitea/Forgejo/GitLab.
+        - `no_cache`: the project's organisation has no writable cache
+          subscription, so build outputs would have nowhere to land. The
+          evaluation auto-unparks the moment a writable cache is
+          subscribed.
+      oneOf:
+        - $ref: '#/components/schemas/WaitingReasonWorkers'
+        - $ref: '#/components/schemas/WaitingReasonApproval'
+        - $ref: '#/components/schemas/WaitingReasonNoCache'
+      discriminator:
+        propertyName: kind
+        mapping:
+          workers: '#/components/schemas/WaitingReasonWorkers'
+          approval: '#/components/schemas/WaitingReasonApproval'
+          no_cache: '#/components/schemas/WaitingReasonNoCache'
+
+    WaitingReasonWorkers:
+      type: object
+      required: [kind, unmet, connected_workers, available_architectures]
       properties:
+        kind:
+          type: string
+          enum: [workers]
         unmet:
           type: array
           description: |
@@ -5641,11 +5662,32 @@ components:
           description: Total number of workers currently connected to the scheduler.
         available_architectures:
           type: array
-          description: |
-            Distinct architectures advertised by the connected pool. Empty if no
-            workers are connected.
+          description: Distinct architectures advertised by the connected pool. Empty if no workers are connected.
           items:
             type: string
+
+    WaitingReasonApproval:
+      type: object
+      required: [kind, pr_number, pr_author]
+      properties:
+        kind:
+          type: string
+          enum: [approval]
+        pr_number:
+          type: integer
+          minimum: 0
+          description: PR / MR number on the forge that the maintainer must approve.
+        pr_author:
+          type: string
+          description: Forge login of the PR author whose contribution is being gated.
+
+    WaitingReasonNoCache:
+      type: object
+      required: [kind]
+      properties:
+        kind:
+          type: string
+          enum: [no_cache]
 
     UnmetRequirement:
       type: object
@@ -6602,6 +6644,15 @@ components:
           items:
             type: string
           description: 'PR actions that fire the trigger. Defaults to ["opened","synchronize","reopened"].'
+        require_approval:
+          type: boolean
+          default: true
+          description: |
+            When `true` (default), PRs from contributors who are not forge
+            repo writers are parked in `Waiting + WaitingReason::Approval`
+            until a maintainer clicks "Approve and run" on the GitHub Check
+            or comments `/ci run` on Gitea/Forgejo/GitLab. Set to `false` to
+            disable the gate and run every PR build automatically.
 
     TimeTriggerConfig:
       type: object
