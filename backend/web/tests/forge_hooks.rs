@@ -252,6 +252,33 @@ fn commit_row() -> entity::commit::Model {
     }
 }
 
+fn cache_row() -> entity::cache::Model {
+    entity::cache::Model {
+        id: CacheId::now_v7(),
+        name: "test-cache".into(),
+        display_name: "Test Cache".into(),
+        description: String::new(),
+        active: true,
+        priority: 10,
+        local_priority: None,
+        public_key: String::new(),
+        private_key: String::new(),
+        public: false,
+        created_by: UserId::nil(),
+        created_at: fixture_date(),
+        managed: false,
+    }
+}
+
+fn org_cache_row() -> entity::organization_cache::Model {
+    entity::organization_cache::Model {
+        id: OrganizationCacheId::now_v7(),
+        organization: org_id(),
+        cache: CacheId::now_v7(),
+        mode: entity::organization_cache::CacheSubscriptionMode::ReadWrite,
+    }
+}
+
 /// Build a `project_trigger` row with the given config.
 fn trigger_row(cfg: TriggerConfig) -> entity::project_trigger::Model {
     entity::project_trigger::Model {
@@ -293,7 +320,8 @@ fn reporter_pr_trigger(actions: Vec<&str>) -> TriggerConfig {
 }
 
 /// Mock DB chain for a successful `apply_trigger` call with no prior evaluation
-/// (skips same-commit dedup) and no in-flight evaluation.
+/// (skips same-commit dedup) and no in-flight evaluation. Includes the
+/// `org_has_writable_cache` lookup that runs after the eval is created.
 fn apply_trigger_db_chain(db: MockDatabase) -> MockDatabase {
     db.append_query_results([Vec::<entity::evaluation::Model>::new()]) // in-flight check
         .append_query_results([Vec::<entity::evaluation::Model>::new()]) // trigger_evaluation: in-progress check
@@ -304,6 +332,8 @@ fn apply_trigger_db_chain(db: MockDatabase) -> MockDatabase {
             last_insert_id: 0,
             rows_affected: 1,
         }]) // UPDATE project
+        .append_query_results([vec![org_cache_row()]]) // org_has_writable_cache: subscription rows
+        .append_query_results([vec![cache_row()]]) // org_has_writable_cache: active cache rows
 }
 
 // ── Test 1: Generic forge — no matching trigger (Gitea) ───────────────────────

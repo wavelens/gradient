@@ -446,6 +446,19 @@ impl<'a> BuildStateHandler<'a> {
         }
 
         for eval in evals {
+            // Approval and no-cache parks are owned by webhook + cache-create
+            // hooks. The reconciler must not unpark them just because workers
+            // showed up.
+            if eval.status == EvaluationStatus::Waiting
+                && eval
+                    .waiting_reason
+                    .as_ref()
+                    .and_then(WaitingReason::from_json)
+                    .is_some_and(|r| !matches!(r, WaitingReason::Workers { .. }))
+            {
+                continue;
+            }
+
             let pending_builds = EBuild::find()
                 .filter(CBuild::Evaluation.eq(eval.id))
                 .filter(CBuild::Status.is_in(vec![
