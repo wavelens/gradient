@@ -46,6 +46,50 @@ export interface CacheStats {
   weeks: CacheMetricPoint[];
 }
 
+export interface NarSummary {
+  hash: string;
+  store_path: string;
+  package: string;
+  nar_size: number | null;
+  file_size: number | null;
+  created_at: string;
+  last_fetched_at: string | null;
+}
+
+export interface NarListResponse {
+  items: NarSummary[];
+  total: number;
+  page: number;
+  per_page: number;
+}
+
+export interface NarDetail extends NarSummary {
+  file_hash: string | null;
+  nar_hash: string | null;
+  references: string[];
+  deriver: string | null;
+  ca: string | null;
+  fetch_count: number;
+  signed: boolean;
+}
+
+export interface NarStats {
+  total_nars: number;
+  total_nar_size: number;
+  total_file_size: number;
+  last_uploaded_at: string | null;
+  oldest_fetched_at: string | null;
+}
+
+export interface NarListQuery {
+  hash?: string;
+  package?: string;
+  sort?: string;
+  order?: string;
+  page?: number;
+  per_page?: number;
+}
+
 @Injectable({ providedIn: 'root' })
 export class CachesService {
   private api = inject(ApiService);
@@ -136,5 +180,27 @@ export class CachesService {
 
   removeUpstream(cache: string, upstreamId: string): Observable<void> {
     return this.api.delete<void>(`caches/${cache}/upstreams/${upstreamId}`);
+  }
+
+  getCacheNars(cache: string, query: NarListQuery = {}): Observable<NarListResponse> {
+    const params = new URLSearchParams();
+    for (const [k, v] of Object.entries(query)) {
+      if (v !== undefined && v !== null && v !== '') params.set(k, String(v));
+    }
+    const qs = params.toString();
+    const suffix = qs ? `?${qs}` : '';
+    return this.api.get<NarListResponse>(`caches/${cache}/nars${suffix}`);
+  }
+
+  getCacheNar(cache: string, hash: string): Observable<NarDetail> {
+    return this.api.get<NarDetail>(`caches/${cache}/nars/${hash}`);
+  }
+
+  getCacheNarStats(cache: string): Observable<NarStats> {
+    return this.api.get<NarStats>(`caches/${cache}/nars/stats`);
+  }
+
+  deleteCacheNar(cache: string, hash: string): Observable<void> {
+    return this.api.delete<void>(`caches/${cache}/nars/${hash}`);
   }
 }
