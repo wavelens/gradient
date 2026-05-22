@@ -322,6 +322,10 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             patch(caches::patch_cache).delete(caches::delete_cache),
         )
         .route(
+            "/caches/{cache}/nars/{hash}",
+            axum::routing::delete(caches::nars_delete),
+        )
+        .route(
             "/caches/{cache}/active",
             post(caches::post_cache_active).delete(caches::delete_cache_active),
         )
@@ -458,6 +462,13 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             get(caches::get_cache_public_key),
         )
         .route("/caches/{cache}/stats", get(stats::get_cache_stats))
+        .route("/caches/{cache}/nars", get(caches::nars_list))
+        .route("/caches/{cache}/nars/stats", get(caches::nars_stats))
+        .route(
+            "/caches/{cache}/nars/available",
+            get(caches::nars_available),
+        )
+        .route("/caches/{cache}/nars/{hash}", get(caches::nars_show))
         .route_layer(middleware::from_fn_with_state(
             Arc::clone(&state),
             authorization::authorize_optional,
