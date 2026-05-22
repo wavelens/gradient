@@ -101,6 +101,15 @@ export const routes: Routes = [
             (m) => m.ProjectTriggersComponent,
           ),
       },
+      {
+        path: 'flake-inputs',
+        title: 'Project Flake Inputs',
+        canActivate: [authGuard],
+        loadComponent: () =>
+          import('./features/projects/project-flake-inputs/project-flake-inputs.component').then(
+            (m) => m.ProjectFlakeInputsComponent,
+          ),
+      },
     ],
   },
 
