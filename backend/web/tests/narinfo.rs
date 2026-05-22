@@ -150,6 +150,8 @@ async fn narinfo_served_from_db_inner() {
         cache: cache_id(),
         // 64 raw bytes — any non-empty Ed25519-shaped buffer works.
         signature: Some(vec![0x42; 64]),
+        last_fetched_at: None,
+        fetch_count: 0,
         created_at: test_date(),
     };
 
@@ -298,6 +300,8 @@ async fn narinfo_unsigned_inner() {
         cached_path: cached_path_id(),
         cache: cache_id(),
         signature: None,
+        last_fetched_at: None,
+        fetch_count: 0,
         created_at: test_date(),
     };
 
