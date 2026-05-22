@@ -81,6 +81,18 @@ pub struct StateProject {
     /// won't trust them. Defaults to `true`.
     #[serde(default = "default_true")]
     pub sign_cache: bool,
+    /// Declarative flake input overrides. An absent or empty map deletes all
+    /// existing override rows for this project.
+    #[serde(default)]
+    pub flake_input_overrides: HashMap<String, StateFlakeInputOverride>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StateFlakeInputOverride {
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub keep_url: bool,
 }
 
 fn default_soft_abort() -> ConcurrencyPolicy {

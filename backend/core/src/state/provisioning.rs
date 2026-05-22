@@ -5,8 +5,8 @@
  */
 
 use super::{
-    StateApiKey, StateCache, StateConfiguration, StateIntegration, StateOrganization, StateProject,
-    StateRole, StateTrigger, StateUpstream, StateUser, StateWorker,
+    StateApiKey, StateCache, StateConfiguration, StateFlakeInputOverride, StateIntegration,
+    StateOrganization, StateProject, StateRole, StateTrigger, StateUpstream, StateUser, StateWorker,
 };
 use crate::ci::{
     ForgeType, GITHUB_APP_INTEGRATION_NAME, IntegrationKind, encrypt_webhook_secret,
@@ -484,6 +484,81 @@ impl<'a> StateApplicator<'a> {
                             state_project.name, e
                         )
                     })?;
+            }
+
+            self.apply_flake_input_overrides(
+                project_row.id,
+                &state_project.flake_input_overrides,
+            )
+            .await
+            .map_err(|e| {
+                format!(
+                    "Failed to apply flake input overrides for project '{}': {}",
+                    state_project.name, e
+                )
+            })?;
+        }
+
+        Ok(())
+    }
+
+    // ── apply_flake_input_overrides ───────────────────────────────────────────
+
+    async fn apply_flake_input_overrides(
+        &self,
+        project_id: ProjectId,
+        desired: &HashMap<String, StateFlakeInputOverride>,
+    ) -> Result<(), DynError> {
+        use entity::project_flake_input_override as pfio;
+
+        for (name, o) in desired {
+            if o.url.is_some() == o.keep_url {
+                return Err(format!(
+                    "flake input override '{name}' must set exactly one of `url` or `keep_url`",
+                )
+                .into());
+            }
+        }
+
+        let existing = pfio::Entity::find()
+            .filter(pfio::Column::Project.eq(project_id))
+            .all(self.db)
+            .await?;
+
+        let existing_map: HashMap<String, pfio::Model> =
+            existing.into_iter().map(|r| (r.input_name.clone(), r)).collect();
+
+        let now = chrono::Utc::now().naive_utc();
+
+        for (name, o) in desired {
+            let desired_url: Option<String> = if o.keep_url { None } else { o.url.clone() };
+            match existing_map.get(name) {
+                None => {
+                    pfio::ActiveModel {
+                        id: Set(entity::ids::FlakeInputOverrideId::now_v7()),
+                        project: Set(project_id),
+                        input_name: Set(name.clone()),
+                        url: Set(desired_url),
+                        created_at: Set(now),
+                        updated_at: Set(now),
+                    }
+                    .insert(self.db)
+                    .await?;
+                }
+                Some(row) if row.url != desired_url => {
+                    let mut am: pfio::ActiveModel = row.clone().into();
+                    am.url = Set(desired_url);
+                    am.updated_at = Set(now);
+                    am.update(self.db).await?;
+                }
+                Some(_) => {}
+            }
+        }
+
+        for (name, row) in &existing_map {
+            if !desired.contains_key(name) {
+                let am: pfio::ActiveModel = row.clone().into();
+                am.delete(self.db).await?;
             }
         }
 
