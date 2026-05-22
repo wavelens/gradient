@@ -166,11 +166,11 @@
         default = null;
         description = ''
           Flake reference to use as the override for this input. When
-          null and `keepUrl` is true, the input is force-updated using
+          null and `keep_url` is true, the input is force-updated using
           the URL declared in the project's flake.nix.
         '';
       };
-      keepUrl = mkOption {
+      keep_url = mkOption {
         type = types.bool;
         default = false;
         description = ''
@@ -314,7 +314,7 @@
         '';
       };
 
-      flakeInputOverrides = mkOption {
+      flake_input_overrides = mkOption {
         type = types.attrsOf flakeInputOverrideType;
         default = {};
         description = ''
@@ -325,7 +325,7 @@
         example = literalExpression ''
           {
             nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-            flake-utils.keepUrl = true;
+            flake-utils.keep_url = true;
           }
         '';
       };
@@ -890,16 +890,16 @@ in
         mapAttrsToList (iName: o: {
           project = pName;
           input = iName;
-          valid = (o.url != null) != o.keepUrl;
-        }) p.flakeInputOverrides
+          valid = (o.url != null) != o.keep_url;
+        }) p.flake_input_overrides
       ) config.services.gradient.state.projects);
       invalid = filter (b: !b.valid) bad;
     in
     map (b: {
       assertion = false;
       message = ''
-        services.gradient.state.projects.${b.project}.flakeInputOverrides.${b.input}: \
-        exactly one of `url` (string) or `keepUrl = true` must be set.
+        services.gradient.state.projects.${b.project}.flake_input_overrides.${b.input}: \
+        exactly one of `url` (string) or `keep_url = true` must be set.
       '';
     }) invalid;
 }
