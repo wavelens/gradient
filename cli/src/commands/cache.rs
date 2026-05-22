@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::commands::cache_nar;
 use crate::input::{client_from_config, handle_input};
 use crate::output::{ExitKind, Output, to_exit_kind};
 use clap::Subcommand;
@@ -55,6 +56,11 @@ pub enum Commands {
         /// Path to the netrc file to update (default: /etc/nix/netrc)
         #[arg(short = 'f', long, default_value = "/etc/nix/netrc")]
         netrc_file: String,
+    },
+    /// Manage individual NARs in a cache
+    Nar {
+        #[command(subcommand)]
+        cmd: cache_nar::Commands,
     },
 }
 
@@ -225,6 +231,8 @@ pub async fn handle(cmd: Commands, out: Output) {
                 cache, machine_host, netrc_file
             ));
         }
+
+        Commands::Nar { cmd } => cache_nar::handle(cmd, out).await,
     }
 }
 
