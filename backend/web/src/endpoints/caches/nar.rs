@@ -103,14 +103,20 @@ fn spawn_nar_traffic_metric(state: Arc<ServerState>, cache_id: CacheId, bytes_le
 }
 
 /// Bookkeeping update spawned after every successful NAR fetch. Uses
-/// `worker_db` (not `web_db`) on purpose: under heavy NAR traffic this
-/// fire-and-forget UPDATE would otherwise contend with foreground HTTP
+/// `worker_db` (not `web_db`) on purpose: under heavy NAR traffic these
+/// fire-and-forget UPDATEs would otherwise contend with foreground HTTP
 /// requests on the web pool.
 fn spawn_cache_derivation_fetch_update(state: Arc<ServerState>, cache_id: CacheId, hash: String) {
     let s = Arc::clone(&state);
     state.shutdown.spawn(async move {
         use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
         let now = gradient_core::types::now();
+        let now_val = sea_orm::Value::ChronoDateTimeUtc(Some(Box::new(
+            chrono::DateTime::from_naive_utc_and_offset(now, chrono::Utc),
+        )));
+        let cache_val = sea_orm::Value::Uuid(Some(Box::new(cache_id.into_inner())));
+        let hash_val = sea_orm::Value::String(Some(Box::new(hash.clone())));
+
         let _ = s
             .worker_db
             .execute(Statement::from_sql_and_values(
@@ -119,13 +125,19 @@ fn spawn_cache_derivation_fetch_update(state: Arc<ServerState>, cache_id: CacheI
                  WHERE cache = $2 AND derivation IN ( \
                      SELECT derivation FROM derivation_output WHERE hash = $3 AND is_cached = true \
                  )",
-                [
-                    sea_orm::Value::ChronoDateTimeUtc(Some(Box::new(
-                        chrono::DateTime::from_naive_utc_and_offset(now, chrono::Utc),
-                    ))),
-                    sea_orm::Value::Uuid(Some(Box::new(cache_id.into_inner()))),
-                    sea_orm::Value::String(Some(Box::new(hash))),
-                ],
+                [now_val.clone(), cache_val.clone(), hash_val.clone()],
+            ))
+            .await;
+
+        let _ = s
+            .worker_db
+            .execute(Statement::from_sql_and_values(
+                DatabaseBackend::Postgres,
+                "UPDATE cached_path_signature \
+                 SET last_fetched_at = $1, fetch_count = fetch_count + 1 \
+                 WHERE cache = $2 \
+                   AND cached_path = (SELECT id FROM cached_path WHERE hash = $3)",
+                [now_val, cache_val, hash_val],
             ))
             .await;
     });
