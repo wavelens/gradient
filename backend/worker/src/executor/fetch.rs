@@ -354,6 +354,69 @@ fn clone_and_checkout(url: &str, commit: &str, ssh_key: Option<&str>) -> Result<
     Ok(temp_dir.to_string_lossy().into_owned())
 }
 
+/// Reconstruct a flake-ref string from a `flake.lock` node's `original`
+/// field. Supports `github`, `gitlab`, `sourcehut`, `git`, `tarball`,
+/// `path`, and `indirect` types — the set Nix emits for typical inputs.
+fn flake_ref_from_lock_original(original: &serde_json::Value) -> anyhow::Result<String> {
+    use anyhow::Context;
+    let ty = original
+        .get("type")
+        .and_then(|v| v.as_str())
+        .context("flake.lock node.original missing 'type'")?;
+
+    let str_field = |k: &str| -> Option<&str> { original.get(k).and_then(|v| v.as_str()) };
+
+    Ok(match ty {
+        "github" | "gitlab" | "sourcehut" => {
+            let owner = str_field("owner")
+                .with_context(|| format!("{ty} node missing 'owner'"))?;
+            let repo = str_field("repo")
+                .with_context(|| format!("{ty} node missing 'repo'"))?;
+            match str_field("ref") {
+                Some(r) => format!("{ty}:{owner}/{repo}/{r}"),
+                None => format!("{ty}:{owner}/{repo}"),
+            }
+        }
+        "git" => {
+            let url = str_field("url").context("git node missing 'url'")?;
+            format!("git+{url}")
+        }
+        "tarball" => {
+            let url = str_field("url").context("tarball node missing 'url'")?;
+            url.to_owned()
+        }
+        "path" => {
+            let path = str_field("path").context("path node missing 'path'")?;
+            format!("path:{path}")
+        }
+        "indirect" => {
+            let id = str_field("id").context("indirect node missing 'id'")?;
+            format!("flake:{id}")
+        }
+        other => anyhow::bail!("unsupported flake.lock input type '{other}'"),
+    })
+}
+
+/// Read the set of input names declared in the root flake from a parsed
+/// `flake.lock` document.
+fn declared_inputs_from_lock(
+    lock: &serde_json::Value,
+) -> anyhow::Result<std::collections::HashSet<String>> {
+    use anyhow::Context;
+    let root_key = lock
+        .get("root")
+        .and_then(|v| v.as_str())
+        .unwrap_or("root");
+    let root = lock
+        .get("nodes")
+        .and_then(|n| n.get(root_key))
+        .with_context(|| format!("flake.lock missing nodes.{root_key}"))?;
+    let Some(inputs) = root.get("inputs").and_then(|v| v.as_object()) else {
+        return Ok(std::collections::HashSet::new());
+    };
+    Ok(inputs.keys().cloned().collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -486,5 +549,72 @@ mod tests {
         assert!(result.is_err(), "expected error when nix is unavailable");
         // The Fetching event was still emitted before the failure.
         assert!(matches!(reporter.events[0], ReportedEvent::Fetching));
+    }
+
+    #[test]
+    fn flake_ref_from_lock_original_github() {
+        let original: serde_json::Value = serde_json::json!({
+            "type": "github",
+            "owner": "NixOS",
+            "repo": "nixpkgs",
+            "ref": "nixos-unstable",
+        });
+        assert_eq!(
+            super::flake_ref_from_lock_original(&original).unwrap(),
+            "github:NixOS/nixpkgs/nixos-unstable",
+        );
+    }
+
+    #[test]
+    fn flake_ref_from_lock_original_github_no_ref() {
+        let original: serde_json::Value = serde_json::json!({
+            "type": "github",
+            "owner": "NixOS",
+            "repo": "nixpkgs",
+        });
+        assert_eq!(
+            super::flake_ref_from_lock_original(&original).unwrap(),
+            "github:NixOS/nixpkgs",
+        );
+    }
+
+    #[test]
+    fn flake_ref_from_lock_original_indirect() {
+        let original: serde_json::Value = serde_json::json!({
+            "type": "indirect",
+            "id": "flake-utils",
+        });
+        assert_eq!(
+            super::flake_ref_from_lock_original(&original).unwrap(),
+            "flake:flake-utils",
+        );
+    }
+
+    #[test]
+    fn flake_ref_from_lock_original_git_url() {
+        let original: serde_json::Value = serde_json::json!({
+            "type": "git",
+            "url": "https://example.test/r.git",
+        });
+        assert_eq!(
+            super::flake_ref_from_lock_original(&original).unwrap(),
+            "git+https://example.test/r.git",
+        );
+    }
+
+    #[test]
+    fn declared_inputs_from_lock_reads_root_inputs() {
+        let lock: serde_json::Value = serde_json::json!({
+            "nodes": {
+                "root": { "inputs": { "nixpkgs": "nixpkgs", "flake-utils": "flake-utils" } },
+                "nixpkgs": { "original": { "type": "github", "owner": "NixOS", "repo": "nixpkgs" } },
+                "flake-utils": { "original": { "type": "indirect", "id": "flake-utils" } },
+            },
+            "root": "root",
+        });
+        let names = super::declared_inputs_from_lock(&lock).unwrap();
+        assert!(names.contains("nixpkgs"));
+        assert!(names.contains("flake-utils"));
+        assert_eq!(names.len(), 2);
     }
 }
