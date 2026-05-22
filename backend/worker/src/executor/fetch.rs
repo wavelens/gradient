@@ -129,6 +129,7 @@ pub async fn fetch_repository(
         &binpath_nix,
         &binpath_ssh,
         ssh_key.as_deref(),
+        &[],
         abort,
     )
     .await
@@ -149,6 +150,18 @@ fn parse_nix_json(stdout: &[u8], cmd: &str) -> Result<serde_json::Value> {
     serde_json::from_slice(stdout).with_context(|| format!("failed to parse {cmd} JSON"))
 }
 
+fn build_archive_argv(flake_ref: &str, overrides: &[(String, String)]) -> Vec<String> {
+    let mut argv = vec!["flake".to_owned(), "archive".to_owned()];
+    for (name, ref_str) in overrides {
+        argv.push("--override-input".to_owned());
+        argv.push(name.clone());
+        argv.push(ref_str.clone());
+    }
+    argv.push("--json".to_owned());
+    argv.push(flake_ref.to_owned());
+    argv
+}
+
 /// Run `nix flake archive --json` and collect all store paths (source + all
 /// transitive flake inputs).  Returns the source store path and metadata for
 /// every archived path obtained from `nix path-info`.
@@ -161,13 +174,14 @@ async fn archive_flake(
     binpath_nix: &str,
     binpath_ssh: &str,
     ssh_key: Option<&str>,
+    overrides: &[(String, String)],
     mut abort: watch::Receiver<bool>,
 ) -> Result<(String, Vec<String>)> {
     use std::os::unix::fs::PermissionsExt;
 
     trace!(binpath_nix, flake_ref, "executing nix flake archive");
     let mut cmd = tokio::process::Command::new(binpath_nix);
-    cmd.args(["flake", "archive", "--json", flake_ref]);
+    cmd.args(build_archive_argv(flake_ref, overrides));
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
     cmd.kill_on_drop(true);
@@ -599,6 +613,44 @@ mod tests {
         assert_eq!(
             super::flake_ref_from_lock_original(&original).unwrap(),
             "git+https://example.test/r.git",
+        );
+    }
+
+    #[test]
+    fn build_archive_argv_appends_override_input_flags() {
+        let overrides = [
+            ("nixpkgs".to_owned(), "github:NixOS/nixpkgs/nixos-unstable".to_owned()),
+            ("utils".to_owned(), "flake:flake-utils".to_owned()),
+        ];
+        let argv = super::build_archive_argv("git+file:///tmp/x?rev=abc", &overrides);
+        assert_eq!(
+            argv,
+            vec![
+                "flake".to_owned(),
+                "archive".to_owned(),
+                "--override-input".to_owned(),
+                "nixpkgs".to_owned(),
+                "github:NixOS/nixpkgs/nixos-unstable".to_owned(),
+                "--override-input".to_owned(),
+                "utils".to_owned(),
+                "flake:flake-utils".to_owned(),
+                "--json".to_owned(),
+                "git+file:///tmp/x?rev=abc".to_owned(),
+            ],
+        );
+    }
+
+    #[test]
+    fn build_archive_argv_no_overrides_matches_baseline() {
+        let argv = super::build_archive_argv("git+file:///tmp/x?rev=abc", &[]);
+        assert_eq!(
+            argv,
+            vec![
+                "flake".to_owned(),
+                "archive".to_owned(),
+                "--json".to_owned(),
+                "git+file:///tmp/x?rev=abc".to_owned(),
+            ],
         );
     }
 
