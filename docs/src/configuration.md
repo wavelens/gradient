@@ -334,3 +334,22 @@ State-managed custom roles are declared under `state.roles.<name>`:
 - `permissions` (required, list of strings): the capabilities the role grants.
 
 Managed roles cannot be modified or deleted via the API.
+
+### Flake input overrides
+
+Each project may declare per-input flake overrides applied during evaluation fetch. Each entry must set exactly one of:
+
+- `url` — a flake-ref string to replace the input's URL.
+- `keep_url = true` — force an update of the input keeping the URL declared in the project's `flake.nix`.
+
+Empty `flake_input_overrides = {}` (the default) means no overrides — `flake.lock` is used as-is. Setting the attrset to `{}` from a non-empty state removes all override rows for that project.
+
+```nix
+services.gradient.state.projects.my-project = {
+  # ...
+  flake_input_overrides = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    flake-utils.keep_url = true;
+  };
+};
+```
