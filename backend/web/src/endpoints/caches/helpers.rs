@@ -15,7 +15,8 @@ use gradient_core::sources::get_path_from_derivation_output;
 use gradient_core::types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter,
+    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, PaginatorTrait,
+    QueryFilter, TransactionTrait,
 };
 use std::sync::Arc;
 use tracing::error;
@@ -415,4 +416,83 @@ pub async fn fetch_nar_bytes(state: &Arc<ServerState>, path_hash: &str) -> WebRe
         .await
         .map_err(|e| WebError::internal(format!("Failed to read NAR: {}", e)))?
         .or_not_found("Path")
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct DeleteOutcome {
+    pub ref_counted_others: bool,
+}
+
+/// Removes a single cache's claim on a NAR. Drops the per-cache signature row,
+/// the per-cache derivation pin, and — if no other cache still holds the path —
+/// the shared `cached_path` row plus the underlying NAR blob.
+pub(super) async fn delete_nar_from_cache(
+    state: &Arc<ServerState>,
+    cache_id: CacheId,
+    hash: &str,
+) -> WebResult<(MCachedPath, DeleteOutcome)> {
+    let tx = state.web_db.inner().begin().await?;
+
+    let cached_path = ECachedPath::find()
+        .filter(CCachedPath::Hash.eq(hash))
+        .one(&tx)
+        .await?
+        .or_not_found("Path")?;
+
+    let sig = ECachedPathSignature::find()
+        .filter(CCachedPathSignature::CachedPath.eq(cached_path.id))
+        .filter(CCachedPathSignature::Cache.eq(cache_id))
+        .one(&tx)
+        .await?
+        .or_not_found("Signature")?;
+
+    ECachedPathSignature::delete_by_id(sig.id).exec(&tx).await?;
+
+    let derivation_ids: Vec<DerivationId> = EDerivationOutput::find()
+        .filter(CDerivationOutput::Hash.eq(hash))
+        .all(&tx)
+        .await?
+        .into_iter()
+        .map(|o| o.derivation)
+        .collect();
+
+    if !derivation_ids.is_empty() {
+        ECacheDerivation::delete_many()
+            .filter(CCacheDerivation::Cache.eq(cache_id))
+            .filter(CCacheDerivation::Derivation.is_in(derivation_ids))
+            .exec(&tx)
+            .await?;
+    }
+
+    let remaining = ECachedPathSignature::find()
+        .filter(CCachedPathSignature::CachedPath.eq(cached_path.id))
+        .count(&tx)
+        .await?;
+    let ref_counted_others = remaining > 0;
+
+    if !ref_counted_others {
+        EDerivationOutput::update_many()
+            .col_expr(
+                CDerivationOutput::IsCached,
+                sea_orm::sea_query::Expr::value(false),
+            )
+            .filter(CDerivationOutput::Hash.eq(hash))
+            .exec(&tx)
+            .await?;
+        ECachedPath::delete_by_id(cached_path.id).exec(&tx).await?;
+    }
+
+    tx.commit().await?;
+
+    if !ref_counted_others {
+        let state_bg = Arc::clone(state);
+        let h = hash.to_string();
+        state.shutdown.spawn(async move {
+            if let Err(e) = state_bg.nar_storage.delete(&h).await {
+                error!(error = %e, hash = %h, "Failed to remove NAR from storage");
+            }
+        });
+    }
+
+    Ok((cached_path, DeleteOutcome { ref_counted_others }))
 }
