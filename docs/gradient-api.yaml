@@ -3651,6 +3651,200 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /caches/{cache}/nars:
+    parameters:
+      - $ref: '#/components/parameters/CacheSlug'
+    get:
+      tags: [caches]
+      summary: List cached NARs
+      description: |-
+        Returns a paginated list of NARs (cached store paths) currently signed by this cache.
+        Public caches are open; private caches require the owner's bearer token.
+      operationId: listCacheNars
+      parameters:
+        - name: hash
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter by store-path hash prefix
+        - name: package
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter by package-name substring
+        - name: sort
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [created_at, nar_size, last_fetched_at]
+            default: created_at
+          description: Sort field
+        - name: order
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+          description: Sort direction
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+          description: 1-indexed page number
+        - name: per_page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+          description: Items per page (max 200)
+      responses:
+        '200':
+          description: Paginated NAR list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/NarListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /caches/{cache}/nars/stats:
+    parameters:
+      - $ref: '#/components/parameters/CacheSlug'
+    get:
+      tags: [caches]
+      summary: NAR aggregate statistics
+      description: |-
+        Returns aggregate counts and sizes for all NARs signed by this cache.
+        Public caches are open; private caches require the owner's bearer token.
+      operationId: getCacheNarStats
+      responses:
+        '200':
+          description: NAR aggregates
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/NarStats'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /caches/{cache}/nars/available:
+    parameters:
+      - $ref: '#/components/parameters/CacheSlug'
+    get:
+      tags: [caches]
+      summary: Check whether a NAR is available
+      description: |-
+        Returns `{ available: true }` when this cache currently holds a signature
+        row for the given store-path hash. Cheaper than a `GET /nars/{hash}` round-trip
+        for clients that only need a yes/no answer.
+      operationId: getCacheNarAvailable
+      parameters:
+        - name: hash
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Store-path hash to check
+      responses:
+        '200':
+          description: Availability flag
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/NarAvailable'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /caches/{cache}/nars/{hash}:
+    parameters:
+      - $ref: '#/components/parameters/CacheSlug'
+      - name: hash
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Store-path hash
+    get:
+      tags: [caches]
+      summary: Get NAR detail
+      description: |-
+        Returns full metadata for a NAR signed by this cache, including references,
+        deriver, content-addressed flag, fetch count, and signature presence.
+        Public caches are open; private caches require the owner's bearer token.
+      operationId: getCacheNar
+      responses:
+        '200':
+          description: NAR detail
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/NarDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [caches]
+      summary: Delete a NAR from this cache
+      description: |-
+        Removes this cache's signature row for the given store-path hash. The delete
+        is ref-counted: when other caches still hold the same NAR, only this cache's
+        signature is dropped. When this is the last cache holding the NAR, the
+        `cached_path` row is removed in the same transaction, any matching
+        `derivation_output.is_cached` rows are flipped to `false`, and the NAR
+        blob is garbage-collected asynchronously after the response. Requires
+        cache-owner authentication.
+      operationId: deleteCacheNar
+      security:
+        - bearerAuth: []
+      responses:
+        '204':
+          description: NAR removed from this cache
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /caches/{cache}/upstreams:
     parameters:
       - $ref: '#/components/parameters/CacheSlug'
@@ -6192,6 +6386,129 @@ components:
           type: integer
           format: int64
           description: Number of successful narinfo / NAR requests
+
+    NarSummary:
+      type: object
+      required: [hash, store_path, package, created_at]
+      properties:
+        hash:
+          type: string
+          description: Store-path hash (the part before the first `-` in `/nix/store/<hash>-<name>`)
+        store_path:
+          type: string
+        package:
+          type: string
+        nar_size:
+          type: integer
+          format: int64
+          nullable: true
+        file_size:
+          type: integer
+          format: int64
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        last_fetched_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    NarDetail:
+      type: object
+      required: [hash, store_path, package, references, created_at, fetch_count, signed]
+      properties:
+        hash:
+          type: string
+        store_path:
+          type: string
+        package:
+          type: string
+        nar_size:
+          type: integer
+          format: int64
+          nullable: true
+        file_size:
+          type: integer
+          format: int64
+          nullable: true
+        file_hash:
+          type: string
+          nullable: true
+        nar_hash:
+          type: string
+          nullable: true
+        references:
+          type: array
+          items:
+            type: string
+        deriver:
+          type: string
+          nullable: true
+        ca:
+          type: string
+          nullable: true
+          description: Content-addressed metadata when the path is CA
+        created_at:
+          type: string
+          format: date-time
+        last_fetched_at:
+          type: string
+          format: date-time
+          nullable: true
+        fetch_count:
+          type: integer
+          format: int64
+        signed:
+          type: boolean
+          description: True when this cache currently holds a signature for the NAR
+
+    NarListResponse:
+      type: object
+      required: [items, total, page, per_page]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/NarSummary'
+        total:
+          type: integer
+          format: int64
+        page:
+          type: integer
+          format: int64
+        per_page:
+          type: integer
+          format: int64
+
+    NarStats:
+      type: object
+      required: [total_nars, total_nar_size, total_file_size]
+      properties:
+        total_nars:
+          type: integer
+          format: int64
+        total_nar_size:
+          type: integer
+          format: int64
+        total_file_size:
+          type: integer
+          format: int64
+        last_uploaded_at:
+          type: string
+          format: date-time
+          nullable: true
+        oldest_fetched_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    NarAvailable:
+      type: object
+      required: [available]
+      properties:
+        available:
+          type: boolean
 
     CacheUpstream:
       type: object
