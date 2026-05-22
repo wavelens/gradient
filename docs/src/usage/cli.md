@@ -81,11 +81,31 @@ gradient project eval <name>          # Trigger a new evaluation
 
 ### Caches
 
+Cache CRUD:
+
 ```sh
 gradient cache list
 gradient cache add
 gradient cache remove <name>
 ```
+
+NAR management (list, inspect, delete cached store paths inside a cache):
+
+```sh
+gradient cache nar list <cache> [--hash <prefix>] [--package <substring>] \
+  [--sort created_at|nar_size|last_fetched_at] [--order asc|desc] \
+  [--page N] [--per-page N]
+gradient cache nar show <cache> <hash>
+gradient cache nar delete <cache> <hash> [-y]
+gradient cache nar stats <cache>
+```
+
+Deleting a NAR is ref-counted: if the NAR is signed by more than one cache,
+the delete only drops the current cache's signature; the underlying NAR blob
+stays. When the last cache holding a NAR drops it, the blob is GC'd
+asynchronously and any `derivation_output.is_cached` rows for it flip to
+`false`. NAR upload from local store is tracked separately under
+[issue #261](https://github.com/wavelens/gradient/issues/261).
 
 ### Build Requests
 

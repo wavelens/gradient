@@ -1542,6 +1542,29 @@ relative path.
 
 ---
 
+## Cache NAR management (issue #260)
+
+### Backend (`backend/web/tests/`)
+- `cache_nar_list::list_empty_cache_returns_empty_items`
+- `cache_nar_list::list_private_cache_requires_auth`
+- `cache_nar_list::list_accepts_pagination_query_params`
+- `cache_nar_show::show_returns_full_detail`
+- `cache_nar_show::show_404_when_signature_missing`
+- `cache_nar_stats::stats_returns_aggregates`
+- `cache_nar_available::available_returns_true_when_signature_present`
+- `cache_nar_available::available_returns_false_when_no_cached_path`
+- `cache_nar_delete::delete_unauthenticated_returns_403`
+- `cache_nar_delete::delete_owner_removes_signature_and_writes_audit_row` *(ignored — requires real-DB harness)*
+
+### Notes
+
+Tests that depend on read-after-write persistence (signature removal,
+`is_cached` flip, blob GC) are gated `#[ignore]` because the existing test
+harness uses SeaORM `MockDatabase`. Verifying these behaviors needs a real
+Postgres backend, which is a follow-up infrastructure task.
+
+---
+
 ## Test count summary
 
 | Crate | Runner | Count |
