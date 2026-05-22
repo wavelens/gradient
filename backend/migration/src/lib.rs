@@ -106,6 +106,7 @@ mod m20260519_000003_add_organization_hide_build_requests;
 mod m20260519_000004_drop_direct_build;
 mod m20260521_000000_tag_waiting_reason_kind;
 mod m20260522_000000_cached_path_signature_fetch_stats;
+mod m20260522_000001_create_flake_input_override;
 
 pub struct Migrator;
 
@@ -213,6 +214,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260519_000004_drop_direct_build::Migration),
             Box::new(m20260521_000000_tag_waiting_reason_kind::Migration),
             Box::new(m20260522_000000_cached_path_signature_fetch_stats::Migration),
+            Box::new(m20260522_000001_create_flake_input_override::Migration),
         ]
     }
 }
