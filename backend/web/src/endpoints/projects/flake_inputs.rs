@@ -93,10 +93,10 @@ fn validate_input_name(name: &str) -> WebResult<()> {
 }
 
 fn validate_url(url: &Option<String>) -> WebResult<()> {
-    if let Some(u) = url {
-        if u.trim().is_empty() {
-            return Err(WebError::bad_request("url must not be empty"));
-        }
+    if let Some(u) = url
+        && u.trim().is_empty()
+    {
+        return Err(WebError::bad_request("url must not be empty"));
     }
     Ok(())
 }
@@ -236,18 +236,18 @@ pub async fn update(
         .await?
         .or_not_found("FlakeInputOverride")?;
 
-    if let Some(new_name) = &body.input_name {
-        if new_name != &row.input_name {
-            let dup = EProjectFlakeInputOverride::find()
-                .filter(CProjectFlakeInputOverride::Project.eq(proj.id))
-                .filter(CProjectFlakeInputOverride::InputName.eq(new_name))
-                .one(&state.web_db)
-                .await?;
-            if dup.is_some() {
-                return Err(WebError::bad_request(format!(
-                    "override for input '{new_name}' already exists",
-                )));
-            }
+    if let Some(new_name) = &body.input_name
+        && new_name != &row.input_name
+    {
+        let dup = EProjectFlakeInputOverride::find()
+            .filter(CProjectFlakeInputOverride::Project.eq(proj.id))
+            .filter(CProjectFlakeInputOverride::InputName.eq(new_name))
+            .one(&state.web_db)
+            .await?;
+        if dup.is_some() {
+            return Err(WebError::bad_request(format!(
+                "override for input '{new_name}' already exists",
+            )));
         }
     }
 

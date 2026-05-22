@@ -452,13 +452,15 @@ impl From<&gradient_core::types::proto::FlakeInputOverride> for OverrideInput {
     }
 }
 
+type AppliedOverride = (String, String);
+
 /// Validate overrides against the declared flake inputs, resolve `url=None`
 /// entries from the lock's `original` field, and return `(applied, warnings)`.
 fn resolve_overrides(
     overrides: &[OverrideInput],
     declared: &std::collections::HashSet<String>,
     lock: &serde_json::Value,
-) -> anyhow::Result<(Vec<(String, String)>, Vec<String>)> {
+) -> anyhow::Result<(Vec<AppliedOverride>, Vec<String>)> {
     let mut applied = Vec::with_capacity(overrides.len());
     let mut warnings = Vec::new();
     for o in overrides {
