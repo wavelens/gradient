@@ -48,6 +48,62 @@ pub struct Upstream {
     pub public_key: Option<String>,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct NarSummary {
+    pub hash: String,
+    pub store_path: String,
+    pub package: String,
+    pub nar_size: Option<i64>,
+    pub file_size: Option<i64>,
+    pub created_at: String,
+    pub last_fetched_at: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct NarListResponse {
+    pub items: Vec<NarSummary>,
+    pub total: u64,
+    pub page: u64,
+    pub per_page: u64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct NarDetail {
+    pub hash: String,
+    pub store_path: String,
+    pub package: String,
+    pub nar_size: Option<i64>,
+    pub file_size: Option<i64>,
+    pub file_hash: Option<String>,
+    pub nar_hash: Option<String>,
+    pub references: Vec<String>,
+    pub deriver: Option<String>,
+    pub ca: Option<String>,
+    pub created_at: String,
+    pub last_fetched_at: Option<String>,
+    pub fetch_count: i64,
+    pub signed: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct NarStats {
+    pub total_nars: i64,
+    pub total_nar_size: i64,
+    pub total_file_size: i64,
+    pub last_uploaded_at: Option<String>,
+    pub oldest_fetched_at: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct NarListQuery {
+    pub hash: Option<String>,
+    pub package: Option<String>,
+    pub sort: Option<String>,
+    pub order: Option<String>,
+    pub page: Option<u32>,
+    pub per_page: Option<u32>,
+}
+
 pub struct CachesApi<'a>(pub(crate) &'a Client);
 
 impl CachesApi<'_> {
@@ -145,5 +201,50 @@ impl CachesApi<'_> {
     pub async fn delete_upstream(&self, cache: &str, id: &str) -> Result<String, ConnectorError> {
         let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::DELETE, &format!("caches/{cache}/upstreams/{id}"), true)?;
         http::decode(req.send().await?).await
+    }
+
+    pub async fn nars_list(&self, cache: &str, q: NarListQuery) -> Result<NarListResponse, ConnectorError> {
+        let mut qs: Vec<(&str, String)> = Vec::new();
+        if let Some(v) = q.hash { qs.push(("hash", v)); }
+        if let Some(v) = q.package { qs.push(("package", v)); }
+        if let Some(v) = q.sort { qs.push(("sort", v)); }
+        if let Some(v) = q.order { qs.push(("order", v)); }
+        if let Some(v) = q.page { qs.push(("page", v.to_string())); }
+        if let Some(v) = q.per_page { qs.push(("per_page", v.to_string())); }
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("caches/{cache}/nars"), true)?
+            .query(&qs);
+        http::decode(req.send().await?).await
+    }
+
+    pub async fn nar_show(&self, cache: &str, hash: &str) -> Result<NarDetail, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("caches/{cache}/nars/{hash}"), true)?;
+        http::decode(req.send().await?).await
+    }
+
+    pub async fn nars_stats(&self, cache: &str) -> Result<NarStats, ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("caches/{cache}/nars/stats"), true)?;
+        http::decode(req.send().await?).await
+    }
+
+    pub async fn nar_delete(&self, cache: &str, hash: &str) -> Result<(), ConnectorError> {
+        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::DELETE, &format!("caches/{cache}/nars/{hash}"), true)?;
+        let resp = req.send().await?;
+        let status = resp.status();
+        if status == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(ConnectorError::Unauthorized);
+        }
+        if !status.is_success() {
+            let bytes = resp.bytes().await?;
+            let message = if let Ok(env) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+                env.get("message")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| String::from_utf8_lossy(&bytes).into_owned())
+            } else {
+                String::from_utf8_lossy(&bytes).into_owned()
+            };
+            return Err(ConnectorError::Api { status, message });
+        }
+        Ok(())
     }
 }
