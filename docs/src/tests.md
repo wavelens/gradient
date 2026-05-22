@@ -2456,3 +2456,43 @@ immediately. Coverage:
   `Waiting + Approval` back to `Queued` once a maintainer authorises
   the PR; no-ops when the row's reason is something else (NoCache /
   Workers).
+
+## Flake input overrides (issue #259)
+
+### Proto
+
+- `proto/src/messages.rs::flake_input_override_roundtrip` — rkyv roundtrip of a `FlakeJob` carrying `input_overrides`.
+
+### Worker (`backend/worker/src/executor/fetch.rs`)
+
+- `build_archive_argv_appends_override_input_flags` — argv has interleaved `--override-input <name> <ref>` pairs.
+- `build_archive_argv_no_overrides_matches_baseline` — empty overrides leaves argv identical to baseline.
+- `flake_ref_from_lock_original_github` / `_github_no_ref` / `_indirect` / `_git_url` — flake-ref reconstruction for each `flake.lock` node type.
+- `declared_inputs_from_lock_reads_root_inputs` — root inputs are extracted as the declared set.
+- `resolve_overrides_keeps_url_some` — explicit URL passes through.
+- `resolve_overrides_keep_url_reconstructs_from_lock` — `url = None` resolves via `nodes.<input>.original`.
+- `resolve_overrides_unknown_input_drops_with_warning` — unknown input drops and emits warning.
+
+### Web (`backend/web/tests/flake_input_overrides.rs`)
+
+- `list_empty_returns_empty`
+- `create_then_list_returns_one`
+- `create_with_null_url_keep_url_mode`
+- `create_duplicate_input_name_rejects_400`
+- `create_invalid_input_name_rejects_400`
+- `patch_updates_url_and_returns_new_row`
+- `patch_url_to_null_sets_keep_url`
+- `patch_omitting_url_does_not_change_it`
+- `delete_removes_the_row`
+- `list_sorted_by_input_name`
+- `get_not_found_returns_404` — also covers cross-project access.
+- `managed_project_rejects_mutations_403`
+
+### Frontend (`frontend/src/app/features/projects/project-flake-inputs/project-flake-inputs.component.spec.ts`)
+
+- `lists overrides on init`
+- `keep_url checkbox causes url: null submission`
+- `non-keep url submission passes url string`
+- `edit prefills form fields`
+- `delete calls service after confirm`
+- `hides write buttons under read-only access`

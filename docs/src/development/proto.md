@@ -512,6 +512,27 @@ FetchResult {
 }
 ```
 
+##### Flake input overrides
+
+`FlakeJob.input_overrides` is a per-input list applied during `FetchFlake`. Each entry carries `input_name` plus an `url` that is either `Some(<flake-ref>)` (replace URL) or `None` (force-update keeping the project's flake-declared URL — the worker reconstructs the original ref from `nodes.<input>.original` in `flake.lock`).
+
+The worker assembles the archive command as:
+
+```
+nix flake archive [--override-input <name> <ref>]... --json <flake-ref>
+```
+
+Empty `input_overrides` ⇒ argv matches the pre-change baseline byte-for-byte.
+
+Before the archive runs, the worker reads `flake.lock`, builds the set of names declared in `nodes.root.inputs`, and drops any override whose `input_name` is not declared. Each dropped override emits one `EvalMessage` with `level = Warning`, `source = "fetch"`, and message `"flake input '<name>' does not exist in this project's flake — override skipped"`. The archive proceeds with the surviving overrides.
+
+```rust
+pub struct FlakeInputOverride {
+    pub input_name: String,
+    pub url: Option<String>,   // None = keep_url (force-update from flake's declared URL)
+}
+```
+
 #### EvaluateDerivations — drv caching
 
 Every `.drv` file discovered during `EvaluateDerivations` is a cacheable store path that substituters ask for by `<drv-hash>.narinfo`. The eval worker therefore:
