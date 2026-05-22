@@ -109,6 +109,8 @@ tags:
     description: Project management and evaluation triggers
   - name: triggers
     description: Per-project evaluation triggers (polling, reporter_push, reporter_pull_request, time)
+  - name: flake-inputs
+    description: Per-project flake input URL overrides applied during evaluation fetch.
   - name: evals
     description: Evaluation details, status, and log streaming
   - name: builds
@@ -2298,6 +2300,144 @@ paths:
                       message:
                         type: string
                         description: Outcome description
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ── Flake Input Overrides ─────────────────────────────────────────────────────
+
+  /projects/{organization}/{project}/flake-inputs:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
+    get:
+      tags: [flake-inputs]
+      summary: List flake input overrides
+      operationId: listFlakeInputOverrides
+      responses:
+        '200':
+          description: List of flake input overrides
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/FlakeInputOverride'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [flake-inputs]
+      summary: Create a flake input override
+      operationId: createFlakeInputOverride
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MakeFlakeInputOverrideRequest'
+      responses:
+        '200':
+          description: Flake input override created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/FlakeInputOverride'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /projects/{organization}/{project}/flake-inputs/{id}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Flake input override UUID
+    get:
+      tags: [flake-inputs]
+      summary: Get a flake input override
+      operationId: getFlakeInputOverride
+      responses:
+        '200':
+          description: Flake input override
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/FlakeInputOverride'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [flake-inputs]
+      summary: Update a flake input override
+      operationId: updateFlakeInputOverride
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchFlakeInputOverrideRequest'
+      responses:
+        '200':
+          description: Flake input override updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/FlakeInputOverride'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [flake-inputs]
+      summary: Delete a flake input override
+      operationId: deleteFlakeInputOverride
+      responses:
+        '200':
+          description: Flake input override deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BoolResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -7037,6 +7177,52 @@ components:
             Populated for `reporter_push` and `reporter_pull_request` triggers
             when the referenced integration row still exists. `null` for
             polling/time triggers and for orphaned references.
+
+    FlakeInputOverride:
+      type: object
+      required: [id, project, input_name, url, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        project:
+          type: string
+          format: uuid
+        input_name:
+          type: string
+        url:
+          type: string
+          nullable: true
+          description: >-
+            New flake-ref to use as the override. `null` means
+            "keep the flake's declared URL, just force an update".
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    MakeFlakeInputOverrideRequest:
+      type: object
+      required: [input_name]
+      properties:
+        input_name:
+          type: string
+          pattern: '^[A-Za-z_][A-Za-z0-9_-]*$'
+        url:
+          type: string
+          nullable: true
+
+    PatchFlakeInputOverrideRequest:
+      type: object
+      properties:
+        input_name:
+          type: string
+          pattern: '^[A-Za-z_][A-Za-z0-9_-]*$'
+        url:
+          type: string
+          nullable: true
 
     EvaluationTriggerSummary:
       type: object
