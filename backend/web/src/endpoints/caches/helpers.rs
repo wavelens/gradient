@@ -437,14 +437,14 @@ pub(super) async fn delete_nar_from_cache(
         .filter(CCachedPath::Hash.eq(hash))
         .one(&tx)
         .await?
-        .or_not_found("Path")?;
+        .or_not_found("Nar")?;
 
     let sig = ECachedPathSignature::find()
         .filter(CCachedPathSignature::CachedPath.eq(cached_path.id))
         .filter(CCachedPathSignature::Cache.eq(cache_id))
         .one(&tx)
         .await?
-        .or_not_found("Signature")?;
+        .or_not_found("Nar")?;
 
     ECachedPathSignature::delete_by_id(sig.id).exec(&tx).await?;
 

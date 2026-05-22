@@ -102,7 +102,7 @@ async fn resolve_visible_cache(
     if !cache.public {
         match maybe_user {
             Some(u) if u.id == cache.created_by => {}
-            _ => return Err(WebError::unauthorized("Authentication required")),
+            _ => return Err(WebError::not_found("Cache")),
         }
     }
     Ok(cache)
@@ -118,8 +118,37 @@ pub async fn list(
     let per_page = q.per_page.unwrap_or(DEFAULT_PER_PAGE).clamp(1, MAX_PER_PAGE);
     let page = q.page.unwrap_or(1).max(1);
 
+    let mut paths_query = ECachedPath::find();
+    if let Some(prefix) = q.hash.as_deref().filter(|s| !s.is_empty()) {
+        paths_query = paths_query.filter(CCachedPath::Hash.starts_with(prefix));
+    }
+    if let Some(needle) = q.package.as_deref().filter(|s| !s.is_empty()) {
+        paths_query = paths_query.filter(CCachedPath::Package.contains(needle));
+    }
+
+    let has_filter = q.hash.as_deref().is_some_and(|s| !s.is_empty())
+        || q.package.as_deref().is_some_and(|s| !s.is_empty());
+
     let mut sig_query =
         ECachedPathSignature::find().filter(CCachedPathSignature::Cache.eq(cache.id));
+
+    if has_filter {
+        let matching_paths: Vec<CachedPathId> = paths_query
+            .all(&state.web_db)
+            .await?
+            .into_iter()
+            .map(|p| p.id)
+            .collect();
+        if matching_paths.is_empty() {
+            return Ok(ok_json(NarListResponse {
+                items: Vec::new(),
+                total: 0,
+                page,
+                per_page,
+            }));
+        }
+        sig_query = sig_query.filter(CCachedPathSignature::CachedPath.is_in(matching_paths));
+    }
 
     let ascending = matches!(q.order.as_deref(), Some("asc"));
     sig_query = match q.sort.as_deref().unwrap_or("created_at") {
@@ -136,16 +165,16 @@ pub async fn list(
     let paginator = sig_query.paginate(&state.web_db, per_page);
     let total = paginator.num_items().await?;
     let signatures = paginator.fetch_page(page - 1).await?;
-    let cp_ids: Vec<CachedPathId> = signatures.iter().map(|s| s.cached_path).collect();
 
-    let mut paths_query = ECachedPath::find().filter(CCachedPath::Id.is_in(cp_ids));
-    if let Some(prefix) = q.hash.as_deref().filter(|s| !s.is_empty()) {
-        paths_query = paths_query.filter(CCachedPath::Hash.starts_with(prefix));
-    }
-    if let Some(needle) = q.package.as_deref().filter(|s| !s.is_empty()) {
-        paths_query = paths_query.filter(CCachedPath::Package.contains(needle));
-    }
-    let paths = paths_query.all(&state.web_db).await?;
+    let cp_ids: Vec<CachedPathId> = signatures.iter().map(|s| s.cached_path).collect();
+    let paths = if cp_ids.is_empty() {
+        Vec::new()
+    } else {
+        ECachedPath::find()
+            .filter(CCachedPath::Id.is_in(cp_ids))
+            .all(&state.web_db)
+            .await?
+    };
     let by_id: std::collections::HashMap<CachedPathId, MCachedPath> =
         paths.into_iter().map(|p| (p.id, p)).collect();
 
