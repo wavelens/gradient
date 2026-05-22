@@ -178,6 +178,14 @@ export const routes: Routes = [
             (m) => m.CacheUpstreamsComponent,
           ),
       },
+      {
+        path: 'nars',
+        title: 'Cache NARs',
+        loadComponent: () =>
+          import('./features/caches/cache-nars/cache-nars.component').then(
+            (m) => m.CacheNarsComponent,
+          ),
+      },
     ],
   },
 
