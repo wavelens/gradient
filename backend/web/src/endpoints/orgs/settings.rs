@@ -279,6 +279,8 @@ async fn enqueue_backfill_signatures(
             cache: Set(cache_id),
             signature: Set(None),
             created_at: Set(now),
+            last_fetched_at: Set(None),
+            fetch_count: Set(0),
         };
         if let Err(e) = am.insert(&state.web_db).await {
             tracing::warn!(cached_path = %cp_id, cache = %cache_id, error = %e, "backfill: placeholder insert failed");

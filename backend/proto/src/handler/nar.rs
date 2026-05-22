@@ -252,6 +252,8 @@ async fn ensure_signature_placeholders(
             cache: Set(oc.cache),
             signature: Set(None),
             created_at: Set(now),
+            last_fetched_at: Set(None),
+            fetch_count: Set(0),
         })
         .collect();
 

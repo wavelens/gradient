@@ -28,6 +28,9 @@ pub struct Model {
     pub cached_path: CachedPathId,
     pub cache: CacheId,
     pub signature: Option<Vec<u8>>,
+    pub last_fetched_at: Option<NaiveDateTime>,
+    #[sea_orm(default_value = "0")]
+    pub fetch_count: i64,
     pub created_at: NaiveDateTime,
 }
 
