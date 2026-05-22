@@ -144,7 +144,9 @@ async fn dispatch_queued_eval_enqueues_job() {
         .append_query_results([vec![make_eval_queued(eval_id, commit_id, Some(project_id))]])
         // 2. find commit
         .append_query_results([vec![make_commit(commit_id)]])
-        // 3. organization_id_for_eval: find project → returns org_id
+        // 3. snapshot flake input overrides (none)
+        .append_query_results([Vec::<entity::evaluation_flake_input_override::Model>::new()])
+        // 4. organization_id_for_eval: find project → returns org_id
         .append_query_results([vec![make_project(project_id, org_id)]])
         .into_connection();
 
@@ -175,10 +177,12 @@ async fn dispatch_queued_eval_skips_already_enqueued() {
         .append_query_results([vec![make_eval_queued(eval_id, commit_id, Some(project_id))]])
         // 2. find commit
         .append_query_results([vec![make_commit(commit_id)]])
-        // 3. find project
+        // 3. snapshot flake input overrides (none)
+        .append_query_results([Vec::<entity::evaluation_flake_input_override::Model>::new()])
+        // 4. find project
         .append_query_results([vec![make_project(project_id, org_id)]])
         // Second dispatch:
-        // 4. find Queued evaluations (same eval still Queued in DB)
+        // 5. find Queued evaluations (same eval still Queued in DB)
         .append_query_results([vec![make_eval_queued(eval_id, commit_id, Some(project_id))]])
         // No commit/project lookup — contains_job check short-circuits
         .into_connection();
@@ -237,6 +241,8 @@ async fn dispatch_queued_eval_without_project_is_skipped() {
         .append_query_results([vec![make_eval_queued(eval_id, commit_id, None)]])
         // 2. find commit
         .append_query_results([vec![make_commit(commit_id)]])
+        // 3. snapshot flake input overrides (none) — runs even when project: None
+        .append_query_results([Vec::<entity::evaluation_flake_input_override::Model>::new()])
         // No project lookup — organization_id_for_eval bails on None project
         .into_connection();
 
