@@ -504,6 +504,120 @@ pub async fn private_cache_with_nar() -> Arc<ServerState> {
     state
 }
 
+fn cached_path_row_fixture() -> entity::cached_path::Model {
+    entity::cached_path::Model {
+        id: cached_path_id(),
+        store_path: format!("/nix/store/{}-hello", FIXTURE_PATH_HASH),
+        hash: FIXTURE_PATH_HASH.into(),
+        package: "hello".into(),
+        file_hash: Some(
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000".into(),
+        ),
+        file_size: Some(12345),
+        nar_size: Some(67890),
+        nar_hash: Some("sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73".into()),
+        references: Some(String::new()),
+        ca: None,
+        deriver: Some(format!("/nix/store/{}-hello.drv", FIXTURE_PATH_HASH)),
+        created_at: test_date(),
+    }
+}
+
+fn cached_path_sig_row_fixture() -> entity::cached_path_signature::Model {
+    entity::cached_path_signature::Model {
+        id: cached_path_sig_id(),
+        cached_path: cached_path_id(),
+        cache: cache_id(),
+        signature: Some(vec![0x42; 64]),
+        created_at: test_date(),
+        last_fetched_at: Some(test_date()),
+        fetch_count: 3,
+    }
+}
+
+/// Public cache with no signatures — list/stats/available return empty results.
+pub async fn public_cache_empty_nars() -> Arc<ServerState> {
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![cache_row()]])
+        .append_query_results([Vec::<entity::cached_path_signature::Model>::new()])
+        .append_query_results([Vec::<entity::cached_path_signature::Model>::new()])
+        .append_query_results([Vec::<entity::cached_path::Model>::new()])
+        .into_connection();
+    make_state(db, Arc::new(NoopLogStorage))
+}
+
+/// Private cache + no NAR rows — list/show/stats/available reject anon callers.
+pub async fn private_cache_for_nars() -> Arc<ServerState> {
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![cache_row_with_visibility(false)]])
+        .into_connection();
+    make_state(db, Arc::new(NoopLogStorage))
+}
+
+/// Public cache + one cached_path with a matching signature — show returns full detail.
+pub async fn public_cache_with_one_nar() -> Arc<ServerState> {
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![cache_row()]])
+        .append_query_results([vec![cached_path_row_fixture()]])
+        .append_query_results([vec![cached_path_sig_row_fixture()]])
+        .into_connection();
+    make_state(db, Arc::new(NoopLogStorage))
+}
+
+/// Public cache + cached_path exists but no signature row for this cache — show 404s.
+pub async fn public_cache_with_path_no_signature() -> Arc<ServerState> {
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![cache_row()]])
+        .append_query_results([vec![cached_path_row_fixture()]])
+        .append_query_results([Vec::<entity::cached_path_signature::Model>::new()])
+        .into_connection();
+    make_state(db, Arc::new(NoopLogStorage))
+}
+
+/// Public cache + path + matching signature — `available` returns true.
+pub async fn public_cache_available_true() -> Arc<ServerState> {
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![cache_row()]])
+        .append_query_results([vec![cached_path_row_fixture()]])
+        .append_query_results([vec![cached_path_sig_row_fixture()]])
+        .into_connection();
+    make_state(db, Arc::new(NoopLogStorage))
+}
+
+/// Public cache + no cached_path row at all — `available` returns false.
+pub async fn public_cache_available_false() -> Arc<ServerState> {
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![cache_row()]])
+        .append_query_results([Vec::<entity::cached_path::Model>::new()])
+        .into_connection();
+    make_state(db, Arc::new(NoopLogStorage))
+}
+
+/// Public cache + a raw aggregate row matching the stats handler's SQL.
+pub async fn public_cache_stats_row() -> Arc<ServerState> {
+    use sea_orm::Value;
+    use std::collections::BTreeMap;
+
+    let mut row: BTreeMap<&'static str, Value> = BTreeMap::new();
+    row.insert("total_nars", Value::BigInt(Some(2)));
+    row.insert("total_nar_size", Value::BigInt(Some(135780)));
+    row.insert("total_file_size", Value::BigInt(Some(24690)));
+    row.insert(
+        "last_uploaded_at",
+        Value::ChronoDateTime(Some(Box::new(test_date()))),
+    );
+    row.insert(
+        "oldest_fetched_at",
+        Value::ChronoDateTime(Some(Box::new(test_date()))),
+    );
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![cache_row()]])
+        .append_query_results([vec![row]])
+        .into_connection();
+    make_state(db, Arc::new(NoopLogStorage))
+}
+
 /// Private cache + completed build in cache — for auth-required tests on `/log`.
 pub async fn private_cache_with_completed_build_in_cache() -> Arc<ServerState> {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
