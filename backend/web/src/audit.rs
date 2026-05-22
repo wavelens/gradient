@@ -44,6 +44,7 @@ pub mod events {
     pub const ORG_ROLE_DELETE: &str = "organization.role.delete";
     pub const PROJECT_DELETE: &str = "project.delete";
     pub const CACHE_DELETE: &str = "cache.delete";
+    pub const CACHE_NAR_DELETE: &str = "cache.nar.delete";
 }
 
 /// Caller context derived from the inbound HTTP request — used to enrich
