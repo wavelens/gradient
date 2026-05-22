@@ -8,7 +8,7 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use proto::messages::{BuildOutput, CachedPath, DiscoveredDerivation, QueryMode};
+use proto::messages::{BuildOutput, CachedPath, DiscoveredDerivation, EvalMessageLevel, QueryMode};
 use proto::traits::JobReporter;
 
 /// A reported event captured by [`RecordingJobReporter`].
@@ -36,6 +36,11 @@ pub enum ReportedEvent {
     LogChunk {
         task_index: u32,
         data: Vec<u8>,
+    },
+    EvalMessage {
+        level: EvalMessageLevel,
+        source: String,
+        message: String,
     },
 }
 
@@ -205,6 +210,20 @@ impl JobReporter for RecordingJobReporter {
     async fn send_log_chunk(&mut self, task_index: u32, data: Vec<u8>) -> Result<()> {
         self.events
             .push(ReportedEvent::LogChunk { task_index, data });
+        Ok(())
+    }
+
+    async fn send_eval_message(
+        &mut self,
+        level: EvalMessageLevel,
+        source: &str,
+        message: &str,
+    ) -> Result<()> {
+        self.events.push(ReportedEvent::EvalMessage {
+            level,
+            source: source.to_owned(),
+            message: message.to_owned(),
+        });
         Ok(())
     }
 }

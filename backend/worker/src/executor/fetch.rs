@@ -116,6 +116,34 @@ pub async fn fetch_repository(
         }
     };
 
+    let overrides_in: Vec<OverrideInput> = job.input_overrides.iter().map(Into::into).collect();
+    let (applied_overrides, warnings) = if overrides_in.is_empty() {
+        (Vec::new(), Vec::new())
+    } else {
+        let lock_path = std::path::Path::new(&tmp_path).join("flake.lock");
+        let lock_bytes = tokio::fs::read(&lock_path)
+            .await
+            .with_context(|| format!("failed to read {}", lock_path.display()))?;
+        let lock: serde_json::Value =
+            serde_json::from_slice(&lock_bytes).context("failed to parse flake.lock")?;
+        let declared = declared_inputs_from_lock(&lock)?;
+        resolve_overrides(&overrides_in, &declared, &lock)?
+    };
+
+    for msg in &warnings {
+        updater
+            .send_eval_message(
+                gradient_core::types::proto::EvalMessageLevel::Warning,
+                "fetch",
+                msg,
+            )
+            .await?;
+    }
+
+    if !applied_overrides.is_empty() {
+        info!(count = applied_overrides.len(), "applying flake input overrides");
+    }
+
     // Archive the flake source and all locked inputs into the nix store via a
     // subprocess (so fetching goes through the nix daemon with proper network
     // and store-write access).  Returns the nix store source path so the
@@ -129,7 +157,7 @@ pub async fn fetch_repository(
         &binpath_nix,
         &binpath_ssh,
         ssh_key.as_deref(),
-        &[],
+        &applied_overrides,
         abort,
     )
     .await
@@ -411,6 +439,67 @@ fn flake_ref_from_lock_original(original: &serde_json::Value) -> anyhow::Result<
     })
 }
 
+/// Worker-side mirror of the proto `FlakeInputOverride`.
+#[derive(Debug, Clone)]
+pub struct OverrideInput {
+    pub input_name: String,
+    pub url: Option<String>,
+}
+
+impl From<&gradient_core::types::proto::FlakeInputOverride> for OverrideInput {
+    fn from(o: &gradient_core::types::proto::FlakeInputOverride) -> Self {
+        Self { input_name: o.input_name.clone(), url: o.url.clone() }
+    }
+}
+
+/// Validate overrides against the declared flake inputs, resolve `url=None`
+/// entries from the lock's `original` field, and return `(applied, warnings)`.
+fn resolve_overrides(
+    overrides: &[OverrideInput],
+    declared: &std::collections::HashSet<String>,
+    lock: &serde_json::Value,
+) -> anyhow::Result<(Vec<(String, String)>, Vec<String>)> {
+    let mut applied = Vec::with_capacity(overrides.len());
+    let mut warnings = Vec::new();
+    for o in overrides {
+        if !declared.contains(&o.input_name) {
+            warnings.push(format!(
+                "flake input '{}' does not exist in this project's flake — override skipped",
+                o.input_name,
+            ));
+            continue;
+        }
+        let ref_str = match &o.url {
+            Some(u) => u.clone(),
+            None => {
+                let root_key = lock
+                    .get("root")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("root");
+                let node_key = lock
+                    .get("nodes")
+                    .and_then(|n| n.get(root_key))
+                    .and_then(|r| r.get("inputs"))
+                    .and_then(|i| i.get(&o.input_name))
+                    .and_then(|k| k.as_str())
+                    .with_context(|| {
+                        format!("flake.lock missing nodes.root.inputs.{}", o.input_name)
+                    })?;
+                let original = lock
+                    .get("nodes")
+                    .and_then(|n| n.get(node_key))
+                    .and_then(|n| n.get("original"))
+                    .with_context(|| {
+                        format!("flake.lock missing nodes.{node_key}.original")
+                    })?;
+                flake_ref_from_lock_original(original)?
+            }
+        };
+        applied.push((o.input_name.clone(), ref_str));
+    }
+    Ok((applied, warnings))
+}
+
 /// Read the set of input names declared in the root flake from a parsed
 /// `flake.lock` document.
 fn declared_inputs_from_lock(
@@ -668,5 +757,57 @@ mod tests {
         assert!(names.contains("nixpkgs"));
         assert!(names.contains("flake-utils"));
         assert_eq!(names.len(), 2);
+    }
+
+    #[test]
+    fn resolve_overrides_keeps_url_some() {
+        let declared: std::collections::HashSet<String> =
+            ["nixpkgs".to_owned()].into_iter().collect();
+        let lock = serde_json::json!({"nodes":{"root":{"inputs":{"nixpkgs":"nixpkgs"}}}});
+        let overrides = [super::OverrideInput {
+            input_name: "nixpkgs".into(),
+            url: Some("github:NixOS/nixpkgs/nixos-unstable".into()),
+        }];
+        let (applied, warnings) =
+            super::resolve_overrides(&overrides, &declared, &lock).unwrap();
+        assert_eq!(applied, vec![("nixpkgs".to_owned(), "github:NixOS/nixpkgs/nixos-unstable".to_owned())]);
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn resolve_overrides_keep_url_reconstructs_from_lock() {
+        let declared: std::collections::HashSet<String> =
+            ["nixpkgs".to_owned()].into_iter().collect();
+        let lock = serde_json::json!({
+            "nodes": {
+                "root": {"inputs": {"nixpkgs": "nixpkgs"}},
+                "nixpkgs": {"original": {"type":"github","owner":"NixOS","repo":"nixpkgs","ref":"nixos-unstable"}},
+            },
+            "root": "root",
+        });
+        let overrides = [super::OverrideInput {
+            input_name: "nixpkgs".into(),
+            url: None,
+        }];
+        let (applied, warnings) =
+            super::resolve_overrides(&overrides, &declared, &lock).unwrap();
+        assert_eq!(applied, vec![("nixpkgs".to_owned(), "github:NixOS/nixpkgs/nixos-unstable".to_owned())]);
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn resolve_overrides_unknown_input_drops_with_warning() {
+        let declared: std::collections::HashSet<String> =
+            ["nixpkgs".to_owned()].into_iter().collect();
+        let lock = serde_json::json!({"nodes":{"root":{"inputs":{"nixpkgs":"nixpkgs"}}}});
+        let overrides = [super::OverrideInput {
+            input_name: "missing".into(),
+            url: Some("github:x/y".into()),
+        }];
+        let (applied, warnings) =
+            super::resolve_overrides(&overrides, &declared, &lock).unwrap();
+        assert!(applied.is_empty());
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("missing"));
     }
 }
