@@ -3840,10 +3840,8 @@ paths:
           description: NAR removed from this cache
         '401':
           $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: Not Found — cache or NAR not found, or caller is not the cache owner.
 
   /caches/{cache}/upstreams:
     parameters:
