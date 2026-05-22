@@ -369,6 +369,7 @@ mod tests {
             },
             wildcards: vec![],
             timeout_secs: None,
+            input_overrides: vec![],
         }
     }
 
@@ -472,6 +473,7 @@ mod tests {
             },
             wildcards: vec![],
             timeout_secs: None,
+            input_overrides: vec![],
         };
 
         let credentials = crate::proto::credentials::CredentialStore::new();

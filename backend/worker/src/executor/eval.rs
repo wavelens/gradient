@@ -574,6 +574,7 @@ mod tests {
             },
             wildcards: vec!["*".into()],
             timeout_secs: None,
+            input_overrides: vec![],
         }
     }
 

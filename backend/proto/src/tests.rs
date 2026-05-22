@@ -5,8 +5,8 @@
  */
 
 use crate::messages::{
-    CachedPath, ClientMessage, FlakeJob, FlakeSource, FlakeTask, GradientCapabilities, Job,
-    JobCandidate, PROTO_VERSION, QueryMode, RequiredPath, ServerMessage,
+    CachedPath, ClientMessage, FlakeInputOverride, FlakeJob, FlakeSource, FlakeTask,
+    GradientCapabilities, Job, JobCandidate, PROTO_VERSION, QueryMode, RequiredPath, ServerMessage,
 };
 use rkyv::rancor::Error as RkyvError;
 
@@ -129,12 +129,39 @@ fn assign_job_roundtrip() {
             },
             wildcards: vec!["packages.*".into()],
             timeout_secs: Some(300),
+            input_overrides: vec![],
         }),
         timeout_secs: Some(600),
     };
     let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
     let decoded = rkyv::from_bytes::<ServerMessage, RkyvError>(&bytes).unwrap();
     assert_eq!(decoded, original);
+}
+
+#[test]
+fn flake_input_override_roundtrip() {
+    let job = FlakeJob {
+        tasks: vec![FlakeTask::FetchFlake, FlakeTask::EvaluateFlake],
+        source: FlakeSource::Repository {
+            url: "https://example.test/repo.git".into(),
+            commit: "deadbeef".into(),
+        },
+        wildcards: vec!["packages.x86_64-linux.*".into()],
+        timeout_secs: None,
+        input_overrides: vec![
+            FlakeInputOverride {
+                input_name: "nixpkgs".into(),
+                url: Some("github:NixOS/nixpkgs/nixos-unstable".into()),
+            },
+            FlakeInputOverride {
+                input_name: "flake-utils".into(),
+                url: None,
+            },
+        ],
+    };
+    let bytes = rkyv::to_bytes::<RkyvError>(&job).unwrap();
+    let decoded: FlakeJob = rkyv::from_bytes::<_, RkyvError>(&bytes[..]).unwrap();
+    assert_eq!(decoded, job);
 }
 
 #[test]

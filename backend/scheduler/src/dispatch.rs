@@ -110,6 +110,7 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
                 .map(|w| w.patterns().to_vec())
                 .unwrap_or_else(|_| vec![eval.wildcard.clone()]),
             timeout_secs: None,
+            input_overrides: vec![],
         };
 
         let organization_id = organization_id_for_eval(state, &eval).await;
