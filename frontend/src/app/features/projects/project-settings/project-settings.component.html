@@ -189,6 +189,20 @@
       </div>
     </div>
 
+    <!-- Flake Inputs -->
+    <div class="settings-section">
+      <h2>Flake Inputs</h2>
+      <div class="settings-card">
+        <div class="nav-row">
+          <p class="text-secondary">
+            Override individual flake inputs with a new git URL, or force an update of an input keeping its original URL. Inputs without an override stay at whatever flake.lock has locked.
+          </p>
+          <a pButton label="Manage Flake Inputs" icon="pi pi-share-alt" severity="secondary"
+             [routerLink]="['/organization', orgName, 'project', projectName, 'flake-inputs']"></a>
+        </div>
+      </div>
+    </div>
+
     <!-- Status -->
     <div class="settings-section">
       <h2>Status</h2>
