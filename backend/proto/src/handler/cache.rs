@@ -113,6 +113,8 @@ async fn ensure_push_signatures(
                 cache: sea_orm::ActiveValue::Set(oc.cache),
                 signature: sea_orm::ActiveValue::Set(None),
                 created_at: sea_orm::ActiveValue::Set(now),
+                last_fetched_at: sea_orm::ActiveValue::Set(None),
+                fetch_count: sea_orm::ActiveValue::Set(0),
             })
         })
         .collect();

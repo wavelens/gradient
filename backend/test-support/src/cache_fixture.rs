@@ -135,6 +135,8 @@ pub async fn public_cache_with_narinfo() -> Arc<ServerState> {
         cache: cache_id(),
         signature: Some(vec![0x42; 64]),
         created_at: test_date(),
+        last_fetched_at: None,
+        fetch_count: 0,
     };
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)

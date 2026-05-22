@@ -269,6 +269,8 @@ async fn queue_signature_placeholders<C: ConnectionTrait>(
             cache: Set(oc.cache),
             signature: Set(None),
             created_at: Set(now_ts),
+            last_fetched_at: Set(None),
+            fetch_count: Set(0),
         })
         .collect();
 
