@@ -1,0 +1,175 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<p-toast />
+
+<div class="container">
+  <div class="page-header">
+    <div>
+      <div class="breadcrumb">
+        <a [routerLink]="['/organization', orgName]" class="breadcrumb-link">{{ orgDisplayName() || orgName }}</a>
+        <span class="breadcrumb-separator">/</span>
+        <a [routerLink]="['/organization', orgName, 'project', projectName]" class="breadcrumb-link">{{ projectName }}</a>
+        <span class="breadcrumb-separator">/</span>
+        <span class="breadcrumb-current">Flake Input Overrides</span>
+      </div>
+      <h1>Flake Input Overrides</h1>
+      <p class="text-secondary">Override flake inputs to pin or redirect dependencies for the next evaluation</p>
+    </div>
+    <button
+      *appWritable="access()"
+      pButton
+      label="New Override"
+      icon="pi pi-plus"
+      (click)="startCreate()"
+      [appManagedDisable]="access()"
+    ></button>
+  </div>
+
+  @if (loading()) {
+    <app-loading-spinner message="Loading overrides..." />
+  } @else {
+    @if (overrides().length === 0) {
+      <div class="empty-state">
+        <span class="material-symbols-outlined">tune</span>
+        <h3>No overrides configured</h3>
+        <p class="text-secondary">No overrides configured. The project's flake.lock is used as-is.</p>
+        <button
+          *appWritable="access()"
+          pButton
+          label="New Override"
+          icon="pi pi-plus"
+          (click)="startCreate()"
+          [appManagedDisable]="access()"
+        ></button>
+      </div>
+    } @else {
+      <div class="overrides-list">
+        @for (override of overrides(); track override.id) {
+          <div class="override-row">
+            <div class="override-header">
+              <div class="override-info">
+                <div>
+                  <div class="override-name">{{ override.input_name }}</div>
+                  <div class="override-meta text-secondary">
+                    <span class="badge" [class]="override.url === null ? 'badge-keep' : 'badge-url'">
+                      {{ modeLabel(override) }}
+                    </span>
+                    @if (override.url !== null) {
+                      <span class="override-url">{{ override.url }}</span>
+                    }
+                  </div>
+                </div>
+              </div>
+              <div class="override-actions">
+                <button
+                  *appWritable="access()"
+                  pButton
+                  label="Edit"
+                  icon="pi pi-pencil"
+                  severity="secondary"
+                  size="small"
+                  [disabled]="rowDisabled()"
+                  (click)="startEdit(override)"
+                ></button>
+                <button
+                  *appWritable="access()"
+                  pButton
+                  label="Delete"
+                  icon="pi pi-trash"
+                  severity="danger"
+                  size="small"
+                  [loading]="deletingId() === override.id"
+                  [disabled]="rowDisabled()"
+                  (click)="deleteOverride(override.id)"
+                ></button>
+              </div>
+            </div>
+          </div>
+        }
+      </div>
+    }
+  }
+</div>
+
+<!-- Create Dialog -->
+<p-dialog
+  header="New Override"
+  [(visible)]="showCreateDialog"
+  [modal]="true"
+  [style]="{ width: '520px' }"
+  [draggable]="false"
+  [resizable]="false"
+  (onHide)="cancelEdit()"
+>
+  <ng-container *ngTemplateOutlet="overrideForm"></ng-container>
+  <ng-template pTemplate="footer">
+    <button pButton label="Cancel" severity="secondary" (click)="showCreateDialog.set(false)" [disabled]="saving()"></button>
+    <button pButton label="Create" icon="pi pi-check" (click)="saveCreate()" [loading]="saving()" [disabled]="saving()"></button>
+  </ng-template>
+</p-dialog>
+
+<!-- Edit Dialog -->
+<p-dialog
+  header="Edit Override"
+  [(visible)]="showEditDialog"
+  [modal]="true"
+  [style]="{ width: '520px' }"
+  [draggable]="false"
+  [resizable]="false"
+  (onHide)="cancelEdit()"
+>
+  <ng-container *ngTemplateOutlet="overrideForm"></ng-container>
+  <ng-template pTemplate="footer">
+    <button pButton label="Cancel" severity="secondary" (click)="showEditDialog.set(false)" [disabled]="saving()"></button>
+    <button pButton label="Save" icon="pi pi-check" (click)="saveEdit()" [loading]="saving()" [disabled]="saving()"></button>
+  </ng-template>
+</p-dialog>
+
+<!-- Shared form template -->
+<ng-template #overrideForm>
+  @if (error()) {
+    <div class="dialog-error">
+      <span class="material-symbols-outlined">error</span>
+      {{ error() }}
+    </div>
+  }
+
+  <div class="form-group">
+    <label for="fi-input-name">Input Name</label>
+    <input
+      pInputText
+      id="fi-input-name"
+      [(ngModel)]="form.input_name"
+      class="w-full"
+      placeholder="nixpkgs"
+    />
+    <small class="text-secondary">Matches the input name declared in your flake.nix (e.g. <code>nixpkgs</code>).</small>
+  </div>
+
+  <div class="form-group checkbox-group">
+    <p-checkbox
+      inputId="fi-keep-url"
+      [(ngModel)]="form.keepUrl"
+      [binary]="true"
+    />
+    <label for="fi-keep-url">Force update using the URL declared in flake.nix</label>
+  </div>
+
+  @if (!form.keepUrl) {
+    <div class="form-group">
+      <label for="fi-url">URL</label>
+      <input
+        pInputText
+        id="fi-url"
+        [(ngModel)]="form.url"
+        class="w-full"
+        placeholder="github:NixOS/nixpkgs/nixos-24.05"
+      />
+      <small class="text-secondary">Nix flake URL to substitute for this input.</small>
+    </div>
+  }
+</ng-template>
