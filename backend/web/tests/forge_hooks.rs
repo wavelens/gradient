@@ -330,6 +330,7 @@ fn apply_trigger_db_chain(db: MockDatabase) -> MockDatabase {
         .append_query_results([Vec::<entity::evaluation::Model>::new()]) // trigger_evaluation: in-progress check
         .append_query_results([vec![commit_row()]]) // INSERT commit
         .append_query_results([vec![eval_row(EvaluationStatus::Queued)]]) // INSERT eval
+        .append_query_results([Vec::<entity::project_flake_input_override::Model>::new()]) // snapshot flake input overrides (none)
         .append_query_results([vec![project_row()]]) // SELECT project for update
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
