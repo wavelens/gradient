@@ -123,7 +123,7 @@
   &:hover:not(.nar-head) { background: $color-quaternary; }
 
   &.nar-head {
-    background: $color-secondary;
+    background: $color-quaternary;
     cursor: default;
     font-size: $font-size-xs;
     text-transform: uppercase;
