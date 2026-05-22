@@ -401,6 +401,8 @@ mod tests {
                 m.trigger = Some(trig);
                 m
             }]])
+            // snapshot flake input overrides (none)
+            .append_query_results([Vec::<entity::project_flake_input_override::Model>::new()])
             // project update read-back
             .append_query_results([vec![project.clone()]])
             // project update exec
@@ -518,6 +520,8 @@ mod tests {
                 m.concurrent = true;
                 m
             }]])
+            // snapshot flake input overrides (none)
+            .append_query_results([Vec::<entity::project_flake_input_override::Model>::new()])
             // project update read-back
             .append_query_results([vec![project.clone()]])
             // project update exec
@@ -612,6 +616,8 @@ mod tests {
                 new_commit_id,
                 EvaluationStatus::Queued,
             )]])
+            // snapshot flake input overrides (none)
+            .append_query_results([Vec::<entity::project_flake_input_override::Model>::new()])
             // project update read-back
             .append_query_results([vec![project.clone()]])
             // project update exec
@@ -698,6 +704,8 @@ mod tests {
                 m.trigger = Some(trig);
                 m
             }]])
+            // snapshot flake input overrides (none)
+            .append_query_results([Vec::<entity::project_flake_input_override::Model>::new()])
             // trigger_evaluation: project update read-back
             .append_query_results([vec![project.clone()]])
             // trigger_evaluation: project exec
@@ -767,6 +775,8 @@ mod tests {
                 m.trigger = Some(trig);
                 m
             }]])
+            // snapshot flake input overrides (none)
+            .append_query_results([Vec::<entity::project_flake_input_override::Model>::new()])
             .append_query_results([vec![project.clone()]])
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
@@ -858,6 +868,8 @@ mod tests {
                 m.trigger = Some(trig);
                 m
             }]])
+            // snapshot flake input overrides (none)
+            .append_query_results([Vec::<entity::project_flake_input_override::Model>::new()])
             // trigger_evaluation: project update read-back + exec
             .append_query_results([vec![project.clone()]])
             .append_exec_results([MockExecResult {
