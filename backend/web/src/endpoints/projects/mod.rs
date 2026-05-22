@@ -5,6 +5,7 @@
  */
 
 pub mod evaluations;
+pub mod flake_inputs;
 pub mod integrations;
 pub mod management;
 pub mod metrics;

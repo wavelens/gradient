@@ -288,6 +288,10 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
                 .delete(projects::delete_project_integration),
         )
         .nest(
+            "/projects/{organization}/{project}/flake-inputs",
+            projects::flake_inputs::router(),
+        )
+        .nest(
             "/projects/{organization}/{project}/triggers",
             projects::triggers::router(),
         )
