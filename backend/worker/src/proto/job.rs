@@ -349,6 +349,20 @@ impl JobReporter for JobUpdater {
             data,
         })
     }
+
+    async fn send_eval_message(
+        &mut self,
+        level: EvalMessageLevel,
+        source: &str,
+        message: &str,
+    ) -> Result<()> {
+        self.writer.send(ClientMessage::EvalMessage {
+            job_id: self.job_id.clone(),
+            level,
+            source: source.to_owned(),
+            message: message.to_owned(),
+        })
+    }
 }
 
 #[cfg(test)]

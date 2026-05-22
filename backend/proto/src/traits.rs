@@ -84,6 +84,12 @@ pub trait JobReporter: Send {
     ) -> Result<()>;
     async fn report_compressing(&mut self) -> Result<()>;
     async fn send_log_chunk(&mut self, task_index: u32, data: Vec<u8>) -> Result<()>;
+    async fn send_eval_message(
+        &mut self,
+        level: crate::messages::EvalMessageLevel,
+        source: &str,
+        message: &str,
+    ) -> Result<()>;
 }
 
 // ── Role-neutral peer primitives ─────────────────────────────────────────────
