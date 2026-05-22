@@ -240,6 +240,8 @@ pub async fn trigger_restart_builds<C: ConnectionTrait>(
     };
     let new_eval = aevaluation.insert(db).await?;
 
+    snapshot_flake_input_overrides(db, project.id, new_eval.id).await?;
+
     // Look up any in-flight leader (Created/Queued/Building) in another
     // evaluation for the derivations we're about to rebuild. Restarting must
     // honour the same cross-evaluation dedup as the regular eval-result path,
@@ -389,6 +391,8 @@ mod tests {
             }]])
             // INSERT evaluation → returns evaluation row
             .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Queued)]])
+            // SELECT project flake input overrides for snapshot (none)
+            .append_query_results([Vec::<entity::project_flake_input_override::Model>::new()])
             // SELECT project for update
             .append_query_results([vec![project.clone()]])
             // UPDATE project → exec result
@@ -429,6 +433,8 @@ mod tests {
             }]])
             // insert evaluation (previous should be None despite stale pointer)
             .append_query_results([vec![make_eval(new_eval_id, EvaluationStatus::Queued)]])
+            // snapshot flake input overrides (none)
+            .append_query_results([Vec::<entity::project_flake_input_override::Model>::new()])
             // project update read-back + exec
             .append_query_results([vec![project.clone()]])
             .append_exec_results([MockExecResult {
@@ -531,6 +537,7 @@ mod tests {
                 author_name: "".into(),
             }]])
             .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Queued)]])
+            .append_query_results([Vec::<entity::project_flake_input_override::Model>::new()])
             .append_query_results([vec![project.clone()]])
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
@@ -564,6 +571,7 @@ mod tests {
                 m.trigger = Some(trig);
                 m
             }]])
+            .append_query_results([Vec::<entity::project_flake_input_override::Model>::new()])
             .append_query_results([vec![project.clone()]])
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
@@ -638,6 +646,8 @@ mod tests {
             .append_query_results([prev_builds])
             // 4. INSERT new evaluation → returns the row with status=Completed
             .append_query_results([vec![inserted_eval]])
+            // snapshot flake input overrides (none)
+            .append_query_results([Vec::<entity::project_flake_input_override::Model>::new()])
             // 5. INSERT 3 builds (each returns the inserted row; we don't read back)
             .append_query_results([vec![make_build(
                 BuildId::now_v7(),
@@ -700,6 +710,8 @@ mod tests {
             .append_query_results([vec![prev_eval]])
             .append_query_results([prev_builds])
             .append_query_results([vec![inserted_eval]])
+            // snapshot flake input overrides (none)
+            .append_query_results([Vec::<entity::project_flake_input_override::Model>::new()])
             // find_active_leaders for the one Queued drv → no in-flight leader.
             //   same-org pass: empty
             //   cross-org pass: empty derivation lookup short-circuits
@@ -769,6 +781,8 @@ mod tests {
             .append_query_results([vec![prev_eval]])
             .append_query_results([vec![prev_build]])
             .append_query_results([vec![inserted_eval]])
+            // snapshot flake input overrides (none)
+            .append_query_results([Vec::<entity::project_flake_input_override::Model>::new()])
             // find_active_leaders for [shared_drv] → returns the in-flight leader.
             .append_query_results([vec![leader]])
             // INSERT new build (with via=leader_id).
