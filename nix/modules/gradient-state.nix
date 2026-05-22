@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-{ lib, ... }: with lib; let
+{ lib, config, ... }: with lib; let
   upstreamType = types.submodule {
     options = {
       type = mkOption {
@@ -159,6 +159,29 @@
     };
   });
 
+  flakeInputOverrideType = types.submodule ({ ... }: {
+    options = {
+      url = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        description = ''
+          Flake reference to use as the override for this input. When
+          null and `keepUrl` is true, the input is force-updated using
+          the URL declared in the project's flake.nix.
+        '';
+      };
+      keepUrl = mkOption {
+        type = types.bool;
+        default = false;
+        description = ''
+          When true, force an update of this input using its original
+          flake-declared URL (without changing the URL). Mutually
+          exclusive with `url` — exactly one of the two must be set.
+        '';
+      };
+    };
+  });
+
   projectType = types.submodule ({ config, name, ... }: {
     options = {
       name = mkOption {
@@ -288,6 +311,22 @@
               config = { cron = "0 0 2 * * *"; };
             }
           ]
+        '';
+      };
+
+      flakeInputOverrides = mkOption {
+        type = types.attrsOf flakeInputOverrideType;
+        default = {};
+        description = ''
+          Per-input overrides applied during flake fetch. The attribute
+          key is the flake input name. Empty (`{}`) means no overrides
+          — flake.lock is used as-is.
+        '';
+        example = literalExpression ''
+          {
+            nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+            flake-utils.keepUrl = true;
+          }
         '';
       };
 
@@ -844,4 +883,23 @@ in
       '';
     };
   };
+
+  config.assertions =
+    let
+      bad = flatten (mapAttrsToList (pName: p:
+        mapAttrsToList (iName: o: {
+          project = pName;
+          input = iName;
+          valid = (o.url != null) != o.keepUrl;
+        }) p.flakeInputOverrides
+      ) config.services.gradient.state.projects);
+      invalid = filter (b: !b.valid) bad;
+    in
+    map (b: {
+      assertion = false;
+      message = ''
+        services.gradient.state.projects.${b.project}.flakeInputOverrides.${b.input}: \
+        exactly one of `url` (string) or `keepUrl = true` must be set.
+      '';
+    }) invalid;
 }
