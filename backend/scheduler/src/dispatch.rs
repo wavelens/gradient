@@ -94,6 +94,22 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
 
         let commit_sha = vec_to_hex(&commit.hash);
 
+        let input_overrides = {
+            use entity::evaluation_flake_input_override as efio;
+            use sea_orm::QueryOrder;
+            efio::Entity::find()
+                .filter(efio::Column::Evaluation.eq(eval.id))
+                .order_by_asc(efio::Column::InputName)
+                .all(&state.worker_db)
+                .await?
+                .into_iter()
+                .map(|r| gradient_core::types::proto::FlakeInputOverride {
+                    input_name: r.input_name,
+                    url: r.url,
+                })
+                .collect::<Vec<_>>()
+        };
+
         let flake_job = FlakeJob {
             tasks: vec![
                 FlakeTask::FetchFlake,
@@ -110,7 +126,7 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
                 .map(|w| w.patterns().to_vec())
                 .unwrap_or_else(|_| vec![eval.wildcard.clone()]),
             timeout_secs: None,
-            input_overrides: vec![],
+            input_overrides,
         };
 
         let organization_id = organization_id_for_eval(state, &eval).await;
