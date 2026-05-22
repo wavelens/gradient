@@ -109,6 +109,8 @@ pub async fn trigger_evaluation<C: ConnectionTrait>(
     };
     let evaluation = aevaluation.insert(db).await?;
 
+    snapshot_flake_input_overrides(db, project.id, evaluation.id).await?;
+
     let mut aproject: AProject = project.clone().into();
     aproject.last_check_at = Set(*NULL_TIME);
     aproject.last_evaluation = Set(Some(evaluation.id));
@@ -116,6 +118,28 @@ pub async fn trigger_evaluation<C: ConnectionTrait>(
     aproject.update(db).await?;
 
     Ok(evaluation)
+}
+
+pub(super) async fn snapshot_flake_input_overrides<C: ConnectionTrait>(
+    txn: &C,
+    project_id: entity::ids::ProjectId,
+    evaluation_id: entity::ids::EvaluationId,
+) -> Result<(), sea_orm::DbErr> {
+    let rows = EProjectFlakeInputOverride::find()
+        .filter(CProjectFlakeInputOverride::Project.eq(project_id))
+        .all(txn)
+        .await?;
+
+    for r in rows {
+        let am = AEvaluationFlakeInputOverride {
+            id: Set(EvaluationFlakeInputOverrideId::now_v7()),
+            evaluation: Set(evaluation_id),
+            input_name: Set(r.input_name),
+            url: Set(r.url),
+        };
+        am.insert(txn).await?;
+    }
+    Ok(())
 }
 
 /// Status mapping applied to each previous build when restarting.
