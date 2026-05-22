@@ -1,0 +1,97 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<p-dialog
+  header="NAR details"
+  [visible]="visible()"
+  (visibleChange)="onVisibleChange($event)"
+  [modal]="true"
+  [style]="{ width: '640px' }"
+  [draggable]="false"
+  [resizable]="false"
+>
+  @if (loading()) {
+    <app-loading-spinner message="Loading NAR..." />
+  } @else if (error()) {
+    <div class="dialog-error">
+      <span class="material-symbols-outlined">error</span>
+      {{ error() }}
+    </div>
+  } @else if (detail(); as d) {
+    <div class="detail-grid">
+      <div class="detail-row">
+        <span class="detail-label">Hash</span>
+        <code class="detail-value mono">{{ d.hash }}</code>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Package</span>
+        <span class="detail-value">{{ d.package }}</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Store path</span>
+        <code class="detail-value mono">{{ d.store_path }}</code>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">NAR hash</span>
+        <code class="detail-value mono">{{ d.nar_hash ?? '-' }}</code>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">File hash</span>
+        <code class="detail-value mono">{{ d.file_hash ?? '-' }}</code>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">NAR size</span>
+        <span class="detail-value">{{ formatBytes(d.nar_size) }}</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">File size</span>
+        <span class="detail-value">{{ formatBytes(d.file_size) }}</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Deriver</span>
+        <code class="detail-value mono">{{ d.deriver ?? '-' }}</code>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">CA</span>
+        <code class="detail-value mono">{{ d.ca ?? '-' }}</code>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Fetch count</span>
+        <span class="detail-value">{{ d.fetch_count }}</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Last fetched</span>
+        <span class="detail-value">{{ d.last_fetched_at ?? 'never' }}</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Created</span>
+        <span class="detail-value">{{ d.created_at }}</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Signed</span>
+        <span class="signed-badge" [class.signed]="d.signed" [class.unsigned]="!d.signed">
+          <span class="material-symbols-outlined">{{ d.signed ? 'verified' : 'gpp_maybe' }}</span>
+          {{ d.signed ? 'Signed' : 'Unsigned' }}
+        </span>
+      </div>
+      <div class="detail-row references-row">
+        <span class="detail-label">References ({{ d.references.length }})</span>
+        @if (d.references.length === 0) {
+          <span class="detail-value text-secondary">none</span>
+        } @else {
+          <ul class="references-list">
+            @for (r of d.references; track r) {
+              <li><code class="mono">{{ r }}</code></li>
+            }
+          </ul>
+        }
+      </div>
+    </div>
+  }
+  <ng-template pTemplate="footer">
+    <button pButton label="Close" severity="secondary" (click)="onVisibleChange(false)"></button>
+  </ng-template>
+</p-dialog>

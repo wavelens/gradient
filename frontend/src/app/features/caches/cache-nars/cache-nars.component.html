@@ -1,0 +1,169 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<div class="container">
+  <div class="page-header">
+    <div>
+      <div class="breadcrumb">
+        <a routerLink="/caches" class="breadcrumb-link">Caches</a>
+        <span class="breadcrumb-separator">/</span>
+        <a [routerLink]="['/caches', cacheName]" class="breadcrumb-link">{{ cacheDisplayName || cacheName }}</a>
+        <span class="breadcrumb-separator">/</span>
+        <span class="breadcrumb-current">NARs</span>
+      </div>
+      <h1>NARs</h1>
+      <p class="text-secondary">Browse and manage Nix archives stored in this cache.</p>
+    </div>
+  </div>
+
+  @if (stats(); as s) {
+    <div class="stat-cards">
+      <div class="stat-card">
+        <span class="stat-label">Total NARs</span>
+        <span class="stat-value">{{ s.total_nars }}</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label">NAR size</span>
+        <span class="stat-value">{{ formatBytes(s.total_nar_size) }}</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label">File size</span>
+        <span class="stat-value">{{ formatBytes(s.total_file_size) }}</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label">Last uploaded</span>
+        <span class="stat-value small">{{ s.last_uploaded_at ?? '-' }}</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label">Oldest fetched</span>
+        <span class="stat-value small">{{ s.oldest_fetched_at ?? '-' }}</span>
+      </div>
+    </div>
+  }
+
+  <div class="filter-row">
+    <div class="filter-group">
+      <label for="filter-hash">Hash</label>
+      <input pInputText id="filter-hash" [ngModel]="hash()" (ngModelChange)="hash.set($event)" placeholder="store hash prefix" class="w-full" (keydown.enter)="applyFilters()" />
+    </div>
+    <div class="filter-group">
+      <label for="filter-package">Package</label>
+      <input pInputText id="filter-package" [ngModel]="package()" (ngModelChange)="package.set($event)" placeholder="package name" class="w-full" (keydown.enter)="applyFilters()" />
+    </div>
+    <div class="filter-group">
+      <label for="filter-sort">Sort by</label>
+      <select id="filter-sort" [ngModel]="sort()" (ngModelChange)="setSort($event)" class="role-select w-full">
+        @for (o of sortOptions; track o.value) {
+          <option [value]="o.value">{{ o.label }}</option>
+        }
+      </select>
+    </div>
+    <div class="filter-actions">
+      <button pButton type="button" [icon]="order() === 'asc' ? 'pi pi-sort-amount-up' : 'pi pi-sort-amount-down'" severity="secondary" (click)="toggleOrder()" [title]="order() === 'asc' ? 'Ascending' : 'Descending'"></button>
+      <button pButton type="button" label="Apply" icon="pi pi-filter" (click)="applyFilters()"></button>
+      <button pButton type="button" label="Reset" severity="secondary" (click)="reset()"></button>
+    </div>
+  </div>
+
+  @if (loadError()) {
+    <div class="inline-error">
+      <span class="material-symbols-outlined">error</span>
+      {{ loadError() }}
+    </div>
+  }
+
+  @if (loading()) {
+    <app-loading-spinner message="Loading NARs..." />
+  } @else if (rows().length === 0) {
+    <div class="empty-state">
+      <span class="material-symbols-outlined">inbox</span>
+      <h3>No NARs found</h3>
+      <p class="text-secondary">No archives match the current filters.</p>
+    </div>
+  } @else {
+    <div class="nar-table">
+      <div class="nar-row nar-head">
+        <span class="col col-hash">Hash</span>
+        <span class="col col-package">Package</span>
+        <span class="col col-size">NAR size</span>
+        <span class="col col-size">File size</span>
+        <span class="col col-time">Last fetched</span>
+        <span class="col col-actions"></span>
+      </div>
+      @for (row of rows(); track row.hash) {
+        <div class="nar-row" (click)="show(row)">
+          <code class="col col-hash mono">{{ row.hash }}</code>
+          <span class="col col-package">{{ row.package }}</span>
+          <span class="col col-size">{{ formatBytes(row.nar_size) }}</span>
+          <span class="col col-size">{{ formatBytes(row.file_size) }}</span>
+          <span class="col col-time text-secondary">{{ row.last_fetched_at ?? 'never' }}</span>
+          <span class="col col-actions" (click)="$event.stopPropagation()">
+            <button pButton icon="pi pi-eye" severity="secondary" [text]="true" (click)="show(row)" title="Show details"></button>
+            <button
+              *appWritable="access()"
+              pButton
+              icon="pi pi-trash"
+              severity="danger"
+              [text]="true"
+              [loading]="deletingHash() === row.hash"
+              [disabled]="rowDisabled()"
+              (click)="askDelete(row)"
+              title="Delete"
+            ></button>
+          </span>
+        </div>
+      }
+    </div>
+
+    <div class="pagination">
+      <span class="text-secondary">
+        Page {{ page() }} of {{ totalPages() }} &middot; {{ total() }} total
+      </span>
+      <div class="pagination-actions">
+        <button pButton icon="pi pi-angle-double-left" severity="secondary" [disabled]="page() <= 1" (click)="goToPage(1)"></button>
+        <button pButton icon="pi pi-angle-left" severity="secondary" [disabled]="page() <= 1" (click)="goToPage(page() - 1)"></button>
+        <button pButton icon="pi pi-angle-right" severity="secondary" [disabled]="page() >= totalPages()" (click)="goToPage(page() + 1)"></button>
+        <button pButton icon="pi pi-angle-double-right" severity="secondary" [disabled]="page() >= totalPages()" (click)="goToPage(totalPages())"></button>
+      </div>
+    </div>
+  }
+</div>
+
+<app-cache-nars-detail-drawer
+  [cacheName]="cacheName"
+  [summary]="selected()"
+  (closed)="closeDrawer()"
+/>
+
+<p-dialog
+  header="Delete NAR"
+  [visible]="pendingDelete() !== null"
+  (visibleChange)="$event || cancelDelete()"
+  [modal]="true"
+  [style]="{ width: '480px' }"
+  [draggable]="false"
+  [resizable]="false"
+  [closable]="!deletingHash()"
+>
+  @if (deleteError()) {
+    <div class="inline-error">
+      <span class="material-symbols-outlined">error</span>
+      {{ deleteError() }}
+    </div>
+  }
+  @if (pendingDelete(); as row) {
+    <p>
+      Remove <code class="mono">{{ row.hash }}</code> from this cache?
+    </p>
+    <p class="text-secondary">
+      If other caches still hold this NAR, only this cache's signature is removed. Otherwise the NAR blob is deleted permanently.
+    </p>
+  }
+  <ng-template pTemplate="footer">
+    <button pButton label="Cancel" severity="secondary" (click)="cancelDelete()" [disabled]="deletingHash() !== null"></button>
+    <button pButton label="Delete" severity="danger" icon="pi pi-trash" (click)="confirmDelete()" [loading]="deletingHash() !== null"></button>
+  </ng-template>
+</p-dialog>
