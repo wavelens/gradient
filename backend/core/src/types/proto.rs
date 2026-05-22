@@ -59,6 +59,15 @@ pub enum FlakeSource {
     Cached { store_path: String },
 }
 
+/// Per-input override applied during `FetchFlake`.
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[rkyv(derive(Debug, PartialEq))]
+pub struct FlakeInputOverride {
+    pub input_name: String,
+    /// `None` keeps the URL from the project's flake but still forces an update.
+    pub url: Option<String>,
+}
+
 /// Evaluation job: fetch and/or evaluate a Nix flake.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
@@ -67,6 +76,8 @@ pub struct FlakeJob {
     pub source: FlakeSource,
     pub wildcards: Vec<String>,
     pub timeout_secs: Option<u64>,
+    /// Per-input overrides applied during `FetchFlake`. Empty means no overrides.
+    pub input_overrides: Vec<FlakeInputOverride>,
 }
 
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]

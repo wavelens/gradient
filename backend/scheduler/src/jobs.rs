@@ -415,6 +415,7 @@ mod tests {
                 },
                 wildcards: vec!["*".into()],
                 timeout_secs: None,
+                input_overrides: vec![],
             },
             required_paths: vec![],
             queued_at: gradient_core::types::now(),

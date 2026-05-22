@@ -76,6 +76,7 @@ mod tests {
                 },
                 wildcards: vec![],
                 timeout_secs: None,
+                input_overrides: vec![],
             },
         )
         .await
