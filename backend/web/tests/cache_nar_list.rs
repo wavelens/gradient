@@ -39,7 +39,7 @@ fn list_empty_cache_returns_empty_items() {
 }
 
 #[test]
-fn list_private_cache_requires_auth() {
+fn list_private_cache_anon_returns_not_found() {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -51,7 +51,7 @@ fn list_private_cache_requires_auth() {
         let resp = server
             .get(&format!("/api/v1/caches/{FIXTURE_CACHE_NAME}/nars"))
             .await;
-        resp.assert_status(StatusCode::UNAUTHORIZED);
+        resp.assert_status(StatusCode::NOT_FOUND);
     });
 }
 
