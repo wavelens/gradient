@@ -18,7 +18,7 @@ import {
   NarSummary,
 } from '@core/services/caches.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
-import { WritableDirective, AccessService } from '@shared/access';
+import { WritableDirective } from '@shared/access';
 import { injectCacheAccess } from '@core/resolvers/inject-access';
 import { CacheNarsDetailDrawerComponent } from './cache-nars-detail-drawer.component';
 
@@ -46,15 +46,10 @@ export class CacheNarsComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private cachesService = inject(CachesService);
-  private accessSvc = inject(AccessService);
 
   access = injectCacheAccess();
 
-  rowDisabled = computed(
-    () =>
-      this.deletingHash() !== null ||
-      this.accessSvc.shouldDisableInput(this.access()),
-  );
+  rowDisabled = computed(() => this.deletingHash() !== null);
 
   cacheName = '';
   cacheDisplayName = '';

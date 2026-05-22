@@ -64,6 +64,11 @@ guard:
   `project_editable_managed_forbidden` / `project_missing_returns_project_label` —
   same matrix at the project level, including the project-existence label
   guarantee.
+- `cache_owned_unmanaged_passes` / `cache_editable_rejects_managed` /
+  `cache_owned_allows_managed` / `cache_non_owner_returns_not_found` — cache
+  matrix at the owner-scoped layer. `Editable` blocks state-managed caches
+  (cache *config* is declarative), while `Owned` permits them so that NAR
+  content endpoints can mutate operational data on managed caches.
 
 Unit tests in `permissions.rs` (in `core`) lock the bitmask invariants:
 

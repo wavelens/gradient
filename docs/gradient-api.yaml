@@ -3971,7 +3971,8 @@ paths:
         `cached_path` row is removed in the same transaction, any matching
         `derivation_output.is_cached` rows are flipped to `false`, and the NAR
         blob is garbage-collected asynchronously after the response. Requires
-        cache-owner authentication.
+        cache-owner authentication. Allowed on state-managed caches — NAR content
+        is operational data, distinct from cache configuration.
       operationId: deleteCacheNar
       security:
         - bearerAuth: []

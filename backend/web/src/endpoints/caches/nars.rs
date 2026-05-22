@@ -332,7 +332,7 @@ pub async fn delete(
     Extension(user): Extension<MUser>,
     Path((cache_name, hash)): Path<(String, String)>,
 ) -> WebResult<impl IntoResponse> {
-    let cache = load_cache(&state, user.id, cache_name.clone(), CacheAccess::Editable).await?;
+    let cache = load_cache(&state, user.id, cache_name.clone(), CacheAccess::Owned).await?;
     let (cp, outcome) = delete_nar_from_cache(&state, cache.id, &hash).await?;
     audit_record(
         &state.web_db,

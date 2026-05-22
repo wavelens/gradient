@@ -962,4 +962,99 @@ mod tests {
             assert!(r.is_ok(), "{:?}", r.err());
         });
     }
+
+    // ── load_cache ─────────────────────────────────────────────────────────
+
+    fn cache_fixture(managed: bool) -> entity::cache::Model {
+        entity::cache::Model {
+            id: gradient_core::types::ids::CacheId::new(uuid!(
+                "a0000000-0000-0000-0000-000000000020"
+            )),
+            name: "test-cache".into(),
+            display_name: "Test".into(),
+            description: String::new(),
+            active: true,
+            priority: 30,
+            local_priority: None,
+            public_key: "k".into(),
+            private_key: "p".into(),
+            public: false,
+            created_by: UserId::new(uuid!("a0000000-0000-0000-0000-000000000004")),
+            created_at: fixture_date(),
+            managed,
+        }
+    }
+
+    #[test]
+    fn cache_owned_unmanaged_passes() {
+        run(async {
+            let db = MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([vec![cache_fixture(false)]])
+                .into_connection();
+            let state = make_state(db);
+            let r = load_cache(
+                &state,
+                user_fixture().id,
+                "test-cache".into(),
+                CacheAccess::Editable,
+            )
+            .await;
+            assert!(r.is_ok(), "{:?}", r.err());
+        });
+    }
+
+    #[test]
+    fn cache_editable_rejects_managed() {
+        run(async {
+            let db = MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([vec![cache_fixture(true)]])
+                .into_connection();
+            let state = make_state(db);
+            let err = load_cache(
+                &state,
+                user_fixture().id,
+                "test-cache".into(),
+                CacheAccess::Editable,
+            )
+            .await
+            .expect_err("Editable must reject managed cache");
+            assert!(matches!(err, WebError::Forbidden(..)));
+        });
+    }
+
+    /// `Owned` is the access level NAR-content endpoints use: it must permit
+    /// the cache owner to mutate content even when the cache's *config* is
+    /// state-managed, because NAR storage is operational data, not config.
+    #[test]
+    fn cache_owned_allows_managed() {
+        run(async {
+            let db = MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([vec![cache_fixture(true)]])
+                .into_connection();
+            let state = make_state(db);
+            let r = load_cache(
+                &state,
+                user_fixture().id,
+                "test-cache".into(),
+                CacheAccess::Owned,
+            )
+            .await;
+            assert!(r.is_ok(), "Owned must allow managed cache: {:?}", r.err());
+        });
+    }
+
+    #[test]
+    fn cache_non_owner_returns_not_found() {
+        run(async {
+            let db = MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([vec![cache_fixture(false)]])
+                .into_connection();
+            let state = make_state(db);
+            let other = UserId::new(uuid!("a0000000-0000-0000-0000-000000000099"));
+            let err = load_cache(&state, other, "test-cache".into(), CacheAccess::Owned)
+                .await
+                .expect_err("non-owner must be rejected");
+            assert!(matches!(err, WebError::NotFound(..)));
+        });
+    }
 }
