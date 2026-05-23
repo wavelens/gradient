@@ -20,6 +20,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 
+use crate::ci::actions::{dispatch_build_event, dispatch_evaluation_event};
 use crate::state_machine::{BuildStateMachine, EvalStateMachine};
 use crate::types::*;
 
@@ -56,7 +57,7 @@ pub async fn update_build_status(
 
     let mut active_build: ABuild = build.clone().into_active_model();
 
-    let webhook_status = status;
+    let event_status = status;
     let now = crate::types::now();
     // When transitioning out of `Building` into a terminal state, record the
     // elapsed wall-clock time. `build.updated_at` is the timestamp of the
@@ -79,10 +80,10 @@ pub async fn update_build_status(
 
     match active_build.update(&state.worker_db).await {
         Ok(updated_build) => {
-            let webhook_state = Arc::clone(&state);
-            let webhook_build = updated_build.clone();
+            let action_state = Arc::clone(&state);
+            let action_build = updated_build.clone();
             state.shutdown.spawn(async move {
-                crate::ci::fire_build_webhook(webhook_state, webhook_build, webhook_status).await;
+                dispatch_build_event_for_status(&action_state, action_build, event_status).await;
             });
 
             // Finalize the build log on terminal state transitions so backends
@@ -138,7 +139,7 @@ pub async fn update_evaluation_status(
 
     debug!(evaluation_id = %evaluation.id, status = ?status, "Updating evaluation status");
 
-    let webhook_status = status;
+    let event_status = status;
     let now = crate::types::now();
 
     let mut update = EEvaluation::update_many()
@@ -193,10 +194,10 @@ pub async fn update_evaluation_status(
             e
         });
 
-    let webhook_state = Arc::clone(&state);
-    let webhook_eval = updated_eval.clone();
+    let action_state = Arc::clone(&state);
+    let action_eval = updated_eval.clone();
     state.shutdown.spawn(async move {
-        crate::ci::fire_evaluation_webhook(webhook_state, webhook_eval, webhook_status).await;
+        dispatch_evaluation_event_for_status(&action_state, action_eval, event_status).await;
     });
 
     if let Some(ci_status) = crate::ci::ci_status_for_evaluation(&updated_eval.status) {
@@ -599,6 +600,89 @@ pub async fn find_active_leaders<C: ConnectionTrait>(
     }
 
     Ok(out)
+}
+
+async fn dispatch_build_event_for_status(
+    state: &Arc<ServerState>,
+    build: MBuild,
+    status: BuildStatus,
+) {
+    let event = match status {
+        BuildStatus::Queued => "build.queued",
+        BuildStatus::Building => "build.started",
+        BuildStatus::Completed => "build.completed",
+        BuildStatus::Failed => "build.failed",
+        BuildStatus::Substituted => "build.substituted",
+        BuildStatus::Created | BuildStatus::Aborted | BuildStatus::DependencyFailed => return,
+    };
+
+    let evaluation = match EEvaluation::find_by_id(build.evaluation)
+        .one(&state.worker_db)
+        .await
+    {
+        Ok(Some(e)) => e,
+        Ok(None) => {
+            warn!(evaluation_id = %build.evaluation, "Evaluation not found for action dispatch");
+            return;
+        }
+        Err(e) => {
+            error!(error = %e, evaluation_id = %build.evaluation, "DB error looking up evaluation for action dispatch");
+            return;
+        }
+    };
+
+    let project_id = match evaluation.project {
+        Some(id) => id,
+        None => return,
+    };
+
+    let derivation_path = EDerivation::find_by_id(build.derivation)
+        .one(&state.worker_db)
+        .await
+        .ok()
+        .flatten()
+        .map(|d| d.store_path());
+
+    let payload = serde_json::json!({
+        "build_id": build.id,
+        "evaluation_id": build.evaluation,
+        "derivation_path": derivation_path,
+        "status": event,
+    });
+
+    dispatch_build_event(state, project_id, event, payload).await;
+}
+
+async fn dispatch_evaluation_event_for_status(
+    state: &Arc<ServerState>,
+    evaluation: MEvaluation,
+    status: EvaluationStatus,
+) {
+    let event = match status {
+        EvaluationStatus::Queued => "evaluation.queued",
+        EvaluationStatus::Fetching
+        | EvaluationStatus::EvaluatingFlake
+        | EvaluationStatus::EvaluatingDerivation => "evaluation.started",
+        EvaluationStatus::Building => "evaluation.building",
+        EvaluationStatus::Waiting => "evaluation.waiting",
+        EvaluationStatus::Completed => "evaluation.completed",
+        EvaluationStatus::Failed => "evaluation.failed",
+        EvaluationStatus::Aborted => "evaluation.aborted",
+    };
+
+    let project_id = match evaluation.project {
+        Some(id) => id,
+        None => return,
+    };
+
+    let payload = serde_json::json!({
+        "evaluation_id": evaluation.id,
+        "project_id": evaluation.project,
+        "repository": evaluation.repository,
+        "status": event,
+    });
+
+    dispatch_evaluation_event(state, project_id, event, payload).await;
 }
 
 #[cfg(test)]

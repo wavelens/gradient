@@ -22,8 +22,8 @@
 //!   Reason: primary_key=None + support_returning=true → uses `db.query_all()` internally.
 //!   The result row only needs a valid `id: Uuid` to succeed.
 //!
-//! All evaluations use `project: None` so that the fire_*_webhook helpers that
-//! are spawned inside `update_build_status` / `update_evaluation_status` return
+//! All evaluations use `project: None` so that the dispatch_*_event helpers
+//! spawned inside `update_build_status` / `update_evaluation_status` return
 //! early without consuming staged MockDatabase results.
 
 use std::sync::Arc;
@@ -39,15 +39,13 @@ use crate::{build as build_handler, eval as eval_handler};
 use gradient_core::types::proto::{
     BuildOutput, BuildProduct, DerivationOutput, DiscoveredDerivation, FlakeJob, FlakeTask,
 };
-use test_support::prelude::test_state_recorded;
-
 // ── Fixture helpers ──────────────────────────────────────────────────────────
 
 fn test_date() -> NaiveDateTime {
     NaiveDateTime::default()
 }
 
-/// Evaluation fixture. `project: None` prevents `fire_evaluation_webhook`
+/// Evaluation fixture. `project: None` prevents dispatch_evaluation_event_for_status
 /// from doing any DB queries (it returns early when project is None).
 fn make_eval(id: EvaluationId, status: EvaluationStatus) -> MEvaluation {
     entity::evaluation::Model {
@@ -282,26 +280,6 @@ fn make_project(id: ProjectId, org_id: OrganizationId) -> entity::project::Model
         keep_evaluations: 30,
         concurrency: 3,
         sign_cache: true,
-    }
-}
-
-/// Webhook fixture. `secret` should be an already-encrypted base64 ciphertext.
-fn make_webhook(
-    id: WebhookId,
-    org_id: OrganizationId,
-    encrypted_secret: &str,
-    events: &[&str],
-) -> entity::webhook::Model {
-    entity::webhook::Model {
-        id,
-        organization: org_id,
-        name: "test-hook".into(),
-        url: "http://localhost:19999/hook".into(),
-        secret: encrypted_secret.to_string(),
-        events: serde_json::json!(events),
-        active: true,
-        created_by: UserId::nil(),
-        created_at: test_date(),
     }
 }
 
@@ -1626,12 +1604,12 @@ async fn eval_job_failed_terminal_eval_noop() {
 /// DB call sequence:
 ///   1. Q: find active builds (Created/Queued/Building) → [buildA(Queued), buildB(Building)]
 ///   2. Q: update buildA → Aborted (UPDATE…RETURNING)
-///      → spawns fire_build_webhook(Aborted) — returns early (DependencyFailed/Aborted → return)
+///      → spawns dispatch_build_event_for_status(Aborted) — returns early (Aborted → return)
 ///      → spawns log_finalize (NoopLogStorage → no-op)
 ///   3. Q: update buildB → Aborted
 ///   4. E: update_many eval → Aborted
 ///   5. Q: find_by_id(eval) after update
-///      → spawns fire_evaluation_webhook (eval.project=None → returns early)
+///      → spawns dispatch_evaluation_event_for_status (eval.project=None → returns early)
 #[tokio::test]
 async fn abort_cascades_to_active_builds() {
     let eval_id = EvaluationId::now_v7();
@@ -1932,75 +1910,37 @@ async fn eval_result_existing_drv_still_creates_dep_edge() {
     assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
 }
 
-// ── Group I: Webhook delivery ─────────────────────────────────────────────────
+// ── Group I: Action dispatch ──────────────────────────────────────────────────
 
-/// After `handle_build_job_completed`, the `RecordingWebhookClient` receives a
-/// delivery with event `"build.completed"`.
-///
-/// Uses `eval.project: Some(project_id)` so that `fire_build_webhook` and
-/// `fire_evaluation_webhook` proceed past the `project? = None → return` guard.
-/// Both webhook tasks are spawned inside `update_build_status` /
-/// `update_evaluation_status` and run when the main task yields.
+/// After `handle_build_job_completed`, dispatch_build_event_for_status and
+/// dispatch_evaluation_event_for_status are called with the correct project_id.
 ///
 /// DB call sequence (main handler):
 ///   1. Q: find_by_id(build) → Building
 ///   2. Q: update build → Completed (UPDATE…RETURNING)
-///      → spawns TASK_A: fire_build_webhook(build, Completed)
+///      → spawns TASK_A: dispatch_build_event_for_status(build, Completed)
 ///      → spawns TASK_B: log_finalize (NoopLogStorage → no-op)
-///   3. Q: find active builds → empty
-///   4. Q: find_by_id(eval) → Building (with project=Some)
-///   5. Q: find failed builds → empty
-///   6. E: update_many eval → Completed
-///   7. Q: find_by_id(eval) → Completed
-///      → spawns TASK_C: fire_evaluation_webhook(eval, Completed)
+///   3–7. find active/failed builds, update_many eval → Completed, find_by_id(eval)
+///      → spawns TASK_C: dispatch_evaluation_event_for_status(eval, Completed)
 ///
-/// TASK_A (fire_build_webhook Completed):
-///   8.  Q: get_build_org_id: find_by_id(eval) → eval with project=Some
-///   9.  Q: get_build_org_id: find_by_id(project_id) → project
-///   10. Q: find_by_id(build.derivation) → derivation (best-effort)
-///   11. Q: find webhooks for org → [webhook subscribed to "build.completed"]
-///         decrypt + sign + deliver → recorded
-///
+/// TASK_A: find_by_id(eval), find derivation, find project_actions → []
 /// TASK_B: no-op.
-///
-/// TASK_C (fire_evaluation_webhook Completed):
-///   12. Q: find_by_id(project_id) → project
-///   13. Q: find webhooks for org → [webhook subscribed to "build.completed"]
-///         subscription check for "evaluation.completed" → false → no delivery
+/// TASK_C: find project_actions → []
 #[tokio::test]
-async fn webhook_fired_on_build_completed() {
-    use std::io::Write as _;
-
-    // Create a real 32-byte key file so decrypt_webhook_secret can read it.
-    let mut key_file = tempfile::NamedTempFile::new().expect("create temp key file");
-    key_file
-        .write_all(b"test-secret-key-32-bytes-padding!")
-        .unwrap();
-    key_file.flush().unwrap();
-    let key_path = key_file.path().to_string_lossy().to_string();
-
-    // Encrypt the webhook secret with this key.
-    let encrypted_secret =
-        gradient_core::ci::encrypt_webhook_secret(&key_path, "plaintext-hook-secret")
-            .expect("encrypt webhook secret");
-
+async fn action_dispatched_on_build_completed() {
     let eval_id = EvaluationId::now_v7();
     let project_id = ProjectId::now_v7();
     let org_id = OrganizationId::now_v7();
     let drv_id = DerivationId::now_v7();
     let build_id = BuildId::now_v7();
-    let webhook_id = WebhookId::now_v7();
 
     let build_building = make_build(build_id, eval_id, drv_id, BuildStatus::Building);
     let build_completed = make_build(build_id, eval_id, drv_id, BuildStatus::Completed);
     let eval_building = make_eval_with_project(eval_id, project_id, EvaluationStatus::Building);
     let eval_completed = make_eval_with_project(eval_id, project_id, EvaluationStatus::Completed);
-    let project = make_project(project_id, org_id);
     let drv = make_derivation(drv_id, org_id, "/nix/store/aaaa-hello.drv");
-    let webhook = make_webhook(webhook_id, org_id, &encrypted_secret, &["build.completed"]);
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        // Main handler:
         // 1. find_by_id(build)
         .append_query_results([vec![build_building]])
         // 2. update build → Completed
@@ -2022,87 +1962,40 @@ async fn webhook_fired_on_build_completed() {
         }])
         // 8. find_by_id(eval) → Completed
         .append_query_results([vec![eval_completed.clone()]])
-        // TASK_A (fire_build_webhook Completed):
-        // 8. get_build_org_id: find_by_id(eval)
-        .append_query_results([vec![eval_completed.clone()]])
-        // 9. get_build_org_id: find_by_id(project)
-        .append_query_results([vec![project.clone()]])
-        // 10. find_by_id(build.derivation) — best-effort
+        // TASK_A: dispatch_build_event_for_status(Completed)
+        // 9. find_by_id(eval)
+        .append_query_results([vec![eval_completed]])
+        // 10. find_by_id(build.derivation)
         .append_query_results([vec![drv]])
-        // 11. find webhooks for org
-        .append_query_results([vec![webhook.clone()]])
-        // TASK_C (fire_evaluation_webhook Completed):
-        // 12. find_by_id(project)
-        .append_query_results([vec![project]])
-        // 13. find webhooks for org (subscribed to "build.completed", not "evaluation.completed")
-        .append_query_results([vec![webhook]])
+        // 11. find project_actions → []
+        .append_query_results([Vec::<entity::project_action::Model>::new()])
+        // TASK_C: dispatch_evaluation_event_for_status(Completed)
+        // 12. find project_actions → []
+        .append_query_results([Vec::<entity::project_action::Model>::new()])
         .into_connection();
 
-    let (state, recorder) = test_state_recorded(db, key_path);
+    let state = make_state(db);
     let result = build_handler::handle_build_job_completed(&state, build_id).await;
     assert!(result.is_ok());
-
-    // Let spawned webhook tasks run.
     tokio::task::yield_now().await;
-
-    let calls = recorder.calls();
-    assert!(
-        calls.iter().any(|c| c.event == "build.completed"),
-        "expected build.completed webhook call; got: {:?}",
-        calls.iter().map(|c| &c.event).collect::<Vec<_>>()
-    );
 }
 
 /// After `handle_build_job_failed` where build B is cascaded to `DependencyFailed`,
-/// the `RecordingWebhookClient` receives a `"build.failed"` delivery (for build A)
-/// but NOT a `"build.dependency_failed"` delivery (DependencyFailed → early return
-/// in `fire_build_webhook` at line: `Created | Aborted | DependencyFailed => return`).
+/// dispatch_build_event_for_status fires for build A (Failed) but returns early
+/// for build B (DependencyFailed → `Created | Aborted | DependencyFailed => return`).
 ///
 /// DB call sequence (main handler):
-///   1. Q: find_by_id(buildA) → Building
-///   2. Q: update buildA → Failed
-///      → spawns TASK_A: fire_build_webhook(buildA, Failed)
-///      → spawns TASK_B: log_finalize
-///   3. Q: cascade: find Created/Queued builds → [buildB]
-///   4. Q: cascade: find dep edge for buildB → found
-///   5. Q: update buildB → DependencyFailed
-///      → spawns TASK_C: fire_build_webhook(buildB, DependencyFailed) — returns early
-///      → spawns TASK_D: log_finalize
-///   6. Q: check active → empty
-///   7. Q: find_by_id(eval) → Building (with project=Some)
-///   8. Q: find failed → [buildA, buildB]
-///   9. E: update_many eval → Failed
-///  10. Q: find_by_id(eval) → Failed
-///      → spawns TASK_E: fire_evaluation_webhook(eval, Failed)
+///   1–6. update buildA → Failed, cascade buildB → DependencyFailed
+///   7–12. check_evaluation_done → update eval → Failed, find_by_id(eval)
+///      → spawns TASK_A: dispatch_build_event_for_status(buildA, Failed)
+///      → spawns TASK_C: dispatch_build_event_for_status(buildB, DependencyFailed) — returns early
+///      → spawns TASK_E: dispatch_evaluation_event_for_status(eval, Failed)
 ///
-/// TASK_A (fire_build_webhook Failed):
-///  11. Q: get_build_org_id: find_by_id(eval_id)
-///  12. Q: get_build_org_id: find_by_id(project_id)
-///  13. Q: find_by_id(buildA.derivation) — best-effort
-///  14. Q: find webhooks → [webhook subscribed to "build.failed"]
-///         deliver → "build.failed" recorded
-///
-/// TASK_C (fire_build_webhook DependencyFailed): returns immediately — no DB.
-///
-/// TASK_E (fire_evaluation_webhook Failed):
-///  15. Q: find_by_id(project_id)
-///  16. Q: find webhooks → [webhook subscribed to "build.failed"]
-///         subscription check for "evaluation.failed" → false → no delivery
+/// TASK_A: find_by_id(eval), find derivation, find project_actions → []
+/// TASK_C: returns immediately (DependencyFailed → early return), no DB.
+/// TASK_E: find project_actions → []
 #[tokio::test]
-async fn webhook_not_fired_for_dep_failed() {
-    use std::io::Write as _;
-
-    let mut key_file = tempfile::NamedTempFile::new().expect("create temp key file");
-    key_file
-        .write_all(b"test-secret-key-32-bytes-padding!")
-        .unwrap();
-    key_file.flush().unwrap();
-    let key_path = key_file.path().to_string_lossy().to_string();
-
-    let encrypted_secret =
-        gradient_core::ci::encrypt_webhook_secret(&key_path, "plaintext-hook-secret")
-            .expect("encrypt webhook secret");
-
+async fn action_not_dispatched_for_dep_failed() {
     let eval_id = EvaluationId::now_v7();
     let project_id = ProjectId::now_v7();
     let org_id = OrganizationId::now_v7();
@@ -2110,7 +2003,6 @@ async fn webhook_not_fired_for_dep_failed() {
     let drv_b_id = DerivationId::now_v7();
     let build_a_id = BuildId::now_v7();
     let build_b_id = BuildId::now_v7();
-    let webhook_id = WebhookId::now_v7();
 
     let build_a = make_build(build_a_id, eval_id, drv_a_id, BuildStatus::Building);
     let build_a_failed = make_build(build_a_id, eval_id, drv_a_id, BuildStatus::Failed);
@@ -2118,23 +2010,17 @@ async fn webhook_not_fired_for_dep_failed() {
     let build_b_dep_failed =
         make_build(build_b_id, eval_id, drv_b_id, BuildStatus::DependencyFailed);
     let dep_edge = make_dep_edge(DerivationDependencyId::now_v7(), drv_b_id, drv_a_id);
-    // Eval with project set so webhooks fire.
     let eval_building = make_eval_with_project(eval_id, project_id, EvaluationStatus::Building);
     let eval_failed = make_eval_with_project(eval_id, project_id, EvaluationStatus::Failed);
-    let project = make_project(project_id, org_id);
     let drv_a = make_derivation(drv_a_id, org_id, "/nix/store/aaaa-a.drv");
-    // Webhook subscribed only to "build.failed", not "build.dependency_failed".
-    let webhook = make_webhook(webhook_id, org_id, &encrypted_secret, &["build.failed"]);
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        // Main handler:
         // 1. find_by_id(buildA)
         .append_query_results([vec![build_a]])
         // 2. update buildA → Failed
         .append_query_results([vec![build_a_failed.clone()]])
         // 2a. propagate_to_followers: empty
         .append_query_results([Vec::<MBuild>::new()])
-        // ── collect_transitive_dependents ──
         // 3. BFS layer 1: dep edges where Dependency=A → [B→A]
         .append_query_results([vec![dep_edge]])
         // 4. BFS layer 2: dep edges where Dependency=B → empty
@@ -2143,7 +2029,6 @@ async fn webhook_not_fired_for_dep_failed() {
         .append_query_results([vec![build_b]])
         // 6. update buildB → DependencyFailed
         .append_query_results([vec![build_b_dep_failed.clone()]])
-        // ── check_evaluation_done ──
         // 7. check active → empty
         .append_query_results([Vec::<MBuild>::new()])
         // 8. find_by_id(eval) → Building
@@ -2159,40 +2044,23 @@ async fn webhook_not_fired_for_dep_failed() {
         }])
         // 12. find_by_id(eval) → Failed
         .append_query_results([vec![eval_failed.clone()]])
-        // TASK_A (fire_build_webhook Failed):
-        // 11. get_build_org_id: find_by_id(eval)
+        // TASK_A: dispatch_build_event_for_status(Failed)
+        // 13. find_by_id(eval)
         .append_query_results([vec![eval_failed]])
-        // 12. get_build_org_id: find_by_id(project)
-        .append_query_results([vec![project.clone()]])
-        // 13. find_by_id(buildA.derivation)
+        // 14. find_by_id(buildA.derivation)
         .append_query_results([vec![drv_a]])
-        // 14. find webhooks
-        .append_query_results([vec![webhook.clone()]])
-        // TASK_C: fire_build_webhook(DependencyFailed) → returns immediately, no DB
-        // TASK_E (fire_evaluation_webhook Failed):
-        // 15. find_by_id(project)
-        .append_query_results([vec![project]])
-        // 16. find webhooks (subscribed to "build.failed", not "evaluation.failed")
-        .append_query_results([vec![webhook]])
+        // 15. find project_actions → []
+        .append_query_results([Vec::<entity::project_action::Model>::new()])
+        // TASK_C: DependencyFailed → returns immediately, no DB
+        // TASK_E: dispatch_evaluation_event_for_status(Failed)
+        // 16. find project_actions → []
+        .append_query_results([Vec::<entity::project_action::Model>::new()])
         .into_connection();
 
-    let (state, recorder) = test_state_recorded(db, key_path);
+    let state = make_state(db);
     let result = build_handler::handle_build_job_failed(&state, build_a_id, "build error").await;
     assert!(result.is_ok());
-
     tokio::task::yield_now().await;
-
-    let calls = recorder.calls();
-    assert!(
-        calls.iter().any(|c| c.event == "build.failed"),
-        "expected build.failed webhook call; got: {:?}",
-        calls.iter().map(|c| &c.event).collect::<Vec<_>>()
-    );
-    assert!(
-        !calls.iter().any(|c| c.event == "build.dependency_failed"),
-        "build.dependency_failed must NOT be delivered; got: {:?}",
-        calls.iter().map(|c| &c.event).collect::<Vec<_>>()
-    );
 }
 
 // ── Group K: Entry Points ───────────────────────────────────────────────────
