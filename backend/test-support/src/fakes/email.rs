@@ -6,7 +6,7 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use gradient_core::storage::EmailSender;
+use gradient_core::storage::{EmailSender, MailDeliveryResult};
 use std::sync::Mutex;
 
 #[derive(Debug, Clone)]
@@ -22,6 +22,11 @@ pub enum SentEmail {
         to_name: String,
         token: String,
         base_url: String,
+    },
+    ActionMail {
+        to: Vec<String>,
+        subject: String,
+        body: String,
     },
 }
 
@@ -88,5 +93,22 @@ impl EmailSender for InMemoryEmailSender {
             base_url: base_url.to_string(),
         });
         Ok(())
+    }
+
+    async fn send_action_mail(
+        &self,
+        to: &[String],
+        subject: &str,
+        body: &str,
+    ) -> Result<MailDeliveryResult> {
+        self.sent.lock().unwrap().push(SentEmail::ActionMail {
+            to: to.to_vec(),
+            subject: subject.to_string(),
+            body: body.to_string(),
+        });
+        Ok(MailDeliveryResult {
+            status_code: 250,
+            server_response: "Ok".to_string(),
+        })
     }
 }

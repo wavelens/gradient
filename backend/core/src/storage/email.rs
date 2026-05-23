@@ -34,6 +34,19 @@ pub trait EmailSender: Send + Sync + std::fmt::Debug + 'static {
         reset_token: &str,
         base_url: &str,
     ) -> Result<()>;
+
+    async fn send_action_mail(
+        &self,
+        to: &[String],
+        subject: &str,
+        body: &str,
+    ) -> Result<MailDeliveryResult>;
+}
+
+#[derive(Clone, Debug)]
+pub struct MailDeliveryResult {
+    pub status_code: i32,
+    pub server_response: String,
 }
 
 #[derive(Debug)]
@@ -258,6 +271,37 @@ impl EmailSender for EmailService {
 
         info!(to = to_email, "Password reset email sent");
         Ok(())
+    }
+
+    async fn send_action_mail(
+        &self,
+        to: &[String],
+        subject: &str,
+        body: &str,
+    ) -> Result<MailDeliveryResult> {
+        if !self.enabled || self.transport.is_none() {
+            bail!("SMTP is not configured on this server");
+        }
+        if to.is_empty() {
+            bail!("send_action_mail: no recipients");
+        }
+        let transport = self.transport.as_ref().unwrap();
+        let from = format!("{} <{}>", self.from_name, self.from_address);
+        let mut builder = Message::builder()
+            .from(from.parse().context("invalid from address")?)
+            .subject(subject);
+        for addr in to {
+            builder = builder.to(addr.parse().context("invalid recipient")?);
+        }
+        let msg = builder
+            .header(ContentType::TEXT_PLAIN)
+            .body(body.to_string())
+            .context("building email message")?;
+        let response = transport.send(&msg).context("smtp send")?;
+        Ok(MailDeliveryResult {
+            status_code: u16::from(response.code()) as i32,
+            server_response: response.message().collect::<Vec<_>>().join(" "),
+        })
     }
 }
 
