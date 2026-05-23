@@ -1,0 +1,141 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<p-dialog
+  [header]="mode() === 'create' ? 'New Action' : 'Edit Action'"
+  [visible]="visible()"
+  (visibleChange)="onVisibleChange($event)"
+  [modal]="true"
+  [style]="{ width: '560px' }"
+  [draggable]="false"
+  [resizable]="false"
+>
+  <div class="form-group">
+    <label for="action-name">Name</label>
+    <input pInputText id="action-name" [ngModel]="name()" (ngModelChange)="name.set($event)" class="w-full" />
+  </div>
+
+  <div class="form-group">
+    <label>Type</label>
+    <div class="radio-row">
+      @for (opt of typeOptions(); track opt.value) {
+        <label class="radio-option">
+          <input
+            type="radio"
+            name="action-type"
+            [value]="opt.value"
+            [checked]="type() === opt.value"
+            [disabled]="typeRadioDisabled()"
+            (change)="onTypeChange(opt.value)"
+          />
+          {{ opt.label }}
+        </label>
+      }
+    </div>
+    @if (typeRadioDisabled()) {
+      <small class="text-secondary">Action type cannot be changed after creation.</small>
+    }
+  </div>
+
+  @if (type() === 'send_mail') {
+    <div class="form-group">
+      <label for="action-recipients">Recipients</label>
+      <input
+        pInputText
+        id="action-recipients"
+        [ngModel]="recipientsRaw()"
+        (ngModelChange)="recipientsRaw.set($event)"
+        placeholder="alice@example.com, ops@example.com"
+        class="w-full"
+      />
+      <small class="text-secondary">Comma-separated email addresses.</small>
+    </div>
+    <div class="form-group">
+      <label for="action-subject">Subject Template (optional)</label>
+      <input
+        pInputText
+        id="action-subject"
+        [ngModel]="subjectTemplate()"
+        (ngModelChange)="subjectTemplate.set($event)"
+        placeholder="[Gradient] {{ '{{event}}' }}"
+        class="w-full"
+      />
+    </div>
+  }
+
+  @if (type() === 'send_web_request') {
+    <div class="form-group">
+      <label for="action-url">URL</label>
+      <input
+        pInputText
+        id="action-url"
+        [ngModel]="url()"
+        (ngModelChange)="url.set($event)"
+        placeholder="https://example.com/hook"
+        class="w-full"
+      />
+    </div>
+    <div class="form-group">
+      <label for="action-token">Token</label>
+      <div class="token-row">
+        <input
+          pInputText
+          id="action-token"
+          [ngModel]="tokenValue()"
+          (ngModelChange)="tokenValue.set($event)"
+          [placeholder]="mode() === 'edit' ? 'Leave blank to keep existing token' : ''"
+          class="w-full"
+        />
+        <button pButton type="button" label="Generate" severity="secondary" (click)="generateToken()"></button>
+      </div>
+      <small class="text-secondary">
+        @if (mode() === 'edit') {
+          Leave blank to keep existing token; enter to replace.
+        } @else {
+          Sent as <code>Authorization: Bearer &lt;token&gt;</code>. Shown once after creation.
+        }
+      </small>
+    </div>
+  }
+
+  @if (type() === 'forge_status_report') {
+    <div class="form-group">
+      <label for="action-integration">Outbound Integration</label>
+      <p-select
+        inputId="action-integration"
+        [ngModel]="integrationId()"
+        (ngModelChange)="integrationId.set($event)"
+        [options]="integrationOptions()"
+        optionLabel="label"
+        optionValue="value"
+        styleClass="w-full"
+      />
+    </div>
+  }
+
+  <div class="form-group">
+    <label>Events</label>
+    @if (type() === 'forge_status_report') {
+      <app-action-events [selected]="displayedEvents()" [disabled]="true" />
+      <small class="text-secondary">Events are fixed for forge status reports.</small>
+    } @else {
+      <app-action-events
+        [selected]="events()"
+        (selectedChange)="events.set($event)"
+      />
+    }
+  </div>
+
+  <div class="form-group checkbox-group">
+    <p-checkbox inputId="action-active" [ngModel]="active()" (ngModelChange)="active.set($event)" [binary]="true" />
+    <label for="action-active">Active</label>
+  </div>
+
+  <ng-template pTemplate="footer">
+    <button pButton label="Cancel" severity="secondary" (click)="onCancel()"></button>
+    <button pButton [label]="mode() === 'create' ? 'Create' : 'Save'" icon="pi pi-check" (click)="onSubmit()"></button>
+  </ng-template>
+</p-dialog>
