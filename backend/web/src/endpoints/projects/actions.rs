@@ -10,7 +10,7 @@
 use crate::access::{Caller, ProjectAccess, load_project};
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
-use crate::helpers::ok_json;
+use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::Permission;
 use axum::extract::{Path, State};
 use axum::{Extension, Json, Router};
@@ -287,32 +287,208 @@ pub async fn create_action(
     }))
 }
 
+#[derive(Deserialize, Debug)]
+pub struct UpdateActionRequest {
+    pub name: Option<String>,
+    pub config: Option<ActionConfig>,
+    pub events: Option<Vec<String>>,
+    pub active: Option<bool>,
+}
+
 pub async fn read_action(
-    _state: State<Arc<ServerState>>,
-    Extension(_user): Extension<MUser>,
-    Extension(_api_key): Extension<MaybeApiKey>,
-    Path((_organization, _project, _id)): Path<(String, String, ProjectActionId)>,
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
+    Path((organization, project, id)): Path<(String, String, ProjectActionId)>,
 ) -> WebResult<Json<BaseResponse<ActionResponse>>> {
-    Err(WebError::internal("not implemented"))
+    let (_org, proj) = load_project(
+        &state,
+        Caller::User(&user),
+        api_key.as_ref(),
+        organization,
+        project,
+        ProjectAccess::Member,
+    )
+    .await?;
+
+    let row = EProjectAction::find()
+        .filter(CProjectAction::Id.eq(id))
+        .filter(CProjectAction::Project.eq(proj.id))
+        .one(&state.web_db)
+        .await?
+        .or_not_found("Action")?;
+
+    Ok(ok_json(to_response(row)))
 }
 
 pub async fn update_action(
-    _state: State<Arc<ServerState>>,
-    Extension(_user): Extension<MUser>,
-    Extension(_api_key): Extension<MaybeApiKey>,
-    Path((_organization, _project, _id)): Path<(String, String, ProjectActionId)>,
-    Json(_body): Json<serde_json::Value>,
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
+    Path((organization, project, id)): Path<(String, String, ProjectActionId)>,
+    Json(body): Json<UpdateActionRequest>,
 ) -> WebResult<Json<BaseResponse<ActionResponse>>> {
-    Err(WebError::internal("not implemented"))
+    let (org, proj) = load_project(
+        &state,
+        Caller::User(&user),
+        api_key.as_ref(),
+        organization,
+        project,
+        ProjectAccess::Require {
+            permission: Permission::EditProject,
+            reject_managed: false,
+        },
+    )
+    .await?;
+
+    let row = EProjectAction::find()
+        .filter(CProjectAction::Id.eq(id))
+        .filter(CProjectAction::Project.eq(proj.id))
+        .one(&state.web_db)
+        .await?
+        .or_not_found("Action")?;
+
+    let existing_type = ActionType::from_i16(row.action_type).unwrap_or(ActionType::SendMail);
+
+    if let Some(ref new_cfg) = body.config {
+        if new_cfg.action_type() != existing_type {
+            return Err(WebError::unprocessable_entity("action_type cannot be changed"));
+        }
+        match new_cfg {
+            ActionConfig::SendMail { recipients, .. } if recipients.is_empty() => {
+                return Err(WebError::unprocessable_entity(
+                    "send_mail requires at least one recipient",
+                ));
+            }
+            ActionConfig::SendWebRequest { url, .. } => {
+                if let Err(e) = validate_webhook_url(url) {
+                    return Err(WebError::unprocessable_entity(e));
+                }
+            }
+            ActionConfig::ForgeStatusReport { integration_id } => {
+                let integration = EIntegration::find()
+                    .filter(CIntegration::Id.eq(*integration_id))
+                    .filter(CIntegration::Organization.eq(org.id))
+                    .one(&state.web_db)
+                    .await?;
+                match integration {
+                    Some(r) if r.kind == i16::from(IntegrationKind::Outbound) => {}
+                    Some(_) => {
+                        return Err(WebError::unprocessable_entity(
+                            "integration is not an outbound integration",
+                        ));
+                    }
+                    None => {
+                        return Err(WebError::unprocessable_entity(
+                            "outbound integration not found",
+                        ));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if let Some(ref evs) = body.events
+        && existing_type == ActionType::ForgeStatusReport
+        && !evs.is_empty()
+    {
+        return Err(WebError::unprocessable_entity(
+            "forge_status_report actions cannot carry custom events",
+        ));
+    }
+
+    let mut active: AProjectAction = row.into();
+
+    if let Some(new_cfg) = body.config {
+        // For send_web_request, token: None means preserve the existing encrypted token.
+        let stored_cfg = match new_cfg {
+            ActionConfig::SendWebRequest { url, token: None } => {
+                let existing_config: ActionConfig = serde_json::from_value(
+                    active.config.as_ref().clone(),
+                )
+                .map_err(|e| WebError::internal(e.to_string()))?;
+                let existing_token = if let ActionConfig::SendWebRequest { token, .. } = existing_config {
+                    token
+                } else {
+                    None
+                };
+                ActionConfig::SendWebRequest { url, token: existing_token }
+            }
+            ActionConfig::SendWebRequest {
+                url,
+                token: Some(plaintext),
+            } => {
+                let key = load_secret_bytes(&state.config.secrets.crypt_secret_file)
+                    .map_err(|e| WebError::internal(e.to_string()))?;
+                let encrypted = encrypt_action_secret(&plaintext, key.expose())
+                    .map_err(|e| WebError::internal(e.to_string()))?;
+                ActionConfig::SendWebRequest {
+                    url,
+                    token: Some(encrypted),
+                }
+            }
+            other => other,
+        };
+        active.config = Set(serde_json::to_value(&stored_cfg)
+            .map_err(|e| WebError::internal(e.to_string()))?);
+    }
+
+    if let Some(name) = body.name {
+        active.name = Set(name);
+    }
+    if let Some(evs) = body.events {
+        active.events = Set(serde_json::to_value(&evs)
+            .map_err(|e| WebError::internal(e.to_string()))?);
+    }
+    if let Some(a) = body.active {
+        active.active = Set(a);
+    }
+    active.updated_at = Set(Utc::now().naive_utc());
+
+    let updated = active
+        .update(&state.web_db)
+        .await
+        .map_err(|e| WebError::from_db_err(e, "Action"))?;
+
+    Ok(ok_json(to_response(updated)))
+}
+
+#[derive(Serialize, Debug)]
+pub struct DeletedResponse {
+    deleted: bool,
 }
 
 pub async fn delete_action(
-    _state: State<Arc<ServerState>>,
-    Extension(_user): Extension<MUser>,
-    Extension(_api_key): Extension<MaybeApiKey>,
-    Path((_organization, _project, _id)): Path<(String, String, ProjectActionId)>,
-) -> WebResult<Json<BaseResponse<serde_json::Value>>> {
-    Err(WebError::internal("not implemented"))
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
+    Path((organization, project, id)): Path<(String, String, ProjectActionId)>,
+) -> WebResult<Json<BaseResponse<DeletedResponse>>> {
+    let (_org, proj) = load_project(
+        &state,
+        Caller::User(&user),
+        api_key.as_ref(),
+        organization,
+        project,
+        ProjectAccess::Require {
+            permission: Permission::EditProject,
+            reject_managed: false,
+        },
+    )
+    .await?;
+
+    let row = EProjectAction::find()
+        .filter(CProjectAction::Id.eq(id))
+        .filter(CProjectAction::Project.eq(proj.id))
+        .one(&state.web_db)
+        .await?
+        .or_not_found("Action")?;
+
+    let active: AProjectAction = row.into();
+    active.delete(&state.web_db).await?;
+
+    Ok(ok_json(DeletedResponse { deleted: true }))
 }
 
 pub async fn test_action(

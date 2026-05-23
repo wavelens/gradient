@@ -384,7 +384,111 @@ fn create_forge_status_report_rejects_nonempty_events() {
 }
 
 #[test]
-#[ignore = "implemented in Task 10"]
 fn read_action_strips_token_from_config() {
-    unimplemented!()
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let session_id = SessionId::now_v7();
+        let token = make_token(session_id);
+
+        let db = with_project_member(with_auth(
+            MockDatabase::new(DatabaseBackend::Postgres),
+            session_id,
+        ))
+        .append_query_results([vec![web_request_action_row()]]);
+
+        let server = make_test_server_with(db.into_connection(), None);
+        let url = format!("{}/{}", BASE_URL, action_id());
+        let res = server
+            .get(&url)
+            .add_header("authorization", format!("Bearer {}", token))
+            .await;
+
+        res.assert_status_ok();
+        let body: Value = res.json();
+        assert_eq!(body["error"], false);
+        assert!(
+            body["message"]["config"].get("token").is_none(),
+            "token must be stripped from read response: {}",
+            body["message"]["config"]
+        );
+        assert_eq!(body["message"]["action_type"], "send_web_request");
+    });
+}
+
+#[test]
+fn update_rejects_action_type_change() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let session_id = SessionId::now_v7();
+        let token = make_token(session_id);
+
+        // Existing row is send_mail (action_type = 0); PATCH with send_web_request config.
+        let db = with_project_edit(with_auth(
+            MockDatabase::new(DatabaseBackend::Postgres),
+            session_id,
+        ))
+        .append_query_results([vec![send_mail_action_row()]]);
+
+        let server = make_test_server_with(db.into_connection(), None);
+        let url = format!("{}/{}", BASE_URL, action_id());
+        let res = server
+            .patch(&url)
+            .add_header("authorization", format!("Bearer {}", token))
+            .json(&json!({
+                "config": {
+                    "type": "send_web_request",
+                    "url": "https://example.com/hook",
+                },
+            }))
+            .await;
+
+        res.assert_status(axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+        let body: Value = res.json();
+        assert_eq!(body["error"], true);
+        assert!(
+            body["message"].as_str().unwrap().contains("action_type"),
+            "expected action_type mention, got: {}",
+            body["message"]
+        );
+    });
+}
+
+#[test]
+#[ignore = "needs end-to-end harness: MockDatabase prescribes query expectations, making it impractical to verify encrypted token preservation via raw row read after update"]
+fn update_send_web_request_without_token_preserves_existing() {}
+
+#[test]
+fn delete_returns_404_when_unknown() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let session_id = SessionId::now_v7();
+        let token = make_token(session_id);
+
+        let db = with_project_edit(with_auth(
+            MockDatabase::new(DatabaseBackend::Postgres),
+            session_id,
+        ))
+        .append_query_results([Vec::<project_action::Model>::new()]);
+
+        let server = make_test_server_with(db.into_connection(), None);
+        let unknown_id = ProjectActionId::now_v7();
+        let url = format!("{}/{}", BASE_URL, unknown_id);
+        let res = server
+            .delete(&url)
+            .add_header("authorization", format!("Bearer {}", token))
+            .await;
+
+        res.assert_status(axum::http::StatusCode::NOT_FOUND);
+        let body: Value = res.json();
+        assert_eq!(body["error"], true);
+    });
 }
