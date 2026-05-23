@@ -1,0 +1,122 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+//! Integration tests for `core::ci::actions`.
+//!
+//! The `core` crate name shadows stdlib `::core`, which breaks `#[tokio::test]`
+//! macro expansion. We use sync `#[test]` + `tokio::runtime::Builder::block_on`
+//! for any async assertion — same pattern as `tests/nar_extract.rs`.
+
+extern crate core as gradient_core;
+
+use gradient_core::ci::actions::{
+    FORGE_STATUS_EVENTS, forge_status_for_event, forge_status_payload, matches_event,
+};
+use gradient_core::ci::reporter::CiStatus;
+use gradient_core::types::{ActionType, MProjectAction, ProjectActionId, ProjectId, UserId};
+use serde_json::json;
+use uuid::Uuid;
+
+fn action_with(action_type: ActionType, events: serde_json::Value) -> MProjectAction {
+    MProjectAction {
+        id: ProjectActionId::now_v7(),
+        project: ProjectId::new(Uuid::nil()),
+        name: "test".into(),
+        action_type: action_type.to_i16(),
+        config: json!({}),
+        events,
+        active: true,
+        last_fired_at: None,
+        created_by: UserId::new(Uuid::nil()),
+        created_at: chrono::Utc::now().naive_utc(),
+        updated_at: chrono::Utc::now().naive_utc(),
+    }
+}
+
+#[test]
+fn matches_event_send_mail_filters_by_events() {
+    let action = action_with(
+        ActionType::SendMail,
+        json!(["build.completed", "build.failed"]),
+    );
+    assert!(matches_event(&action, "build.completed"));
+    assert!(matches_event(&action, "build.failed"));
+    assert!(!matches_event(&action, "build.started"));
+    assert!(!matches_event(&action, "evaluation.completed"));
+}
+
+#[test]
+fn matches_event_send_web_request_filters_by_events() {
+    let action = action_with(ActionType::SendWebRequest, json!(["evaluation.completed"]));
+    assert!(matches_event(&action, "evaluation.completed"));
+    assert!(!matches_event(&action, "build.completed"));
+}
+
+#[test]
+fn matches_event_forge_status_report_ignores_stored_events() {
+    let action = action_with(ActionType::ForgeStatusReport, json!(["build.queued"]));
+    for ev in FORGE_STATUS_EVENTS {
+        assert!(
+            matches_event(&action, ev),
+            "forge-status should always match '{}'",
+            ev
+        );
+    }
+    assert!(!matches_event(&action, "build.queued"));
+    assert!(!matches_event(&action, "evaluation.completed"));
+}
+
+#[test]
+fn forge_status_mapping_complete() {
+    assert!(matches!(
+        forge_status_for_event("build.started"),
+        Some(CiStatus::Running)
+    ));
+    assert!(matches!(
+        forge_status_for_event("build.completed"),
+        Some(CiStatus::Success)
+    ));
+    assert!(matches!(
+        forge_status_for_event("build.failed"),
+        Some(CiStatus::Failure)
+    ));
+    assert!(forge_status_for_event("evaluation.queued").is_none());
+}
+
+#[test]
+fn forge_status_payload_round_trip_required_fields() {
+    let p = forge_status_payload("acme", "widgets", "deadbeef", "ctx", None, None, None);
+    assert_eq!(p["owner"], "acme");
+    assert_eq!(p["repo"], "widgets");
+    assert_eq!(p["sha"], "deadbeef");
+    assert_eq!(p["context"], "ctx");
+    assert!(p.get("description").is_none());
+    assert!(p.get("details_url").is_none());
+    assert!(p.get("check_run_id").is_none());
+}
+
+#[test]
+fn forge_status_payload_carries_optional_fields() {
+    let p = forge_status_payload(
+        "o",
+        "r",
+        "s",
+        "c",
+        Some("desc"),
+        Some("https://example.com/log"),
+        Some(7),
+    );
+    assert_eq!(p["description"], "desc");
+    assert_eq!(p["details_url"], "https://example.com/log");
+    assert_eq!(p["check_run_id"], 7);
+}
+
+// Full DB-backed executor flows (send_mail, send_web_request, delivery row on
+// failure) are covered in CI's end-to-end suite once Task 8 wires emitters
+// through the dispatcher. They are out of scope for this unit-level harness
+// because they need a populated mock query sequence for action lookup,
+// delivery insert, and last_fired_at update — five chained `MockDatabase`
+// expectations per case.
