@@ -107,6 +107,8 @@ mod m20260519_000004_drop_direct_build;
 mod m20260521_000000_tag_waiting_reason_kind;
 mod m20260522_000000_cached_path_signature_fetch_stats;
 mod m20260522_000001_create_flake_input_override;
+mod m20260524_000000_create_table_project_action;
+mod m20260524_000001_create_table_project_action_delivery;
 
 pub struct Migrator;
 
@@ -215,6 +217,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20260521_000000_tag_waiting_reason_kind::Migration),
             Box::new(m20260522_000000_cached_path_signature_fetch_stats::Migration),
             Box::new(m20260522_000001_create_flake_input_override::Migration),
+            Box::new(m20260524_000000_create_table_project_action::Migration),
+            Box::new(m20260524_000001_create_table_project_action_delivery::Migration),
         ]
     }
 }
