@@ -68,6 +68,7 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
         cli.storage.state_file.as_deref(),
         &cli.secrets.crypt_secret_file,
         cli.storage.delete_state,
+        cli.email.email_enabled,
     )
     .await
     {
