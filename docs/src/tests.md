@@ -2279,6 +2279,13 @@ against a `MockDatabase` via `test-support` fixtures.
 - `narinfo_json_returns_object_with_pascal_case_keys` — `?json` on `.narinfo` returns `StorePath`, `URL`, `NarHash`.
 - `private_cache_requires_auth` — unauthenticated requests to a private cache return `401` on `nix-cache-info`, `gradient-cache-info`, and `.narinfo`.
 
+### `/nars` cache NAR list (`cache_nar_list.rs`)
+
+- `list_empty_cache_returns_empty_items` — empty cache returns `total = 0` and `items = []`.
+- `list_returns_signed_nar_for_cache` — regression for "missing build outputs": a `cached_path_signature` row whose FK resolves MUST appear in the listing. Locks in the SQL JOIN's behaviour so future refactors cannot regress to silently dropping rows that narinfo would still serve.
+- `list_private_cache_anon_returns_not_found` — anonymous access to a private cache's listing returns `404`.
+- `list_accepts_pagination_query_params` — `page`/`per_page`/`sort`/`order` query params are accepted.
+
 ### `/ls/{hash}` NAR tree listing (`cache_narlist.rs`)
 
 - `ls_returns_v1_tree_with_null_offsets` — returns `{ version: 1, root: { type: "directory", entries: { bin: { entries: { hello: { type: "regular", size: 2, narOffset: null } } } } } }`.

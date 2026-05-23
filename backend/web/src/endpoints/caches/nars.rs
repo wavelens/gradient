@@ -19,7 +19,7 @@ use axum::response::IntoResponse;
 use chrono::NaiveDateTime;
 use gradient_core::db::get_any_cache_by_name;
 use gradient_core::types::*;
-use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder};
+use sea_orm::{ColumnTrait, EntityTrait, FromQueryResult, QueryFilter};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -37,7 +37,7 @@ pub struct ListQuery {
     pub per_page: Option<u64>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, FromQueryResult)]
 pub struct NarSummary {
     pub hash: String,
     pub store_path: String,
@@ -114,98 +114,83 @@ pub async fn list(
     Path(cache_name): Path<String>,
     Query(q): Query<ListQuery>,
 ) -> WebResult<Json<BaseResponse<NarListResponse>>> {
+    use sea_orm::{DatabaseBackend, Statement};
+
     let cache = resolve_visible_cache(&state, &maybe_user, cache_name).await?;
     let per_page = q.per_page.unwrap_or(DEFAULT_PER_PAGE).clamp(1, MAX_PER_PAGE);
     let page = q.page.unwrap_or(1).max(1);
-
-    let mut paths_query = ECachedPath::find();
-    if let Some(prefix) = q.hash.as_deref().filter(|s| !s.is_empty()) {
-        paths_query = paths_query.filter(CCachedPath::Hash.starts_with(prefix));
-    }
-    if let Some(needle) = q.package.as_deref().filter(|s| !s.is_empty()) {
-        paths_query = paths_query.filter(CCachedPath::Package.contains(needle));
-    }
-
-    let has_filter = q.hash.as_deref().is_some_and(|s| !s.is_empty())
-        || q.package.as_deref().is_some_and(|s| !s.is_empty());
-
-    let mut sig_query =
-        ECachedPathSignature::find().filter(CCachedPathSignature::Cache.eq(cache.id));
-
-    if has_filter {
-        let matching_paths: Vec<CachedPathId> = paths_query
-            .all(&state.web_db)
-            .await?
-            .into_iter()
-            .map(|p| p.id)
-            .collect();
-        if matching_paths.is_empty() {
-            return Ok(ok_json(NarListResponse {
-                items: Vec::new(),
-                total: 0,
-                page,
-                per_page,
-            }));
-        }
-        sig_query = sig_query.filter(CCachedPathSignature::CachedPath.is_in(matching_paths));
-    }
+    let offset = (page - 1) * per_page;
 
     let ascending = matches!(q.order.as_deref(), Some("asc"));
-    sig_query = match q.sort.as_deref().unwrap_or("created_at") {
-        "last_fetched_at" => {
-            if ascending {
-                sig_query.order_by_asc(CCachedPathSignature::LastFetchedAt)
-            } else {
-                sig_query.order_by_desc(CCachedPathSignature::LastFetchedAt)
-            }
-        }
-        _ => sig_query,
+    let order_dir = if ascending { "ASC" } else { "DESC" };
+    let sort_col = match q.sort.as_deref().unwrap_or("created_at") {
+        "nar_size" => "cp.nar_size",
+        "last_fetched_at" => "cps.last_fetched_at",
+        _ => "cp.created_at",
     };
 
-    let paginator = sig_query.paginate(&state.web_db, per_page);
-    let total = paginator.num_items().await?;
-    let signatures = paginator.fetch_page(page - 1).await?;
+    let mut where_clauses = vec!["cps.cache = $1".to_string()];
+    let mut values: Vec<sea_orm::Value> = vec![sea_orm::Value::Uuid(Some(Box::new(
+        cache.id.into_inner(),
+    )))];
 
-    let cp_ids: Vec<CachedPathId> = signatures.iter().map(|s| s.cached_path).collect();
-    let paths = if cp_ids.is_empty() {
-        Vec::new()
-    } else {
-        ECachedPath::find()
-            .filter(CCachedPath::Id.is_in(cp_ids))
-            .all(&state.web_db)
-            .await?
-    };
-    let by_id: std::collections::HashMap<CachedPathId, MCachedPath> =
-        paths.into_iter().map(|p| (p.id, p)).collect();
-
-    let mut items: Vec<NarSummary> = signatures
-        .iter()
-        .filter_map(|sig| {
-            by_id.get(&sig.cached_path).map(|p| NarSummary {
-                hash: p.hash.clone(),
-                store_path: p.store_path.clone(),
-                package: p.package.clone(),
-                nar_size: p.nar_size,
-                file_size: p.file_size,
-                created_at: p.created_at,
-                last_fetched_at: sig.last_fetched_at,
-            })
-        })
-        .collect();
-
-    match q.sort.as_deref().unwrap_or("created_at") {
-        "nar_size" => items.sort_by_key(|s| s.nar_size.unwrap_or(0)),
-        "created_at" => items.sort_by_key(|s| s.created_at),
-        _ => {}
+    if let Some(prefix) = q.hash.as_deref().filter(|s| !s.is_empty()) {
+        let n = values.len() + 1;
+        where_clauses.push(format!("cp.hash LIKE ${n}"));
+        values.push(sea_orm::Value::String(Some(Box::new(format!("{prefix}%")))));
     }
-    if !ascending
-        && matches!(
-            q.sort.as_deref().unwrap_or("created_at"),
-            "nar_size" | "created_at"
-        )
-    {
-        items.reverse();
+    if let Some(needle) = q.package.as_deref().filter(|s| !s.is_empty()) {
+        let n = values.len() + 1;
+        where_clauses.push(format!("cp.package LIKE ${n}"));
+        values.push(sea_orm::Value::String(Some(Box::new(format!("%{needle}%")))));
     }
+    let where_sql = where_clauses.join(" AND ");
+
+    #[derive(FromQueryResult)]
+    struct CountRow {
+        total: i64,
+    }
+
+    let count_sql = format!(
+        "SELECT COUNT(*) AS total \
+         FROM cached_path_signature cps \
+         JOIN cached_path cp ON cp.id = cps.cached_path \
+         WHERE {where_sql}"
+    );
+    let total = CountRow::find_by_statement(Statement::from_sql_and_values(
+        DatabaseBackend::Postgres,
+        &count_sql,
+        values.clone(),
+    ))
+    .one(&state.web_db)
+    .await?
+    .map(|r| r.total.max(0) as u64)
+    .unwrap_or(0);
+
+    // `NULLS LAST` keeps unsigned/never-fetched rows from monopolising the
+    // first page on `DESC` sorts; `cp.id` is the stable tie-breaker so
+    // separate page fetches return disjoint sets.
+    let limit_idx = values.len() + 1;
+    let offset_idx = values.len() + 2;
+    let select_sql = format!(
+        "SELECT cp.hash, cp.store_path, cp.package, cp.nar_size, cp.file_size, \
+                cp.created_at, cps.last_fetched_at \
+         FROM cached_path_signature cps \
+         JOIN cached_path cp ON cp.id = cps.cached_path \
+         WHERE {where_sql} \
+         ORDER BY {sort_col} {order_dir} NULLS LAST, cp.id ASC \
+         LIMIT ${limit_idx} OFFSET ${offset_idx}"
+    );
+    values.push(sea_orm::Value::BigInt(Some(per_page as i64)));
+    values.push(sea_orm::Value::BigInt(Some(offset as i64)));
+
+    let items = NarSummary::find_by_statement(Statement::from_sql_and_values(
+        DatabaseBackend::Postgres,
+        &select_sql,
+        values,
+    ))
+    .all(&state.web_db)
+    .await?;
 
     Ok(ok_json(NarListResponse {
         items,

@@ -536,12 +536,22 @@ fn cached_path_sig_row_fixture() -> entity::cached_path_signature::Model {
 }
 
 /// Public cache with no signatures — list/stats/available return empty results.
+///
+/// Query order for `/nars` list endpoint:
+///   0. `ECache::find` (cache resolution)
+///   1. raw COUNT — single row with `total = 0`
+///   2. raw SELECT — empty rows
 pub async fn public_cache_empty_nars() -> Arc<ServerState> {
+    use sea_orm::Value;
+    use std::collections::BTreeMap;
+
+    let mut count_row: BTreeMap<&'static str, Value> = BTreeMap::new();
+    count_row.insert("total", Value::BigInt(Some(0)));
+
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![cache_row()]])
-        .append_query_results([Vec::<entity::cached_path_signature::Model>::new()])
-        .append_query_results([Vec::<entity::cached_path_signature::Model>::new()])
-        .append_query_results([Vec::<entity::cached_path::Model>::new()])
+        .append_query_results([vec![count_row]])
+        .append_query_results([Vec::<BTreeMap<&'static str, Value>>::new()])
         .into_connection();
     make_state(db, Arc::new(NoopLogStorage))
 }
@@ -560,6 +570,50 @@ pub async fn public_cache_with_one_nar() -> Arc<ServerState> {
         .append_query_results([vec![cache_row()]])
         .append_query_results([vec![cached_path_row_fixture()]])
         .append_query_results([vec![cached_path_sig_row_fixture()]])
+        .into_connection();
+    make_state(db, Arc::new(NoopLogStorage))
+}
+
+/// Public cache + one signed cached_path returned by the list endpoint's raw
+/// JOIN query. Mock query order:
+///   0. `ECache::find` (cache resolution)
+///   1. raw COUNT — single row with `total = 1`
+///   2. raw SELECT — one row with the cached_path + signature columns
+pub async fn public_cache_list_one_signed_nar() -> Arc<ServerState> {
+    use sea_orm::Value;
+    use std::collections::BTreeMap;
+
+    let mut count_row: BTreeMap<&'static str, Value> = BTreeMap::new();
+    count_row.insert("total", Value::BigInt(Some(1)));
+
+    let mut nar_row: BTreeMap<&'static str, Value> = BTreeMap::new();
+    nar_row.insert(
+        "hash",
+        Value::String(Some(Box::new(FIXTURE_PATH_HASH.into()))),
+    );
+    nar_row.insert(
+        "store_path",
+        Value::String(Some(Box::new(format!(
+            "/nix/store/{}-hello",
+            FIXTURE_PATH_HASH
+        )))),
+    );
+    nar_row.insert("package", Value::String(Some(Box::new("hello".into()))));
+    nar_row.insert("nar_size", Value::BigInt(Some(67890)));
+    nar_row.insert("file_size", Value::BigInt(Some(12345)));
+    nar_row.insert(
+        "created_at",
+        Value::ChronoDateTime(Some(Box::new(test_date()))),
+    );
+    nar_row.insert(
+        "last_fetched_at",
+        Value::ChronoDateTime(Some(Box::new(test_date()))),
+    );
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![cache_row()]])
+        .append_query_results([vec![count_row]])
+        .append_query_results([vec![nar_row]])
         .into_connection();
     make_state(db, Arc::new(NoopLogStorage))
 }
