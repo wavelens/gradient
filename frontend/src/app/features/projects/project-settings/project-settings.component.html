@@ -117,65 +117,6 @@
       </div>
     </div>
 
-    <!-- Integrations -->
-    <div class="settings-section">
-      <h2>Integrations</h2>
-      @if (integrationSaveSuccess()) {
-        <div class="message-banner success">
-          <span class="material-symbols-outlined">check_circle</span>
-          Integration link saved.
-        </div>
-      }
-      @if (integrationErrorMessage()) {
-        <div class="message-banner error">
-          <span class="material-symbols-outlined">error</span>
-          {{ integrationErrorMessage() }}
-        </div>
-      }
-      <div class="settings-card">
-        @if (integrationsLoading()) {
-          <app-loading-spinner message="Loading integrations..." />
-        } @else {
-          <div class="form-group">
-            <label for="outbound-integration">Outbound Integration</label>
-            <p-select
-              inputId="outbound-integration"
-              [(ngModel)]="outboundSelection"
-              [options]="outboundIntegrationOptions()"
-              optionLabel="label"
-              optionValue="value"
-              styleClass="w-full"
-              [appManagedDisable]="access()"
-            />
-            <small class="text-secondary">Status reporter used to report build results per entry point.</small>
-            @if (showGithubAppInstallHint()) {
-              <div class="message-banner info">
-                <span class="material-symbols-outlined">info</span>
-                <span>
-                  This project is on github.com but the GitHub App isn't installed on this organization yet.
-                  Install it to enable status reporting via the
-                  <a [routerLink]="['/organization', orgName, 'integrations']">org integrations page</a>.
-                </span>
-              </div>
-            }
-          </div>
-
-          <div class="form-actions">
-            <button
-              *appWritable="access()"
-              pButton
-              label="Save Integrations"
-              icon="pi pi-check"
-              (click)="saveIntegrationLink()"
-              [loading]="savingIntegration()"
-              [appManagedDisable]="access()"
-            ></button>
-            <a pButton label="Manage Integrations" icon="pi pi-external-link" severity="secondary" [routerLink]="['/organization', orgName, 'integrations']"></a>
-          </div>
-        }
-      </div>
-    </div>
-
     <!-- Triggers -->
     <div class="settings-section">
       <h2>Triggers</h2>

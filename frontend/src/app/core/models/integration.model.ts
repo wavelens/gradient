@@ -50,12 +50,3 @@ export interface PatchIntegrationRequest {
   endpoint_url?: string;
   access_token?: string;
 }
-
-export interface ProjectIntegrationLink {
-  project: string;
-  outbound_integration: string | null;
-}
-
-export interface SetProjectIntegrationRequest {
-  outbound_integration?: string | null;
-}

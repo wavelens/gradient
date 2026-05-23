@@ -12,7 +12,6 @@ import { of } from 'rxjs';
 import { ProjectSettingsComponent } from './project-settings.component';
 import { ProjectsService } from '@core/services/projects.service';
 import { OrganizationsService } from '@core/services/organizations.service';
-import { IntegrationsService } from '@core/services/integrations.service';
 import { AccessState } from '@core/models/access.model';
 
 type AccessCase = { managed: boolean; canEdit: boolean; canTrigger?: boolean };
@@ -71,13 +70,6 @@ function setup(c: AccessCase): ComponentFixture<ProjectSettingsComponent> {
       {
         provide: OrganizationsService,
         useValue: { getOrganization: () => of({ id: 'o', display_name: 'Acme' }) },
-      },
-      {
-        provide: IntegrationsService,
-        useValue: {
-          listOrgIntegrations: () => of([]),
-          getProjectIntegration: () => of(null),
-        },
       },
     ],
   });

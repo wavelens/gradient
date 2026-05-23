@@ -4,25 +4,22 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { forkJoin, of } from 'rxjs';
-import { catchError } from 'rxjs/operators';
 import { DialogModule } from 'primeng/dialog';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { TextareaModule } from 'primeng/textarea';
 import { ProjectsService } from '@core/services/projects.service';
 import { OrganizationsService } from '@core/services/organizations.service';
-import { IntegrationsService } from '@core/services/integrations.service';
 import { AutoCompleteModule } from 'primeng/autocomplete';
 import { SelectModule } from 'primeng/select';
 import { CheckboxModule } from 'primeng/checkbox';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
-import { ConcurrencyPolicy, Integration, Project, ProjectIntegrationLink } from '@core/models';
+import { ConcurrencyPolicy, Project } from '@core/models';
 import { injectProjectAccess } from '@core/resolvers/inject-access';
 
 @Component({
@@ -51,7 +48,6 @@ export class ProjectSettingsComponent implements OnInit {
   private router = inject(Router);
   private projectsService = inject(ProjectsService);
   private orgsService = inject(OrganizationsService);
-  private integrationsService = inject(IntegrationsService);
 
   access = injectProjectAccess();
 
@@ -100,29 +96,6 @@ export class ProjectSettingsComponent implements OnInit {
     { label: 'All: run a new evaluation alongside the in-flight one', value: 'all' },
   ];
 
-  integrationsLoading = signal(true);
-  savingIntegration = signal(false);
-  integrationSaveSuccess = signal(false);
-  integrationErrorMessage = signal<string | null>(null);
-  availableIntegrations = signal<Integration[]>([]);
-  projectIntegration = signal<ProjectIntegrationLink | null>(null);
-
-  outboundSelection: string | null = null;
-
-  outboundIntegrationOptions = signal<{ label: string; value: string | null }[]>([
-    { label: 'None', value: null },
-  ]);
-
-  /// True when the project repository URL points at github.com but the org
-  /// has no GitHub App outbound integration row - surfaces an install CTA.
-  showGithubAppInstallHint = computed(() => {
-    const repo = this.project()?.repository ?? '';
-    if (!isGithubRepoUrl(repo)) return false;
-    return !this.availableIntegrations().some(
-      (i) => i.kind === 'outbound' && i.forge_type === 'github',
-    );
-  });
-
   ngOnInit(): void {
     this.orgName = this.route.snapshot.paramMap.get('org') || '';
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
@@ -131,62 +104,6 @@ export class ProjectSettingsComponent implements OnInit {
       error: () => {},
     });
     this.loadProject();
-    this.loadIntegrations();
-  }
-
-  loadIntegrations(): void {
-    this.integrationsLoading.set(true);
-    forkJoin({
-      list: this.integrationsService.listOrgIntegrations(this.orgName).pipe(
-        catchError(() => of<Integration[]>([])),
-      ),
-      link: this.integrationsService.getProjectIntegration(this.orgName, this.projectName).pipe(
-        catchError(() => of<ProjectIntegrationLink | null>(null)),
-      ),
-    }).subscribe(({ list, link }) => {
-      this.availableIntegrations.set(list);
-      const outbound: { label: string; value: string | null }[] = [{ label: 'None', value: null }];
-      for (const i of list) {
-        if (i.kind === 'outbound') outbound.push({ label: `${i.display_name} (${i.forge_type})`, value: i.id });
-      }
-      // The project may point at an integration the org no longer lists
-      // (renamed, deleted, or never seeded). Surface it as a labelled option
-      // so the dropdown shows something meaningful instead of a raw UUID,
-      // and the user can switch to a known-good one without saving the
-      // unresolved value back.
-      const stored = link?.outbound_integration ?? null;
-      if (stored && !outbound.some((o) => o.value === stored)) {
-        outbound.push({
-          label: `Unknown integration (${stored.slice(0, 8)}…) - please reselect`,
-          value: stored,
-        });
-      }
-      this.outboundIntegrationOptions.set(outbound);
-      this.projectIntegration.set(link);
-      this.outboundSelection = stored;
-      this.integrationsLoading.set(false);
-    });
-  }
-
-  saveIntegrationLink(): void {
-    this.savingIntegration.set(true);
-    this.integrationErrorMessage.set(null);
-    this.integrationSaveSuccess.set(false);
-    this.integrationsService
-      .setProjectIntegration(this.orgName, this.projectName, {
-        outbound_integration: this.outboundSelection,
-      })
-      .subscribe({
-        next: (link) => {
-          this.projectIntegration.set(link);
-          this.savingIntegration.set(false);
-          this.integrationSaveSuccess.set(true);
-        },
-        error: (error) => {
-          this.integrationErrorMessage.set(error.message || 'Failed to save integration link.');
-          this.savingIntegration.set(false);
-        },
-      });
   }
 
   loadProject(): void {
@@ -309,25 +226,4 @@ export class ProjectSettingsComponent implements OnInit {
       },
     });
   }
-}
-
-/// Mirrors the backend's host check (drop schemes/auth, then exact-match
-/// `github.com` or `*.github.com`). Used only to decide whether to surface
-/// the GitHub App install hint in the UI.
-function isGithubRepoUrl(url: string): boolean {
-  let rest = url.startsWith('git+') ? url.slice(4) : url;
-  for (const scheme of ['https://', 'http://', 'git://', 'ssh://']) {
-    if (rest.startsWith(scheme)) {
-      rest = rest.slice(scheme.length);
-      const host = rest.split(/[/:]/, 1)[0]?.toLowerCase() ?? '';
-      return host === 'github.com' || host.endsWith('.github.com');
-    }
-  }
-  // SCP-style: user@host:path
-  const at = rest.indexOf('@');
-  if (at >= 0 && rest.slice(at + 1).includes(':')) {
-    const host = rest.slice(at + 1).split(/[/:]/, 1)[0]?.toLowerCase() ?? '';
-    return host === 'github.com' || host.endsWith('.github.com');
-  }
-  return false;
 }
