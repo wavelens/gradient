@@ -109,6 +109,9 @@ mod m20260522_000000_cached_path_signature_fetch_stats;
 mod m20260522_000001_create_flake_input_override;
 mod m20260524_000000_create_table_project_action;
 mod m20260524_000001_create_table_project_action_delivery;
+mod m20260524_000002_drop_table_webhook_delivery;
+mod m20260524_000003_drop_table_webhook;
+mod m20260524_000004_drop_table_project_integration;
 
 pub struct Migrator;
 
@@ -219,6 +222,9 @@ impl MigratorTrait for Migrator {
             Box::new(m20260522_000001_create_flake_input_override::Migration),
             Box::new(m20260524_000000_create_table_project_action::Migration),
             Box::new(m20260524_000001_create_table_project_action_delivery::Migration),
+            Box::new(m20260524_000002_drop_table_webhook_delivery::Migration),
+            Box::new(m20260524_000003_drop_table_webhook::Migration),
+            Box::new(m20260524_000004_drop_table_project_integration::Migration),
         ]
     }
 }
