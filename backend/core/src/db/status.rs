@@ -688,6 +688,9 @@ mod reelect_leader_tests {
             fn is_enabled(&self) -> bool { false }
             async fn send_verification_email(&self, _: &str, _: &str, _: &str, _: &str) -> anyhow::Result<()> { Ok(()) }
             async fn send_password_reset_email(&self, _: &str, _: &str, _: &str, _: &str) -> anyhow::Result<()> { Ok(()) }
+            async fn send_action_mail(&self, _: &[String], _: &str, _: &str) -> anyhow::Result<crate::storage::email::MailDeliveryResult> {
+                Ok(crate::storage::email::MailDeliveryResult { status_code: 0, server_response: String::new() })
+            }
         }
 
         let cli = crate::types::Cli {
