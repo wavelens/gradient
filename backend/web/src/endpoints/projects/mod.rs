@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+pub mod actions;
 pub mod evaluations;
 pub mod flake_inputs;
 pub mod integrations;
