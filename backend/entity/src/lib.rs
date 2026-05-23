@@ -33,6 +33,8 @@ pub mod organization;
 pub mod organization_cache;
 pub mod organization_user;
 pub mod project;
+pub mod project_action;
+pub mod project_action_delivery;
 pub mod project_flake_input_override;
 pub mod project_integration;
 pub mod project_trigger;

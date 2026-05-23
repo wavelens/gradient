@@ -109,6 +109,8 @@ id_newtype!(OrganizationId);
 id_newtype!(OrganizationCacheId);
 id_newtype!(OrganizationUserId);
 id_newtype!(ProjectId);
+id_newtype!(ProjectActionId);
+id_newtype!(ProjectActionDeliveryId);
 id_newtype!(ProjectTriggerId);
 id_newtype!(RoleId);
 id_newtype!(UserId);
