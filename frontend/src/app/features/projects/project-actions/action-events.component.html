@@ -1,0 +1,21 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<div class="events">
+  @for (group of grouped(); track group.group) {
+    <fieldset [disabled]="disabled()">
+      <legend>{{ group.group }}</legend>
+      @for (item of group.items; track item.value) {
+        <label>
+          <input type="checkbox"
+                 [checked]="selected().includes(item.value)"
+                 (change)="toggle(item.value, $any($event.target).checked)" />
+          {{ item.label }}
+        </label>
+      }
+    </fieldset>
+  }
+</div>
