@@ -114,9 +114,3 @@ fn forge_status_payload_carries_optional_fields() {
     assert_eq!(p["check_run_id"], 7);
 }
 
-// Full DB-backed executor flows (send_mail, send_web_request, delivery row on
-// failure) are covered in CI's end-to-end suite once Task 8 wires emitters
-// through the dispatcher. They are out of scope for this unit-level harness
-// because they need a populated mock query sequence for action lookup,
-// delivery insert, and last_fired_at update — five chained `MockDatabase`
-// expectations per case.
