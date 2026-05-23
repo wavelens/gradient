@@ -33,6 +33,13 @@
     lib.optional (int.access_token_file != null)
       "gradient_integration_${int.name}_token:${int.access_token_file}"
   ) cfg.state.integrations);
+  actionTokenFiles = lib.concatLists (lib.mapAttrsToList (_: project:
+    lib.concatMap (action:
+      let tokenFile = action.config.token_file or null; in
+      lib.optional (action.type == "send_web_request" && tokenFile != null)
+        "gradient_action_${action.name}_token:${tokenFile}"
+    ) project.actions
+  ) cfg.state.projects);
 in {
   # disabledModules = [
   #   "services/gradient/default.nix"
@@ -503,7 +510,8 @@ in {
         ] ++ lib.optional (cfg.metricsTokenFile != null)
           "gradient_metrics_token:${cfg.metricsTokenFile}"
         ++ userPasswordFiles ++ orgPrivateKeyFiles ++ cacheSigningKeyFiles ++ apiKeyFiles
-          ++ workerTokenFiles ++ integrationSecretFiles ++ integrationTokenFiles;
+          ++ workerTokenFiles ++ integrationSecretFiles ++ integrationTokenFiles
+          ++ actionTokenFiles;
       };
 
       unitConfig = {

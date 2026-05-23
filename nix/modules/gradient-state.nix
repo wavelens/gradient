@@ -249,19 +249,6 @@
         '';
       };
 
-      outbound_integration = mkOption {
-        type = types.nullOr types.str;
-        default = null;
-        description = ''
-          Name of an **outbound** integration in the same organization that
-          receives CI status reports for this project. Null disables status
-          reporting. The integration must be declared in
-          `services.gradient.state.integrations`, except for the auto-managed
-          GitHub App row, which is referenced as `"github"` and is seeded
-          automatically once the App is installed on the org.
-        '';
-      };
-
       concurrency = mkOption {
         type = types.enum [ "hard_abort" "soft_abort" "skip" "all" ];
         default = "soft_abort";
@@ -330,6 +317,47 @@
         '';
       };
 
+      actions = mkOption {
+        type = types.listOf actionType;
+        default = [];
+        description = ''
+          Project actions (email notifications, outbound web requests, forge
+          status reports). Re-applying state with fewer actions removes the
+          missing ones (matched by `name` within the project).
+
+          Token files for `send_web_request` actions must live at the systemd
+          credential path
+          `''${GRADIENT_CREDENTIALS_DIR}/gradient_action_''${name}_token`.
+        '';
+        example = literalExpression ''
+          [
+            {
+              name = "notify-ops";
+              type = "send_mail";
+              events = [ "build.failed" ];
+              config = {
+                recipients = [ "ops@example.com" ];
+                subject_template = null;
+              };
+            }
+            {
+              name = "notify-hooks";
+              type = "send_web_request";
+              events = [ "build.completed" "build.failed" ];
+              config = {
+                url = "https://hooks.example.com/gradient";
+                token_file = "/etc/gradient/secrets/notify-hooks-token";
+              };
+            }
+            {
+              name = "report-status";
+              type = "forge_status_report";
+              config = { integration = "gitea-prod"; };
+            }
+          ]
+        '';
+      };
+
       created_by = mkOption {
         type = types.str;
         description = "Username of the user who created this project";
@@ -374,7 +402,7 @@
 
           GitHub is intentionally absent: GitHub integration rows are
           server-managed (auto-created when the App is installed on the org)
-          and referenced from `triggers` / `outbound_integration` by the name
+          and referenced from `triggers` / project `actions` by the name
           `"github"`.
         '';
       };
@@ -468,6 +496,58 @@
       };
     };
   });
+
+  actionType = types.submodule {
+    options = {
+      name = mkOption {
+        type = types.str;
+        description = ''
+          Action name unique within the project. The provisioner upserts on
+          (project_id, name); changing this string creates a new action and
+          deletes the old one on next reconciliation.
+        '';
+      };
+
+      type = mkOption {
+        type = types.enum [ "send_mail" "send_web_request" "forge_status_report" ];
+        description = "Action kind. Drives which `config` shape is expected.";
+      };
+
+      active = mkOption {
+        type = types.bool;
+        default = true;
+        description = "Whether the action is active. Inactive actions are stored but never fire.";
+      };
+
+      events = mkOption {
+        type = types.listOf types.str;
+        default = [];
+        description = ''
+          Events the action subscribes to. Must be empty for
+          `forge_status_report` (status events are derived from build state).
+        '';
+      };
+
+      config = mkOption {
+        type = types.attrs;
+        description = ''
+          Type-specific configuration. Shape depends on `type`:
+
+          - `send_mail`: `{ recipients = [ "ops@example.com" ]; subject_template = null; }`
+          - `send_web_request`: `{ url = "https://hooks.example.com/gradient"; token_file = "/etc/gradient/secrets/<name>-token"; }`
+          - `forge_status_report`: `{ integration = "gitea-prod"; }` (name of an outbound integration in the same organization)
+
+          For `send_web_request`, omit `token_file` to send unauthenticated
+          requests. When set, the token is read from the systemd credential
+          file `gradient_action_''${name}_token` and stored encrypted with
+          the server's crypt key.
+        '';
+        example = literalExpression ''
+          { recipients = [ "ops@example.com" ]; }
+        '';
+      };
+    };
+  };
 
   cacheType = types.submodule ({ config, name, ... }: {
     options = {
@@ -894,6 +974,15 @@ in
         }) p.flake_input_overrides
       ) config.services.gradient.state.projects);
       invalid = filter (b: !b.valid) bad;
+
+      badActions = flatten (mapAttrsToList (pName: p:
+        map (a: {
+          project = pName;
+          action = a.name;
+          valid = !(a.type == "forge_status_report" && a.events != []);
+        }) p.actions
+      ) config.services.gradient.state.projects);
+      invalidActions = filter (b: !b.valid) badActions;
     in
     map (b: {
       assertion = false;
@@ -901,5 +990,12 @@ in
         services.gradient.state.projects.${b.project}.flake_input_overrides.${b.input}: \
         exactly one of `url` (string) or `keep_url = true` must be set.
       '';
-    }) invalid;
+    }) invalid
+    ++ map (b: {
+      assertion = false;
+      message = ''
+        services.gradient.state.projects.${b.project}.actions.${b.action}: \
+        forge_status_report actions cannot declare custom `events`.
+      '';
+    }) invalidActions;
 }
