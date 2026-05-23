@@ -1,0 +1,197 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<div class="container">
+  <div class="page-header">
+    <div>
+      <div class="breadcrumb">
+        <a [routerLink]="['/organization', orgName]" class="breadcrumb-link">{{ orgDisplayName() || orgName }}</a>
+        <span class="breadcrumb-separator">/</span>
+        <a [routerLink]="['/organization', orgName, 'project', projectName]" class="breadcrumb-link">{{ projectName }}</a>
+        <span class="breadcrumb-separator">/</span>
+        <span class="breadcrumb-current">Actions</span>
+      </div>
+      <h1>Actions</h1>
+      <p class="text-secondary">Side effects triggered by evaluation and build events</p>
+    </div>
+    <button
+      *appWritable="access()"
+      pButton
+      label="New Action"
+      icon="pi pi-plus"
+      (click)="startCreate()"
+      [appManagedDisable]="access()"
+    ></button>
+  </div>
+
+  @if (error()) {
+    <div class="dialog-error">
+      <span class="material-symbols-outlined">error</span>
+      {{ error() }}
+    </div>
+  }
+
+  @if (loading()) {
+    <app-loading-spinner message="Loading actions..." />
+  } @else {
+    @if (actions().length === 0) {
+      <div class="empty-state">
+        <span class="material-symbols-outlined">notifications_active</span>
+        <h3>No actions configured</h3>
+        <p class="text-secondary">Create an action to send mail, post webhooks, or report build status back to your forge.</p>
+        <button
+          *appWritable="access()"
+          pButton
+          label="New Action"
+          icon="pi pi-plus"
+          (click)="startCreate()"
+          [appManagedDisable]="access()"
+        ></button>
+      </div>
+    } @else {
+      <div class="actions-list">
+        @for (action of actions(); track action.id) {
+          <div class="action-row">
+            <div class="action-header">
+              <div class="action-info">
+                <span class="type-icon"><i [class]="typeIcon(action.action_type)"></i></span>
+                <div>
+                  <div class="action-name">{{ action.name }}</div>
+                  <div class="action-meta text-secondary">
+                    <span class="badge" [class]="'badge-' + action.action_type">{{ typeLabel(action.action_type) }}</span>
+                    <span class="status-chip" [class.status-ok]="action.active" [class.status-warn]="!action.active">
+                      {{ action.active ? 'Active' : 'Inactive' }}
+                    </span>
+                    <span>Last fired: {{ relativeTime(action.last_fired_at) }}</span>
+                    @if (testSuccessId() === action.id) {
+                      <span class="fire-success">
+                        <span class="material-symbols-outlined">check_circle</span>
+                        Test fired
+                      </span>
+                    }
+                    @if (testFailureId() === action.id) {
+                      <span class="fire-fail">
+                        <span class="material-symbols-outlined">error</span>
+                        Test failed
+                      </span>
+                    }
+                  </div>
+                  @if (action.events.length > 0) {
+                    <div class="events-chips">
+                      @for (ev of action.events; track ev) {
+                        <span class="event-chip">{{ ev }}</span>
+                      }
+                    </div>
+                  }
+                </div>
+              </div>
+              <div class="action-actions">
+                <button
+                  *appWritable="access()"
+                  pButton
+                  label="Test"
+                  icon="pi pi-play"
+                  severity="secondary"
+                  size="small"
+                  [loading]="testingId() === action.id"
+                  [disabled]="rowDisabled()"
+                  (click)="testAction(action.id)"
+                ></button>
+                <button
+                  pButton
+                  label="Deliveries"
+                  icon="pi pi-list"
+                  severity="secondary"
+                  size="small"
+                  (click)="openDeliveries(action.id)"
+                ></button>
+                <button
+                  *appWritable="access()"
+                  pButton
+                  label="Edit"
+                  icon="pi pi-pencil"
+                  severity="secondary"
+                  size="small"
+                  [disabled]="rowDisabled()"
+                  (click)="startEdit(action)"
+                ></button>
+                <button
+                  *appWritable="access()"
+                  pButton
+                  label="Delete"
+                  icon="pi pi-trash"
+                  severity="danger"
+                  size="small"
+                  [loading]="deletingId() === action.id"
+                  [disabled]="rowDisabled()"
+                  (click)="requestDelete(action.id)"
+                ></button>
+              </div>
+            </div>
+          </div>
+        }
+      </div>
+    }
+  }
+</div>
+
+<app-action-form
+  mode="create"
+  [open]="showCreateDialog()"
+  [outboundIntegrations]="outboundIntegrations()"
+  (saved)="onCreateSaved($event)"
+  (closed)="showCreateDialog.set(false)"
+/>
+
+<app-action-form
+  mode="edit"
+  [open]="showEditDialog()"
+  [existing]="editingAction()"
+  [outboundIntegrations]="outboundIntegrations()"
+  (saved)="onEditSaved($event)"
+  (closed)="showEditDialog.set(false); editingAction.set(null)"
+/>
+
+@if (deliveriesActionId(); as id) {
+  <app-action-deliveries
+    [org]="orgName"
+    [project]="projectName"
+    [actionId]="id"
+    (closed)="closeDeliveries()"
+  />
+}
+
+<p-dialog
+  header="Delete Action"
+  [visible]="confirmDeleteId() !== null"
+  (visibleChange)="$event || cancelDelete()"
+  [modal]="true"
+  [style]="{ width: '400px' }"
+  [draggable]="false"
+  [resizable]="false"
+>
+  <p>Delete this action? This cannot be undone.</p>
+  <ng-template pTemplate="footer">
+    <button pButton label="Cancel" severity="secondary" (click)="cancelDelete()"></button>
+    <button pButton label="Delete" severity="danger" (click)="confirmDelete()"></button>
+  </ng-template>
+</p-dialog>
+
+<p-dialog
+  header="Save this token now"
+  [visible]="revealedToken() !== null"
+  (visibleChange)="$event || dismissToken()"
+  [modal]="true"
+  [style]="{ width: '520px' }"
+  [draggable]="false"
+  [resizable]="false"
+>
+  <p>The action's token is shown below. It will not be displayed again - copy it now and store it somewhere safe.</p>
+  <pre class="token-reveal">{{ revealedToken() }}</pre>
+  <ng-template pTemplate="footer">
+    <button pButton label="I've copied it" icon="pi pi-check" (click)="dismissToken()"></button>
+  </ng-template>
+</p-dialog>

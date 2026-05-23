@@ -1,0 +1,199 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '../../../styles/variables' as *;
+
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: $spacing-xxl;
+  h1 { font-size: $font-size-xxl; margin: 0 0 $spacing-sm 0; }
+}
+
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  margin-bottom: $spacing-sm;
+  font-size: $font-size-sm;
+  color: $text-secondary;
+
+  .breadcrumb-link { color: $text-secondary; &:hover { color: $text-primary; } }
+  .breadcrumb-separator { color: $text-light; }
+  .breadcrumb-current { color: $text-primary; }
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: $spacing-xxl;
+  text-align: center;
+  background: $color-tertiary;
+  border: 1px solid $color-border;
+  border-radius: $border-radius-md;
+
+  .material-symbols-outlined { font-size: 48px; color: $text-secondary; margin-bottom: $spacing-md; }
+  h3 { margin: 0 0 $spacing-sm 0; }
+  p { margin: 0 0 $spacing-lg 0; }
+}
+
+.actions-list {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-md;
+}
+
+.action-row {
+  padding: $spacing-md $spacing-lg;
+  background: $color-tertiary;
+  border: 1px solid $color-border;
+  border-radius: $border-radius-md;
+}
+
+.action-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: $spacing-md;
+}
+
+.action-info {
+  display: flex;
+  align-items: flex-start;
+  gap: $spacing-md;
+
+  .type-icon {
+    color: $text-secondary;
+    font-size: 20px;
+    margin-top: 2px;
+  }
+
+  .action-name {
+    font-weight: 500;
+    color: $text-primary;
+  }
+
+  .action-meta {
+    display: flex;
+    align-items: center;
+    gap: $spacing-sm;
+    margin-top: $spacing-xs;
+    font-size: $font-size-sm;
+    flex-wrap: wrap;
+  }
+
+  .events-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: $spacing-xs;
+    margin-top: $spacing-xs;
+  }
+
+  .event-chip {
+    display: inline-block;
+    padding: 2px 6px;
+    background: rgba($color-info, 0.1);
+    color: $color-info;
+    border-radius: $border-radius-sm;
+    font-size: $font-size-xs;
+    font-family: monospace;
+  }
+}
+
+.action-actions {
+  display: flex;
+  gap: $spacing-sm;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: $border-radius-sm;
+  font-size: $font-size-xs;
+  font-weight: 500;
+  white-space: nowrap;
+
+  &.badge-send_mail {
+    background: rgba($color-info, 0.15);
+    color: $color-info;
+  }
+  &.badge-send_web_request {
+    background: rgba($color-success, 0.15);
+    color: $color-success;
+  }
+  &.badge-forge_status_report {
+    background: rgba($color-warning, 0.15);
+    color: $color-warning;
+  }
+}
+
+.status-chip {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: $border-radius-sm;
+  font-size: $font-size-xs;
+  font-weight: 500;
+
+  &.status-ok {
+    background: rgba($color-success, 0.15);
+    color: $color-success;
+  }
+  &.status-warn {
+    background: rgba($color-warning, 0.15);
+    color: $color-warning;
+  }
+}
+
+.fire-success {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: $color-success;
+  font-size: $font-size-sm;
+
+  .material-symbols-outlined { font-size: 16px; }
+}
+
+.fire-fail {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: $color-danger;
+  font-size: $font-size-sm;
+
+  .material-symbols-outlined { font-size: 16px; }
+}
+
+.dialog-error {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  background: rgba($color-danger, 0.1);
+  border: 1px solid rgba($color-danger, 0.5);
+  border-radius: $border-radius-md;
+  padding: $spacing-md;
+  color: $color-danger;
+  margin-bottom: $spacing-md;
+
+  .material-symbols-outlined { font-size: 20px; }
+}
+
+.token-reveal {
+  background: $color-secondary;
+  border: 1px solid $color-border;
+  border-radius: $border-radius-sm;
+  padding: $spacing-sm $spacing-md;
+  font-family: monospace;
+  font-size: $font-size-sm;
+  user-select: all;
+  word-break: break-all;
+  white-space: pre-wrap;
+}
