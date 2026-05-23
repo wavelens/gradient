@@ -66,6 +66,13 @@
             group = "gradient";
             text = "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6A7B8C9D0E1F2G3";
           };
+
+          "gradient/secrets/web-hook_token" = {
+            mode = "0600";
+            user = "gradient";
+            group = "gradient";
+            text = "gat_state_provisioned_test_token";
+          };
         };
 
         services = {
@@ -111,6 +118,17 @@
                   wildcard = "package.x86_64-linux.*";
                   active = true;
                   created_by = "alice";
+                  actions = [
+                    {
+                      name = "web-hook";
+                      type = "send_web_request";
+                      events = [ "build.completed" "build.failed" ];
+                      config = {
+                        url = "https://hooks.example.com/gradient";
+                        token_file = "/etc/gradient/secrets/web-hook_token";
+                      };
+                    }
+                  ];
                 };
                 mobile-app = {
                   organization = "corp";
