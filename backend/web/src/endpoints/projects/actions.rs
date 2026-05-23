@@ -172,7 +172,7 @@ pub async fn create_action(
         organization,
         project,
         ProjectAccess::Require {
-            permission: Permission::EditProject,
+            permission: Permission::ManageActions,
             reject_managed: false,
         },
     )
@@ -336,7 +336,7 @@ pub async fn update_action(
         organization,
         project,
         ProjectAccess::Require {
-            permission: Permission::EditProject,
+            permission: Permission::ManageActions,
             reject_managed: false,
         },
     )
@@ -473,7 +473,7 @@ pub async fn delete_action(
         organization,
         project,
         ProjectAccess::Require {
-            permission: Permission::EditProject,
+            permission: Permission::ManageActions,
             reject_managed: false,
         },
     )
@@ -505,7 +505,7 @@ pub async fn test_action(
         organization.clone(),
         project.clone(),
         ProjectAccess::Require {
-            permission: Permission::EditProject,
+            permission: Permission::ManageActions,
             reject_managed: false,
         },
     )
@@ -572,7 +572,7 @@ pub async fn regenerate_token(
         organization,
         project,
         ProjectAccess::Require {
-            permission: Permission::EditProject,
+            permission: Permission::ManageActions,
             reject_managed: false,
         },
     )

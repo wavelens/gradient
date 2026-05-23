@@ -40,8 +40,8 @@ pub enum Permission {
     ManageRoles,
     /// CRUD on org integrations (forge credentials).
     ManageIntegrations,
-    /// CRUD on org webhooks.
-    ManageWebhooks,
+    /// CRUD on project actions.
+    ManageActions,
     /// Register/configure org-owned workers.
     ManageWorkers,
     /// Subscribe / unsubscribe the org from caches.
@@ -71,7 +71,7 @@ impl Permission {
         Permission::ManageMembers,
         Permission::ManageRoles,
         Permission::ManageIntegrations,
-        Permission::ManageWebhooks,
+        Permission::ManageActions,
         Permission::ManageWorkers,
         Permission::ManageSubscriptions,
         Permission::ManageSshKey,
@@ -92,7 +92,7 @@ impl Permission {
             Permission::ManageMembers => 3,
             Permission::ManageRoles => 4,
             Permission::ManageIntegrations => 5,
-            Permission::ManageWebhooks => 6,
+            Permission::ManageActions => 6,
             Permission::ManageWorkers => 7,
             Permission::ManageSubscriptions => 8,
             Permission::ManageSshKey => 9,
@@ -112,7 +112,7 @@ impl Permission {
             Permission::ManageMembers => "manageMembers",
             Permission::ManageRoles => "manageRoles",
             Permission::ManageIntegrations => "manageIntegrations",
-            Permission::ManageWebhooks => "manageWebhooks",
+            Permission::ManageActions => "manageActions",
             Permission::ManageWorkers => "manageWorkers",
             Permission::ManageSubscriptions => "manageSubscriptions",
             Permission::ManageSshKey => "manageSshKey",
@@ -164,7 +164,7 @@ pub fn admin_mask() -> PermissionMask {
     mask_from(Permission::ALL)
 }
 
-/// Canonical bitmask for the built-in **Write** role: project, webhook, and
+/// Canonical bitmask for the built-in **Write** role: project, action, and
 /// integration management - but no member/role administration and no destruction
 /// of the organization or its settings.
 pub fn write_mask() -> PermissionMask {
@@ -172,7 +172,7 @@ pub fn write_mask() -> PermissionMask {
     mask_from(&[
         ViewOrg,
         ManageIntegrations,
-        ManageWebhooks,
+        ManageActions,
         ManageWorkers,
         ManageSubscriptions,
         ManageSshKey,
@@ -184,7 +184,7 @@ pub fn write_mask() -> PermissionMask {
 
 /// Canonical bitmask for the built-in **View** role.
 ///
-/// Read-only on sensitive surfaces (members, projects, webhooks, the org
+/// Read-only on sensitive surfaces (members, projects, actions, the org
 /// itself), but currently retains mutation rights on a handful of non-secret
 /// sub-resources (workers, ssh key, cache subscriptions, integrations) to
 /// preserve historical behavior. Tightening these is an explicit follow-up.
@@ -244,14 +244,14 @@ mod tests {
         assert!(!mask_grants(mask, Permission::DeleteOrg));
         assert!(!mask_grants(mask, Permission::ManageOrgSettings));
         assert!(mask_grants(mask, Permission::EditProject));
-        assert!(mask_grants(mask, Permission::ManageWebhooks));
+        assert!(mask_grants(mask, Permission::ManageActions));
     }
 
     #[test]
-    fn view_mask_cannot_edit_projects_or_webhooks() {
+    fn view_mask_cannot_edit_projects_or_actions() {
         let mask = view_mask();
         assert!(!mask_grants(mask, Permission::EditProject));
-        assert!(!mask_grants(mask, Permission::ManageWebhooks));
+        assert!(!mask_grants(mask, Permission::ManageActions));
         assert!(!mask_grants(mask, Permission::ManageMembers));
         assert!(!mask_grants(mask, Permission::ManageRoles));
         assert!(mask_grants(mask, Permission::ViewOrg));
