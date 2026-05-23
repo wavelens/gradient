@@ -22,6 +22,7 @@ nav:
     - State: usage/state.md
     - Pull Deployment: usage/pull-deployment.md
     - Forge Integration: usage/integration.md
+    - Actions: usage/actions.md
     - Cache NARs: usage/cache-nars.md
   - Development:
     - Architecture: development/architecture.md

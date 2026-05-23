@@ -2508,3 +2508,52 @@ immediately. Coverage:
 - `edit prefills form fields`
 - `delete calls service after confirm`
 - `hides write buttons under read-only access`
+
+## Actions (per-project)
+
+### Backend — REST endpoints (`backend/web/tests/actions.rs`)
+
+Run with: `cargo test -p web --test actions`
+
+- `create_send_mail_action_returns_no_token` - POST with `send_mail` config → `201`, `token: null`.
+- `create_send_web_request_returns_token_once` - POST with `send_web_request` config → `token` present in response body; subsequent GET returns `token: null`.
+- `create_send_mail_without_smtp_returns_400` - when `smtp_enabled=false`, creating a `send_mail` action returns `400`.
+- `list_actions_returns_all_project_actions` - GET list includes all created actions, tokens stripped.
+- `get_action_strips_token` - GET single action never returns the bearer token field.
+- `patch_action_updates_name_and_events` - PATCH changes `name` and `events`; `updated_at` advances.
+- `delete_action_removes_row` - DELETE returns `true`; subsequent GET returns `404`.
+- `test_fire_creates_delivery_row` - POST `.../test` inserts a delivery row and returns `200`.
+- `regenerate_token_returns_new_plaintext` - POST `.../regenerate-token` on a `send_web_request` action returns a new token string.
+- `regenerate_token_on_send_mail_returns_400` - calling regenerate-token on a non-`send_web_request` action returns `400`.
+- `deliveries_paginated` - GET `.../deliveries` with `limit=2&offset=0` returns first 2 rows; `total` reflects full count.
+- `delivery_detail_includes_request_response_body` - GET `.../deliveries/{id}` returns `request_body` and `response_body`.
+- `view_role_cannot_delete_action` - `403` for callers without write permission.
+- `managed_project_rejects_create` - state-managed projects reject action mutations with `403`.
+
+### Backend — dispatcher unit tests (`backend/core/tests/actions_dispatch.rs`)
+
+Run with: `cargo test -p core --test actions_dispatch`
+
+- `matches_event_returns_true_for_listed_event` - action fires when its `events` list contains the incoming event.
+- `matches_event_returns_false_for_unlisted` - action does not fire for events not in its list.
+- `matches_event_empty_events_never_fires` - empty `events` list → no dispatch.
+- `forge_status_ignores_events_list` - `forge_status_report` always maps `build.started/completed/failed` regardless of `events`.
+- `payload_helpers_include_all_fields` - outgoing JSON payload for `send_web_request` contains `event`, `project`, `organization`, `id`, `status`.
+
+### Backend — inline unit tests (`backend/core/src/ci/actions.rs`)
+
+Run with: `cargo test -p core --lib ci::actions::tests`
+
+- `matches_event` - `Action::matches_event` returns correct booleans for listed/unlisted events and the empty-events edge case.
+- `forge_status_for_event` - maps `build.started → pending`, `build.completed → success`, `build.failed → failure`; non-build events return `None`.
+- `render_subject` - applies `{event}`, `{project}`, `{org}`, `{id}`, `{status}` placeholders to a subject template string.
+- `render_default_body` - default body contains event, project slug, entity id, status, and a URL.
+
+### Frontend
+
+Run with: `pnpm --dir frontend exec ng test --watch=false`
+
+- `action-events.component.spec.ts` - checkbox group renders all known event strings; toggling emits updated selection via `ngModel`.
+- `action-deliveries.component.spec.ts` - popup renders paginated delivery rows; clicking a row fetches and displays detail bodies.
+- `action-form.component.spec.ts` - form switches config fields on `type` change; SMTP-disabled state hides `send_mail` option and shows a warning; one-time token is displayed after create/regenerate and cleared on modal close.
+- `project-actions.component.spec.ts` - list page loads actions on init, calls delete service on confirm, links to form modal.

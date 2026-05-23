@@ -50,14 +50,9 @@ Reference these rows from project triggers (inbound) and project
 `outbound_integration` (outbound) the same way you'd reference any other
 integration.
 
-## 2. Link a project
+## 2. Report build status
 
-Open the project's **Settings** page. The **Outbound Integration** dropdown
-lists every outbound integration for the organization, including the
-auto-managed *GitHub App* row when applicable. Pick the one this project
-should use, or leave at *None* to disable status reporting. Inbound
-integrations are not linked here; they're attached per-trigger on the
-**Triggers** page.
+To report build status back to a forge, create a `forge_status_report` action on the project (see [Actions](./actions.md)).
 
 ## 3. Configure the forge webhook
 
