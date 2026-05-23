@@ -82,6 +82,28 @@ pub struct StateProject {
     /// existing override rows for this project.
     #[serde(default)]
     pub flake_input_overrides: HashMap<String, StateFlakeInputOverride>,
+    /// Declarative action list. Re-applying state with fewer actions removes
+    /// the missing ones (matched by `name` within the project).
+    #[serde(default)]
+    pub actions: Vec<StateAction>,
+}
+
+/// Declarative project action. `config` is type-specific and validated
+/// against `action_type` at apply time:
+///   - `send_mail`           `{ recipients: [..], subject_template?: str }`
+///   - `send_web_request`    `{ url: str, token_file?: str }`
+///   - `forge_status_report` `{ integration: <outbound integration name> }`
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct StateAction {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub action_type: String,
+    #[serde(default = "default_true")]
+    pub active: bool,
+    #[serde(default)]
+    pub events: Vec<String>,
+    pub config: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -334,6 +356,38 @@ impl StateConfiguration {
                     message: "keep_evaluations must be at least 1".to_string(),
                 });
             }
+
+            let mut action_names: std::collections::HashSet<&str> =
+                std::collections::HashSet::new();
+            for action in &project.actions {
+                if !matches!(
+                    action.action_type.as_str(),
+                    "send_mail" | "send_web_request" | "forge_status_report"
+                ) {
+                    errors.push(ValidationError {
+                        field: format!("projects.{}.actions.{}.type", project.name, action.name),
+                        message: format!(
+                            "Invalid action type '{}': expected send_mail/send_web_request/forge_status_report",
+                            action.action_type
+                        ),
+                    });
+                }
+                if action.action_type == "forge_status_report" && !action.events.is_empty() {
+                    errors.push(ValidationError {
+                        field: format!("projects.{}.actions.{}.events", project.name, action.name),
+                        message: "forge_status_report actions cannot carry custom events".into(),
+                    });
+                }
+                if !action_names.insert(action.name.as_str()) {
+                    errors.push(ValidationError {
+                        field: format!("projects.{}.actions.{}.name", project.name, action.name),
+                        message: format!(
+                            "Duplicate action name '{}' in project '{}'",
+                            action.name, project.name
+                        ),
+                    });
+                }
+            }
         }
 
         for integration in self.integrations.values() {
@@ -500,6 +554,7 @@ pub async fn load_and_apply_state(
     state_file_path: Option<&str>,
     crypt_secret_file: &str,
     delete_state: bool,
+    email_enabled: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let Some(path) = state_file_path else {
         tracing::info!("No state file configured, skipping state management");
@@ -527,7 +582,7 @@ pub async fn load_and_apply_state(
 
     tracing::info!("State configuration validated successfully");
 
-    provisioning::apply_state_to_database(db, &config, crypt_secret_file, delete_state).await?;
+    provisioning::apply_state_to_database(db, &config, crypt_secret_file, delete_state, email_enabled).await?;
 
     Ok(())
 }
@@ -719,6 +774,176 @@ mod tests {
                 .any(|e| e.field == "projects.web.keep_evaluations"
                     && e.message.contains("at least 1")),
             "expected keep_evaluations >= 1 validation error, got: {:?}",
+            v.errors
+        );
+    }
+
+    #[test]
+    fn state_project_actions_round_trip_all_types() {
+        let json = r#"{
+            "projects": {
+                "web": {
+                    "name": "web",
+                    "organization": "acme",
+                    "display_name": "Web",
+                    "repository": "https://example.com/acme/web.git",
+                    "created_by": "alice",
+                    "actions": [
+                        {
+                            "name": "notify-ops",
+                            "type": "send_mail",
+                            "events": ["build.failed"],
+                            "config": { "recipients": ["ops@example.com"] }
+                        },
+                        {
+                            "name": "webhook",
+                            "type": "send_web_request",
+                            "events": ["build.completed"],
+                            "config": { "url": "https://hooks.example.com/gradient", "token_file": "/etc/gradient/secrets/hook-token" }
+                        },
+                        {
+                            "name": "status",
+                            "type": "forge_status_report",
+                            "config": { "integration": "gitea-prod" }
+                        }
+                    ]
+                }
+            }
+        }"#;
+        let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
+        assert_eq!(cfg.projects["web"].actions.len(), 3);
+        assert_eq!(cfg.projects["web"].actions[0].action_type, "send_mail");
+        assert!(cfg.projects["web"].actions[2].events.is_empty());
+    }
+
+    #[test]
+    fn state_action_rejects_unknown_field() {
+        let json = r#"{
+            "projects": {
+                "web": {
+                    "name": "web",
+                    "organization": "acme",
+                    "display_name": "Web",
+                    "repository": "https://example.com/acme/web.git",
+                    "created_by": "alice",
+                    "actions": [
+                        {
+                            "name": "x",
+                            "type": "send_mail",
+                            "events": [],
+                            "config": {},
+                            "bogus": true
+                        }
+                    ]
+                }
+            }
+        }"#;
+        let err = serde_json::from_str::<StateConfiguration>(json).unwrap_err();
+        assert!(err.to_string().contains("bogus"), "got: {err}");
+    }
+
+    #[test]
+    fn state_action_validate_rejects_unknown_type() {
+        let json = r#"{
+            "users": {
+                "alice": {
+                    "username": "alice", "name": "Alice", "email": "a@x.io",
+                    "password_file": "/dev/null"
+                }
+            },
+            "organizations": {
+                "acme": {
+                    "name": "acme", "display_name": "ACME",
+                    "private_key_file": "/dev/null", "public": false, "created_by": "alice"
+                }
+            },
+            "projects": {
+                "web": {
+                    "name": "web", "organization": "acme", "display_name": "Web",
+                    "repository": "https://example.com/acme/web.git", "created_by": "alice",
+                    "actions": [
+                        { "name": "a", "type": "garbage", "config": {} }
+                    ]
+                }
+            }
+        }"#;
+        let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
+        let v = cfg.validate();
+        assert!(!v.is_valid);
+        assert!(
+            v.errors.iter().any(|e| e.field == "projects.web.actions.a.type"),
+            "expected unknown-type error, got: {:?}",
+            v.errors
+        );
+    }
+
+    #[test]
+    fn state_action_validate_rejects_duplicate_names() {
+        let json = r#"{
+            "users": {
+                "alice": {
+                    "username": "alice", "name": "Alice", "email": "a@x.io",
+                    "password_file": "/dev/null"
+                }
+            },
+            "organizations": {
+                "acme": {
+                    "name": "acme", "display_name": "ACME",
+                    "private_key_file": "/dev/null", "public": false, "created_by": "alice"
+                }
+            },
+            "projects": {
+                "web": {
+                    "name": "web", "organization": "acme", "display_name": "Web",
+                    "repository": "https://example.com/acme/web.git", "created_by": "alice",
+                    "actions": [
+                        { "name": "dup", "type": "send_mail", "config": { "recipients": ["a@x.io"] } },
+                        { "name": "dup", "type": "send_mail", "config": { "recipients": ["b@x.io"] } }
+                    ]
+                }
+            }
+        }"#;
+        let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
+        let v = cfg.validate();
+        assert!(!v.is_valid);
+        assert!(
+            v.errors.iter().any(|e| e.message.contains("Duplicate action name")),
+            "expected duplicate-name error, got: {:?}",
+            v.errors
+        );
+    }
+
+    #[test]
+    fn state_action_validate_rejects_events_on_forge_status_report() {
+        let json = r#"{
+            "users": {
+                "alice": {
+                    "username": "alice", "name": "Alice", "email": "a@x.io",
+                    "password_file": "/dev/null"
+                }
+            },
+            "organizations": {
+                "acme": {
+                    "name": "acme", "display_name": "ACME",
+                    "private_key_file": "/dev/null", "public": false, "created_by": "alice"
+                }
+            },
+            "projects": {
+                "web": {
+                    "name": "web", "organization": "acme", "display_name": "Web",
+                    "repository": "https://example.com/acme/web.git", "created_by": "alice",
+                    "actions": [
+                        { "name": "x", "type": "forge_status_report", "events": ["build.completed"], "config": { "integration": "gh" } }
+                    ]
+                }
+            }
+        }"#;
+        let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
+        let v = cfg.validate();
+        assert!(!v.is_valid);
+        assert!(
+            v.errors.iter().any(|e| e.field == "projects.web.actions.x.events"),
+            "expected forge_status_report-events error, got: {:?}",
             v.errors
         );
     }

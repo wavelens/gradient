@@ -5,8 +5,9 @@
  */
 
 use super::{
-    StateApiKey, StateCache, StateConfiguration, StateFlakeInputOverride, StateIntegration,
-    StateOrganization, StateProject, StateRole, StateTrigger, StateUpstream, StateUser, StateWorker,
+    StateAction, StateApiKey, StateCache, StateConfiguration, StateFlakeInputOverride,
+    StateIntegration, StateOrganization, StateProject, StateRole, StateTrigger, StateUpstream,
+    StateUser, StateWorker,
 };
 use crate::ci::actions::encrypt_secret_with_file;
 use crate::ci::{ForgeType, GITHUB_APP_INTEGRATION_NAME, IntegrationKind};
@@ -35,12 +36,14 @@ pub(super) async fn apply_state_to_database(
     config: &StateConfiguration,
     crypt_secret_file: &str,
     delete_state: bool,
+    email_enabled: bool,
 ) -> Result<(), DynError> {
     tracing::info!("Applying state to database");
 
     let app = StateApplicator {
         db,
         crypt_secret_file,
+        email_enabled,
     };
 
     app.apply_users(&config.users).await?;
@@ -113,6 +116,20 @@ async fn inbound_integrations_by_name<C: ConnectionTrait>(
         .collect())
 }
 
+async fn outbound_integrations_by_name<C: ConnectionTrait>(
+    db: &C,
+    org_id: OrganizationId,
+) -> Result<HashMap<String, IntegrationId>, sea_orm::DbErr> {
+    Ok(integration::Entity::find()
+        .filter(integration::Column::Organization.eq(org_id))
+        .filter(integration::Column::Kind.eq(i16::from(IntegrationKind::Outbound)))
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|r| (r.name, r.id))
+        .collect())
+}
+
 // ── managed_keep_sets ─────────────────────────────────────────────────────────
 
 /// Names of state-managed rows that must remain `managed` after reconciliation.
@@ -178,6 +195,7 @@ macro_rules! unmark_managed {
 struct StateApplicator<'a> {
     db: &'a DatabaseConnection,
     crypt_secret_file: &'a str,
+    email_enabled: bool,
 }
 
 impl<'a> StateApplicator<'a> {
@@ -460,6 +478,123 @@ impl<'a> StateApplicator<'a> {
                     state_project.name, e
                 )
             })?;
+
+            self.apply_project_actions(
+                project_row.id,
+                created_by_id,
+                org_id,
+                &state_project.name,
+                &state_project.actions,
+            )
+            .await
+            .map_err(|e| {
+                format!(
+                    "Failed to apply actions for project '{}': {}",
+                    state_project.name, e
+                )
+            })?;
+        }
+
+        Ok(())
+    }
+
+    // ── apply_project_actions ─────────────────────────────────────────────────
+
+    async fn apply_project_actions(
+        &self,
+        project_id: ProjectId,
+        created_by: UserId,
+        org_id: OrganizationId,
+        project_name: &str,
+        desired: &[StateAction],
+    ) -> Result<(), DynError> {
+        let outbound = outbound_integrations_by_name(self.db, org_id).await?;
+        let crypt_key = load_secret_bytes(self.crypt_secret_file)
+            .map_err(|e| format!("Failed to load crypt secret: {}", e))?;
+
+        let existing = EProjectAction::find()
+            .filter(CProjectAction::Project.eq(project_id))
+            .all(self.db)
+            .await?;
+        let existing_by_name: HashMap<String, MProjectAction> = existing
+            .into_iter()
+            .map(|r| (r.name.clone(), r))
+            .collect();
+
+        let now = now();
+        let mut declared: HashSet<String> = HashSet::new();
+
+        for action in desired {
+            if !declared.insert(action.name.clone()) {
+                return Err(format!(
+                    "duplicate action name '{}' in project '{}'",
+                    action.name, project_name
+                )
+                .into());
+            }
+
+            let cfg = build_action_config(
+                action,
+                project_name,
+                &outbound,
+                self.email_enabled,
+                crypt_key.expose(),
+            )?;
+            let cfg_json =
+                serde_json::to_value(&cfg).map_err(|e| format!("encoding action config: {e}"))?;
+            let events_json = serde_json::to_value(&action.events)
+                .map_err(|e| format!("encoding action events: {e}"))?;
+            let action_type_i16 = cfg.action_type().to_i16();
+
+            match existing_by_name.get(&action.name) {
+                Some(row) => {
+                    let mut am: AProjectAction = row.clone().into();
+                    am.action_type = Set(action_type_i16);
+                    am.config = Set(cfg_json);
+                    am.events = Set(events_json);
+                    am.active = Set(action.active);
+                    am.updated_at = Set(now);
+                    am.update(self.db).await?;
+                    tracing::info!(
+                        project = %project_name,
+                        action = %action.name,
+                        "Updated project action"
+                    );
+                }
+                None => {
+                    let am = AProjectAction {
+                        id: Set(ProjectActionId::now_v7()),
+                        project: Set(project_id),
+                        name: Set(action.name.clone()),
+                        action_type: Set(action_type_i16),
+                        config: Set(cfg_json),
+                        events: Set(events_json),
+                        active: Set(action.active),
+                        last_fired_at: Set(None),
+                        created_by: Set(created_by),
+                        created_at: Set(now),
+                        updated_at: Set(now),
+                    };
+                    am.insert(self.db).await?;
+                    tracing::info!(
+                        project = %project_name,
+                        action = %action.name,
+                        "Created project action"
+                    );
+                }
+            }
+        }
+
+        for (name, row) in &existing_by_name {
+            if declared.contains(name) {
+                continue;
+            }
+            EProjectAction::delete_by_id(row.id).exec(self.db).await?;
+            tracing::info!(
+                project = %project_name,
+                action = %name,
+                "Deleted project action no longer declared in state"
+            );
         }
 
         Ok(())
@@ -1365,6 +1500,101 @@ fn trigger_key(cfg: &TriggerConfig) -> String {
     format!("{}|{}", i16::from(cfg.trigger_type()), canonical)
 }
 
+// ── Action sync ──────────────────────────────────────────────────────────────
+
+/// Build a stored `ActionConfig` from a declared `StateAction`. Tokens for
+/// `send_web_request` are loaded from the systemd credential file
+/// `gradient_action_${name}_token` and encrypted with the server's crypt key
+/// before storage, matching the REST `create_action` path.
+fn build_action_config(
+    a: &StateAction,
+    project_name: &str,
+    outbound: &HashMap<String, IntegrationId>,
+    email_enabled: bool,
+    crypt_key: &[u8],
+) -> Result<ActionConfig, DynError> {
+    let want = |k: &str| -> Result<&serde_json::Value, DynError> {
+        a.config
+            .get(k)
+            .ok_or_else(|| format!("action '{}' config missing '{}'", a.name, k).into())
+    };
+
+    match a.action_type.as_str() {
+        "send_mail" => {
+            if !email_enabled {
+                return Err(format!(
+                    "action '{}' in project '{}' is type 'send_mail' but SMTP is not enabled on this server",
+                    a.name, project_name
+                )
+                .into());
+            }
+            let recipients: Vec<String> = want("recipients")?
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(str::to_owned))
+                        .collect()
+                })
+                .ok_or_else(|| format!("action '{}': recipients must be a list", a.name))?;
+            if recipients.is_empty() {
+                return Err(format!("action '{}': recipients must be non-empty", a.name).into());
+            }
+            let subject_template = a
+                .config
+                .get("subject_template")
+                .and_then(|v| v.as_str())
+                .map(str::to_owned);
+            Ok(ActionConfig::SendMail {
+                recipients,
+                subject_template,
+            })
+        }
+        "send_web_request" => {
+            let url = want("url")?
+                .as_str()
+                .ok_or_else(|| format!("action '{}': url must be a string", a.name))?
+                .to_owned();
+            crate::ci::http_validation::validate_webhook_url(&url)
+                .map_err(|e| format!("action '{}': {}", a.name, e))?;
+            let token = if a.config.get("token_file").is_some() {
+                let (plain, _) =
+                    read_credential("action", &a.name, "token", "action token file")?;
+                let plain = plain.trim();
+                let enc = crate::ci::actions::encrypt_action_secret(plain, crypt_key)
+                    .map_err(|e| format!("encrypt action token: {e}"))?;
+                Some(enc)
+            } else {
+                None
+            };
+            Ok(ActionConfig::SendWebRequest { url, token })
+        }
+        "forge_status_report" => {
+            if !a.events.is_empty() {
+                return Err(format!(
+                    "action '{}': forge_status_report cannot carry custom events",
+                    a.name
+                )
+                .into());
+            }
+            let int_name = want("integration")?
+                .as_str()
+                .ok_or_else(|| format!("action '{}': integration must be a string", a.name))?;
+            let integration_id = *outbound.get(int_name).ok_or_else(|| {
+                format!(
+                    "action '{}': outbound integration '{}' not found in project's organization",
+                    a.name, int_name
+                )
+            })?;
+            Ok(ActionConfig::ForgeStatusReport { integration_id })
+        }
+        other => Err(format!(
+            "action '{}' has invalid type '{}': expected send_mail/send_web_request/forge_status_report",
+            a.name, other
+        )
+        .into()),
+    }
+}
+
 // ── Pure helpers ──────────────────────────────────────────────────────────────
 
 /// Validate the contents of a user password credential file. The file must
@@ -1860,5 +2090,148 @@ mod keep_set_tests {
         let key_key = "key-key".to_string();
         assert!(sets.api_key_names.contains(&ci_runner));
         assert!(!sets.api_key_names.contains(&key_key));
+    }
+}
+
+#[cfg(test)]
+mod action_helper_tests {
+    use super::*;
+    use uuid::Uuid;
+
+    fn key() -> Vec<u8> {
+        b"01234567890123456789012345678901".to_vec()
+    }
+
+    #[test]
+    fn build_send_mail_round_trip() {
+        let a = StateAction {
+            name: "ops".into(),
+            action_type: "send_mail".into(),
+            active: true,
+            events: vec!["build.failed".into()],
+            config: serde_json::json!({
+                "recipients": ["ops@example.com"],
+                "subject_template": "[Gradient] {event}",
+            }),
+        };
+        let cfg = build_action_config(&a, "web", &HashMap::new(), true, &key()).unwrap();
+        match cfg {
+            ActionConfig::SendMail {
+                recipients,
+                subject_template,
+            } => {
+                assert_eq!(recipients, vec!["ops@example.com".to_string()]);
+                assert_eq!(subject_template.as_deref(), Some("[Gradient] {event}"));
+            }
+            other => panic!("expected SendMail, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn build_send_mail_rejects_when_email_disabled() {
+        let a = StateAction {
+            name: "ops".into(),
+            action_type: "send_mail".into(),
+            active: true,
+            events: vec![],
+            config: serde_json::json!({ "recipients": ["ops@example.com"] }),
+        };
+        let err = build_action_config(&a, "web", &HashMap::new(), false, &key()).unwrap_err();
+        assert!(err.to_string().contains("SMTP"), "got: {err}");
+    }
+
+    #[test]
+    fn build_send_mail_requires_non_empty_recipients() {
+        let a = StateAction {
+            name: "ops".into(),
+            action_type: "send_mail".into(),
+            active: true,
+            events: vec![],
+            config: serde_json::json!({ "recipients": [] }),
+        };
+        let err = build_action_config(&a, "web", &HashMap::new(), true, &key()).unwrap_err();
+        assert!(err.to_string().contains("recipients"), "got: {err}");
+    }
+
+    #[test]
+    fn build_send_web_request_without_token() {
+        let a = StateAction {
+            name: "hook".into(),
+            action_type: "send_web_request".into(),
+            active: true,
+            events: vec!["build.completed".into()],
+            config: serde_json::json!({ "url": "https://hooks.example.com/x" }),
+        };
+        let cfg = build_action_config(&a, "web", &HashMap::new(), true, &key()).unwrap();
+        match cfg {
+            ActionConfig::SendWebRequest { url, token } => {
+                assert_eq!(url, "https://hooks.example.com/x");
+                assert!(token.is_none());
+            }
+            other => panic!("expected SendWebRequest, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn build_forge_status_report_resolves_integration() {
+        let int_id = IntegrationId::new(Uuid::nil());
+        let mut outbound = HashMap::new();
+        outbound.insert("gitea-prod".to_string(), int_id);
+        let a = StateAction {
+            name: "status".into(),
+            action_type: "forge_status_report".into(),
+            active: true,
+            events: vec![],
+            config: serde_json::json!({ "integration": "gitea-prod" }),
+        };
+        let cfg = build_action_config(&a, "web", &outbound, true, &key()).unwrap();
+        assert_eq!(
+            cfg,
+            ActionConfig::ForgeStatusReport {
+                integration_id: int_id
+            }
+        );
+    }
+
+    #[test]
+    fn build_forge_status_report_errors_on_unknown_integration() {
+        let a = StateAction {
+            name: "status".into(),
+            action_type: "forge_status_report".into(),
+            active: true,
+            events: vec![],
+            config: serde_json::json!({ "integration": "missing" }),
+        };
+        let err = build_action_config(&a, "web", &HashMap::new(), true, &key()).unwrap_err();
+        assert!(err.to_string().contains("missing"), "got: {err}");
+    }
+
+    #[test]
+    fn build_forge_status_report_rejects_events() {
+        let int_id = IntegrationId::new(Uuid::nil());
+        let mut outbound = HashMap::new();
+        outbound.insert("gh".to_string(), int_id);
+        let a = StateAction {
+            name: "status".into(),
+            action_type: "forge_status_report".into(),
+            active: true,
+            events: vec!["build.completed".into()],
+            config: serde_json::json!({ "integration": "gh" }),
+        };
+        let err = build_action_config(&a, "web", &outbound, true, &key()).unwrap_err();
+        assert!(err.to_string().contains("events"), "got: {err}");
+    }
+
+    #[test]
+    fn build_rejects_unknown_action_type() {
+        let a = StateAction {
+            name: "x".into(),
+            action_type: "garbage".into(),
+            active: true,
+            events: vec![],
+            config: serde_json::json!({}),
+        };
+        let err = build_action_config(&a, "web", &HashMap::new(), true, &key()).unwrap_err();
+        assert!(err.to_string().contains("invalid type"), "got: {err}");
     }
 }
