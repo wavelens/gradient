@@ -121,8 +121,8 @@ tags:
     description: Binary cache management
   - name: commits
     description: Commit records
-  - name: webhooks
-    description: Outgoing webhook management (Gradient → external URLs)
+  - name: actions
+    description: Per-project Actions (Send Mail, Send Web Request, Forge Status Report)
   - name: forge-webhooks
     description: Incoming forge webhooks (external forges → Gradient push triggers)
   - name: integrations
@@ -1817,23 +1817,17 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /projects/{organization}/{project}/integration:
+  /projects/{organization}/{project}/actions:
     parameters:
       - $ref: '#/components/parameters/OrganizationSlug'
       - $ref: '#/components/parameters/ProjectSlug'
     get:
-      tags: [integrations]
-      summary: Get project integration link
-      description: >-
-        Returns the outbound integration ID linked to this project, or `null`
-        when no link exists. Inbound integration linkage moved to `/triggers`
-        (configure a `reporter_push` or `reporter_pull_request` trigger that
-        references an `integration_id`). This endpoint now manages only the
-        outbound integration link.
-      operationId: getProjectIntegration
+      tags: [actions]
+      summary: List project actions
+      operationId: listProjectActions
       responses:
         '200':
-          description: Current link
+          description: List of actions
           content:
             application/json:
               schema:
@@ -1842,30 +1836,26 @@ paths:
                   - type: object
                     properties:
                       message:
-                        $ref: '#/components/schemas/ProjectIntegrationLink'
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Action'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
-    put:
-      tags: [integrations]
-      summary: Set project integration link
-      description: >-
-        Upserts the project → outbound-integration link. The ID must reference
-        an outbound integration in the same organization. Pass `null` to unset.
-        Requires Admin/Write on the project. Inbound integration linkage moved
-        to `/triggers` (configure a `reporter_push` or `reporter_pull_request`
-        trigger that references an `integration_id`).
-      operationId: putProjectIntegration
+    post:
+      tags: [actions]
+      summary: Create project action
+      operationId: createProjectAction
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PutProjectIntegrationRequest'
+              $ref: '#/components/schemas/CreateActionRequest'
       responses:
         '200':
-          description: Link updated
+          description: Action created; token present only for send_web_request
           content:
             application/json:
               schema:
@@ -1874,9 +1864,71 @@ paths:
                   - type: object
                     properties:
                       message:
-                        $ref: '#/components/schemas/ProjectIntegrationLink'
+                        $ref: '#/components/schemas/CreateActionResponse'
         '400':
-          description: Integration kind mismatch or not in org
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /projects/{organization}/{project}/actions/{id}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Action UUID
+    get:
+      tags: [actions]
+      summary: Get project action
+      operationId: getProjectAction
+      responses:
+        '200':
+          description: Action (token stripped)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/Action'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [actions]
+      summary: Update project action
+      operationId: updateProjectAction
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateActionRequest'
+      responses:
+        '200':
+          description: Action updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/Action'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -1884,19 +1936,174 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
     delete:
-      tags: [integrations]
-      summary: Remove project integration link
-      description: >-
-        Removes the project → integration link row entirely. Disables
-        commit-status reporting and inbound webhook routing for this project.
-      operationId: deleteProjectIntegration
+      tags: [actions]
+      summary: Delete project action
+      operationId: deleteProjectAction
       responses:
         '200':
-          description: Link removed
+          description: Action deleted
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/BoolResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /projects/{organization}/{project}/actions/{id}/test:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Action UUID
+    post:
+      tags: [actions]
+      summary: Fire action now (synthetic test)
+      operationId: testProjectAction
+      description: Fires the action immediately with a synthetic test event, bypassing event matching.
+      responses:
+        '200':
+          description: Action fired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BoolResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /projects/{organization}/{project}/actions/{id}/regenerate-token:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Action UUID
+    post:
+      tags: [actions]
+      summary: Regenerate send_web_request token
+      operationId: regenerateActionToken
+      description: Invalidates the current token and returns a new one in plaintext. Only valid for send_web_request actions.
+      responses:
+        '200':
+          description: New token (one-time reveal)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: string
+                        description: Plaintext token
+        '400':
+          description: Action is not of type send_web_request
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /projects/{organization}/{project}/actions/{id}/deliveries:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Action UUID
+    get:
+      tags: [actions]
+      summary: List action deliveries
+      operationId: listActionDeliveries
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: offset
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        '200':
+          description: Paginated delivery list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: object
+                        properties:
+                          items:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/ActionDelivery'
+                          total: { type: integer }
+                          limit: { type: integer }
+                          offset: { type: integer }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /projects/{organization}/{project}/actions/{id}/deliveries/{delivery_id}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Action UUID
+      - name: delivery_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Delivery UUID
+    get:
+      tags: [actions]
+      summary: Get action delivery detail
+      operationId: getActionDelivery
+      responses:
+        '200':
+          description: Delivery with request/response bodies
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/ActionDeliveryDetail'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -4143,263 +4350,6 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  # ── Webhooks ─────────────────────────────────────────────────────────────────
-
-  /webhook/{organization}:
-    parameters:
-      - $ref: '#/components/parameters/OrganizationSlug'
-    get:
-      tags: [webhooks]
-      summary: List webhooks
-      description: Returns all webhooks configured for the organization. Requires Admin or Write role.
-      operationId: listWebhooks
-      security:
-        - bearerAuth: []
-      responses:
-        '200':
-          description: List of webhooks (secret is never included)
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/BaseResponse'
-                  - type: object
-                    properties:
-                      message:
-                        type: array
-                        items:
-                          $ref: '#/components/schemas/Webhook'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-    put:
-      tags: [webhooks]
-      summary: Create webhook
-      description: Creates a new webhook for the organization. Requires Admin or Write role.
-      operationId: createWebhook
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreateWebhookRequest'
-      responses:
-        '200':
-          description: Created webhook
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/BaseResponse'
-                  - type: object
-                    properties:
-                      message:
-                        $ref: '#/components/schemas/Webhook'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-
-  /webhook/{organization}/{webhook}:
-    parameters:
-      - $ref: '#/components/parameters/OrganizationSlug'
-      - name: webhook
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-        description: Webhook UUID
-    get:
-      tags: [webhooks]
-      summary: Get webhook
-      description: Returns a single webhook. Requires Admin or Write role. Secret is never returned.
-      operationId: getWebhook
-      security:
-        - bearerAuth: []
-      responses:
-        '200':
-          description: Webhook
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/BaseResponse'
-                  - type: object
-                    properties:
-                      message:
-                        $ref: '#/components/schemas/Webhook'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-    patch:
-      tags: [webhooks]
-      summary: Update webhook
-      description: Updates a webhook's name, URL, secret, events, or active state. Requires Admin or Write role.
-      operationId: updateWebhook
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/UpdateWebhookRequest'
-      responses:
-        '200':
-          description: Updated webhook
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/BaseResponse'
-                  - type: object
-                    properties:
-                      message:
-                        $ref: '#/components/schemas/Webhook'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-    delete:
-      tags: [webhooks]
-      summary: Delete webhook
-      description: Permanently deletes a webhook. Requires Admin or Write role.
-      operationId: deleteWebhook
-      security:
-        - bearerAuth: []
-      responses:
-        '200':
-          description: Deletion confirmed
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/BaseResponse'
-                  - type: object
-                    properties:
-                      message:
-                        type: boolean
-                        example: true
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-
-  /webhook/{organization}/{webhook}/test:
-    parameters:
-      - $ref: '#/components/parameters/OrganizationSlug'
-      - name: webhook
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-        description: Webhook UUID
-    post:
-      tags: [webhooks]
-      summary: Send test event
-      description: |-
-        Sends a `ping` event to the webhook URL to verify delivery. Requires Admin or Write role.
-
-        The request body sent to the webhook URL will be:
-        ```json
-        { "event": "ping", "data": { "test": true, "webhook_id": "...", "organization": "..." } }
-        ```
-      operationId: testWebhook
-      security:
-        - bearerAuth: []
-      responses:
-        '200':
-          description: Test event delivered successfully
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/BaseResponse'
-                  - type: object
-                    properties:
-                      message:
-                        type: boolean
-                        example: true
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '500':
-          description: Webhook delivery failed
-
-  /webhook/{organization}/{webhook}/deliveries:
-    parameters:
-      - $ref: '#/components/parameters/OrganizationSlug'
-      - name: webhook
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-        description: Webhook UUID
-    get:
-      tags: [webhooks]
-      summary: Webhook delivery history
-      description: |-
-        Paginated list of past delivery attempts for this webhook. Each entry
-        records the response status (or error), latency, and event payload.
-      operationId: getWebhookDeliveries
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: page
-          in: query
-          schema: { type: integer, minimum: 1, default: 1 }
-        - name: per_page
-          in: query
-          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
-      responses:
-        '200':
-          description: Delivery history
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/BaseResponse'
-                  - type: object
-                    properties:
-                      message:
-                        type: object
-                        properties:
-                          items:
-                            type: array
-                            items:
-                              $ref: '#/components/schemas/WebhookDeliveryEntry'
-                          total: { type: integer }
-                          page: { type: integer }
-                          per_page: { type: integer }
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-
   # ── Organization integrations ────────────────────────────────────────────────
 
   /orgs/{organization}/integrations:
@@ -5114,7 +5064,7 @@ components:
 
     ServerConfig:
       type: object
-      required: [oidc_enabled, registration_enabled, email_verification_enabled, quic]
+      required: [oidc_enabled, registration_enabled, email_verification_enabled, quic, smtp_enabled]
       properties:
         oidc_enabled:
           type: boolean
@@ -5131,6 +5081,9 @@ components:
             Whether the server advertises HTTP/3 (QUIC) support via the reverse
             proxy. Clients may attempt an HTTP/3 upgrade when true. Actual QUIC
             termination is handled by nginx, not the backend.
+        smtp_enabled:
+          type: boolean
+          description: Whether the server has SMTP configured (required for send_mail actions)
     # ── Auth ─────────────────────────────────────────────────────────────────
 
     MakeLoginRequest:
@@ -5367,21 +5320,108 @@ components:
           nullable: true
           description: Required for OIDC users - must equal the caller's own username.
 
-    WebhookDeliveryEntry:
+    # ── Actions ───────────────────────────────────────────────────────────────
+
+    ActionType:
+      type: string
+      enum: [send_mail, send_web_request, forge_status_report]
+
+    ActionConfigSendMail:
+      type: object
+      required: [type, recipients]
+      properties:
+        type: { type: string, enum: [send_mail] }
+        recipients: { type: array, items: { type: string, format: email } }
+        subject_template: { type: string, nullable: true }
+
+    ActionConfigSendWebRequest:
+      type: object
+      required: [type, url]
+      properties:
+        type: { type: string, enum: [send_web_request] }
+        url: { type: string, format: uri }
+        token:
+          type: string
+          nullable: true
+          description: "Write-only; never returned in reads"
+
+    ActionConfigForgeStatusReport:
+      type: object
+      required: [type, integration_id]
+      properties:
+        type: { type: string, enum: [forge_status_report] }
+        integration_id: { type: string, format: uuid }
+
+    ActionConfig:
+      oneOf:
+        - { $ref: '#/components/schemas/ActionConfigSendMail' }
+        - { $ref: '#/components/schemas/ActionConfigSendWebRequest' }
+        - { $ref: '#/components/schemas/ActionConfigForgeStatusReport' }
+      discriminator:
+        propertyName: type
+
+    Action:
+      type: object
+      required: [id, name, action_type, config, events, active, created_by, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        action_type: { $ref: '#/components/schemas/ActionType' }
+        config: { $ref: '#/components/schemas/ActionConfig' }
+        events: { type: array, items: { type: string } }
+        active: { type: boolean }
+        last_fired_at: { type: string, format: date-time, nullable: true }
+        created_by: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    CreateActionRequest:
+      type: object
+      required: [name, config]
+      properties:
+        name: { type: string }
+        config: { $ref: '#/components/schemas/ActionConfig' }
+        events: { type: array, items: { type: string }, default: [] }
+        active: { type: boolean, default: true }
+
+    CreateActionResponse:
+      type: object
+      required: [action]
+      properties:
+        action: { $ref: '#/components/schemas/Action' }
+        token:
+          type: string
+          nullable: true
+          description: "Plaintext token for send_web_request, returned once"
+
+    UpdateActionRequest:
+      type: object
+      properties:
+        name: { type: string }
+        config: { $ref: '#/components/schemas/ActionConfig' }
+        events: { type: array, items: { type: string } }
+        active: { type: boolean }
+
+    ActionDelivery:
       type: object
       required: [id, event, success, duration_ms, delivered_at]
       properties:
         id: { type: string, format: uuid }
         event: { type: string }
         success: { type: boolean }
-        response_status:
-          type: integer
-          nullable: true
-        error_message:
-          type: string
-          nullable: true
+        response_status: { type: integer, nullable: true }
+        error_message: { type: string, nullable: true }
         duration_ms: { type: integer }
         delivered_at: { type: string, format: date-time }
+
+    ActionDeliveryDetail:
+      allOf:
+        - { $ref: '#/components/schemas/ActionDelivery' }
+        - type: object
+          required: [request_body]
+          properties:
+            request_body: { type: string }
+            response_body: { type: string, nullable: true }
 
     # ── Organizations ─────────────────────────────────────────────────────────
 
@@ -6764,128 +6804,6 @@ components:
           description: Git author name
           example: Alice Example
 
-    # ── Webhooks ──────────────────────────────────────────────────────────────
-
-    Webhook:
-      type: object
-      required: [id, organization, name, url, events, active, created_by, created_at]
-      properties:
-        id:
-          type: string
-          format: uuid
-          description: Webhook UUID
-        organization:
-          type: string
-          format: uuid
-          description: Organization UUID
-        name:
-          type: string
-          description: Human-readable webhook name
-          example: My Webhook
-        url:
-          type: string
-          format: uri
-          description: URL that receives webhook POST requests
-          example: https://example.com/hooks/gradient
-        events:
-          type: array
-          description: |-
-            List of event types this webhook subscribes to. Supported events:
-            - `evaluation.queued` - an evaluation was queued
-            - `evaluation.started` - an evaluation began (Evaluating state)
-            - `evaluation.building` - an evaluation entered the Building state
-            - `evaluation.completed` - an evaluation completed successfully
-            - `evaluation.failed` - an evaluation failed
-            - `evaluation.aborted` - an evaluation was aborted
-            - `build.queued` - a build was queued
-            - `build.started` - a build started executing
-            - `build.completed` - a build completed successfully
-            - `build.failed` - a build failed
-          items:
-            type: string
-            enum:
-              - evaluation.queued
-              - evaluation.started
-              - evaluation.building
-              - evaluation.completed
-              - evaluation.failed
-              - evaluation.aborted
-              - build.queued
-              - build.started
-              - build.completed
-              - build.failed
-          example: ["evaluation.completed", "build.failed"]
-        active:
-          type: boolean
-          description: Whether the webhook is active and will receive events
-          default: true
-        created_by:
-          type: string
-          format: uuid
-          description: UUID of the user who created the webhook
-        created_at:
-          type: string
-          format: date-time
-          description: Creation timestamp
-
-    CreateWebhookRequest:
-      type: object
-      required: [name, url, secret, events]
-      properties:
-        name:
-          type: string
-          description: Human-readable webhook name
-          example: My Webhook
-        url:
-          type: string
-          format: uri
-          description: |-
-            URL to send webhook POST requests to. Must use `http` or `https`.
-            URLs whose host is a loopback / private (RFC1918) / link-local /
-            multicast / CGNAT (`100.64.0.0/10`) / unspecified / reserved IP,
-            an IPv6 unique-local (`fc00::/7`) or link-local (`fe80::/10`)
-            literal, or the literal name `localhost` are rejected with
-            `400 Bad Request`. Cloud-metadata addresses (e.g.
-            `169.254.169.254`) are blocked by the link-local rule. HTTP
-            redirects on outbound delivery are not followed.
-          example: https://example.com/hooks/gradient
-        secret:
-          type: string
-          description: |-
-            HMAC-SHA256 signing secret. Each delivery includes an
-            `X-Gradient-Signature: sha256=<hex>` header computed with this secret.
-          example: "s3cr3t-webhook-key"
-        events:
-          type: array
-          description: Event types to subscribe to
-          items:
-            type: string
-          example: ["evaluation.completed", "build.failed"]
-
-    UpdateWebhookRequest:
-      type: object
-      properties:
-        name:
-          type: string
-          description: New name
-        url:
-          type: string
-          format: uri
-          description: |-
-            New URL. Must use `http`/`https`; private/loopback/link-local IP
-            literals and `localhost` are rejected (see `CreateWebhookRequest`).
-        secret:
-          type: string
-          description: New signing secret
-        events:
-          type: array
-          description: New event subscription list (replaces existing)
-          items:
-            type: string
-        active:
-          type: boolean
-          description: Enable or disable the webhook
-
     Integration:
       type: object
       required: [id, organization, name, display_name, kind, forge_type, has_secret, has_access_token, created_by, created_at]
@@ -7019,26 +6937,6 @@ components:
           type: string
         access_token:
           type: string
-
-    ProjectIntegrationLink:
-      type: object
-      required: [project, outbound_integration]
-      properties:
-        project:
-          type: string
-          format: uuid
-        outbound_integration:
-          type: string
-          format: uuid
-          nullable: true
-
-    PutProjectIntegrationRequest:
-      type: object
-      properties:
-        outbound_integration:
-          type: string
-          format: uuid
-          nullable: true
 
     TriggerType:
       type: string
