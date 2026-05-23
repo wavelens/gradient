@@ -102,6 +102,15 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'actions',
+        title: 'Project Actions',
+        canActivate: [authGuard],
+        loadComponent: () =>
+          import('./features/projects/project-actions/project-actions.component').then(
+            (m) => m.ProjectActionsComponent,
+          ),
+      },
+      {
         path: 'flake-inputs',
         title: 'Project Flake Inputs',
         canActivate: [authGuard],

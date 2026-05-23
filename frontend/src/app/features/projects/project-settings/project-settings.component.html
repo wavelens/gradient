@@ -189,6 +189,19 @@
       </div>
     </div>
 
+    <!-- Actions -->
+    <div class="settings-section">
+      <h2>Actions</h2>
+      <div class="settings-card">
+        <div class="nav-row">
+          <p class="text-secondary">
+            Actions react to evaluation and build events - send mail, post webhooks, or report status back to your forge.
+          </p>
+          <a pButton label="Manage Actions" icon="pi pi-bolt" severity="secondary" [routerLink]="['/organization', orgName, 'project', projectName, 'actions']"></a>
+        </div>
+      </div>
+    </div>
+
     <!-- Flake Inputs -->
     <div class="settings-section">
       <h2>Flake Inputs</h2>
