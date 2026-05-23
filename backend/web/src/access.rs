@@ -617,7 +617,7 @@ mod tests {
         run(async {
             let user = user_fixture();
             let access = OrgAccess::Require {
-                permission: Permission::ManageWebhooks,
+                permission: Permission::ManageActions,
                 reject_managed: true,
             };
             let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -636,7 +636,7 @@ mod tests {
         run(async {
             let user = user_fixture();
             let access = OrgAccess::Require {
-                permission: Permission::ManageWebhooks,
+                permission: Permission::ManageActions,
                 reject_managed: true,
             };
             let db = MockDatabase::new(DatabaseBackend::Postgres)
