@@ -23,9 +23,8 @@ use crate::permissions::Permission;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 
-use gradient_core::ci::{
-    ForgeType, GITHUB_APP_INTEGRATION_NAME, IntegrationKind, encrypt_webhook_secret,
-};
+use gradient_core::ci::actions::encrypt_secret_with_file;
+use gradient_core::ci::{ForgeType, GITHUB_APP_INTEGRATION_NAME, IntegrationKind};
 use gradient_core::types::input::check_index_name;
 use gradient_core::types::*;
 use sea_orm::ActiveValue::Set;
@@ -281,7 +280,7 @@ pub async fn put_integration(
 
     let encrypted_secret = match body.secret.as_deref() {
         Some(s) if !s.is_empty() => Some(
-            encrypt_webhook_secret(&state.config.secrets.crypt_secret_file, s)
+            encrypt_secret_with_file(&state.config.secrets.crypt_secret_file, s)
                 .map_err(|e| WebError::internal(format!("Failed to encrypt secret: {}", e)))?,
         ),
         _ => None,
@@ -289,7 +288,7 @@ pub async fn put_integration(
 
     let encrypted_token = match body.access_token.as_deref() {
         Some(t) if !t.is_empty() => Some(
-            encrypt_webhook_secret(&state.config.secrets.crypt_secret_file, t)
+            encrypt_secret_with_file(&state.config.secrets.crypt_secret_file, t)
                 .map_err(|e| WebError::internal(format!("Failed to encrypt token: {}", e)))?,
         ),
         _ => None,
@@ -436,7 +435,7 @@ pub async fn patch_integration(
             None
         } else {
             Some(
-                encrypt_webhook_secret(&state.config.secrets.crypt_secret_file, &secret)
+                encrypt_secret_with_file(&state.config.secrets.crypt_secret_file, &secret)
                     .map_err(|e| WebError::internal(format!("Failed to encrypt secret: {}", e)))?,
             )
         });
@@ -447,7 +446,7 @@ pub async fn patch_integration(
             None
         } else {
             Some(
-                encrypt_webhook_secret(&state.config.secrets.crypt_secret_file, &token)
+                encrypt_secret_with_file(&state.config.secrets.crypt_secret_file, &token)
                     .map_err(|e| WebError::internal(format!("Failed to encrypt token: {}", e)))?,
             )
         });

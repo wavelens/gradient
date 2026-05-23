@@ -25,8 +25,9 @@ use axum::Json;
 use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
+use gradient_core::ci::actions::decrypt_secret_with_file;
 use gradient_core::ci::{
-    ForgeType, IntegrationKind, decrypt_webhook_secret, verify_gitea_signature,
+    ForgeType, IntegrationKind, verify_gitea_signature,
     verify_github_signature,
 };
 use gradient_core::types::input::load_secret;
@@ -335,7 +336,7 @@ pub async fn forge_webhook(
         WebError::not_found_msg("integration not found")
     })?;
 
-    let plaintext_secret = decrypt_webhook_secret(
+    let plaintext_secret = decrypt_secret_with_file(
         &state.config.secrets.crypt_secret_file,
         encrypted_secret,
     )

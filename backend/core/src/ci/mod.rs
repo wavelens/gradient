@@ -10,13 +10,13 @@ pub mod abort;
 pub mod apply;
 pub mod github_app;
 pub mod github_app_manifest;
+pub mod http_validation;
 pub mod integration_lookup;
 pub mod manifest_state;
 pub mod reporter;
 pub mod reporting;
 pub mod trigger;
 pub mod unpark;
-pub mod webhook;
 
 pub use self::abort::{AbortKind, abort_evaluation};
 pub use self::apply::{
@@ -24,9 +24,9 @@ pub use self::apply::{
     park_if_pending_approval,
 };
 pub use self::github_app::*;
+pub use self::http_validation::validate_webhook_url;
 pub use self::integration_lookup::*;
 pub use self::reporter::*;
 pub use self::reporting::*;
 pub use self::trigger::*;
 pub use self::unpark::{find_approval_gated_eval, unpark_approval, unpark_no_cache_for_org};
-pub use self::webhook::*;

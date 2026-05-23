@@ -21,7 +21,6 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 use test_support::cli::{test_cli, test_cli_with_crypt};
 use test_support::fakes::email::InMemoryEmailSender;
-use test_support::fakes::webhooks::RecordingWebhookClient;
 use test_support::fixtures::{org, org_id, project_id, test_date, user, user_id};
 use test_support::log_storage::NoopLogStorage;
 use test_support::web::{TEST_JWT_SECRET, live_session, make_test_server_with, make_token};
@@ -160,10 +159,7 @@ fn server_with_email(
         web_db: WebDb::new(db),
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config,
-        log_storage: Arc::new(NoopLogStorage),
-        webhooks: Arc::new(RecordingWebhookClient::new())
-            as Arc<dyn gradient_core::ci::WebhookClient>,
-        email,
+        log_storage: Arc::new(NoopLogStorage),        email,
         nar_storage,
         manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),

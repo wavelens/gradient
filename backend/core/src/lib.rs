@@ -21,7 +21,6 @@ pub mod state_machine;
 pub mod storage;
 pub mod types;
 
-use ci::ReqwestWebhookClient;
 use db::{connect_db, connect_web_db};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
@@ -119,9 +118,6 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
         }
     };
 
-    let webhooks: Arc<dyn ci::WebhookClient> =
-        Arc::new(ReqwestWebhookClient::with_client(http.clone()));
-
     let jwt_secret = match types::input::load_secret(&cli.secrets.jwt_secret_file) {
         Ok(s) => s,
         Err(e) => {
@@ -213,7 +209,6 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
         web_db: WebDb::new(web_db),
         config,
         log_storage,
-        webhooks,
         email,
         nar_storage,
         manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),

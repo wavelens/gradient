@@ -281,12 +281,6 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             "/projects/{organization}/{project}/active",
             post(projects::post_project_active).delete(projects::delete_project_active),
         )
-        .route(
-            "/projects/{organization}/{project}/integration",
-            get(projects::get_project_integration)
-                .put(projects::put_project_integration)
-                .delete(projects::delete_project_integration),
-        )
         .nest(
             "/projects/{organization}/{project}/flake-inputs",
             projects::flake_inputs::router(),
@@ -370,24 +364,6 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         .route(
             "/user/settings",
             get(user::get_settings).patch(user::patch_settings),
-        )
-        .route(
-            "/webhook/{organization}",
-            get(webhooks::get).put(webhooks::put),
-        )
-        .route(
-            "/webhook/{organization}/{webhook}",
-            get(webhooks::get_webhook)
-                .patch(webhooks::patch_webhook)
-                .delete(webhooks::delete_webhook),
-        )
-        .route(
-            "/webhook/{organization}/{webhook}/test",
-            post(webhooks::post_webhook_test),
-        )
-        .route(
-            "/webhook/{organization}/{webhook}/deliveries",
-            get(webhooks::get_webhook_deliveries),
         )
         .nest("/admin", admin::admin_router())
         .route_layer(middleware::from_fn_with_state(
@@ -628,7 +604,7 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
     .with_graceful_shutdown(async move { drain_token.cancelled().await })
     .await;
 
-    // Drain background tasks (dispatch loops, outbound, cache GC, webhook
+    // Drain background tasks (dispatch loops, outbound, cache GC, action
     // deliveries, metric writes). Bounded so a misbehaving task can't block
     // shutdown indefinitely.
     shutdown

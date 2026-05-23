@@ -370,7 +370,6 @@ mod tests {
     use std::collections::BTreeMap;
     use std::path::Path;
     use test_support::fakes::email::InMemoryEmailSender;
-    use test_support::fakes::webhooks::RecordingWebhookClient;
     use test_support::log_storage::NoopLogStorage;
     use test_support::prelude::test_cli;
 
@@ -407,7 +406,6 @@ mod tests {
             worker_db: WorkerDb::new(db),
             config: Arc::new(RuntimeConfig::from_cli(&test_cli()).expect("valid test config")),
             log_storage: Arc::new(NoopLogStorage),
-            webhooks: Arc::new(RecordingWebhookClient::new()),
             email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
             nar_storage,
             manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
@@ -497,7 +495,6 @@ mod tests {
             worker_db: WorkerDb::new(db),
             config,
             log_storage: Arc::new(NoopLogStorage),
-            webhooks: Arc::new(RecordingWebhookClient::new()),
             email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
             nar_storage,
             manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
@@ -588,7 +585,6 @@ mod tests {
             worker_db: WorkerDb::new(db),
             config: Arc::new(RuntimeConfig::from_cli(&test_cli()).expect("valid test config")),
             log_storage: Arc::new(NoopLogStorage),
-            webhooks: Arc::new(RecordingWebhookClient::new()),
             email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
             nar_storage,
             manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
@@ -619,7 +615,6 @@ mod tests {
             worker_db: WorkerDb::new(db),
             config: Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config")),
             log_storage: Arc::new(NoopLogStorage),
-            webhooks: Arc::new(RecordingWebhookClient::new()),
             email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
             nar_storage,
             manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
@@ -692,7 +687,6 @@ mod tests {
             ),
             config: Arc::new(RuntimeConfig::from_cli(&test_cli()).expect("valid test config")),
             log_storage: Arc::new(NoopLogStorage),
-            webhooks: Arc::new(RecordingWebhookClient::new()),
             email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
             nar_storage,
             manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),

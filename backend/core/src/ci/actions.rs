@@ -11,7 +11,6 @@ use crate::ci::reporter::{
     CiReport, CiReporter, CiStatus, GiteaReporter, GithubAppReporter, GithubReporter,
     GitlabReporter,
 };
-use crate::ci::webhook::decrypt_webhook_secret;
 use crate::ci::{parse_owner_repo, reporting};
 use crate::types::input::{load_secret_bytes, vec_to_hex};
 use crate::types::{
@@ -33,6 +32,24 @@ pub fn encrypt_action_secret(plaintext: &str, crypt_key: &[u8]) -> Result<String
 
 pub fn decrypt_action_secret(ciphertext: &str, crypt_key: &[u8]) -> Result<String> {
     super::action_crypto::decrypt(ciphertext, crypt_key)
+}
+
+/// Load the server's crypt key from `crypt_secret_file` and encrypt `plaintext`.
+pub fn encrypt_secret_with_file(crypt_secret_file: &str, plaintext: &str) -> Result<String> {
+    let key = load_secret_bytes(crypt_secret_file)
+        .map_err(|e| anyhow!("loading crypt key: {}", e))?;
+    encrypt_action_secret(plaintext, key.expose())
+}
+
+/// Load the server's crypt key from `crypt_secret_file` and decrypt `ciphertext`,
+/// returning a [`crate::types::SecretString`] so the plaintext is zeroized on drop.
+pub fn decrypt_secret_with_file(
+    crypt_secret_file: &str,
+    ciphertext: &str,
+) -> Result<crate::types::SecretString> {
+    let key = load_secret_bytes(crypt_secret_file)
+        .map_err(|e| anyhow!("loading crypt key: {}", e))?;
+    decrypt_action_secret(ciphertext, key.expose()).map(crate::types::SecretString::new)
 }
 
 pub const FORGE_STATUS_EVENTS: &[&str] = &["build.started", "build.completed", "build.failed"];
@@ -226,7 +243,7 @@ async fn execute_send_web_request(
     url: &str,
     token: Option<&str>,
 ) -> Result<ExecutorOk> {
-    crate::ci::webhook::validate_webhook_url(url)
+    crate::ci::http_validation::validate_webhook_url(url)
         .map_err(|e| anyhow!("URL rejected: {}", e))?;
     let body = serde_json::to_string(payload).context("serializing webhook payload")?;
     let mut req = state
@@ -386,7 +403,7 @@ async fn build_reporter_for_integration(
 
     let token = match integration.access_token.as_deref() {
         Some(enc) => Some(
-            decrypt_webhook_secret(&state.config.secrets.crypt_secret_file, enc)
+            decrypt_secret_with_file(&state.config.secrets.crypt_secret_file, enc)
                 .map_err(|e| anyhow!("decrypt integration token: {}", e))?,
         ),
         None => None,
@@ -623,7 +640,6 @@ mod tests {
     }
 
     fn make_state() -> Arc<ServerState> {
-        use crate::ci::WebhookClient;
         use crate::storage::{EmailSender, LogStorage, NarStore};
         use crate::types::{RuntimeConfig, SecretString, WebDb, WorkerDb};
         use futures::future::BoxFuture;
@@ -640,15 +656,6 @@ mod tests {
             }
             fn delete<'a>(&'a self, _: entity::ids::BuildId) -> BoxFuture<'a, anyhow::Result<()>> {
                 Box::pin(async { Ok(()) })
-            }
-        }
-
-        #[derive(Debug)]
-        struct NoopWebhook;
-        #[async_trait::async_trait]
-        impl WebhookClient for NoopWebhook {
-            async fn deliver(&self, _: &str, _: &str, _: &str, _: String) -> anyhow::Result<u16> {
-                Ok(200)
             }
         }
 
@@ -688,7 +695,6 @@ mod tests {
             worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
             config,
             log_storage: std::sync::Arc::new(NoopLog),
-            webhooks: std::sync::Arc::new(NoopWebhook) as std::sync::Arc<dyn WebhookClient>,
             email: std::sync::Arc::new(NoopEmail) as std::sync::Arc<dyn EmailSender>,
             nar_storage,
             manifest_state: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
