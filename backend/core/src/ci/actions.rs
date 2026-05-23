@@ -12,11 +12,13 @@ use crate::ci::reporter::{
     GitlabReporter,
 };
 use crate::ci::webhook::decrypt_webhook_secret;
-use crate::types::input::load_secret_bytes;
+use crate::ci::{parse_owner_repo, reporting};
+use crate::types::input::{load_secret_bytes, vec_to_hex};
 use crate::types::{
-    ActionConfig, ActionType, AProjectActionDelivery, CIntegration, CProjectAction, EIntegration,
-    EOrganization, EProjectAction, IntegrationId, MProjectAction, ProjectActionDeliveryId,
-    ProjectId, ServerState,
+    ActionConfig, ActionType, AProjectActionDelivery, BuildId, CEntryPoint, CIntegration,
+    CProjectAction, EBuild, ECommit, EEntryPoint, EEvaluation, EIntegration, EOrganization,
+    EProject, EProjectAction, IntegrationId, MProjectAction, ProjectActionDeliveryId, ProjectId,
+    ServerState,
 };
 use anyhow::{Context, Result, anyhow};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
@@ -271,32 +273,99 @@ async fn execute_forge_status_report(
 }
 
 async fn build_ci_report_from_payload(
-    _state: &Arc<ServerState>,
+    state: &Arc<ServerState>,
     payload: &JsonValue,
     status: CiStatus,
 ) -> Result<CiReport> {
-    let s = |k: &str| {
-        payload
-            .get(k)
-            .and_then(|v| v.as_str())
-            .map(|v| v.to_string())
-    };
-    let owner = s("owner").ok_or_else(|| anyhow!("payload missing 'owner'"))?;
-    let repo = s("repo").ok_or_else(|| anyhow!("payload missing 'repo'"))?;
-    let sha = s("sha").ok_or_else(|| anyhow!("payload missing 'sha'"))?;
-    let context = s("context").ok_or_else(|| anyhow!("payload missing 'context'"))?;
-    let description = s("description");
-    let details_url = s("details_url");
-    let existing_check_id = payload.get("check_run_id").and_then(|v| v.as_i64());
+    let s = |k: &str| payload.get(k).and_then(|v| v.as_str()).map(String::from);
+
+    if let (Some(owner), Some(repo), Some(sha), Some(context)) =
+        (s("owner"), s("repo"), s("sha"), s("context"))
+    {
+        return Ok(CiReport {
+            owner,
+            repo,
+            sha,
+            context,
+            status,
+            description: s("description"),
+            details_url: s("details_url"),
+            existing_check_id: payload.get("check_run_id").and_then(|v| v.as_i64()),
+            requested_actions: Vec::new(),
+        });
+    }
+
+    let build_id: BuildId = s("build_id")
+        .ok_or_else(|| anyhow!("payload missing both 'build_id' and the full owner/repo/sha/context set"))?
+        .parse()
+        .map_err(|_| anyhow!("invalid build_id"))?;
+
+    let build = EBuild::find_by_id(build_id)
+        .one(&state.worker_db)
+        .await
+        .context("loading build")?
+        .ok_or_else(|| anyhow!("build {} not found", build_id))?;
+
+    let evaluation = EEvaluation::find_by_id(build.evaluation)
+        .one(&state.worker_db)
+        .await
+        .context("loading evaluation")?
+        .ok_or_else(|| anyhow!("evaluation {} not found", build.evaluation))?;
+
+    let project_id = evaluation
+        .project
+        .ok_or_else(|| anyhow!("evaluation has no project (direct build)"))?;
+
+    let project = EProject::find_by_id(project_id)
+        .one(&state.worker_db)
+        .await
+        .context("loading project")?
+        .ok_or_else(|| anyhow!("project {} not found", project_id))?;
+
+    let commit = ECommit::find_by_id(evaluation.commit)
+        .one(&state.worker_db)
+        .await
+        .context("loading commit")?
+        .ok_or_else(|| anyhow!("commit {} not found", evaluation.commit))?;
+
+    let (owner, repo) = parse_owner_repo(&evaluation.repository)
+        .ok_or_else(|| anyhow!("could not parse owner/repo from {}", evaluation.repository))?;
+
+    let entry_points = EEntryPoint::find()
+        .filter(CEntryPoint::Build.eq(build.id))
+        .all(&state.worker_db)
+        .await
+        .context("loading entry points")?;
+
+    let org_name = EOrganization::find_by_id(project.organization)
+        .one(&state.worker_db)
+        .await
+        .ok()
+        .flatten()
+        .map(|o| o.name);
+
+    let scope = reporting::format_check_scope(org_name.as_deref(), &project.name);
+    let context = entry_points
+        .first()
+        .map(|ep| reporting::build_check_context(&scope, &ep.eval))
+        .unwrap_or_else(|| format!("gradient/{}", project.name));
+
+    let details_url = org_name.as_ref().map(|org| {
+        format!(
+            "{}/organization/{}/log/{}",
+            state.config.server.frontend_url, org, evaluation.id
+        )
+    });
+
     Ok(CiReport {
         owner,
         repo,
-        sha,
+        sha: vec_to_hex(&commit.hash),
         context,
         status,
-        description,
+        description: s("description"),
         details_url,
-        existing_check_id,
+        existing_check_id: payload.get("check_run_id").and_then(|v| v.as_i64()),
         requested_actions: Vec::new(),
     })
 }
@@ -543,5 +612,139 @@ mod tests {
         assert_eq!(p["description"], "desc");
         assert_eq!(p["details_url"], "https://x");
         assert_eq!(p["check_run_id"], 42);
+    }
+
+    fn run<F: std::future::Future>(fut: F) -> F::Output {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(fut)
+    }
+
+    fn make_state() -> Arc<ServerState> {
+        use crate::ci::WebhookClient;
+        use crate::storage::{EmailSender, LogStorage, NarStore};
+        use crate::types::{RuntimeConfig, SecretString, WebDb, WorkerDb};
+        use futures::future::BoxFuture;
+        use sea_orm::{DatabaseBackend, MockDatabase};
+
+        #[derive(Debug)]
+        struct NoopLog;
+        impl LogStorage for NoopLog {
+            fn append<'a>(&'a self, _: entity::ids::BuildId, _: &'a str) -> BoxFuture<'a, anyhow::Result<()>> {
+                Box::pin(async { Ok(()) })
+            }
+            fn read<'a>(&'a self, _: entity::ids::BuildId) -> BoxFuture<'a, anyhow::Result<String>> {
+                Box::pin(async { Ok(String::new()) })
+            }
+            fn delete<'a>(&'a self, _: entity::ids::BuildId) -> BoxFuture<'a, anyhow::Result<()>> {
+                Box::pin(async { Ok(()) })
+            }
+        }
+
+        #[derive(Debug)]
+        struct NoopWebhook;
+        #[async_trait::async_trait]
+        impl WebhookClient for NoopWebhook {
+            async fn deliver(&self, _: &str, _: &str, _: &str, _: String) -> anyhow::Result<u16> {
+                Ok(200)
+            }
+        }
+
+        #[derive(Debug)]
+        struct NoopEmail;
+        #[async_trait::async_trait]
+        impl EmailSender for NoopEmail {
+            fn is_enabled(&self) -> bool { false }
+            async fn send_verification_email(&self, _: &str, _: &str, _: &str, _: &str) -> anyhow::Result<()> { Ok(()) }
+            async fn send_password_reset_email(&self, _: &str, _: &str, _: &str, _: &str) -> anyhow::Result<()> { Ok(()) }
+            async fn send_action_mail(&self, _: &[String], _: &str, _: &str) -> anyhow::Result<crate::storage::email::MailDeliveryResult> {
+                Ok(crate::storage::email::MailDeliveryResult { status_code: 0, server_response: String::new() })
+            }
+        }
+
+        let cli = crate::types::Cli {
+            logging: crate::types::LoggingArgs::default(),
+            server: crate::types::ServerArgs::default(),
+            database: crate::types::DatabaseArgs::default(),
+            eval: crate::types::EvalArgs::default(),
+            storage: crate::types::StorageArgs { base_path: "/tmp/gradient-test".into(), ..Default::default() },
+            secrets: crate::types::SecretsArgs { crypt_secret_file: "test-secret".into(), jwt_secret_file: "test-jwt".into() },
+            limits: crate::types::LimitsArgs::default(),
+            registration: crate::types::RegistrationArgs::default(),
+            proto: crate::types::ProtoArgs::default(),
+            oidc: crate::types::OidcArgs::default(),
+            email: crate::types::EmailArgs::default(),
+            s3: crate::types::S3Args::default(),
+            github_app: crate::types::GitHubAppArgs::default(),
+            metrics: crate::types::MetricsArgs::default(),
+            network: crate::types::NetworkArgs::default(),
+        };
+        let config = std::sync::Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
+        let nar_storage = NarStore::local(&config.storage.base_path).expect("nar store");
+        Arc::new(crate::types::ServerState {
+            web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
+            worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
+            config,
+            log_storage: std::sync::Arc::new(NoopLog),
+            webhooks: std::sync::Arc::new(NoopWebhook) as std::sync::Arc<dyn WebhookClient>,
+            email: std::sync::Arc::new(NoopEmail) as std::sync::Arc<dyn EmailSender>,
+            nar_storage,
+            manifest_state: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            pending_credentials: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            http: crate::http::build_client().expect("http client"),
+            shutdown: crate::shutdown::Shutdown::new(),
+            jwt_secret: SecretString::new("test-jwt-secret".to_string()),
+            started_at: chrono::Utc::now(),
+        })
+    }
+
+    #[test]
+    fn build_ci_report_fast_path_uses_payload_fields() {
+        run(async {
+            let state = make_state();
+            let payload = json!({
+                "owner": "acme",
+                "repo": "widgets",
+                "sha": "deadbeef",
+                "context": "gradient/my-pkg",
+                "description": "Building…",
+                "details_url": "https://example.com/log/1",
+                "check_run_id": 99,
+            });
+            let report = build_ci_report_from_payload(&state, &payload, CiStatus::Running)
+                .await
+                .expect("fast path should succeed");
+            assert_eq!(report.owner, "acme");
+            assert_eq!(report.repo, "widgets");
+            assert_eq!(report.sha, "deadbeef");
+            assert_eq!(report.context, "gradient/my-pkg");
+            assert_eq!(report.description.as_deref(), Some("Building…"));
+            assert_eq!(report.existing_check_id, Some(99));
+        });
+    }
+
+    #[test]
+    fn build_ci_report_errors_when_payload_empty() {
+        run(async {
+            let state = make_state();
+            let err = build_ci_report_from_payload(&state, &json!({}), CiStatus::Running)
+                .await
+                .unwrap_err();
+            assert!(err.to_string().contains("build_id"), "error: {err}");
+        });
+    }
+
+    #[test]
+    fn build_ci_report_errors_on_invalid_build_id() {
+        run(async {
+            let state = make_state();
+            let payload = json!({ "build_id": "not-a-uuid" });
+            let err = build_ci_report_from_payload(&state, &payload, CiStatus::Running)
+                .await
+                .unwrap_err();
+            assert!(err.to_string().contains("invalid build_id"), "error: {err}");
+        });
     }
 }
