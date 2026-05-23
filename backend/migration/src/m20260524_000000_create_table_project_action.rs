@@ -55,12 +55,14 @@ impl MigrationTrait for Migration {
                     .col(
                         ColumnDef::new(ProjectAction::CreatedAt)
                             .date_time()
-                            .not_null(),
+                            .not_null()
+                            .default(Expr::current_timestamp()),
                     )
                     .col(
                         ColumnDef::new(ProjectAction::UpdatedAt)
                             .date_time()
-                            .not_null(),
+                            .not_null()
+                            .default(Expr::current_timestamp()),
                     )
                     .foreign_key(
                         ForeignKey::create()
