@@ -28,6 +28,7 @@ use test_support::web::{TEST_JWT_SECRET, live_session, make_test_server_with, ma
 use uuid::Uuid;
 use web::create_router;
 
+
 // ── Fixture helpers ────────────────────────────────────────────────────────────
 
 fn action_id() -> ProjectActionId {
@@ -462,6 +463,83 @@ fn update_rejects_action_type_change() {
 #[test]
 #[ignore = "needs end-to-end harness: MockDatabase prescribes query expectations, making it impractical to verify encrypted token preservation via raw row read after update"]
 fn update_send_web_request_without_token_preserves_existing() {}
+
+#[test]
+#[ignore = "test-fire calls execute_action which writes a delivery row via state.worker_db; \
+            the worker_db MockDatabase in make_test_server_with has no prescripted rows for the \
+            worker-side INSERT + UPDATE, causing MockDatabase to return an error. \
+            A real integration test with a live DB is needed to validate end-to-end."]
+fn test_fire_returns_ok_for_send_web_request() {}
+
+#[test]
+fn regenerate_token_returns_new_plaintext() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let session_id = SessionId::now_v7();
+        let token = make_token(session_id);
+
+        let db = with_project_edit(with_auth(
+            MockDatabase::new(DatabaseBackend::Postgres),
+            session_id,
+        ))
+        .append_query_results([vec![web_request_action_row()]])
+        .append_query_results([vec![web_request_action_row()]]);
+
+        let server = make_test_server_with(db.into_connection(), Some(temp_crypt_secret_file()));
+        let url = format!("{}/{}/regenerate-token", BASE_URL, action_id());
+        let res = server
+            .post(&url)
+            .add_header("authorization", format!("Bearer {}", token))
+            .await;
+
+        res.assert_status_ok();
+        let body: Value = res.json();
+        assert_eq!(body["error"], false);
+        let new_token = body["message"]["token"].as_str().expect("token string");
+        assert!(new_token.starts_with("gat_"), "token prefix: {}", new_token);
+        assert_ne!(new_token, "old", "token must be newly generated");
+    });
+}
+
+#[test]
+fn regenerate_token_rejects_non_web_request_action() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let session_id = SessionId::now_v7();
+        let token = make_token(session_id);
+
+        let db = with_project_edit(with_auth(
+            MockDatabase::new(DatabaseBackend::Postgres),
+            session_id,
+        ))
+        .append_query_results([vec![send_mail_action_row()]]);
+
+        let server = make_test_server_with(db.into_connection(), None);
+        let url = format!("{}/{}/regenerate-token", BASE_URL, action_id());
+        let res = server
+            .post(&url)
+            .add_header("authorization", format!("Bearer {}", token))
+            .await;
+
+        res.assert_status(axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+        let body: Value = res.json();
+        assert_eq!(body["error"], true);
+        assert!(
+            body["message"]
+                .as_str()
+                .unwrap()
+                .contains("send_web_request"),
+            "expected send_web_request mention, got: {}",
+            body["message"]
+        );
+    });
+}
 
 #[test]
 fn delete_returns_404_when_unknown() {

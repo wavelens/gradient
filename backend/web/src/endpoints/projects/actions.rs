@@ -492,21 +492,127 @@ pub async fn delete_action(
 }
 
 pub async fn test_action(
-    _state: State<Arc<ServerState>>,
-    Extension(_user): Extension<MUser>,
-    Extension(_api_key): Extension<MaybeApiKey>,
-    Path((_organization, _project, _id)): Path<(String, String, ProjectActionId)>,
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
+    Path((organization, project, id)): Path<(String, String, ProjectActionId)>,
 ) -> WebResult<Json<BaseResponse<serde_json::Value>>> {
-    Err(WebError::internal("not implemented"))
+    let (_org, proj) = load_project(
+        &state,
+        Caller::User(&user),
+        api_key.as_ref(),
+        organization.clone(),
+        project.clone(),
+        ProjectAccess::Require {
+            permission: Permission::EditProject,
+            reject_managed: false,
+        },
+    )
+    .await?;
+
+    let action = EProjectAction::find()
+        .filter(CProjectAction::Id.eq(id))
+        .filter(CProjectAction::Project.eq(proj.id))
+        .one(&state.web_db)
+        .await?
+        .or_not_found("Action")?;
+
+    let action_type = ActionType::from_i16(action.action_type).unwrap_or(ActionType::SendMail);
+    let event = match action_type {
+        ActionType::ForgeStatusReport => "build.completed".to_string(),
+        _ => action
+            .events
+            .as_array()
+            .and_then(|a| a.first())
+            .and_then(|v| v.as_str())
+            .unwrap_or("evaluation.completed")
+            .to_string(),
+    };
+
+    let now = chrono::Utc::now();
+    let payload = serde_json::json!({
+        "synthetic": true,
+        "event": event,
+        "org": organization,
+        "project": project,
+        "id": "00000000-0000-0000-0000-000000000000",
+        "status": match action_type {
+            ActionType::ForgeStatusReport => "success",
+            _ => "ok",
+        },
+        "time": now.to_rfc3339(),
+        "link": format!("https://gradient.example/projects/{}/{}", organization, project),
+        "owner": "gradient-test",
+        "repo": project,
+        "sha": "0000000000000000000000000000000000000000",
+        "context": "gradient/test-fire",
+    });
+
+    gradient_core::ci::actions::execute_action(&state, action, &event, payload)
+        .await
+        .map_err(|e| WebError::internal(format!("test fire failed: {}", e)))?;
+
+    Ok(ok_json(serde_json::Value::Null))
 }
 
 pub async fn regenerate_token(
-    _state: State<Arc<ServerState>>,
-    Extension(_user): Extension<MUser>,
-    Extension(_api_key): Extension<MaybeApiKey>,
-    Path((_organization, _project, _id)): Path<(String, String, ProjectActionId)>,
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
+    Path((organization, project, id)): Path<(String, String, ProjectActionId)>,
 ) -> WebResult<Json<BaseResponse<serde_json::Value>>> {
-    Err(WebError::internal("not implemented"))
+    use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+    use rand::RngExt as _;
+
+    let (_org, proj) = load_project(
+        &state,
+        Caller::User(&user),
+        api_key.as_ref(),
+        organization,
+        project,
+        ProjectAccess::Require {
+            permission: Permission::EditProject,
+            reject_managed: false,
+        },
+    )
+    .await?;
+
+    let existing = EProjectAction::find()
+        .filter(CProjectAction::Id.eq(id))
+        .filter(CProjectAction::Project.eq(proj.id))
+        .one(&state.web_db)
+        .await?
+        .or_not_found("Action")?;
+
+    if ActionType::from_i16(existing.action_type) != Some(ActionType::SendWebRequest) {
+        return Err(WebError::unprocessable_entity(
+            "regenerate-token is only valid for send_web_request actions",
+        ));
+    }
+
+    let mut raw = [0u8; 32];
+    rand::rng().fill(&mut raw);
+    let plaintext_token = format!("gat_{}", URL_SAFE_NO_PAD.encode(raw));
+
+    let key = load_secret_bytes(&state.config.secrets.crypt_secret_file)
+        .map_err(|e| WebError::internal(e.to_string()))?;
+    let encrypted = encrypt_action_secret(&plaintext_token, key.expose())
+        .map_err(|e| WebError::internal(e.to_string()))?;
+
+    let mut cfg: ActionConfig = serde_json::from_value(existing.config.clone())
+        .map_err(|e| WebError::internal(e.to_string()))?;
+    if let ActionConfig::SendWebRequest { token: t, .. } = &mut cfg {
+        *t = Some(encrypted);
+    }
+
+    let mut am: AProjectAction = existing.into();
+    am.config = Set(serde_json::to_value(&cfg).map_err(|e| WebError::internal(e.to_string()))?);
+    am.updated_at = Set(Utc::now().naive_utc());
+    am.update(&state.web_db)
+        .await
+        .map_err(|e| WebError::from_db_err(e, "Action"))?;
+
+    Ok(ok_json(serde_json::json!({ "token": plaintext_token })))
 }
 
 pub async fn list_deliveries(
