@@ -1,0 +1,146 @@
+# Actions
+
+Actions are the response-side counterpart of Triggers. Where a Trigger fires an evaluation when an event arrives, an Action reacts to evaluation and build lifecycle events and does something: sends an email, calls a webhook, or posts a commit status back to a forge.
+
+Actions are per-project. Three types ship in v1:
+
+| Type | Summary | Prerequisite |
+|---|---|---|
+| `send_mail` | Email one or more recipients | Server SMTP configured |
+| `send_web_request` | HTTP POST to an external URL | None |
+| `forge_status_report` | Post commit status to a forge | Outbound integration in the org |
+
+## Events
+
+| Event | Fired when |
+|---|---|
+| `evaluation.queued` | Evaluation enters the queue |
+| `evaluation.started` | Evaluation begins running |
+| `evaluation.building` | Evaluation enters the building phase |
+| `evaluation.completed` | Evaluation completed successfully |
+| `evaluation.failed` | Evaluation failed |
+| `evaluation.aborted` | Evaluation was aborted |
+| `build.queued` | Build enters the queue |
+| `build.started` | Build starts executing on a worker |
+| `build.completed` | Build completed successfully |
+| `build.failed` | Build failed |
+
+An action with an empty `events` list never fires. `forge_status_report` ignores the `events` list — it is hard-wired to `build.started`, `build.completed`, and `build.failed`.
+
+## Send Mail
+
+Uses the server-global SMTP configuration (`services.gradient.email.*`). If SMTP is not configured, creating a `send_mail` action returns `400`.
+
+**Config fields:**
+
+| Field | Required | Description |
+|---|---|---|
+| `recipients` | yes | List of email addresses |
+| `subject_template` | no | Subject line with placeholders |
+
+**Subject placeholders:** `{event}`, `{project}`, `{org}`, `{id}`, `{status}`
+
+Default subject: `[Gradient] {event}: {project}`
+
+Default body includes: event name, project slug, entity id (eval/build UUID), status, and a link to the Gradient UI.
+
+## Send Web Request
+
+POSTs a JSON payload to a URL. Optional `Authorization: Bearer <token>` header.
+
+**Config fields:**
+
+| Field | Required | Description |
+|---|---|---|
+| `url` | yes | HTTPS endpoint |
+| `token` | no | Bearer token (write-only; never returned in reads) |
+
+**Request headers:**
+
+```
+Content-Type: application/json
+X-Gradient-Event: build.completed
+Authorization: Bearer <token>   # only if token is set
+```
+
+**Payload shape:**
+
+```json
+{
+  "event": "build.completed",
+  "project": "my-project",
+  "organization": "acme",
+  "id": "<eval-or-build-uuid>",
+  "status": "completed"
+}
+```
+
+Token management: the plaintext token is revealed exactly once — on create or after `POST .../regenerate-token`. Store it immediately.
+
+## Forge Status Report
+
+Posts a commit status (pending / success / failure) back to the forge. Fires on `build.started → pending`, `build.completed → success`, `build.failed → failure`.
+
+**Config fields:**
+
+| Field | Required | Description |
+|---|---|---|
+| `integration_id` | yes | UUID of an outbound integration in the same org |
+
+The integration must be `kind: outbound`. The forge type determines the API call format (Gitea, GitLab, GitHub App).
+
+## Declarative configuration via Nix
+
+```nix
+services.gradient.state.projects.web-app = {
+  actions = [
+    {
+      name = "notify-failures";
+      type = "send_mail";
+      events = [ "evaluation.failed" "build.failed" ];
+      config = {
+        recipients = [ "ops@example.com" ];
+        subject_template = "[Gradient] {event}: {project}";
+      };
+    }
+    {
+      name = "webhook-completed";
+      type = "send_web_request";
+      events = [ "build.completed" ];
+      config = {
+        url = "https://hooks.example.com/gradient";
+        token_file = "/run/credentials/gradient.service/webhook-token";
+      };
+    }
+    {
+      name = "github-status";
+      type = "forge_status_report";
+      config = {
+        integration = "github-main";
+      };
+    }
+  ];
+};
+```
+
+`token_file` is read at activation time and stored encrypted. It is not re-read on reload; rotate with `services.gradient.state.projects.<name>.actions.<n>.config.token_file` and `systemctl restart gradient`.
+
+State-managed actions (`managed: true`) cannot be mutated through the API; remove or change them via NixOS config.
+
+## Troubleshooting
+
+Open the action's **Deliveries** popup in the UI (Actions page → click the delivery count badge on any action row). Each row shows:
+
+- HTTP status or error message
+- Duration (ms)
+- Request body sent
+- Response body received (if any)
+
+Common issues:
+
+| Symptom | Cause |
+|---|---|
+| `400` on create (send_mail) | SMTP not configured on the server |
+| Delivery shows `connection refused` | Target URL unreachable from the server |
+| No deliveries logged | Action `active: false`, or no matching events fired |
+| `403` on regenerate-token | Action is not of type `send_web_request` |
