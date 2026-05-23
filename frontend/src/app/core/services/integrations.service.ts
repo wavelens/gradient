@@ -12,8 +12,6 @@ import {
   Integration,
   IntegrationSummary,
   PatchIntegrationRequest,
-  ProjectIntegrationLink,
-  SetProjectIntegrationRequest,
 } from '@core/models';
 
 @Injectable({ providedIn: 'root' })
@@ -45,21 +43,5 @@ export class IntegrationsService {
 
   deleteOrgIntegration(org: string, id: string): Observable<boolean> {
     return this.api.delete<boolean>(`orgs/${org}/integrations/${id}`);
-  }
-
-  getProjectIntegration(org: string, project: string): Observable<ProjectIntegrationLink> {
-    return this.api.get<ProjectIntegrationLink>(`projects/${org}/${project}/integration`);
-  }
-
-  setProjectIntegration(
-    org: string,
-    project: string,
-    body: SetProjectIntegrationRequest,
-  ): Observable<ProjectIntegrationLink> {
-    return this.api.put<ProjectIntegrationLink>(`projects/${org}/${project}/integration`, body);
-  }
-
-  deleteProjectIntegration(org: string, project: string): Observable<boolean> {
-    return this.api.delete<boolean>(`projects/${org}/${project}/integration`);
   }
 }
