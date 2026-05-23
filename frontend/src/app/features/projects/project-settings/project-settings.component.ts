@@ -114,7 +114,7 @@ export class ProjectSettingsComponent implements OnInit {
   ]);
 
   /// True when the project repository URL points at github.com but the org
-  /// has no GitHub App outbound integration row — surfaces an install CTA.
+  /// has no GitHub App outbound integration row - surfaces an install CTA.
   showGithubAppInstallHint = computed(() => {
     const repo = this.project()?.repository ?? '';
     if (!isGithubRepoUrl(repo)) return false;
@@ -157,7 +157,7 @@ export class ProjectSettingsComponent implements OnInit {
       const stored = link?.outbound_integration ?? null;
       if (stored && !outbound.some((o) => o.value === stored)) {
         outbound.push({
-          label: `Unknown integration (${stored.slice(0, 8)}…) — please reselect`,
+          label: `Unknown integration (${stored.slice(0, 8)}…) - please reselect`,
           value: stored,
         });
       }

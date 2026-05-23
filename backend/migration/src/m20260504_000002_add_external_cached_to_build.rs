@@ -7,7 +7,7 @@
 //! Adds `build.external_cached`. When true, the build's outputs are known to
 //! be available from an upstream cache (cache.nixos.org etc.) but are NOT
 //! yet in the gradient cache. The dispatcher hands these jobs to a worker
-//! which downloads from upstream, recompresses, and pushes to our cache —
+//! which downloads from upstream, recompresses, and pushes to our cache -
 //! it does not actually rebuild from source. When false, the build is
 //! either Substituted (status enum) or a real `nix build`.
 //!

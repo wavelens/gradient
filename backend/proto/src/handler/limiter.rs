@@ -26,7 +26,7 @@ pub struct ProtoLimiter {
 impl ProtoLimiter {
     /// Build a limiter sized for `capacity` simultaneous connections. A
     /// configured value of `0` is clamped to `1` so the proto endpoint never
-    /// silently rejects every upgrade — operators who want to disable the
+    /// silently rejects every upgrade - operators who want to disable the
     /// endpoint should set `discoverable = false` instead.
     pub fn new(capacity: usize) -> Self {
         let capacity = capacity.max(1);
@@ -38,7 +38,7 @@ impl ProtoLimiter {
 
     /// Try to claim a slot. Returns `Some(permit)` if a slot was free and
     /// `None` if the configured cap has been hit. The caller must keep the
-    /// permit alive for the entire connection — dropping it returns the slot
+    /// permit alive for the entire connection - dropping it returns the slot
     /// to the pool.
     pub fn try_acquire(&self) -> Option<OwnedSemaphorePermit> {
         Arc::clone(&self.semaphore).try_acquire_owned().ok()

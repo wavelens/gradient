@@ -82,7 +82,7 @@ function findAllByText(root: HTMLElement, text: string): HTMLButtonElement[] {
   );
 }
 
-describe('IntegrationsComponent — access gating', () => {
+describe('IntegrationsComponent - access gating', () => {
   it('hides New Integration / Edit / Delete under read-only access', async () => {
     const fixture = setup({ managed: false, canEdit: false, canTrigger: false }, [baseIntegration]);
     await settled(fixture);

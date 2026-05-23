@@ -53,9 +53,9 @@ pub trait JobReporter: Send {
     /// Query the server's cache for path availability and optional transfer URLs.
     ///
     /// `mode` controls what is returned:
-    /// - [`QueryMode::Normal`] — only paths already in the cache (`cached: true`, no URLs).
-    /// - [`QueryMode::Pull`]   — cached paths with presigned S3 GET URLs where available.
-    /// - [`QueryMode::Push`]   — all paths; uncached ones include presigned S3 PUT URLs.
+    /// - [`QueryMode::Normal`] - only paths already in the cache (`cached: true`, no URLs).
+    /// - [`QueryMode::Pull`]   - cached paths with presigned S3 GET URLs where available.
+    /// - [`QueryMode::Push`]   - all paths; uncached ones include presigned S3 PUT URLs.
     async fn query_cache(&mut self, paths: Vec<String>, mode: QueryMode)
     -> Result<Vec<CachedPath>>;
 
@@ -98,8 +98,8 @@ pub trait JobReporter: Send {
 /// against the peers the server lists in `AuthChallenge`.
 ///
 /// Production impls:
-/// - `worker::config::WorkerConfig` — static `(peer_id, plaintext_token)` pairs from config.
-/// - `proxy-core::upstream::ProxyUpstreamIdentity` — proxy's own worker token issued by gradient-server.
+/// - `worker::config::WorkerConfig` - static `(peer_id, plaintext_token)` pairs from config.
+/// - `proxy-core::upstream::ProxyUpstreamIdentity` - proxy's own worker token issued by gradient-server.
 #[async_trait]
 pub trait PeerIdentity: Send + Sync {
     /// Stable peer id advertised in `InitConnection.id`.
@@ -115,8 +115,8 @@ pub trait PeerIdentity: Send + Sync {
 /// Supplies the `GradientCapabilities` advertised at handshake.
 ///
 /// Production impls:
-/// - `worker::config::StaticCapabilities` — read once from config.
-/// - `proxy-core::pool::AggregatedCapabilities` — live aggregate over the
+/// - `worker::config::StaticCapabilities` - read once from config.
+/// - `proxy-core::pool::AggregatedCapabilities` - live aggregate over the
 ///   connected backend pool, recomputed on join/leave.
 #[async_trait]
 pub trait CapabilitiesProvider: Send + Sync {
@@ -128,7 +128,7 @@ pub trait CapabilitiesProvider: Send + Sync {
 
 /// Resolves an incoming peer claim against the implementation's auth store
 /// and reports back which `(peer_id, token)` pairs validated successfully
-/// (and which failed). Implementations look this up in their state — sea-orm
+/// (and which failed). Implementations look this up in their state - sea-orm
 /// tables for gradient-server, the `authorized_peers` Postgres table for
 /// proxy.
 #[async_trait]
@@ -141,7 +141,7 @@ pub trait PeerAuthority: Send + Sync {
     async fn challenge_peers(&self, claimed: &str) -> Result<Vec<String>>;
 
     /// Validate `(peer_id, plaintext_token)` pairs against stored argon2
-    /// hashes. Returns `(authorized_peers, failed_peers)` — matching the
+    /// hashes. Returns `(authorized_peers, failed_peers)` - matching the
     /// existing `proto::handler::auth::validate_tokens` contract.
     async fn validate_tokens(
         &self,

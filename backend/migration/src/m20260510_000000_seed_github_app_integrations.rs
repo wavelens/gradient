@@ -8,7 +8,7 @@
 //! already has a `github_installation_id`.
 //!
 //! GitHub forge support is delivered through the server-wide GitHub App, so
-//! the `integration` rows that represent it carry no per-row credentials —
+//! the `integration` rows that represent it carry no per-row credentials -
 //! they are stable handles the trigger lookup (`resolve_github_integration_id`)
 //! and the project_integration outbound link can reference. The runtime hook
 //! that records new App installations creates these rows going forward;

@@ -91,7 +91,7 @@ function findAllByText(root: HTMLElement, text: string): HTMLButtonElement[] {
   );
 }
 
-describe('WorkersComponent — no-cache banner (existing)', () => {
+describe('WorkersComponent - no-cache banner (existing)', () => {
   it('shows the banner when the org has no subscribed caches', async () => {
     const fixture = setup({ access: { managed: false, canEdit: true, canTrigger: true }, workers: [], caches: [] });
     await settled(fixture);
@@ -111,7 +111,7 @@ describe('WorkersComponent — no-cache banner (existing)', () => {
   });
 });
 
-describe('WorkersComponent — access gating', () => {
+describe('WorkersComponent - access gating', () => {
   it('hides Register Worker button under read-only org access', async () => {
     const fixture = setup({ access: { managed: false, canEdit: false, canTrigger: false }, workers: [workerUnmanaged], caches: [{ id: 'c', name: 'c' }] });
     await settled(fixture);

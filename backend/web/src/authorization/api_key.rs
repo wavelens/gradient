@@ -22,7 +22,7 @@ pub struct ApiKeyContext {
     /// The key's permission bitmask. The access layer intersects this with
     /// the user's role-derived mask before granting any capability.
     pub mask: PermissionMask,
-    /// `None` for unscoped keys; `Some(id)` pins the key to a single org —
+    /// `None` for unscoped keys; `Some(id)` pins the key to a single org -
     /// requests for any other org are short-circuited as not-found.
     pub organization: Option<OrganizationId>,
 }

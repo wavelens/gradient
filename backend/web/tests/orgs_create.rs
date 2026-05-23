@@ -12,7 +12,7 @@
 //!   * the happy-path transactional flow where the pre-check is empty, both
 //!     `organization` and `organization_user` insert, and the tx commits.
 //!
-//! `MockDatabase` cannot model unique-violation rollbacks — `begin()` and
+//! `MockDatabase` cannot model unique-violation rollbacks - `begin()` and
 //! `commit()` succeed unconditionally. The race between the pre-check SELECT
 //! and the INSERT is therefore a SeaORM transaction-semantics trust boundary,
 //! not something we can prove with mocks. The two tests here are the

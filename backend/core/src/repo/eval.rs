@@ -6,7 +6,7 @@
 
 //! Pure database operations for the `evaluation` and `evaluation_message` tables.
 //!
-//! [`EvalRepo`] takes only a `&DatabaseConnection` — no `Arc<ServerState>`.
+//! [`EvalRepo`] takes only a `&DatabaseConnection` - no `Arc<ServerState>`.
 //! Side effects (webhooks, CI reporting) stay in the service layer.
 
 use anyhow::Result;

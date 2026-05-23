@@ -10,7 +10,7 @@ reinventing one in a feature component.
 The page is mounted at `/styleguide`, lazy-loaded, and intentionally not
 linked from any navigation. Open it directly in the browser while developing.
 
-There is no auth guard — anyone with the URL can view it. It is read-only and
+There is no auth guard - anyone with the URL can view it. It is read-only and
 purely a reference; no production data is shown.
 
 ## What it covers
@@ -18,27 +18,27 @@ purely a reference; no production data is shown.
 The page is structured into anchored sections (sticky table of contents on the
 left):
 
-1. **Colors** — palette swatches grouped as Base, Theme, UI, Semantic,
+1. **Colors** - palette swatches grouped as Base, Theme, UI, Semantic,
    Graph/Badge, and Text. Click a swatch to copy its hex.
-2. **Typography** — font families, all `$font-size-*` tokens, headings, links,
+2. **Typography** - font families, all `$font-size-*` tokens, headings, links,
    inline code.
-3. **Spacing & Radius** — visual chips for every `$spacing-*` and
+3. **Spacing & Radius** - visual chips for every `$spacing-*` and
    `$border-radius-*` token.
-4. **Icons** — Material Symbols and PrimeIcons sample grids.
-5. **Buttons** — PrimeNG `pButton` severities, variants (icon, text, outlined,
+4. **Icons** - Material Symbols and PrimeIcons sample grids.
+5. **Buttons** - PrimeNG `pButton` severities, variants (icon, text, outlined,
    rounded), and states (default, disabled, loading).
-6. **Form Primitives** — live demo of `<gr-form-field>`,
+6. **Form Primitives** - live demo of `<gr-form-field>`,
    `<gr-password-input>`, `<gr-message-banner>`, and the `FormFieldsBuilder`
    service.
-7. **Popups & Overlays** — `<gr-form-dialog>`, PrimeNG confirm dialog,
+7. **Popups & Overlays** - `<gr-form-dialog>`, PrimeNG confirm dialog,
    toast notifications, and tooltips.
-8. **Feedback** — `<app-loading-spinner>`, `<app-empty-state>`,
+8. **Feedback** - `<app-loading-spinner>`, `<app-empty-state>`,
    `<app-stat-card>`, status chips, and badges.
-9. **Tables & Lists** — table styles, list rows using the
+9. **Tables & Lists** - table styles, list rows using the
    `.gr-grid-rows` utility, breadcrumb.
-10. **Grids** — `.gr-grid-stats`, `.gr-grid-form`, `.gr-grid-cards`,
+10. **Grids** - `.gr-grid-stats`, `.gr-grid-form`, `.gr-grid-cards`,
     `.gr-grid-rows` utility classes from `app/styles/_grids.scss`.
-11. **Layouts** — `<gr-page-layout>` + `<gr-settings-section>`, the
+11. **Layouts** - `<gr-page-layout>` + `<gr-settings-section>`, the
     primitives that replace the per-feature page-header / settings-card
     SCSS scattered across settings pages.
 

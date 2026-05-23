@@ -34,7 +34,7 @@ in with pkgs; runCommand "store-${testPkgs.pname}" { } ''
   mkdir -p $out/store
 
   ${if skipDirectories then ''
-    # Default mode (e.g. for the Rust fixture loader): only flat files —
+    # Default mode (e.g. for the Rust fixture loader): only flat files -
     # `.drv` files and source blobs. Directory outputs of derivations
     # (`coreutils-9.0/`, `glibc-2.42-linux/`, …) are intentionally dropped.
     while read -r path; do

@@ -198,8 +198,8 @@ in {
         # Ship hello's full build closure (`.drv` files, sources, and every
         # transitive output directory) into the worker VM's nix store, so
         # every derivation the worker walks is already substituted.  Without
-        # this the worker would try to fetch tarballs from the internet —
-        # which the test VM cannot reach — and every build would fail.
+        # this the worker would try to fetch tarballs from the internet -
+        # which the test VM cannot reach - and every build would fail.
         virtualisation.additionalPaths = [ testStore ];
 
         nix.settings = {
@@ -448,7 +448,7 @@ in {
       print(f"Output path:      {store_path}")
 
       # ── Phase 7: verify the cache serves the narinfo ──────────────────────
-      # `nix-cache-info` is unauthenticated and always available — a quick
+      # `nix-cache-info` is unauthenticated and always available - a quick
       # smoke test that `/cache/main/*` is wired up.
       banner("Phase 7: cache serves nix-cache-info and the narinfo")
       print(client.succeed(f"{CURL} {CACHE}/nix-cache-info -i --fail"))

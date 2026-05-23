@@ -14,7 +14,7 @@
 //!
 //! For complex per-field logic (cross-field validation, uniqueness checks
 //! that must hit the DB, post-processing) keep the explicit `if let Some`
-//! block — these helpers are deliberately scoped to the mechanical cases.
+//! block - these helpers are deliberately scoped to the mechanical cases.
 
 /// Set `active.$field = Set(value)` when `$body.$field` is `Some`.
 ///

@@ -28,7 +28,7 @@ pub struct Model {
     pub created_at: NaiveDateTime,
     pub managed: bool,
     /// GitHub App installation ID for this organization. `Some` is the single
-    /// source of truth for "this org uses the GitHub App" — outbound CI status
+    /// source of truth for "this org uses the GitHub App" - outbound CI status
     /// reporting, webhook routing, etc. all gate on this being `Some`.
     ///
     /// Populated by:

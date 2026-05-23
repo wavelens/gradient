@@ -135,7 +135,7 @@ pub async fn gc_project_evaluations(
 /// rows pointing at them and whose grace period has expired. The grace lets
 /// rapid re-evaluations reuse recent derivations without re-inserting.
 ///
-/// NAR deletion is keyed by the orphan-only output hashes — a hash referenced
+/// NAR deletion is keyed by the orphan-only output hashes - a hash referenced
 /// by any *non-orphan* `derivation_output` (typical for FOD source tarballs
 /// that many drvs share via `fetchurl`) keeps both its NAR and its
 /// `cached_path` row. For hashes referenced only by orphans, both the NAR

@@ -124,7 +124,7 @@ wiremock = { version = "0.6", default-features = false }
 # Each `tests/*.rs` file in `web` is its own binary that links the full crate
 # graph (axum + tokio + sea-orm + …); 17 of them in parallel pushes link-time
 # memory past 8 GB. Line tables keep panic backtraces useful while halving
-# debuginfo size — and link-time RAM with it.
+# debuginfo size - and link-time RAM with it.
 [profile.test]
 debug = "line-tables-only"
 

@@ -179,7 +179,7 @@ impl ProtoSocket {
     /// Split the socket into a reader half and a cloneable writer half. The
     /// writer is backed by a bounded mpsc drained by a spawned task that owns
     /// the WebSocket sink. `send_chunk_timeout` bounds how long each producer
-    /// `send` may wait when the queue is full — exceeding it indicates the
+    /// `send` may wait when the queue is full - exceeding it indicates the
     /// peer's TCP receive side is stalled.
     pub fn split(self, send_chunk_timeout: Duration) -> (ProtoReader, ProtoWriter) {
         let (tx, rx) = mpsc::channel::<Vec<u8>>(WRITER_QUEUE_DEPTH);
@@ -285,7 +285,7 @@ impl ProtoWriter {
             Err(_) => {
                 warn!(
                     timeout_secs = self.send_chunk_timeout.as_secs(),
-                    "WS writer queue full beyond send timeout — peer TCP stalled"
+                    "WS writer queue full beyond send timeout - peer TCP stalled"
                 );
                 Err(())
             }
@@ -402,7 +402,7 @@ mod writer_tests {
     }
 
     /// A backed-up writer queue must surface as `Err(())` from `send_msg`
-    /// after the configured timeout — never hang. This is what makes a
+    /// after the configured timeout - never hang. This is what makes a
     /// stalled peer detectable on the server side instead of waiting for
     /// the worker's 600 s receive ceiling.
     #[tokio::test(start_paused = true)]
@@ -422,7 +422,7 @@ mod writer_tests {
     }
 
     /// Fast-path: when the queue has room, send_msg returns Ok immediately
-    /// (the drainer task isn't required for correctness here — the mpsc
+    /// (the drainer task isn't required for correctness here - the mpsc
     /// receiver just keeps the channel open).
     #[tokio::test]
     async fn send_msg_succeeds_when_queue_has_room() {

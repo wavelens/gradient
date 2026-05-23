@@ -152,7 +152,7 @@ pub struct DeletedResponse {
     pub deleted: bool,
 }
 
-/// `GET /projects/{org}/{project}/triggers` — list all triggers for the project.
+/// `GET /projects/{org}/{project}/triggers` - list all triggers for the project.
 pub async fn list(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -183,7 +183,7 @@ pub async fn list(
     ))
 }
 
-/// `POST /projects/{org}/{project}/triggers` — create a new trigger.
+/// `POST /projects/{org}/{project}/triggers` - create a new trigger.
 pub async fn create(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -229,7 +229,7 @@ pub async fn create(
     Ok(ok_json(TriggerOut::build(row, &integrations)))
 }
 
-/// `GET /projects/{org}/{project}/triggers/{id}` — fetch one trigger.
+/// `GET /projects/{org}/{project}/triggers/{id}` - fetch one trigger.
 pub async fn read(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -257,7 +257,7 @@ pub async fn read(
     Ok(ok_json(TriggerOut::build(row, &integrations)))
 }
 
-/// `PATCH /projects/{org}/{project}/triggers/{id}` — update a trigger.
+/// `PATCH /projects/{org}/{project}/triggers/{id}` - update a trigger.
 pub async fn update(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -307,7 +307,7 @@ pub async fn update(
     Ok(ok_json(TriggerOut::build(updated, &integrations)))
 }
 
-/// `DELETE /projects/{org}/{project}/triggers/{id}` — hard delete the trigger.
+/// `DELETE /projects/{org}/{project}/triggers/{id}` - hard delete the trigger.
 pub async fn delete_one(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -340,7 +340,7 @@ pub async fn delete_one(
     Ok(ok_json(DeletedResponse { deleted: true }))
 }
 
-/// `POST /projects/{org}/{project}/triggers/{id}/test` — manually fire a trigger.
+/// `POST /projects/{org}/{project}/triggers/{id}/test` - manually fire a trigger.
 pub async fn fire_now(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,

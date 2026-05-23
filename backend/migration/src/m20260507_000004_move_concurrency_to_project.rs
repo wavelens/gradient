@@ -6,7 +6,7 @@
 
 //! Move concurrency policy from per-trigger to per-project. Adds
 //! `project.concurrency` (default 1 = soft_abort) and drops the column
-//! on `project_trigger`. No data migration — every project starts at
+//! on `project_trigger`. No data migration - every project starts at
 //! `soft_abort`.
 
 use sea_orm_migration::prelude::*;

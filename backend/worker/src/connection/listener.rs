@@ -8,7 +8,7 @@
 //!
 //! When `discoverable = true`, the worker starts a TCP listener and accepts
 //! incoming WebSocket upgrades.  Each accepted connection runs the same
-//! handshake and dispatch loop as an outbound connection — the protocol is
+//! handshake and dispatch loop as an outbound connection - the protocol is
 //! identical regardless of who initiated the transport.
 
 use anyhow::{Context, Result};

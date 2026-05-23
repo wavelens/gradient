@@ -64,7 +64,7 @@ pub(super) async fn push_pending_candidates(
 ///   waits via the queue + `send_chunk_timeout` configured at split time.
 ///   A stalled peer is detected as `Err(())` from `send_server_msg` and
 ///   triggers a best-effort `NarAbort`.
-/// - The body is read from `object_store`'s streaming API — no full file is
+/// - The body is read from `object_store`'s streaming API - no full file is
 ///   ever held in memory. Chunks are coalesced/split to `NAR_PUSH_CHUNK_SIZE`.
 /// - Per-chunk read from the storage stream is also bounded so a backend that
 ///   sends the first byte and then hangs cannot pin the task indefinitely.
@@ -238,7 +238,7 @@ pub(super) async fn serve_nar_request(
 ///
 /// Sets `file_hash` / `nar_hash` / `file_size` / `nar_size` to NULL so
 /// `Model::is_fully_cached()` flips to `false` and the next `CacheQuery`
-/// stops claiming the path is available — letting the next build either
+/// stops claiming the path is available - letting the next build either
 /// rebuild from source or pick the path up from a configured upstream.
 async fn invalidate_cached_path(state: &Arc<ServerState>, hash: &str, store_path: &str) {
     let row = match ECachedPath::find()

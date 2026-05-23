@@ -14,7 +14,7 @@ import { catchError, throwError } from 'rxjs';
  *
  * - 401: clears auth tokens, redirects to login
  * - 502/503/504/0: server unavailable, render the matching error page in
- *   place WITHOUT changing the URL — so F5 reloads the user's original
+ *   place WITHOUT changing the URL - so F5 reloads the user's original
  *   route and re-tries the failing request rather than reloading the
  *   error page itself.
  * - Other errors: re-thrown so individual components can handle them
@@ -39,7 +39,7 @@ export const errorInterceptor: HttpInterceptorFn = (req, next) => {
           break;
 
         case 0:
-          // Network error or server completely unreachable — treat as 503
+          // Network error or server completely unreachable - treat as 503
           showErrorPage(503);
           break;
 

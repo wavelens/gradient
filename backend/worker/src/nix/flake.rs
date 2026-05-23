@@ -107,9 +107,9 @@ fn is_literal_include(pattern: &str) -> bool {
 
 /// Splits a wildcard list into the two streams `discover_derivations` consumes:
 ///
-/// - `literal_attrs` — fully literal include paths that bypass `eval.nix`. Any
+/// - `literal_attrs` - fully literal include paths that bypass `eval.nix`. Any
 ///   literal include also listed as an exact-path exclusion is dropped here.
-/// - `eval_patterns` — patterns forwarded to `eval.nix`: every non-literal
+/// - `eval_patterns` - patterns forwarded to `eval.nix`: every non-literal
 ///   include plus, when any such include exists, every exclusion so the
 ///   evaluator can apply them during traversal. With no non-literal include
 ///   this list is empty (exclusions act on `literal_attrs` only).
@@ -154,18 +154,18 @@ fn partition_for_eval(wildcards: &[String]) -> (Vec<String>, Vec<String>) {
 ///
 /// ## Wildcard semantics (for patterns passed to eval.nix)
 ///
-/// - `*` — **recursive** wildcard. Consecutive `*` segments are collapsed by
+/// - `*` - **recursive** wildcard. Consecutive `*` segments are collapsed by
 ///   [`build_wildcard_nix_expr`] before being passed to `eval.nix`, so
 ///   `packages.*.*` and `packages.*` resolve identically. When `*` is the
 ///   last segment the evaluator also descends one additional level into nested
 ///   attrsets, which recovers the derivations that would have been found by the
 ///   collapsed trailing `.*`.
-/// - `#` — **non-recursive** wildcard. Matches any attribute name at its
+/// - `#` - **non-recursive** wildcard. Matches any attribute name at its
 ///   position but stops there; only nodes with `type == "derivation"` at
 ///   exactly that depth are collected. Use this when you want to target a
 ///   specific nesting level without the extra descent that `*` performs.
 ///
-/// Synchronous — must run inside `spawn_blocking`.
+/// Synchronous - must run inside `spawn_blocking`.
 pub(super) fn discover_derivations(
     evaluator: &NixEvaluator,
     repository: &str,
@@ -332,7 +332,7 @@ mod tests {
         // This is the broken behaviour we fixed: the comma ends up inside a segment.
         let patterns = vec!["packages.x86_64-linux.*,checks.x86_64-linux.*".to_string()];
         let result = build_wildcard_nix_expr(&patterns);
-        // The comma-containing segment makes the include list malformed —
+        // The comma-containing segment makes the include list malformed -
         // it will NOT match the expected two-entry form.
         assert_ne!(
             result,

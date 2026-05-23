@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Tests for `core::sources` — path/hash utilities and SSH key generation.
+//! Tests for `core::sources` - path/hash utilities and SSH key generation.
 
 extern crate core as gradient_core;
 use base64::Engine;
@@ -42,7 +42,7 @@ fn hash_from_url_nar_with_compression_ok() {
 
 #[test]
 fn hash_from_url_narinfo_cannot_have_compression_suffix() {
-    // narinfo must be 2 parts exactly — `.narinfo.zst` is 3 parts → rejected.
+    // narinfo must be 2 parts exactly - `.narinfo.zst` is 3 parts → rejected.
     let url = format!("{}.narinfo.zst", h32());
     assert!(get_hash_from_url(url).is_err());
 }
@@ -63,7 +63,7 @@ fn hash_from_url_wrong_hash_length_rejected() {
     // 31 chars
     let url = format!("{}.narinfo", &H32[..31]);
     assert!(get_hash_from_url(url).is_err());
-    // 40 chars (git hash — not a Nix hash length)
+    // 40 chars (git hash - not a Nix hash length)
     let url = format!("{}.nar", "a".repeat(40));
     assert!(get_hash_from_url(url).is_err());
 }

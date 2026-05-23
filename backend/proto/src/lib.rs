@@ -11,23 +11,23 @@
 //! gradient-worker, and gradient-proxy (closed source).
 //!
 //! Layout:
-//! - `messages` — wire message types and rkyv codecs.
-//! - `session::{frame, handshake}` — pure transport framing and the two
+//! - `messages` - wire message types and rkyv codecs.
+//! - `session::{frame, handshake}` - pure transport framing and the two
 //!   role-symmetric handshake drivers (`as_peer`, `as_authority`). Both
 //!   drivers operate on an established `ProtoSocket`, regardless of which
 //!   side dialed/accepted the underlying TCP+WS connection.
-//! - `client::dial` — pure outbound TCP+WS dial.
-//! - `server::{accept_axum, accept_tungstenite, dispatch}` — inbound
+//! - `client::dial` - pure outbound TCP+WS dial.
+//! - `server::{accept_axum, accept_tungstenite, dispatch}` - inbound
 //!   accept-side adapters and the per-message dispatch loop.
-//! - `cap::{build,eval,fetch,cache,federate}` — per-capability trait pairs.
-//! - `traits` — `PeerIdentity`, `CapabilitiesProvider`, `PeerAuthority`,
+//! - `cap::{build,eval,fetch,cache,federate}` - per-capability trait pairs.
+//! - `traits` - `PeerIdentity`, `CapabilitiesProvider`, `PeerAuthority`,
 //!   `SessionFactory`, plus the worker-side `WorkerStore`, `DrvReader`,
 //!   `JobReporter`.
-//! - `handler` — gradient-server's existing inbound axum router and the
+//! - `handler` - gradient-server's existing inbound axum router and the
 //!   state-coupled NAR serving / credential delivery helpers. Will shrink
 //!   in follow-up refactors as the worker and gradient-server migrate to
 //!   the new primitives.
-//! - `outbound` — server's outbound-side message loop.
+//! - `outbound` - server's outbound-side message loop.
 //!
 //! Bidirectional connectivity: callers compose `client::dial` or one of the
 //! `server::accept_*` adapters (producing a `ProtoSocket`) with whichever

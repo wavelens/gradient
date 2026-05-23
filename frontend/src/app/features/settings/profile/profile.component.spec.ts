@@ -46,7 +46,7 @@ function findByText(root: HTMLElement, text: string): HTMLElement | null {
   ) ?? null;
 }
 
-describe('ProfileComponent — access gating', () => {
+describe('ProfileComponent - access gating', () => {
   it('renders Save Changes enabled for an unmanaged, non-OIDC account', () => {
     const fixture = setup({ managed: false, oidc: false });
     const save = findByText(fixture.nativeElement, 'save changes') as HTMLButtonElement | null;

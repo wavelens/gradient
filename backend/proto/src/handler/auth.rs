@@ -188,10 +188,10 @@ pub(super) async fn has_any_registrations(state: &ServerState, worker_id: &str) 
 /// Verifies `token` against a stored `token_hash` in constant time.
 ///
 /// Accepts two storage formats:
-/// - PHC strings (e.g. `$argon2id$...`) — verified via `password_auth`,
+/// - PHC strings (e.g. `$argon2id$...`) - verified via `password_auth`,
 ///   which is constant-time and salted/KDF-hardened. This is what new
 ///   registrations write.
-/// - Lowercase hex SHA-256 — legacy format from older registrations,
+/// - Lowercase hex SHA-256 - legacy format from older registrations,
 ///   compared in constant time via `subtle::ConstantTimeEq`. New rows
 ///   are never written in this format.
 pub(super) fn verify_token(token: &str, token_hash: &str) -> bool {

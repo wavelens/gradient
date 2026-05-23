@@ -50,7 +50,7 @@ impl BuildStateMachine {
             return Ok(to);
         }
 
-        // Terminal states — nothing can move away from these.
+        // Terminal states - nothing can move away from these.
         let from_is_terminal = matches!(
             from,
             BuildStatus::Completed
@@ -78,7 +78,7 @@ impl BuildStateMachine {
             //                          `Building`)
             //   Created → Failed     (eval-side rejection before queueing)
             // Without these, a lost / out-of-order `Building` update would
-            // strand the build in `Queued`/`Building` forever — the same
+            // strand the build in `Queued`/`Building` forever - the same
             // bug class as the silent Queued→Failed reject we hit earlier.
             (_, BuildStatus::Completed) => Ok(to),
             (_, BuildStatus::Failed) => Ok(to),
@@ -202,7 +202,7 @@ mod tests {
     /// `DependencyFailed`) are accepted from every non-terminal source.
     /// This is the regression guard for "JobFailed / JobCompleted arriving
     /// while the build is still `Queued` because the worker's `Building`
-    /// update was lost or never sent" — without this, the build would be
+    /// update was lost or never sent" - without this, the build would be
     /// silently stranded in the wrong state.
     #[test]
     fn build_sm_any_nonterminal_to_any_terminal() {

@@ -10,7 +10,7 @@
 //! The `server` concept conflicted with "the Gradient server" itself, so the
 //! entity has been renamed to `build_machine` (a host delegated builds over SSH).
 //!
-//! Data is preserved — this is a pure rename with no schema changes.
+//! Data is preserved - this is a pure rename with no schema changes.
 
 use sea_orm_migration::prelude::*;
 

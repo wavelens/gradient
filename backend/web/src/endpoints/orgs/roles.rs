@@ -116,7 +116,7 @@ async fn load_org_role(
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
-/// `GET /orgs/{organization}/roles` — list roles available in the org.
+/// `GET /orgs/{organization}/roles` - list roles available in the org.
 ///
 /// Visible to any member (so the add-member UI can populate its role
 /// dropdown). The `available_permissions` catalogue is included on every
@@ -153,7 +153,7 @@ pub async fn get_organization_roles(
     }))
 }
 
-/// `POST /orgs/{organization}/roles` — create a custom role.
+/// `POST /orgs/{organization}/roles` - create a custom role.
 pub async fn post_organization_role(
     state: State<Arc<ServerState>>,
     info: RequestInfo,
@@ -181,7 +181,7 @@ pub async fn post_organization_role(
     let mask = parse_permission_list(&body.permissions, "GET /orgs/{organization}/roles")?;
 
     // Names must be unique within (org_id, name) and must not collide with a
-    // built-in role's name (Admin/Write/View) — otherwise membership lookup
+    // built-in role's name (Admin/Write/View) - otherwise membership lookup
     // by name becomes ambiguous.
     let clash = ERole::find()
         .filter(CRole::Name.eq(body.name.as_str()))
@@ -223,7 +223,7 @@ pub async fn post_organization_role(
     Ok(ok_json(RoleResponse::from_model(role)))
 }
 
-/// `GET /orgs/{organization}/roles/{role_id}` — fetch a single role.
+/// `GET /orgs/{organization}/roles/{role_id}` - fetch a single role.
 pub async fn get_organization_role(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -244,7 +244,7 @@ pub async fn get_organization_role(
     Ok(ok_json(RoleResponse::from_model(role)))
 }
 
-/// `PATCH /orgs/{organization}/roles/{role_id}` — update a custom role.
+/// `PATCH /orgs/{organization}/roles/{role_id}` - update a custom role.
 ///
 /// Built-in roles are immutable: attempting to mutate them returns 403.
 pub async fn patch_organization_role(
@@ -331,7 +331,7 @@ pub async fn patch_organization_role(
     Ok(ok_json(RoleResponse::from_model(updated)))
 }
 
-/// `DELETE /orgs/{organization}/roles/{role_id}` — delete a custom role.
+/// `DELETE /orgs/{organization}/roles/{role_id}` - delete a custom role.
 ///
 /// Refuses to delete a role that is still in use; the caller must reassign
 /// affected members first (the UI surfaces the in-use count).

@@ -73,7 +73,7 @@ a production trait and substitutes the real dependency with an in-memory version
 | `FakeWorkerStore` | `worker_store.rs` | `WorkerStore` | Minimal path-presence tracker |
 | `FakeDrvReader` | `drv_reader.rs` | `DrvReader` | Serves raw `.drv` bytes from memory (backed by `StoreFixture.raw_drvs`) |
 | `RecordingJobReporter` | `job_reporter.rs` | `JobReporter` | Captures all job status calls as `Vec<ReportedEvent>` |
-| `MockProtoServer` / `MockServerConn` | `mock_server.rs` | — | In-process WebSocket server for testing `ProtoConnection`-based code; binds `127.0.0.1:0`, accepts one connection, provides typed `send(ServerMessage)` / `recv() → ClientMessage` over rkyv framing |
+| `MockProtoServer` / `MockServerConn` | `mock_server.rs` | - | In-process WebSocket server for testing `ProtoConnection`-based code; binds `127.0.0.1:0`, accepts one connection, provides typed `send(ServerMessage)` / `recv() → ClientMessage` over rkyv framing |
 | `RecordingWebhookClient` | `webhooks.rs` | `WebhookClient` | Records webhook deliveries with scripted status codes |
 | `InMemoryEmailSender` | `email.rs` | `EmailSender` | Captures verification/password-reset emails |
 | `RecordingCiReporter` | `ci_reporter.rs` | `CiReporter` | Records CI status report calls |
@@ -81,7 +81,7 @@ a production trait and substitutes the real dependency with an in-memory version
 | `FakeFlakePrefetcher` | `flake_prefetcher.rs` | `FlakePrefetcher` | Records prefetch calls, returns `None` |
 | `NoopLogStorage` | `log_storage.rs` | `LogStorage` | No-op append/read/delete |
 
-### `StoreFixture` — real derivation trees
+### `StoreFixture` - real derivation trees
 
 `StoreFixture` (`test-support/src/fakes/store_fixture.rs`) loads **real** Nix
 `.drv` files from the `test/` directory (951 derivations for `hello-2.12.3`).
@@ -138,7 +138,7 @@ Key methods:
 
 ---
 
-## `proto` — Wire Message Serialization
+## `proto` - Wire Message Serialization
 
 **File:** `backend/proto/src/tests.rs`
 **Run:** `cargo test -p proto`
@@ -229,7 +229,7 @@ sequenceDiagram
 
 ---
 
-## `proto::scheduler::jobs` — Job Tracker
+## `proto::scheduler::jobs` - Job Tracker
 
 **File:** `backend/proto/src/scheduler/jobs.rs`
 **Run:** `cargo test -p proto`
@@ -295,7 +295,7 @@ lifecycle. Tests exercise the state machine directly without any async runtime.
 
 ---
 
-## `proto::scheduler::worker_pool` — Worker Registry
+## `proto::scheduler::worker_pool` - Worker Registry
 
 **File:** `backend/proto/src/scheduler/worker_pool.rs`
 **Run:** `cargo test -p proto`
@@ -336,7 +336,7 @@ authorized peers, and assigned-job tracking.
 
 ---
 
-## `proto::scheduler` — Scheduler Coordination
+## `proto::scheduler` - Scheduler Coordination
 
 **File:** `backend/proto/src/scheduler/scheduler_tests.rs`
 **Run:** `cargo test -p proto`
@@ -389,7 +389,7 @@ sequenceDiagram
 
 ---
 
-## `test_support::fakes::store_fixture` — Store Fixture
+## `test_support::fakes::store_fixture` - Store Fixture
 
 **File:** `backend/test-support/src/fakes/store_fixture.rs`
 **Run:** `cargo test -p test-support`
@@ -433,7 +433,7 @@ Tests for the `StoreFixture` itself, validating that real `.drv` files from
 
 ---
 
-## `worker::executor::eval` — Evaluation Closure Walk
+## `worker::executor::eval` - Evaluation Closure Walk
 
 **File:** `backend/worker/src/executor/eval.rs`
 **Run:** `cargo test -p worker`
@@ -441,7 +441,7 @@ Tests for the `StoreFixture` itself, validating that real `.drv` files from
 Tests for `evaluate_derivations_with()`, which performs a BFS closure walk
 from entry-point `.drv` files through `inputDrvs` to discover all derivations
 and check their substitution status. Tests use `FakeDerivationResolver`,
-`FakeDrvReader`, `FakeWorkerStore`, and `RecordingJobReporter` — no real
+`FakeDrvReader`, `FakeWorkerStore`, and `RecordingJobReporter` - no real
 nix-daemon, filesystem, or WebSocket connection.
 
 ### Evaluation data flow (test configuration)
@@ -491,7 +491,7 @@ nix-daemon, filesystem, or WebSocket connection.
 
 ---
 
-## `core::types::wildcard` — Evaluation Wildcard Parsing
+## `core::types::wildcard` - Evaluation Wildcard Parsing
 
 **File:** `backend/core/src/types/wildcard.rs`  
 **Run:** `cargo test -p core --tests`
@@ -518,7 +518,7 @@ Tests for the `Wildcard` type used in project evaluation patterns. Parsing is vi
 | `exclusion_with_wildcard_rejected` | `my.*,!my.ignored.*` | `*` in an exclusion body is rejected |
 | `exclusion_with_hash_rejected` | `packages.*.*,!packages.x86_64-linux.#` | `#` in an exclusion body is rejected |
 
-### `get_eval_str()` — Nix expression output
+### `get_eval_str()` - Nix expression output
 
 | Test | Input | Expected output |
 |------|-------|----------------|
@@ -560,14 +560,14 @@ Tests for the `Wildcard` type used in project evaluation patterns. Parsing is vi
 
 ---
 
-## `core::nix::url` — Repository & Flake URL Parsing
+## `core::nix::url` - Repository & Flake URL Parsing
 
 **File:** `backend/core/src/nix/url.rs`  
 **Run:** `cargo test -p core --tests`
 
 Tests for `RepositoryUrl` (stored in the database, used for display and git operations) and `NixFlakeUrl` (passed to `nix flake` commands, always includes `?rev=`).
 
-### `RepositoryUrl` — normalization
+### `RepositoryUrl` - normalization
 
 `RepositoryUrl::from_str` normalizes certain schemes for Nix compatibility. All others are preserved or rejected.
 
@@ -582,7 +582,7 @@ Tests for `RepositoryUrl` (stored in the database, used for display and git oper
 | `repo_url_file_rejected` | `file:///local/repo` | `file://` URLs are rejected |
 | `repo_url_plain_string_rejected` | `notaurl` | Strings with no recognized scheme are rejected |
 
-### `NixFlakeUrl` — flake reference construction
+### `NixFlakeUrl` - flake reference construction
 
 `NixFlakeUrl::new(url, rev)` constructs a `?rev=<sha1>` flake URL. The revision must be a full 40-character SHA-1.
 
@@ -597,7 +597,7 @@ Tests for `RepositoryUrl` (stored in the database, used for display and git oper
 
 ---
 
-## `core::db::derivation` — `.drv` File Parsing
+## `core::db::derivation` - `.drv` File Parsing
 
 **File:** `backend/core/src/db/derivation.rs`  
 **Run:** `cargo test -p core --tests`
@@ -624,7 +624,7 @@ Derive(
 
 ---
 
-## `web::endpoints::badges` — CI Badge Rendering
+## `web::endpoints::badges` - CI Badge Rendering
 
 **File:** `backend/web/src/endpoints/badges.rs`  
 **Run:** `cargo test -p web`
@@ -642,7 +642,7 @@ Tests for the SVG badge renderer used by `GET /projects/{org}/{project}/badge`.
 
 ---
 
-## `core` — Input Validation
+## `core` - Input Validation
 
 **File:** `backend/core/tests/input.rs`
 **Run:** `cargo test -p core --tests`
@@ -738,7 +738,7 @@ validates user-supplied values and returns a descriptive error on rejection.
 
 ---
 
-## `core` — Source Utilities
+## `core` - Source Utilities
 
 **File:** `backend/core/tests/sources.rs`
 **Run:** `cargo test -p core --tests`
@@ -752,7 +752,7 @@ validates user-supplied values and returns a descriptive error on rejection.
 
 ---
 
-## `worker::config` — Peer Token Parsing
+## `worker::config` - Peer Token Parsing
 
 **File:** `backend/worker/src/config.rs`
 **Run:** `cargo test -p worker`
@@ -797,7 +797,7 @@ the two functions responsible for reading peer-to-token pairs from `--peers` /
 | `peer_tokens_skips_short_tokens` | Tokens < 64 chars are rejected; 64-char tokens pass |
 | `peer_tokens_empty_when_neither_set` | Both `--peers` and `--peers-file` unset → empty vec |
 | `peer_tokens_skips_empty_peer_or_token` | `":tok"`, `"peer:"`, and `"nocolon"` are all skipped |
-| `peer_tokens_preserves_wildcard` | `"*:tok64"` → `("*", "tok64")` — wildcard is preserved verbatim |
+| `peer_tokens_preserves_wildcard` | `"*:tok64"` → `("*", "tok64")` - wildcard is preserved verbatim |
 | `peer_tokens_from_file` | Writes a temp file, sets `peers_file`; file takes precedence over `--peers` |
 
 ### `resolve_tokens_for_challenge()` tests
@@ -811,7 +811,7 @@ the two functions responsible for reading peer-to-token pairs from `--peers` /
 
 ---
 
-## `worker::credentials` — Credential Store
+## `worker::credentials` - Credential Store
 
 **File:** `backend/worker/src/credentials.rs`
 **Run:** `cargo test -p worker`
@@ -846,7 +846,7 @@ accidental logging.
 
 ---
 
-## `worker::scorer` — Job Candidate Scoring
+## `worker::scorer` - Job Candidate Scoring
 
 **File:** `backend/worker/src/scorer.rs`
 **Run:** `cargo test -p worker`
@@ -873,13 +873,13 @@ The scheduler uses this score to prefer jobs whose inputs are already cached.
 
 ---
 
-## `worker::handshake` — Challenge-Response Handshake
+## `worker::handshake` - Challenge-Response Handshake
 
 **File:** `backend/worker/src/handshake.rs`
 **Run:** `cargo test -p worker`
 
 Tests for `perform_handshake()`, which drives the full challenge-response auth
-sequence over a live `ProtoConnection`. All tests use `MockProtoServer` —
+sequence over a live `ProtoConnection`. All tests use `MockProtoServer` -
 no real Gradient server needed.
 
 ### Handshake sequence
@@ -906,7 +906,7 @@ sequenceDiagram
 
 ---
 
-## `worker::job` — Job Updater Protocol
+## `worker::job` - Job Updater Protocol
 
 **File:** `backend/worker/src/job.rs`
 **Run:** `cargo test -p worker`
@@ -938,7 +938,7 @@ tokio runtime).
 
 ---
 
-## `worker::nar` — NAR Push & Upload
+## `worker::nar` - NAR Push & Upload
 
 **File:** `backend/worker/src/nar.rs`
 **Run:** `cargo test -p worker`
@@ -979,7 +979,7 @@ Tests for `push_direct()` (chunk-streaming to server) and `upload_presigned()`
 
 ---
 
-## `worker::executor::sign` — Nix Path Signing Helpers
+## `worker::executor::sign` - Nix Path Signing Helpers
 
 **File:** `backend/worker/src/executor/sign.rs`
 **Run:** `cargo test -p worker`
@@ -1012,14 +1012,14 @@ required by `fingerprint_path`. No nix-daemon, filesystem, or network access.
 
 ---
 
-## `worker::executor::fetch` — Flake Fetching
+## `worker::executor::fetch` - Flake Fetching
 
 **File:** `backend/worker/src/executor/fetch.rs`
 **Run:** `cargo test -p worker`
 
 Tests for `fetch_repository()`, which clones or fetches a git repository for
 a given commit and optionally injects an SSH key from `CredentialStore`.
-Tests use `RecordingJobReporter` — no real git server or WebSocket needed.
+Tests use `RecordingJobReporter` - no real git server or WebSocket needed.
 
 | Test | What it checks |
 |------|---------------|
@@ -1028,7 +1028,7 @@ Tests use `RecordingJobReporter` — no real git server or WebSocket needed.
 
 ---
 
-## `core::types::secret` — Secret Memory Wrappers
+## `core::types::secret` - Secret Memory Wrappers
 
 | Test | What it checks |
 |------|---------------|
@@ -1040,7 +1040,7 @@ Tests use `RecordingJobReporter` — no real git server or WebSocket needed.
 
 ---
 
-## `core::state_machine::build` — Build Status Machine
+## `core::state_machine::build` - Build Status Machine
 
 | Test | What it checks |
 |------|---------------|
@@ -1057,7 +1057,7 @@ Tests use `RecordingJobReporter` — no real git server or WebSocket needed.
 
 ---
 
-## `core::state_machine::eval` — Evaluation Status Machine
+## `core::state_machine::eval` - Evaluation Status Machine
 
 | Test | What it checks |
 |------|---------------|
@@ -1075,7 +1075,7 @@ Tests use `RecordingJobReporter` — no real git server or WebSocket needed.
 
 ---
 
-## `core::ci::github_app` — GitHub App JWT & Webhook Verification
+## `core::ci::github_app` - GitHub App JWT & Webhook Verification
 
 | Test | What it checks |
 |------|---------------|
@@ -1098,7 +1098,7 @@ Tests use `RecordingJobReporter` — no real git server or WebSocket needed.
 
 ---
 
-## `core::ci::webhook` — Webhook Signing & Encryption
+## `core::ci::webhook` - Webhook Signing & Encryption
 
 | Test | What it checks |
 |------|---------------|
@@ -1111,7 +1111,7 @@ Tests use `RecordingJobReporter` — no real git server or WebSocket needed.
 
 ---
 
-## `core::ci::trigger` — Evaluation Trigger Guard
+## `core::ci::trigger` - Evaluation Trigger Guard
 
 | Test | What it checks |
 |------|---------------|
@@ -1122,7 +1122,7 @@ Tests use `RecordingJobReporter` — no real git server or WebSocket needed.
 
 ---
 
-## `core::state::provisioning` — Inbound Integration Lookup
+## `core::state::provisioning` - Inbound Integration Lookup
 
 | Test | What it checks |
 |------|---------------|
@@ -1130,7 +1130,7 @@ Tests use `RecordingJobReporter` — no real git server or WebSocket needed.
 
 ---
 
-## `core::sources::ssh_key` — SSH Key Formatting
+## `core::sources::ssh_key` - SSH Key Formatting
 
 | Test | What it checks |
 |------|---------------|
@@ -1140,7 +1140,7 @@ Tests use `RecordingJobReporter` — no real git server or WebSocket needed.
 
 ---
 
-## `web::endpoints::caches::nar` — NAR URL Resolver
+## `web::endpoints::caches::nar` - NAR URL Resolver
 
 Unit tests for `resolve_effective_hash_db`, which maps the file-hash embedded in a narinfo URL back to the store-hash key used by the NAR blob storage.
 
@@ -1151,7 +1151,7 @@ Unit tests for `resolve_effective_hash_db`, which maps the file-hash embedded in
 
 ---
 
-## `core::sources::cache_key` — Cache Signing Key Lifecycle
+## `core::sources::cache_key` - Cache Signing Key Lifecycle
 
 | Test | What it checks |
 |------|---------------|
@@ -1164,7 +1164,7 @@ Unit tests for `resolve_effective_hash_db`, which maps the file-hash embedded in
 
 ---
 
-## `builder::status` — Evaluation Terminal Status
+## `builder::status` - Evaluation Terminal Status
 
 | Test | What it checks |
 |------|---------------|
@@ -1176,7 +1176,7 @@ Unit tests for `resolve_effective_hash_db`, which maps the file-hash embedded in
 
 ---
 
-## `worker::nix_eval` — Nix String Escaping
+## `worker::nix_eval` - Nix String Escaping
 
 | Test | What it checks |
 |------|---------------|
@@ -1188,7 +1188,7 @@ Unit tests for `resolve_effective_hash_db`, which maps the file-hash embedded in
 
 ---
 
-## `worker::flake` — Flake Attribute Path Utilities
+## `worker::flake` - Flake Attribute Path Utilities
 
 | Test | What it checks |
 |------|---------------|
@@ -1211,7 +1211,7 @@ Unit tests for `resolve_effective_hash_db`, which maps the file-hash embedded in
 
 ---
 
-## `worker::worker_pool::resolver` — Attr Path Matching
+## `worker::worker_pool::resolver` - Attr Path Matching
 
 | Test | What it checks |
 |------|---------------|
@@ -1227,7 +1227,7 @@ Unit tests for `resolve_effective_hash_db`, which maps the file-hash embedded in
 
 ---
 
-## `worker::executor::build` — BasicDerivation Construction
+## `worker::executor::build` - BasicDerivation Construction
 
 | Test | What it checks |
 |------|---------------|
@@ -1238,7 +1238,7 @@ Unit tests for `resolve_effective_hash_db`, which maps the file-hash embedded in
 
 ---
 
-## `worker::worker` — Persistent Worker ID
+## `worker::worker` - Persistent Worker ID
 
 | Test | What it checks |
 |------|---------------|
@@ -1248,7 +1248,7 @@ Unit tests for `resolve_effective_hash_db`, which maps the file-hash embedded in
 
 ---
 
-## `worker::eval_worker` — Eval Worker Protocol Serde
+## `worker::eval_worker` - Eval Worker Protocol Serde
 
 | Test | What it checks |
 |------|---------------|
@@ -1257,7 +1257,7 @@ Unit tests for `resolve_effective_hash_db`, which maps the file-hash embedded in
 
 ---
 
-## `proto::scheduler::dispatch_tests` — Dispatch Loop Functions
+## `proto::scheduler::dispatch_tests` - Dispatch Loop Functions
 
 **File:** `backend/proto/src/scheduler/dispatch_tests.rs`
 **Run:** `cargo test -p proto`
@@ -1269,7 +1269,7 @@ exposed as `pub(crate)` for testability.
 Tests use a staged `MockDatabase` and a real `Scheduler` instance; after each
 call the pending job count is asserted directly on the scheduler.
 
-### `dispatch_queued_evals` — DB call sequence
+### `dispatch_queued_evals` - DB call sequence
 
 ```
   dispatch_queued_evals(scheduler)
@@ -1287,7 +1287,7 @@ call the pending job count is asserted directly on the scheduler.
                                .filter(evaluation=id).one()        Q
 ```
 
-### `dispatch_ready_builds` — DB call sequence
+### `dispatch_ready_builds` - DB call sequence
 
 ```
   dispatch_ready_builds(scheduler)
@@ -1319,7 +1319,7 @@ call the pending job count is asserted directly on the scheduler.
 
 ---
 
-## `proto::scheduler::handler_tests` — Scheduler DB Handler Functions
+## `proto::scheduler::handler_tests` - Scheduler DB Handler Functions
 
 **File:** `backend/proto/src/scheduler/handler_tests.rs`
 **Run:** `cargo test -p proto`
@@ -1331,7 +1331,7 @@ dependency edges, and determine when an evaluation is complete.
 
 Tests drive the handler functions directly (`eval::handle_eval_result`,
 `build::handle_build_job_completed`, etc.) using SeaORM's `MockDatabase` with
-staged query/exec results — no real Postgres required.
+staged query/exec results - no real Postgres required.
 
 ### MockDatabase staging rules
 
@@ -1476,7 +1476,7 @@ all active builds before aborting the evaluation itself.
 | Test | Scenario | What it checks |
 |------|----------|---------------|
 | `abort_cascades_to_active_builds` | Eval Building, 2 active builds (Queued + Building) | Both builds → Aborted via `update_build_status`; eval → Aborted |
-| `abort_skips_completed_eval` | Eval already Completed | Guard fires immediately — empty MockDB means any unexpected query would surface as an error |
+| `abort_skips_completed_eval` | Eval already Completed | Guard fires immediately - empty MockDB means any unexpected query would surface as an error |
 | `abort_no_active_builds` | Eval Building, no active builds found | Build query returns empty; eval still transitions → Aborted |
 
 ### Group H: Handler behavioral gaps
@@ -1522,7 +1522,7 @@ captured by `RecordingWebhookClient` (returned alongside the state by
 
 ---
 
-## `core::storage::nar_extract` — NAR Single-File Extractor
+## `core::storage::nar_extract` - NAR Single-File Extractor
 
 ### NAR extraction (`core/tests/nar_extract.rs`)
 
@@ -1554,7 +1554,7 @@ relative path.
 - `cache_nar_available::available_returns_true_when_signature_present`
 - `cache_nar_available::available_returns_false_when_no_cached_path`
 - `cache_nar_delete::delete_unauthenticated_returns_403`
-- `cache_nar_delete::delete_owner_removes_signature_and_writes_audit_row` *(ignored — requires real-DB harness)*
+- `cache_nar_delete::delete_owner_removes_signature_and_writes_audit_row` *(ignored - requires real-DB harness)*
 
 ### Notes
 
@@ -1587,7 +1587,7 @@ The NixOS VM integration tests live in `nix/tests/gradient/` and are documented 
 Both the `building` and `cache` integration tests validate the challenge-response
 authentication flow that workers use to connect to the server:
 
-**`gradient-building`** — API-based worker registration:
+**`gradient-building`** - API-based worker registration:
 1. Worker boots and generates a persistent UUID
 2. User creates an organization via CLI
 3. Worker's UUID is registered with the org via `POST /api/v1/orgs/{org}/workers`
@@ -1598,14 +1598,14 @@ authentication flow that workers use to connect to the server:
    `"handshake successful"` in journalctl.
 6. Project is created and evaluation + build complete with the authenticated worker.
 
-**`gradient-cache`** — Declarative state-managed worker registration:
+**`gradient-cache`** - Declarative state-managed worker registration:
 1. Worker UUID is pre-seeded via `systemd.tmpfiles.rules` to a known value
 2. Server state config registers the worker with a shared token (hashed and stored)
 3. Worker's `peersFile` contains `*:{token}` (wildcard matches any org UUID)
 4. On boot, worker authenticates via challenge-response with the pre-shared token
 5. Test asserts `"handshake successful"` in journalctl before proceeding to builds
 
-**`gradient-api`** — Worker registration CRUD:
+**`gradient-api`** - Worker registration CRUD:
 - Tests `POST /api/v1/orgs/{org}/workers` returns a valid 64-character base64 token
 - Tests `GET /api/v1/orgs/{org}/workers` lists the registered worker
 - Tests `DELETE /api/v1/orgs/{org}/workers/{id}` removes the registration

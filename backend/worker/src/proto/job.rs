@@ -37,7 +37,7 @@ pub(crate) type KnownDerivationWaiters = Arc<Mutex<HashMap<String, oneshot::Send
 /// Upper bound for how long a single `CacheQuery` may wait for its `CacheStatus`
 /// response. The worker dispatch loop processes server messages serially, so a
 /// slow `JobOffer` scoring pass can delay routing a `CacheStatus` to the waiter.
-/// Without a timeout the eval task would hang forever in pathological cases —
+/// Without a timeout the eval task would hang forever in pathological cases -
 /// surface the stall instead so the eval fails loudly and the operator can act.
 const CACHE_QUERY_TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -94,10 +94,10 @@ impl JobUpdater {
     ///
     /// All waiters are registered **before** the `NarRequest` goes on the
     /// wire so every server response (`NarPush` / `NarUnavailable` /
-    /// `NarAbort`) finds a live waiter — otherwise the server's late
+    /// `NarAbort`) finds a live waiter - otherwise the server's late
     /// responses for paths whose siblings already failed would land in the
     /// dispatch loop with no destination and surface as
-    /// "received NarUnavailable/NarAbort with no waiter — discarding"
+    /// "received NarUnavailable/NarAbort with no waiter - discarding"
     /// log spam.
     ///
     /// On the first failure all in-flight waiters are dropped (their
@@ -172,7 +172,7 @@ impl JobUpdater {
     }
 
     /// Report an infrastructure-level message that should surface on the
-    /// evaluation page. Use only for transport / prefetch / cache problems —
+    /// evaluation page. Use only for transport / prefetch / cache problems -
     /// not for compile failures (those are implicit in `JobFailed`).
     pub fn send_eval_message(
         &self,
@@ -188,7 +188,7 @@ impl JobUpdater {
         })
     }
 
-    /// Forward a chunk of build log output to the server. Sync — returns
+    /// Forward a chunk of build log output to the server. Sync - returns
     /// immediately after the message is enqueued in the writer's mpsc channel.
     pub fn send_log_chunk(&self, task_index: u32, data: Vec<u8>) -> Result<()> {
         self.writer.send(ClientMessage::LogChunk {
@@ -225,7 +225,7 @@ async fn known_derivations_with_timeout(
     match tokio::time::timeout(CACHE_QUERY_TIMEOUT, rx).await {
         Ok(Ok(known)) => Ok(known),
         Ok(Err(_)) => Err(anyhow::anyhow!(
-            "known-derivation waiter dropped — connection closed or superseded?"
+            "known-derivation waiter dropped - connection closed or superseded?"
         )),
         Err(_) => {
             waiters.lock().unwrap().remove(job_id);
@@ -261,7 +261,7 @@ async fn cache_query_with_timeout(
     match tokio::time::timeout(CACHE_QUERY_TIMEOUT, rx).await {
         Ok(Ok(cached)) => Ok(cached),
         Ok(Err(_)) => Err(anyhow::anyhow!(
-            "cache waiter dropped — connection closed or superseded?"
+            "cache waiter dropped - connection closed or superseded?"
         )),
         Err(_) => {
             // Drop the waiter so a late CacheStatus doesn't deliver to a

@@ -68,7 +68,7 @@ pub async fn post_build_log(
             let log_key = build.log_id.unwrap_or(build_id);
 
             // While the build hasn't started executing yet (`Created` /
-            // `Queued`), there's nothing to stream — but we must not close
+            // `Queued`), there's nothing to stream - but we must not close
             // the connection either, otherwise a UI that opened the stream
             // before the worker picked the build up would see an empty
             // response and never get the live output. Keep polling.
@@ -88,7 +88,7 @@ pub async fn post_build_log(
                 }
             }
 
-            // Anything other than `Building` is terminal — flush a final
+            // Anything other than `Building` is terminal - flush a final
             // read (catches the race where lines were appended between our
             // read above and the daemon-side status transition committing)
             // and close the stream.
@@ -103,7 +103,7 @@ pub async fn post_build_log(
                 }
                 if !sent_any {
                     // Build completed (or was Substituted / DependencyFailed
-                    // and never produced output) — emit one empty frame so
+                    // and never produced output) - emit one empty frame so
                     // the client sees a clean end-of-stream rather than a
                     // hanging connection.
                     yield String::new();

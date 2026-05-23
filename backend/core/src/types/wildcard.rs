@@ -17,7 +17,7 @@ use crate::types::input::InputError;
 /// attribute names (e.g. `my."python3.12".*`). Unquoted `*` is a wildcard
 /// that matches any attribute name at that position.
 ///
-/// Patterns prefixed with `!` are exclusions — they remove matching paths
+/// Patterns prefixed with `!` are exclusions - they remove matching paths
 /// from the set built by the preceding include patterns:
 /// `packages.*.*,!packages.x86_64-linux.broken` includes everything in
 /// `packages.*.*` except that one path.
@@ -54,7 +54,7 @@ use crate::types::input::InputError;
 /// - Bare `*` as the entire pattern is valid and means "evaluate everything".
 /// - Quoted segments (`"…"`) whose content is `*`, `#`, or `!` are rejected.
 /// - Unquoted segments starting with `!` are rejected (`!` is only valid as a
-///   whole-pattern prefix, e.g. `!packages.broken` — not `my.!bad`).
+///   whole-pattern prefix, e.g. `!packages.broken` - not `my.!bad`).
 ///
 /// # Example
 ///
@@ -168,7 +168,7 @@ fn path_to_nix_list(path: &str) -> String {
         })
         .collect();
 
-    // Collapse consecutive `"*"` segments — `*.*` is semantically identical to `*`
+    // Collapse consecutive `"*"` segments - `*.*` is semantically identical to `*`
     // because `*` is recursive. `#` is non-recursive so `#.#` is NOT collapsed:
     // each `#` targets a distinct depth level.
     let mut elems: Vec<String> = Vec::new();
@@ -227,12 +227,12 @@ fn validate_pattern(part: &str) -> Result<(), InputError> {
     }
 
     // Bare `#` as the entire body is invalid (internal sentinel character).
-    // Bare `*` is valid — it means "evaluate everything".
+    // Bare `*` is valid - it means "evaluate everything".
     if body == "#" {
         return Err(InputError::EvaluationWildcardBareSpecialChar);
     }
 
-    // Exclusion patterns must be exact paths — wildcards make no sense there.
+    // Exclusion patterns must be exact paths - wildcards make no sense there.
     if is_exclusion {
         for (seg, is_quoted) in split_segments(body) {
             if !is_quoted && matches!(seg.as_str(), "*" | "#") {

@@ -9,7 +9,7 @@
 //! Two-stage strategy: reuse a sibling build's `log_id` via DB pointer first,
 //! and (only when `allow_upstream_fetch == true`) fall back to the Hydra-style
 //! `/log/{drv}` endpoint on each configured upstream cache. All failures are
-//! non-fatal — log substitution must never break the build pipeline.
+//! non-fatal - log substitution must never break the build pipeline.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -29,7 +29,7 @@ const LOG_FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 const LOG_FETCH_MAX_BYTES: usize = 16 * 1024 * 1024;
 
 /// Try to give `build_id` a `log_id` via local dedup, then (optionally) an
-/// upstream `/log/{drv}` fetch. Always returns `Ok` — failures are logged but
+/// upstream `/log/{drv}` fetch. Always returns `Ok` - failures are logged but
 /// never propagated, so the caller's pipeline is unaffected.
 pub async fn substitute_log(
     state: Arc<ServerState>,
@@ -587,7 +587,7 @@ mod tests {
         let build = make_build(build_id, drv_id, BuildStatus::Substituted, None, false);
 
         // Initial load succeeds; both dedup queries return empty (so set_log_id is not called).
-        // No exec results are staged — if substitute_log tried to UPDATE, the test would panic.
+        // No exec results are staged - if substitute_log tried to UPDATE, the test would panic.
         let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
             .append_query_results([vec![build]])
             .append_query_results([Vec::<build::Model>::new()])

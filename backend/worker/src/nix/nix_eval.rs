@@ -9,7 +9,7 @@
 //! Uses `nix_bindings::sys` (raw FFI) directly because the high-level
 //! `nix-bindings` wrapper does not expose
 //! `nix_flake_settings_add_to_eval_state_builder`, which is required to make
-//! `builtins.getFlake` available — without it every flake-aware evaluation
+//! `builtins.getFlake` available - without it every flake-aware evaluation
 //! fails with `nix eval failed` even though the same expression works via the
 //! `nix` CLI.
 //!

@@ -20,7 +20,7 @@ pub type ResolvedDerivation = (String, Result<(String, Vec<String>)>);
 /// Evaluates flake-based Nix derivations. All methods are async; production
 /// impls run their work inside `tokio::task::spawn_blocking` to keep the
 /// embedded Nix C API off Tokio worker threads (Boehm GC vs. signal-blocked
-/// workers — see `builder::evaluator::nix_eval`).
+/// workers - see `builder::evaluator::nix_eval`).
 #[async_trait]
 pub trait DerivationResolver: Send + Sync + std::fmt::Debug + 'static {
     /// Discover all attribute paths matching `wildcards` in the given flake.

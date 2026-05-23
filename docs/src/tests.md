@@ -2,18 +2,18 @@
 
 This page tracks notable tests added to Gradient and where they live.
 
-## OIDC — CSRF cookie, ID-token verification, identity binding
+## OIDC - CSRF cookie, ID-token verification, identity binding
 
 Tests in `backend/web/src/authorization/oidc.rs` cover the security
 fixes for issue #38:
 
-- `random_url_safe_is_unique_and_url_safe` — `state`/`nonce` are
+- `random_url_safe_is_unique_and_url_safe` - `state`/`nonce` are
   cryptographically random and URL-safe.
 - `csrf_cookie_roundtrips` / `csrf_cookie_rejects_wrong_secret` /
-  `csrf_cookie_rejects_expired` — the `oidc_csrf` cookie is an
+  `csrf_cookie_rejects_expired` - the `oidc_csrf` cookie is an
   HMAC-signed JWT that round-trips, fails verification under a
   different secret, and is rejected when expired.
-- `state_compare_constant_time_rejects_mismatch` — `state` comparison
+- `state_compare_constant_time_rejects_mismatch` - `state` comparison
   uses `subtle::ConstantTimeEq`.
 
 The full ID-token verification path (signature against the provider's
@@ -21,21 +21,21 @@ JWKS, `iss`/`aud`/`exp`/`nonce` checks, identity bound to
 `(oidc_issuer, oidc_subject)` rather than email) is enforced in
 `oidc_login_verify` and exercised end-to-end via the
 `/auth/oauth/authorize` and `/auth/oidc/callback` endpoints.
-## Unified resource access — `crate::access` and `crate::permissions`
+## Unified resource access - `crate::access` and `crate::permissions`
 
 All "load resource by name and check the caller may use it" logic lives in
 two modules:
 
-- `backend/core/src/permissions.rs` — declares the [`Permission`] capability
+- `backend/core/src/permissions.rs` - declares the [`Permission`] capability
   enum (e.g. `EditProject`, `ManageMembers`, `ManageRoles`, `ManageWebhooks`),
   each capability's stable bit position in the `role.permission` bitmask
   (`Permission::bit`), and the canonical bitmasks for the three built-in
   roles (`admin_mask` / `write_mask` / `view_mask`). The mapping between
-  roles and capabilities lives entirely in the database — `mask_grants`
+  roles and capabilities lives entirely in the database - `mask_grants`
   decides authorization from a role row's `permission` column, so custom
   roles configured at runtime require no code change at the call sites.
   The web crate re-exports this module as `web::permissions`.
-- `backend/web/src/access.rs` — exposes `load_org`, `load_project`,
+- `backend/web/src/access.rs` - exposes `load_org`, `load_project`,
   `load_cache`, `load_webhook_in_org`, `load_integration_in_org`, plus the
   predicates `is_org_member` / `has_permission` and the new
   `load_membership_with_permissions` helper that loads the membership row
@@ -47,43 +47,43 @@ two modules:
 Unit tests in `access.rs` cover the role matrix and the managed-resource
 guard:
 
-- `org_admin_passes` — admin role + permission grants the resource.
-- `org_admin_view_role_forbidden` — view role + admin-required permission →
+- `org_admin_passes` - admin role + permission grants the resource.
+- `org_admin_view_role_forbidden` - view role + admin-required permission →
   `WebError::Forbidden`.
-- `org_admin_managed_forbidden` — state-managed org rejected for mutating
+- `org_admin_managed_forbidden` - state-managed org rejected for mutating
   permissions.
-- `org_admin_non_member_not_found` — non-member → `WebError::NotFound`
+- `org_admin_non_member_not_found` - non-member → `WebError::NotFound`
   (no leak between "missing" and "not a member").
-- `org_writable_write_role_passes` / `org_writable_view_role_forbidden` —
+- `org_writable_write_role_passes` / `org_writable_view_role_forbidden` -
   write-tier permission honors Admin+Write but rejects View.
-- `org_member_view_role_passes` — `OrgAccess::Member` accepts any role.
+- `org_member_view_role_passes` - `OrgAccess::Member` accepts any role.
 - `org_readable_public_visible_to_anon` /
-  `org_readable_private_invisible_to_anon` — visibility rule for anonymous
+  `org_readable_private_invisible_to_anon` - visibility rule for anonymous
   callers.
 - `project_editable_admin_passes` / `project_editable_view_forbidden` /
-  `project_editable_managed_forbidden` / `project_missing_returns_project_label` —
+  `project_editable_managed_forbidden` / `project_missing_returns_project_label` -
   same matrix at the project level, including the project-existence label
   guarantee.
 - `cache_owned_unmanaged_passes` / `cache_editable_rejects_managed` /
-  `cache_owned_allows_managed` / `cache_non_owner_returns_not_found` — cache
+  `cache_owned_allows_managed` / `cache_non_owner_returns_not_found` - cache
   matrix at the owner-scoped layer. `Editable` blocks state-managed caches
   (cache *config* is declarative), while `Owned` permits them so that NAR
   content endpoints can mutate operational data on managed caches.
 
 Unit tests in `permissions.rs` (in `core`) lock the bitmask invariants:
 
-- `each_permission_has_unique_bit` — no capability shares a bit position.
-- `wire_names_round_trip` — every `Permission::as_wire_name()` parses back
+- `each_permission_has_unique_bit` - no capability shares a bit position.
+- `wire_names_round_trip` - every `Permission::as_wire_name()` parses back
   via `from_wire_name`.
-- `admin_mask_grants_everything` — Admin's canonical mask covers
+- `admin_mask_grants_everything` - Admin's canonical mask covers
   `Permission::ALL`.
-- `write_mask_excludes_admin_only_perms` — Write retains project/webhook
+- `write_mask_excludes_admin_only_perms` - Write retains project/webhook
   management but cannot manage members, roles, or org settings.
-- `view_mask_cannot_edit_projects_or_webhooks` — View is read-only on
+- `view_mask_cannot_edit_projects_or_webhooks` - View is read-only on
   sensitive surfaces.
-- `empty_mask_grants_nothing` — defensive: a role with `permission = 0`
+- `empty_mask_grants_nothing` - defensive: a role with `permission = 0`
   authorizes nothing.
-- `mask_round_trips_through_vec` — `mask_to_vec` and `mask_from` are inverses.
+- `mask_round_trips_through_vec` - `mask_to_vec` and `mask_from` are inverses.
 - `view_org_is_not_mutating` / `is_builtin_role_recognises_seed_uuids`.
 
 Run with: `cargo test -p web --lib access::tests`
@@ -99,36 +99,36 @@ family exposes CRUD for org-scoped custom roles.
 Integration tests in `backend/web/tests/roles_crud.rs` exercise the full API
 through `axum_test::TestServer` + `MockDatabase`:
 
-- `list_roles_returns_builtins_plus_custom` — `GET /orgs/{org}/roles` is
+- `list_roles_returns_builtins_plus_custom` - `GET /orgs/{org}/roles` is
   visible to any member and returns the three built-ins, all org-scoped
   custom roles, and an `available_permissions` catalogue derived from
   `Permission::ALL`.
-- `create_role_persists_permission_bitmask` — `POST` resolves the wire-form
+- `create_role_persists_permission_bitmask` - `POST` resolves the wire-form
   permission identifiers, composes the bitmask, and round-trips it back on
   the response.
-- `create_role_rejects_unknown_permission` — unknown identifiers return
+- `create_role_rejects_unknown_permission` - unknown identifiers return
   `400` with the offending name in the message.
-- `create_role_rejects_view_role_caller` — only callers with the
+- `create_role_rejects_view_role_caller` - only callers with the
   `manageRoles` permission may create roles; a View-tier member is rejected
   with `403`.
-- `create_role_rejects_duplicate_name` — name uniqueness is scoped to
+- `create_role_rejects_duplicate_name` - name uniqueness is scoped to
   `(org_id, name)` ∪ built-ins; duplicates return `409`.
-- `patch_builtin_role_is_forbidden` / `delete_builtin_role_is_forbidden` —
+- `patch_builtin_role_is_forbidden` / `delete_builtin_role_is_forbidden` -
   the three system roles are immutable.
-- `patch_custom_role_updates_mask` — the bitmask is overwritten wholesale
+- `patch_custom_role_updates_mask` - the bitmask is overwritten wholesale
   on PATCH so the UI can reflect a permission set without diff plumbing.
-- `delete_role_in_use_is_rejected` — deleting a role that is still assigned
+- `delete_role_in_use_is_rejected` - deleting a role that is still assigned
   to one or more members returns `400`; the caller must reassign first.
-- `delete_unused_custom_role_succeeds` — the happy path.
+- `delete_unused_custom_role_succeeds` - the happy path.
 - `custom_role_with_manage_webhooks_can_list_webhooks` /
-  `custom_role_without_manage_webhooks_is_rejected` — end-to-end
+  `custom_role_without_manage_webhooks_is_rejected` - end-to-end
   authorization through `access::has_permission`, proving that a custom
   role's bitmask reaches the webhook-list gate without any role-id
   comparison.
 
 Run with: `cargo test -p web --test roles_crud`.
 
-## Proto handshake — organization peer filtering
+## Proto handshake - organization peer filtering
 
 Helper `filter_org_peers_without_cache` runs during the `/proto` handshake's
 `perform_auth` step. After token validation, each authorized peer that is an
@@ -145,12 +145,12 @@ Backend tests (in `backend/core/src/proto/handler/auth.rs`):
 - `proto::handler::auth::tests::filter_org_peers_mixed`
 - `proto::handler::auth::tests::validate_then_filter_demotes_org_without_cache`
 
-## Frontend — workers page no-cache banner
+## Frontend - workers page no-cache banner
 
 When the active organization has no subscribed cache, the workers page shows
 a banner instructing the admin to subscribe to a cache before workers can run.
 
-- `WorkersComponent — no-cache banner` — banner show/hide specs at
+- `WorkersComponent - no-cache banner` - banner show/hide specs at
   `frontend/src/app/features/organizations/workers/workers.component.spec.ts`
 
 ## Auth middleware response envelope
@@ -217,8 +217,8 @@ Backend (`cargo test -p core --tests ci::github_app_manifest`):
 - `exchange_code_non_2xx_errors`
 
 Backend (`cargo test -p core --tests ci::reporting`):
-- `maps_terminal_states` — `EvaluationStatus::{Completed, Failed, Aborted}` map to `CiStatus::{Success, Failure, Error}`.
-- `skips_intermediate_states` — non-terminal statuses produce no CI status (avoids double-reporting `Running`).
+- `maps_terminal_states` - `EvaluationStatus::{Completed, Failed, Aborted}` map to `CiStatus::{Success, Failure, Error}`.
+- `skips_intermediate_states` - non-terminal statuses produce no CI status (avoids double-reporting `Running`).
 
 Backend (`cargo test -p core --tests ci::manifest_state`):
 - `issue_state_returns_unique_tokens`
@@ -240,7 +240,7 @@ Frontend (`pnpm --dir frontend exec ng test --include='**/github-app.component.s
 ## Narinfo Deriver field
 
 Backend (`cargo test -p web --tests narinfo`):
-- `narinfo_served_from_db_without_daemon_probe` — verifies the `.narinfo`
+- `narinfo_served_from_db_without_daemon_probe` - verifies the `.narinfo`
   response is assembled from DB rows (no nix-daemon probe) and now also asserts
   that the optional `Deriver:` line is emitted when `cached_path.deriver` is
   populated. Worker-supplied deriver metadata arrives via `NarUploaded.deriver`
@@ -251,19 +251,19 @@ Backend (`cargo test -p web --tests narinfo`):
 
 Backend:
 
-- `cache::cacher::sign_sweep::tests::skip_when_all_producing_projects_private` —
+- `cache::cacher::sign_sweep::tests::skip_when_all_producing_projects_private` -
   `compute_skipped_cached_paths` skips a path iff every producing project has
   `sign_cache=false` and at least one such project exists. A mixed
   public+private path stays signed (option B semantics).
-- `cache::cacher::sign_sweep::tests::skip_set_empty_when_no_private_producers` —
+- `cache::cacher::sign_sweep::tests::skip_set_empty_when_no_private_producers` -
   no skips when all producers are public.
-- `web::tests::projects_sign_cache::get_project_includes_sign_cache` — GET
+- `web::tests::projects_sign_cache::get_project_includes_sign_cache` - GET
   `/api/v1/projects/{org}/{name}` returns `sign_cache` in the response body.
-- `web::tests::projects_sign_cache::patch_project_writes_sign_cache_false` —
+- `web::tests::projects_sign_cache::patch_project_writes_sign_cache_false` -
   PATCH with `{ "sign_cache": false }` is accepted and round-trips.
-- `web::tests::projects_sign_cache::create_project_accepts_sign_cache_false` —
+- `web::tests::projects_sign_cache::create_project_accepts_sign_cache_false` -
   PUT body may include `sign_cache: false`; default is `true` when omitted.
-- `web::tests::narinfo::narinfo_returns_404_when_signature_null` —
+- `web::tests::narinfo::narinfo_returns_404_when_signature_null` -
   regression: when `cached_path_signature.signature` is NULL (the state the
   sweep leaves rows in for `sign_cache=false` projects), the narinfo handler
   returns 404 rather than serving an unsigned narinfo. The whole privacy
@@ -279,12 +279,12 @@ filtered out, or when a derivation came back as a "known/pruned" subtree
 with no outputs persisted), causing `is_cached` to silently stay `false`
 and every subsequent narinfo lookup for the build output to 404.
 
-The filter now uses `hash` — the same column the read path
-(`get_nar_by_hash`) filters on — and updates **all** matching
+The filter now uses `hash` - the same column the read path
+(`get_nar_by_hash`) filters on - and updates **all** matching
 `derivation_output` rows, also linking each row's `cached_path` UUID
 to the freshly-written `cached_path` row.
 
-## Worker NAR upload — store path normalisation
+## Worker NAR upload - store path normalisation
 
 Eval-worker `get_derivation_path` returns drv paths as bare `<hash>-<name>.drv`
 strings (no `/nix/store/` prefix). `nar::push_direct` and `nar::upload_presigned`
@@ -294,14 +294,14 @@ must canonicalise to the absolute path before handing it to harmonia's
 stored without prefix and the served narinfo `StorePath:` line is malformed).
 
 Backend (`cargo test -p worker --bins proto::nar::tests::ensure_full_store_path`):
-- `ensure_full_store_path_prefixes_bare_hash_name` — bare drv path gets
+- `ensure_full_store_path_prefixes_bare_hash_name` - bare drv path gets
   `/nix/store/` prepended.
-- `ensure_full_store_path_preserves_absolute` — `/nix/store/...` paths are
+- `ensure_full_store_path_preserves_absolute` - `/nix/store/...` paths are
   passed through unchanged.
-- `ensure_full_store_path_preserves_other_absolute_paths` — unrelated absolute
+- `ensure_full_store_path_preserves_other_absolute_paths` - unrelated absolute
   paths (e.g. test tmpdirs) are not touched.
 
-## Worker NAR upload — fatal on incomplete path metadata
+## Worker NAR upload - fatal on incomplete path metadata
 
 `push_direct` and `upload_presigned` used to swallow `gather_path_meta`
 failures (`unwrap_or_default`) and ship `NarUploaded` with empty
@@ -314,14 +314,14 @@ reference, and aborted with `path '…' is not valid`. Uploads must now fail
 loudly so the cache is never seeded with an incomplete row.
 
 Backend (`cargo test -p worker --bins proto::nar::tests`):
-- `push_direct_fails_when_path_meta_unavailable` — with a store handle
+- `push_direct_fails_when_path_meta_unavailable` - with a store handle
   provided, a path `gather_path_meta` cannot resolve aborts the push with
   a "path metadata" error instead of emitting `NarUploaded` with empty
   metadata.
-- `upload_presigned_fails_when_path_meta_unavailable` — same contract for
+- `upload_presigned_fails_when_path_meta_unavailable` - same contract for
   the S3 / presigned-PUT branch.
 
-## Worker prefetch — re-derive `.drv` references from content
+## Worker prefetch - re-derive `.drv` references from content
 
 When `prefetch_inputs` fetches a `.drv` during the closure walk, it harvests
 seeds for the next iteration from the `.drv` content itself rather than
@@ -343,15 +343,15 @@ The omission is the fix for the cross-worker
 showed up when the build's `.drv` arrived without its input `.drv` chain.
 
 Backend (`cargo test -p worker --bins proto::nar_import::tests`):
-- `drv_closure_seeds_include_outputs_inputs_and_sources` — a synthetic
+- `drv_closure_seeds_include_outputs_inputs_and_sources` - a synthetic
   `.drv` with one output, one input_derivation, and one input_source
   returns all three paths from `drv_closure_seeds` under
   `ClosureMode::FollowOutputs`.
-- `drv_closure_seeds_inputs_only_excludes_outputs` — regression for the
+- `drv_closure_seeds_inputs_only_excludes_outputs` - regression for the
   cross-worker `.drv` import failure: under `ClosureMode::InputsOnly` the
   declared output path is dropped while input_derivation + input_source
   remain.
-- `drv_closure_seeds_skip_empty_output_paths` — content-addressed /
+- `drv_closure_seeds_skip_empty_output_paths` - content-addressed /
   deferred outputs (empty `path` field) are filtered so the closure walk
   never queries the empty string.
 
@@ -368,21 +368,21 @@ scheduler call `gradient_core::nix_hash::normalize_nar_hash` before
 pre-existing rows.
 
 Backend:
-- `cargo test -p core --lib nix_hash` — round-trip and idempotency tests for
+- `cargo test -p core --lib nix_hash` - round-trip and idempotency tests for
   `normalize_nar_hash` covering SRI, prefixed hex, prefixed nix32, bare hex,
   rejection of malformed inputs, and the BLAKE3 variants of each (test
   vectors cross-checked against NixOS/nix PR #12379). Also covers
   `strip_hash_algo`, the algorithm-agnostic prefix stripper used when
   building narinfo `URL:` slugs.
-- `cargo test -p migration --lib normalize_hash_columns` — covers the
+- `cargo test -p migration --lib normalize_hash_columns` - covers the
   hex→nix32 conversion helper used by the backfill migration.
-- `cargo test -p web --lib endpoints::caches::nar::tests` —
+- `cargo test -p web --lib endpoints::caches::nar::tests` -
   `resolve_returns_store_hash_for_normalized_derivation_output` is the
   regression test for the original 404 bug: a narinfo URL hash (nix32)
   resolves a `derivation_output` row whose `file_hash` is in canonical
   `sha256:<nix32>` form.
 
-## NAR path extraction — file or directory subtree
+## NAR path extraction - file or directory subtree
 
 `core::storage::nar_extract::extract_path_from_nar_bytes` returns either
 `Extracted::File` (regular file body) or `Extracted::Directory { tar_zst }`
@@ -394,16 +394,16 @@ download) detect the variant and set `Content-Type: application/zstd` plus a
 Backend (`cargo test -p core --test nar_extract`):
 - `extracts_file_at_relative_path`, `extracts_file_in_nested_directory`,
   `drains_non_matching_sibling_before_extracting_target`,
-  `returns_not_found_for_missing_path` — file-mode behaviours preserved.
-- `extracts_directory_as_tar_zst` — regression for "fails if build output is
+  `returns_not_found_for_missing_path` - file-mode behaviours preserved.
+- `extracts_directory_as_tar_zst` - regression for "fails if build output is
   a folder": when the build product's relative path resolves to a directory
   in the NAR, the extractor walks the subtree, emits tar entries for nested
   directories and files (preserving the executable bit), and zstd-compresses
   the result.
-- `directory_tarball_preserves_symlinks` — symlinks inside the matched
+- `directory_tarball_preserves_symlinks` - symlinks inside the matched
   subtree are written as `tar::EntryType::Symlink` with the original target
   bytes, not flattened to regular files.
-- `directory_match_at_root_via_basename` — a build product whose path equals
+- `directory_match_at_root_via_basename` - a build product whose path equals
   the output store path returns the whole subtree as `tar.zst`, with entries
   rooted at the matched directory's basename so extraction recreates that
   name.
@@ -411,79 +411,79 @@ Backend (`cargo test -p core --test nar_extract`):
 ## Upstream narinfo metadata for worker prefetch
 
 Backend (`cargo test -p proto --lib handler::cache::tests`):
-- `parse_upstream_narinfo_full_fields` — verifies the server parses
+- `parse_upstream_narinfo_full_fields` - verifies the server parses
   `NarHash`, `NarSize`, `FileSize`, `References`, `Deriver`, and `Sig` from an
   upstream `.narinfo` body so the worker receives enough metadata to build a
   `ValidPathInfo` and call `add_to_store_nar`. Without this the worker
   silently failed imports and the build died with
   "dependency does not exist, and substitution is disabled".
-- `parse_upstream_narinfo_requires_url` — a narinfo without `URL:` is rejected.
-- `parse_upstream_narinfo_trims_base_url_trailing_slash` — joins
+- `parse_upstream_narinfo_requires_url` - a narinfo without `URL:` is rejected.
+- `parse_upstream_narinfo_trims_base_url_trailing_slash` - joins
   `base_url` + `URL:` without double slashes.
-- `parse_upstream_narinfo_empty_references_is_some_empty` — `References:` with
+- `parse_upstream_narinfo_empty_references_is_some_empty` - `References:` with
   no paths yields `Some(vec![])`, not `None`.
-- `parse_upstream_narinfo_ignores_unparseable_sizes` — malformed `NarSize` /
+- `parse_upstream_narinfo_ignores_unparseable_sizes` - malformed `NarSize` /
   `FileSize` fall back to `None` rather than aborting the parse.
 
-## Worker prefetch robustness — uncached inputs and broken daemon connections
+## Worker prefetch robustness - uncached inputs and broken daemon connections
 
 Backend (`cargo test -p worker --tests`):
-- `nix::store::tests::scoped_guard_discards_inner_when_not_marked_ok` —
+- `nix::store::tests::scoped_guard_discards_inner_when_not_marked_ok` -
   every daemon op in the worker runs against a `ScopedGuard`. If the guard
-  is dropped without an explicit `mark_ok()` call — the path taken on `Err`
+  is dropped without an explicit `mark_ok()` call - the path taken on `Err`
   returns, panics, and `await` cancellation (e.g. `FuturesUnordered` being
-  dropped on the first prefetch import failure) — `Drop` discards the
+  dropped on the first prefetch import failure) - `Drop` discards the
   pooled connection so the next acquirer doesn't inherit a possibly
   out-of-phase protocol stream. Without this, a cancelled `add_to_store_nar`
   would silently recycle a mid-frame connection and the next caller would
   surface as `"serialised integer N is too large for type 'j'"` or as
   `query_path_info` returning `Ok(None)` on a path that exists.
-- `nix::store::tests::scoped_guard_preserves_inner_when_marked_ok` — the
+- `nix::store::tests::scoped_guard_preserves_inner_when_marked_ok` - the
   symmetric success path: a daemon op that completes cleanly calls
   `mark_ok()` and the connection is recycled, preserving pool warmth.
-- `proto::nar_import::tests::classify_splits_cached_by_url_presence` — cached
+- `proto::nar_import::tests::classify_splits_cached_by_url_presence` - cached
   entries with a presigned `download_url` go to the S3 bucket, those without
   go to the WebSocket `NarRequest` bucket.
-- `proto::nar_import::tests::classify_collects_uncached_separately` —
+- `proto::nar_import::tests::classify_collects_uncached_separately` -
   regression guard for the Stage-3 prefetch hard-fail: when the server
   reports a required input as `Uncached`, it is *not* silently skipped.
   Previously the path was dropped on the floor and a dependent build
   eventually failed inside `add_to_store_nar` with
   `path '/nix/store/…' is not valid`; classifying it explicitly lets the
   prefetcher abort with a clear message that names the missing path.
-- `proto::nar_import::tests::classify_empty_input_is_empty_output` — empty
+- `proto::nar_import::tests::classify_empty_input_is_empty_output` - empty
   cache responses produce empty buckets.
 
-## State configuration — optional fields for OIDC-only users
+## State configuration - optional fields for OIDC-only users
 
 Backend (`cargo test -p core --lib state::tests`):
-- `user_accepts_missing_password_file` — `StateUser` accepts a JSON
+- `user_accepts_missing_password_file` - `StateUser` accepts a JSON
   document with `"password_file": null`, so the NixOS module may emit
   OIDC-only users without a password credential file.
-- `org_project_cache_descriptions_optional` — `description` on
+- `org_project_cache_descriptions_optional` - `description` on
   organizations, projects, and caches is optional; a full config without
   them validates cleanly.
-- `state_project_accepts_wildcard_field` — `StateProject` deserialises
+- `state_project_accepts_wildcard_field` - `StateProject` deserialises
   the canonical `wildcard` field.
-- `state_project_accepts_legacy_evaluation_wildcard_alias` — pre-rename
+- `state_project_accepts_legacy_evaluation_wildcard_alias` - pre-rename
   state files using `evaluation_wildcard` continue to parse via the
   serde alias, so existing `gradient-state.nix` configurations don't
   break on upgrade.
-- `state_project_keep_evaluations_defaults_to_thirty` — when a project
+- `state_project_keep_evaluations_defaults_to_thirty` - when a project
   omits `keep_evaluations`, the parsed value defaults to 30 so newly
   provisioned state-managed projects match the API-created default and
   the GC pass keeps a meaningful history window.
-- `state_project_keep_evaluations_zero_rejected_by_validator` — the
+- `state_project_keep_evaluations_zero_rejected_by_validator` - the
   configuration validator rejects `keep_evaluations < 1`, matching the
   `types.ints.positive` constraint in `nix/modules/gradient-state.nix`
   and the API-level `apply_keep_evaluations` check.
-- `state_project_silently_ignores_legacy_force_evaluation_field` —
+- `state_project_silently_ignores_legacy_force_evaluation_field` -
   state files written before the rename may still carry
   `force_evaluation`; serde's default unknown-field handling drops it
   silently so existing deployments parse cleanly after the field's
   removal from the schema.
 - `keep_set_tests::keep_sets_track_inner_name_not_attrset_key`
-  (`backend/core/src/state/provisioning.rs`) — `gradient-state.nix`
+  (`backend/core/src/state/provisioning.rs`) - `gradient-state.nix`
   exposes `name = mkOption { default = <attrset key>; }` on users,
   organizations, projects, caches, and API keys, so a user may pin
   `projects.foo = { name = "main"; … }`. Every `apply_*` writes the
@@ -503,26 +503,26 @@ authentication`.
 ## Hashed API keys at rest
 
 Backend (`cargo test -p core --lib state::provisioning::api_key_hash_tests`):
-- `accepts_64_char_hex` — a lowercase 64-char hex string round-trips.
-- `trims_trailing_whitespace` — credential files written with a trailing
+- `accepts_64_char_hex` - a lowercase 64-char hex string round-trips.
+- `trims_trailing_whitespace` - credential files written with a trailing
   newline still parse.
-- `lowercases_uppercase_hex` — uppercase hex is normalised on the way in.
-- `rejects_plaintext_token` / `rejects_short_hex` / `rejects_non_hex_chars` —
+- `lowercases_uppercase_hex` - uppercase hex is normalised on the way in.
+- `rejects_plaintext_token` / `rejects_short_hex` / `rejects_non_hex_chars` -
   malformed values are rejected with a "SHA-256" hint pointing at the right
   shell incantation.
 
 Backend (`cargo test -p core --lib state::provisioning::helper_tests`):
-- `lookup_id_returns_id_when_present` / `lookup_id_errors_with_kind_and_name` —
+- `lookup_id_returns_id_when_present` / `lookup_id_errors_with_kind_and_name` -
   pin the shared `lookup_id` helper used by every `apply_*` provisioning step
   so missing user/org references produce a uniform `"<Kind> '<name>' not
   found"` error.
 - `read_credential_default_dir_when_env_unset` /
-  `credentials_dir_returns_nonempty` — pin the shared credential-file
+  `credentials_dir_returns_nonempty` - pin the shared credential-file
   resolver: the error always names the file it tried to read and the file
   label, so an operator who misnames a systemd credential sees which one.
 
 Backend (`cargo test -p migration --lib m20260502_000000_hash_api_keys`):
-- `sha256_hex_known_vector` — pins the in-place migration's digest helper to
+- `sha256_hex_known_vector` - pins the in-place migration's digest helper to
   `SHA-256("abc")`.
 
 Together these guard the contract that every value in `api.key` is a
@@ -547,25 +547,25 @@ covered by the compile-checked MockDatabase fixtures in
 `scheduler/src/handler_tests.rs`, and the one-line UPDATE added in
 `handle_build_status_update` is a trivial write that reuses the existing
 `ABuild::update` path. The migration and entity alignment are verified by
-`cargo test --workspace --tests` — any `entity::build::Model` literal
+`cargo test --workspace --tests` - any `entity::build::Model` literal
 that forgot the new field would fail to compile.
 
-## Evaluation builds list — follower → leader substitution
+## Evaluation builds list - follower → leader substitution
 
 `GET /evals/{evaluation}/builds` is the build list rendered alongside logs on
 the evaluation page. A follower build (`build.via` set) is a placeholder waiting
-on a leader build in another evaluation that's doing the actual work — until
+on a leader build in another evaluation that's doing the actual work - until
 `propagate_to_followers` runs, the follower's `status`, `updated_at`,
 `build_time_ms` and `log_id` are stale stand-ins. The handler resolves
 followers to their leader row so the client sees the live build it can act on
 (log endpoint, downloads, dependency graph all key off `id`).
 
 Tests (`backend/web/tests/evaluation_builds_via.rs`):
-- `follower_build_is_replaced_with_leader_row` — a follower with
+- `follower_build_is_replaced_with_leader_row` - a follower with
   `via=Some(leader_id)` produces a list item carrying the leader's `id`,
   `status`, and `updated_at`; the shared derivation path keeps `name`
   unchanged.
-- `plain_build_returns_own_row_without_extra_query` — a build with `via=None`
+- `plain_build_returns_own_row_without_extra_query` - a build with `via=None`
   short-circuits the leader-resolution query (no extra `SELECT builds`) and
   returns its own row.
 
@@ -573,41 +573,41 @@ Tests (`backend/web/tests/evaluation_builds_via.rs`):
 
 `GET /evals/{evaluation}/artefacts` returns a nested tree (entry point →
 output → product) consumed by the `gradient download` CLI artefact picker.
-The handler issues a fixed number of batched queries — one per
+The handler issues a fixed number of batched queries - one per
 `entry_point` / `build` / `derivation` / `derivation_output` / `build_product`
-table — and buckets the rows in memory rather than N+1 per derivation.
+table - and buckets the rows in memory rather than N+1 per derivation.
 
 Tests (`backend/web/tests/evals_artefacts.rs`):
-- `empty_eval_returns_empty_tree` — evaluation with zero entry points
+- `empty_eval_returns_empty_tree` - evaluation with zero entry points
   short-circuits to `entry_points: []` after the eval-access load.
-- `returns_full_tree_grouped_by_entry_point_and_output` — seeds one entry
+- `returns_full_tree_grouped_by_entry_point_and_output` - seeds one entry
   point with two derivation outputs and three products; asserts grouping,
   alphabetic ordering of outputs by `name` and products by `path`, the
   `type`/`subtype`/`id` serde rename mapping for `build_product.file_type`,
   and that `entry_point.build_id` is populated (used by the CLI download
   picker to resolve `/builds/{build}/download/{filename}` without a second
   lookup).
-- `missing_eval_returns_404` — non-existent evaluation id surfaces as
+- `missing_eval_returns_404` - non-existent evaluation id surfaces as
   `404 Not Found`.
-- `public_org_allows_anonymous` — anonymous request against an evaluation
+- `public_org_allows_anonymous` - anonymous request against an evaluation
   owned by a `public=true` organization succeeds without a Bearer token.
-- `private_org_rejects_anonymous` — anonymous request against a
+- `private_org_rejects_anonymous` - anonymous request against a
   `public=false` organization returns `404` (the same shape eval-access uses
   to avoid distinguishing missing from forbidden).
 
-## EvalMessage — worker-surfaced evaluation messages
+## EvalMessage - worker-surfaced evaluation messages
 
 Backend (`cargo test -p scheduler --tests scheduler_tests::record_eval_message`):
-- `record_eval_message_drops_when_job_unknown` — a `ClientMessage::EvalMessage`
+- `record_eval_message_drops_when_job_unknown` - a `ClientMessage::EvalMessage`
   whose `job_id` is not an active scheduler job is silently accepted (no DB
   insert, no error). Ensures stale messages from finished jobs can't poison
   the evaluation log.
-- `record_eval_message_inserts_for_active_build_job` — for an enqueued build
+- `record_eval_message_inserts_for_active_build_job` - for an enqueued build
   job the handler resolves `PendingJob::evaluation_id()` and inserts one row
   into `evaluation_message`. Build compile failures and user-initiated aborts
   deliberately do not flow through this path.
 
-## Cache GC — orphan files keep predicate
+## Cache GC - orphan files keep predicate
 
 `cleanup_orphaned_cache_files` (`backend/cache/src/cacher/cleanup.rs`) is the
 safety-net pass that removes NAR files in `nar_storage` with no DB references.
@@ -621,15 +621,15 @@ fully-uploaded `cached_path` row (e.g. `.drv` files) are also kept.
 
 Run with: `cargo test -p cache --lib cacher::cleanup`
 
-- `cacher::cleanup::tests::keeps_active_drops_orphan` — file for an active
+- `cacher::cleanup::tests::keeps_active_drops_orphan` - file for an active
   build's hash survives; file with no DB references is removed.
-- `cacher::cleanup::tests::keeps_cached_path_only` — a hash returned only by
+- `cacher::cleanup::tests::keeps_cached_path_only` - a hash returned only by
   the `cached_path.file_hash IS NOT NULL` UNION branch is kept (covers `.drv`
   files that have no `derivation_output`).
-- `cacher::cleanup::tests::drops_everything_when_no_keep` — empty keep set
+- `cacher::cleanup::tests::drops_everything_when_no_keep` - empty keep set
   removes every on-disk NAR.
 
-## Cache GC — TTL pass orphan guard
+## Cache GC - TTL pass orphan guard
 
 `cleanup_stale_cached_nars` (`backend/cache/src/cacher/cleanup.rs`) evicts
 `cache_derivation` rows whose `last_fetched_at` is older than
@@ -648,15 +648,15 @@ transient gap in build references must never delete the only cached copy.
 FODs are reclaimed only by `gc_orphan_derivations` after the grace period
 and zero remaining build references.
 
-- `cacher::cleanup::tests::stale_nars_disabled_when_ttl_zero` — pass is a
+- `cacher::cleanup::tests::stale_nars_disabled_when_ttl_zero` - pass is a
   no-op when `nar_ttl_hours = 0`.
-- `cacher::cleanup::tests::stale_nars_no_eligible_rows` — empty SELECT
+- `cacher::cleanup::tests::stale_nars_no_eligible_rows` - empty SELECT
   result leaves on-disk NARs untouched.
-- `cacher::cleanup::tests::ttl_select_skips_fixed_output_derivations` —
+- `cacher::cleanup::tests::ttl_select_skips_fixed_output_derivations` -
   regression for #107: the TTL SELECT must keep its `derivation_output.ca
   IS NOT NULL` guard so FOD NARs are never evicted by the TTL pass.
 
-## Frontend — form primitives & style guide
+## Frontend - form primitives & style guide
 
 Reusable form primitives live under
 `frontend/src/app/shared/components/form/` and consolidate the
@@ -667,30 +667,30 @@ serves as a living reference.
 
 Specs (vitest + jsdom):
 
-- `FormFieldComponent` — renders label/required marker; toggles
+- `FormFieldComponent` - renders label/required marker; toggles
   `has-error` class on touched + invalid control.
   (`shared/components/form/form-field/form-field.component.spec.ts`)
-- `FormErrorComponent` — hidden until touched; resolves default
+- `FormErrorComponent` - hidden until touched; resolves default
   messages by error key; honours overrides; formats `minlength` with
   required length.
   (`shared/components/form/form-error/form-error.component.spec.ts`)
-- `MessageBannerComponent` — applies `--type` modifier class; uses
+- `MessageBannerComponent` - applies `--type` modifier class; uses
   default icon per type; honours custom icon override.
   (`shared/components/form/message-banner/message-banner.component.spec.ts`)
-- `PasswordInputComponent` — toggles input type between `password`
+- `PasswordInputComponent` - toggles input type between `password`
   and `text` on the eye button.
   (`shared/components/form/password-input/password-input.component.spec.ts`)
-- `FormFieldsBuilder` — typed wrappers for text/email/password/confirm
+- `FormFieldsBuilder` - typed wrappers for text/email/password/confirm
   produce controls with the expected validators; password strength
   validator covers length + character class requirements; cross-field
   `confirm()` validates against the named control.
   (`shared/components/form/form-fields-builder.spec.ts`)
-- `HeaderComponent` — Register link is rendered when registration is
+- `HeaderComponent` - Register link is rendered when registration is
   enabled and hidden when `ConfigService.registrationDisabled` is true,
   matching the server `/config` response. Direct regression for #218.
   (`shared/components/header/header.component.spec.ts`)
 
-## CI check names — org/project context
+## CI check names - org/project context
 
 CI check names reported to GitHub/Gitea now include the organization
 and project so multiple Gradient instances/projects sharing a forge
@@ -707,15 +707,15 @@ repository remain distinguishable. Helpers live in
 
 Tests (`cargo test -p core --tests ci::reporting`):
 
-- `check_scope_with_org` — `Some("wavelens"), "my-project"` →
+- `check_scope_with_org` - `Some("wavelens"), "my-project"` →
   `"wavelens/my-project"`.
-- `check_scope_without_org_falls_back_to_project` — `None, "my-project"`
+- `check_scope_without_org_falls_back_to_project` - `None, "my-project"`
   → `"my-project"`.
-- `evaluation_context_format` — produces the new
+- `evaluation_context_format` - produces the new
   `"Gradient Evaluation …"` string.
-- `build_context_format` — produces
+- `build_context_format` - produces
   `"Gradient Build wavelens/my-project: my-package"`.
-- `build_context_falls_back_when_org_missing` — degrades correctly when
+- `build_context_falls_back_when_org_missing` - degrades correctly when
   the organization is unknown.
 
 ## Per-IP HTTP rate limiting
@@ -738,12 +738,12 @@ falling back to a single global bucket if no signal is available
 
 Tests (`cargo test -p web --test rate_limit`):
 
-- `auth_tier_throttles_burst` — 5 successive `POST /api/v1/auth/check-username`
+- `auth_tier_throttles_burst` - 5 successive `POST /api/v1/auth/check-username`
   requests succeed, 6th returns `429`.
-- `cache_tier_does_not_throttle_moderate_burst` — 50 successive GETs to
+- `cache_tier_does_not_throttle_moderate_burst` - 50 successive GETs to
   `/cache/{cache}/nix-cache-info` never return `429`.
 
-## Outgoing webhook URL — SSRF validation
+## Outgoing webhook URL - SSRF validation
 
 `validate_webhook_url` (in `backend/core/src/ci/webhook.rs`) is the gate
 between user-supplied webhook URLs and the outbound HTTP client. It is
@@ -755,36 +755,36 @@ the production reqwest client.
 
 Unit tests (`cargo test -p core --tests ci::webhook`):
 
-- `validate_url_accepts_public_https` — `https://`/`http://` to public
+- `validate_url_accepts_public_https` - `https://`/`http://` to public
   hostnames pass.
-- `validate_url_rejects_invalid_scheme` — `file://`, `ftp://`,
+- `validate_url_rejects_invalid_scheme` - `file://`, `ftp://`,
   `gopher://`, `javascript:` are rejected.
-- `validate_url_rejects_unparseable` — empty / non-URL strings rejected.
-- `validate_url_rejects_localhost_name` — `localhost` (any case) is
+- `validate_url_rejects_unparseable` - empty / non-URL strings rejected.
+- `validate_url_rejects_localhost_name` - `localhost` (any case) is
   rejected.
-- `validate_url_rejects_loopback_ipv4` — `127.0.0.0/8` blocked.
-- `validate_url_rejects_aws_metadata_ip` — covers the motivating attack
+- `validate_url_rejects_loopback_ipv4` - `127.0.0.0/8` blocked.
+- `validate_url_rejects_aws_metadata_ip` - covers the motivating attack
   (`169.254.169.254`) plus the wider link-local block.
-- `validate_url_rejects_rfc1918_ranges` — `10.x`, `172.16-31.x`,
+- `validate_url_rejects_rfc1918_ranges` - `10.x`, `172.16-31.x`,
   `192.168.x`.
-- `validate_url_rejects_cgnat_shared_space` — `100.64.0.0/10` blocked,
+- `validate_url_rejects_cgnat_shared_space` - `100.64.0.0/10` blocked,
   with boundary asserts that adjacent public space (`100.63.255.255`,
   `100.128.0.1`) is allowed.
-- `validate_url_rejects_unspecified_and_broadcast` — `0.0.0.0`,
+- `validate_url_rejects_unspecified_and_broadcast` - `0.0.0.0`,
   `255.255.255.255`.
-- `validate_url_rejects_multicast_ipv4` — `224.0.0.0/4`.
-- `validate_url_rejects_reserved_ipv4` — `240.0.0.0/4`.
-- `validate_url_rejects_ipv6_loopback_and_unspecified` — `::1`, `::`.
-- `validate_url_rejects_ipv6_link_and_unique_local` — `fe80::/10`,
+- `validate_url_rejects_multicast_ipv4` - `224.0.0.0/4`.
+- `validate_url_rejects_reserved_ipv4` - `240.0.0.0/4`.
+- `validate_url_rejects_ipv6_loopback_and_unspecified` - `::1`, `::`.
+- `validate_url_rejects_ipv6_link_and_unique_local` - `fe80::/10`,
   `fc00::/7`.
-- `validate_url_rejects_ipv6_multicast` — `ff00::/8`.
-- `validate_url_rejects_ipv4_mapped_loopback_in_ipv6` — `::ffff:127.0.0.1`
+- `validate_url_rejects_ipv6_multicast` - `ff00::/8`.
+- `validate_url_rejects_ipv4_mapped_loopback_in_ipv6` - `::ffff:127.0.0.1`
   and `::ffff:169.254.169.254` blocked via the embedded-v4 check.
 - `validate_url_accepts_public_ipv4_literal` /
-  `validate_url_accepts_public_ipv6_literal` — sanity asserts that
+  `validate_url_accepts_public_ipv6_literal` - sanity asserts that
   legitimate public IP literals (`8.8.8.8`, `2001:4860:4860::8888`) pass.
 
-## CI reporter base URL — SSRF + redirect token leak (#113)
+## CI reporter base URL - SSRF + redirect token leak (#113)
 
 `GiteaReporter`, `GithubReporter`, and `GithubAppReporter` (in
 `backend/core/src/ci/reporter.rs`) now validate any user-supplied
@@ -799,21 +799,21 @@ Unit tests (`cargo test -p core --tests ci::reporter`):
 
 - `gitea_reporter_rejects_aws_metadata_ip` /
   `github_reporter_rejects_aws_metadata_ip` /
-  `github_app_reporter_rejects_aws_metadata_ip` — the motivating
+  `github_app_reporter_rejects_aws_metadata_ip` - the motivating
   attack (`169.254.169.254`) is rejected by all three constructors.
 - `gitea_reporter_rejects_localhost_hostname` /
-  `github_reporter_rejects_localhost_hostname` — literal `localhost`
+  `github_reporter_rejects_localhost_hostname` - literal `localhost`
   rejected.
 - `gitea_reporter_rejects_loopback_ipv4` /
-  `github_reporter_rejects_ipv6_loopback` — `127.0.0.1`, `[::1]`
+  `github_reporter_rejects_ipv6_loopback` - `127.0.0.1`, `[::1]`
   rejected.
-- `gitea_reporter_rejects_rfc1918` — `10.x`, `192.168.x` rejected.
-- `gitea_reporter_rejects_non_http_scheme` — `file://`, `ftp://`
+- `gitea_reporter_rejects_rfc1918` - `10.x`, `192.168.x` rejected.
+- `gitea_reporter_rejects_non_http_scheme` - `file://`, `ftp://`
   rejected.
-- `github_app_reporter_empty_url_still_uses_default` — empty string
+- `github_app_reporter_empty_url_still_uses_default` - empty string
   continues to fall back to `https://api.github.com` (the field is
   optional in `integration_lookup`).
-- `reporter_for_project_unsafe_url_falls_back_to_noop` — an unsafe
+- `reporter_for_project_unsafe_url_falls_back_to_noop` - an unsafe
   Gitea base URL plumbed through the factory degrades to
   `NoopCiReporter` rather than crashing the caller.
 
@@ -834,24 +834,24 @@ operators can tell something is misconfigured.
 
 Unit tests (`cargo test -p core --tests ci::reporter`):
 
-- `gitlab_state_from_ci_status_all_variants` — every `CiStatus` maps
+- `gitlab_state_from_ci_status_all_variants` - every `CiStatus` maps
   to the documented GitLab state (`pending`, `running`, `success`,
   `failed`, with `Error` collapsed to `failed`).
-- `gitlab_state_serializes_lowercase` — wire format matches the
+- `gitlab_state_serializes_lowercase` - wire format matches the
   GitLab API enum.
 - `gitlab_project_id_flat_path` /
-  `gitlab_project_id_nested_groups` — `owner/repo` is URL-encoded as
+  `gitlab_project_id_nested_groups` - `owner/repo` is URL-encoded as
   `acme%2Fwidgets`, and nested groups (`group/sub/repo`) become
   `group%2Fsub%2Frepo`.
-- `gitlab_reporter_trims_trailing_slash` — base URL normalised.
+- `gitlab_reporter_trims_trailing_slash` - base URL normalised.
 - `gitlab_reporter_rejects_aws_metadata_ip` /
   `gitlab_reporter_rejects_localhost_hostname` /
-  `gitlab_reporter_rejects_non_http_scheme` — same SSRF gate as the
+  `gitlab_reporter_rejects_non_http_scheme` - same SSRF gate as the
   other reporters (`169.254.169.254`, `localhost`, `file://`).
-- `reporter_for_project_gitlab_builds_gitlab` — the public factory
+- `reporter_for_project_gitlab_builds_gitlab` - the public factory
   builds a `GitlabReporter` for `ci_type="gitlab"`.
 
-## SSH private key decryption — no plaintext fallback
+## SSH private key decryption - no plaintext fallback
 
 `decrypt_ssh_private_key` in `backend/core/src/sources/ssh_key.rs`
 decrypts the per-organization SSH key from `organization.private_key`.
@@ -861,16 +861,16 @@ that column could bypass encryption entirely.
 
 Tests (`backend/core/src/sources/ssh_key.rs`):
 
-- `decrypt_ssh_key_corrupt_base64_fails` — non-base64 column rejected
+- `decrypt_ssh_key_corrupt_base64_fails` - non-base64 column rejected
   with `OrganizationKeyDecoding`.
-- `decrypt_ssh_key_plaintext_pem_rejected` — a base64-encoded plaintext
+- `decrypt_ssh_key_plaintext_pem_rejected` - a base64-encoded plaintext
   OpenSSH PEM placed directly in the column is rejected with
   `KeyDecryption`, not accepted.
-- `decrypt_ssh_key_plaintext_non_pem_rejected` — random base64 garbage
+- `decrypt_ssh_key_plaintext_non_pem_rejected` - random base64 garbage
   also fails with `KeyDecryption`.
-- `generate_ssh_key_decrypts_to_openssh_pem` — properly encrypted keys
+- `generate_ssh_key_decrypts_to_openssh_pem` - properly encrypted keys
   still round-trip through decrypt.
-## Body-size limits — webhook and blob upload (#51)
+## Body-size limits - webhook and blob upload (#51)
 
 Without a body-size cap, `field.bytes().await` and the `body: Bytes`
 extractor used by `forge_hooks` would buffer entire request bodies into
@@ -883,14 +883,14 @@ whole API router (default 2 MiB) and overrides it on
 
 Tests (`cargo test -p web --test body_size_limit`):
 
-- `webhook_body_over_limit_returns_413` — a 4 KiB POST to
+- `webhook_body_over_limit_returns_413` - a 4 KiB POST to
   `/api/v1/hooks/github` with `max_request_size = 1024` is rejected with
   `413 Payload Too Large` *before* the handler runs (so the OOM-prone
   `body: Bytes` read never happens).
-- `webhook_body_within_limit_reaches_handler` — a 256 B body under the
+- `webhook_body_within_limit_reaches_handler` - a 256 B body under the
   same 1 KiB cap is *not* short-circuited with 413; the handler runs and
   returns its normal response.
-- `blob_upload_route_uses_higher_limit` — a 16 KiB body to
+- `blob_upload_route_uses_higher_limit` - a 16 KiB body to
   `POST /api/v1/build-requests/{session}/blobs` with
   `max_request_size = 1024` is *not* rejected with 413, proving the
   per-route override to `MAX_BUILD_REQUEST_SIZE` is wired up.
@@ -898,7 +898,7 @@ Tests (`cargo test -p web --test body_size_limit`):
 Regression for the build-request rework
 (`cargo test -p web --test old_direct_build_gone`):
 
-- `post_builds_returns_404` and `get_recent_direct_builds_returns_404` —
+- `post_builds_returns_404` and `get_recent_direct_builds_returns_404` -
   the legacy `POST /api/v1/builds` and `GET /api/v1/builds/direct/recent`
   routes are no longer registered.
 
@@ -910,44 +910,44 @@ materialises `/nix/store/<hash>-source` server-side. The legacy
 `direct_build` table and its endpoints are gone in a clean break (no data
 migration). Tests:
 
-- `backend/web/tests/build_requests_manifest.rs` — manifest validation:
+- `backend/web/tests/build_requests_manifest.rs` - manifest validation:
   path syntax checks (`.` / `..` / `/absolute` / null bytes / duplicates),
   per-file hex hash decoding, total-size cap (`MAX_BUILD_REQUEST_SIZE`,
   20 MiB → 413), and happy-path session creation that surfaces the
   missing-blob hex list.
-- `backend/web/tests/build_requests_blobs.rs` — multipart blob upload:
+- `backend/web/tests/build_requests_blobs.rs` - multipart blob upload:
   hash-mismatch and foreign-hash rejection (both 400), already-dispatched
   session (409), expired session (410), session-not-found (404), and the
   happy path verifying both `session.missing` is cleared in the DB and a
   `build_request_blob` row exists.
-- `backend/web/tests/build_requests_dispatch.rs` — dispatch flow guards:
+- `backend/web/tests/build_requests_dispatch.rs` - dispatch flow guards:
   blobs-still-missing → 409, double-dispatch → 409, expired → 410,
   session-not-found → 404, plus a smoke happy-path on the empty-manifest
   branch (real-blob coverage runs in CI against Postgres).
-- `backend/web/tests/evals_artefacts.rs` — artefact tree response: empty
+- `backend/web/tests/evals_artefacts.rs` - artefact tree response: empty
   evaluation returns empty `entry_points`, full tree exposes
   `entry_point → outputs → products` with alphabetic ordering and the
   `build_id` field on each entry point, public-org evaluations allow
   anonymous access, private-org evaluations 404 for anonymous callers.
-- `backend/web/tests/old_direct_build_gone.rs` — see the regression
+- `backend/web/tests/old_direct_build_gone.rs` - see the regression
   block above.
-- `backend/core/src/storage/source_nar.rs` — in-file unit tests for
+- `backend/core/src/storage/source_nar.rs` - in-file unit tests for
   `materialise_source_nar`: deterministic NAR hash + store path across
   repeat calls, `-source` suffix on the resulting `/nix/store/<hash>`,
   and the canonical 32-char base32 hash shape.
-- `backend/cache/src/cacher/cleanup.rs` — GC sweeps for the new tables:
+- `backend/cache/src/cacher/cleanup.rs` - GC sweeps for the new tables:
   `build_request_blob_sweep_evicts_stale` and
   `build_request_blob_sweep_disabled_when_ttl_zero` cover the blob TTL
   (driven by the existing `nar_ttl_hours` global), and
   `upload_session_sweep_deletes_expired_undispatched` proves that
   expired sessions without a `dispatched_at` flip are reclaimed.
 
-## Cache traffic metrics — atomic UPSERT (no lost updates)
+## Cache traffic metrics - atomic UPSERT (no lost updates)
 
 `record_nar_traffic` (`backend/web/src/endpoints/stats.rs`) records bytes
 served per `(cache, bucket_time)` row. The previous implementation used a
 SELECT-then-UPDATE/INSERT pattern, which dropped updates whenever two NAR
-fetches in the same minute bucket ran concurrently — both reads observed
+fetches in the same minute bucket ran concurrently - both reads observed
 the same `bytes_sent` value and the second writer clobbered the first
 (see issue #50). It is now a single `INSERT … ON CONFLICT (cache,
 bucket_time) DO UPDATE SET bytes_sent = bytes_sent + EXCLUDED.bytes_sent,
@@ -956,11 +956,11 @@ the unique index so every caller's increment is preserved.
 
 Tests (`cargo test -p web --lib stats`):
 
-- `record_nar_traffic_stmt_is_atomic_upsert` — asserts the generated SQL
+- `record_nar_traffic_stmt_is_atomic_upsert` - asserts the generated SQL
   contains `INSERT INTO cache_metric`, `ON CONFLICT (cache, bucket_time)`,
   the additive `bytes_sent`/`nar_count` updates, and contains no `SELECT`
   (a `SELECT` would reintroduce the read-modify-write race).
-## Worker-peer token verification — argon2 + constant time
+## Worker-peer token verification - argon2 + constant time
 
 Worker registration tokens are now stored as argon2 PHC strings rather
 than bare hex SHA-256, and the handshake comparison runs in constant
@@ -974,21 +974,21 @@ by state-file provisioning use `password_auth::generate_hash`.
 
 Backend tests (`cargo test -p proto --lib handler::auth`):
 
-- `validate_tokens_argon2_hash_authorizes` — argon2-hashed registration
+- `validate_tokens_argon2_hash_authorizes` - argon2-hashed registration
   authorises the matching plaintext token.
-- `validate_tokens_argon2_wrong_token_fails` — argon2 row rejects
+- `validate_tokens_argon2_wrong_token_fails` - argon2 row rejects
   wrong tokens with `"invalid token"`.
-- `verify_token_dispatches_on_format` — `$argon2…` routes to
+- `verify_token_dispatches_on_format` - `$argon2…` routes to
   `password_auth`; lowercase hex routes to constant-time SHA-256.
 - The pre-existing `validate_tokens_*` tests using `sha256_hex` continue
   to cover the legacy-format compatibility path.
 
-## Sign sweep — batched, bounded, single crypt-secret read (#105)
+## Sign sweep - batched, bounded, single crypt-secret read (#105)
 
 `sign_missing_signatures` (in `backend/cache/src/cacher/sign_sweep.rs`)
 used to issue 2 SELECTs per pending row (cache + cached_path), reload
 the crypt-secret file from disk, and re-decrypt each cache's private
-key on every row, with no `LIMIT` on the initial query — at scale this
+key on every row, with no `LIMIT` on the initial query - at scale this
 became 50k+ DB calls plus 50k+ crypt-secret reads per minute, and a
 single backlog could pin one DB connection indefinitely.
 
@@ -996,19 +996,19 @@ The sweep is now `LIMIT`-bounded (`SIGN_SWEEP_BATCH = 1000` rows per
 pass) and batches the `cache` / `cached_path` lookups into one
 `is_in(...)` query each. Per-cache decrypted keys are wrapped in a new
 `CacheSigner` (in `backend/core/src/sources/cache_key.rs`) built once
-per pass per cache — the crypt secret is read at most once per cache,
+per pass per cache - the crypt secret is read at most once per cache,
 not once per signature. `sign_narinfo_fingerprint` is now a thin
 one-shot wrapper around `CacheSigner::sign_narinfo` so existing
 callers keep working byte-for-byte.
 
 Unit tests (`cargo test -p core --lib sources::cache_key`):
 
-- `cache_signer_matches_one_shot_signer` — for several
+- `cache_signer_matches_one_shot_signer` - for several
   `(store_path, nar_hash, nar_size, refs)` tuples, asserts that the
   signature produced by `CacheSigner::sign_narinfo` is byte-identical
   to the one produced by `sign_narinfo_fingerprint`. Guards against the
   batching refactor silently changing the on-wire fingerprint.
-- `cache_signer_rejects_bad_key_at_build_time` — a cache row whose
+- `cache_signer_rejects_bad_key_at_build_time` - a cache row whose
   `private_key` cannot be base64-decoded fails at
   `CacheSigner::from_cache`, so the sweep can mark the cache as
   unsignable for the rest of the pass instead of repeating the
@@ -1020,10 +1020,10 @@ directly. The hash-format conversion path is now covered by the
 algorithm-aware test suite in `cargo test -p core --lib nix_hash` (see
 above), which exercises both `sha256:` and `blake3:` inputs.
 
-## Proto WebSocket — message-size cap & handshake timeout
+## Proto WebSocket - message-size cap & handshake timeout
 
 The `/proto` WebSocket caps every inbound and outbound frame at
-`MAX_PROTO_MESSAGE_SIZE` (1 MiB) — applied to both the inbound
+`MAX_PROTO_MESSAGE_SIZE` (1 MiB) - applied to both the inbound
 `axum::extract::ws::WebSocketUpgrade` and the outbound
 `tokio_tungstenite::connect_async_with_config` call in
 `backend/proto/src/outbound.rs`. The cap comfortably exceeds any legitimate
@@ -1038,15 +1038,15 @@ or file descriptor indefinitely.
 
 Tests (`cargo test -p proto`):
 
-- `tests::max_proto_message_size_is_sane` — regression for #110: cap stays
+- `tests::max_proto_message_size_is_sane` - regression for #110: cap stays
   at least `2 × NAR_PUSH_CHUNK_SIZE` (room for chunk + framing) and well
   below 16 MiB so a future refactor cannot silently relax the bound back
   toward tungstenite's 64 MiB default.
-- `tests::handshake_timeout_is_sane` — regression for #110: deadline stays
+- `tests::handshake_timeout_is_sane` - regression for #110: deadline stays
   in `[5 s, 60 s]` so a real auth round-trip still fits but a stalled peer
   is dropped quickly.
 
-## Worker — reconnect retries forever
+## Worker - reconnect retries forever
 
 `Worker<Disconnected>::reconnect` (`backend/worker/src/worker/mod.rs`) now
 returns `Result<Worker<Connected>, (anyhow::Error, Self)>`: on failure, the
@@ -1054,22 +1054,22 @@ disconnected typestate (and the cached executor / scorer / credentials /
 candidate maps) is handed back so the caller can retry without losing
 state. The reconnect-with-backoff loop in `main.rs` is extracted to
 `backend/worker/src/reconnect.rs::retry_reconnect` so it is unit-testable
-without standing up a real `Worker`. The loop never gives up — a transient
+without standing up a real `Worker`. The loop never gives up - a transient
 network blip cannot terminate the worker process anymore (#99).
 
 Tests (`cargo test -p worker --bins reconnect`):
 
-- `reconnect::tests::keeps_retrying_after_failure` — regression for #99:
+- `reconnect::tests::keeps_retrying_after_failure` - regression for #99:
   the loop returns `Ok` only after several failed attempts, so a single
   transient error no longer breaks out and shuts the worker down.
-- `reconnect::tests::backoff_caps_at_max` — delay sequence doubles from the
+- `reconnect::tests::backoff_caps_at_max` - delay sequence doubles from the
   initial backoff and plateaus at `max_backoff`.
-- `reconnect::tests::state_threads_through_retries` — the same state value
+- `reconnect::tests::state_threads_through_retries` - the same state value
   is threaded through every attempt, proving the typestate-preservation
   contract that the real `Worker<Disconnected>` relies on for cached
   resources.
 
-## Typed DB pools — `WebDb` / `WorkerDb`
+## Typed DB pools - `WebDb` / `WorkerDb`
 
 `ServerState` previously held two raw `DatabaseConnection` fields named `db`
 and `web_db`; nothing in the type system stopped a web handler from
@@ -1083,7 +1083,7 @@ that types its parameter explicitly as `&WebDb` or `&WorkerDb`: the two
 newtypes are non-substitutable.
 
 While auditing, one inconsistency was fixed in
-`web::endpoints::stats::get_cache_stats` — the cache-totals query was
+`web::endpoints::stats::get_cache_stats` - the cache-totals query was
 reading from the worker pool while every other query in the same handler
 used `web_db`; it now uses `web_db` consistently. The fire-and-forget
 NAR-fetch bookkeeping in `web::endpoints::caches::nar` keeps using
@@ -1092,27 +1092,27 @@ requests) and now carries a comment explaining the choice.
 
 Tests (`cargo test -p core --lib types::db`):
 
-- `types::db::tests::newtypes_are_non_substitutable` — regression for
+- `types::db::tests::newtypes_are_non_substitutable` - regression for
   #68: a function typed `fn(&WebDb)` must not accept a `&WorkerDb` and
   vice versa, which is the compile-time defense the issue asked for.
-- `types::db::tests::forwards_connection_trait` — `&WebDb` / `&WorkerDb`
+- `types::db::tests::forwards_connection_trait` - `&WebDb` / `&WorkerDb`
   satisfy `&impl ConnectionTrait`, so existing SeaORM call sites keep
   working without `.inner()` boilerplate.
 
-## Build status — `Created` collapsed to `Queued` for API responses
+## Build status - `Created` collapsed to `Queued` for API responses
 
 Issue #120: the frontend renders a coloured dot via
 `status-{{ build.status.toLowerCase() }}`, but no `status-created` style
-exists. `Created` is an internal-only transient state — the scheduler
-flips builds to `Queued` almost immediately — so the API now collapses
+exists. `Created` is an internal-only transient state - the scheduler
+flips builds to `Queued` almost immediately - so the API now collapses
 it via `BuildStatus::for_api()` (`backend/entity/src/build.rs`) at every
 response boundary (`evals::query`, `projects::evaluations`,
 `projects::metrics`, `builds::query`).
 
 Unit tests in `backend/entity/src/build.rs`:
 
-- `for_api_collapses_created_to_queued` — `Created.for_api() == Queued`.
-- `for_api_passes_through_other_states` — every other variant is
+- `for_api_collapses_created_to_queued` - `Created.for_api() == Queued`.
+- `for_api_passes_through_other_states` - every other variant is
   returned unchanged.
 
 ## Shared web/core helpers (`#78`)
@@ -1120,29 +1120,29 @@ Unit tests in `backend/entity/src/build.rs`:
 To collapse the boilerplate measured in issue #78, the following helpers
 were introduced and applied repo-wide:
 
-- `core::types::now()` — single source for `chrono::Utc::now().naive_utc()`,
+- `core::types::now()` - single source for `chrono::Utc::now().naive_utc()`,
   the timestamp shape every persisted column expects.
-- `web::helpers::ok_json(message)` — wraps a value in the standard
+- `web::helpers::ok_json(message)` - wraps a value in the standard
   successful `BaseResponse` envelope, replacing the boilerplate
   `Json(BaseResponse { error: false, message })`.
-- `web::helpers::OptionExt::or_not_found(resource)` — converts the
+- `web::helpers::OptionExt::or_not_found(resource)` - converts the
   result of a SeaORM `.one(db).await?` lookup into a `WebResult<T>`
   with a `<resource> not found` 404, replacing the
   `.ok_or_else(|| WebError::not_found(...))` chain.
 - `WebError::{bad_request, unauthorized, forbidden, conflict,
-  unprocessable_entity, internal, service_unavailable}` — accept
+  unprocessable_entity, internal, service_unavailable}` - accept
   `impl Into<String>` so callers can drop `.to_string()` on string
   literals and `format!(...)` payloads.
-- `WebError::data_inconsistency(resource)` — for the recurring
+- `WebError::data_inconsistency(resource)` - for the recurring
   `"<resource> data inconsistency"` referential-integrity 500.
 
 Unit tests in `backend/web/src/helpers.rs`:
 
-- `ok_json_wraps_with_error_false` — the envelope is constructed with
+- `ok_json_wraps_with_error_false` - the envelope is constructed with
   `error: false` and the supplied message.
-- `or_not_found_returns_value_for_some` — passes the inner value through
+- `or_not_found_returns_value_for_some` - passes the inner value through
   unchanged.
-- `or_not_found_maps_none_to_not_found` — produces the expected
+- `or_not_found_maps_none_to_not_found` - produces the expected
   `WebError::NotFound("Thing not found")`.
 
 ## Shared HTTP client (`#79`)
@@ -1167,14 +1167,14 @@ their own.
 
 Unit tests in `backend/core/src/http.rs`:
 
-- `build_client_succeeds` — the default builder yields a usable
+- `build_client_succeeds` - the default builder yields a usable
   `reqwest::Client`.
-- `user_agent_includes_brand_and_contact_url` — the user-agent string
+- `user_agent_includes_brand_and_contact_url` - the user-agent string
   starts with `Gradient/` and embeds the project URL so cache operators
   can identify and contact-trace outbound calls (`#205`).
-- `user_agent_does_not_use_lowercase_brand` — regression guard against
+- `user_agent_does_not_use_lowercase_brand` - regression guard against
   the previous lowercase `gradient/` format (`#205`).
-- `init_crypto_provider_is_idempotent_and_enables_tls` — regression
+- `init_crypto_provider_is_idempotent_and_enables_tls` - regression
   guard for `#232`: `init_crypto_provider` installs the rustls
   `aws-lc-rs` provider, may be called repeatedly, and unblocks
   `rustls::ClientConfig::builder()` (which otherwise panics when the
@@ -1187,7 +1187,7 @@ Unit tests in `backend/core/src/http.rs`:
 
 `backend/core/src/shutdown.rs` introduces a `Shutdown` primitive bundling a
 `tokio_util::sync::CancellationToken` with a `tokio_util::task::TaskTracker`.
-It replaces bare `tokio::spawn` for every long-lived background task —
+It replaces bare `tokio::spawn` for every long-lived background task -
 dispatch loops, the outbound worker connection loop, the cache GC and
 sign-sweep loops, webhook deliveries, CI reporters, and the fire-and-forget
 metric writes from the NAR cache surface. `serve_web` installs a
@@ -1198,14 +1198,14 @@ webhook deliveries finish before the process exits.
 
 Unit tests in `backend/core/src/shutdown.rs`:
 
-- `cancel_interrupts_select_loop` — a task that `select!`s on
+- `cancel_interrupts_select_loop` - a task that `select!`s on
   `cancelled()` against a 60-second sleep returns immediately when the
   token fires.
-- `drain_waits_for_in_flight_work` — `cancel_and_drain` waits for
+- `drain_waits_for_in_flight_work` - `cancel_and_drain` waits for
   spawned futures to finish (no abandonment of in-flight work).
-- `drain_timeout_returns_false` — a task that ignores the cancel
+- `drain_timeout_returns_false` - a task that ignores the cancel
   signal is reported as a drain timeout, not silently abandoned.
-- `child_token_cascades_from_parent` — child tokens used for
+- `child_token_cascades_from_parent` - child tokens used for
   per-connection / per-job scopes cancel transitively.
 
 ## Shared transitive-dependents walk (`#108`)
@@ -1222,11 +1222,11 @@ prior per-iteration full re-scan + per-build edge probe.
 
 Unit tests in `backend/core/src/db/dependency_graph.rs`:
 
-- `no_dependents_returns_only_start` — a leaf derivation yields a set
+- `no_dependents_returns_only_start` - a leaf derivation yields a set
   containing exactly the starting id.
-- `walks_multiple_layers_breadth_first` — a 3-layer graph is fully
+- `walks_multiple_layers_breadth_first` - a 3-layer graph is fully
   visited, including a sibling that depends directly on the start.
-- `cycles_terminate` — a pathological reverse cycle is deduped via the
+- `cycles_terminate` - a pathological reverse cycle is deduped via the
   visited set so the BFS terminates.
 
 ## Build deduplication via `via` field (`#175`)
@@ -1240,7 +1240,7 @@ leader transitions to `Completed`, `Substituted`, `Failed`, or
 `DependencyFailed`, `propagate_to_followers` copies the terminal status,
 `log_id`, `build_time_ms`, and `worker` onto every follower, runs the
 per-evaluation cascade for failure cases, and finalises each follower's
-evaluation. `Aborted` is never propagated — when a leader is aborted (its
+evaluation. `Aborted` is never propagated - when a leader is aborted (its
 own evaluation cancelled) `abort_evaluation` re-elects a new leader from
 the surviving followers instead of dragging unrelated evaluations down.
 
@@ -1251,14 +1251,14 @@ truth for the leader lookup, called both from `eval::insert_build_rows`
 
 Tests:
 
-- `dispatch_tests::dispatch_skips_follower_builds` — the SQL gate keeps
+- `dispatch_tests::dispatch_skips_follower_builds` - the SQL gate keeps
   followers out of the dispatcher result set, so no follower job is ever
   enqueued.
 - The full pre-existing `handle_build_job_completed` /
   `handle_build_job_failed` mock-DB suite was extended to mock the
   `propagate_to_followers` followers query, exercising the new code path
   on every terminal transition.
-- `ci::trigger::tests::restart_sets_via_when_leader_active_elsewhere` —
+- `ci::trigger::tests::restart_sets_via_when_leader_active_elsewhere` -
   when the "rerun failed builds" path finds an in-flight leader for a
   derivation it's about to re-queue, the new build row carries
   `via = leader.id`. Verified by draining the MockDatabase transaction
@@ -1284,7 +1284,7 @@ after a deliberate API change with:
 
     TRYBUILD=overwrite cargo test -p entity --test compile_fail
 
-## NAR streaming — bounded backend reads
+## NAR streaming - bounded backend reads
 
 `core/src/storage/nar.rs::tests`:
 
@@ -1298,7 +1298,7 @@ after a deliberate API change with:
   surface as `Ok(None)` so the caller can emit `NarUnavailable` instead
   of hanging.
 
-## Proto writer — peer-stall detection
+## Proto writer - peer-stall detection
 
 `proto/src/handler/socket.rs::writer_tests`:
 
@@ -1307,13 +1307,13 @@ after a deliberate API change with:
   asserts the next `send_msg` returns `Err(())` after
   `send_chunk_timeout` instead of blocking forever. This is the
   producer-observable signal that a peer's TCP receive side has stalled
-  — the failure unblocks the dispatch loop instead of letting the
+  - the failure unblocks the dispatch loop instead of letting the
   worker's 600 s receive ceiling fire.
 - `send_msg_succeeds_when_queue_has_room` covers the fast path: a
   serialised message lands in the channel without delay when there's
   capacity.
 
-## Proto NAR serving — streaming, chunking, and missing paths
+## Proto NAR serving - streaming, chunking, and missing paths
 
 `proto/src/handler/socket.rs::serve_nar_tests`:
 
@@ -1323,10 +1323,10 @@ after a deliberate API change with:
   source. The last frame must have `is_final = true`. Locks the
   invariant that streaming serving preserves wire semantics.
 - `serve_emits_nar_unavailable_when_missing` confirms a missing hash
-  surfaces as exactly one `NarUnavailable` frame plus an `Err` return —
+  surfaces as exactly one `NarUnavailable` frame plus an `Err` return -
   no `NarAbort`, no orphan `NarPush`.
 
-## Per-session NAR upload buffer — bounded memory (issue #109)
+## Per-session NAR upload buffer - bounded memory (issue #109)
 
 `proto/src/handler/dispatch.rs::nar_buffers_tests`:
 
@@ -1341,10 +1341,10 @@ after a deliberate API change with:
 - `take_missing_returns_none` covers the presigned-S3 path where no
   `NarPush` chunks were ever buffered.
 - `append_overflow_across_keys_is_caught` proves the cap is a *session*
-  budget, not a per-path one — many small open uploads cannot collude
+  budget, not a per-path one - many small open uploads cannot collude
   to exceed the limit.
 
-## Auth hardening — sessions, API key lifecycle, account deletion (issue #91)
+## Auth hardening - sessions, API key lifecycle, account deletion (issue #91)
 
 `backend/web/tests/auth_hardening.rs` drives the production router with a
 `MockDatabase` and signs synthetic JWTs against the same secret the test
@@ -1352,7 +1352,7 @@ state holds. Each test pins one revocation/expiry rule to a specific HTTP
 status so a regression cannot quietly weaken the surface:
 
 - `jwt_with_revoked_session_is_rejected` and `jwt_with_expired_session_is_rejected`
-  prove that a JWT alone is no longer sufficient — the auth middleware
+  prove that a JWT alone is no longer sufficient - the auth middleware
   loads the matching `session` row and refuses anything revoked or past
   `expires_at`. This is what makes logout effective (issue #104).
 - `jwt_with_unknown_session_is_rejected` covers the case where the row was
@@ -1362,51 +1362,51 @@ status so a regression cannot quietly weaken the surface:
   returns 401 even if the hash still matches.
 - `delete_user_without_password_is_forbidden` and
   `delete_user_with_wrong_password_is_forbidden` enforce the re-auth
-  requirement on `DELETE /user` — a stolen JWT cannot wipe a
+  requirement on `DELETE /user` - a stolen JWT cannot wipe a
   password-auth account on its own (issue #43).
 
 Run with `cargo test -p web --test auth_hardening`.
 
-## Evaluation `waiting_reason` — surfaces the reconciler verdict (issue #98)
+## Evaluation `waiting_reason` - surfaces the reconciler verdict (issue #98)
 
 `backend/scheduler/src/build.rs::waiting_reason_tests` exercises
 `BuildabilityChecker::compute_waiting_reason` directly so the API payload
 returned by `GET /evals/{evaluation}` is locked in:
 
-- `no_workers_lists_every_unique_arch` — when no worker is connected, every
+- `no_workers_lists_every_unique_arch` - when no worker is connected, every
   pending build's `(architecture, required_features)` combo lands in
   `unmet`, with `connected_workers == 0`.
-- `satisfied_builds_are_excluded_from_unmet` — pending builds whose arch
+- `satisfied_builds_are_excluded_from_unmet` - pending builds whose arch
   matches some connected worker are filtered out; only the genuinely
   blocked combos remain.
-- `missing_feature_is_reported_alongside_arch` — a build whose arch is
+- `missing_feature_is_reported_alongside_arch` - a build whose arch is
   available but whose `requiredSystemFeatures` aren't satisfied is
   reported with the missing feature names attached.
-- `identical_requirements_are_grouped_with_count` — N pending builds with
+- `identical_requirements_are_grouped_with_count` - N pending builds with
   the same blocking requirement collapse to one `UnmetRequirement` with
   `build_count == N`, so the UI doesn't repeat itself.
-- `builtin_arch_satisfied_by_any_worker` — `architecture == "builtin"`
+- `builtin_arch_satisfied_by_any_worker` - `architecture == "builtin"`
   derivations are never counted as unmet so long as any worker is
   connected.
-- `pre_build_target_queued_no_workers_stalls_to_waiting` — when an
+- `pre_build_target_queued_no_workers_stalls_to_waiting` - when an
   evaluation is in `Queued` and no worker is connected, the reconciler
   picks `Waiting` with an empty `unmet` list so the UI can explain the
   stall without inventing fake build requirements (issue #97).
-- `pre_build_target_waiting_with_workers_recovers_to_queued` — once any
+- `pre_build_target_waiting_with_workers_recovers_to_queued` - once any
   worker is connected, a `Waiting` eval is recovered to `Queued` so the
   dispatch loop replays the normal progression.
-- `pre_build_target_waiting_no_workers_keeps_waiting` — a `Waiting` eval
+- `pre_build_target_waiting_no_workers_keeps_waiting` - a `Waiting` eval
   with no workers stays in `Waiting` but its `WaitingReason` is
   refreshed.
-- `pre_build_target_queued_with_workers_is_noop` — a `Queued` eval with
+- `pre_build_target_queued_with_workers_is_noop` - a `Queued` eval with
   workers connected needs no reconciliation; the dispatcher will pick it
   up.
-- `pre_build_target_active_pre_build_with_workers_left_alone` — a
+- `pre_build_target_active_pre_build_with_workers_left_alone` - a
   `Fetching` / `EvaluatingFlake` / `EvaluatingDerivation` eval is owned
   by an eval worker. The reconciler must not push it back to `Queued`,
   which the state machine forbids and would produce a spurious
   "invalid status transition: Fetching → Queued" warning.
-- `pre_build_target_active_pre_build_no_workers_stalls` — the same
+- `pre_build_target_active_pre_build_no_workers_stalls` - the same
   active pre-build states do stall into `Waiting` when every worker has
   disconnected.
 
@@ -1418,15 +1418,15 @@ Run with `cargo test -p scheduler --tests waiting_reason_tests`.
 state machine to allow the scheduler to surface a "no worker connected"
 stall before any builds have been queued:
 
-- `eval_sm_pre_build_states_can_enter_waiting` — every pre-build status
+- `eval_sm_pre_build_states_can_enter_waiting` - every pre-build status
   (`Queued`, `Fetching`, `EvaluatingFlake`, `EvaluatingDerivation`) can
   transition to `Waiting`, matching what `BuildStateHandler::reconcile_waiting_state`
   now does when `worker_caps.is_empty()`.
-- `eval_sm_waiting_recovers_to_queued` — the recovery edge `Waiting →
+- `eval_sm_waiting_recovers_to_queued` - the recovery edge `Waiting →
   Queued` is valid; this is the path the reconciler takes once a worker
   reconnects, so the dispatch loop replays the normal pre-build chain
   rather than skipping straight back into a later phase.
-- `eval_sm_waiting_cannot_skip_into_pre_build_phases` — direct
+- `eval_sm_waiting_cannot_skip_into_pre_build_phases` - direct
   `Waiting → Fetching/EvaluatingFlake/EvaluatingDerivation` transitions
   are rejected so that recovery always flows through `Queued`.
 
@@ -1434,22 +1434,22 @@ Run with `cargo test -p core --tests state_machine::eval`.
 
 ## Project triggers (issue #116)
 
-- `core::types::triggers` — round-trip serialisation, polling interval validation (≥10s), polling branch field (optional, nullable), six-field cron parsing, type/JSON shape mismatches.
-- `core::ci::abort` — `abort_evaluation` hard vs soft, terminal eval no-op.
-- `core::ci::apply` — `apply_trigger` orchestration: same-commit dedup, time-trigger and manual bypass, project-level concurrency policies (skip / hard_abort / soft_abort / all). The `all` policy creates a new evaluation alongside a running one; the new row carries `concurrent = true`.
-- `core::state::provisioning` — trigger config builder helpers, integration name resolution, key stability.
-- `scheduler::trigger_dispatch` — `polling_due` and `cron_due` boundary conditions; `dispatch_once` no-trigger and within-interval skip cases; polling jitter bounded to 10% of `interval_secs`, deterministic for a `(trigger_id, last_fired_at)` pair, varies across cycles, zero when `interval_secs < 10`, and gates firing exactly at the `interval + jitter` boundary.
-- `scheduler::jobs::JobTracker::remove_job` — pending and active map removal; unknown id no-op.
-- `scheduler::Scheduler::cancel_evaluation_jobs` — drops eval and per-build entries from the tracker.
-- `web::endpoints::projects::triggers` — list/create/read/update/delete; `all` concurrency accepted (200); invalid config rejected (400).
-- `web::endpoints::projects::triggers` — **integration enrichment**: list/get responses for `reporter_push`/`reporter_pull_request` include an inlined `integration` object (`id`, `name`, `display_name`, `forge_type`); polling triggers return `integration: null` and skip the integration SELECT (`list_polling_trigger_has_null_integration_and_skips_lookup`); orphaned references (integration row deleted) degrade to `integration: null` (`list_reporter_trigger_with_missing_integration_returns_null`).
-- `web::endpoints::orgs::integrations` — **summaries endpoint** (`GET /orgs/{org}/integrations/summary`): any org member can list summaries (no `ManageIntegrations` required); response excludes `secret`, `endpoint_url`, `access_token`, `has_secret`, `has_access_token` so non-admins cannot probe credential state; non-members get 404 (consistent with org loader's hide-existence policy).
-- `web::endpoints::projects::evaluations` — response includes nullable `trigger` summary, populated for evaluations created by a trigger.
-- `web::endpoints::forge_hooks::events` — PR (github/gitea/gitlab) and release (github/gitea/gitlab) parsers; GitLab action mapping; tag-ref support on push parsers.
-- `web::endpoints::forge_hooks` integration — push fans out to matching trigger row; branch glob filter skip; PR action filter; release fires only `releases_only` triggers; GitHub App push by installation_id.
-- `web::endpoints::projects::management` — creating a project seeds a default polling trigger.
+- `core::types::triggers` - round-trip serialisation, polling interval validation (≥10s), polling branch field (optional, nullable), six-field cron parsing, type/JSON shape mismatches.
+- `core::ci::abort` - `abort_evaluation` hard vs soft, terminal eval no-op.
+- `core::ci::apply` - `apply_trigger` orchestration: same-commit dedup, time-trigger and manual bypass, project-level concurrency policies (skip / hard_abort / soft_abort / all). The `all` policy creates a new evaluation alongside a running one; the new row carries `concurrent = true`.
+- `core::state::provisioning` - trigger config builder helpers, integration name resolution, key stability.
+- `scheduler::trigger_dispatch` - `polling_due` and `cron_due` boundary conditions; `dispatch_once` no-trigger and within-interval skip cases; polling jitter bounded to 10% of `interval_secs`, deterministic for a `(trigger_id, last_fired_at)` pair, varies across cycles, zero when `interval_secs < 10`, and gates firing exactly at the `interval + jitter` boundary.
+- `scheduler::jobs::JobTracker::remove_job` - pending and active map removal; unknown id no-op.
+- `scheduler::Scheduler::cancel_evaluation_jobs` - drops eval and per-build entries from the tracker.
+- `web::endpoints::projects::triggers` - list/create/read/update/delete; `all` concurrency accepted (200); invalid config rejected (400).
+- `web::endpoints::projects::triggers` - **integration enrichment**: list/get responses for `reporter_push`/`reporter_pull_request` include an inlined `integration` object (`id`, `name`, `display_name`, `forge_type`); polling triggers return `integration: null` and skip the integration SELECT (`list_polling_trigger_has_null_integration_and_skips_lookup`); orphaned references (integration row deleted) degrade to `integration: null` (`list_reporter_trigger_with_missing_integration_returns_null`).
+- `web::endpoints::orgs::integrations` - **summaries endpoint** (`GET /orgs/{org}/integrations/summary`): any org member can list summaries (no `ManageIntegrations` required); response excludes `secret`, `endpoint_url`, `access_token`, `has_secret`, `has_access_token` so non-admins cannot probe credential state; non-members get 404 (consistent with org loader's hide-existence policy).
+- `web::endpoints::projects::evaluations` - response includes nullable `trigger` summary, populated for evaluations created by a trigger.
+- `web::endpoints::forge_hooks::events` - PR (github/gitea/gitlab) and release (github/gitea/gitlab) parsers; GitLab action mapping; tag-ref support on push parsers.
+- `web::endpoints::forge_hooks` integration - push fans out to matching trigger row; branch glob filter skip; PR action filter; release fires only `releases_only` triggers; GitHub App push by installation_id.
+- `web::endpoints::projects::management` - creating a project seeds a default polling trigger.
 
-## Proto wire decoders — alignment-safe deserialisation
+## Proto wire decoders - alignment-safe deserialisation
 
 `rkyv::from_bytes` requires the input slice to be aligned to the archive's
 required alignment (16 bytes for `ClientMessage` / `ServerMessage`), but
@@ -1469,7 +1469,7 @@ path in the workspace funnels through these helpers; open-coding
 Tests (`cargo test -p proto`):
 
 - `messages::wire::tests::decode_client_message_handles_misaligned_input`
-  and `…::decode_server_message_handles_misaligned_input` —
+  and `…::decode_server_message_handles_misaligned_input` -
   encode a representative message, place the bytes at a deliberately
   misaligned address (`AlignedVec<16>` base + 1) so the input pointer is
   guaranteed not to be 16-byte-aligned, then assert the helper still
@@ -1478,13 +1478,13 @@ Tests (`cargo test -p proto`):
   inbound buffer happened to land at a non-16-byte-aligned allocator
   address.
 
-## NAR upload integrity — buffer-overflow poisoning, abort propagation, self-heal
+## NAR upload integrity - buffer-overflow poisoning, abort propagation, self-heal
 
 Four interlocking bugs let a session-buffer overflow produce a build that the
 server marked `Completed` while the path's NAR was never persisted:
 
 - `proto/src/handler/dispatch.rs` (`NarBuffers::append`) returned an error on
-  overflow but **did not poison the path** — subsequent chunks for the same
+  overflow but **did not poison the path** - subsequent chunks for the same
   path could land in the buffer if the budget freed up, the partial buffer was
   retained, and `on_nar_uploaded` would still call `mark_nar_stored` because
   `nar_buffers.take()` returned the (now bogus) bytes or `None` (treated as
@@ -1496,7 +1496,7 @@ server marked `Completed` while the path's NAR was never persisted:
 - `worker/src/proto/job.rs` `request_nars` registered each path's waiter
   inside its `await` rather than synchronously before sending `NarRequest`,
   so any server response that raced ahead found no waiter and surfaced as a
-  *"received NarUnavailable/NarAbort with no waiter — discarding"* warning.
+  *"received NarUnavailable/NarAbort with no waiter - discarding"* warning.
 - `proto/src/handler/socket.rs` `serve_nar_request` left lying `cached_path`
   rows behind when `nar_storage.get_stream(hash)` reported the NAR missing,
   so the next worker requested the same missing path forever.
@@ -1504,23 +1504,23 @@ server marked `Completed` while the path's NAR was never persisted:
 Tests:
 
 - `proto::handler::dispatch::nar_buffers_tests::append_overflow_drops_partial_buffer_and_poisons_path`
-  (`cargo test -p proto`) — first overflowing chunk drops the partial buffer,
+  (`cargo test -p proto`) - first overflowing chunk drops the partial buffer,
   releases bytes back to the budget, marks the path poisoned, and any further
   chunks return `AppendOutcome::Poisoned`.
 - `proto::handler::dispatch::nar_buffers_tests::clear_poison_allows_retry`
-  — a retry on a fresh job/path key clears the flag.
+  - a retry on a fresh job/path key clears the flag.
 - `proto::nar_recv::tests::register_synchronously_installs_waiter_before_response`
-  (`cargo test -p worker`) — every path in a batched `NarRequest` has a
+  (`cargo test -p worker`) - every path in a batched `NarRequest` has a
   live waiter at the time the server's first response arrives, including
   paths whose siblings already failed.
 - `executor::compress::tests::check_abort_returns_err_after_signal`
-  (`cargo test -p worker`) — once the dispatch loop signals `abort_tx`,
+  (`cargo test -p worker`) - once the dispatch loop signals `abort_tx`,
   `compress_and_push_paths` propagates the abort as an `Err`, which becomes
   a `ClientMessage::JobFailed` instead of `JobCompleted`.
 
 `serve_nar_request`'s self-heal demote (`invalidate_cached_path`) is
 exercised end-to-end whenever an integration test routes through the
-`NarRequest` path with a missing NAR — the row is updated to
+`NarRequest` path with a missing NAR - the row is updated to
 `file_hash = NULL` so `Model::is_fully_cached()` returns `false` and the
 next `CacheQuery` no longer reports the path as cached. We deliberately
 demote rather than delete: `derivation_output.cached_path` is `ON DELETE
@@ -1528,14 +1528,14 @@ SET NULL`, so a delete would silently drop the link plus the
 `cached_path_signature` placeholders, while a demote keeps the row's
 identity and lets a subsequent successful upload re-fill the metadata.
 
-## Cache GC — guard shared-hash NARs and purge zombie cached_path rows
+## Cache GC - guard shared-hash NARs and purge zombie cached_path rows
 
 Two bugs together inflated cache stats and over-deleted shared NARs:
 
 - `gc_orphan_derivations` deleted the NAR for every output of every orphan
   derivation, with no check whether another (non-orphan) `derivation_output`
   shared the same hash via `cached_path`. FOD source tarballs are the
-  textbook case — `fetchurl` derivations across many projects all
+  textbook case - `fetchurl` derivations across many projects all
   reference the same `<hash>-<name>`, so when one drv aged into the
   orphan window its NAR vanished for everyone. Fixed by collecting all
   orphan output hashes, subtracting hashes still referenced by any
@@ -1551,7 +1551,7 @@ Two bugs together inflated cache stats and over-deleted shared NARs:
 
 Tests (`cargo test -p cache --tests cacher::cleanup`):
 
-- `purges_cached_paths_whose_nar_is_missing` — feeds a `cached_path`
+- `purges_cached_paths_whose_nar_is_missing` - feeds a `cached_path`
   whose hash is absent from the local NAR store and asserts the live
   NAR is preserved while the orphan-files pass exercises the new
   cleanup branch.
@@ -1565,7 +1565,7 @@ the legacy `StringMap` form and returns an empty `BTreeMap`. The
 worker's `ParsedDerivation::realize`
 (`backend/worker/src/executor/build.rs`) consumed `s.built_outputs`
 directly, so a successful local build against such a daemon produced
-`Vec<BuildOutput>::new()` — the worker reported
+`Vec<BuildOutput>::new()` - the worker reported
 `BuildOutput { outputs: [] }`, the server's `handle_build_output` had
 nothing to iterate, no `derivation_output` was updated with `nar_size`,
 no `build_product` rows were written, and the `/builds/{id}/downloads`
@@ -1576,22 +1576,22 @@ Recovery now happens in
 `output_pairs_from_built_or_drv`: when `built_outputs` is empty, fall
 back to the parsed `.drv`'s declared outputs (input-addressed drvs
 already carry the exact paths nix will produce). Outputs whose `.drv`
-entry has an empty `path` (content-addressed / deferred) are skipped —
+entry has an empty `path` (content-addressed / deferred) are skipped -
 those genuinely require the daemon's response. The fallback emits a
 `warn!` so an old-daemon environment is visible in the worker log
 instead of failing silently.
 
 Tests (`cargo test -p worker --tests output_pairs`):
 
-- `output_pairs_use_built_outputs_when_daemon_returned_them` — modern
+- `output_pairs_use_built_outputs_when_daemon_returned_them` - modern
   protocol path: when `built_outputs` is non-empty, the helper passes
   it through and ignores the `.drv` (whose path may be stale for
   CA-derivations).
-- `output_pairs_fall_back_to_drv_when_daemon_dropped_built_outputs` —
+- `output_pairs_fall_back_to_drv_when_daemon_dropped_built_outputs` -
   regression: empty `built_outputs` plus a multi-output `.drv` yields
   one pair per declared output. Locks in the recovery path so a future
   refactor doesn't re-introduce the silent empty-report.
-- `output_pairs_skip_drv_outputs_with_empty_path` — CA / deferred
+- `output_pairs_skip_drv_outputs_with_empty_path` - CA / deferred
   outputs in the `.drv` (empty `path` field) are dropped from the
   fallback rather than producing malformed `/nix/store/` strings.
 
@@ -1620,13 +1620,13 @@ gradient cache` message before any import is attempted.
 Tests (`cargo test -p proto --tests cache_query`):
 
 - `cache_query_pull_uncached_returns_entries_with_cached_false`
-  — replaces the previous `cache_query_pull_uncached_returns_empty`.
+  - replaces the previous `cache_query_pull_uncached_returns_empty`.
   With an empty mock DB the handler must return one `cached: false`
   entry per queried path, all metadata fields `None`. Locks the new
   Pull-mode contract so a future regression to the silent-omit
   behaviour fails the test instead of surfacing as a daemon error
   during a real build.
-- `cache_query_normal_uncached_returns_empty` — preserved unchanged.
+- `cache_query_normal_uncached_returns_empty` - preserved unchanged.
   Normal mode is consumed by `mark_substituted` in
   `backend/worker/src/executor/eval.rs`, which iterates returned
   entries to flip a `substituted` flag without inspecting `cached`;
@@ -1634,7 +1634,7 @@ Tests (`cargo test -p proto --tests cache_query`):
   derivations as substituted. The asymmetry between Pull and Normal is
   intentional and the test makes it explicit.
 
-## Substituted classification — match cached_path by hash, not by foreign-key link
+## Substituted classification - match cached_path by hash, not by foreign-key link
 
 `compute_truly_substituted` previously demanded
 `derivation_output.cached_path IS NOT NULL` and `is_cached = true` to mark
@@ -1647,40 +1647,40 @@ same reason; the eval-time decision now does too.
 
 Tests (`cargo test -p scheduler --tests substitut`):
 
-- `eval_result_substituted_derivation_completes_eval` — original happy
+- `eval_result_substituted_derivation_completes_eval` - original happy
   path: linked cached_path with file_hash → drv marked Substituted, eval
   completes immediately.
-- `eval_result_substitutes_when_hash_in_cached_path_without_link` —
+- `eval_result_substitutes_when_hash_in_cached_path_without_link` -
   regression: derivation_output with `is_cached = false` and
   `cached_path = None`, but a `cached_path` row with the same hash and
   `file_hash IS NOT NULL` exists. The drv is marked Substituted and the
   eval completes without dispatching a build. Confirms the hash-based
   fallback in `compute_truly_substituted`.
 
-## Scheduler policy — anti-starvation cap (#112)
+## Scheduler policy - anti-starvation cap (#112)
 
 `WaitTimeRule::max_wait_secs` caps how much wait time can contribute to a
 job's score. The previous default (600s, +60 max) was below
 `MissingPathsRule::scored_bonus` (200), so a steady stream of fresh
-fully-cached candidates outscored older queued builds indefinitely —
+fully-cached candidates outscored older queued builds indefinitely -
 builds older than 10 minutes were no longer differentiated by wait time.
 The default is now 3600s (+360 max), enough to overcome the cached-fresh
 preference plus typical penalties on the older job.
 
 Tests (`cargo test -p scheduler --lib policy`):
 
-- `default_policy_long_waiting_build_overcomes_fresh_cached` — locks in
+- `default_policy_long_waiting_build_overcomes_fresh_cached` - locks in
   the anti-starvation guarantee by composing the full
   `Policy::default_build_policy()`: a build queued an hour ago must
   outscore a fresh candidate the worker can serve directly. Fails if
   `WaitTimeRule::max_wait_secs` is lowered back below the
   `MissingPathsRule` scored bonus.
-- `wait_time_rule_longer_wait_scores_higher_but_capped` — preserved from
+- `wait_time_rule_longer_wait_scores_higher_but_capped` - preserved from
   before; still asserts that the score saturates at
   `max_wait_secs * bonus_per_second` so ancient jobs cannot dominate
   every other rule.
 
-## Build artefacts — `external_cached` outputs include `hydra-build-products`
+## Build artefacts - `external_cached` outputs include `hydra-build-products`
 
 Builds that are dispatched as `external_cached` (substituted from upstream,
 not rebuilt locally) used to report `products: Vec::new()` even when the
@@ -1691,10 +1691,10 @@ fetched output path, the same loader the regular build path uses.
 
 Tests (`cargo test -p worker executor::build::tests`):
 
-- `load_products_returns_empty_when_file_absent` — the loader is a no-op
+- `load_products_returns_empty_when_file_absent` - the loader is a no-op
   when the output has no `nix-support/hydra-build-products`, so substituted
   outputs without artefacts remain artefact-free.
-- `load_products_parses_hydra_lines` — a `file html …/index.html` line in
+- `load_products_parses_hydra_lines` - a `file html …/index.html` line in
   `nix-support/hydra-build-products` produces one `BuildProduct` with the
   `file_type`, `subtype`, `name` (basename), and `size` (stat) populated.
   Regression for substituted/external-cached builds whose artefacts never
@@ -1714,10 +1714,10 @@ same check run id.
 
 Tests (`cargo test -p scheduler --tests ci::tests`):
 
-- `pending_ci_skips_when_eval_has_no_project` — direct builds and other
+- `pending_ci_skips_when_eval_has_no_project` - direct builds and other
   project-less evaluations don't get a CI report; the helper returns
   without spawning so the shutdown tracker stays empty.
-- `pending_ci_spawns_task_when_eval_has_project` — when the evaluation
+- `pending_ci_spawns_task_when_eval_has_project` - when the evaluation
   has a project, the helper registers a task on the shutdown tracker so
   `cancel_and_drain` covers the in-flight report on shutdown.
 
@@ -1727,7 +1727,7 @@ Tests (`cargo test -p scheduler --tests ci::tests`):
 `TriggerType`, and `ConcurrencyPolicy` derive
 `num_enum::IntoPrimitive`/`TryFromPrimitive` instead of hand-rolled
 `as_i16`/`from_i16`/`num_value` helpers. Database rows still use the
-explicit discriminants — moving them in source would silently break the
+explicit discriminants - moving them in source would silently break the
 on-disk encoding.
 
 The `concurrency_round_trip` and `trigger_type_round_trip` tests in
@@ -1737,7 +1737,7 @@ that out-of-range values produce an error rather than panicking.
 ## `GET /commits/{commit}` authorization (#88)
 
 The endpoint historically returned commit metadata to any authenticated
-caller — the handler held a `// TODO: Check if user has access to the
+caller - the handler held a `// TODO: Check if user has access to the
 commit` and never enforced it, allowing cross-tenant disclosure of
 commit message, hash, and author for any commit UUID an attacker could
 guess or harvest. The route now lives behind `authorize_optional` and
@@ -1748,26 +1748,26 @@ evaluation) maps to `404` so existence isn't leaked.
 
 Tests (`cargo test -p web --test commits_authorization`):
 
-- `anon_can_read_commit_in_public_org` — an unauthenticated caller may
+- `anon_can_read_commit_in_public_org` - an unauthenticated caller may
   fetch a commit reachable through a project in a public organization.
-- `anon_cannot_read_commit_in_private_org` — the same commit, but the
+- `anon_cannot_read_commit_in_private_org` - the same commit, but the
   organization is private, returns `404` for an unauthenticated caller.
-- `member_can_read_commit_in_private_org` — an authenticated member of
+- `member_can_read_commit_in_private_org` - an authenticated member of
   the owning organization sees the commit (200).
-- `non_member_cannot_read_commit` — an authenticated user who is not a
+- `non_member_cannot_read_commit` - an authenticated user who is not a
   member of any organization that owns a referencing evaluation gets
   `404`. Direct regression for #88.
-- `commit_referenced_only_via_orphan_eval_returns_404` — when every
+- `commit_referenced_only_via_orphan_eval_returns_404` - when every
   referencing evaluation has no `project` (legacy direct-build rows
   before issue #234), no org can be resolved and the response is `404`.
 - `nonexistent_commit_returns_404` and
-  `commit_without_evaluation_returns_404` — both shapes of "no path"
+  `commit_without_evaluation_returns_404` - both shapes of "no path"
   return `404` without leaking which case applied.
 
 ## Proto WebSocket connection cap (#89)
 
 `max_proto_connections` (env `GRADIENT_MAX_PROTO_CONNECTIONS`, default
-256) was previously declared as configuration but never read — workers
+256) was previously declared as configuration but never read - workers
 could open `/proto` WebSockets without bound, exhausting file
 descriptors, scheduler slots, and memory. The proto upgrade handler now
 holds a permit on a `ProtoLimiter` (a `tokio::sync::Semaphore` sized
@@ -1777,26 +1777,26 @@ hit, further upgrade attempts get `503 Service Unavailable` with
 
 Unit tests (`cargo test -p proto handler::limiter`):
 
-- `new_clamps_zero_capacity_to_one` — a misconfigured `0` collapses to
+- `new_clamps_zero_capacity_to_one` - a misconfigured `0` collapses to
   `1` so the endpoint never silently rejects every upgrade; operators
   who want the endpoint disabled set `discoverable = false`.
-- `try_acquire_returns_none_when_exhausted` — at capacity the next
+- `try_acquire_returns_none_when_exhausted` - at capacity the next
   acquire fails immediately rather than queueing.
-- `dropping_permit_releases_slot` — the slot is reclaimed when the
+- `dropping_permit_releases_slot` - the slot is reclaimed when the
   permit is dropped, which corresponds to the upgraded session ending.
-- `in_use_tracks_held_permits` — the operator-visible `in_use()` count
+- `in_use_tracks_held_permits` - the operator-visible `in_use()` count
   matches the number of live permits (used in the rejection log line).
 
 Integration tests (`cargo test -p web --test proto_connection_limit`)
 cover the wiring of the limiter into the proto router:
 
-- `upgrade_rejected_with_503_and_retry_after_when_limit_exhausted` — a
+- `upgrade_rejected_with_503_and_retry_after_when_limit_exhausted` - a
   WS-shaped GET against a saturated limiter returns `503` with the
   documented `Retry-After: 10` header. Direct regression for #89.
-- `upgrade_proceeds_past_limiter_when_slot_is_free` — a fresh limiter
+- `upgrade_proceeds_past_limiter_when_slot_is_free` - a fresh limiter
   does not produce the rejection response, confirming the handler only
   short-circuits on exhaustion.
-- `slot_is_released_for_subsequent_upgrades_after_drop` — a held permit
+- `slot_is_released_for_subsequent_upgrades_after_drop` - a held permit
   forces the first upgrade to `503`; dropping it lets the next request
   through, confirming the permit lifetime is what gates the slot.
 
@@ -1831,13 +1831,13 @@ is a SeaORM trust boundary.
 
 Unit tests for the SQL-error mapping live in `backend/web/src/error.rs`:
 
-- `from_db_err_passes_through_non_db_errors` — non-`DbErr::Query`
+- `from_db_err_passes_through_non_db_errors` - non-`DbErr::Query`
   variants (e.g. `RecordNotFound`) round-trip as `WebError::Internal`
   rather than being misclassified as conflicts.
-- `from_db_err_passes_through_query_string_errors` — a `DbErr::Query`
+- `from_db_err_passes_through_query_string_errors` - a `DbErr::Query`
   carrying a string-only payload (no underlying `sqlx::Error`) is
   treated as `Internal`.
-- `from_db_err_record_not_found_is_internal` — pins the documented
+- `from_db_err_record_not_found_is_internal` - pins the documented
   behaviour that "row missing" is the caller's pre-check problem, not
   a 409.
 
@@ -1848,10 +1848,10 @@ reflow the message text.
 Unit tests for the `TempUploadDir` RAII guard used by the direct-build
 upload path live in `backend/web/src/endpoints/builds/direct.rs`:
 
-- `temp_upload_dir_drop_removes_directory` — dropping the guard
+- `temp_upload_dir_drop_removes_directory` - dropping the guard
   without calling `commit()` removes the on-disk staging directory, so
   a failed DB transaction cannot leave orphaned NARs behind.
-- `temp_upload_dir_commit_keeps_directory` — `commit()` consumes the
+- `temp_upload_dir_commit_keeps_directory` - `commit()` consumes the
   guard and leaves the directory in place, matching the contract that
   the upload only becomes "real" once the surrounding transaction has
   committed.
@@ -1872,14 +1872,14 @@ span and the id is on every line they emit.
 
 Tests (`cargo test -p web --test request_id`):
 
-- `missing_request_id_is_generated` — a request without `x-request-id`
+- `missing_request_id_is_generated` - a request without `x-request-id`
   comes back with one, and the value parses as a UUID. Confirms the
   `MakeRequestUuid` minter is wired in front of `TraceLayer`.
-- `supplied_request_id_is_echoed` — a request that *does* carry
+- `supplied_request_id_is_echoed` - a request that *does* carry
   `x-request-id` has its value preserved verbatim on the response, so a
   reverse-proxy that injects an upstream trace id keeps the trace
   stitched end-to-end.
-- `each_request_gets_a_distinct_id` — successive auto-generated ids
+- `each_request_gets_a_distinct_id` - successive auto-generated ids
   differ; otherwise log correlation collapses across concurrent
   requests on the same connection.
 
@@ -1889,8 +1889,8 @@ Access-context loaders (`EvalAccessContext` in
 `backend/web/src/endpoints/evals/mod.rs`, `BuildAccessContext` in
 `backend/web/src/endpoints/builds/mod.rs`, the derivation lookup in
 `backend/web/src/endpoints/builds/query.rs`) chase from a child row to
-its parent through FK columns. When the parent is missing — almost
-always a transient race against a concurrent delete — the previous
+its parent through FK columns. When the parent is missing - almost
+always a transient race against a concurrent delete - the previous
 implementation logged the event twice at error level: once at the
 callsite and again inside `WebError::IntoResponse` for the wrapping
 `Internal` variant. That noise drowned legitimate server errors.
@@ -1899,7 +1899,7 @@ The fix introduces a dedicated `WebError::DataInconsistency` variant.
 External behaviour is unchanged (HTTP 500, code `internal`, body
 `Internal server error`); the difference is operational:
 
-- `IntoResponse` no longer logs for the new variant — the rich-context
+- `IntoResponse` no longer logs for the new variant - the rich-context
   warn line is emitted exactly once at the construction callsite,
   carrying the structured ids (`project_id`, `evaluation_id`,
   `derivation_id`, `organization_id`) that triage actually needs.
@@ -1927,41 +1927,41 @@ temp files because libnix's atexit handlers never ran.
 
 Unit tests in `backend/worker/src/worker_pool/pool.rs`:
 
-- `shutdown_with_no_idle_workers_returns_immediately` — `shutdown()` on
+- `shutdown_with_no_idle_workers_returns_immediately` - `shutdown()` on
   a fresh pool must not block.
-- `shutdown_drains_idle_workers_gracefully` — pre-populated idle workers
+- `shutdown_drains_idle_workers_gracefully` - pre-populated idle workers
   are sent through the graceful path and the idle vec is empty
   afterwards. Uses a `cat` subprocess as a stand-in worker so the test
   does not need libnix.
-- `acquire_after_shutdown_errors` — once `shutdown()` returns, further
+- `acquire_after_shutdown_errors` - once `shutdown()` returns, further
   `acquire()` calls fail fast with a "semaphore closed" error.
-- `inflight_worker_shuts_down_gracefully_on_pool_shutdown` — when
+- `inflight_worker_shuts_down_gracefully_on_pool_shutdown` - when
   `shutdown()` runs concurrently with an in-flight `PooledEvalWorker`
   being released, the released worker takes the graceful-shutdown
   branch in `Drop` instead of being pushed back into the (now drained)
   idle vec.
 
-## Prometheus metrics endpoint — `web/tests/metrics.rs`
+## Prometheus metrics endpoint - `web/tests/metrics.rs`
 
 Covers `GET /metrics`, the Prometheus exposition endpoint introduced
 in #35:
 
-- `endpoint_404_when_no_token_configured` — when
+- `endpoint_404_when_no_token_configured` - when
   `GRADIENT_METRICS_TOKEN_FILE` is unset, the route is not mounted and
   the global 404 fallback handles the request.
 - `endpoint_401_when_no_authorization_header` /
-  `endpoint_401_when_bearer_mismatch` — the bearer-token middleware
+  `endpoint_401_when_bearer_mismatch` - the bearer-token middleware
   rejects unauthenticated requests with 401 and a wrong token never
   reaches the handler.
-- `endpoint_200_when_bearer_matches` — a valid token returns 200 with
+- `endpoint_200_when_bearer_matches` - a valid token returns 200 with
   `Content-Type: text/plain; version=0.0.4` and the body advertises
   every base metric family (`gradient_info`, `gradient_uptime_seconds`,
   `gradient_workers_connected`, `gradient_jobs_pending`,
   `gradient_jobs_active`, `gradient_cache_bytes`).
-- `endpoint_reflects_seeded_counts` — the collector renders DB-derived
+- `endpoint_reflects_seeded_counts` - the collector renders DB-derived
   counters and gauges with the expected `status` labels (e.g.
   `gradient_builds_total{status="Completed"} 7`).
-- `endpoint_rate_limited` — five requests succeed in burst, the sixth
+- `endpoint_rate_limited` - five requests succeed in burst, the sixth
   returns 429 (same tier as `auth_sensitive`).
 
 The metric encoder itself is exercised by a unit test
@@ -1979,27 +1979,27 @@ integration rows. Run with
 
 `backend/web/tests/projects_integration.rs`:
 
-- `put_project_integration_accepts_github_outbound_row` — linking a project
+- `put_project_integration_accepts_github_outbound_row` - linking a project
   to the auto-managed GitHub outbound integration via its UUID succeeds.
-- `put_project_integration_accepts_non_github_outbound_row` — Gitea/GitLab
+- `put_project_integration_accepts_non_github_outbound_row` - Gitea/GitLab
   outbound rows continue to work the same way (regression).
 - `patch_integration_rejects_github_row` /
-  `delete_integration_rejects_github_row` — server-managed rows can't be
+  `delete_integration_rejects_github_row` - server-managed rows can't be
   edited or deleted via the org integrations API.
-- `delete_integration_accepts_non_github_row` — non-managed rows still
+- `delete_integration_accepts_non_github_row` - non-managed rows still
   delete normally (regression).
-- `put_integration_still_rejects_github_forge_type` — POST with
+- `put_integration_still_rejects_github_forge_type` - POST with
   `forge_type=github` continues to be rejected (no manual rows).
-- `put_integration_rejects_reserved_github_name` — name `"github"` is
+- `put_integration_rejects_reserved_github_name` - name `"github"` is
   reserved for the auto-managed row; user-created integrations using it
   are rejected with 400.
 
 `backend/core/src/ci/integration_lookup.rs::ensure_tests`:
 
-- `creates_both_rows_when_none_exist` — calling
+- `creates_both_rows_when_none_exist` - calling
   `ensure_github_app_integrations` on an org with no existing rows inserts
   the inbound and outbound GitHub rows.
-- `skips_kinds_that_already_exist` — repeated calls are idempotent; rows
+- `skips_kinds_that_already_exist` - repeated calls are idempotent; rows
   that already exist for that org/kind are not duplicated.
 
 The resolver simplification (URL-based auto-detection removed) is
@@ -2011,7 +2011,7 @@ linking returns the row id and the resolver now branches purely on
 ## Worker: empty `built_outputs` self-heals from the parsed `.drv`
 
 Modern daemons can legitimately return `BuildResult::Success` with an
-empty `built_outputs` map — fixed-output derivations whose path was
+empty `built_outputs` map - fixed-output derivations whose path was
 already valid in the local store, for example, get a no-op success.
 Older daemon protocols that predate `realisation-with-path-not-hash`
 also drain the legacy map into an empty one. Both produce the same
@@ -2028,14 +2028,14 @@ being silently recorded with no metadata.
 
 Tests in `executor::build::tests`:
 
-- `output_pairs_use_built_outputs_when_daemon_returned_them` — non-empty
+- `output_pairs_use_built_outputs_when_daemon_returned_them` - non-empty
   `built_outputs` is canonical and wins over any `.drv` paths.
-- `output_pairs_recover_from_drv_when_built_outputs_empty` — empty
+- `output_pairs_recover_from_drv_when_built_outputs_empty` - empty
   daemon map, both outputs in the `.drv` carry paths → both recovered.
-- `output_pairs_skip_drv_outputs_with_empty_path` — mixed `.drv`
+- `output_pairs_skip_drv_outputs_with_empty_path` - mixed `.drv`
   (one input-addressed, one CA-pending) → only the input-addressed
   pair survives; `realize` keeps the build alive on that single output.
-- `output_pairs_returns_empty_for_pure_ca_drv_without_realisation` —
+- `output_pairs_returns_empty_for_pure_ca_drv_without_realisation` -
   CA-only `.drv` with no daemon realisation → empty pairs, the caller
   fails the build.
 
@@ -2054,12 +2054,12 @@ think it was a "few-seconds-later" cache propagation.
 
 Fix lives in `worker/src/nix/store.rs` and `worker/src/executor/mod.rs`:
 
-- `LocalNixStore::query_references` — returns the daemon's `references`
+- `LocalNixStore::query_references` - returns the daemon's `references`
   for one path; surfaces missing-path / corrupt-connection errors.
-- `LocalNixStore::collect_runtime_closure` — BFS over `query_references`,
+- `LocalNixStore::collect_runtime_closure` - BFS over `query_references`,
   visited-set deduplicated. Logs and skips individual unreadable paths
   so one stale path doesn't tank the whole walk.
-- `push_drv_closure` (replaces `push_drvs`) — feeds the closure into
+- `push_drv_closure` (replaces `push_drvs`) - feeds the closure into
   `query_fetched_paths` (CacheQuery Push) and pushes every uncached path
   before `EvaluateDerivations` returns. The eval `JobCompleted` therefore
   arrives at the server only after the cache holds every path any
@@ -2068,29 +2068,29 @@ Fix lives in `worker/src/nix/store.rs` and `worker/src/executor/mod.rs`:
 The closure walker is exercised end-to-end by the
 `nix/tests/gradient/state` fixture (which evaluates a flake and then
 builds derivations referencing locally-created sources). Live-daemon
-unit coverage isn't worth the harness cost — the BFS is a few lines
+unit coverage isn't worth the harness cost - the BFS is a few lines
 and the failure mode is loud.
 
 ## Configurable API-key options
 
 `backend/web/tests/auth_hardening.rs` (full HTTP via `axum_test`):
 
-- `api_key_with_only_view_cannot_trigger_evaluation` — a key whose mask is
+- `api_key_with_only_view_cannot_trigger_evaluation` - a key whose mask is
   `[viewOrg]` returns 403 from the project evaluate endpoint, even when the
   owning user is admin.
-- `api_key_pinned_to_other_org_is_invisible` — a key pinned to a different
+- `api_key_pinned_to_other_org_is_invisible` - a key pinned to a different
   org returns 404 (not 403, not 401) on `GET /api/v1/orgs/{name}` so org
   existence isn't leaked.
-- `api_key_cannot_create_api_keys` — `POST /api/v1/user/keys` from an
+- `api_key_cannot_create_api_keys` - `POST /api/v1/user/keys` from an
   API-key-authenticated request returns 403 (the self-management guard).
 
-## Frontend access control — `shared/access`
+## Frontend access control - `shared/access`
 
 Three API-provided flags drive the user-visible rule that:
 
 - **State-managed** resources (`entity.managed === true`) appear with all
   fields and write buttons visible but disabled, with a hover tooltip
-  ("Managed by Nix — edit via declarative config").
+  ("Managed by Nix - edit via declarative config").
 - **Read-only** access (`entity.can_edit === false`) hides write buttons
   entirely and shows inputs as disabled with a "You have read-only access"
   hover tooltip.
@@ -2103,39 +2103,39 @@ Three API-provided flags drive the user-visible rule that:
 
 The primitives:
 
-- `frontend/src/app/shared/access/access.service.ts` — `AccessService` with
+- `frontend/src/app/shared/access/access.service.ts` - `AccessService` with
   pure helpers (`isWritable`, `shouldShowWriteAction`, `shouldDisableInput`,
   `triggerAccess`). Tests cover the four flag combinations plus
   `triggerAccess` for the deeper model split: it projects an AccessState
   onto trigger-action permissions by replacing `canEdit` with `canTrigger`
   and forcing `managed=false` (trigger actions don't mutate config, so the
   managed flag must not disable them).
-- `frontend/src/app/shared/access/writable.directive.ts` — `*appWritable`
+- `frontend/src/app/shared/access/writable.directive.ts` - `*appWritable`
   structural directive. Renders content iff `canEdit`. Tests cover
   render/hide on each combination plus toggling.
-- `frontend/src/app/shared/access/managed-disable.directive.ts` —
+- `frontend/src/app/shared/access/managed-disable.directive.ts` -
   `[appManagedDisable]` attribute directive. Adds `disabled` and a tooltip
   when `managed || !canEdit`. Tests cover all four flag combinations,
   tooltip text, and that the directive correctly clears its own state when
   access becomes writable. The directive also propagates the disabled state
   through `NgControl.valueAccessor.setDisabledState`, so PrimeNG controls
-  (`p-select`, `p-checkbox`, `p-autoComplete`, …) — which only honor the
-  ControlValueAccessor hook, not raw DOM `disabled` — actually become
+  (`p-select`, `p-checkbox`, `p-autoComplete`, …) - which only honor the
+  ControlValueAccessor hook, not raw DOM `disabled` - actually become
   read-only when the user has no write access. A `FakePrimeNgInputDirective`
   in the spec stands in for any `ControlValueAccessor` host and asserts the
   propagation (issue #229).
 - `frontend/src/app/core/resolvers/project-access.resolver.ts` and
-  `cache-access.resolver.ts` — fetch the parent entity once, expose
+  `cache-access.resolver.ts` - fetch the parent entity once, expose
   `{ entity, access }` on `route.parent.data`. Children consume via
   `injectProjectAccess()` / `injectCacheAccess()`. Tests cover the happy
   path and the `managed=true / can_edit=false` propagation. The router is
   configured with `paramsInheritanceStrategy: 'always'`
   (`frontend/src/app/app.config.ts`) so child routes nested under
   `project-layout` / `cache-layout` inherit the `:org` / `:project` /
-  `:cache` params from the parent — without it, child components reading
+  `:cache` params from the parent - without it, child components reading
   `route.snapshot.paramMap` get empty strings and the settings pages render
   blank.
-- `frontend/src/app/core/services/org-access.service.ts` — derives
+- `frontend/src/app/core/services/org-access.service.ts` - derives
   `AccessState` from `Organization.role` and `Organization.managed` for
   org-scoped pages without a parent entity resolver. Tests cover Admin /
   Write / View / undefined / custom-role-name cases.
@@ -2158,23 +2158,23 @@ of `canEdit`. The component exposes a `triggerAccess` computed signal
 `*appWritable="triggerAccess()"` rather than `*appWritable="access()"`. The
 spec asserts three scenarios:
 
-- `{ managed=false, canEdit=false, canTrigger=false }` — all three trigger
+- `{ managed=false, canEdit=false, canTrigger=false }` - all three trigger
   buttons absent from the DOM.
-- `{ managed=true, canEdit=true, canTrigger=true }` — buttons present and
+- `{ managed=true, canEdit=true, canTrigger=true }` - buttons present and
   enabled (the managed flag does not disable them, because the backend
   permits trigger actions on managed projects).
-- `{ managed=false, canEdit=false, canTrigger=true }` — buttons present and
+- `{ managed=false, canEdit=false, canTrigger=true }` - buttons present and
   enabled (a caller with TriggerEvaluation but not EditProject can act).
 
 The two reported bugs that motivated this work are covered directly:
 
-- `WorkersComponent` — Register Worker absent under view-only access;
+- `WorkersComponent` - Register Worker absent under view-only access;
   present-disabled under state-managed org; per-row buttons honor each
   worker's own `managed` flag independent of the org's access.
-- `CacheUpstreamsComponent` — Add Upstream / Edit / Delete absent under
+- `CacheUpstreamsComponent` - Add Upstream / Edit / Delete absent under
   view-only access (page itself remains navigable); present-disabled
   under state-managed cache.
-- `ProjectTriggersComponent` — reporter trigger renders integration
+- `ProjectTriggersComponent` - reporter trigger renders integration
   display name from the inlined `trigger.integration` field (so the
   trigger row shows "from GitHub" rather than the raw `integration_id`
   UUID, even when the caller lacks `ManageIntegrations`); orphaned
@@ -2184,49 +2184,49 @@ The two reported bugs that motivated this work are covered directly:
 Run command: `pnpm -C frontend test --watch=false --include='**/access*'`
 (primitives) or the full suite with `pnpm -C frontend test --watch=false`.
 
-## Entry-point metrics — surface in-progress evaluations (`web/tests/entry_point_metrics.rs`)
+## Entry-point metrics - surface in-progress evaluations (`web/tests/entry_point_metrics.rs`)
 
 Integration tests for `GET /projects/{org}/{project}/entry-point-metrics`
 guarding against the regression where the metrics page renders the empty
 state ("No completed evaluations found for this entry point.") even though
 the entry-point's build is in a terminal state. The endpoint must filter
 only by `project` and `eval`, never by `evaluation.status`, because the
-chart's data point is the build's wall-clock — completed builds are
+chart's data point is the build's wall-clock - completed builds are
 meaningful even while the owning evaluation is still mid-flight.
 
 Three cases:
 
-- `returns_point_when_eval_is_in_progress_but_build_is_completed` — the
+- `returns_point_when_eval_is_in_progress_but_build_is_completed` - the
   evaluation is `Building` but the entry-point's build is `Completed`. The
   response carries one point with the build's `build_time_ms` and a
   `build_status` of `Completed`.
-- `returns_point_when_eval_is_in_progress_but_build_is_substituted` —
+- `returns_point_when_eval_is_in_progress_but_build_is_substituted` -
   same shape with a substituted build (`build_time_ms = null`). Locks in
   the fix from #119 so a future regression that filters Substituted out
   again is caught.
-- `returns_empty_points_when_no_entry_point_matches` — when no
+- `returns_empty_points_when_no_entry_point_matches` - when no
   `entry_point` row matches `project` + `eval`, the response is the empty
   array (the frontend's empty state is then legitimate).
 
-## Entry-point download — pin to newest commit (`web/tests/entry_point_download.rs`)
+## Entry-point download - pin to newest commit (`web/tests/entry_point_download.rs`)
 
 Integration tests for `GET /projects/{org}/{project}/entry-point-downloads`
 guarding against #185: the endpoint previously selected the most recently
 *completed* evaluation by ordering on `evaluation.created_at`, so a
 retriggered run of an older commit shadowed the latest one. The handler now
-resolves against `project.last_evaluation` — the evaluation tied to the
-project's newest commit — with no fallback to older evaluations.
+resolves against `project.last_evaluation` - the evaluation tied to the
+project's newest commit - with no fallback to older evaluations.
 
 Three cases:
 
-- `returns_404_when_project_has_no_last_evaluation` — when
+- `returns_404_when_project_has_no_last_evaluation` - when
   `project.last_evaluation` is `None` the endpoint 404s instead of running a
   broad search across all evaluations.
-- `resolves_entry_point_against_project_last_evaluation` — happy path with
+- `resolves_entry_point_against_project_last_evaluation` - happy path with
   the project pinned to a newest-commit evaluation; the handler reaches the
   artefact-serving stage (the test stops at empty `derivation_output` rows
   → `404 File`, sufficient to prove the pinned evaluation drove lookup).
-- `returns_404_when_entry_point_missing_from_last_evaluation` — when the
+- `returns_404_when_entry_point_missing_from_last_evaluation` - when the
   requested `eval` attribute doesn't exist in the newest-commit evaluation,
   the response is 404; no fallback to older evaluations that might still
   carry a matching entry point.
@@ -2251,18 +2251,18 @@ Three cases:
 
 ## Cache local-priority (issue #222)
 
-- `core::types::cli::network::parse_cidr_list` — empty, single IPv4, single IPv6, mixed-with-whitespace, malformed (`banana`), malformed mid-list.
-- `core::types::cli::network::in_any` — IPv4 hit, IPv4 miss, IPv6 hit.
-- `core::types::config::network_config` — defaults parse; bad `trusted_proxies` and `local_ips` each return errors naming the env var.
-- `web::client_ip::resolve_client_ip` — untrusted peer with/without XFF returns peer; trusted peer returns single XFF / first-untrusted-from-right / leftmost-when-all-trusted; malformed XFF entries skipped; all-malformed XFF returns peer; IPv6 happy path; IPv4-mapped IPv6 peer matches IPv4 CIDRs.
-- `web::endpoints::caches::narinfo` integration (`cache_local_priority.rs`) — local_priority swapped for matching XFF, not swapped for non-local XFF, ignored when NULL, ignored when 0, ignored when peer untrusted.
+- `core::types::cli::network::parse_cidr_list` - empty, single IPv4, single IPv6, mixed-with-whitespace, malformed (`banana`), malformed mid-list.
+- `core::types::cli::network::in_any` - IPv4 hit, IPv4 miss, IPv6 hit.
+- `core::types::config::network_config` - defaults parse; bad `trusted_proxies` and `local_ips` each return errors naming the env var.
+- `web::client_ip::resolve_client_ip` - untrusted peer with/without XFF returns peer; trusted peer returns single XFF / first-untrusted-from-right / leftmost-when-all-trusted; malformed XFF entries skipped; all-malformed XFF returns peer; IPv6 happy path; IPv4-mapped IPv6 peer matches IPv4 CIDRs.
+- `web::endpoints::caches::narinfo` integration (`cache_local_priority.rs`) - local_priority swapped for matching XFF, not swapped for non-local XFF, ignored when NULL, ignored when 0, ignored when peer untrusted.
 
-## Sentry DSN — operator-overridable reporting target (issue #106)
+## Sentry DSN - operator-overridable reporting target (issue #106)
 
 Tests in `backend/core/src/types/cli/registration.rs` cover the DSN override helper:
 
-- `effective_sentry_dsn_returns_default_when_none` — when `RegistrationArgs::sentry_dsn` is `None`, the helper returns `DEFAULT_SENTRY_DSN` (the upstream Wavelens DSN).
-- `effective_sentry_dsn_returns_override_when_some` — when an operator sets `GRADIENT_SENTRY_DSN` / `settings.sentryDsn`, the helper returns the override string, and the three Sentry init call-sites (`backend/src/main.rs`, `cache_loop`, `sign_sweep_loop`) route reports there instead.
+- `effective_sentry_dsn_returns_default_when_none` - when `RegistrationArgs::sentry_dsn` is `None`, the helper returns `DEFAULT_SENTRY_DSN` (the upstream Wavelens DSN).
+- `effective_sentry_dsn_returns_override_when_some` - when an operator sets `GRADIENT_SENTRY_DSN` / `settings.sentryDsn`, the helper returns the override string, and the three Sentry init call-sites (`backend/src/main.rs`, `cache_loop`, `sign_sweep_loop`) route reports there instead.
 
 ## Cache inspection & substituter-compat endpoints (`web/tests/cache_*.rs`)
 
@@ -2272,39 +2272,39 @@ against a `MockDatabase` via `test-support` fixtures.
 
 ### `?json` flag on text-format endpoints (`cache_json.rs`)
 
-- `nix_cache_info_json_returns_object_with_pascal_case_keys` — `?json` returns `application/json` with `StoreDir`, `WantMassQuery`, `Priority`.
-- `nix_cache_info_no_json_returns_text` — without `?json` the content-type is `text/x-nix-cache-info`.
-- `gradient_cache_info_json_returns_object` — `?json` returns `GradientVersion` and `GradientUrl` fields.
-- `gradient_cache_info_no_json_returns_text` — without `?json` returns key-value text.
-- `narinfo_json_returns_object_with_pascal_case_keys` — `?json` on `.narinfo` returns `StorePath`, `URL`, `NarHash`.
-- `private_cache_requires_auth` — unauthenticated requests to a private cache return `401` on `nix-cache-info`, `gradient-cache-info`, and `.narinfo`.
+- `nix_cache_info_json_returns_object_with_pascal_case_keys` - `?json` returns `application/json` with `StoreDir`, `WantMassQuery`, `Priority`.
+- `nix_cache_info_no_json_returns_text` - without `?json` the content-type is `text/x-nix-cache-info`.
+- `gradient_cache_info_json_returns_object` - `?json` returns `GradientVersion` and `GradientUrl` fields.
+- `gradient_cache_info_no_json_returns_text` - without `?json` returns key-value text.
+- `narinfo_json_returns_object_with_pascal_case_keys` - `?json` on `.narinfo` returns `StorePath`, `URL`, `NarHash`.
+- `private_cache_requires_auth` - unauthenticated requests to a private cache return `401` on `nix-cache-info`, `gradient-cache-info`, and `.narinfo`.
 
 ### `/nars` cache NAR list (`cache_nar_list.rs`)
 
-- `list_empty_cache_returns_empty_items` — empty cache returns `total = 0` and `items = []`.
-- `list_returns_signed_nar_for_cache` — regression for "missing build outputs": a `cached_path_signature` row whose FK resolves MUST appear in the listing. Locks in the SQL JOIN's behaviour so future refactors cannot regress to silently dropping rows that narinfo would still serve.
-- `list_private_cache_anon_returns_not_found` — anonymous access to a private cache's listing returns `404`.
-- `list_accepts_pagination_query_params` — `page`/`per_page`/`sort`/`order` query params are accepted.
+- `list_empty_cache_returns_empty_items` - empty cache returns `total = 0` and `items = []`.
+- `list_returns_signed_nar_for_cache` - regression for "missing build outputs": a `cached_path_signature` row whose FK resolves MUST appear in the listing. Locks in the SQL JOIN's behaviour so future refactors cannot regress to silently dropping rows that narinfo would still serve.
+- `list_private_cache_anon_returns_not_found` - anonymous access to a private cache's listing returns `404`.
+- `list_accepts_pagination_query_params` - `page`/`per_page`/`sort`/`order` query params are accepted.
 
 ### `/ls/{hash}` NAR tree listing (`cache_narlist.rs`)
 
-- `ls_returns_v1_tree_with_null_offsets` — returns `{ version: 1, root: { type: "directory", entries: { bin: { entries: { hello: { type: "regular", size: 2, narOffset: null } } } } } }`.
-- `ls_unknown_hash_returns_404` — unknown hash returns `404`.
-- `private_cache_ls_requires_auth` — unauthenticated request to a private cache returns `401`.
+- `ls_returns_v1_tree_with_null_offsets` - returns `{ version: 1, root: { type: "directory", entries: { bin: { entries: { hello: { type: "regular", size: 2, narOffset: null } } } } } }`.
+- `ls_unknown_hash_returns_404` - unknown hash returns `404`.
+- `private_cache_ls_requires_auth` - unauthenticated request to a private cache returns `401`.
 
 ### `/serve/{hash}/{*path}` NAR content extraction (`cache_serve.rs`)
 
-- `serve_returns_file_bytes` — `bin/hello` returns raw bytes `"hi"`.
-- `serve_returns_tar_zst_for_directory` — `bin/` returns `application/zstd` with zstd magic bytes.
-- `serve_unknown_path_returns_404` — non-existent path returns `404`.
-- `private_cache_serve_requires_auth` — unauthenticated request to a private cache returns `401`.
+- `serve_returns_file_bytes` - `bin/hello` returns raw bytes `"hi"`.
+- `serve_returns_tar_zst_for_directory` - `bin/` returns `application/zstd` with zstd magic bytes.
+- `serve_unknown_path_returns_404` - non-existent path returns `404`.
+- `private_cache_serve_requires_auth` - unauthenticated request to a private cache returns `401`.
 
 ### `/log/{drv}` build log (`cache_log.rs`)
 
-- `log_returns_text_for_completed_build_in_cache` — returns `text/plain` log body for a completed build linked to the cache.
-- `log_404_when_build_not_linked_to_cache` — `404` when no `cache_derivation` link exists.
-- `log_404_when_only_failed_builds_exist` — `404` when only failed builds are recorded.
-- `private_cache_log_requires_auth` — unauthenticated request to a private cache returns `401`.
+- `log_returns_text_for_completed_build_in_cache` - returns `text/plain` log body for a completed build linked to the cache.
+- `log_404_when_build_not_linked_to_cache` - `404` when no `cache_derivation` link exists.
+- `log_404_when_only_failed_builds_exist` - `404` when only failed builds are recorded.
+- `private_cache_log_requires_auth` - unauthenticated request to a private cache returns `401`.
 
 ## Log substitution
 
@@ -2312,18 +2312,18 @@ Tests for when a derivation's outputs are pulled from an upstream cache, Gradien
 
 ### log_substitution module (`scheduler/src/log_substitution.rs`)
 
-- `dedup_hit_via_existing_log_id_pointer` — newly-inserted Substituted build inherits a sibling's `log_id`.
-- `no_prior_build_no_fetch_returns_ok` — without siblings and with `allow_upstream_fetch=false`, returns Ok and leaves `log_id` null.
-- `upstream_fetch_persists_log_on_200` — external_cached build's log is fetched from the configured upstream and stored.
-- `first_upstream_404_second_200` — falls through to the next upstream on a 404.
-- `all_upstreams_404_leaves_log_null` — silent no-op when no upstream has the log.
-- `upstream_body_exceeding_cap_is_truncated` — oversize log is capped at LOG_FETCH_MAX_BYTES with a trailing marker.
-- `followers_get_log_id_via_backfill` — leader's log_id propagation includes a follower backfill UPDATE.
+- `dedup_hit_via_existing_log_id_pointer` - newly-inserted Substituted build inherits a sibling's `log_id`.
+- `no_prior_build_no_fetch_returns_ok` - without siblings and with `allow_upstream_fetch=false`, returns Ok and leaves `log_id` null.
+- `upstream_fetch_persists_log_on_200` - external_cached build's log is fetched from the configured upstream and stored.
+- `first_upstream_404_second_200` - falls through to the next upstream on a 404.
+- `all_upstreams_404_leaves_log_null` - silent no-op when no upstream has the log.
+- `upstream_body_exceeding_cap_is_truncated` - oversize log is capped at LOG_FETCH_MAX_BYTES with a trailing marker.
+- `followers_get_log_id_via_backfill` - leader's log_id propagation includes a follower backfill UPDATE.
 
 ### Upstream URL helper (`core/src/db/cache_upstream.rs`)
 
-- `returns_urls_from_subscribed_caches` — shared upstream-URL helper.
-- `empty_when_no_org_caches` — empty result when org has no caches.
+- `returns_urls_from_subscribed_caches` - shared upstream-URL helper.
+- `empty_when_no_org_caches` - empty result when org has no caches.
 
 ## Derivation path parsing (`core/src/sources/nar_path.rs`)
 
@@ -2331,17 +2331,17 @@ Unit tests covering `parse_drv_hash_name`, used at scheduler insert time and
 on the `/log/{drv}` cache endpoint to split bare `<hash>-<name>.drv` strings
 into the `hash` and `name` columns now stored on `derivation` (issue #237):
 
-- `parses_canonical_drv_form` — `aaaa…aa-hello-2.12.1.drv` → (`aaaa…aa`, `hello-2.12.1`).
-- `rejects_missing_drv_suffix` — input without `.drv` returns `InvalidPath`.
-- `rejects_missing_hash_or_name` — empty hash or empty name returns `InvalidPath`.
-- `rejects_missing_dash` — input without `-` returns `InvalidPath`.
+- `parses_canonical_drv_form` - `aaaa…aa-hello-2.12.1.drv` → (`aaaa…aa`, `hello-2.12.1`).
+- `rejects_missing_drv_suffix` - input without `.drv` returns `InvalidPath`.
+- `rejects_missing_hash_or_name` - empty hash or empty name returns `InvalidPath`.
+- `rejects_missing_dash` - input without `-` returns `InvalidPath`.
 
 ## `GET /evals/{eval}/builds` parameter overflow on large evaluations (#237)
 
 The endpoint previously fetched every build in the evaluation and hydrated
 display data via `WHERE id IN ($1, …, $N)` against `derivation`,
 `derivation_output`, and `build_product`. With ~28 000 builds the combined
-parameter count reached 84 560 — over Postgres' 65 535 wire-protocol limit —
+parameter count reached 84 560 - over Postgres' 65 535 wire-protocol limit -
 and the endpoint returned `500`.
 
 `backend/web/src/endpoints/evals/query.rs::get_evaluation_builds` now chunks
@@ -2367,18 +2367,18 @@ crashed prior worker.
 
 ### `gradient_worker::nix::gcroots::tests`
 
-- `disabled_keeper_purge_is_noop` — empty `gcroots_dir` skips startup
+- `disabled_keeper_purge_is_noop` - empty `gcroots_dir` skips startup
   cleanup and never touches the filesystem.
-- `disabled_keeper_add_returns_inert_handle` — disabled keeper returns
+- `disabled_keeper_add_returns_inert_handle` - disabled keeper returns
   a handle that owns no symlink.
-- `purge_all_removes_existing_entries_and_creates_missing_dir` —
+- `purge_all_removes_existing_entries_and_creates_missing_dir` -
   startup wipes regular files and symlinks left by a prior crashed
   worker.
-- `purge_all_creates_missing_dir` — first-run startup with no dir
+- `purge_all_creates_missing_dir` - first-run startup with no dir
   present creates it instead of failing.
-- `drop_removes_symlink` — `GcRootHandle::Drop` releases the indirect
+- `drop_removes_symlink` - `GcRootHandle::Drop` releases the indirect
   root by removing its symlink.
-- `create_symlink_idempotent_skips_existing` — re-adding a root for an
+- `create_symlink_idempotent_skips_existing` - re-adding a root for an
   existing symlink is a no-op (handles cross-build re-entry without
   clobbering the daemon's existing root).
 
@@ -2409,18 +2409,18 @@ truth for "how long has this evaluation been running?". Both
 `project-detail` and `evaluation-log` now use
 `evaluationDuration(evaluation, now)` and `formatEvaluationDuration(ms)`
 so the same evaluation row shows the same `Xh Ym Zs` figure on both
-pages. The regression that motivated this — the log page kept growing
+pages. The regression that motivated this - the log page kept growing
 its duration after the evaluation finished because it used
-`Date.now()` instead of `updated_at` — is covered by
+`Date.now()` instead of `updated_at` - is covered by
 `duration.spec.ts`:
 
-- `isRunningEvaluationStatus` — the six in-flight statuses return true,
+- `isRunningEvaluationStatus` - the six in-flight statuses return true,
   the three terminal statuses return false.
-- `formatEvaluationDuration` — sub-minute / sub-hour / multi-hour
+- `formatEvaluationDuration` - sub-minute / sub-hour / multi-hour
   rendering, plus the negative-clock-skew clamp.
-- `parseUtcTimestamp` — backend timestamps with explicit zone and the
+- `parseUtcTimestamp` - backend timestamps with explicit zone and the
   naive form that gets treated as UTC.
-- `evaluationDuration` — terminal evaluations stop at `updated_at`;
+- `evaluationDuration` - terminal evaluations stop at `updated_at`;
   running evaluations track the current time.
 
 ## Connector + CLI JSON
@@ -2438,7 +2438,7 @@ instead of `rustls-platform-verifier`'s system trust-store load.
 
 CLI integration tests in `cli/tests/`:
 
-- `download_attr.rs` — `gradient download '#attr' --json` writes the right files; `--json` without args returns a structured missing-argument envelope and exits 2.
+- `download_attr.rs` - `gradient download '#attr' --json` writes the right files; `--json` without args returns a structured missing-argument envelope and exits 2.
 
 Run a single connector test file with `cargo test -p connector --test <name>`; CI runs the full suite.
 
@@ -2448,23 +2448,23 @@ Untrusted PRs (from forks where the contributor is not a forge repo writer)
 are parked in `Waiting + WaitingReason::Approval` instead of running
 immediately. Coverage:
 
-- `core/src/types/triggers.rs` — `reporter_pull_request_require_approval_defaults_true_for_legacy_rows`
+- `core/src/types/triggers.rs` - `reporter_pull_request_require_approval_defaults_true_for_legacy_rows`
   asserts the secure-by-default `require_approval = true` decoding for
   pre-#247 rows that lack the field in stored JSON.
-- `core/src/types/waiting_reason.rs` — round-trips for the
+- `core/src/types/waiting_reason.rs` - round-trips for the
   `workers` / `approval` / `no_cache` variants plus the legacy-row
   decoder.
 - `core/src/ci/apply.rs::no_writable_cache_parks_evaluation_in_waiting_no_cache`
-  — `apply_trigger` parks newly-created evals as `NoCache` when the org
+  - `apply_trigger` parks newly-created evals as `NoCache` when the org
   has no writable cache subscription.
-- `web/src/endpoints/forge_hooks/events.rs` — extraction of
+- `web/src/endpoints/forge_hooks/events.rs` - extraction of
   `pr_number`, `pr_author`, `is_fork`, `base_owner`, `base_repo` from
   GitHub / Gitea / GitLab payloads.
-- `web/src/endpoints/forge_hooks/trigger.rs::is_ci_run_command_*` —
+- `web/src/endpoints/forge_hooks/trigger.rs::is_ci_run_command_*` -
   recogniser for the `/ci run` comment unpark command (case
   insensitive, allows leading quote-reply lines, rejects trailing
   noise).
-- `core/src/ci/unpark.rs::unpark_approval_*` — transitions
+- `core/src/ci/unpark.rs::unpark_approval_*` - transitions
   `Waiting + Approval` back to `Queued` once a maintainer authorises
   the PR; no-ops when the row's reason is something else (NoCache /
   Workers).
@@ -2473,17 +2473,17 @@ immediately. Coverage:
 
 ### Proto
 
-- `proto/src/messages.rs::flake_input_override_roundtrip` — rkyv roundtrip of a `FlakeJob` carrying `input_overrides`.
+- `proto/src/messages.rs::flake_input_override_roundtrip` - rkyv roundtrip of a `FlakeJob` carrying `input_overrides`.
 
 ### Worker (`backend/worker/src/executor/fetch.rs`)
 
-- `build_archive_argv_appends_override_input_flags` — argv has interleaved `--override-input <name> <ref>` pairs.
-- `build_archive_argv_no_overrides_matches_baseline` — empty overrides leaves argv identical to baseline.
-- `flake_ref_from_lock_original_github` / `_github_no_ref` / `_indirect` / `_git_url` — flake-ref reconstruction for each `flake.lock` node type.
-- `declared_inputs_from_lock_reads_root_inputs` — root inputs are extracted as the declared set.
-- `resolve_overrides_keeps_url_some` — explicit URL passes through.
-- `resolve_overrides_keep_url_reconstructs_from_lock` — `url = None` resolves via `nodes.<input>.original`.
-- `resolve_overrides_unknown_input_drops_with_warning` — unknown input drops and emits warning.
+- `build_archive_argv_appends_override_input_flags` - argv has interleaved `--override-input <name> <ref>` pairs.
+- `build_archive_argv_no_overrides_matches_baseline` - empty overrides leaves argv identical to baseline.
+- `flake_ref_from_lock_original_github` / `_github_no_ref` / `_indirect` / `_git_url` - flake-ref reconstruction for each `flake.lock` node type.
+- `declared_inputs_from_lock_reads_root_inputs` - root inputs are extracted as the declared set.
+- `resolve_overrides_keeps_url_some` - explicit URL passes through.
+- `resolve_overrides_keep_url_reconstructs_from_lock` - `url = None` resolves via `nodes.<input>.original`.
+- `resolve_overrides_unknown_input_drops_with_warning` - unknown input drops and emits warning.
 
 ### Web (`backend/web/tests/flake_input_overrides.rs`)
 
@@ -2497,7 +2497,7 @@ immediately. Coverage:
 - `patch_omitting_url_does_not_change_it`
 - `delete_removes_the_row`
 - `list_sorted_by_input_name`
-- `get_not_found_returns_404` — also covers cross-project access.
+- `get_not_found_returns_404` - also covers cross-project access.
 - `managed_project_rejects_mutations_403`
 
 ### Frontend (`frontend/src/app/features/projects/project-flake-inputs/project-flake-inputs.component.spec.ts`)

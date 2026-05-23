@@ -129,7 +129,7 @@ in {
         a 48-byte random secret (e.g. <literal>openssl rand -base64 48</literal>)
         and is registered via <literal>POST /api/v1/orgs/{org}/workers</literal>.
 
-        When null (default), the worker connects in open/discoverable mode —
+        When null (default), the worker connects in open/discoverable mode -
         the server accepts the connection without token validation. Suitable
         for local co-located workers.
       '';

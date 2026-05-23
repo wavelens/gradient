@@ -174,7 +174,7 @@
                 <div class="integration-body">
                   <div class="form-group">
                     <label>Endpoint URL</label>
-                    <div class="mono-value">{{ integration.endpoint_url || '(not set — defaults will be used)' }}</div>
+                    <div class="mono-value">{{ integration.endpoint_url || '(not set - defaults will be used)' }}</div>
                   </div>
                   <div class="form-group">
                     <label>Access Token</label>
@@ -253,7 +253,7 @@
         <input pInputText id="int-secret" [(ngModel)]="formData.secret" class="w-full" placeholder="Leave blank to omit verification" />
         <button pButton type="button" icon="pi pi-refresh" severity="secondary" (click)="generateSecret()"></button>
       </div>
-      <small class="text-secondary">Copy this into your forge's webhook secret field. Store it now — it will not be shown again.</small>
+      <small class="text-secondary">Copy this into your forge's webhook secret field. Store it now - it will not be shown again.</small>
     </div>
   } @else {
     <div class="form-group">

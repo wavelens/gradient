@@ -14,7 +14,7 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::collections::HashSet;
 use std::sync::Arc;
 
-/// `GET /commits/{commit}` — returns commit metadata when the caller can
+/// `GET /commits/{commit}` - returns commit metadata when the caller can
 /// reach the commit through an evaluation in an organization they belong to,
 /// or the org is public. Anything else maps to `404` so the endpoint never
 /// confirms or denies the existence of a commit the caller can't see.

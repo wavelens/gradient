@@ -226,7 +226,7 @@ async fn get_nar_by_hash_inner(
     })
 }
 
-/// Narinfo lookup for store paths that aren't build outputs — notably
+/// Narinfo lookup for store paths that aren't build outputs - notably
 /// `.drv` files. Access is gated on the signature row for `cache.id`:
 /// its existence proves the caller-authorised cache also holds the
 /// path.  All metadata comes from `cached_path` because the server
@@ -424,7 +424,7 @@ pub(super) struct DeleteOutcome {
 }
 
 /// Removes a single cache's claim on a NAR. Drops the per-cache signature row,
-/// the per-cache derivation pin, and — if no other cache still holds the path —
+/// the per-cache derivation pin, and - if no other cache still holds the path -
 /// the shared `cached_path` row plus the underlying NAR blob.
 pub(super) async fn delete_nar_from_cache(
     state: &Arc<ServerState>,

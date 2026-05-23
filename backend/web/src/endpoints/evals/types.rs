@@ -70,7 +70,7 @@ pub struct EvaluationResponse {
 }
 
 /// Trigger that fired an evaluation. Same shape as
-/// `crate::endpoints::projects::EvaluationTriggerSummary` — duplicated here to
+/// `crate::endpoints::projects::EvaluationTriggerSummary` - duplicated here to
 /// keep the `evals` endpoint module self-contained (the projects module
 /// re-exports a long chain of unrelated types).
 #[derive(Serialize, Debug)]

@@ -299,7 +299,7 @@ fn read_cookie(headers: &axum::http::HeaderMap, name: &str) -> Option<String> {
 }
 
 /// Logs the full anyhow chain at warn level and converts the error into a
-/// generic 401 — the upstream IdP / transport detail stays in the operator's
+/// generic 401 - the upstream IdP / transport detail stays in the operator's
 /// log instead of being echoed into the response body where the client (or an
 /// attacker probing the endpoint) can read it.
 fn oidc_failure(stage: &'static str) -> impl FnOnce(anyhow::Error) -> WebError {

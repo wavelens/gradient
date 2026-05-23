@@ -205,7 +205,7 @@
                     <span class="material-symbols-outlined">
                       {{ evaluation.entry_point_diff === null ? 'remove' : evaluation.entry_point_diff > 0 ? 'trending_up' : evaluation.entry_point_diff < 0 ? 'trending_down' : 'trending_flat' }}
                     </span>
-                    {{ evaluation.entry_point_diff !== null ? (evaluation.entry_point_diff > 0 ? '+' : '') + evaluation.entry_point_diff : '—' }}
+                    {{ evaluation.entry_point_diff !== null ? (evaluation.entry_point_diff > 0 ? '+' : '') + evaluation.entry_point_diff : '-' }}
                   </span>
                   <span class="build-stat" [class.running]="isRunningStatus(evaluation.status)" title="Evaluation duration">
                     <span class="material-symbols-outlined">timer</span>

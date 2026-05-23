@@ -9,15 +9,15 @@
  * Per docs/src/development/proto.md ("Server rejects when no peers have
  * registered this worker ID (unknown worker)") the expected outcome is
  * `Reject`. If the server instead returns `InitAck`, an unauthenticated
- * client has been admitted in "open mode" (PeerAuth::Open) — see
+ * client has been admitted in "open mode" (PeerAuth::Open) - see
  * backend/proto/src/handler/session.rs:154.
  *
  * Usage: cargo run -p proto --example probe_handshake -- ws://127.0.0.1:3000/proto
  *
  * Exit codes:
- *   0 — server rejected the connection (documented/secure behaviour)
- *   2 — server returned InitAck (open-mode auth bypass confirmed)
- *   1 — protocol/transport error
+ *   0 - server rejected the connection (documented/secure behaviour)
+ *   2 - server returned InitAck (open-mode auth bypass confirmed)
+ *   1 - protocol/transport error
  */
 
 use futures::{SinkExt, StreamExt};
@@ -67,7 +67,7 @@ async fn main() {
         }
         ServerMessage::Reject { code, reason } => {
             eprintln!("[probe] REJECTED at init (code {code}): {reason}");
-            eprintln!("[probe] OK — server refused unknown worker (secure)");
+            eprintln!("[probe] OK - server refused unknown worker (secure)");
             std::process::exit(0);
         }
         other => {
@@ -93,14 +93,14 @@ async fn main() {
                  failed_peers={failed_peers:?}"
             );
             eprintln!(
-                "[probe] VULNERABLE — unknown worker admitted in open mode \
+                "[probe] VULNERABLE - unknown worker admitted in open mode \
                  with zero credentials"
             );
             std::process::exit(2);
         }
         ServerMessage::Reject { code, reason } => {
             eprintln!("[probe] REJECTED after auth (code {code}): {reason}");
-            eprintln!("[probe] OK — server refused unknown worker (secure)");
+            eprintln!("[probe] OK - server refused unknown worker (secure)");
             std::process::exit(0);
         }
         other => {

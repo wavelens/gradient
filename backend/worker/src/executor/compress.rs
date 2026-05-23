@@ -8,7 +8,7 @@
 //!
 //! Uses `harmonia-file-nar`'s `NarByteStream` for pure-Rust NAR packing (no `nix nar`
 //! subprocess). The compressed data is pushed to the server in 64 KiB chunks via
-//! [`ClientMessage::NarPush`] — delegated to [`crate::proto::nar::push_direct`].
+//! [`ClientMessage::NarPush`] - delegated to [`crate::proto::nar::push_direct`].
 //!
 //! The worker always compresses before upload; the server never sees or
 //! writes an uncompressed NAR.

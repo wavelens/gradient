@@ -42,7 +42,7 @@ function registerLink(root: HTMLElement): HTMLAnchorElement | null {
   ) ?? null;
 }
 
-describe('HeaderComponent — registration visibility', () => {
+describe('HeaderComponent - registration visibility', () => {
   it('renders the Register link when registration is enabled', () => {
     const fixture = setup(false);
     expect(registerLink(fixture.nativeElement)).not.toBeNull();

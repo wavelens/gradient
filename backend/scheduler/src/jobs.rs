@@ -139,7 +139,7 @@ impl PendingJob {
 pub struct Assignment {
     pub job_id: String,
     pub job: Job,
-    /// Organization UUID that owns this job — used for credential lookup.
+    /// Organization UUID that owns this job - used for credential lookup.
     pub peer_id: OrganizationId,
 }
 
@@ -206,7 +206,7 @@ impl JobTracker {
     }
 
     /// Record scores from a worker without assigning anything. The server only
-    /// assigns jobs in response to an explicit `RequestJob` — scores just
+    /// assigns jobs in response to an explicit `RequestJob` - scores just
     /// inform which candidate to pick at that point.
     pub fn record_scores(&mut self, peer_id: &str, scores: Vec<CandidateScore>) {
         let worker_scores = self.scores.entry(peer_id.to_owned()).or_default();
@@ -227,7 +227,7 @@ impl JobTracker {
     /// highest total score is assigned.  When multiple jobs tie, the one with
     /// the lexicographically smallest `job_id` is chosen for determinism.
     ///
-    /// This is the ONLY assignment path — the server never assigns without
+    /// This is the ONLY assignment path - the server never assigns without
     /// an explicit `RequestJob` from the worker.
     pub fn take_best_of_kind(
         &mut self,
@@ -574,13 +574,13 @@ mod tests {
             system_features: vec!["kvm".into()],
         };
         let p = Policy::default_build_policy();
-        // Worker without kvm — no assignment.
+        // Worker without kvm - no assignment.
         assert!(
             tracker
                 .take_best_of_kind("w1", None, Some(&no_kvm), &JobKind::Build, &p)
                 .is_none()
         );
-        // Worker with kvm — assigned.
+        // Worker with kvm - assigned.
         assert!(
             tracker
                 .take_best_of_kind("w2", None, Some(&with_kvm), &JobKind::Build, &p)
@@ -603,7 +603,7 @@ mod tests {
             ),
         );
 
-        // Record scores, then request — assignment uses the score to pick.
+        // Record scores, then request - assignment uses the score to pick.
         tracker.record_scores(
             "w1",
             vec![CandidateScore {
@@ -635,7 +635,7 @@ mod tests {
             ),
         );
 
-        // No scores recorded — take_best_of_kind still assigns (unscored = MAX).
+        // No scores recorded - take_best_of_kind still assigns (unscored = MAX).
         let p = Policy::default_build_policy();
         let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &p);
         assert!(assignment.is_some());
@@ -701,7 +701,7 @@ mod tests {
     fn test_take_empty_required() {
         let mut tracker = JobTracker::new();
         let peer = OrganizationId::now_v7();
-        // Job with required paths — should NOT be taken.
+        // Job with required paths - should NOT be taken.
         tracker.add_pending(
             "j1".into(),
             build_job(
@@ -712,7 +712,7 @@ mod tests {
                 }],
             ),
         );
-        // Job with no required paths — should be taken.
+        // Job with no required paths - should be taken.
         tracker.add_pending("j2".into(), eval_job(peer));
 
         let p = Policy::default_build_policy();
@@ -798,7 +798,7 @@ mod tests {
             &JobKind::Flake,
             &Policy::default_build_policy(),
         );
-        // Now in active, not pending — should still be "contained".
+        // Now in active, not pending - should still be "contained".
         assert!(tracker.contains_job("j1"));
     }
 

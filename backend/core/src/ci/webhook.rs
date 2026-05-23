@@ -62,7 +62,7 @@ pub fn validate_webhook_url(url: &str) -> Result<reqwest::Url, String> {
             if d.is_empty() {
                 return Err("URL host is empty".to_string());
             }
-            // Reject literal "localhost" — common typo bypass.
+            // Reject literal "localhost" - common typo bypass.
             if d.eq_ignore_ascii_case("localhost") {
                 return Err("URL host 'localhost' is not allowed".to_string());
             }
@@ -87,11 +87,11 @@ fn is_unsafe_ipv4(ip: &Ipv4Addr) -> bool {
     if o[0] == 100 && (o[1] & 0xC0) == 64 {
         return true;
     }
-    // 0.0.0.0/8 — current network.
+    // 0.0.0.0/8 - current network.
     if o[0] == 0 {
         return true;
     }
-    // 192.0.0.0/24 — IETF protocol assignments.
+    // 192.0.0.0/24 - IETF protocol assignments.
     if o[0] == 192 && o[1] == 0 && o[2] == 0 {
         return true;
     }
@@ -116,7 +116,7 @@ fn is_unsafe_ipv6(ip: &Ipv6Addr) -> bool {
     if (segs[0] & 0xffc0) == 0xfe80 {
         return true;
     }
-    // IPv4-mapped ::ffff:0:0/96 — check the embedded v4.
+    // IPv4-mapped ::ffff:0:0/96 - check the embedded v4.
     if segs[0] == 0
         && segs[1] == 0
         && segs[2] == 0
@@ -176,7 +176,7 @@ impl WebhookClient for ReqwestWebhookClient {
 
         // DNS-rebinding defence: resolve the host now and reject if any
         // resolved IP is in a disallowed range. We still hand the URL to
-        // reqwest, which performs its own resolution — so this is a guard,
+        // reqwest, which performs its own resolution - so this is a guard,
         // not a substitute for proper SSRF-aware connection wiring.
         if let Some(host) = parsed.host_str()
             && matches!(parsed.host(), Some(url::Host::Domain(_)))
@@ -584,7 +584,7 @@ mod tests {
 
     #[test]
     fn validate_url_rejects_cgnat_shared_space() {
-        // 100.64.0.0/10 — RFC 6598.
+        // 100.64.0.0/10 - RFC 6598.
         assert!(validate_webhook_url("http://100.64.0.1/").is_err());
         assert!(validate_webhook_url("http://100.127.255.254/").is_err());
         // Boundary: 100.128.0.0 is public.
@@ -634,19 +634,19 @@ mod tests {
     fn validate_url_rejects_ipv4_mapped_loopback_in_ipv6() {
         // ::ffff:127.0.0.1
         assert!(validate_webhook_url("http://[::ffff:7f00:1]/").is_err());
-        // ::ffff:169.254.169.254 — metadata IP via v4-mapped v6.
+        // ::ffff:169.254.169.254 - metadata IP via v4-mapped v6.
         assert!(validate_webhook_url("http://[::ffff:a9fe:a9fe]/").is_err());
     }
 
     #[test]
     fn validate_url_accepts_public_ipv4_literal() {
-        // 8.8.8.8 is a public address — this is allowed.
+        // 8.8.8.8 is a public address - this is allowed.
         assert!(validate_webhook_url("http://8.8.8.8/").is_ok());
     }
 
     #[test]
     fn validate_url_accepts_public_ipv6_literal() {
-        // 2001:4860:4860::8888 (Google public DNS) — allowed.
+        // 2001:4860:4860::8888 (Google public DNS) - allowed.
         assert!(validate_webhook_url("http://[2001:4860:4860::8888]/").is_ok());
     }
 

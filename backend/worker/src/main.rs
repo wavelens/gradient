@@ -51,7 +51,7 @@ fn main() -> Result<()> {
         return nix::eval_worker::run_eval_worker().map_err(anyhow::Error::from);
     }
 
-    // Must precede the first TLS handshake — `connect_async` for `wss://` is
+    // Must precede the first TLS handshake - `connect_async` for `wss://` is
     // the first thing the runtime does and rustls 0.23 panics if no provider
     // is installed (see issue #232).
     gradient_core::http::init_crypto_provider();
@@ -85,7 +85,7 @@ fn main() -> Result<()> {
 
         let mut backoff = INITIAL_BACKOFF;
 
-        // Initial connection — abandon retries if shutdown fires.
+        // Initial connection - abandon retries if shutdown fires.
         let initial = tokio::select! {
             _ = shutdown.cancelled() => None,
             w = async {
@@ -146,7 +146,7 @@ fn main() -> Result<()> {
             }
 
             // Reconnect with exponential backoff, but bail out if shutdown
-            // fires while we're waiting. Never give up otherwise — a transient
+            // fires while we're waiting. Never give up otherwise - a transient
             // network blip must not kill the worker. The disconnected handle
             // is consumed by retry_reconnect; if shutdown cancels the future
             // mid-attempt the cached `executor_handle` still drives the

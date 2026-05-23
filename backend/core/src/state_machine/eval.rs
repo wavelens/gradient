@@ -52,7 +52,7 @@ impl EvalStateMachine {
             return Ok(to);
         }
 
-        // Terminal states — nothing can move away from these.
+        // Terminal states - nothing can move away from these.
         let from_is_terminal = matches!(
             from,
             EvaluationStatus::Completed | EvaluationStatus::Failed | EvaluationStatus::Aborted

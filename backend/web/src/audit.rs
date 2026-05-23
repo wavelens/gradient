@@ -47,7 +47,7 @@ pub mod events {
     pub const CACHE_NAR_DELETE: &str = "cache.nar.delete";
 }
 
-/// Caller context derived from the inbound HTTP request — used to enrich
+/// Caller context derived from the inbound HTTP request - used to enrich
 /// audit log rows and `session` rows with IP and user-agent for the
 /// "logged-in devices" UI.
 #[derive(Debug, Clone, Default)]

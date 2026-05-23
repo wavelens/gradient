@@ -116,7 +116,7 @@ pub(super) async fn run_dispatch_loop(
                 .await;
                 let elapsed_ms = started.elapsed().as_millis();
                 if elapsed_ms > 1_000 {
-                    warn!(kind, elapsed_ms, "slow message dispatch — loop was blocked");
+                    warn!(kind, elapsed_ms, "slow message dispatch - loop was blocked");
                 }
                 result?;
             }
@@ -230,7 +230,7 @@ fn on_heartbeat(
 /// Holds the per-connection context needed to process a single `ServerMessage`.
 ///
 /// Constructed fresh for each message in the dispatch loop so the lifetime
-/// scope is tight.  All fields are borrows — no ownership transfer.
+/// scope is tight.  All fields are borrows - no ownership transfer.
 pub(super) struct MessageHandler<'a> {
     pub writer: &'a ProtoWriter,
     pub cache_waiters: &'a CacheWaiters,
@@ -329,7 +329,7 @@ impl<'a> MessageHandler<'a> {
                 error!(code, %message, "protocol error from server");
             }
             ServerMessage::InitAck { .. } | ServerMessage::Reject { .. } => {
-                warn!("unexpected handshake message in dispatch loop — ignoring");
+                warn!("unexpected handshake message in dispatch loop - ignoring");
             }
             ServerMessage::AuthChallenge { peers } => {
                 self.on_auth_challenge(peers)?;
@@ -419,7 +419,7 @@ impl<'a> MessageHandler<'a> {
         let all: Vec<JobCandidate> = self.candidates.lock().unwrap().values().cloned().collect();
         debug!(
             count = all.len(),
-            "RequestAllScores — re-scoring all cached candidates"
+            "RequestAllScores - re-scoring all cached candidates"
         );
         if all.is_empty() {
             if let Err(e) = send_score_chunks(self.writer, vec![]) {
@@ -442,7 +442,7 @@ impl<'a> MessageHandler<'a> {
 
     fn on_assign_job(self, job_id: String, job: Job) -> Result<()> {
         if *self.draining {
-            warn!(%job_id, "rejecting assigned job — draining");
+            warn!(%job_id, "rejecting assigned job - draining");
             self.writer.send(ClientMessage::AssignJobResponse {
                 job_id,
                 accepted: false,
@@ -462,7 +462,7 @@ impl<'a> MessageHandler<'a> {
         };
 
         if active_count >= max {
-            warn!(%job_id, ?kind, active = active_count, limit = max, "rejecting assigned job — at capacity");
+            warn!(%job_id, ?kind, active = active_count, limit = max, "rejecting assigned job - at capacity");
             self.writer.send(ClientMessage::AssignJobResponse {
                 job_id,
                 accepted: false,
@@ -471,7 +471,7 @@ impl<'a> MessageHandler<'a> {
             return Ok(());
         }
 
-        info!(%job_id, ?kind, "job assigned — accepting");
+        info!(%job_id, ?kind, "job assigned - accepting");
         self.writer.send(ClientMessage::AssignJobResponse {
             job_id: job_id.clone(),
             accepted: true,
@@ -593,7 +593,7 @@ impl<'a> MessageHandler<'a> {
     fn on_auth_challenge(self, peers: Vec<String>) -> Result<()> {
         debug!(
             ?peers,
-            "mid-connection AuthChallenge — sending AuthResponse"
+            "mid-connection AuthChallenge - sending AuthResponse"
         );
         let peer_tokens = self.config.peer_tokens();
         let tokens = WorkerConfig::resolve_tokens_for_challenge(&peer_tokens, &peers);

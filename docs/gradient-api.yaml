@@ -16,7 +16,7 @@ info:
     | JWT (header) | `Authorization: Bearer <token>` | `POST /auth/basic/login` or OIDC flow |
     | API Key | `Authorization: Bearer GRAD<key>` | `POST /user/keys` |
 
-    Cookie auth is the default for browser clients — the `jwt_token` cookie is set
+    Cookie auth is the default for browser clients - the `jwt_token` cookie is set
     by the login and OIDC-callback endpoints and cleared on logout. The
     `Authorization` header is accepted as a fallback (e.g. for CI/scripts).
 
@@ -26,7 +26,7 @@ info:
     `nix-support/hydra-build-products`. Access is granted when any of the following
     conditions is met:
 
-    - The owning organisation is **public** — no credentials required.
+    - The owning organisation is **public** - no credentials required.
     - A short-lived (1 h) **download token** is supplied via `?token=<download_token>`.
       Obtain one from `GET /builds/{build}/download-token` while authenticated.
       Tokens are scoped to a single build and are safe to embed in URLs.
@@ -54,7 +54,7 @@ info:
     Every response carries an `x-request-id` header. If the client (or an
     upstream reverse proxy) supplies an `x-request-id` on the request, it is
     preserved verbatim; otherwise the server mints a UUID v7. Use this id to
-    correlate client-side traces with server logs — every log line emitted
+    correlate client-side traces with server logs - every log line emitted
     while the request is in flight (handler, DB, spawned cleanup tasks)
     carries the same id.
 
@@ -100,7 +100,7 @@ tags:
   - name: general
     description: Health check and server configuration
   - name: auth
-    description: Authentication — login, register, OAuth/OIDC
+    description: Authentication - login, register, OAuth/OIDC
   - name: user
     description: Current user profile, API keys, and settings
   - name: orgs
@@ -233,7 +233,7 @@ paths:
       operationId: protoWebSocket
       responses:
         '101':
-          description: Switching Protocols — WebSocket upgrade successful
+          description: Switching Protocols - WebSocket upgrade successful
         '404':
           description: Protocol endpoint is disabled (`GRADIENT_PROTO_ENABLE=false`)
 
@@ -316,7 +316,7 @@ paths:
       tags: [auth]
       summary: Check username availability
       description: |-
-        Returns `error: false` if the username is valid and not taken, `error: true` otherwise (non-2xx status is not used — always inspect the `error` field).
+        Returns `error: false` if the username is valid and not taken, `error: true` otherwise (non-2xx status is not used - always inspect the `error` field).
       security: []
       operationId: checkUsername
       requestBody:
@@ -614,7 +614,7 @@ paths:
       tags: [user]
       summary: Create API key
       description: |-
-        Creates a new API key. The full key (prefixed with `GRAD`) is returned once —
+        Creates a new API key. The full key (prefixed with `GRAD`) is returned once -
         it cannot be retrieved again. Use it as `Authorization: Bearer GRAD<key>`.
         Pass `expires_in_days` to make the key auto-expire; omit for no expiry.
       operationId: createUserKey
@@ -704,7 +704,7 @@ paths:
         Edit the key's name, permission set, or organization pin in place.
         Permissions replace the existing set wholesale. State-managed keys
         cannot be edited. Cannot be called from an API-key-authenticated
-        request — sessions only.
+        request - sessions only.
       operationId: patchUserKey
       parameters:
         - name: api_id
@@ -1983,14 +1983,14 @@ paths:
       description: |-
         Serves the named file from `nix-support/hydra-build-products` for the build of
         the given entry point in the project's **newest-commit evaluation**
-        (`project.last_evaluation`). Designed as a stable permalink — retriggering an
+        (`project.last_evaluation`). Designed as a stable permalink - retriggering an
         older commit does not shadow the latest one. Returns `404` if no evaluation
         has been recorded yet, or if the entry point / file is missing from the
         newest evaluation.
 
         Authentication:
-        - **Public organisations** — no credentials required.
-        - **Private organisations** — supply `?token=GRADxxxx` (API key) or a JWT, **or**
+        - **Public organisations** - no credentials required.
+        - **Private organisations** - supply `?token=GRADxxxx` (API key) or a JWT, **or**
           authenticate via `Authorization: Bearer` header / `jwt_token` session cookie.
 
         The `eval` value may contain double-quoted Nix attribute segments
@@ -2060,8 +2060,8 @@ paths:
         | Aborted | yellow | `aborted` |
 
         **Authentication:**
-        - **Public organisations** — no credentials required. Embed the URL directly.
-        - **Private organisations** — supply `?token=GRADxxxx` (API key) or a JWT so the
+        - **Public organisations** - no credentials required. Embed the URL directly.
+        - **Private organisations** - supply `?token=GRADxxxx` (API key) or a JWT so the
           image can be fetched by external services without a session cookie.
 
         Responses include `Cache-Control: no-cache` so badge aggregator CDNs always
@@ -2513,8 +2513,8 @@ paths:
         then by display name. Supports optional `limit` and `offset` query parameters
         for pagination.
 
-        Follower builds — those with a non-null `via` pointing at a leader build
-        in another evaluation that's doing the actual work — are returned as the
+        Follower builds - those with a non-null `via` pointing at a leader build
+        in another evaluation that's doing the actual work - are returned as the
         **leader's row**, not the follower's stand-in. The frontend should treat
         each item's `id` as the canonical build id (used for log, downloads, and
         dependency graph endpoints); for follower placements that id will resolve
@@ -2739,7 +2739,7 @@ paths:
                       message:
                         $ref: '#/components/schemas/BlobsResponse'
         '400':
-          description: Bad request — malformed part name, hash mismatch, or hash not in `session.missing`.
+          description: Bad request - malformed part name, hash mismatch, or hash not in `session.missing`.
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -3011,8 +3011,8 @@ paths:
         `Content-Disposition` header for the suggested filename in either case.
 
         Access is granted when **any** of the following is satisfied:
-        1. The owning organisation is public — no credentials required.
-        2. `?token=<download_token>` — a short-lived per-build token from
+        1. The owning organisation is public - no credentials required.
+        2. `?token=<download_token>` - a short-lived per-build token from
            `GET /builds/{build}/download-token` (1 h validity, safe to embed in URLs).
         3. `jwt_token` cookie or `Authorization: Bearer` header and the caller is a
            member of the owning organisation.
@@ -3126,7 +3126,7 @@ paths:
       description: |
         Registers a worker ID under this organization as a peer. Returns a one-time
         plaintext token that the worker operator must add to their worker config.
-        The token is shown only once — it cannot be retrieved later.
+        The token is shown only once - it cannot be retrieved later.
       operationId: registerOrgWorker
       security:
         - bearerAuth: []
@@ -3154,7 +3154,7 @@ paths:
                   description: >
                     Pre-generated token (output of `openssl rand -base64 48`, exactly 64 standard-base64 characters).
                     When provided the server stores its hash and does NOT return the token in the response.
-                    Omit to have the server generate a token — it will be returned once and cannot be retrieved again.
+                    Omit to have the server generate a token - it will be returned once and cannot be retrieved again.
                 enable_fetch:
                   type: boolean
                   default: true
@@ -3256,7 +3256,7 @@ paths:
       summary: Unregister a worker from an organization
       description: |
         Removes the worker registration. The worker may still be connected until
-        it disconnects naturally — it will not be able to reconnect after that.
+        it disconnects naturally - it will not be able to reconnect after that.
       operationId: deleteOrgWorker
       security:
         - bearerAuth: []
@@ -3379,7 +3379,7 @@ paths:
         in-memory store keyed by the superuser who initiated the manifest
         flow, and redirects the browser to `/admin/github-app?ready=1`.
 
-        **Unauthenticated** — GitHub redirects the operator's browser here
+        **Unauthenticated** - GitHub redirects the operator's browser here
         from `https://github.com/...` and that cross-site navigation does not
         carry a bearer token. CSRF and identity binding are provided by the
         one-shot `state` token issued at `POST /admin/github-app/manifest`,
@@ -3457,7 +3457,7 @@ paths:
                           id:
                             type: integer
                             format: int64
-                            description: Numeric GitHub App ID — set as `GRADIENT_GITHUB_APP_ID`.
+                            description: Numeric GitHub App ID - set as `GRADIENT_GITHUB_APP_ID`.
                           slug:
                             type: string
                             description: GitHub App slug.
@@ -3466,10 +3466,10 @@ paths:
                             description: Public GitHub URL of the App settings page.
                           pem:
                             type: string
-                            description: RS256 private key — write to `GRADIENT_GITHUB_APP_PRIVATE_KEY_FILE`.
+                            description: RS256 private key - write to `GRADIENT_GITHUB_APP_PRIVATE_KEY_FILE`.
                           webhook_secret:
                             type: string
-                            description: Shared webhook secret — write to `GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE`.
+                            description: Shared webhook secret - write to `GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE`.
                           client_id:
                             type: string
                           client_secret:
@@ -3722,7 +3722,7 @@ paths:
         `gradient.example.com-mycache:AAAA...` (base64-encoded 64-byte ed25519 keypair)
 
         This key is used internally by Gradient to sign store paths uploaded to the cache.
-        Keep it secret — do not add it to `nix.conf`.
+        Keep it secret - do not add it to `nix.conf`.
         To configure Nix clients, use the public key from `GET /caches/{cache}/public-key` instead.
       operationId: getCacheKey
       responses:
@@ -3971,7 +3971,7 @@ paths:
         `cached_path` row is removed in the same transaction, any matching
         `derivation_output.is_cached` rows are flipped to `false`, and the NAR
         blob is garbage-collected asynchronously after the response. Requires
-        cache-owner authentication. Allowed on state-managed caches — NAR content
+        cache-owner authentication. Allowed on state-managed caches - NAR content
         is operational data, distinct from cache configuration.
       operationId: deleteCacheNar
       security:
@@ -3982,7 +3982,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
-          description: Not Found — cache or NAR not found, or caller is not the cache owner.
+          description: Not Found - cache or NAR not found, or caller is not the cache owner.
 
   /caches/{cache}/upstreams:
     parameters:
@@ -4018,8 +4018,8 @@ paths:
       description: |-
         Adds an upstream cache. Two types are supported:
 
-        - **internal** — another Gradient-managed cache (referenced by name). Supports ReadOnly / ReadWrite / WriteOnly modes.
-        - **external** — an arbitrary Nix binary cache URL. Always ReadOnly.
+        - **internal** - another Gradient-managed cache (referenced by name). Supports ReadOnly / ReadWrite / WriteOnly modes.
+        - **external** - an arbitrary Nix binary cache URL. Always ReadOnly.
       operationId: addCacheUpstream
       security:
         - bearerAuth: []
@@ -4031,7 +4031,7 @@ paths:
               $ref: '#/components/schemas/AddUpstreamRequest'
       responses:
         '200':
-          description: Upstream added — returns the new upstream UUID
+          description: Upstream added - returns the new upstream UUID
           content:
             application/json:
               schema:
@@ -4439,7 +4439,7 @@ paths:
         Name is unique within `(organization, kind)`.
 
         One **inbound** integration can serve Gitea/Forgejo/GitLab
-        simultaneously — the caller picks the forge path segment in the webhook
+        simultaneously - the caller picks the forge path segment in the webhook
         URL (`/hooks/gitea/...`, `/hooks/forgejo/...`, `/hooks/gitlab/...`).
         The stored `forge_type` is display metadata only for inbound.
 
@@ -4490,7 +4490,7 @@ paths:
         The response excludes `secret`, `endpoint_url`, `access_token`, and
         the `has_secret` / `has_access_token` booleans so non-admin members
         cannot fingerprint credential state. Intended for UIs that only need
-        an integration's name and forge type — e.g. populating the trigger
+        an integration's name and forge type - e.g. populating the trigger
         create/edit dropdown for users who hold `EditProject` but not
         `ManageIntegrations`.
       operationId: listOrgIntegrationSummaries
@@ -4551,7 +4551,7 @@ paths:
         Pass an empty string for `secret` or `access_token` to **clear** it.
 
         `forge_type=github` rows are server-managed (auto-seeded when the
-        GitHub App is installed on the org) and cannot be modified — PATCH
+        GitHub App is installed on the org) and cannot be modified - PATCH
         rejects them with `400`.
       operationId: patchOrgIntegration
       requestBody:
@@ -4586,7 +4586,7 @@ paths:
       description: >-
         Deletes an integration. Any project `project_integration` rows
         referencing it are cleared via `ON DELETE SET NULL`.
-        `forge_type=github` rows are server-managed and cannot be deleted —
+        `forge_type=github` rows are server-managed and cannot be deleted -
         the endpoint returns `400` for them.
       operationId: deleteOrgIntegration
       responses:
@@ -4615,10 +4615,10 @@ paths:
         `GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE`.
 
         **Handled events:**
-        - `push` — triggers an evaluation on any project whose repository URL matches.
-        - `installation` / `installation_repositories` — stores or clears the GitHub App
+        - `push` - triggers an evaluation on any project whose repository URL matches.
+        - `installation` / `installation_repositories` - stores or clears the GitHub App
           `installation_id` on the matching Gradient organization.
-        - `ping` — always returns 200.
+        - `ping` - always returns 200.
 
         This endpoint is unauthenticated (verified via HMAC signature).
       operationId: githubAppWebhook
@@ -4675,7 +4675,7 @@ paths:
           enum: [gitea, forgejo, gitlab]
         description: >-
           Forge type path segment. Determines the HMAC scheme; does **not**
-          filter the integration lookup — a single inbound integration can
+          filter the integration lookup - a single inbound integration can
           serve all three forges. GitHub deliveries go through
           `POST /hooks/github` (the App webhook) instead.
       - name: org
@@ -4761,7 +4761,7 @@ x-nix-cache-paths:
     |---|---|
     | `GET /cache/{cache}/ls/{hash}` | JSON tree listing of the NAR (nix-serve `.ls` v1 schema). Rate-limited at 60 req/min. |
     | `GET /cache/{cache}/serve/{hash}/{path}` | Extract a single file (bytes, Content-Type sniffed) or directory (tar.zst) from a NAR. Rate-limited at 60 req/min. |
-    | `GET /cache/{cache}/log/{drv}` | Build log for `<drv>.drv`, from either locally-built or upstream-substituted builds (substituter compat — `nix log`). Rate-limited at ~300 req/min. |
+    | `GET /cache/{cache}/log/{drv}` | Build log for `<drv>.drv`, from either locally-built or upstream-substituted builds (substituter compat - `nix log`). Rate-limited at ~300 req/min. |
 
 components:
 
@@ -4830,7 +4830,7 @@ components:
 
   responses:
     BadRequest:
-      description: Bad request — invalid input
+      description: Bad request - invalid input
       content:
         application/json:
           schema:
@@ -4891,7 +4891,7 @@ components:
           type: boolean
           description: "`true` if an error occurred, `false` on success"
         message:
-          description: Response payload — type varies by endpoint
+          description: Response payload - type varies by endpoint
 
     ErrorResponse:
       type: object
@@ -4977,12 +4977,12 @@ components:
         peer_id:
           type: string
           format: uuid
-          description: The organization's UUID — used as the peer_id in worker config
+          description: The organization's UUID - used as the peer_id in worker config
         token:
           type: string
           nullable: true
           description: >
-            Plaintext token (present only when the server generated it — not present when the caller
+            Plaintext token (present only when the server generated it - not present when the caller
             supplied a token in the request). Store securely; it cannot be retrieved again.
 
     WorkerLiveInfo:
@@ -5365,7 +5365,7 @@ components:
         confirm_username:
           type: string
           nullable: true
-          description: Required for OIDC users — must equal the caller's own username.
+          description: Required for OIDC users - must equal the caller's own username.
 
     WebhookDeliveryEntry:
       type: object
@@ -5566,7 +5566,7 @@ components:
           description: >-
             GitHub App installation ID bound to this org. The presence of this
             value (non-null) is the single signal that this org uses the GitHub
-            App — outbound CI status reporting and webhook routing both gate on
+            App - outbound CI status reporting and webhook routing both gate on
             it. Populated automatically by the `installation` webhook (when the
             GitHub login matches the Gradient org name) and by the state-driven
             provisioner (`StateOrganization.github_installation_id`); cleared
@@ -5682,10 +5682,10 @@ components:
           description: True when the project is managed by declarative Nix state and cannot be edited via the UI.
         can_edit:
           type: boolean
-          description: True when the caller has Permission::EditProject — may edit project configuration.
+          description: True when the caller has Permission::EditProject - may edit project configuration.
         can_trigger:
           type: boolean
-          description: True when the caller has Permission::TriggerEvaluation — may start, restart, or abort evaluations. Independent of can_edit so users granted only trigger rights can act and managed projects retain trigger access.
+          description: True when the caller has Permission::TriggerEvaluation - may start, restart, or abort evaluations. Independent of can_edit so users granted only trigger rights can act and managed projects retain trigger access.
 
     EntryPointSummary:
       type: object
@@ -5778,10 +5778,10 @@ components:
             $ref: '#/components/schemas/EvaluationSummary'
         can_edit:
           type: boolean
-          description: True when the caller has Permission::EditProject — may edit project configuration.
+          description: True when the caller has Permission::EditProject - may edit project configuration.
         can_trigger:
           type: boolean
-          description: True when the caller has Permission::TriggerEvaluation — may start, restart, or abort evaluations. Independent of can_edit so users granted only trigger rights can act and managed projects retain trigger access even though their config is read-only.
+          description: True when the caller has Permission::TriggerEvaluation - may start, restart, or abort evaluations. Independent of can_edit so users granted only trigger rights can act and managed projects retain trigger access even though their config is read-only.
         managed:
           type: boolean
           description: True when the project is managed by declarative Nix state and cannot be edited via the UI.
@@ -5887,7 +5887,7 @@ components:
         | `EvaluatingFlake` | Running `nix eval` on the flake |
         | `EvaluatingDerivation` | Resolving derivation paths |
         | `Building` | Builds are in progress |
-        | `Waiting` | Stalled because no connected worker can pick up the evaluation — either no worker is connected at all (pre-build phase) or none of the connected workers can satisfy the pending builds' `(architecture, required_features)` |
+        | `Waiting` | Stalled because no connected worker can pick up the evaluation - either no worker is connected at all (pre-build phase) or none of the connected workers can satisfy the pending builds' `(architecture, required_features)` |
         | `Completed` | All builds finished successfully |
         | `Failed` | At least one build failed |
         | `Aborted` | Cancelled by user |
@@ -6076,7 +6076,7 @@ components:
         method:
           type: string
           enum: [abort]
-          description: Action to perform — currently only `abort` is supported
+          description: Action to perform - currently only `abort` is supported
 
     BuildItem:
       type: object
@@ -6376,7 +6376,7 @@ components:
         source:
           type: string
           format: uuid
-          description: Dependency — must be built first
+          description: Dependency - must be built first
         target:
           type: string
           format: uuid
@@ -6791,16 +6791,16 @@ components:
           type: array
           description: |-
             List of event types this webhook subscribes to. Supported events:
-            - `evaluation.queued` — an evaluation was queued
-            - `evaluation.started` — an evaluation began (Evaluating state)
-            - `evaluation.building` — an evaluation entered the Building state
-            - `evaluation.completed` — an evaluation completed successfully
-            - `evaluation.failed` — an evaluation failed
-            - `evaluation.aborted` — an evaluation was aborted
-            - `build.queued` — a build was queued
-            - `build.started` — a build started executing
-            - `build.completed` — a build completed successfully
-            - `build.failed` — a build failed
+            - `evaluation.queued` - an evaluation was queued
+            - `evaluation.started` - an evaluation began (Evaluating state)
+            - `evaluation.building` - an evaluation entered the Building state
+            - `evaluation.completed` - an evaluation completed successfully
+            - `evaluation.failed` - an evaluation failed
+            - `evaluation.aborted` - an evaluation was aborted
+            - `build.queued` - a build was queued
+            - `build.started` - a build started executing
+            - `build.completed` - a build completed successfully
+            - `build.failed` - a build failed
           items:
             type: string
             enum:
@@ -6908,14 +6908,14 @@ components:
           type: string
           enum: [inbound, outbound]
           description: >-
-            `inbound` — the forge calls Gradient (HMAC-verified webhook).
-            `outbound` — Gradient calls the forge (status reports, etc).
+            `inbound` - the forge calls Gradient (HMAC-verified webhook).
+            `outbound` - Gradient calls the forge (status reports, etc).
         forge_type:
           type: string
           enum: [gitea, forgejo, gitlab, github]
           description: >-
             Which forge this integration targets. For inbound integrations this
-            is display metadata only — a single inbound row can serve
+            is display metadata only - a single inbound row can serve
             Gitea/Forgejo/GitLab via the forge path segment of the webhook URL.
         endpoint_url:
           type: string
@@ -6976,7 +6976,7 @@ components:
           type: string
           enum: [gitea, forgejo, gitlab]
           description: >-
-            `github` is intentionally excluded — GitHub integration is
+            `github` is intentionally excluded - GitHub integration is
             provided by the server-wide GitHub App and the org's
             `github_installation_id`, not by per-integration rows.
         secret:
@@ -7009,7 +7009,7 @@ components:
           type: string
           enum: [gitea, forgejo, gitlab]
           description: >-
-            `github` is rejected here — GitHub integration is provided by the
+            `github` is rejected here - GitHub integration is provided by the
             server-wide GitHub App and the org's `github_installation_id`
             instead.
         endpoint_url:

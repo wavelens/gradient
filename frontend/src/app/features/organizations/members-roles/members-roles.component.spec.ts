@@ -58,7 +58,7 @@ async function settled(fixture: ComponentFixture<MembersRolesComponent>) {
   fixture.detectChanges();
 }
 
-describe('MembersRolesComponent — access gating', () => {
+describe('MembersRolesComponent - access gating', () => {
   it('hides Add Member, New Role, per-row Remove under read-only access', async () => {
     const fixture = setup({ managed: false, canEdit: false, canTrigger: false });
     await settled(fixture);

@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 /// Returns the sub-router that is nested under `/admin` by `create_router`.
 ///
-/// The GitHub App manifest *callback* is intentionally NOT mounted here — it
+/// The GitHub App manifest *callback* is intentionally NOT mounted here - it
 /// is registered as a public route by `create_router` because GitHub's
 /// browser redirect from github.com cannot carry the operator's bearer
 /// token. CSRF/identity is bound through the one-shot `state` token instead.

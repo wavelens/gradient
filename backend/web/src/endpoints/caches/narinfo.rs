@@ -19,7 +19,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tracing::warn;
 
-/// Optional peer address — mirrors `ConnectInfo`'s real / `MockConnectInfo`
+/// Optional peer address - mirrors `ConnectInfo`'s real / `MockConnectInfo`
 /// fallback, but yields `None` instead of 500 when the runtime wired neither
 /// (`axum_test::TestServer` without `MockConnectInfo`, ad-hoc tower stacks).
 pub struct OptionalPeer(pub Option<SocketAddr>);

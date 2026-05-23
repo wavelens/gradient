@@ -171,7 +171,7 @@ pub async fn resolve_outbound_reporter_for_project(
 ///
 /// Returns `None` when either precondition isn't satisfied so the caller can
 /// fall back to a noop reporter. Opt-in is conveyed by the project pointing
-/// `outbound_integration` at the GitHub App row — repo URL is not consulted.
+/// `outbound_integration` at the GitHub App row - repo URL is not consulted.
 async fn build_github_app_reporter_for_project(
     state: &Arc<ServerState>,
     project_id: ProjectId,
@@ -204,7 +204,7 @@ async fn build_github_app_reporter_for_project(
         }
     };
 
-    // GitHub Enterprise support deferred — no production user yet. When
+    // GitHub Enterprise support deferred - no production user yet. When
     // adding it, derive `api_base_url` from the installation account host or
     // from a server-config field instead of hardcoding the empty default.
     match GithubAppReporter::new(
@@ -231,7 +231,7 @@ pub const GITHUB_APP_INTEGRATION_DISPLAY_NAME: &str = "GitHub";
 /// rows for `org_id`. Used by the App-install hook to materialise the rows
 /// that triggers and project_integration links reference.
 ///
-/// Rows carry no per-row credentials — the App's private key and the org's
+/// Rows carry no per-row credentials - the App's private key and the org's
 /// `github_installation_id` are the credentials at runtime. `created_by` is
 /// set to `creator` (typically the org's `created_by`) to satisfy the FK.
 pub async fn ensure_github_app_integrations<C: ConnectionTrait>(

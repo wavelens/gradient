@@ -8,7 +8,7 @@ pub mod client;
 pub mod server;
 pub mod wire;
 
-// Job and scheduling types live in core::types::proto — re-exported here for
+// Job and scheduling types live in core::types::proto - re-exported here for
 // backward compatibility so existing `proto::messages::FlakeJob` paths still work.
 pub use client::ClientMessage;
 pub use gradient_core::types::proto::{

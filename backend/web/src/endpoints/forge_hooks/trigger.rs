@@ -321,9 +321,9 @@ enum FilterResult {
     /// PR trigger matched; whether the approval gate engages depends on the
     /// PR being from a fork and the contributor failing the writer-trust probe.
     FirePr { require_approval: bool },
-    /// Config filter did not match — add to skipped with reason "filter".
+    /// Config filter did not match - add to skipped with reason "filter".
     SkipFilter,
-    /// This trigger type / config shape doesn't apply at all — silently ignore.
+    /// This trigger type / config shape doesn't apply at all - silently ignore.
     Skip,
 }
 
@@ -506,7 +506,7 @@ async fn decide_pr_gate(
                     %project_id,
                     pr_number,
                     %author,
-                    "PR trust probe failed — parking pending approval"
+                    "PR trust probe failed - parking pending approval"
                 );
             }
         }
@@ -703,7 +703,7 @@ pub(super) async fn handle_github_check_run(
         warn!(
             evaluation_id = %eval.id,
             sender = %sender.login,
-            "Rejecting approval click — sender is not a repo writer"
+            "Rejecting approval click - sender is not a repo writer"
         );
         return;
     }
@@ -836,7 +836,7 @@ struct GitlabNoteMr {
 /// evaluation when the commenter passes the writer-trust probe.
 ///
 /// `integration_id` is `Some` for per-integration webhook routes (Gitea /
-/// Forgejo / GitLab) and `None` for the shared GitHub App route — for the
+/// Forgejo / GitLab) and `None` for the shared GitHub App route - for the
 /// latter we resolve the integration from `installation.id` in the body.
 pub(super) async fn handle_issue_comment(
     state: &Arc<ServerState>,
@@ -949,7 +949,7 @@ pub(super) async fn handle_issue_comment(
                 project_id = %project_id,
                 pr_number,
                 %sender,
-                "Rejecting /ci run — sender is not a repo writer"
+                "Rejecting /ci run - sender is not a repo writer"
             );
             continue;
         }
@@ -981,7 +981,7 @@ fn debug_no_match(pr_number: u64) {
 /// line (after trimming whitespace). Blank lines and forge quote-reply lines
 /// (`> …`) are skipped so a maintainer can quote the PR context above the
 /// command, but any other prose before or after the command disqualifies
-/// the comment — that protects against accidental unparks when a contributor
+/// the comment - that protects against accidental unparks when a contributor
 /// quotes an earlier `/ci run` in a reply.
 fn is_ci_run_command(body: &str) -> bool {
     let mut saw_command = false;

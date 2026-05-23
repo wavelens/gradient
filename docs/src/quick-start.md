@@ -22,7 +22,7 @@ Minimal setup: Gradient server + co-located worker on a single NixOS host.
 
 ## 2. Generate Secrets
 
-Pick a UUID for the worker — you will use it in the config and when registering the worker to your org:
+Pick a UUID for the worker - you will use it in the config and when registering the worker to your org:
 
 ```sh
 uuidgen
@@ -74,6 +74,6 @@ After `nixos-rebuild switch`, navigate to `https://gradient.example.com/account/
 
 ## Next Steps
 
-- [Configuration](configuration.md) — full options reference, OIDC, GitHub App, remote workers
-- [Usage](usage/overview.md) — evaluation wildcards, SSH keys, triggering builds
+- [Configuration](configuration.md) - full options reference, OIDC, GitHub App, remote workers
+- [Usage](usage/overview.md) - evaluation wildcards, SSH keys, triggering builds
 - [API Reference](https://petstore.swagger.io/?url=https://raw.githubusercontent.com/wavelens/gradient/master/docs/gradient-api.yaml)

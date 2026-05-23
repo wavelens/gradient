@@ -22,7 +22,7 @@ pub struct FailedPeer {
 #[rkyv(derive(Debug, PartialEq))]
 pub enum ServerMessage {
     /// Challenge sent after `InitConnection`.  Lists the peer IDs that have
-    /// registered this worker ID — the worker must respond with tokens for
+    /// registered this worker ID - the worker must respond with tokens for
     /// each peer it has credentials for.
     AuthChallenge { peers: Vec<String> },
 
@@ -68,7 +68,7 @@ pub enum ServerMessage {
     /// Paginated at 1 000 entries per message.
     JobOffer { candidates: Vec<JobCandidate> },
 
-    /// Remove candidates from the worker's local cache — they have been
+    /// Remove candidates from the worker's local cache - they have been
     /// assigned to another worker or cancelled.
     RevokeJob { job_ids: Vec<String> },
 
@@ -145,7 +145,7 @@ pub enum ServerMessage {
     /// Sent once by the server during the initial handshake completion so it
     /// can populate its in-memory score table.  After startup all score
     /// updates arrive as delta [`super::client::ClientMessage::RequestJobChunk`]
-    /// messages — `RequestAllScores` is not sent again.
+    /// messages - `RequestAllScores` is not sent again.
     RequestAllScores,
 
     /// Response to [`super::client::ClientMessage::CacheQuery`].

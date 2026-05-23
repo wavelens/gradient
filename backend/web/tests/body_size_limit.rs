@@ -82,7 +82,7 @@ fn webhook_body_over_limit_returns_413() {
 }
 
 /// A body within the limit reaches the handler. The webhook then rejects
-/// with 401 (invalid signature) — we don't care about that, only that the
+/// with 401 (invalid signature) - we don't care about that, only that the
 /// body limit didn't trip.
 #[test]
 fn webhook_body_within_limit_reaches_handler() {
@@ -115,7 +115,7 @@ fn webhook_body_within_limit_reaches_handler() {
 /// `POST /api/v1/build-requests/{session}/blobs` gets a per-route layer
 /// raising the limit to `MAX_BUILD_REQUEST_SIZE`, so a payload that would
 /// fail the global `max_request_size` is allowed through. We send the
-/// request unauthenticated — it will fail with 401, but the point is that
+/// request unauthenticated - it will fail with 401, but the point is that
 /// a 413 response would mean the per-route override isn't in effect.
 #[test]
 fn blob_upload_route_uses_higher_limit() {

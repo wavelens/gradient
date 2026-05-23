@@ -15,13 +15,13 @@
 //!   EvalAccessContext::load:
 //!     4. SELECT evaluation        (org_b's eval)
 //!     5. SELECT project           (org_b's project)
-//!     6. SELECT organization      (org_b — private)
+//!     6. SELECT organization      (org_b - private)
 //!     7. SELECT organization_user (org_b × user → member)
 //!   get_evaluation_builds:
 //!     8. SELECT builds            (filter by evaluation = follower_eval_id)
-//!     9. SELECT builds            (filter by id in [leader_build_id]) — leader-row dereference
-//!    10. SELECT derivations       (filter by id in [leader_drv_id]) — no org filter
-//!    11. SELECT derivation_outputs (filter by derivation in [leader_drv_id]) — empty
+//!     9. SELECT builds            (filter by id in [leader_build_id]) - leader-row dereference
+//!    10. SELECT derivations       (filter by id in [leader_drv_id]) - no org filter
+//!    11. SELECT derivation_outputs (filter by derivation in [leader_drv_id]) - empty
 
 use axum_test::TestServer;
 use entity::build::BuildStatus;

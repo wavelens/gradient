@@ -85,7 +85,7 @@ mod tests {
         assert_eq!(*attempts.borrow(), 4);
     }
 
-    /// Backoff must double until it hits `max_backoff` and then plateau —
+    /// Backoff must double until it hits `max_backoff` and then plateau -
     /// guards against an off-by-one where an unbounded multiplication could
     /// overflow `Duration` after enough retries.
     #[tokio::test]

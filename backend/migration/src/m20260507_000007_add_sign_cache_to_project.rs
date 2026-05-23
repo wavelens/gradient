@@ -6,7 +6,7 @@
 
 //! Add `project.sign_cache` (default `true`). When `false`, the sign sweep
 //! leaves narinfo signatures NULL for paths produced solely by this project,
-//! so external Nix clients won't trust them — making the project's outputs
+//! so external Nix clients won't trust them - making the project's outputs
 //! private even when the cache itself is public.
 
 use sea_orm_migration::prelude::*;

@@ -66,7 +66,7 @@ nix build .#checks.x86_64-linux.gradient-remote    -L
 ### Rust
 
 - Format with `cargo fmt` before committing.
-- No `unwrap()` in production paths — use `?` or explicit error handling.
+- No `unwrap()` in production paths - use `?` or explicit error handling.
 - New API endpoints go in `web/src/endpoints/` following the pattern: extract path/query params → check authorization → query DB → return response.
 - New database tables require a migration in `migration/src/` and an entity module in `entity/src/`.
 - Log with `tracing::{info, debug, warn, error}`, not `println!`. Add `#[instrument]` to significant async functions.

@@ -252,7 +252,7 @@ pub(super) struct ParsedPullRequestEvent {
     pub pr_author: Option<String>,
     /// `true` when the head repo is not the base repo (i.e. the PR comes
     /// from a fork). `false` when same-repo. `None` when the payload lacks
-    /// enough information to decide — callers should treat as untrusted.
+    /// enough information to decide - callers should treat as untrusted.
     pub is_fork: Option<bool>,
     /// Owner segment of the base repository's `full_name` (`owner/repo`).
     pub base_owner: Option<String>,

@@ -285,7 +285,7 @@ mod tests {
 
     #[test]
     fn polling_well_past_interval_plus_max_jitter_fires() {
-        // 60s interval + max 10% jitter (6s) = at most 66s — 90s is past that.
+        // 60s interval + max 10% jitter (6s) = at most 66s - 90s is past that.
         let id = tid();
         assert!(polling_due(
             id,
@@ -330,7 +330,7 @@ mod tests {
 
     #[test]
     fn polling_jitter_zero_when_interval_below_threshold() {
-        // 10% of 9 is 0 with integer floor — jitter must be 0.
+        // 10% of 9 is 0 with integer floor - jitter must be 0.
         assert_eq!(polling_jitter_secs(tid(), dt("2026-05-06 10:00:00"), 9), 0);
     }
 
@@ -373,7 +373,7 @@ mod tests {
 
     #[test]
     fn cron_no_prior_fires_when_due() {
-        // No prior — picks `now - 1 day` as the cursor; daily cron at 02:00
+        // No prior - picks `now - 1 day` as the cursor; daily cron at 02:00
         // should be due if now is past 02:00 today.
         let now = dt("2026-05-06 03:00:00");
         assert!(cron_due("0 0 2 * * *", None, now));

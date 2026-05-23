@@ -8,9 +8,9 @@
 //!
 //! A worker operates in one of two modes:
 //!
-//! - [`PeerAuth::Open`] — no peers have registered this worker; job candidates
+//! - [`PeerAuth::Open`] - no peers have registered this worker; job candidates
 //!   are not filtered by peer/org.
-//! - [`PeerAuth::Restricted`] — one or more peer UUIDs have registered this
+//! - [`PeerAuth::Restricted`] - one or more peer UUIDs have registered this
 //!   worker; only jobs belonging to those peers are offered.
 //!
 //! Previously this was represented as `authorized_peers: HashSet<Uuid>` where
@@ -25,9 +25,9 @@ use gradient_core::types::ids::OrganizationId;
 /// Peer authorization mode for a connected worker.
 #[derive(Debug, Clone)]
 pub enum PeerAuth {
-    /// No peers registered — worker accepts jobs from all peers.
+    /// No peers registered - worker accepts jobs from all peers.
     Open,
-    /// One or more peers registered — worker only sees jobs from these peers.
+    /// One or more peers registered - worker only sees jobs from these peers.
     Restricted(HashSet<OrganizationId>),
 }
 

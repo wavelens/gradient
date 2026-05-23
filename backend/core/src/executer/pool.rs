@@ -167,7 +167,7 @@ pub async fn get_build_outputs_from_derivation(
     Ok(outputs)
 }
 
-/// Gradient's own `PathInfo` — a thin, string-based representation of the
+/// Gradient's own `PathInfo` - a thin, string-based representation of the
 /// fields consumers actually need. Avoids leaking harmonia protocol types
 /// throughout the codebase.
 #[derive(Debug, Clone)]

@@ -22,18 +22,18 @@ pub enum MessageLevel {
     Notice,
 }
 
-/// A single message emitted during an evaluation — error, warning, or notice.
+/// A single message emitted during an evaluation - error, warning, or notice.
 ///
 /// Messages with no `entry_point_message` rows are **evaluation-scoped** (e.g.
 /// flake fetch failures, global warnings). Messages joined via `entry_point_message`
 /// are attributed to specific attribute paths.
 ///
 /// `source` carries where the message originated:
-/// - `"flake-prefetch"` — `nix flake prefetch` or SSH fetch failure
-/// - `"nix-eval"` — wildcard listing or path resolution (not attr-specific)
-/// - `"nix-eval:<attr>"` — resolution of a specific attribute path
-/// - `"dep-graph"` — dependency graph walk error
-/// - `"db-insert"` — internal: batch insert failure
+/// - `"flake-prefetch"` - `nix flake prefetch` or SSH fetch failure
+/// - `"nix-eval"` - wildcard listing or path resolution (not attr-specific)
+/// - `"nix-eval:<attr>"` - resolution of a specific attribute path
+/// - `"dep-graph"` - dependency graph walk error
+/// - `"db-insert"` - internal: batch insert failure
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "evaluation_message")]
 pub struct Model {

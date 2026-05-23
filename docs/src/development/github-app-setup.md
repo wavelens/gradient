@@ -22,10 +22,10 @@ that registers the App and produces the credentials Gradient needs.
    name. Click **Create GitHub App**.
 6. GitHub redirects you back to `/admin/github-app?ready=1`.
 7. Copy each credential block:
-   - **App ID** — set as `GRADIENT_GITHUB_APP_ID`.
-   - **Private key (PEM)** — write to a file and set the path as
+   - **App ID** - set as `GRADIENT_GITHUB_APP_ID`.
+   - **Private key (PEM)** - write to a file and set the path as
      `GRADIENT_GITHUB_APP_PRIVATE_KEY_FILE` (e.g. `/run/secrets/gradient-github-app.pem`).
-   - **Webhook secret** — write to a file and set the path as
+   - **Webhook secret** - write to a file and set the path as
      `GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE`.
 8. Restart Gradient. The GitHub App toggle now appears on org Integration pages.
 
@@ -57,7 +57,7 @@ env vars as below.
 | `GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE` | `services.gradient.githubApp.webhookSecretFile` | Path to the webhook secret file |
 
 The nix module also exposes `services.gradient.githubApp.enable` as the master
-switch — set it to `true` to wire the credentials into the systemd unit.
+switch - set it to `true` to wire the credentials into the systemd unit.
 
 ## Troubleshooting
 

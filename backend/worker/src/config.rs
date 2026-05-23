@@ -66,7 +66,7 @@ pub struct WorkerConfig {
     )]
     pub gcroots_dir: String,
 
-    /// Re-exec as a Nix evaluator subprocess (internal — do not set manually).
+    /// Re-exec as a Nix evaluator subprocess (internal - do not set manually).
     #[arg(long, env = "GRADIENT_EVAL_WORKER", hide = true)]
     pub eval_worker: bool,
 
@@ -158,7 +158,7 @@ pub struct WorkerConfig {
     // ── Build environment ─────────────────────────────────────────────────────
     /// Comma-separated Nix system strings this worker can build for.
     /// Defaults to the host system (e.g. `x86_64-linux`). Override to add
-    /// emulated targets — e.g. `x86_64-linux,aarch64-linux` on a binfmt host.
+    /// emulated targets - e.g. `x86_64-linux,aarch64-linux` on a binfmt host.
     /// Used by the server's dispatcher to gate build assignment.
     #[arg(long, env = "GRADIENT_WORKER_ARCHITECTURES", value_delimiter = ',')]
     pub architectures: Option<Vec<String>>,
@@ -187,7 +187,7 @@ impl WorkerConfig {
     /// Returns an empty vec when neither is set (open/discoverable mode).
     ///
     /// Format: one `peer_id:token` entry per line. The special peer ID `*`
-    /// matches any UUID the server challenges — callers should expand it using
+    /// matches any UUID the server challenges - callers should expand it using
     /// [`Self::resolve_tokens_for_challenge`].
     pub fn peer_tokens(&self) -> Vec<(String, String)> {
         let raw = if let Some(path) = &self.peers_file {
@@ -317,11 +317,11 @@ mod tests {
         }
     }
 
-    /// 64 `x` characters — the only accepted token length.
+    /// 64 `x` characters - the only accepted token length.
     const TOK64: &str = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
-    /// 63 `x` characters — one too short.
+    /// 63 `x` characters - one too short.
     const TOK63: &str = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
-    /// 65 `x` characters — one too long.
+    /// 65 `x` characters - one too long.
     const TOK65: &str = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
 
     // ── peer_tokens() ─────────────────────────────────────────────────────────

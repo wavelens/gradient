@@ -130,7 +130,7 @@ fn reporter_push_trigger_row() -> project_trigger::Model {
 
 /// Append the standard auth mock sequence:
 /// 1. SELECT session (decode_jwt validates session)
-/// 2. SELECT session (UPDATE ... RETURNING — Postgres backend uses RETURNING path)
+/// 2. SELECT session (UPDATE ... RETURNING - Postgres backend uses RETURNING path)
 /// 3. SELECT user
 fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
     let session = live_session(session_id);
@@ -527,7 +527,7 @@ fn fire_now_on_inactive_trigger_returns_400() {
 }
 
 // fire_now is not integration-tested further here because it calls resolve_head
-// which makes actual git network requests — it will be exercised by E2E smoke tests.
+// which makes actual git network requests - it will be exercised by E2E smoke tests.
 
 #[test]
 fn create_project_seeds_default_polling_trigger() {
@@ -758,7 +758,7 @@ fn patch_project_concurrency_to_skip() {
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
-        // aproject.update() — read-back then exec
+        // aproject.update() - read-back then exec
         .append_query_results([vec![project_row()]])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
@@ -887,7 +887,7 @@ fn list_reporter_trigger_with_missing_integration_returns_null() {
 
 #[test]
 fn list_polling_trigger_has_null_integration_and_skips_lookup() {
-    // No reporter triggers in the list — handler must NOT issue an integration
+    // No reporter triggers in the list - handler must NOT issue an integration
     // SELECT. MockDatabase panics on unexpected queries, which is the assertion.
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()

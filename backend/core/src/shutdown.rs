@@ -77,7 +77,7 @@ impl Shutdown {
     /// The future is instrumented with the current `tracing` span, so cleanup
     /// work spawned from inside an HTTP handler keeps the request span (and
     /// therefore the request-id) on every log line. Outside of a request
-    /// `Span::current()` is the root no-op span — instrumenting is then
+    /// `Span::current()` is the root no-op span - instrumenting is then
     /// effectively free.
     pub fn spawn<F>(&self, future: F) -> JoinHandle<F::Output>
     where
@@ -105,7 +105,7 @@ impl Shutdown {
             Err(_) => {
                 warn!(
                     pending = self.tracker.len(),
-                    "shutdown drain timed out — some background tasks were abandoned"
+                    "shutdown drain timed out - some background tasks were abandoned"
                 );
                 false
             }
@@ -164,7 +164,7 @@ mod tests {
     async fn drain_timeout_returns_false() {
         let s = Shutdown::new();
         s.spawn(async {
-            // Ignores the cancel signal — simulates a misbehaving task.
+            // Ignores the cancel signal - simulates a misbehaving task.
             tokio::time::sleep(Duration::from_secs(10)).await;
         });
         let drained = s.cancel_and_drain(Duration::from_millis(50)).await;

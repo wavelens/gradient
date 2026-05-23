@@ -151,7 +151,7 @@ async fn process_graph_wave(
     })
 }
 
-/// GET /builds/{build}/dependencies — direct dependencies of a single build
+/// GET /builds/{build}/dependencies - direct dependencies of a single build
 pub async fn get_build_dependencies(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -202,7 +202,7 @@ pub async fn get_build_dependencies(
     Ok(ok_json(nodes))
 }
 
-/// GET /builds/{build}/graph — full transitive dependency graph rooted at a build
+/// GET /builds/{build}/graph - full transitive dependency graph rooted at a build
 pub async fn get_build_graph(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,

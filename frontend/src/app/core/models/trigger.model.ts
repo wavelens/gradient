@@ -10,7 +10,7 @@ export type TriggerType = 'polling' | 'reporter_push' | 'reporter_pull_request' 
 export type ConcurrencyPolicy = 'hard_abort' | 'soft_abort' | 'all' | 'skip';
 
 /** Inlined integration handle on reporter trigger responses. Mirrors the
- *  backend `TriggerIntegrationSummary` — `null` for polling/time triggers
+ *  backend `TriggerIntegrationSummary` - `null` for polling/time triggers
  *  and for orphaned references (integration row deleted). */
 export interface TriggerIntegrationRef {
   id: string;

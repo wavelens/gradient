@@ -8,12 +8,12 @@
 //!
 //! [`SecretString`] and [`SecretBytes`] wrap heap-allocated secrets and:
 //!
-//! - **Pin to RAM** — call `mlock(2)` on construction so the OS never swaps
+//! - **Pin to RAM** - call `mlock(2)` on construction so the OS never swaps
 //!   the underlying page to disk, even under memory pressure.
-//! - **Zeroize on drop** — overwrite every byte with `0` via volatile writes
+//! - **Zeroize on drop** - overwrite every byte with `0` via volatile writes
 //!   before the allocator recycles the memory, so secrets are not left in
 //!   freed heap regions.
-//! - **Redact in output** — `Debug` and `Display` print `[REDACTED]`, making
+//! - **Redact in output** - `Debug` and `Display` print `[REDACTED]`, making
 //!   accidental logging of secrets a no-op.
 //!
 //! # Usage
@@ -27,7 +27,7 @@
 //! # `mlock` failure handling
 //!
 //! `mlock` can fail when the process's locked-memory limit (`RLIMIT_MEMLOCK`)
-//! is exhausted. We log a warning and continue rather than crashing — the
+//! is exhausted. We log a warning and continue rather than crashing - the
 //! secret is still zeroized on drop; only the swap-prevention guarantee is
 //! lost. On Linux you can raise the limit with:
 //! ```sh
@@ -53,7 +53,7 @@ impl SecretString {
         Self(b)
     }
 
-    /// Access the secret value. The name `expose` is intentional — it makes
+    /// Access the secret value. The name `expose` is intentional - it makes
     /// every read-site visible in code review.
     pub fn expose(&self) -> &str {
         &self.0
@@ -159,7 +159,7 @@ fn mlock_slice(s: &[u8]) {
             tracing::warn!(
                 bytes = s.len(),
                 error = %err,
-                "mlock failed — secret may be swappable (raise RLIMIT_MEMLOCK or set LimitMEMLOCK in the service unit)"
+                "mlock failed - secret may be swappable (raise RLIMIT_MEMLOCK or set LimitMEMLOCK in the service unit)"
             );
         }
     }

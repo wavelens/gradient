@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Tests for `core::executer::path_utils` — pure string manipulation.
+//! Tests for `core::executer::path_utils` - pure string manipulation.
 
 extern crate core as gradient_core;
 use gradient_core::executer::path_utils::{
@@ -28,7 +28,7 @@ fn nix_store_path_passes_through_already_absolute_path() {
 
 #[test]
 fn nix_store_path_passes_through_other_absolute_paths() {
-    // Any path starting with `/` is left alone — the function does not
+    // Any path starting with `/` is left alone - the function does not
     // re-check that the prefix is actually `/nix/store/`.
     assert_eq!(nix_store_path("/tmp/foo"), "/tmp/foo");
 }

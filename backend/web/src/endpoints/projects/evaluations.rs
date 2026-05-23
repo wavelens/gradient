@@ -38,7 +38,7 @@ pub struct EvaluateRequest {
 
 /// Builds one [`EvaluationSummary`] per evaluation using a fixed number of DB
 /// round-trips regardless of input size (commits, builds, entry_points,
-/// entry-point builds — 4 queries total).
+/// entry-point builds - 4 queries total).
 pub(super) async fn evaluations_to_summaries(
     state: &Arc<ServerState>,
     evaluations: Vec<MEvaluation>,
@@ -684,7 +684,7 @@ pub async fn get_entry_point_download(
         }
     }
 
-    // Newest-commit evaluation — `last_evaluation` over a query avoids a stale
+    // Newest-commit evaluation - `last_evaluation` over a query avoids a stale
     // completed run shadowing the latest one (#185).
     let evaluation_id = project.last_evaluation.or_not_found("Evaluation")?;
     let evaluation = EEvaluation::find_by_id(evaluation_id)

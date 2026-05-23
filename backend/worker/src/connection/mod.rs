@@ -114,7 +114,7 @@ impl ProtoConnection {
     ///
     /// Spawns a background task that drains the writer channel and forwards
     /// messages to the underlying WebSocket sink.  The `ProtoConnection` is
-    /// consumed — only the reader half is returned (for `recv` calls).
+    /// consumed - only the reader half is returned (for `recv` calls).
     pub fn split(self) -> (ProtoWriter, ProtoReader) {
         type BoxSink = std::pin::Pin<
             Box<dyn futures::Sink<Message, Error = tokio_tungstenite::tungstenite::Error> + Send>,

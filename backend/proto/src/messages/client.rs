@@ -28,7 +28,7 @@ pub enum ClientMessage {
     /// Pairs are `(peer_id, token)`.
     AuthResponse { tokens: Vec<(String, String)> },
 
-    /// Request a new auth challenge from the server — sent when the worker
+    /// Request a new auth challenge from the server - sent when the worker
     /// has acquired a new peer token and wants to become authorized for that
     /// peer without reconnecting.
     ReauthRequest,
@@ -84,7 +84,7 @@ pub enum ClientMessage {
     /// A task in the job failed; remaining tasks are skipped.
     JobFailed { job_id: String, error: String },
 
-    /// Worker is draining — it will finish in-flight jobs then disconnect.
+    /// Worker is draining - it will finish in-flight jobs then disconnect.
     /// Server stops assigning new jobs to this peer.
     Draining,
 
@@ -139,7 +139,7 @@ pub enum ClientMessage {
     /// still has spare capacity.  Re-sent every 10 s as a heartbeat in case
     /// the server restarted and lost the pending request.
     ///
-    /// The server assigns the first matching pending job directly — no scoring
+    /// The server assigns the first matching pending job directly - no scoring
     /// round-trip needed.
     RequestJob { kind: JobKind },
 
@@ -154,9 +154,9 @@ pub enum ClientMessage {
     ///
     /// Server responds with [`super::server::ServerMessage::CacheStatus`].
     /// [`QueryMode`] controls what the server returns beyond the cached flag:
-    /// - `Normal` — only paths already in the cache (no URLs).
-    /// - `Pull`   — cached paths with presigned S3 GET URLs (or `url: None` for local).
-    /// - `Push`   — all paths; uncached ones include presigned S3 PUT URLs (or `url: None`).
+    /// - `Normal` - only paths already in the cache (no URLs).
+    /// - `Pull`   - cached paths with presigned S3 GET URLs (or `url: None` for local).
+    /// - `Push`   - all paths; uncached ones include presigned S3 PUT URLs (or `url: None`).
     CacheQuery {
         job_id: String,
         paths: Vec<String>,
@@ -170,7 +170,7 @@ pub enum ClientMessage {
     /// the evaluation page without drilling into individual build logs.
     ///
     /// This is **not** meant for build compile failures or user-initiated
-    /// aborts — those are already reported via `JobFailed` and deliberately
+    /// aborts - those are already reported via `JobFailed` and deliberately
     /// stay out of the evaluation log.
     EvalMessage {
         job_id: String,

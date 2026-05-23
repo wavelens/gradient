@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Prometheus exposition endpoint (`GET /metrics`) — closes #35.
+//! Prometheus exposition endpoint (`GET /metrics`) - closes #35.
 //!
 //! Collects metrics on demand at scrape time. No background aggregation:
 //! one DB query plus one scheduler snapshot per request. The route is only
@@ -203,7 +203,7 @@ fn register_labelled_gauge(registry: &Registry, name: &str, help: &str, values: 
 /// Collect metrics by querying the DB and scheduler in-memory state.
 ///
 /// Errors propagate as `WebError`; the handler converts those into 500.
-/// We intentionally never serve a partial response — Prometheus would
+/// We intentionally never serve a partial response - Prometheus would
 /// treat a 200 with missing series as authoritative and corrupt counters.
 pub(crate) async fn collect(
     state: &Arc<ServerState>,

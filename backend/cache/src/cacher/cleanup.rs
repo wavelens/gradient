@@ -186,7 +186,7 @@ pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
         // Drop the cached_path_signature rows that tied each output to THIS
         // cache, and (if no other cache still references the path) the
         // cached_path row itself. Without this, the "compressed stored"
-        // metric — a SUM(file_size) joined via cached_path_signature — would
+        // metric - a SUM(file_size) joined via cached_path_signature - would
         // stay inflated after TTL eviction even though the NAR file is gone.
         for o in &outputs {
             let cached_paths = ECachedPath::find()
@@ -320,9 +320,9 @@ async fn purge_zombie_cached_paths(
 /// 1. it belongs to a `derivation_output` whose `derivation` has at least one
 ///    `build` row whose status is not a terminal failure (`Failed`, `Aborted`,
 ///    `DependencyFailed`). This covers Substituted, Completed, and any
-///    in-flight build (Created/Queued/Building) — including the upload race
+///    in-flight build (Created/Queued/Building) - including the upload race
 ///    window where the NAR is on disk before `is_cached=true` is flipped.
-/// 2. it belongs to a `cached_path` row with `file_hash IS NOT NULL` —
+/// 2. it belongs to a `cached_path` row with `file_hash IS NOT NULL` -
 ///    typically `.drv` files that have no `derivation_output` of their own.
 ///
 /// Note: this is intentionally more permissive than the old `is_cached=true`
@@ -443,7 +443,7 @@ mod tests {
     }
 
     /// A NAR referenced only by a `cached_path` row (e.g. a `.drv` file) must
-    /// be kept — exercises the UNION branch of the keep query.
+    /// be kept - exercises the UNION branch of the keep query.
     #[tokio::test]
     async fn keeps_cached_path_only() {
         let tmp = tempfile::tempdir().unwrap();
@@ -476,7 +476,7 @@ mod tests {
     }
 
     /// When the orphan-aware SELECT returns no `cache_derivation` rows, the
-    /// TTL pass leaves on-disk NARs untouched — covering the case where
+    /// TTL pass leaves on-disk NARs untouched - covering the case where
     /// every cache_derivation is either fresh or still tied to an active
     /// build.
     #[tokio::test]

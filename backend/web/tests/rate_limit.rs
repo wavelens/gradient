@@ -84,7 +84,7 @@ fn auth_tier_throttles_burst() {
 }
 
 /// Cache tier burst is 1000: 50 rapid GETs against `/cache/{cache}/...` all
-/// succeed (or fail through to the handler) — no 429s. The handler itself
+/// succeed (or fail through to the handler) - no 429s. The handler itself
 /// 404s for the unknown cache, but the request reaching the handler proves
 /// the rate limiter didn't reject it.
 #[test]

@@ -247,7 +247,7 @@ fn listing_returns_products_from_db() {
         .build()
         .unwrap();
     rt.block_on(async {
-        // Set up state — nar_storage is not needed for listing.
+        // Set up state - nar_storage is not needed for listing.
         let cli = test_cli();
         let nar_storage = NarStore::local(&cli.storage.base_path).expect("create test NarStore");
 

@@ -86,7 +86,7 @@ function setup(c: AccessCase): ComponentFixture<ProjectSettingsComponent> {
   return fixture;
 }
 
-describe('ProjectSettingsComponent — access gating', () => {
+describe('ProjectSettingsComponent - access gating', () => {
   it('hides Save Changes when access is read-only', () => {
     const fixture = setup({ managed: false, canEdit: false, canTrigger: false });
     expect(findByText(fixture.nativeElement, 'save changes')).toBeNull();

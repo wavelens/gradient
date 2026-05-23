@@ -9,7 +9,7 @@
 //! When a worker registration has a non-null `url`, the server periodically
 //! attempts to connect to that URL via WebSocket.  Once connected the same
 //! [`handle_socket`](crate::handler::handle_socket) function drives the
-//! connection — the protocol is identical regardless of who initiated the
+//! connection - the protocol is identical regardless of who initiated the
 //! transport.
 
 use std::collections::HashSet;
@@ -68,7 +68,7 @@ async fn connect_to_registered_workers(
         }
     };
 
-    // Deduplicate by worker_id — multiple orgs can register the same worker.
+    // Deduplicate by worker_id - multiple orgs can register the same worker.
     let mut seen = HashSet::new();
     for reg in registrations {
         let Some(url) = reg.url.as_deref() else {

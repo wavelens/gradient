@@ -28,7 +28,7 @@ use super::derivation::DerivationOutput;
 /// Obtain via [`DerivationOutput::as_spec`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DrvOutputSpec<'a> {
-    /// **Fixed-output derivation (FOD)** — both `hash_algo` and `hash` are
+    /// **Fixed-output derivation (FOD)** - both `hash_algo` and `hash` are
     /// present. The daemon requires this variant to enable network access
     /// inside the build sandbox (e.g. `fetchurl`, `fetchGit`).
     ///
@@ -42,12 +42,12 @@ pub enum DrvOutputSpec<'a> {
         hash: &'a str,
     },
 
-    /// **Floating content-addressed derivation** — `path`, `hash_algo`, and
+    /// **Floating content-addressed derivation** - `path`, `hash_algo`, and
     /// `hash` are all empty. The daemon computes the output path from the
     /// build result.
     Deferred,
 
-    /// **Input-addressed derivation** — `path` is non-empty and `hash_algo` /
+    /// **Input-addressed derivation** - `path` is non-empty and `hash_algo` /
     /// `hash` are empty. The output path is fully determined at eval time.
     InputAddressed {
         /// Full `/nix/store/hash-name` output path.

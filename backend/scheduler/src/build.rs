@@ -171,7 +171,7 @@ impl<'a> BuildStateHandler<'a> {
         // Surface the worker's failure reason in the build log so the
         // frontend's log viewer renders it. Without this, pre-`nix build`
         // aborts (prefetch-time errors, daemon connection failures, etc.)
-        // produce a Failed badge with an empty log — useless for diagnosis.
+        // produce a Failed badge with an empty log - useless for diagnosis.
         // Followers share this `log_id` via `propagate_to_followers`, so a
         // single append covers the whole leader→followers fan-out.
         let log_id = build.log_id.unwrap_or(build.id);
@@ -201,11 +201,11 @@ impl<'a> BuildStateHandler<'a> {
     /// Same-org followers share the leader's `derivation` row, so its
     /// `derivation_output` and `build_product` children are already visible to
     /// the follower's evaluation without any copy. Cross-org followers (whose
-    /// `derivation` differs from the leader's — created when the leader belongs
+    /// `derivation` differs from the leader's - created when the leader belongs
     /// to a cache-connected organisation) have those rows mirrored onto the
     /// follower's `derivation`.
     ///
-    /// `Aborted` is not propagated — when a leader is aborted (its eval was
+    /// `Aborted` is not propagated - when a leader is aborted (its eval was
     /// cancelled), callers re-elect a new leader from the followers instead.
     async fn propagate_to_followers(&self, leader: &MBuild) -> Result<()> {
         let propagate = matches!(
@@ -385,7 +385,7 @@ impl<'a> BuildStateHandler<'a> {
             .context("fetch failed builds")?;
 
         // Also treat error-level evaluation messages (nix eval errors, attr
-        // resolution failures) as a failure signal — the evaluation was only
+        // resolution failures) as a failure signal - the evaluation was only
         // partially successful even if every discovered build passed.
         let eval_error_messages = EEvaluationMessage::find()
             .filter(CEvaluationMessage::Evaluation.eq(evaluation_id))
@@ -544,7 +544,7 @@ impl<'a> BuildStateHandler<'a> {
 ///
 /// Active pre-build states (`Fetching`, `EvaluatingFlake`,
 /// `EvaluatingDerivation`) are owned by an eval worker. They may only stall
-/// into `Waiting` if every worker has disconnected — they must never be
+/// into `Waiting` if every worker has disconnected - they must never be
 /// reset back to `Queued`, which the `EvalStateMachine` forbids and which
 /// would clobber the worker's in-flight progress.
 fn decide_pre_build_target(
@@ -1055,7 +1055,7 @@ mod waiting_reason_tests {
     fn pre_build_target_active_pre_build_with_workers_left_alone() {
         // Regression: a Fetching/EvaluatingFlake/EvaluatingDerivation eval is
         // already being processed by an eval worker. Reconcile must not push
-        // it back to Queued — that violates the state machine and would log a
+        // it back to Queued - that violates the state machine and would log a
         // spurious "invalid status transition: Fetching → Queued" warning.
         for status in [
             EvaluationStatus::Fetching,

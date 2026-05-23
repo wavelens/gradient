@@ -8,8 +8,8 @@
 //! `max_proto_connections` (issue #89).
 //!
 //! Builds the same wiring `web::create_router` produces for the `/proto`
-//! route — `proto_router` + `Extension<Arc<Scheduler>>` +
-//! `Extension<Arc<ProtoLimiter>>` — so the test can pre-acquire the only
+//! route - `proto_router` + `Extension<Arc<Scheduler>>` +
+//! `Extension<Arc<ProtoLimiter>>` - so the test can pre-acquire the only
 //! configured permit and observe the rejection shape (`503` + `Retry-After`).
 //! The unit tests in `proto::handler::limiter` cover the semaphore semantics
 //! themselves; this test verifies the handler is actually consulting them.
@@ -75,7 +75,7 @@ fn upgrade_proceeds_past_limiter_when_slot_is_free() {
         let res = upgrade_request(&server).await;
 
         // The in-memory transport doesn't carry the upgrade through to a real
-        // WebSocket, so we don't check for `101` exactly — but we do check
+        // WebSocket, so we don't check for `101` exactly - but we do check
         // that the limiter let the request *past* the rejection branch (i.e.
         // the response is not the 503 we'd see when exhausted).
         assert_ne!(

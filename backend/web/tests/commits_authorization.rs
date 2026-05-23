@@ -266,7 +266,7 @@ fn non_member_cannot_read_commit() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        // Commit reachable through a project in `other_org_id` — caller has no
+        // Commit reachable through a project in `other_org_id` - caller has no
         // membership there.
         let foreign_project = entity::project::Model {
             organization: other_org_id(),

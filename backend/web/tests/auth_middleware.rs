@@ -24,7 +24,7 @@ use uuid::Uuid;
 use web::create_router;
 
 /// Build a `ServerState` whose `jwt_secret_file` points at a real on-disk
-/// file — required because `load_secret` calls `process::exit(1)` if the
+/// file - required because `load_secret` calls `process::exit(1)` if the
 /// file is missing, which would tear down the test process before assertions
 /// run.
 fn server() -> TestServer {

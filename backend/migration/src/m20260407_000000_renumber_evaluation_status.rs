@@ -18,7 +18,7 @@
 //!   old 4 Failed     → 6
 //!   old 3 Completed  → 5
 //!   old 2 Building   → 3
-//!   old 1 Evaluating → 1 (EvaluatingFlake) — same numeric value, no-op
+//!   old 1 Evaluating → 1 (EvaluatingFlake) - same numeric value, no-op
 
 use sea_orm_migration::prelude::*;
 

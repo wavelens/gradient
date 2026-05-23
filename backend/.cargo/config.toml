@@ -4,7 +4,7 @@
 # Enable incremental compilation for faster builds
 incremental = true
 # Cap parallel rustc invocations to keep peak memory bounded on dev machines.
-# Cargo.toml has no equivalent — this is the canonical place for the setting.
+# Cargo.toml has no equivalent - this is the canonical place for the setting.
 # `cargo test --workspace` builds dozens of test binaries each pulling in heavy
 # transitive deps (`harmonia-*`, `sea-orm`, `git2`); two parallel link steps
 # blew past 16 GiB on common dev hardware, so this is pinned to 1.

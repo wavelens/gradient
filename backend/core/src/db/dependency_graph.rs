@@ -8,7 +8,7 @@
 //!
 //! The `derivation_dependency` row `(derivation, dependency)` means
 //! "`derivation` depends on `dependency`". A *reverse* walk from a starting
-//! derivation therefore yields its transitive **dependents** — every derivation
+//! derivation therefore yields its transitive **dependents** - every derivation
 //! that (directly or indirectly) needs the start node to be available.
 //!
 //! Two callers historically reimplemented the same BFS with subtly different

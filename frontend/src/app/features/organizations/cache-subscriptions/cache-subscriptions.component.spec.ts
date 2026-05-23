@@ -54,7 +54,7 @@ async function settled(fixture: ComponentFixture<CacheSubscriptionsComponent>) {
   fixture.detectChanges();
 }
 
-describe('CacheSubscriptionsComponent — access gating', () => {
+describe('CacheSubscriptionsComponent - access gating', () => {
   it('hides Subscribe and Unsubscribe under read-only access', async () => {
     const fixture = setup({ managed: false, canEdit: false, canTrigger: false });
     await settled(fixture);

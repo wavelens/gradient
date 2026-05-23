@@ -7,7 +7,7 @@
 //! Integration tests for `POST /api/v1/build-requests/manifest` (issue #234).
 //!
 //! Covers the four validation surfaces (oversized total, bad paths, bad
-//! hashes, duplicates) and the happy-path response shape — `session` is a
+//! hashes, duplicates) and the happy-path response shape - `session` is a
 //! UUID and `missing` is the subset of hex hashes the org doesn't have yet.
 
 use axum::http::StatusCode;

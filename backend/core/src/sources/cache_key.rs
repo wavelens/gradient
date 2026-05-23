@@ -187,7 +187,7 @@ impl CacheSigner {
 /// References should be bare store-path names (without `/nix/store/` prefix);
 /// this function adds the prefix before sorting and joining.
 ///
-/// One-shot wrapper around [`CacheSigner`] — prefer [`CacheSigner::from_cache`]
+/// One-shot wrapper around [`CacheSigner`] - prefer [`CacheSigner::from_cache`]
 /// when signing many paths for the same cache.
 pub fn sign_narinfo_fingerprint(
     secret_file: &str,
@@ -216,7 +216,7 @@ pub fn sign_narinfo_fingerprint(
 /// Returns `true` if any `Sig: {name}:{sig}` line with a matching key name
 /// verifies under the given public key. Returns `false` if the body is
 /// malformed, the public key can't be decoded, or no matching signature
-/// verifies — the caller is expected to treat `false` as "upstream lacks
+/// verifies - the caller is expected to treat `false` as "upstream lacks
 /// a trusted signature for this path".
 pub fn verify_narinfo_signature(public_key: &str, narinfo_body: &str) -> bool {
     let Some((key_name, pub_b64)) = public_key.split_once(':') else {
@@ -451,7 +451,7 @@ mod tests {
         let (_f, path) = temp_secret_file();
         let (encrypted_priv, pub_b64) = generate_signing_key(&path).expect("generate failed");
         let cache = make_cache("sigcache", &pub_b64, &encrypted_priv);
-        // Sign once with sorted order, once with reversed order — signatures must match
+        // Sign once with sorted order, once with reversed order - signatures must match
         let refs_sorted = vec![
             "aaaa-a".to_string(),
             "bbbb-b".to_string(),
@@ -496,7 +496,7 @@ mod tests {
     #[test]
     fn format_cache_public_key_legacy_matches_stored() {
         // Deriving the pubkey from the encrypted private key must yield exactly
-        // the same result as reading cache.public_key — guards against the
+        // the same result as reading cache.public_key - guards against the
         // "last 32 bytes" slice drifting.
         let (_f, path) = temp_secret_file();
         let (encrypted_priv, pub_b64) = generate_signing_key(&path).expect("generate failed");
@@ -651,7 +651,7 @@ mod tests {
             &refs,
         )
         .expect("sign failed");
-        // sig is "{base_url}-{cache.name}:{sig_b64}" — the sig-key name is
+        // sig is "{base_url}-{cache.name}:{sig_b64}" - the sig-key name is
         // everything before the last ':'.
         let (sig_key_name, _) = sig.rsplit_once(':').unwrap();
         let body = format!(
@@ -688,7 +688,7 @@ mod tests {
 
     #[test]
     fn verify_narinfo_signature_rejects_name_mismatch() {
-        // Same key bytes but wrong name — no Sig line matches.
+        // Same key bytes but wrong name - no Sig line matches.
         let (body, real_key) = signed_narinfo_fixture();
         let pub_b64 = real_key.rsplit_once(':').unwrap().1;
         let wrong = format!("other-name:{pub_b64}");

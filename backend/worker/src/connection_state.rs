@@ -9,7 +9,7 @@
 //! [`Worker<Connected>`] holds an active [`ProtoConnection`] and can enter the
 //! dispatch loop via [`Worker::run`].
 //!
-//! [`Worker<Disconnected>`] has no connection — it can reconnect via
+//! [`Worker<Disconnected>`] has no connection - it can reconnect via
 //! [`Worker::reconnect`], which produces a fresh [`Worker<Connected>`].
 //!
 //! The state is encoded in the type parameter so the compiler prevents calling
@@ -32,8 +32,8 @@ pub struct Disconnected;
 /// Why the dispatch loop (`Worker::run`) exited.
 #[derive(Debug)]
 pub enum RunOutcome {
-    /// Server closed the connection cleanly — reconnecting is appropriate.
+    /// Server closed the connection cleanly - reconnecting is appropriate.
     CleanDisconnect,
-    /// Server sent `Draining` — the worker should shut down gracefully.
+    /// Server sent `Draining` - the worker should shut down gracefully.
     Drained,
 }

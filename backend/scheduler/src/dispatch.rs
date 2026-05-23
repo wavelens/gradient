@@ -200,7 +200,7 @@ struct BuildDispatchMaps {
     dep_counts: HashMap<DerivationId, u32>,
     /// derivation_id → direct input store paths (outputs of every input
     /// derivation). Used by workers to score how much they would have to
-    /// download to start this build. `inputSrcs` are not included — they
+    /// download to start this build. `inputSrcs` are not included - they
     /// live in the `.drv` file and are not stored in the scheduler DB.
     direct_inputs: HashMap<DerivationId, Vec<RequiredPath>>,
 }
@@ -499,7 +499,7 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
         return Ok(());
     }
 
-    // Filter out builds already in the in-memory tracker — one lock acquisition
+    // Filter out builds already in the in-memory tracker - one lock acquisition
     // for the whole pass instead of per-build.
     let new_builds: Vec<MBuild> = {
         let tracker = scheduler.job_tracker.read().await;

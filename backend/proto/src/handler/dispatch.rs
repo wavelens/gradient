@@ -33,7 +33,7 @@ pub(super) enum AppendOutcome {
     /// Chunk was appended.
     Ok,
     /// Chunk would have exceeded the session budget. The path is now poisoned
-    /// and any partial buffer for it has been dropped — the caller must abort
+    /// and any partial buffer for it has been dropped - the caller must abort
     /// the job and refuse the eventual `NarUploaded` for the same path.
     Overflow,
     /// Chunk arrived for a path the session has already poisoned. Drop it.
@@ -46,7 +46,7 @@ pub(super) enum AppendOutcome {
 ///
 /// Once a path overflows the budget it is added to a per-session **poison
 /// set**. Any further chunks for that path are dropped, and the eventual
-/// `NarUploaded` for it must be rejected — otherwise the server would write a
+/// `NarUploaded` for it must be rejected - otherwise the server would write a
 /// `cached_path` row with metadata for bytes that were never persisted to
 /// `nar_storage`, and downstream builds would later fail with
 /// "NAR not found in cache" for a path the DB swears is cached.
@@ -96,7 +96,7 @@ impl NarBuffers {
 
     /// Pop the assembled buffer for `store_path`. Returns `None` if no chunks
     /// were ever buffered (e.g. presigned-S3 path that bypassed `NarPush`).
-    /// Poisoned paths return `None` here too — callers must check
+    /// Poisoned paths return `None` here too - callers must check
     /// [`Self::is_poisoned`] before treating `None` as "S3 mode, accept the
     /// metadata".
     pub(super) fn take(&mut self, store_path: &str) -> Option<Vec<u8>> {
@@ -630,7 +630,7 @@ impl<'a> DispatchContext<'a> {
     /// scheduler does not advertise the path as cached.
     ///
     /// For S3 / presigned uploads (no preceding `NarPush`), there is no
-    /// buffer to commit — the worker has already PUT the bytes directly to
+    /// buffer to commit - the worker has already PUT the bytes directly to
     /// object storage and we just record the metadata.
     #[allow(clippy::too_many_arguments)] // mirrors the wire-protocol message fields
     async fn on_nar_uploaded(
@@ -652,7 +652,7 @@ impl<'a> DispatchContext<'a> {
         // return `None` (the buffer was discarded on overflow), the local-
         // mode commit block would be skipped, and `mark_nar_stored` would
         // record a `cached_path` row whose bytes never reached `nar_storage`
-        // — leaving the path "cached" in the DB and undeliverable on the
+        // - leaving the path "cached" in the DB and undeliverable on the
         // next download.
         if nar_buffers.is_poisoned(&store_path) {
             nar_buffers.clear_poison(&store_path);
@@ -728,7 +728,7 @@ impl<'a> DispatchContext<'a> {
     }
 
     /// Send `AbortJob` to the worker. Used when a NAR upload cannot be
-    /// committed safely — the worker stops the job and replies with
+    /// committed safely - the worker stops the job and replies with
     /// `JobFailed`, which the scheduler turns into a failed build.
     async fn abort_job(&mut self, job_id: &str, reason: String) {
         let _ = send_server_msg(
@@ -785,7 +785,7 @@ impl<'a> DispatchContext<'a> {
                 } else {
                     // Second: keep only those that have a Completed or Substituted build.
                     // A derivation exists in the DB but has only Failed builds should
-                    // NOT be pruned — the worker must retry it.
+                    // NOT be pruned - the worker must retry it.
                     let drv_ids: Vec<DerivationId> = candidates.iter().map(|d| d.id).collect();
                     let built: std::collections::HashSet<DerivationId> = EBuild::find()
                         .filter(CBuild::Derivation.is_in(drv_ids))
@@ -843,7 +843,7 @@ mod nar_buffers_tests {
     fn append_overflow_drops_partial_buffer_and_poisons_path() {
         let mut nb = NarBuffers::new(1024);
         assert_ok(nb.append("/nix/store/a", &vec![0u8; 1000]));
-        // Second chunk would exceed budget — overflow drops the partial
+        // Second chunk would exceed budget - overflow drops the partial
         // buffer for /a and marks it poisoned so the eventual NarUploaded is
         // rejected.
         assert!(matches!(

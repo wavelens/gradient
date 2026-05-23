@@ -42,7 +42,7 @@ impl WebDb {
         Self(conn)
     }
 
-    /// Borrow the inner `DatabaseConnection` — needed in the few places
+    /// Borrow the inner `DatabaseConnection` - needed in the few places
     /// where a function signature is hard-coded to `&DatabaseConnection`
     /// instead of `&impl ConnectionTrait`.
     pub fn inner(&self) -> &DatabaseConnection {

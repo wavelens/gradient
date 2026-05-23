@@ -439,7 +439,7 @@ mod tests {
             // dedup against running's commit: row missing → fall through
             .append_query_results([Vec::<entity::commit::Model>::new()])
             // No last_evaluation, so no further dedup queries.
-            // Concurrency policy reuses the in-flight eval — Skip => SkippedConcurrency.
+            // Concurrency policy reuses the in-flight eval - Skip => SkippedConcurrency.
             .into_connection();
 
         let trig = ProjectTriggerId::now_v7();
@@ -473,7 +473,7 @@ mod tests {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             // in_flight lookup returns the running eval
             .append_query_results([vec![running_eval.clone()]])
-            // dedup fetches the running eval's commit — same hash as the poll
+            // dedup fetches the running eval's commit - same hash as the poll
             .append_query_results([vec![make_commit(running_commit_id, same_hash.clone())]])
             // dedup short-circuits with SkippedSameCommit; no abort, no insert
             .into_connection();
@@ -501,14 +501,14 @@ mod tests {
         let new_hash = vec![9u8; 20];
 
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            // in_flight lookup runs unconditionally — return empty for this test
+            // in_flight lookup runs unconditionally - return empty for this test
             .append_query_results([Vec::<entity::evaluation::Model>::new()])
             // all policy skips the in-flight concurrency action
-            // trigger_evaluation: concurrent=true skips the in-progress guard — no guard query
+            // trigger_evaluation: concurrent=true skips the in-progress guard - no guard query
             // trigger_evaluation: resolve previous (no last_evaluation)
             // commit insert
             .append_query_results([vec![make_commit(new_commit_id, new_hash.clone())]])
-            // evaluation insert — the new eval carries concurrent=true
+            // evaluation insert - the new eval carries concurrent=true
             .append_query_results([vec![{
                 let mut m = make_eval(
                     new_eval_id,
@@ -669,7 +669,7 @@ mod tests {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             // in_flight lookup: returns the running eval
             .append_query_results([vec![running_eval.clone()]])
-            // dedup fetches the running eval's commit — row missing → fall through
+            // dedup fetches the running eval's commit - row missing → fall through
             .append_query_results([Vec::<entity::commit::Model>::new()])
             // abort_evaluation: eval fetch
             .append_query_results([vec![running_eval.clone()]])
@@ -827,7 +827,7 @@ mod tests {
 
     /// When the project's organisation has no writable cache subscription, a
     /// freshly-created evaluation is parked in `Waiting` with the `NoCache`
-    /// reason — no jobs are spawned and the scheduler's reconciler must leave
+    /// reason - no jobs are spawned and the scheduler's reconciler must leave
     /// the row alone until the cache-create endpoint re-queues it.
     #[tokio::test]
     async fn no_writable_cache_parks_evaluation_in_waiting_no_cache() {

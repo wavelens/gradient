@@ -40,7 +40,7 @@ pub enum Commands {
         name: String,
     },
     /// Build a netrc entry locally for a cache and install it into a netrc file.
-    /// No request is sent to the server — bring your own API key (issued via the
+    /// No request is sent to the server - bring your own API key (issued via the
     /// frontend or `gradient` UI). Intended to be run as root (e.g. sudo) to
     /// install into /etc/nix/netrc.
     InstallNetrc {

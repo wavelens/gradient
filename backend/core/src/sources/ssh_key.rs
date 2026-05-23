@@ -189,7 +189,7 @@ mod tests {
 
     #[test]
     fn decrypt_ssh_key_plaintext_pem_rejected() {
-        // Plaintext PEM stored in the column must NOT be accepted —
+        // Plaintext PEM stored in the column must NOT be accepted -
         // doing so would let anyone with DB write access bypass encryption.
         let mut f = tempfile::NamedTempFile::new().unwrap();
         std::io::Write::write_all(&mut f, b"test-secret-key-32-bytes-padding!").unwrap();

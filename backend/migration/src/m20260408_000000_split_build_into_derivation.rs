@@ -6,11 +6,11 @@
 
 //! Split the monolithic `build` row into two concepts:
 //!
-//! * `derivation` — the immutable spec (path, architecture, outputs, deps,
+//! * `derivation` - the immutable spec (path, architecture, outputs, deps,
 //!   features). Keyed per-organization. Its `derivation_output` children
 //!   carry content-addressed metadata (hashes, sizes, cache state) so that
 //!   once populated, every future evaluation of the same drv reuses them.
-//! * `build` — a per-evaluation attempt pointing at a derivation. Holds only
+//! * `build` - a per-evaluation attempt pointing at a derivation. Holds only
 //!   the attempt-specific fields (status, server, log_id, build_time_ms).
 //!
 //! This migration drops the old `build_output` / `build_dependency` /
@@ -432,7 +432,7 @@ impl MigrationTrait for Migration {
     async fn down(&self, _manager: &SchemaManager) -> Result<(), DbErr> {
         // One-way migration. Reverting would require re-synthesizing the old
         // denormalized schema, which is not useful at this stage of the
-        // project — use `fresh` to rebuild from scratch.
+        // project - use `fresh` to rebuild from scratch.
         Ok(())
     }
 }

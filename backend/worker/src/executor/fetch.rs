@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Fetch task — clone the repository, archive it into the Nix store, and
+//! Fetch task - clone the repository, archive it into the Nix store, and
 //! upload the source + all flake inputs to the Gradient cache.
 //!
 //! Private repositories are accessed using the SSH private key delivered by the
@@ -39,7 +39,7 @@ async fn abort_true(abort: &mut watch::Receiver<bool>) {
                     return;
                 }
             }
-            // Sender dropped — treat as "no abort", park forever.
+            // Sender dropped - treat as "no abort", park forever.
             Err(_) => std::future::pending::<()>().await,
         }
     }
@@ -50,12 +50,12 @@ async fn abort_true(abort: &mut watch::Receiver<bool>) {
 /// `local_flake_path` is the path eval tasks should point at (either the
 /// archived nix-store source, or the temporary git checkout on fallback).
 /// `flake_source` is `Some(store_path)` when `nix flake archive` succeeded
-/// and the source now lives in the cache — this is the value reported back
+/// and the source now lives in the cache - this is the value reported back
 /// to the server so subsequent eval-only jobs can use
 /// `FlakeSource::Cached { store_path }`. On archive fallback it is `None`
 /// (worker is on a tmp checkout; no eval-only follow-up possible).
 /// `archived_paths` lists every store path produced by the archive (source
-/// + transitive inputs) — the caller pushes and optionally signs these.
+/// + transitive inputs) - the caller pushes and optionally signs these.
 ///   Empty on fallback.
 pub struct FetchOutcome {
     pub local_flake_path: String,
@@ -85,7 +85,7 @@ pub async fn fetch_repository(
 
     updater.report_fetching().await?;
 
-    // Only Repository sources are supported on this path — Cached sources
+    // Only Repository sources are supported on this path - Cached sources
     // skip FetchFlake entirely and go straight to eval. The scheduler
     // guarantees this by construction, but guard in case.
     let (url, commit) = match &job.source {
@@ -147,8 +147,8 @@ pub async fn fetch_repository(
     // Archive the flake source and all locked inputs into the nix store via a
     // subprocess (so fetching goes through the nix daemon with proper network
     // and store-write access).  Returns the nix store source path so the
-    // evaluator can use `path:/nix/store/xxx` — a pure, content-addressed
-    // reference — instead of the git checkout in /tmp.
+    // evaluator can use `path:/nix/store/xxx` - a pure, content-addressed
+    // reference - instead of the git checkout in /tmp.
     let flake_ref = format!("git+file://{}?rev={}", tmp_path, commit);
     let binpath_nix = binpath_nix.to_owned();
     let binpath_ssh = binpath_ssh.to_owned();
@@ -272,7 +272,7 @@ async fn archive_flake(
     collect_input_paths(&json, &mut all_paths);
 
     let all_paths: Vec<String> = all_paths.into_iter().collect();
-    // Path metadata is no longer surfaced via FetchResult — the server
+    // Path metadata is no longer surfaced via FetchResult - the server
     // records cached_path rows from the NarUploaded stream instead. We
     // still run `nix path-info` here to verify every archived path is
     // actually present in the local store before the caller tries to push
@@ -398,7 +398,7 @@ fn clone_and_checkout(url: &str, commit: &str, ssh_key: Option<&str>) -> Result<
 
 /// Reconstruct a flake-ref string from a `flake.lock` node's `original`
 /// field. Supports `github`, `gitlab`, `sourcehut`, `git`, `tarball`,
-/// `path`, and `indirect` types — the set Nix emits for typical inputs.
+/// `path`, and `indirect` types - the set Nix emits for typical inputs.
 fn flake_ref_from_lock_original(original: &serde_json::Value) -> anyhow::Result<String> {
     use anyhow::Context;
     let ty = original
@@ -466,7 +466,7 @@ fn resolve_overrides(
     for o in overrides {
         if !declared.contains(&o.input_name) {
             warnings.push(format!(
-                "flake input '{}' does not exist in this project's flake — override skipped",
+                "flake input '{}' does not exist in this project's flake - override skipped",
                 o.input_name,
             ));
             continue;
@@ -557,7 +557,7 @@ mod tests {
 
         assert_eq!(reporter.len(), 1);
         assert!(matches!(reporter.events[0], ReportedEvent::Fetching));
-        // The actual clone fails because the URL is fake — that's expected.
+        // The actual clone fails because the URL is fake - that's expected.
         assert!(result.is_err());
     }
 
@@ -579,7 +579,7 @@ mod tests {
     }
 
     /// fetch_repository clones the repo then runs nix flake archive.
-    /// In a unit-test context nix is unavailable, so the whole fetch fails —
+    /// In a unit-test context nix is unavailable, so the whole fetch fails -
     /// this verifies the git clone step is reached (Fetching event emitted)
     /// and that the error propagates rather than silently falling back.
     #[tokio::test]

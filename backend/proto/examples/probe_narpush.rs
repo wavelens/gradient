@@ -9,15 +9,15 @@
  *
  * On a vulnerable server this writes attacker-controlled bytes to
  * `{base_path}/nars/{hash[..2]}/{hash[2..]}.nar.zst` and inserts/updates a
- * `cached_path` row — without any job ever being assigned to this peer.
+ * `cached_path` row - without any job ever being assigned to this peer.
  *
  * Usage:
  *   cargo run -p proto --example probe_narpush -- ws://127.0.0.1:3457/proto
  *
  * Exit codes:
- *   2 — handshake admitted AND server accepted NarPush/NarUploaded
- *   0 — server rejected at any earlier stage (secure)
- *   1 — protocol/transport error
+ *   2 - handshake admitted AND server accepted NarPush/NarUploaded
+ *   0 - server rejected at any earlier stage (secure)
+ *   1 - protocol/transport error
  *
  * After running, verify on the server host:
  *   ls -l "$GRADIENT_BASE_PATH"/nars/aa/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.nar.zst
@@ -86,7 +86,7 @@ async fn main() {
             eprintln!("[probe] AuthChallenge peers={peers:?}");
         }
         Some(ServerMessage::Reject { code, reason }) => {
-            eprintln!("[probe] rejected at init ({code}): {reason} — secure");
+            eprintln!("[probe] rejected at init ({code}): {reason} - secure");
             std::process::exit(0);
         }
         other => bail_unexpected("InitConnection", other),
@@ -96,10 +96,10 @@ async fn main() {
 
     match recv(&mut ws).await {
         Some(ServerMessage::InitAck { .. }) => {
-            eprintln!("[probe] InitAck — open-mode admission confirmed (#2)");
+            eprintln!("[probe] InitAck - open-mode admission confirmed (#2)");
         }
         Some(ServerMessage::Reject { code, reason }) => {
-            eprintln!("[probe] rejected after auth ({code}): {reason} — secure");
+            eprintln!("[probe] rejected after auth ({code}): {reason} - secure");
             std::process::exit(0);
         }
         other => bail_unexpected("AuthResponse", other),
@@ -130,7 +130,7 @@ async fn main() {
     )
     .await;
 
-    // Metadata — fully attacker-controlled, lands in `cached_path`.
+    // Metadata - fully attacker-controlled, lands in `cached_path`.
     send(
         &mut ws,
         &ClientMessage::NarUploaded {
@@ -169,11 +169,11 @@ async fn main() {
     let _ = ws.close(None).await;
 
     if got_error {
-        eprintln!("[probe] server signalled error — verify nar_storage to confirm");
+        eprintln!("[probe] server signalled error - verify nar_storage to confirm");
         std::process::exit(1);
     }
     eprintln!(
-        "[probe] VULNERABLE — NarPush/NarUploaded accepted without job ownership.\n\
+        "[probe] VULNERABLE - NarPush/NarUploaded accepted without job ownership.\n\
          [probe] verify: nars/{}/{} .nar.zst under GRADIENT_BASE_PATH and cached_path row for hash={}",
         &FAKE_HASH[..2],
         &FAKE_HASH[2..],

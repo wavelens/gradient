@@ -14,7 +14,7 @@ use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 /// Returns `true` when the organisation has at least one active cache
 /// subscription that can receive build outputs (ReadWrite or WriteOnly).
 ///
-/// ReadOnly subscriptions are excluded — they let the org pull but not push,
+/// ReadOnly subscriptions are excluded - they let the org pull but not push,
 /// so a build would have nowhere to land.
 pub async fn org_has_writable_cache<C: ConnectionTrait>(
     db: &C,

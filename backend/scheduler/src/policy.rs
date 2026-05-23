@@ -17,7 +17,7 @@
 //! policy.add_rule(MyRule { weight: 5.0 });
 //! ```
 //!
-//! Rules run in insertion order but the final decision is the sum — order only
+//! Rules run in insertion order but the final decision is the sum - order only
 //! matters when a tie needs to be broken deterministically.
 
 use crate::jobs::PendingJob;
@@ -54,16 +54,16 @@ pub struct WorkerContext<'a> {
 ///
 /// Returns a `f64` contribution to the total job score.  Positive values
 /// favour assignment; negative values disfavour it.  Rules can return values
-/// of any magnitude — there is no required scale, but the built-in rules use
+/// of any magnitude - there is no required scale, but the built-in rules use
 /// the following rough ranges so custom rules can be written consistently:
 ///
 /// | Range | Meaning |
 /// |-------|---------|
-/// | ≥ 500 | Hard preference — nearly always wins |
+/// | ≥ 500 | Hard preference - nearly always wins |
 /// | 100–500 | Strong preference |
 /// | 0–100 | Soft preference |
 /// | −100–0 | Soft disfavour |
-/// | ≤ −500 | Hard penalty — nearly always loses |
+/// | ≤ −500 | Hard penalty - nearly always loses |
 pub trait Rule: Send + Sync + std::fmt::Debug {
     fn score(&self, job: &JobContext<'_>, worker: &WorkerContext<'_>) -> f64;
 }
@@ -77,13 +77,13 @@ pub trait Rule: Send + Sync + std::fmt::Debug {
 /// - Each missing path → `−path_penalty`
 ///
 /// When no score has been submitted (worker hasn't checked yet), the job
-/// gets `0.0` — scored candidates always win over unscored ones as long as
+/// gets `0.0` - scored candidates always win over unscored ones as long as
 /// `scored_bonus > 0`.
 #[derive(Debug)]
 pub struct MissingPathsRule {
     /// Flat bonus awarded when the worker has submitted any score (≥ 0).
     pub scored_bonus: f64,
-    /// Penalty per missing store path (should be positive — it is subtracted).
+    /// Penalty per missing store path (should be positive - it is subtracted).
     pub path_penalty: f64,
 }
 
@@ -260,11 +260,11 @@ impl Policy {
     /// Construct the default scheduling policy used by the server.
     ///
     /// Rules (in evaluation order):
-    /// 1. [`MissingPathsRule`] — prefer jobs the worker can start without fetching
-    /// 2. [`MissingNarSizeRule`] — prefer jobs that require less data to fetch
-    /// 3. [`DependencyCountRule`] — prefer builds that unblock more downstream work
-    /// 4. [`WaitTimeRule`] — prevent starvation by boosting long-waiting builds
-    /// 5. [`BuiltinDeprioritizeRule`] — keep real builds ahead of synthetic helpers
+    /// 1. [`MissingPathsRule`] - prefer jobs the worker can start without fetching
+    /// 2. [`MissingNarSizeRule`] - prefer jobs that require less data to fetch
+    /// 3. [`DependencyCountRule`] - prefer builds that unblock more downstream work
+    /// 4. [`WaitTimeRule`] - prevent starvation by boosting long-waiting builds
+    /// 5. [`BuiltinDeprioritizeRule`] - keep real builds ahead of synthetic helpers
     pub fn default_build_policy() -> Self {
         let mut p = Self::new();
         p.add_rule(MissingPathsRule::default());

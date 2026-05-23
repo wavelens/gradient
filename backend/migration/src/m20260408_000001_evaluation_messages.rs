@@ -17,7 +17,7 @@ impl MigrationName for Migration {
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        // 1. Drop evaluation.error — replaced by evaluation_message rows.
+        // 1. Drop evaluation.error - replaced by evaluation_message rows.
         manager
             .alter_table(
                 Table::alter()

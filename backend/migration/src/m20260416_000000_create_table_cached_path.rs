@@ -131,7 +131,7 @@ impl MigrationTrait for Migration {
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        // Recreate derivation_output_signature (simplified — loses data)
+        // Recreate derivation_output_signature (simplified - loses data)
         manager
             .create_table(
                 Table::create()

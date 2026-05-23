@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 /// An upstream cache entry attached to a Gradient cache.
 ///
 /// Exactly one of `upstream_cache` (internal) or `url`+`public_key` (external)
-/// must be populated — enforced at the application level.
+/// must be populated - enforced at the application level.
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "cache_upstream")]
 pub struct Model {
@@ -51,7 +51,7 @@ impl ActiveModelBehavior for ActiveModel {}
 /// Whether a [`cache_upstream`](Model) points to an internal Gradient cache
 /// or an external Nix binary cache.
 ///
-/// Exactly one variant is valid for a given row — the invariant is enforced
+/// Exactly one variant is valid for a given row - the invariant is enforced
 /// at the application level (the database allows invalid states).
 ///
 /// Obtain via [`Model::as_source`].

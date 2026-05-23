@@ -340,7 +340,7 @@ fn apply_trigger_db_chain(db: MockDatabase) -> MockDatabase {
         .append_query_results([vec![cache_row()]]) // org_has_writable_cache: active cache rows
 }
 
-// ── Test 1: Generic forge — no matching trigger (Gitea) ───────────────────────
+// ── Test 1: Generic forge - no matching trigger (Gitea) ───────────────────────
 
 #[test]
 fn forge_webhook_no_matching_trigger() {
@@ -390,7 +390,7 @@ async fn forge_webhook_no_matching_trigger_inner() {
     assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
 
-// ── Test 2: Generic forge — push fires matching trigger ───────────────────────
+// ── Test 2: Generic forge - push fires matching trigger ───────────────────────
 
 #[test]
 fn forge_webhook_push_fires_trigger() {
@@ -449,7 +449,7 @@ async fn forge_webhook_push_fires_trigger_inner() {
     assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
 
-// ── Test 3: Generic forge — invalid signature → 401 ───────────────────────────
+// ── Test 3: Generic forge - invalid signature → 401 ───────────────────────────
 
 #[test]
 fn forge_webhook_invalid_signature() {
@@ -489,7 +489,7 @@ async fn forge_webhook_invalid_signature_inner() {
     assert_eq!(json["message"], "invalid webhook signature");
 }
 
-// ── Test 4: Generic forge — integration not found → 404 ───────────────────────
+// ── Test 4: Generic forge - integration not found → 404 ───────────────────────
 
 #[test]
 fn forge_webhook_integration_not_found() {
@@ -527,7 +527,7 @@ async fn forge_webhook_integration_not_found_inner() {
     assert_eq!(json["message"], "integration not found");
 }
 
-// ── Test 5: Generic forge — branch glob non-match → skipped ──────────────────
+// ── Test 5: Generic forge - branch glob non-match → skipped ──────────────────
 
 #[test]
 fn forge_webhook_branch_glob_no_match_skipped() {
@@ -580,7 +580,7 @@ async fn forge_webhook_branch_glob_no_match_skipped_inner() {
     assert_eq!(skipped[0]["reason"], "filter");
 }
 
-// ── Test 6: Generic forge — PR event fires trigger ────────────────────────────
+// ── Test 6: Generic forge - PR event fires trigger ────────────────────────────
 
 #[test]
 fn forge_webhook_pr_fires_trigger() {
@@ -653,7 +653,7 @@ async fn forge_webhook_pr_fires_trigger_inner() {
     assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
 
-// ── Test 7: Generic forge — PR action mismatch → skipped ──────────────────────
+// ── Test 7: Generic forge - PR action mismatch → skipped ──────────────────────
 
 #[test]
 fn forge_webhook_pr_action_mismatch_skipped() {
@@ -721,7 +721,7 @@ async fn forge_webhook_pr_action_mismatch_skipped_inner() {
     assert_eq!(skipped[0]["reason"], "filter");
 }
 
-// ── Test 8: Generic forge — release event fires releases_only trigger ─────────
+// ── Test 8: Generic forge - release event fires releases_only trigger ─────────
 
 #[test]
 fn forge_webhook_release_fires_releases_only_trigger() {
@@ -787,7 +787,7 @@ async fn forge_webhook_release_fires_releases_only_trigger_inner() {
     assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
 
-// ── Test 9: Generic forge — push does NOT fire releases_only trigger ──────────
+// ── Test 9: Generic forge - push does NOT fire releases_only trigger ──────────
 
 #[test]
 fn forge_webhook_push_does_not_fire_releases_only_trigger() {
@@ -834,7 +834,7 @@ async fn forge_webhook_push_does_not_fire_releases_only_trigger_inner() {
     assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
 
-// ── Test 10: GitHub App — push fires trigger ───────────────────────────────────
+// ── Test 10: GitHub App - push fires trigger ───────────────────────────────────
 
 #[test]
 fn github_app_webhook_push_fires_trigger() {
@@ -894,7 +894,7 @@ async fn github_app_webhook_push_fires_trigger_inner() {
     assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
 
-// ── Test 11: GitHub App — ping ─────────────────────────────────────────────────
+// ── Test 11: GitHub App - ping ─────────────────────────────────────────────────
 
 #[test]
 fn github_app_webhook_ping() {
@@ -935,7 +935,7 @@ async fn github_app_webhook_ping_inner() {
     assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
 
-// ── Test 12: GitHub App — installation (org not found, just warns) ─────────────
+// ── Test 12: GitHub App - installation (org not found, just warns) ─────────────
 
 #[test]
 fn github_app_webhook_installation() {
@@ -986,7 +986,7 @@ async fn github_app_webhook_installation_inner() {
     assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
 
-// ── Test 13: GitHub App — not configured → 503 ────────────────────────────────
+// ── Test 13: GitHub App - not configured → 503 ────────────────────────────────
 
 #[test]
 fn github_app_webhook_not_configured() {

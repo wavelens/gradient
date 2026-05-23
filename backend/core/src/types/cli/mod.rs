@@ -8,7 +8,7 @@
 //!
 //! Each module groups the flags of one feature so handlers and tests can
 //! depend on a narrow slice instead of the full 65-field god struct. Field
-//! names, env vars, defaults and doc comments are preserved verbatim — only
+//! names, env vars, defaults and doc comments are preserved verbatim - only
 //! the Rust access path changes (e.g. `cli.port` → `cli.server.port`).
 
 mod database;

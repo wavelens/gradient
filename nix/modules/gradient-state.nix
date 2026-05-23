@@ -70,7 +70,7 @@
         default = null;
         description = ''
           Path to file containing the hashed password. Leave null for
-          OIDC-only users — the provisioned account will be created without
+          OIDC-only users - the provisioned account will be created without
           a local password, so the OIDC login flow can claim it by email.
         '';
       };
@@ -138,7 +138,7 @@
         default = null;
         description = ''
           GitHub App installation id to bind this organization to. Look it up
-          from the App's "Install App" page on github.com — it's the trailing
+          from the App's "Install App" page on github.com - it's the trailing
           number in the installation URL.
 
           When set, the state-driven provisioner writes it on every
@@ -176,7 +176,7 @@
         description = ''
           When true, force an update of this input using its original
           flake-declared URL (without changing the URL). Mutually
-          exclusive with `url` — exactly one of the two must be set.
+          exclusive with `url` - exactly one of the two must be set.
         '';
       };
     };
@@ -243,7 +243,7 @@
         description = ''
           When `false`, build outputs from this project are pushed to the
           cache but their narinfo signatures are left empty, so external
-          Nix clients won't trust them — keeping the project's outputs
+          Nix clients won't trust them - keeping the project's outputs
           private even when the cache itself is public. A path co-produced
           by another `sign_cache = true` project is still signed.
         '';
@@ -288,7 +288,7 @@
           *how* and *when* an evaluation runs (polling, forge push, forge PR,
           cron schedule). When `null`, existing trigger rows are left
           untouched (back-compat for state files predating this option). When
-          set to `[]`, provisioning errors out — every project must have at
+          set to `[]`, provisioning errors out - every project must have at
           least one trigger.
 
           A new project always receives a default polling trigger
@@ -320,7 +320,7 @@
         description = ''
           Per-input overrides applied during flake fetch. The attribute
           key is the flake input name. Empty (`{}`) means no overrides
-          — flake.lock is used as-is.
+          - flake.lock is used as-is.
         '';
         example = literalExpression ''
           {
@@ -360,8 +360,8 @@
       kind = mkOption {
         type = types.enum [ "inbound" "outbound" ];
         description = ''
-          `inbound` — the forge calls Gradient (HMAC-verified webhooks).
-          `outbound` — Gradient calls the forge (CI status reports).
+          `inbound` - the forge calls Gradient (HMAC-verified webhooks).
+          `outbound` - Gradient calls the forge (CI status reports).
         '';
       };
 
@@ -369,7 +369,7 @@
         type = types.enum [ "gitea" "forgejo" "gitlab" ];
         description = ''
           Which forge this integration targets. For inbound integrations this
-          is display metadata only — a single inbound row can serve
+          is display metadata only - a single inbound row can serve
           Gitea/Forgejo/GitLab via the forge path segment of the webhook URL.
 
           GitHub is intentionally absent: GitHub integration rows are
@@ -404,7 +404,7 @@
         description = ''
           Path to a file containing the forge API token for outbound
           integrations. Loaded as a systemd credential and encrypted into
-          the database at startup. Not used for GitHub outbound — those
+          the database at startup. Not used for GitHub outbound - those
           credentials come from the server-configured GitHub App.
         '';
       };
@@ -698,7 +698,7 @@
         type = types.str;
         description = ''
           Organization the role belongs to. State-managed roles are always
-          org-scoped — there is no way to define a global state-managed
+          org-scoped - there is no way to define a global state-managed
           role.
         '';
       };
@@ -778,7 +778,7 @@
           Attribute set of state-managed custom roles, keyed by role name.
           Each entry creates a custom role in the specified organization with
           the given permission set. Managed roles cannot be modified or
-          deleted through the API — only this state file can change them.
+          deleted through the API - only this state file can change them.
         '';
       };
 
@@ -795,7 +795,7 @@
           Attribute set of worker registrations, keyed by worker_id.
           Each entry inserts a row into worker_registration so the worker
           can authenticate via challenge-response. The token is read from
-          token_file, hashed, and stored — the plaintext is never persisted.
+          token_file, hashed, and stored - the plaintext is never persisted.
         '';
 
         example = literalExpression ''

@@ -755,7 +755,7 @@ pub async fn patch_settings(
         ));
     }
 
-    // OIDC users cannot edit their profile — identity is managed by the provider
+    // OIDC users cannot edit their profile - identity is managed by the provider
     if user.password.is_none() {
         return Err(WebError::forbidden(
             "Cannot modify profile of an OIDC user. Your profile is managed by your identity provider.",

@@ -6,7 +6,7 @@
 //! Integration tests for `DELETE /api/v1/caches/{cache}/nars/{hash}`.
 //!
 //! State-mutation behaviors (audit row written, blob deleted, signature gone)
-//! cannot be asserted against the mock DB — they require a real Postgres
+//! cannot be asserted against the mock DB - they require a real Postgres
 //! harness. Only the auth surface is exercised here.
 
 use axum::http::StatusCode;

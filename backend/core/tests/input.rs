@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Tests for `core::input` — all pure functions, no DB or I/O needed.
+//! Tests for `core::input` - all pure functions, no DB or I/O needed.
 
 extern crate core as gradient_core;
 use gradient_core::types::input::*;

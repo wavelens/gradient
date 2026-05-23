@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Integration tests for the `Scheduler` — tests the coordination between
+//! Integration tests for the `Scheduler` - tests the coordination between
 //! `WorkerPool` and `JobTracker` without requiring a real database.
 
 use std::collections::HashSet;
@@ -251,7 +251,7 @@ async fn test_request_reauth_signals_connected_worker() {
 
     scheduler.request_reauth("w1").await;
 
-    // The notify should fire immediately — the dispatch loop would use this
+    // The notify should fire immediately - the dispatch loop would use this
     // to send an AuthChallenge to the worker.
     tokio::time::timeout(std::time::Duration::from_millis(50), notify.notified())
         .await

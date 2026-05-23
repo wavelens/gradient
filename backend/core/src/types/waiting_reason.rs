@@ -11,11 +11,11 @@
 //! frontend's waiting panel.
 //!
 //! Three reasons:
-//! - `Workers` — no connected worker can satisfy the pending builds' arch /
+//! - `Workers` - no connected worker can satisfy the pending builds' arch /
 //!   required-feature combo (legacy reason; persisted under JSON `kind=workers`).
-//! - `Approval` — pull-request evaluation from a contributor who is not a
+//! - `Approval` - pull-request evaluation from a contributor who is not a
 //!   forge writer on the repo, gated until a maintainer approves.
-//! - `NoCache` — the project's organisation has no active cache configured,
+//! - `NoCache` - the project's organisation has no active cache configured,
 //!   so the build outputs would have nowhere to land.
 
 use serde::{Deserialize, Serialize};
@@ -48,7 +48,7 @@ impl WaitingReason {
     }
 
     /// Tolerant of legacy rows written before the `kind` discriminator existed
-    /// — those decode as `Workers { .. }`.
+    /// - those decode as `Workers { .. }`.
     pub fn from_json(value: &serde_json::Value) -> Option<Self> {
         if let Ok(parsed) = serde_json::from_value::<Self>(value.clone()) {
             return Some(parsed);
@@ -122,7 +122,7 @@ mod tests {
     }
 
     /// Legacy rows persisted before the `kind` tag existed must still
-    /// decode — they all represent the workers-capacity reason.
+    /// decode - they all represent the workers-capacity reason.
     #[test]
     fn legacy_untagged_workers_row_decodes() {
         let legacy = serde_json::json!({

@@ -6,7 +6,7 @@
 
 //! Incoming forge webhook endpoints.
 //!
-//! These routes are **unauthenticated** — they verify callers via HMAC
+//! These routes are **unauthenticated** - they verify callers via HMAC
 //! signatures or token headers instead of JWTs.
 //!
 //! | Endpoint                                              | Forge          | Auth method             |
@@ -48,7 +48,7 @@ use trigger::{
 
 // ── GitHub App webhook ─────────────────────────────────────────────────────
 
-/// `POST /api/v1/hooks/github` — receives all events from the GitHub App.
+/// `POST /api/v1/hooks/github` - receives all events from the GitHub App.
 pub async fn github_app_webhook(
     State(state): State<Arc<ServerState>>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
@@ -286,7 +286,7 @@ async fn dispatch_github_app_release(
 
 // ── Generic forge webhook ──────────────────────────────────────────────────
 
-/// `POST /api/v1/hooks/{forge}/{org_name}/{integration_name}` — receives push,
+/// `POST /api/v1/hooks/{forge}/{org_name}/{integration_name}` - receives push,
 /// pull-request, and release events from a named inbound integration.
 ///
 /// The `forge` path segment is one of: `gitea`, `forgejo`, `gitlab`.

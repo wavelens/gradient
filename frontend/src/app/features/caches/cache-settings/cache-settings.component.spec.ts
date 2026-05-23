@@ -58,7 +58,7 @@ function setup(access: AccessState): ComponentFixture<CacheSettingsComponent> {
   return fixture;
 }
 
-describe('CacheSettingsComponent — access gating', () => {
+describe('CacheSettingsComponent - access gating', () => {
   it('hides Save / Delete / Toggle under read-only access', () => {
     const fixture = setup({ managed: false, canEdit: false, canTrigger: false });
     expect(findByText(fixture.nativeElement, 'save changes')).toBeNull();

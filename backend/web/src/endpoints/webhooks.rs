@@ -46,7 +46,7 @@ pub struct UpdateWebhookRequest {
     pub active: Option<bool>,
 }
 
-/// Public-safe webhook view — secret is never exposed.
+/// Public-safe webhook view - secret is never exposed.
 #[derive(Serialize, Debug)]
 pub struct WebhookResponse {
     pub id: WebhookId,
@@ -74,7 +74,7 @@ impl From<MWebhook> for WebhookResponse {
     }
 }
 
-/// `GET /webhook/{organization}` — list all webhooks for an organization.
+/// `GET /webhook/{organization}` - list all webhooks for an organization.
 pub async fn get(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -100,7 +100,7 @@ pub async fn get(
     ))
 }
 
-/// `PUT /webhook/{organization}` — create a new webhook.
+/// `PUT /webhook/{organization}` - create a new webhook.
 pub async fn put(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -160,7 +160,7 @@ pub async fn put(
     Ok(ok_json(WebhookResponse::from(webhook)))
 }
 
-/// `GET /webhook/{organization}/{webhook}` — get a single webhook.
+/// `GET /webhook/{organization}/{webhook}` - get a single webhook.
 pub async fn get_webhook(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -180,7 +180,7 @@ pub async fn get_webhook(
     Ok(ok_json(WebhookResponse::from(webhook)))
 }
 
-/// `PATCH /webhook/{organization}/{webhook}` — update a webhook.
+/// `PATCH /webhook/{organization}/{webhook}` - update a webhook.
 pub async fn patch_webhook(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -226,7 +226,7 @@ pub async fn patch_webhook(
     Ok(ok_json(WebhookResponse::from(updated)))
 }
 
-/// `DELETE /webhook/{organization}/{webhook}` — delete a webhook.
+/// `DELETE /webhook/{organization}/{webhook}` - delete a webhook.
 pub async fn delete_webhook(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -259,7 +259,7 @@ pub struct WebhookDeliveryResponse {
     pub delivered_at: String,
 }
 
-/// `GET /webhook/{organization}/{webhook}/deliveries` — paginated history of
+/// `GET /webhook/{organization}/{webhook}/deliveries` - paginated history of
 /// past delivery attempts for a webhook.
 pub async fn get_webhook_deliveries(
     state: State<Arc<ServerState>>,
@@ -316,7 +316,7 @@ pub async fn get_webhook_deliveries(
     }))
 }
 
-/// `POST /webhook/{organization}/{webhook}/test` — send a test event.
+/// `POST /webhook/{organization}/{webhook}/test` - send a test event.
 pub async fn post_webhook_test(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,

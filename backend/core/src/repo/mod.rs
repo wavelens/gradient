@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Repository layer — pure database access structs.
+//! Repository layer - pure database access structs.
 //!
 //! Each repo takes `&DatabaseConnection` and exposes named async methods for
 //! all DB operations its aggregate owns. No side effects (webhooks, log
-//! finalization, CI reporting) live here — those stay in the service layer.
+//! finalization, CI reporting) live here - those stay in the service layer.
 //!
 //! # Usage
 //! ```ignore

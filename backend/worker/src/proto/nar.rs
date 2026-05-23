@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! NAR transfer — send built store paths to the server.
+//! NAR transfer - send built store paths to the server.
 //!
 //! Two modes depending on server configuration:
 //! - **Direct**: chunked [`ClientMessage::NarPush`] frames over the WebSocket
@@ -38,7 +38,7 @@ const NAR_CHUNK_SIZE: usize = 4 * 1024 * 1024;
 ///
 /// Some upstream sources (e.g. eval-worker `get_derivation_path`) return drv
 /// paths as bare hash-name strings. NarByteStream needs the absolute filesystem
-/// path, and the server stores `cached_path.store_path` verbatim — both must
+/// path, and the server stores `cached_path.store_path` verbatim - both must
 /// see the canonical `/nix/store/<hash>-<name>` form.
 fn ensure_full_store_path(path: &str) -> String {
     if path.starts_with('/') {
@@ -59,14 +59,14 @@ struct PathMeta {
 
 /// Resolve the metadata an upload should attach to a NAR push.
 ///
-/// When the caller passes `None` (no local store — eval-internal pushes,
+/// When the caller passes `None` (no local store - eval-internal pushes,
 /// tests), the server is left to record whatever metadata it derives on its
 /// side; we emit an empty [`PathMeta`].
 ///
 /// When a store *is* provided, [`gather_path_meta`] failure is a hard error:
 /// silently uploading with empty references stores a permanently incomplete
 /// `cached_path` row, and a later build worker's prefetch closure walk then
-/// misses references parsed straight out of the `.drv` content — the daemon
+/// misses references parsed straight out of the `.drv` content - the daemon
 /// rejects the import with `path '…' is not valid`. Failing here keeps the
 /// blame at the right layer and lets the caller retry instead of poisoning
 /// the cache.
@@ -152,7 +152,7 @@ async fn gather_path_meta(store: &LocalNixStore, store_path: &str) -> Option<Pat
 /// Compress `store_path` into a zstd-compressed NAR and push it to the server
 /// in [`NAR_CHUNK_SIZE`]-byte chunks via [`ClientMessage::NarPush`].
 ///
-/// This is the "direct" transfer mode — no S3 involved.
+/// This is the "direct" transfer mode - no S3 involved.
 ///
 /// When `store` is provided the function also queries the local store for
 /// references and includes them in the final [`ClientMessage::NarUploaded`]
@@ -168,7 +168,7 @@ pub async fn push_direct(
     debug!(store_path, "NAR direct push");
 
     // Resolved up-front: a failure here means we'd otherwise stream a NAR the
-    // server can never confirm — wasted bandwidth and a half-written upload
+    // server can never confirm - wasted bandwidth and a half-written upload
     // it has to garbage-collect.
     let meta = resolve_path_meta(store, store_path).await?;
 
@@ -273,7 +273,7 @@ pub async fn upload_presigned(
     debug!(store_path, method, "presigned NAR upload");
 
     // Resolved up-front: a failure here means we'd otherwise PUT a NAR to S3
-    // the server can never confirm — wasted bandwidth and an orphan object.
+    // the server can never confirm - wasted bandwidth and an orphan object.
     let meta = resolve_path_meta(store, store_path).await?;
 
     // --- 1. Pack + compress the NAR into memory ---
@@ -603,7 +603,7 @@ mod tests {
         let _accept = tokio::spawn(async move { server.accept().await });
 
         // store_path is a `/tmp/...` directory, not a `/nix/store/<hash>-…`
-        // path — `gather_path_meta`'s `StorePath::from_base_path` rejects it
+        // path - `gather_path_meta`'s `StorePath::from_base_path` rejects it
         // before any daemon connection is attempted, so the socket path
         // never matters.
         let store = LocalNixStore::connect_at("/var/empty/gradient-nonexistent.sock", 1).unwrap();

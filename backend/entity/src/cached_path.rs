@@ -12,7 +12,7 @@ use crate::ids::CachedPathId;
 
 /// A cached Nix store path.
 ///
-/// Represents any store path whose NAR is stored in the cache — sources,
+/// Represents any store path whose NAR is stored in the cache - sources,
 /// build outputs, or anything else. The NAR data is stored once (keyed by
 /// `hash`). Association with specific caches and their signatures is via
 /// `cached_path_signature`.

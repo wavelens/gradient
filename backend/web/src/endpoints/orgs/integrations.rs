@@ -12,7 +12,7 @@
 //! `endpoint_url` + `access_token` hold API credentials).
 //!
 //! Secrets and access tokens are stored encrypted with the server's crypt key
-//! and never returned in responses — responses only expose a boolean
+//! and never returned in responses - responses only expose a boolean
 //! "has_secret" / "has_access_token" flag.
 
 use crate::access::{Caller, OrgAccess, load_integration_in_org, load_org};
@@ -165,7 +165,7 @@ fn forge_to_str(f: i16) -> &'static str {
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
-/// `GET /orgs/{organization}/integrations` — list integrations for an org.
+/// `GET /orgs/{organization}/integrations` - list integrations for an org.
 pub async fn get_integrations(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -194,7 +194,7 @@ pub async fn get_integrations(
     ))
 }
 
-/// `GET /orgs/{organization}/integrations/summary` — list integrations as
+/// `GET /orgs/{organization}/integrations/summary` - list integrations as
 /// credential-free summaries. Available to any org member; the full listing
 /// remains gated on `ManageIntegrations` because it exposes `has_secret`,
 /// `has_access_token`, and `endpoint_url`. Used by the trigger UI to render
@@ -229,7 +229,7 @@ pub async fn get_integration_summaries(
     ))
 }
 
-/// `PUT /orgs/{organization}/integrations` — create a new integration.
+/// `PUT /orgs/{organization}/integrations` - create a new integration.
 pub async fn put_integration(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -327,7 +327,7 @@ pub async fn put_integration(
     Ok(ok_json(IntegrationResponse::from(integration)))
 }
 
-/// `GET /orgs/{organization}/integrations/{id}` — fetch a single integration.
+/// `GET /orgs/{organization}/integrations/{id}` - fetch a single integration.
 pub async fn get_integration(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -349,7 +349,7 @@ pub async fn get_integration(
     Ok(ok_json(IntegrationResponse::from(integration)))
 }
 
-/// `PATCH /orgs/{organization}/integrations/{id}` — update an integration.
+/// `PATCH /orgs/{organization}/integrations/{id}` - update an integration.
 pub async fn patch_integration(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -458,7 +458,7 @@ pub async fn patch_integration(
     Ok(ok_json(IntegrationResponse::from(updated)))
 }
 
-/// `DELETE /orgs/{organization}/integrations/{id}` — remove an integration.
+/// `DELETE /orgs/{organization}/integrations/{id}` - remove an integration.
 pub async fn delete_integration(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
