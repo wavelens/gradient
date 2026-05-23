@@ -8,7 +8,6 @@ use crate::types::input::load_secret_bytes;
 use crate::types::*;
 use anyhow::Result;
 use async_trait::async_trait;
-use base64::{Engine, engine::general_purpose};
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use hmac::{Hmac, KeyInit, Mac};
@@ -208,28 +207,19 @@ impl WebhookClient for ReqwestWebhookClient {
     }
 }
 
-/// Encrypts `plaintext_secret` with the server crypt key and returns a base64-encoded ciphertext.
 pub fn encrypt_webhook_secret(crypt_secret_file: &str, plaintext: &str) -> Result<String, String> {
     let key = load_secret_bytes(crypt_secret_file).map_err(|e| e.to_string())?;
-    let ciphertext = crypter::encrypt_with_password(key.expose(), plaintext.as_bytes())
-        .ok_or_else(|| "Encryption failed".to_string())?;
-    Ok(general_purpose::STANDARD.encode(ciphertext))
+    super::action_crypto::encrypt(plaintext, key.expose()).map_err(|e| e.to_string())
 }
 
-/// Decrypts a base64-encoded ciphertext produced by `encrypt_webhook_secret`.
 pub fn decrypt_webhook_secret(
     crypt_secret_file: &str,
     encoded: &str,
 ) -> Result<crate::types::SecretString, String> {
     let key = load_secret_bytes(crypt_secret_file).map_err(|e| e.to_string())?;
-    let ciphertext = general_purpose::STANDARD
-        .decode(encoded)
-        .map_err(|e| format!("Base64 decode error: {}", e))?;
-    let plaintext = crypter::decrypt_with_password(key.expose(), ciphertext)
-        .ok_or_else(|| "Decryption failed".to_string())?;
-    String::from_utf8(plaintext)
+    super::action_crypto::decrypt(encoded, key.expose())
         .map(crate::types::SecretString::new)
-        .map_err(|e| format!("UTF-8 decode error: {}", e))
+        .map_err(|e| e.to_string())
 }
 
 /// Signs `body` with HMAC-SHA256 using `secret` and returns `sha256=<hex>`.
@@ -462,6 +452,7 @@ async fn fire_webhooks(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::{Engine, engine::general_purpose};
     use crate::ci::github_app::verify_github_signature;
     use std::io::Write;
 

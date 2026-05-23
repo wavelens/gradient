@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+pub mod action_crypto;
+pub mod actions;
 pub mod abort;
 pub mod apply;
 pub mod github_app;
