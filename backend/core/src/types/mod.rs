@@ -46,7 +46,6 @@ pub use self::triggers::{ConcurrencyPolicy, TriggerConfig, TriggerConfigError, T
 pub use self::waiting_reason::{UnmetRequirement, WaitingReason};
 pub use self::wildcard::*;
 
-use super::ci::webhook::WebhookClient;
 use super::shutdown::Shutdown;
 use super::storage::LogStorage;
 use super::storage::NarStore;
@@ -114,7 +113,6 @@ pub struct ServerState {
     /// 65-field parser DTO.
     pub config: Arc<RuntimeConfig>,
     pub log_storage: Arc<dyn LogStorage>,
-    pub webhooks: Arc<dyn WebhookClient>,
     pub email: Arc<dyn EmailSender>,
     pub nar_storage: NarStore,
     /// Shared outbound HTTP client. Reuse this for any outbound request
@@ -126,7 +124,7 @@ pub struct ServerState {
     /// Manifest results awaiting one-shot pickup by the superuser's browser.
     pub pending_credentials: Arc<crate::ci::manifest_state::PendingCredentialsStore>,
     /// Graceful-shutdown coordination for all long-lived background tasks
-    /// (dispatch loops, outbound, cache loops, webhook deliveries, etc.).
+    /// (dispatch loops, outbound, cache loops, action deliveries, etc.).
     pub shutdown: Shutdown,
     /// JWT signing/verification secret loaded once at startup. Holding it in
     /// memory avoids reading `secrets.jwt_secret_file` on every request and

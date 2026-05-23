@@ -5,10 +5,8 @@
 
 use crate::cli::test_cli;
 use crate::fakes::email::InMemoryEmailSender;
-use crate::fakes::webhooks::RecordingWebhookClient;
 use crate::log_storage::{InMemoryLogStorage, NoopLogStorage};
 use futures::TryStreamExt as _;
-use gradient_core::ci::WebhookClient;
 use gradient_core::storage::{EmailSender, NarStore};
 use gradient_core::types::ids::*;
 use gradient_core::types::{RuntimeConfig, SecretString, ServerState, WebDb, WorkerDb};
@@ -157,7 +155,6 @@ pub async fn public_cache_with_narinfo() -> Arc<ServerState> {
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config,
         log_storage: Arc::new(NoopLogStorage),
-        webhooks: Arc::new(RecordingWebhookClient::new()) as Arc<dyn WebhookClient>,
         email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
         nar_storage,
         manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
@@ -202,7 +199,6 @@ pub async fn public_cache_state() -> Arc<ServerState> {
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config,
         log_storage: Arc::new(NoopLogStorage),
-        webhooks: Arc::new(RecordingWebhookClient::new()) as Arc<dyn WebhookClient>,
         email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
         nar_storage,
         manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
@@ -252,7 +248,6 @@ pub async fn public_cache_with_nar() -> Arc<ServerState> {
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config,
         log_storage: Arc::new(NoopLogStorage),
-        webhooks: Arc::new(RecordingWebhookClient::new()) as Arc<dyn WebhookClient>,
         email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
         nar_storage,
         manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
@@ -356,7 +351,6 @@ fn make_state(
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config,
         log_storage,
-        webhooks: Arc::new(RecordingWebhookClient::new()) as Arc<dyn gradient_core::ci::WebhookClient>,
         email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
         nar_storage,
         manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
@@ -427,7 +421,6 @@ pub async fn private_cache_state() -> Arc<ServerState> {
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config,
         log_storage: Arc::new(NoopLogStorage),
-        webhooks: Arc::new(RecordingWebhookClient::new()) as Arc<dyn gradient_core::ci::WebhookClient>,
         email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
         nar_storage,
         manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
@@ -483,7 +476,6 @@ pub async fn private_cache_with_nar() -> Arc<ServerState> {
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config,
         log_storage: Arc::new(NoopLogStorage),
-        webhooks: Arc::new(RecordingWebhookClient::new()) as Arc<dyn gradient_core::ci::WebhookClient>,
         email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
         nar_storage,
         manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),

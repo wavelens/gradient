@@ -737,7 +737,6 @@ mod reelect_leader_tests {
     }
 
     fn make_state(db: sea_orm::DatabaseConnection) -> std::sync::Arc<crate::types::ServerState> {
-        use crate::ci::WebhookClient;
         use crate::storage::{EmailSender, LogStorage, NarStore};
         use crate::types::{RuntimeConfig, SecretString, WebDb, WorkerDb};
         use futures::future::BoxFuture;
@@ -753,15 +752,6 @@ mod reelect_leader_tests {
             }
             fn delete<'a>(&'a self, _: entity::ids::BuildId) -> BoxFuture<'a, anyhow::Result<()>> {
                 Box::pin(async { Ok(()) })
-            }
-        }
-
-        #[derive(Debug)]
-        struct NoopWebhook;
-        #[async_trait::async_trait]
-        impl WebhookClient for NoopWebhook {
-            async fn deliver(&self, _: &str, _: &str, _: &str, _: String) -> anyhow::Result<u16> {
-                Ok(200)
             }
         }
 
@@ -801,7 +791,6 @@ mod reelect_leader_tests {
             worker_db: WorkerDb::new(db),
             config,
             log_storage: std::sync::Arc::new(NoopLog),
-            webhooks: std::sync::Arc::new(NoopWebhook) as std::sync::Arc<dyn WebhookClient>,
             email: std::sync::Arc::new(NoopEmail) as std::sync::Arc<dyn EmailSender>,
             nar_storage,
             manifest_state: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),

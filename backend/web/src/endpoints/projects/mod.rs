@@ -7,7 +7,6 @@
 pub mod actions;
 pub mod evaluations;
 pub mod flake_inputs;
-pub mod integrations;
 pub mod management;
 pub mod metrics;
 pub mod triggers;
@@ -15,9 +14,6 @@ pub mod triggers;
 pub use self::evaluations::{
     EntryPointDownloadQuery, EntryPointsQuery, EvaluateRequest, get_entry_point_download,
     get_project_details, get_project_entry_points, get_project_evaluations, post_project_evaluate,
-};
-pub use self::integrations::{
-    delete_project_integration, get_project_integration, put_project_integration,
 };
 pub use self::management::{
     MakeProjectRequest, PatchProjectRequest, TransferOwnershipRequest, delete_project,

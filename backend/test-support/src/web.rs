@@ -29,7 +29,6 @@ use serde::Serialize;
 
 use crate::cli::{test_cli, test_cli_with_crypt};
 use crate::fakes::email::InMemoryEmailSender;
-use crate::fakes::webhooks::RecordingWebhookClient;
 use crate::fixtures::user_id;
 use crate::log_storage::NoopLogStorage;
 
@@ -87,7 +86,7 @@ pub fn live_session(id: SessionId) -> session::Model {
 /// `crypt_secret_file` defaults to `cli::test_cli`'s placeholder, which works
 /// for handlers that never read the crypt secret. Pass `Some(path)` for
 /// handlers that call into `generate_signing_key`, `decrypt_signing_key`, or
-/// `encrypt_webhook_secret`.
+/// `encrypt_secret_with_file`.
 pub fn make_test_server(db: DatabaseConnection) -> TestServer {
     make_test_server_with(db, None)
 }
@@ -109,8 +108,6 @@ pub fn make_test_server_with(
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config,
         log_storage: Arc::new(NoopLogStorage),
-        webhooks: Arc::new(RecordingWebhookClient::new())
-            as Arc<dyn gradient_core::ci::WebhookClient>,
         email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
         nar_storage,
         manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),

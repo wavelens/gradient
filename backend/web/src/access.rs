@@ -26,10 +26,10 @@ use crate::permissions::{Permission, PermissionMask, mask_grants};
 use gradient_core::db::{
     get_any_cache_by_name, get_any_organization_by_name, get_any_project_by_name,
 };
-use gradient_core::types::ids::{IntegrationId, OrganizationId, UserId, WebhookId};
+use gradient_core::types::ids::{IntegrationId, OrganizationId, UserId};
 use gradient_core::types::{
-    CIntegration, COrganizationUser, CWebhook, EIntegration, EOrganizationUser, ERole, EWebhook,
-    MCache, MIntegration, MOrganization, MOrganizationUser, MProject, MUser, MWebhook, ServerState,
+    CIntegration, COrganizationUser, EIntegration, EOrganizationUser, ERole, MCache,
+    MIntegration, MOrganization, MOrganizationUser, MProject, MUser, ServerState,
 };
 use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter};
 use std::sync::Arc;
@@ -238,19 +238,6 @@ pub async fn load_cache(
 
 // ── Org-scoped child resources ───────────────────────────────────────────────
 
-pub async fn load_webhook_in_org(
-    state: &Arc<ServerState>,
-    org_id: OrganizationId,
-    webhook_id: WebhookId,
-) -> WebResult<MWebhook> {
-    EWebhook::find()
-        .filter(CWebhook::Id.eq(webhook_id))
-        .filter(CWebhook::Organization.eq(org_id))
-        .one(&state.web_db)
-        .await?
-        .or_not_found("Webhook")
-}
-
 pub async fn load_integration_in_org(
     state: &Arc<ServerState>,
     org_id: OrganizationId,
@@ -390,7 +377,6 @@ fn reject_managed_org(org: &MOrganization) -> WebResult<()> {
 mod tests {
     use super::*;
     use crate::authorization::ApiKeyContext;
-    use gradient_core::ci::WebhookClient;
     use gradient_core::permissions::mask_from;
     use gradient_core::storage::{EmailSender, NarStore};
     use gradient_core::types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID};
@@ -399,7 +385,6 @@ mod tests {
     use sea_orm::{DatabaseBackend, MockDatabase};
     use test_support::cli::test_cli;
     use test_support::fakes::email::InMemoryEmailSender;
-    use test_support::fakes::webhooks::RecordingWebhookClient;
     use test_support::log_storage::NoopLogStorage;
     use uuid::uuid;
 
@@ -511,7 +496,6 @@ mod tests {
             ),
             config,
             log_storage: Arc::new(NoopLogStorage),
-            webhooks: Arc::new(RecordingWebhookClient::new()) as Arc<dyn WebhookClient>,
             email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
             nar_storage,
             manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),

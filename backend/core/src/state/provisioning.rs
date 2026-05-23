@@ -8,9 +8,8 @@ use super::{
     StateApiKey, StateCache, StateConfiguration, StateFlakeInputOverride, StateIntegration,
     StateOrganization, StateProject, StateRole, StateTrigger, StateUpstream, StateUser, StateWorker,
 };
-use crate::ci::{
-    ForgeType, GITHUB_APP_INTEGRATION_NAME, IntegrationKind, encrypt_webhook_secret,
-};
+use crate::ci::actions::encrypt_secret_with_file;
+use crate::ci::{ForgeType, GITHUB_APP_INTEGRATION_NAME, IntegrationKind};
 use crate::types::consts::BASE_ROLE_ADMIN_ID;
 use crate::types::input::load_secret_bytes;
 use crate::types::triggers::TriggerConfig;
@@ -49,8 +48,6 @@ pub(super) async fn apply_state_to_database(
     app.apply_roles(&config.roles).await?;
     app.apply_projects(&config.projects).await?;
     app.apply_integrations(&config.integrations).await?;
-    app.apply_project_integration_links(&config.projects, &config.integrations)
-        .await?;
     app.apply_caches(&config.caches).await?;
     app.apply_api_keys(&config.api_keys).await?;
     app.apply_workers(&config.workers).await?;
@@ -114,40 +111,6 @@ async fn inbound_integrations_by_name<C: ConnectionTrait>(
         .into_iter()
         .map(|r| (r.name, r.id))
         .collect())
-}
-
-async fn resolve_integration_id(
-    db: &DatabaseConnection,
-    org_id: OrganizationId,
-    name: &str,
-    kind: IntegrationKind,
-    state_integrations: &HashMap<String, StateIntegration>,
-    project_name: &str,
-) -> Result<IntegrationId, DynError> {
-    let row = integration::Entity::find()
-        .filter(integration::Column::Organization.eq(org_id))
-        .filter(integration::Column::Kind.eq(i16::from(kind)))
-        .filter(integration::Column::Name.eq(name))
-        .one(db)
-        .await?
-        .ok_or_else(|| {
-            format!(
-                "Integration '{}' ({:?}) for project '{}' not yet provisioned",
-                name, kind, project_name
-            )
-        })?;
-    // Auto-managed `forge_type=github` rows aren't declarable in state - they
-    // are seeded by the App-install hook and the seeding migration. Accept
-    // references to them without requiring an explicit state.integrations entry.
-    let is_github_managed = row.forge_type == i16::from(ForgeType::GitHub);
-    if !is_github_managed && !state_integrations.contains_key(name) {
-        return Err(format!(
-            "Project '{}' references unknown integration '{}'",
-            project_name, name
-        )
-        .into());
-    }
-    Ok(row.id)
 }
 
 // ── managed_keep_sets ─────────────────────────────────────────────────────────
@@ -1125,76 +1088,14 @@ impl<'a> StateApplicator<'a> {
         }
         let label = format!("integration {} file", suffix);
         let (plain, _) = read_credential("integration", int_name, suffix, &label)?;
-        let encrypted =
-            encrypt_webhook_secret(self.crypt_secret_file, plain.trim()).map_err(|e| {
+        let encrypted = encrypt_secret_with_file(self.crypt_secret_file, plain.trim())
+            .map_err(|e| {
                 format!(
                     "Failed to encrypt {} for integration '{}': {}",
                     suffix, int_name, e
                 )
             })?;
         Ok(Some(encrypted))
-    }
-
-    // ── apply_project_integration_links ───────────────────────────────────────
-
-    async fn apply_project_integration_links(
-        &self,
-        state_projects: &HashMap<String, StateProject>,
-        state_integrations: &HashMap<String, StateIntegration>,
-    ) -> Result<(), DynError> {
-        let org_map = self.org_lookup().await?;
-
-        for state_project in state_projects.values() {
-            if state_project.outbound_integration.is_none() {
-                continue;
-            }
-
-            let org_id = lookup_id(&org_map, &state_project.organization, "Organization")?;
-
-            let project_row = project::Entity::find()
-                .filter(project::Column::Name.eq(&state_project.name))
-                .filter(project::Column::Organization.eq(org_id))
-                .one(self.db)
-                .await?
-                .ok_or_else(|| format!("Project '{}' not found", state_project.name))?;
-
-            let outbound_id = match state_project.outbound_integration.as_deref() {
-                None => None,
-                Some(name) => Some(
-                    resolve_integration_id(
-                        self.db,
-                        org_id,
-                        name,
-                        IntegrationKind::Outbound,
-                        state_integrations,
-                        &state_project.name,
-                    )
-                    .await?,
-                ),
-            };
-
-            let existing = project_integration::Entity::find_by_id(project_row.id)
-                .one(self.db)
-                .await?;
-
-            if let Some(row) = existing {
-                let mut active: project_integration::ActiveModel = row.into();
-                active.outbound_integration = Set(outbound_id);
-                active.update(self.db).await?;
-            } else {
-                let row = project_integration::ActiveModel {
-                    project: Set(project_row.id),
-                    outbound_integration: Set(outbound_id),
-                };
-                row.insert(self.db).await?;
-            }
-            tracing::info!(
-                project = %state_project.name,
-                "Updated project integration link"
-            );
-        }
-
-        Ok(())
     }
 
     // ── unmark_removed_entities ───────────────────────────────────────────────

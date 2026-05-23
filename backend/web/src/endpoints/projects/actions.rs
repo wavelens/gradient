@@ -17,7 +17,7 @@ use axum::{Extension, Json, Router};
 use chrono::Utc;
 use gradient_core::ci::IntegrationKind;
 use gradient_core::ci::actions::encrypt_action_secret;
-use gradient_core::ci::webhook::validate_webhook_url;
+use gradient_core::ci::http_validation::validate_webhook_url;
 use gradient_core::types::actions::{ActionConfig, ActionType};
 use gradient_core::types::input::load_secret_bytes;
 use gradient_core::types::*;

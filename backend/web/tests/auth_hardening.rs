@@ -25,7 +25,6 @@ use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use test_support::cli::test_cli;
 use test_support::fakes::email::InMemoryEmailSender;
-use test_support::fakes::webhooks::RecordingWebhookClient;
 use test_support::fixtures::{user, user_id};
 use test_support::log_storage::NoopLogStorage;
 use uuid::Uuid;
@@ -77,10 +76,7 @@ fn server_with(web_db_setup: impl FnOnce(MockDatabase) -> MockDatabase) -> TestS
         web_db: WebDb::new(db.into_connection()),
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config,
-        log_storage: Arc::new(NoopLogStorage),
-        webhooks: Arc::new(RecordingWebhookClient::new())
-            as Arc<dyn gradient_core::ci::WebhookClient>,
-        email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
+        log_storage: Arc::new(NoopLogStorage),        email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
         nar_storage,
         manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),

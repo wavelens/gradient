@@ -18,7 +18,6 @@ pub mod orgs;
 pub mod projects;
 pub mod stats;
 pub mod user;
-pub mod webhooks;
 pub mod workers;
 
 use crate::error::WebResult;

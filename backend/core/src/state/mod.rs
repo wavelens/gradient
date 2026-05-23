@@ -66,9 +66,6 @@ pub struct StateProject {
     /// runtime `GRADIENT_KEEP_EVALUATIONS` cap further reduces it if exceeded.
     #[serde(default = "default_keep_evaluations")]
     pub keep_evaluations: i32,
-    /// Name of an outbound integration in the same org. `None` unlinks.
-    #[serde(default)]
-    pub outbound_integration: Option<String>,
     /// Declarative trigger list. `None` leaves existing triggers untouched
     /// (back-compat). `Some([])` is an error - a project must have at least one.
     #[serde(default)]
@@ -336,51 +333,6 @@ impl StateConfiguration {
                     field: format!("projects.{}.keep_evaluations", project.name),
                     message: "keep_evaluations must be at least 1".to_string(),
                 });
-            }
-
-            for (field_name, binding, expected_kind) in [(
-                "outbound_integration",
-                &project.outbound_integration,
-                "outbound",
-            )] {
-                let Some(int_name) = binding else { continue };
-                // Auto-managed `forge_type=github` rows are seeded per-org by
-                // the App-install hook (see `ensure_github_app_integrations`)
-                // and are never declared in state.integrations. The
-                // provisioning layer accepts them without a state entry, so
-                // the validator must too - apply-time will catch the case
-                // where the org has no GitHub App installed.
-                if int_name == crate::ci::GITHUB_APP_INTEGRATION_NAME
-                    && !self.integrations.contains_key(int_name)
-                {
-                    continue;
-                }
-                match self.integrations.get(int_name) {
-                    None => errors.push(ValidationError {
-                        field: format!("projects.{}.{}", project.name, field_name),
-                        message: format!("Integration '{}' does not exist", int_name),
-                    }),
-                    Some(int) => {
-                        if int.organization != project.organization {
-                            errors.push(ValidationError {
-                                field: format!("projects.{}.{}", project.name, field_name),
-                                message: format!(
-                                    "Integration '{}' belongs to organization '{}', not '{}'",
-                                    int_name, int.organization, project.organization
-                                ),
-                            });
-                        }
-                        if int.kind != expected_kind {
-                            errors.push(ValidationError {
-                                field: format!("projects.{}.{}", project.name, field_name),
-                                message: format!(
-                                    "Integration '{}' is {}, expected {}",
-                                    int_name, int.kind, expected_kind
-                                ),
-                            });
-                        }
-                    }
-                }
             }
         }
 

@@ -44,7 +44,6 @@ use gradient_core::types::{RuntimeConfig, SecretString, ServerState, WebDb, Work
 use sea_orm::{DatabaseBackend, MockDatabase};
 use std::sync::Arc;
 use test_support::fakes::email::InMemoryEmailSender;
-use test_support::fakes::webhooks::RecordingWebhookClient;
 use test_support::fixtures::{test_date, user, user_id};
 use test_support::log_storage::NoopLogStorage;
 use test_support::web::{TEST_JWT_SECRET, live_session, make_token};
@@ -196,10 +195,7 @@ fn make_server(db: sea_orm::DatabaseConnection) -> TestServer {
         web_db: WebDb::new(db),
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config,
-        log_storage: Arc::new(NoopLogStorage),
-        webhooks: Arc::new(RecordingWebhookClient::new())
-            as Arc<dyn gradient_core::ci::WebhookClient>,
-        email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
+        log_storage: Arc::new(NoopLogStorage),        email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
         nar_storage,
         manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),

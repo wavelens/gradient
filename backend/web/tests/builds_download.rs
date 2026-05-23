@@ -18,7 +18,6 @@ use axum_test::TestServer;
 use bytes::Bytes;
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
-use gradient_core::ci::WebhookClient;
 use gradient_core::storage::{EmailSender, NarStore};
 use gradient_core::types::ids::*;
 use gradient_core::types::{ServerState, WebDb, WorkerDb};
@@ -27,7 +26,6 @@ use harmonia_file_nar::archive::write_nar;
 use sea_orm::{DatabaseBackend, MockDatabase};
 use std::sync::Arc;
 use test_support::fakes::email::InMemoryEmailSender;
-use test_support::fakes::webhooks::RecordingWebhookClient;
 use test_support::log_storage::NoopLogStorage;
 use test_support::prelude::test_cli;
 use uuid::Uuid;
@@ -258,9 +256,7 @@ fn listing_returns_products_from_db() {
                 MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
             ),
             config: std::sync::Arc::new(gradient_core::types::RuntimeConfig::from_cli(&cli).expect("valid test config")),
-            log_storage: Arc::new(NoopLogStorage),
-            webhooks: Arc::new(RecordingWebhookClient::new()) as Arc<dyn WebhookClient>,
-            email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
+            log_storage: Arc::new(NoopLogStorage),            email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
             nar_storage,
             manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
@@ -335,9 +331,7 @@ fn download_streams_file_from_nar() {
                 MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
             ),
             config: std::sync::Arc::new(gradient_core::types::RuntimeConfig::from_cli(&cli).expect("valid test config")),
-            log_storage: Arc::new(NoopLogStorage),
-            webhooks: Arc::new(RecordingWebhookClient::new()) as Arc<dyn WebhookClient>,
-            email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
+            log_storage: Arc::new(NoopLogStorage),            email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
             nar_storage,
             manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),

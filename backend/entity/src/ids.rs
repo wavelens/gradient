@@ -114,8 +114,6 @@ id_newtype!(ProjectActionDeliveryId);
 id_newtype!(ProjectTriggerId);
 id_newtype!(RoleId);
 id_newtype!(UserId);
-id_newtype!(WebhookId);
-id_newtype!(WebhookDeliveryId);
 id_newtype!(SessionId);
 id_newtype!(UploadSessionId);
 id_newtype!(AuditLogId);
