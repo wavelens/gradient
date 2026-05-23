@@ -15,6 +15,7 @@ interface ServerConfig {
   oidc_required: boolean;
   registration_enabled: boolean;
   email_verification_enabled: boolean;
+  smtp_enabled: boolean;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -27,6 +28,7 @@ export class ConfigService {
   oidcRequired = false;
   registrationDisabled = false;
   emailVerificationEnabled = false;
+  smtpEnabled = false;
 
   load(): Promise<void> {
     return firstValueFrom(
@@ -41,6 +43,7 @@ export class ConfigService {
           this.oidcRequired = res.message.oidc_required;
           this.registrationDisabled = !res.message.registration_enabled;
           this.emailVerificationEnabled = res.message.email_verification_enabled;
+          this.smtpEnabled = res.message.smtp_enabled;
         }
       })
       .catch(() => {
