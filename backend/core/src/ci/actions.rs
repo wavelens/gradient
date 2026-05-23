@@ -33,12 +33,7 @@ pub fn decrypt_action_secret(ciphertext: &str, crypt_key: &[u8]) -> Result<Strin
     super::action_crypto::decrypt(ciphertext, crypt_key)
 }
 
-/// Forge-status reports are limited to a fixed lifecycle vocabulary so the
-/// matched event always maps to a single CI state.
 pub const FORGE_STATUS_EVENTS: &[&str] = &["build.started", "build.completed", "build.failed"];
-
-/// Truncate persisted request / response payloads so a chatty upstream does
-/// not balloon the delivery table.
 pub const MAX_BODY_BYTES: usize = 64 * 1024;
 
 pub fn matches_event(action: &MProjectAction, event: &str) -> bool {
@@ -112,9 +107,9 @@ async fn dispatch_event(
     }
 }
 
-pub struct ExecutorOk {
-    pub status_code: Option<i32>,
-    pub response_body: Option<String>,
+pub(crate) struct ExecutorOk {
+    pub(crate) status_code: Option<i32>,
+    pub(crate) response_body: Option<String>,
 }
 
 pub async fn execute_action(
@@ -154,7 +149,10 @@ pub async fn execute_action(
     };
 
     let duration_ms = i32::try_from(started.elapsed().as_millis()).unwrap_or(i32::MAX);
-    let success = result.is_ok();
+    let success = match &result {
+        Ok(ok) => ok.status_code.map(|c| (200..300).contains(&c)).unwrap_or(true),
+        Err(_) => false,
+    };
     let (response_status, response_body, error_message) = match &result {
         Ok(ok) => (ok.status_code, ok.response_body.clone(), None),
         Err(e) => (None, None, Some(format!("{:#}", e))),
@@ -243,13 +241,10 @@ async fn execute_send_web_request(
     }
     let resp = req.send().await.context("HTTP send failed")?;
     let status = resp.status().as_u16() as i32;
-    let response_body = resp.text().await.unwrap_or_default();
-    if !(200..300).contains(&status) {
-        return Err(anyhow!("upstream returned HTTP {}: {}", status, truncate(response_body, 256)));
-    }
+    let body = resp.text().await.unwrap_or_default();
     Ok(ExecutorOk {
         status_code: Some(status),
-        response_body: Some(truncate(response_body, MAX_BODY_BYTES)),
+        response_body: Some(truncate(body, MAX_BODY_BYTES)),
     })
 }
 
@@ -275,9 +270,6 @@ async fn execute_forge_status_report(
     })
 }
 
-/// Constructs a `CiReport` from the dispatcher's JSON payload. Required fields
-/// (`owner`, `repo`, `sha`, `context`) must be present; emitters that fire
-/// forge-status-eligible events are responsible for supplying them.
 async fn build_ci_report_from_payload(
     _state: &Arc<ServerState>,
     payload: &JsonValue,
@@ -309,10 +301,6 @@ async fn build_ci_report_from_payload(
     })
 }
 
-/// Build a `CiReporter` from an integration row referenced by id. Returns a
-/// concrete reporter or a hard error so the delivery row reflects the
-/// misconfiguration — unlike the project-level resolver which silently falls
-/// back to `NoopCiReporter`.
 async fn build_reporter_for_integration(
     state: &Arc<ServerState>,
     integration_id: IntegrationId,
@@ -389,10 +377,7 @@ async fn build_github_reporter(
     Ok(Arc::new(r))
 }
 
-/// Build a payload skeleton suitable for forge-status report executors.
-/// Callers fill in `status` and any extra metadata before passing it to
-/// `dispatch_build_event`. Captured as a helper so emitters and tests stay in
-/// sync about which fields the executor reads.
+/// Builds the payload skeleton expected by `execute_forge_status_report`.
 pub fn forge_status_payload(
     owner: &str,
     repo: &str,
