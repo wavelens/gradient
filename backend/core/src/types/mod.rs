@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+pub mod actions;
 pub mod build_output_metadata;
 pub mod cached_path_info;
 pub mod cli;
@@ -40,6 +41,7 @@ pub use self::input::*;
 pub use self::io::*;
 pub use self::nix_cache::*;
 pub use self::secret::{SecretBytes, SecretString};
+pub use self::actions::{ActionConfig, ActionType};
 pub use self::triggers::{ConcurrencyPolicy, TriggerConfig, TriggerConfigError, TriggerType};
 pub use self::waiting_reason::{UnmetRequirement, WaitingReason};
 pub use self::wildcard::*;
