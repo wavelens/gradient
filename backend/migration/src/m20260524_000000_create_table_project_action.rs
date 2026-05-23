@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+//! Create the project_action table for the Actions feature.
+
 use sea_orm_migration::prelude::*;
 
 #[derive(DeriveMigrationName)]
@@ -77,7 +79,8 @@ impl MigrationTrait for Migration {
                             .name("fk-project_action-created_by")
                             .from(ProjectAction::Table, ProjectAction::CreatedBy)
                             .to(User::Table, User::Id)
-                            .on_delete(ForeignKeyAction::Restrict),
+                            .on_delete(ForeignKeyAction::Restrict)
+                            .on_update(ForeignKeyAction::Cascade),
                     )
                     .to_owned(),
             )

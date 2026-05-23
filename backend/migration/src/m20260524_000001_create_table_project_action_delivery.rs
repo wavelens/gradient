@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+//! Create the project_action_delivery history table.
+
 use sea_orm_migration::prelude::*;
 
 #[derive(DeriveMigrationName)]
