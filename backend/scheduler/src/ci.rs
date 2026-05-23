@@ -163,7 +163,7 @@ pub async fn report_ci_for_entry_points(
 /// `apply_trigger` (scheduler trigger dispatch, manual API trigger, forge
 /// webhook fan-out). The report goes out as soon as the evaluation row exists
 /// - before any worker has picked the eval up - so the commit shows a pending
-/// check immediately.
+///   check immediately.
 ///
 /// No-op when the evaluation has no project: direct builds and restart flows
 /// don't currently report CI status.

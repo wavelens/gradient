@@ -21,8 +21,9 @@ use gradient_core::ci::webhook::validate_webhook_url;
 use gradient_core::types::actions::{ActionConfig, ActionType};
 use gradient_core::types::input::load_secret_bytes;
 use gradient_core::types::*;
+use axum::extract::Query;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, Order, QueryFilter, QueryOrder, QuerySelect};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::sync::Arc;
@@ -615,25 +616,118 @@ pub async fn regenerate_token(
     Ok(ok_json(serde_json::json!({ "token": plaintext_token })))
 }
 
+#[derive(Deserialize, Debug)]
+pub struct DeliveryListQuery {
+    pub limit: Option<u64>,
+    pub offset: Option<u64>,
+}
+
+#[derive(Serialize, Debug)]
+pub struct DeliveryListItem {
+    pub id: ProjectActionDeliveryId,
+    pub event: String,
+    pub success: bool,
+    pub response_status: Option<i32>,
+    pub error_message: Option<String>,
+    pub duration_ms: i32,
+    pub delivered_at: chrono::NaiveDateTime,
+}
+
+#[derive(Serialize, Debug)]
+pub struct DeliveryDetail {
+    #[serde(flatten)]
+    pub item: DeliveryListItem,
+    pub request_body: String,
+    pub response_body: Option<String>,
+}
+
+fn to_delivery_list_item(r: MProjectActionDelivery) -> DeliveryListItem {
+    DeliveryListItem {
+        id: r.id,
+        event: r.event,
+        success: r.success,
+        response_status: r.response_status,
+        error_message: r.error_message,
+        duration_ms: r.duration_ms,
+        delivered_at: r.delivered_at,
+    }
+}
+
 pub async fn list_deliveries(
-    _state: State<Arc<ServerState>>,
-    Extension(_user): Extension<MUser>,
-    Extension(_api_key): Extension<MaybeApiKey>,
-    Path((_organization, _project, _id)): Path<(String, String, ProjectActionId)>,
-) -> WebResult<Json<BaseResponse<serde_json::Value>>> {
-    Err(WebError::internal("not implemented"))
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
+    Path((organization, project, id)): Path<(String, String, ProjectActionId)>,
+    Query(q): Query<DeliveryListQuery>,
+) -> WebResult<Json<BaseResponse<Vec<DeliveryListItem>>>> {
+    let (_org, proj) = load_project(
+        &state,
+        Caller::User(&user),
+        api_key.as_ref(),
+        organization,
+        project,
+        ProjectAccess::Member,
+    )
+    .await?;
+
+    EProjectAction::find()
+        .filter(CProjectAction::Id.eq(id))
+        .filter(CProjectAction::Project.eq(proj.id))
+        .one(&state.web_db)
+        .await?
+        .or_not_found("Action")?;
+
+    let limit = q.limit.unwrap_or(50).min(200);
+    let offset = q.offset.unwrap_or(0);
+
+    let rows = EProjectActionDelivery::find()
+        .filter(CProjectActionDelivery::ActionId.eq(id))
+        .order_by(CProjectActionDelivery::DeliveredAt, Order::Desc)
+        .limit(limit)
+        .offset(offset)
+        .all(&state.web_db)
+        .await?;
+
+    Ok(ok_json(rows.into_iter().map(to_delivery_list_item).collect()))
 }
 
 pub async fn get_delivery(
-    _state: State<Arc<ServerState>>,
-    Extension(_user): Extension<MUser>,
-    Extension(_api_key): Extension<MaybeApiKey>,
-    Path((_organization, _project, _id, _delivery_id)): Path<(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
+    Path((organization, project, action_id, delivery_id)): Path<(
         String,
         String,
         ProjectActionId,
         ProjectActionDeliveryId,
     )>,
-) -> WebResult<Json<BaseResponse<serde_json::Value>>> {
-    Err(WebError::internal("not implemented"))
+) -> WebResult<Json<BaseResponse<DeliveryDetail>>> {
+    let (_org, proj) = load_project(
+        &state,
+        Caller::User(&user),
+        api_key.as_ref(),
+        organization,
+        project,
+        ProjectAccess::Member,
+    )
+    .await?;
+
+    EProjectAction::find()
+        .filter(CProjectAction::Id.eq(action_id))
+        .filter(CProjectAction::Project.eq(proj.id))
+        .one(&state.web_db)
+        .await?
+        .or_not_found("Action")?;
+
+    let r = EProjectActionDelivery::find_by_id(delivery_id)
+        .filter(CProjectActionDelivery::ActionId.eq(action_id))
+        .one(&state.web_db)
+        .await?
+        .or_not_found("Delivery")?;
+
+    Ok(ok_json(DeliveryDetail {
+        request_body: r.request_body.clone(),
+        response_body: r.response_body.clone(),
+        item: to_delivery_list_item(r),
+    }))
 }

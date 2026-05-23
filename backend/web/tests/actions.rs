@@ -11,7 +11,7 @@
 //!   can swap in an `InMemoryEmailSender::disabled()`.
 
 use axum_test::TestServer;
-use entity::{ids::*, organization_user, project, project_action};
+use entity::{ids::*, organization_user, project, project_action, project_action_delivery};
 use gradient_core::storage::{EmailSender, NarStore};
 use gradient_core::types::{
     RuntimeConfig, SecretString, ServerState, SessionId, WebDb, WorkerDb,
@@ -538,6 +538,125 @@ fn regenerate_token_rejects_non_web_request_action() {
             "expected send_web_request mention, got: {}",
             body["message"]
         );
+    });
+}
+
+fn delivery_id() -> ProjectActionDeliveryId {
+    ProjectActionDeliveryId::new(Uuid::parse_str("00000000-0000-0000-0000-0000000000d1").unwrap())
+}
+
+fn delivery_row() -> project_action_delivery::Model {
+    project_action_delivery::Model {
+        id: delivery_id(),
+        action_id: action_id(),
+        event: "build.completed".into(),
+        request_body: r#"{"event":"build.completed"}"#.into(),
+        response_status: Some(200),
+        response_body: Some(r#"{"ok":true}"#.into()),
+        error_message: None,
+        success: true,
+        duration_ms: 42,
+        delivered_at: test_date(),
+    }
+}
+
+#[test]
+fn list_deliveries_excludes_bodies() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let session_id = SessionId::now_v7();
+        let token = make_token(session_id);
+
+        let db = with_project_member(with_auth(
+            MockDatabase::new(DatabaseBackend::Postgres),
+            session_id,
+        ))
+        .append_query_results([vec![send_mail_action_row()]])
+        .append_query_results([vec![delivery_row()]]);
+
+        let server = make_test_server_with(db.into_connection(), None);
+        let url = format!("{}/{}/deliveries", BASE_URL, action_id());
+        let res = server
+            .get(&url)
+            .add_header("authorization", format!("Bearer {}", token))
+            .await;
+
+        res.assert_status_ok();
+        let body: Value = res.json();
+        assert_eq!(body["error"], false);
+        let items = body["message"].as_array().expect("array");
+        assert_eq!(items.len(), 1);
+        assert!(items[0].get("request_body").is_none(), "list must not expose request_body");
+        assert!(items[0].get("response_body").is_none(), "list must not expose response_body");
+        assert_eq!(items[0]["event"], "build.completed");
+        assert_eq!(items[0]["success"], true);
+    });
+}
+
+#[test]
+fn get_delivery_detail_includes_bodies() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let session_id = SessionId::now_v7();
+        let token = make_token(session_id);
+
+        let db = with_project_member(with_auth(
+            MockDatabase::new(DatabaseBackend::Postgres),
+            session_id,
+        ))
+        .append_query_results([vec![send_mail_action_row()]])
+        .append_query_results([vec![delivery_row()]]);
+
+        let server = make_test_server_with(db.into_connection(), None);
+        let url = format!("{}/{}/deliveries/{}", BASE_URL, action_id(), delivery_id());
+        let res = server
+            .get(&url)
+            .add_header("authorization", format!("Bearer {}", token))
+            .await;
+
+        res.assert_status_ok();
+        let body: Value = res.json();
+        assert_eq!(body["error"], false);
+        let msg = &body["message"];
+        assert_eq!(msg["request_body"], r#"{"event":"build.completed"}"#);
+        assert_eq!(msg["response_body"], r#"{"ok":true}"#);
+        assert_eq!(msg["event"], "build.completed");
+    });
+}
+
+#[test]
+fn list_deliveries_404_on_unknown_action() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let session_id = SessionId::now_v7();
+        let token = make_token(session_id);
+
+        let db = with_project_member(with_auth(
+            MockDatabase::new(DatabaseBackend::Postgres),
+            session_id,
+        ))
+        .append_query_results([Vec::<project_action::Model>::new()]);
+
+        let server = make_test_server_with(db.into_connection(), None);
+        let unknown_id = ProjectActionId::now_v7();
+        let url = format!("{}/{}/deliveries", BASE_URL, unknown_id);
+        let res = server
+            .get(&url)
+            .add_header("authorization", format!("Bearer {}", token))
+            .await;
+
+        res.assert_status(axum::http::StatusCode::NOT_FOUND);
+        let body: Value = res.json();
+        assert_eq!(body["error"], true);
     });
 }
 
