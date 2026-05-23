@@ -16,8 +16,8 @@
 //! Daemon access goes through [`LocalNixStore::scoped`], which returns a
 //! [`ScopedGuard`] whose default-on-drop behaviour is to *discard* the
 //! underlying connection. Callers must call [`ScopedGuard::mark_ok`]
-//! once the daemon op completes cleanly; otherwise — on an `Err` return,
-//! a panic, or a future cancellation mid-`await` — the inner harmonia
+//! once the daemon op completes cleanly; otherwise - on an `Err` return,
+//! a panic, or a future cancellation mid-`await` - the inner harmonia
 //! guard is marked broken and the possibly-desynced connection is not
 //! handed back to the next acquirer. This inverts harmonia's default
 //! ("dropped guard returns to the pool") which silently recycled
@@ -44,11 +44,11 @@ use proto::traits::WorkerStore;
 /// NAR upload + daemon ingest, which can run into the tens of seconds for
 /// large closures. With concurrent build jobs each issuing parallel
 /// prefetch imports, the pool's acquire queue can grow well past the
-/// harmonia default of 30 s — long enough that downstream acquires time
+/// harmonia default of 30 s - long enough that downstream acquires time
 /// out spuriously even though the pool is making forward progress.
 ///
 /// 10 minutes mirrors the `HTTP_DOWNLOAD_TIMEOUT` for presigned-URL NAR
-/// fetches in `proto::nar_import` — both bound the absolute longest a
+/// fetches in `proto::nar_import` - both bound the absolute longest a
 /// single import is allowed to take. Any acquire that legitimately needs
 /// more than that points at a stuck connection and is the right thing
 /// to surface as an error.
@@ -168,7 +168,7 @@ impl LocalNixStore {
     /// each canonicalised to `/nix/store/<hash>-<name>` form so consumers
     /// (e.g. NAR push) see a single, well-defined string per path.
     /// Paths that fail individual `query_references` calls (e.g. removed
-    /// between calls) are logged and skipped — the walk continues so the
+    /// between calls) are logged and skipped - the walk continues so the
     /// caller still gets a best-effort closure for the remaining paths.
     /// Register `gcroot_symlink` as an indirect GC root with the daemon.
     ///
@@ -238,8 +238,8 @@ impl DiscardOnDrop for PooledConnectionGuard {
 ///
 /// Acquired via [`LocalNixStore::scoped`]. Callers run their daemon op
 /// against [`ScopedGuard::client`] and call [`ScopedGuard::mark_ok`] *only*
-/// after a clean success. Any other drop path — `Err` early return, panic,
-/// or `await` cancellation — leaves `ok = false`, and the `Drop` impl
+/// after a clean success. Any other drop path - `Err` early return, panic,
+/// or `await` cancellation - leaves `ok = false`, and the `Drop` impl
 /// calls `discard()` (i.e. `mark_broken`) on the inner harmonia guard so
 /// the connection (which may be mid-protocol-frame after cancellation) is
 /// not returned to the pool.
@@ -251,12 +251,12 @@ pub struct ScopedGuard<G: DiscardOnDrop = PooledConnectionGuard> {
 impl ScopedGuard<PooledConnectionGuard> {
     /// Mutable access to the underlying daemon client.
     ///
-    /// Panics if called after the guard has been dropped (internal invariant —
+    /// Panics if called after the guard has been dropped (internal invariant -
     /// the `Option` is only taken in [`Drop`]).
     pub fn client(&mut self) -> &mut DaemonClient<OwnedReadHalf, OwnedWriteHalf> {
         self.inner
             .as_mut()
-            .expect("ScopedGuard inner taken before drop — bug in store wrapper")
+            .expect("ScopedGuard inner taken before drop - bug in store wrapper")
             .client()
     }
 }
@@ -311,7 +311,7 @@ mod tests {
     /// imports queued against the pool, the harmonia default
     /// `acquire_timeout` of 30 s fires before the pool can serve them
     /// even though it is making forward progress. We override it to
-    /// 10 min — anything shorter is an artificial cap that surfaces as
+    /// 10 min - anything shorter is an artificial cap that surfaces as
     /// "acquire local store for import: timeout" mid-build.
     #[test]
     fn pool_config_acquire_timeout_is_generous() {

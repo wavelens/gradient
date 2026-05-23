@@ -165,7 +165,7 @@ pub fn admin_mask() -> PermissionMask {
 }
 
 /// Canonical bitmask for the built-in **Write** role: project, webhook, and
-/// integration management — but no member/role administration and no destruction
+/// integration management - but no member/role administration and no destruction
 /// of the organization or its settings.
 pub fn write_mask() -> PermissionMask {
     use Permission::*;

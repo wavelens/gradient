@@ -203,7 +203,7 @@ pub async fn trigger_restart_builds<C: ConnectionTrait>(
     // queued builds finish.
     //
     // Without this, an all-`Substituted` restart would leave the evaluation
-    // stuck in `Building` forever — no build job ever runs, so nothing fires
+    // stuck in `Building` forever - no build job ever runs, so nothing fires
     // the completion check.
     let prev_builds = EBuild::find()
         .filter(CBuild::Evaluation.eq(prev_eval.id))

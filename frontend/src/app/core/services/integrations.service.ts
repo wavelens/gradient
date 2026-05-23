@@ -25,8 +25,8 @@ export class IntegrationsService {
   }
 
   /** Credential-free integration list available to any org member.
-   *  Use this for UIs that only need name/forge_type — e.g. populating the
-   *  trigger create/edit dropdown — instead of the admin-gated full list. */
+   *  Use this for UIs that only need name/forge_type - e.g. populating the
+   *  trigger create/edit dropdown - instead of the admin-gated full list. */
   listOrgIntegrationSummaries(org: string): Observable<IntegrationSummary[]> {
     return this.api.get<IntegrationSummary[]>(`orgs/${org}/integrations/summary`);
   }

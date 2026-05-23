@@ -6,7 +6,7 @@
 
 //! Adds the `Fetching` evaluation status (numeric value 8).
 //!
-//! This is a purely additive change — no existing rows use value 8, so no
+//! This is a purely additive change - no existing rows use value 8, so no
 //! data migration is required.  The migration exists only to mark the schema
 //! version boundary.
 

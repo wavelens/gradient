@@ -22,7 +22,7 @@ pub struct NarStore {
     prefix: String,
     /// Set only for local storage; used by the orphan-file cleanup scan.
     local_base: Option<String>,
-    /// S3 store — held separately to enable presigned URL generation via the
+    /// S3 store - held separately to enable presigned URL generation via the
     /// [`object_store::signer::Signer`] trait.  `None` for local-disk stores.
     s3_signer: Option<Arc<object_store::aws::AmazonS3>>,
 }
@@ -224,7 +224,7 @@ impl NarStore {
     /// Generate a presigned PUT URL valid for `expires_in` for the NAR
     /// identified by `hash`.
     ///
-    /// Returns `None` for local-disk stores (no presigning needed — the server
+    /// Returns `None` for local-disk stores (no presigning needed - the server
     /// accepts direct `NarPush` WebSocket frames).  Returns `Some(url_string)`
     /// for S3-backed stores so workers can upload directly to S3 without
     /// routing all NAR data through the Gradient server.

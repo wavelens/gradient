@@ -118,7 +118,7 @@ pub enum WebError {
     ServiceUnavailable(ErrorCode, String),
     /// Referential-integrity mismatch detected at request time (e.g. a build
     /// row whose derivation row was concurrently deleted). Maps to the same
-    /// HTTP response as [`Internal`] but is logged at warn level — the
+    /// HTTP response as [`Internal`] but is logged at warn level - the
     /// rich-context warn line is emitted at the callsite, so `IntoResponse`
     /// stays silent.
     #[error("Data Inconsistency: {0}")]
@@ -216,7 +216,7 @@ impl IntoResponse for WebError {
             }
             Self::DataInconsistency(_) => {
                 // Rich-context warn line is emitted at the construction
-                // callsite — don't double-log here.
+                // callsite - don't double-log here.
                 "Internal server error".to_string()
             }
             Self::BadRequest(_, m)
@@ -314,7 +314,7 @@ impl WebError {
         Self::NotFound(ErrorCode::NOT_FOUND, msg.into())
     }
 
-    /// Internal-server-error for "<resource> data inconsistency" — a
+    /// Internal-server-error for "<resource> data inconsistency" - a
     /// referential-integrity violation discovered at request time
     /// (e.g. a build row with no derivation row). Maps to HTTP 500 with the
     /// generic `internal` code, but is logged at warn level via the

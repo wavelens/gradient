@@ -156,7 +156,7 @@ with subtest("check api /orgs/{organization}/workers"):
     assert len(token) == 64, f"Expected 64-char base64 token (48 bytes), got {len(token)}: {token}"
     print(f"Worker registered: peer_id={peer_id}")
 
-    # List workers — should contain our registration
+    # List workers - should contain our registration
     req = json.loads(machine.succeed("""
         curl -XGET http://localhost:3000/api/v1/orgs/org_name/workers -H 'Authorization: Bearer api_key' -H 'Content-Type: application/json'
     """.replace("api_key", api_key).replace("org_name", org_name)))

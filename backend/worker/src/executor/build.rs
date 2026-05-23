@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Build task — invoke the local nix-daemon to build a single derivation.
+//! Build task - invoke the local nix-daemon to build a single derivation.
 //!
 //! Unlike the server's `SshBuildExecutor`, the worker builds directly against
 //! its own local nix-daemon (no SSH tunneling). Dependencies are already
@@ -156,7 +156,7 @@ impl ParsedDerivation {
                 let pairs = output_pairs_from_built_or_drv(&s.built_outputs, &self.drv);
                 if pairs.is_empty() {
                     return Err(anyhow::anyhow!(
-                        "build of {} reported success but produced no recordable outputs — \
+                        "build of {} reported success but produced no recordable outputs - \
                          the daemon returned no built_outputs and the .drv carries no \
                          input-addressed paths to recover (likely a content-addressed or \
                          deferred-output derivation built against an old protocol)",
@@ -199,7 +199,7 @@ impl ParsedDerivation {
 
 /// Resolve `(output_name, full_store_path)` pairs for a successful build.
 ///
-/// The daemon's `built_outputs` is authoritative when populated — for
+/// The daemon's `built_outputs` is authoritative when populated - for
 /// content-addressed or deferred-output drvs the realised path is only
 /// knowable post-build.
 ///
@@ -210,7 +210,7 @@ impl ParsedDerivation {
 /// map), we fall back to the parsed `.drv`'s declared output paths.
 /// Input-addressed drvs and FODs already carry the exact path, so the
 /// recovery is correct for them. Empty `path` entries (true CA / deferred
-/// outputs) are skipped — the caller fails the build when no pairs survive,
+/// outputs) are skipped - the caller fails the build when no pairs survive,
 /// since a CA build with no daemon-reported realisation cannot be recorded
 /// safely.
 fn output_pairs_from_built_or_drv(
@@ -319,7 +319,7 @@ where
         stats.total_msgs += 1;
         if let Some(line) = log_message_to_text(&msg) {
             let len = line.len();
-            // Log streaming is best-effort — never fail the build because the
+            // Log streaming is best-effort - never fail the build because the
             // server connection hiccupped.
             match updater.send_log_chunk(task_index, line.into_bytes()) {
                 Ok(()) => {
@@ -354,7 +354,7 @@ fn log_stream_summary(stats: &LogStreamStats, drv_path: &str) {
     if stats.total_msgs == 0 {
         warn!(
             drv = %drv_path,
-            "daemon emitted zero LogMessages during build — daemon verbosity may be too low \
+            "daemon emitted zero LogMessages during build - daemon verbosity may be too low \
              (set `verbose-builds = true` and `log-lines = 0` in nix.conf, or check \
              the worker user's permissions to read daemon output)"
         );
@@ -363,7 +363,7 @@ fn log_stream_summary(stats: &LogStreamStats, drv_path: &str) {
             drv = %drv_path,
             daemon_messages = stats.total_msgs,
             "daemon emitted LogMessages but none had forwardable text content \
-             (only structured progress / activity events) — set `verbose-builds = true` \
+             (only structured progress / activity events) - set `verbose-builds = true` \
              on the worker's nix-daemon to enable BuildLogLine results"
         );
     }
@@ -381,7 +381,7 @@ fn log_stream_summary(stats: &LogStreamStats, drv_path: &str) {
 ///   from the build sandbox or post-build hook (the actual build log).
 ///
 /// `StopActivity`, `Progress`, `SetExpected`, `SetPhase`, and other
-/// structured result types are skipped — they're progress-bar bookkeeping,
+/// structured result types are skipped - they're progress-bar bookkeeping,
 /// not user-facing log content.
 fn log_message_to_text(msg: &LogMessage) -> Option<String> {
     match msg {
@@ -448,7 +448,7 @@ fn get_basic_derivation(
     // 1. Fixed-output derivation (FOD): both `hash_algo` and `hash` are
     //    populated (e.g. a `fetchurl`). The daemon **must** see this as
     //    `CAFixed(ContentAddress)` because that's what unlocks network
-    //    access in the build sandbox — passing it as `InputAddressed`
+    //    access in the build sandbox - passing it as `InputAddressed`
     //    sandboxes it without DNS, so curl fails with
     //    `Could not resolve host: …` and the build dies.
     // 2. Floating CA derivation: `path` is empty AND `hash_algo` is empty.
@@ -541,7 +541,7 @@ fn get_basic_derivation(
 
     // ── Structured attributes ─────────────────────────────────────────────────
     // harmonia's NixSerialize for BasicDerivation never writes `structured_attrs`
-    // to the wire — only `env` is sent. The `__json` key in env is what the Nix
+    // to the wire - only `env` is sent. The `__json` key in env is what the Nix
     // daemon reads for structured-attrs derivations, so leave it in place.
 
     // Extract the name from the drv path ("hash-name.drv" → "name.drv").
@@ -696,7 +696,7 @@ mod tests {
             "out".parse().unwrap(),
             realisation("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo"),
         );
-        // Drv path differs — must be ignored when built_outputs is non-empty
+        // Drv path differs - must be ignored when built_outputs is non-empty
         // (the daemon's realisation is canonical for CA / FOD outputs).
         let drv = drv_with_outputs(vec![(
             "out",
@@ -746,7 +746,7 @@ mod tests {
     fn output_pairs_skip_drv_outputs_with_empty_path() {
         // CA / deferred outputs carry an empty `path` until the daemon emits
         // a realisation. With nothing to fall back on for those, only the
-        // input-addressed siblings survive — and `realize` errors out when
+        // input-addressed siblings survive - and `realize` errors out when
         // the result is empty so a CA-only build doesn't go silently
         // undocumented.
         let built = BTreeMap::new();

@@ -38,7 +38,7 @@ mod private {
 
 /// Marker trait implemented by [`Active`] and [`Draining`].
 ///
-/// Sealed — cannot be implemented outside this module.
+/// Sealed - cannot be implemented outside this module.
 pub trait WorkerMarker: private::Sealed + std::fmt::Debug + 'static {}
 
 // ── State types ───────────────────────────────────────────────────────────────
@@ -47,7 +47,7 @@ pub trait WorkerMarker: private::Sealed + std::fmt::Debug + 'static {}
 #[derive(Debug)]
 pub struct Active;
 
-/// The worker is draining — it finishes in-flight jobs but accepts no new ones.
+/// The worker is draining - it finishes in-flight jobs but accepts no new ones.
 #[derive(Debug)]
 pub struct Draining;
 
@@ -128,7 +128,7 @@ impl TypedWorker<Active> {
 
     /// Returns `true` when this worker can accept another build job.
     ///
-    /// Only defined on `Active` — calling this on a draining worker is a
+    /// Only defined on `Active` - calling this on a draining worker is a
     /// compile-time error (draining workers never have build capacity).
     pub fn has_build_capacity(&self) -> bool {
         (self.assigned_jobs.len() as u32) < self.max_concurrent_builds

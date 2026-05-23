@@ -7,7 +7,7 @@
 //! Periodic sweep that signs `cached_path_signature` placeholder rows.
 //!
 //! NAR uploads and new cache subscriptions insert `cached_path_signature`
-//! rows with `signature = NULL` — "this (path, cache) pair needs a
+//! rows with `signature = NULL` - "this (path, cache) pair needs a
 //! signature". This sweep walks those pending rows, computes narinfo
 //! signatures with the cache's private key, and fills them in. It also
 //! records `cache_derivation` rows when a derivation's full closure has
@@ -29,7 +29,7 @@ const SIGN_SWEEP_BATCH: u64 = 1000;
 
 /// Skip a `cached_path` iff every producing project has `sign_cache=false`
 /// and at least one such project exists. Paths absent from `producers`
-/// (i.e. not produced by any project — `.drv` files, direct builds) are
+/// (i.e. not produced by any project - `.drv` files, direct builds) are
 /// signed normally.
 pub(crate) fn compute_skipped_cached_paths(
     producers: &HashMap<CachedPathId, Vec<bool>>,
@@ -89,7 +89,7 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
 
     // Build a per-cache signer once (one crypt-secret read + one private-key
     // decryption per cache, not per row). `None` marks caches whose key
-    // failed to decode — we skip their rows for this pass.
+    // failed to decode - we skip their rows for this pass.
     let mut signers: HashMap<CacheId, Option<CacheSigner>> = HashMap::new();
     for (cache_id, cache) in &caches {
         if cache.private_key.is_empty() {
@@ -268,7 +268,7 @@ async fn try_record_cache_derivation(
 /// Loads, for every cached_path in `cached_paths`, the `sign_cache` flag of
 /// every project that produced a matching `derivation_output`. Cached_paths
 /// whose hash matches no `derivation_output` (e.g. `.drv` files) are absent
-/// from the returned map — that means "no producing project, sign normally".
+/// from the returned map - that means "no producing project, sign normally".
 async fn load_producing_project_flags(
     state: &Arc<ServerState>,
     cached_paths: &HashMap<CachedPathId, MCachedPath>,

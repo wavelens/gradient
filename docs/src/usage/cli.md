@@ -111,7 +111,7 @@ asynchronously and any `derivation_output.is_cached` rows for it flip to
 
 `gradient build` uploads the current git repository's tracked files to the
 server and queues a Nix evaluation against them. No Nix tooling runs on the
-client — only the files git tracks are uploaded, addressed by BLAKE3 content
+client - only the files git tracks are uploaded, addressed by BLAKE3 content
 hash so unchanged blobs aren't re-sent across runs. The server materialises
 `/nix/store/<hash>-source`, signs it with the org's cache key, and dispatches
 an evaluation under a per-org reserved `build-request` project.
@@ -180,7 +180,7 @@ Emit machine-readable JSON envelopes mirroring the server's response shape:
 - Success: `{"error": false, "message": <data>}`
 - Failure: `{"error": true, "message": "<reason>"}`
 
-In `--json` mode all human-readable output is suppressed on stdout (progress messages go to stderr; banners are hidden). Interactive prompts are disabled — missing inputs that would otherwise have been prompted produce an error with exit code 2. For streaming endpoints (e.g. build logs), each chunk is emitted on its own line as a JSON envelope (NDJSON).
+In `--json` mode all human-readable output is suppressed on stdout (progress messages go to stderr; banners are hidden). Interactive prompts are disabled - missing inputs that would otherwise have been prompted produce an error with exit code 2. For streaming endpoints (e.g. build logs), each chunk is emitted on its own line as a JSON envelope (NDJSON).
 
 Exit codes: `0` success, `1` API/network/IO/decode error, `2` usage/missing argument, `3` unauthorized.
 
@@ -189,7 +189,7 @@ Exit codes: `0` success, `1` API/network/IO/decode error, `2` usage/missing argu
 ```sh
 # Register a worker (worker_id must be a UUID v4).
 # The worker auto-generates one on first start and writes it to
-# /var/lib/gradient-worker/worker-id — use that value here.
+# /var/lib/gradient-worker/worker-id - use that value here.
 gradient worker register <uuid>
 
 # Register with optional URL and pre-generated token
@@ -203,4 +203,4 @@ gradient worker list
 gradient worker delete <uuid>
 ```
 
-When no `--token` is given, the server generates one and prints it once — store it securely. When `--token` is supplied, the token is not echoed back (the server stores only its hash).
+When no `--token` is given, the server generates one and prints it once - store it securely. When `--token` is supplied, the token is not echoed back (the server stores only its hash).

@@ -75,7 +75,7 @@ fn narinfo_served_from_db_without_daemon_probe() {
 async fn narinfo_served_from_db_inner() {
     // ── Build mock DB rows ────────────────────────────────────────────────
 
-    // A public, active cache — no HTTP auth required.
+    // A public, active cache - no HTTP auth required.
     let cache_row = entity::cache::Model {
         id: cache_id(),
         name: "test-cache".into(),
@@ -148,7 +148,7 @@ async fn narinfo_served_from_db_inner() {
         id: cached_path_sig_id(),
         cached_path: cached_path_id(),
         cache: cache_id(),
-        // 64 raw bytes — any non-empty Ed25519-shaped buffer works.
+        // 64 raw bytes - any non-empty Ed25519-shaped buffer works.
         signature: Some(vec![0x42; 64]),
         last_fetched_at: None,
         fetch_count: 0,
@@ -221,7 +221,7 @@ async fn narinfo_served_from_db_inner() {
 
 /// Regression: when the `cached_path_signature` row's `signature` column is
 /// `NULL` (the state the sign sweep leaves rows in for `sign_cache=false`
-/// projects), the narinfo handler must return 404 — never serve an unsigned
+/// projects), the narinfo handler must return 404 - never serve an unsigned
 /// narinfo. The whole `sign_cache=false` privacy guarantee depends on this.
 #[test]
 fn narinfo_returns_404_when_signature_null() {

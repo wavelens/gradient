@@ -66,7 +66,7 @@ async function settled(fixture: ComponentFixture<OrganizationSettingsComponent>)
   fixture.detectChanges();
 }
 
-describe('OrganizationSettingsComponent — access gating', () => {
+describe('OrganizationSettingsComponent - access gating', () => {
   it('hides Save / Delete under read-only access', async () => {
     const fixture = setup({ managed: false, canEdit: false, canTrigger: false });
     await settled(fixture);

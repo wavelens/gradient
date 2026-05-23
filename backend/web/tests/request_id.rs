@@ -7,7 +7,7 @@
 //! Regression for #86: every response must carry an `x-request-id` so logs
 //! emitted while the request is in flight (handler, DB, spawned cleanup
 //! tasks) can be correlated with a single grep. When the client supplies
-//! the header — typically a reverse proxy injecting one — the server must
+//! the header - typically a reverse proxy injecting one - the server must
 //! preserve it instead of minting a new id.
 //!
 //! Uses manual Tokio runtimes because `#[tokio::test]` expands to
@@ -108,7 +108,7 @@ fn each_request_gets_a_distinct_id() {
         assert_ne!(
             first.header("x-request-id"),
             second.header("x-request-id"),
-            "successive requests must get unique ids — otherwise log \
+            "successive requests must get unique ids - otherwise log \
              correlation collapses across concurrent requests"
         );
     });

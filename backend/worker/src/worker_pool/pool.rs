@@ -20,7 +20,7 @@ use crate::nix::eval_worker::{EvalRequest, EvalResponse, ResolvedItem};
 /// Handle to a single live eval-worker subprocess.
 ///
 /// Owns the child plus its piped stdin/stdout. Each request writes one JSON
-/// line to stdin and reads one JSON line back from stdout — the protocol is
+/// line to stdin and reads one JSON line back from stdout - the protocol is
 /// strictly request/response so a single buffer is sufficient.
 pub struct EvalWorker {
     child: Child,
@@ -409,7 +409,7 @@ impl Drop for PooledEvalWorker {
                         });
                         return;
                     }
-                    trace!("pool shutting down; no tokio runtime — killing eval worker via Drop");
+                    trace!("pool shutting down; no tokio runtime - killing eval worker via Drop");
                 }
                 drop(worker);
                 return;
@@ -458,7 +458,7 @@ mod tests {
     use std::time::Duration;
 
     /// Spawn a `cat` subprocess wrapped as an `EvalWorker`. `cat` echoes
-    /// stdin to stdout and exits cleanly when stdin closes — exactly the
+    /// stdin to stdout and exits cleanly when stdin closes - exactly the
     /// behaviour `EvalWorker::shutdown` relies on (it writes the Shutdown
     /// JSON line then drops stdin).
     fn fake_worker() -> EvalWorker {
@@ -526,7 +526,7 @@ mod tests {
 
         assert!(pool.is_shutting_down());
         // The dropped in-flight worker must NOT have been pushed back into
-        // idle — it should have taken the graceful-shutdown branch.
+        // idle - it should have taken the graceful-shutdown branch.
         assert_eq!(
             pool.idle_count(),
             0,

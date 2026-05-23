@@ -8,7 +8,7 @@
 //!
 //! After a successful handshake the server has validated our token and
 //! negotiated capabilities.  The negotiated [`GradientCapabilities`] may be a
-//! strict subset of what we advertised — the server may disable capabilities
+//! strict subset of what we advertised - the server may disable capabilities
 //! it is not configured to accept.
 
 use anyhow::{Context, Result, bail};
@@ -29,9 +29,9 @@ pub struct HandshakeResult {
 
 /// Perform the full challenge-response handshake.
 ///
-/// `peer_id`     — persistent UUID loaded from disk (or freshly generated on first start).
-/// `peer_tokens` — `(peer_id, plaintext_token)` pairs from `GRADIENT_WORKER_PEERS`.
-/// `capabilities`— advertised capabilities.
+/// `peer_id`     - persistent UUID loaded from disk (or freshly generated on first start).
+/// `peer_tokens` - `(peer_id, plaintext_token)` pairs from `GRADIENT_WORKER_PEERS`.
+/// `capabilities`- advertised capabilities.
 pub async fn perform_handshake(
     conn: &mut ProtoConnection,
     peer_id: String,

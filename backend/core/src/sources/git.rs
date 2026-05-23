@@ -107,7 +107,7 @@ impl<'a> ProjectGitContext<'a> {
         }
 
         // A dangling `last_evaluation` (row deleted but pointer stale) is
-        // treated as "no previous evaluation, update needed" — same path as
+        // treated as "no previous evaluation, update needed" - same path as
         // a freshly-created project. The pointer self-heals on the next
         // successful trigger.
         if let Some(last_evaluation) = self.project.last_evaluation {
@@ -546,7 +546,7 @@ fn find_ref_in_list(
 
 /// Read pkt-lines from `reader` and return the SHA-1 hash of HEAD.
 ///
-/// Reads incrementally — one pkt-line at a time — so it works correctly
+/// Reads incrementally - one pkt-line at a time - so it works correctly
 /// even when the remote keeps the connection open after the ref advertisement
 /// (which is normal git protocol behavior).
 ///
@@ -569,7 +569,7 @@ fn read_head_from_pktlines(reader: &mut dyn std::io::Read) -> Result<Vec<u8>, So
             .ok_or(SourceError::GitOutputParsing)?;
 
         if len == 0 {
-            break; // flush pkt — end of advertisement
+            break; // flush pkt - end of advertisement
         }
 
         if len < 4 {
@@ -901,13 +901,13 @@ mod tests {
 
         let server = std::thread::spawn(move || {
             let (mut conn, _) = listener.accept().unwrap();
-            // Send ref advertisement then flush — but do NOT close the connection.
+            // Send ref advertisement then flush - but do NOT close the connection.
             let mut payload = Vec::new();
             payload.extend_from_slice(&ref_line_with_caps(FAKE_SHA, "HEAD", "multi_ack"));
             payload.extend_from_slice(FLUSH);
             conn.write_all(&payload).unwrap();
             conn.flush().unwrap();
-            // Keep connection open — sleep long enough that read_to_end would block.
+            // Keep connection open - sleep long enough that read_to_end would block.
             std::thread::sleep(std::time::Duration::from_secs(5));
             drop(conn);
         });
@@ -925,7 +925,7 @@ mod tests {
         assert_eq!(hex::encode(&result), FAKE_SHA);
         assert!(
             elapsed.as_millis() < 1000,
-            "read_head_from_pktlines blocked for {}ms — likely still using read_to_end",
+            "read_head_from_pktlines blocked for {}ms - likely still using read_to_end",
             elapsed.as_millis()
         );
 

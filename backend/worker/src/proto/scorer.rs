@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Job scoring — determines how suitable this worker is for each job candidate.
+//! Job scoring - determines how suitable this worker is for each job candidate.
 //!
 //! For each candidate the scheduler ships the set of direct input store
 //! paths in `required_paths`. The worker checks each path against its local
@@ -12,7 +12,7 @@
 //! `missing` count means fewer paths need downloading, so the worker is a
 //! better fit for the job.
 //!
-//! Source paths (`inputSrcs`) are not included in `required_paths` — they
+//! Source paths (`inputSrcs`) are not included in `required_paths` - they
 //! live only in the `.drv` file and are not stored server-side. They tend
 //! to be roughly equivalent across workers in the same org so their absence
 //! does not skew scoring meaningfully.

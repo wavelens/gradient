@@ -108,7 +108,7 @@ impl Scheduler {
             max_concurrent_builds,
         );
         debug!(%peer_id, "worker capabilities updated");
-        // Capabilities just changed — a build that was previously "no worker
+        // Capabilities just changed - a build that was previously "no worker
         // can do this" might now be servable, or vice-versa. Re-evaluate
         // every in-flight evaluation's Waiting/Building gate immediately
         // instead of waiting for the next dispatch tick.

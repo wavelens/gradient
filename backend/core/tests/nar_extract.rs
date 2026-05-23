@@ -206,7 +206,7 @@ fn extracts_directory_as_tar_zst() {
     let (files, paths) = read_tar_zst(&tar_zst);
 
     // Tar should contain the matched dir as the root, then nested entries
-    // — every path is rooted at "store/" so extraction recreates that name.
+    // - every path is rooted at "store/" so extraction recreates that name.
     assert!(
         paths.iter().any(|p| p == "store/"),
         "missing root dir entry: {paths:?}"
@@ -271,7 +271,7 @@ fn directory_tarball_preserves_symlinks() {
 }
 
 /// When the requested path is the NAR's root directory itself (target of a
-/// single empty component), we still return a tarball rather than erroring —
+/// single empty component), we still return a tarball rather than erroring -
 /// this happens when a build product's path equals the output store path.
 #[test]
 fn directory_match_at_root_via_basename() {

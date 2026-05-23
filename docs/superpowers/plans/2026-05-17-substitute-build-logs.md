@@ -1,14 +1,14 @@
-# Substituting Build Logs From Upstream Caches — Implementation Plan
+# Substituting Build Logs From Upstream Caches - Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Give `Substituted` and `external_cached` builds a real `log_id` — first by deduplicating against any prior build for the same derivation, then (only for `external_cached`) by fetching `/log/{drv-basename}` from the org's configured upstream caches.
+**Goal:** Give `Substituted` and `external_cached` builds a real `log_id` - first by deduplicating against any prior build for the same derivation, then (only for `external_cached`) by fetching `/log/{drv-basename}` from the org's configured upstream caches.
 
 **Architecture:** New scheduler module `log_substitution.rs` exposing one `substitute_log(state, build_id, derivation_id, drv_path, allow_upstream_fetch)` helper. Three call sites spawn it as a `tokio::spawn` task: `insert_build_rows` and `expand_substituted_closure` in `eval.rs` (dedup-only), and `handle_build_job_completed` in `build.rs` (dedup + HTTP fallback). A shared `upstream_urls_for_org` helper extracted to `core::db` replaces the duplicated query inside `proto/handler/cache.rs`.
 
 **Tech Stack:** Rust, sea-orm, reqwest (already in workspace), tokio, wiremock (new dev-dep).
 
-> **Local verification policy:** This project does NOT run `cargo test` locally — CI runs the full test suite. Each task's "Run the test" step that invokes `cargo test` is a CI verification (push the branch and wait for the run). Locally, use `cargo check --workspace` and `cargo clippy --workspace --no-deps -- -D warnings` after each task.
+> **Local verification policy:** This project does NOT run `cargo test` locally - CI runs the full test suite. Each task's "Run the test" step that invokes `cargo test` is a CI verification (push the branch and wait for the run). Locally, use `cargo check --workspace` and `cargo clippy --workspace --no-deps -- -D warnings` after each task.
 
 > **Branch:** All commits land on `feat/substitute-build-logs`, branched off `main`. Task 0 creates the branch.
 
@@ -17,20 +17,20 @@
 ## File Structure
 
 **Created:**
-- `backend/core/src/db/cache_upstream.rs` — extracted `upstream_urls_for_org` helper + unit test.
-- `backend/scheduler/src/log_substitution.rs` — `substitute_log` + private helpers + tests.
+- `backend/core/src/db/cache_upstream.rs` - extracted `upstream_urls_for_org` helper + unit test.
+- `backend/scheduler/src/log_substitution.rs` - `substitute_log` + private helpers + tests.
 
 **Modified:**
-- `backend/Cargo.toml` — add `wiremock` to `[workspace.dependencies]`.
-- `backend/scheduler/Cargo.toml` — add `reqwest`, `futures` deps; add `wiremock`, `tokio` (with `time` feature), `entity` dev-deps if missing.
-- `backend/core/src/db/mod.rs` — `pub mod cache_upstream;` + re-export `upstream_urls_for_org`.
-- `backend/proto/src/handler/cache.rs` — replace inline upstream-URL query in `extend_with_upstream_results` with the new helper.
-- `backend/scheduler/src/lib.rs` — `pub mod log_substitution;`.
-- `backend/scheduler/src/eval.rs` — call `substitute_log(..., allow_upstream_fetch=false)` after insertion in `insert_build_rows` and `expand_substituted_closure`.
-- `backend/scheduler/src/build.rs` — call `substitute_log(..., allow_upstream_fetch=true)` after `update_build_status(...Completed)` in `BuildStateHandler::handle_build_job_completed` when `leader.external_cached == true`.
-- `docs/gradient-api.yaml` — cross-check `/cache/{cache}/log/{drv}` description (no schema change; copy-edit if it says anything misleading about substituted builds).
-- `docs/src/tests.md` — list the new tests.
-- `docs/src/` — add a short note in the caches/substitution page mentioning that logs are also substituted.
+- `backend/Cargo.toml` - add `wiremock` to `[workspace.dependencies]`.
+- `backend/scheduler/Cargo.toml` - add `reqwest`, `futures` deps; add `wiremock`, `tokio` (with `time` feature), `entity` dev-deps if missing.
+- `backend/core/src/db/mod.rs` - `pub mod cache_upstream;` + re-export `upstream_urls_for_org`.
+- `backend/proto/src/handler/cache.rs` - replace inline upstream-URL query in `extend_with_upstream_results` with the new helper.
+- `backend/scheduler/src/lib.rs` - `pub mod log_substitution;`.
+- `backend/scheduler/src/eval.rs` - call `substitute_log(..., allow_upstream_fetch=false)` after insertion in `insert_build_rows` and `expand_substituted_closure`.
+- `backend/scheduler/src/build.rs` - call `substitute_log(..., allow_upstream_fetch=true)` after `update_build_status(...Completed)` in `BuildStateHandler::handle_build_job_completed` when `leader.external_cached == true`.
+- `docs/gradient-api.yaml` - cross-check `/cache/{cache}/log/{drv}` description (no schema change; copy-edit if it says anything misleading about substituted builds).
+- `docs/src/tests.md` - list the new tests.
+- `docs/src/` - add a short note in the caches/substitution page mentioning that logs are also substituted.
 
 **Deleted:** none.
 
@@ -91,7 +91,7 @@ Run:
 cargo check -p scheduler 2>&1 | tail -10
 ```
 
-Expected: clean compile (no errors). Unused-import warnings for `reqwest`/`futures` are OK at this point — they'll be used in Task 3.
+Expected: clean compile (no errors). Unused-import warnings for `reqwest`/`futures` are OK at this point - they'll be used in Task 3.
 
 - [ ] **Step 4: Commit**
 
@@ -252,7 +252,7 @@ pub mod cache_upstream;
 pub use cache_upstream::upstream_urls_for_org;
 ```
 
-(Add `pub use` next to other re-exports — match the file's existing convention. If the file has no `pub use` lines, just leave the module declaration.)
+(Add `pub use` next to other re-exports - match the file's existing convention. If the file has no `pub use` lines, just leave the module declaration.)
 
 - [ ] **Step 3: Verify it compiles and tests pass on CI**
 
@@ -279,8 +279,8 @@ Open `backend/proto/src/handler/cache.rs:326-378` (function `extend_with_upstrea
 ```
 
 Remove the now-unused imports at the top of the file:
-- `entity::organization_cache::{Entity as EOrganizationCache, Column as COrganizationCache, CacheSubscriptionMode}` — keep only what other functions in the file still use; if no other uses exist, remove entirely.
-- `entity::cache_upstream::{Entity as ECacheUpstream, Column as CCacheUpstream}` — same rule.
+- `entity::organization_cache::{Entity as EOrganizationCache, Column as COrganizationCache, CacheSubscriptionMode}` - keep only what other functions in the file still use; if no other uses exist, remove entirely.
+- `entity::cache_upstream::{Entity as ECacheUpstream, Column as CCacheUpstream}` - same rule.
 - `crate::types::ids::CacheId` (if only used by this query).
 
 - [ ] **Step 5: Verify proto crate still compiles**
@@ -328,7 +328,7 @@ Create `backend/scheduler/src/log_substitution.rs` with:
 //! 2. (Only when `allow_upstream_fetch == true`) fall back to the
 //!    Hydra-style `/log/{drv}` endpoint on each configured upstream cache.
 //!
-//! Failures are never fatal — log substitution must not break the build pipeline.
+//! Failures are never fatal - log substitution must not break the build pipeline.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -348,7 +348,7 @@ const LOG_FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 const LOG_FETCH_MAX_BYTES: usize = 16 * 1024 * 1024;
 
 /// Try to give `build_id` a `log_id` via local dedup, then (optionally) an
-/// upstream `/log/{drv}` fetch. Always returns `Ok` — failures are logged but
+/// upstream `/log/{drv}` fetch. Always returns `Ok` - failures are logged but
 /// never propagated, so the caller's pipeline is unaffected.
 pub async fn substitute_log(
     state: Arc<ServerState>,
@@ -454,11 +454,11 @@ async fn set_log_id(state: &Arc<ServerState>, build_id: BuildId, log_id: BuildId
 // ── Helper to fix a fluent-API typo above. The two filter calls use
 //    `CBuild.derivation_eq(derivation_id)` for readability in code review,
 //    but sea-orm expects the column-trait form. The real implementation uses
-//    `CBuild::Derivation.eq(derivation_id)` — copy that exact form below.
+//    `CBuild::Derivation.eq(derivation_id)` - copy that exact form below.
 trait _RemoveBeforeMerge {} // placeholder: see the literal substitution below
 ```
 
-**Note for implementer:** the two `.filter(CBuild.derivation_eq(...))` calls in the snippet above are pseudocode — replace each with the real sea-orm form `.filter(CBuild::Derivation.eq(derivation_id))`. Sea-orm's `ColumnTrait::eq` is the only form that compiles. The trailing `_RemoveBeforeMerge` trait is just a marker — delete it.
+**Note for implementer:** the two `.filter(CBuild.derivation_eq(...))` calls in the snippet above are pseudocode - replace each with the real sea-orm form `.filter(CBuild::Derivation.eq(derivation_id))`. Sea-orm's `ColumnTrait::eq` is the only form that compiles. The trailing `_RemoveBeforeMerge` trait is just a marker - delete it.
 
 After applying the substitution, the two `filter(...)` lines become:
 
@@ -518,7 +518,7 @@ mod tests {
         let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
             // initial load of `new`
             .append_query_results([vec![new.clone()]])
-            // dedup query (a) — finds `prior`
+            // dedup query (a) - finds `prior`
             .append_query_results([vec![prior.clone()]])
             // reload before update
             .append_query_results([vec![new.clone()]])
@@ -550,7 +550,7 @@ mod tests {
         substitute_log(state, new_id, drv, "/nix/store/x-test.drv".to_string(), false)
             .await
             .expect("substitute_log returns Ok");
-        // No UPDATE call queued — if substitute_log made one, MockDatabase would
+        // No UPDATE call queued - if substitute_log made one, MockDatabase would
         // panic at the unstaged exec.
     }
 }
@@ -571,7 +571,7 @@ cargo check -p scheduler 2>&1 | tail -20
 cargo clippy -p scheduler --no-deps -- -D warnings 2>&1 | tail -20
 ```
 
-Expected: clean. Fix any compile errors (most likely import path issues — `EvaluationStatus` import in test module is unused, drop it; etc.). The two tests above will run on CI.
+Expected: clean. Fix any compile errors (most likely import path issues - `EvaluationStatus` import in test module is unused, drop it; etc.). The two tests above will run on CI.
 
 - [ ] **Step 4: Commit**
 
@@ -1054,7 +1054,7 @@ This sibling fn already inserts `Substituted` rows for the transitive closure. W
 
 - [ ] **Step 1: Add the spawn loop after `insert_many`**
 
-Locate `expand_substituted_closure` (free function, ~line 509). The existing loop builds `builds: Vec<ABuild>` from rows. Before the final `for chunk in builds.chunks(BATCH_SIZE) { ... }`, we already have `builds` in memory but the `ABuild` rows have `Set(BuildId::now_v7())` — to surface the IDs we need to compute them once.
+Locate `expand_substituted_closure` (free function, ~line 509). The existing loop builds `builds: Vec<ABuild>` from rows. Before the final `for chunk in builds.chunks(BATCH_SIZE) { ... }`, we already have `builds` in memory but the `ABuild` rows have `Set(BuildId::now_v7())` - to surface the IDs we need to compute them once.
 
 Refactor the row-build closure to collect `(BuildId, DerivationId)` for `Substituted` rows in parallel with the `ABuild`s. Replace the existing `let builds: Vec<ABuild> = rows.iter().filter_map(|row| { ... }).collect();` block with:
 
@@ -1199,7 +1199,7 @@ Append to the `tests` mod in `log_substitution.rs`:
 ```rust
     #[tokio::test(flavor = "multi_thread")]
     async fn followers_get_log_id_via_backfill() {
-        // The followers are not represented in MockDatabase as Models — we
+        // The followers are not represented in MockDatabase as Models - we
         // only assert that `set_log_id` queues an UPDATE call (via the staged
         // exec result). This guards the back-fill UPDATE never being skipped.
         let drv_id = DerivationId::new(Uuid::now_v7());
@@ -1310,7 +1310,7 @@ Per `CLAUDE.md`: when backend API behavior changes, update `docs/gradient-api.ya
 **Files:**
 - Modify: `docs/gradient-api.yaml`
 - Modify: `docs/src/tests.md`
-- Modify: `docs/src/` — caches/substitution page (find via `grep -l 'substitut' docs/src/*.md`).
+- Modify: `docs/src/` - caches/substitution page (find via `grep -l 'substitut' docs/src/*.md`).
 
 - [ ] **Step 1: Cross-check `docs/gradient-api.yaml` `/cache/{cache}/log/{drv}` description**
 
@@ -1331,15 +1331,15 @@ Find the existing structure (`grep -n "^##" docs/src/tests.md | head -20`). Unde
 ```markdown
 ### Log substitution
 
-- `log_substitution::tests::dedup_hit_via_existing_log_id_pointer` — newly-inserted Substituted build inherits a sibling's `log_id`.
-- `log_substitution::tests::no_prior_build_no_fetch_returns_ok` — without siblings and with `allow_upstream_fetch=false`, returns Ok and leaves `log_id` null.
-- `log_substitution::tests::upstream_fetch_persists_log_on_200` — external_cached build's log is fetched from the configured upstream and stored.
-- `log_substitution::tests::first_upstream_404_second_200` — falls through to the next upstream on a 404.
-- `log_substitution::tests::all_upstreams_404_leaves_log_null` — silent no-op when no upstream has the log.
-- `log_substitution::tests::upstream_body_exceeding_cap_is_truncated` — oversize log is capped at LOG_FETCH_MAX_BYTES with a trailing marker.
-- `log_substitution::tests::followers_get_log_id_via_backfill` — leader's log_id propagation includes a follower backfill UPDATE.
-- `core::db::cache_upstream::tests::returns_urls_from_subscribed_caches` — shared upstream-URL helper.
-- `core::db::cache_upstream::tests::empty_when_no_org_caches` — empty result when org has no caches.
+- `log_substitution::tests::dedup_hit_via_existing_log_id_pointer` - newly-inserted Substituted build inherits a sibling's `log_id`.
+- `log_substitution::tests::no_prior_build_no_fetch_returns_ok` - without siblings and with `allow_upstream_fetch=false`, returns Ok and leaves `log_id` null.
+- `log_substitution::tests::upstream_fetch_persists_log_on_200` - external_cached build's log is fetched from the configured upstream and stored.
+- `log_substitution::tests::first_upstream_404_second_200` - falls through to the next upstream on a 404.
+- `log_substitution::tests::all_upstreams_404_leaves_log_null` - silent no-op when no upstream has the log.
+- `log_substitution::tests::upstream_body_exceeding_cap_is_truncated` - oversize log is capped at LOG_FETCH_MAX_BYTES with a trailing marker.
+- `log_substitution::tests::followers_get_log_id_via_backfill` - leader's log_id propagation includes a follower backfill UPDATE.
+- `core::db::cache_upstream::tests::returns_urls_from_subscribed_caches` - shared upstream-URL helper.
+- `core::db::cache_upstream::tests::empty_when_no_org_caches` - empty result when org has no caches.
 ```
 
 - [ ] **Step 3: Add a user-facing note**
@@ -1427,13 +1427,13 @@ EOF
 | Call site: `handle_build_job_completed` (external_cached only) | Task 7 |
 | Follower backfill UPDATE | Task 7 (inside `set_log_id`) |
 | `wiremock`-backed tests | Tasks 1 (dep) + 4 (tests) |
-| Test fixture for `cache_upstream` row seeding | Task 4 (`seed_upstream_urls` inline helper — kept local since it's a 20-line test helper with no other consumers; if a second consumer appears, hoist to `test-support`) |
+| Test fixture for `cache_upstream` row seeding | Task 4 (`seed_upstream_urls` inline helper - kept local since it's a 20-line test helper with no other consumers; if a second consumer appears, hoist to `test-support`) |
 | Tracing spans (`phase` field) | The spec calls for `local-dedup` / `upstream-fetch` phase tags. The current implementation uses contextual `debug!`/`warn!` with `%build_id` which is functionally equivalent; explicit phase tags can be added in a follow-up if log filtering needs them. |
 | Docs updated (`gradient-api.yaml`, `tests.md`, user-facing) | Task 8 |
 
-**Placeholder scan:** No "TBD/TODO/implement later". One callout in Task 3 about pseudocode (`CBuild.derivation_eq(...)`) with an explicit "the implementer's job is to substitute" — that's an intentional teaching note, not a placeholder. The real form is given verbatim in the same step.
+**Placeholder scan:** No "TBD/TODO/implement later". One callout in Task 3 about pseudocode (`CBuild.derivation_eq(...)`) with an explicit "the implementer's job is to substitute" - that's an intentional teaching note, not a placeholder. The real form is given verbatim in the same step.
 
-**Type consistency:** `substitute_log` takes `(Arc<ServerState>, BuildId, DerivationId, String, bool)` consistently across all 3 call sites. `set_log_id` is internal. `find_dedup_log_id` returns `Option<BuildId>`. `fetch_log_body` returns `anyhow::Result<Option<String>>`. `upstream_urls_for_org` returns `Result<Vec<String>>` — consistent in proto handler refactor and scheduler call.
+**Type consistency:** `substitute_log` takes `(Arc<ServerState>, BuildId, DerivationId, String, bool)` consistently across all 3 call sites. `set_log_id` is internal. `find_dedup_log_id` returns `Option<BuildId>`. `fetch_log_body` returns `anyhow::Result<Option<String>>`. `upstream_urls_for_org` returns `Result<Vec<String>>` - consistent in proto handler refactor and scheduler call.
 
 **Scope check:** Single coherent feature with one helper, three call sites, one shared DB query extracted. No decomposition needed.
 

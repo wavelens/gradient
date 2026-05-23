@@ -6,7 +6,7 @@
 
 //! In-memory registry of connected proto workers.
 //!
-//! Workers are stored as [`WorkerSlot`] values — either
+//! Workers are stored as [`WorkerSlot`] values - either
 //! [`WorkerSlot::Active`] or [`WorkerSlot::Draining`].  Capacity checks are
 //! only ever performed on `Active` workers, so the compiler prevents the class
 //! of bug where a draining worker accidentally receives a new job assignment.
@@ -28,9 +28,9 @@ use crate::worker_state::{Active, Draining, TypedWorker};
 ///
 /// Only [`WorkerSlot::Active`] workers can receive new job offers.
 pub enum WorkerSlot {
-    /// Worker is active — eligible for new job assignments.
+    /// Worker is active - eligible for new job assignments.
     Active(TypedWorker<Active>),
-    /// Worker is draining — finishes in-flight jobs but accepts no new ones.
+    /// Worker is draining - finishes in-flight jobs but accepts no new ones.
     Draining(TypedWorker<Draining>),
 }
 
@@ -173,7 +173,7 @@ impl WorkerPool {
     /// Transition a worker to the draining state.
     ///
     /// Draining workers finish their in-flight jobs but are never offered new
-    /// ones — [`has_capacity`] returns `false` for draining workers at the type
+    /// ones - [`has_capacity`] returns `false` for draining workers at the type
     /// level.
     pub fn mark_draining(&mut self, id: &str) {
         if let Some(slot) = self.workers.remove(id) {
@@ -211,7 +211,7 @@ impl WorkerPool {
 
     /// Returns `true` when the worker can accept a new job of the given kind.
     ///
-    /// - **Draining workers always return `false`** — this is enforced at the
+    /// - **Draining workers always return `false`** - this is enforced at the
     ///   type level by only calling `has_build_capacity` on `TypedWorker<Active>`.
     /// - Eval jobs are always accepted by active workers (capacity is enforced
     ///   worker-side).
@@ -420,7 +420,7 @@ mod tests {
         pool.assign_job("w1", "j2");
         assert!(
             !pool.has_capacity("w1", &JobKind::Build),
-            "2/2 is at limit — must reject"
+            "2/2 is at limit - must reject"
         );
         pool.release_job("w1", "j2");
         assert!(pool.has_capacity("w1", &JobKind::Build), "1/2 again");

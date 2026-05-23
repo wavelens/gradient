@@ -1,4 +1,4 @@
-# Cross-cache leader/follower deduplication — Implementation Plan
+# Cross-cache leader/follower deduplication - Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -6,19 +6,19 @@
 
 **Architecture:** A new `cache_reach` helper in `core::db` computes the set of organizations whose Gradient builds a given org can substitute (walking `organization_cache` and `cache_upstream` transitively). `find_active_leaders` consults that set when no same-org candidate exists, applying a most-advanced/oldest tie-break. `propagate_to_followers` mirrors `derivation_output` and `build_product` rows onto cross-org followers since they have distinct `derivation` rows. `BuildAccessContext::load` is widened to grant follower-org users read access to the leader's build. `reelect_leader` is restricted to same-org follower promotion; cross-org followers are made independent on leader abort.
 
-**Tech Stack:** Rust, sea-orm, axum, PostgreSQL. Tests use `sea_orm::MockDatabase` (canned query results in fixed order) rather than a real database — this is the project's established pattern (see `backend/web/tests/evaluation_builds_via.rs` as the reference). `test_support::db_with(...)` pre-cans a single result set; `MockDatabase::new(...).append_query_results([...])` chains arbitrary sequences.
+**Tech Stack:** Rust, sea-orm, axum, PostgreSQL. Tests use `sea_orm::MockDatabase` (canned query results in fixed order) rather than a real database - this is the project's established pattern (see `backend/web/tests/evaluation_builds_via.rs` as the reference). `test_support::db_with(...)` pre-cans a single result set; `MockDatabase::new(...).append_query_results([...])` chains arbitrary sequences.
 
-> **Test pattern reminder:** every integration test below must (a) mock each DB query the production code path issues, in order, with the correct row type; (b) mount the axum router via `web::create_router(state)` and drive it with `axum_test::TestServer`. The exact query sequence depends on the implementation in earlier tasks — re-read those before writing each test's mock chain. Treat the "fixture seeding" calls in this plan (`common::seed_*`) as **canned query-result helpers**, not as actual DB inserts. If your `common/mod.rs` doesn't already have them, model them after `evaluation_builds_via.rs::*_row()` helpers (functions returning entity `Model` values).
+> **Test pattern reminder:** every integration test below must (a) mock each DB query the production code path issues, in order, with the correct row type; (b) mount the axum router via `web::create_router(state)` and drive it with `axum_test::TestServer`. The exact query sequence depends on the implementation in earlier tasks - re-read those before writing each test's mock chain. Treat the "fixture seeding" calls in this plan (`common::seed_*`) as **canned query-result helpers**, not as actual DB inserts. If your `common/mod.rs` doesn't already have them, model them after `evaluation_builds_via.rs::*_row()` helpers (functions returning entity `Model` values).
 
-> **Local verification policy:** This project does NOT run `cargo test` locally — CI runs the full test suite. Each task's "Run the test" step is a CI verification (push the branch and wait for the run). Locally, use `cargo check` and `cargo clippy --no-deps -- -D warnings` to confirm the code compiles. When a task lists `cargo test` as the verification command, treat it as documentation of *what CI will run for this change* — don't execute it on your workstation.
+> **Local verification policy:** This project does NOT run `cargo test` locally - CI runs the full test suite. Each task's "Run the test" step is a CI verification (push the branch and wait for the run). Locally, use `cargo check` and `cargo clippy --no-deps -- -D warnings` to confirm the code compiles. When a task lists `cargo test` as the verification command, treat it as documentation of *what CI will run for this change* - don't execute it on your workstation.
 
 ---
 
 ## File Structure
 
 **New files:**
-- `backend/core/src/db/cache_reach.rs` — `writer_orgs_reachable_from` + unit tests.
-- `backend/test-support/src/fixtures.rs` — extended with multi-org/cache fixtures (in-place).
+- `backend/core/src/db/cache_reach.rs` - `writer_orgs_reachable_from` + unit tests.
+- `backend/test-support/src/fixtures.rs` - extended with multi-org/cache fixtures (in-place).
 - `backend/scheduler/tests/cross_org_leader_set_on_insert.rs`
 - `backend/scheduler/tests/cross_org_artefacts_mirrored.rs`
 - `backend/scheduler/tests/cross_org_re_election_same_org_only.rs`
@@ -27,16 +27,16 @@
 - `backend/web/tests/evaluation_builds_via_cross_org.rs`
 
 **Modified files:**
-- `backend/core/src/db/mod.rs` — register new module.
-- `backend/core/src/db/status.rs` — rewrite `find_active_leaders`; rewrite `reelect_leader`.
-- `backend/scheduler/src/eval.rs:218` — pass `inserting_org`.
-- `backend/core/src/ci/trigger.rs:231` — pass `inserting_org`.
-- `backend/scheduler/src/build.rs:176` — extend `propagate_to_followers` with cross-org artefact mirroring.
-- `backend/web/src/endpoints/builds/mod.rs:111` — widen `BuildAccessContext::load`.
-- `backend/scheduler/src/handler_tests.rs` — update existing `find_active_leaders` mock-DB callers for new signature.
-- `docs/gradient-api.yaml` — auth note on read-only build endpoints.
-- `docs/src/tests.md` — catalogue new tests.
-- `docs/src/scheduler.md` (or equivalent architecture page) — cross-cache leader/follower contract.
+- `backend/core/src/db/mod.rs` - register new module.
+- `backend/core/src/db/status.rs` - rewrite `find_active_leaders`; rewrite `reelect_leader`.
+- `backend/scheduler/src/eval.rs:218` - pass `inserting_org`.
+- `backend/core/src/ci/trigger.rs:231` - pass `inserting_org`.
+- `backend/scheduler/src/build.rs:176` - extend `propagate_to_followers` with cross-org artefact mirroring.
+- `backend/web/src/endpoints/builds/mod.rs:111` - widen `BuildAccessContext::load`.
+- `backend/scheduler/src/handler_tests.rs` - update existing `find_active_leaders` mock-DB callers for new signature.
+- `docs/gradient-api.yaml` - auth note on read-only build endpoints.
+- `docs/src/tests.md` - catalogue new tests.
+- `docs/src/scheduler.md` (or equivalent architecture page) - cross-cache leader/follower contract.
 
 **Out-of-scope:** Materialised reachability tables; cross-org notifications; mid-build cache-graph mutation handling; frontend changes beyond the existing leader-row swap.
 
@@ -137,7 +137,7 @@ pub fn external_upstream(
 }
 ```
 
-Verify the `cache::Model` field set against `backend/entity/src/cache.rs` — if the actual struct has fields not shown above, copy them into `cache_with_id` with safe defaults.
+Verify the `cache::Model` field set against `backend/entity/src/cache.rs` - if the actual struct has fields not shown above, copy them into `cache_with_id` with safe defaults.
 
 - [ ] **Step 2: Compile-check**
 
@@ -153,7 +153,7 @@ git commit -m "test-support: add multi-org/cache fixture helpers"
 
 ---
 
-## Task 2: Reachability helper — module skeleton + direct-overlap test
+## Task 2: Reachability helper - module skeleton + direct-overlap test
 
 **Files:**
 - Create: `backend/core/src/db/cache_reach.rs`
@@ -198,7 +198,7 @@ Create `backend/core/src/db/cache_reach.rs`:
 //!
 //! Two organizations are "cache-connected" when the writer org pushes into
 //! a cache that lies in the upstream closure of one of the reader org's
-//! caches. External (URL-based) upstreams are excluded — they don't host
+//! caches. External (URL-based) upstreams are excluded - they don't host
 //! Gradient builds.
 
 use std::collections::{HashSet, VecDeque};
@@ -376,7 +376,7 @@ git commit -m "core: db: add cache_reach helper with direct-overlap support"
 
 ---
 
-## Task 3: Reachability — transitive internal chain
+## Task 3: Reachability - transitive internal chain
 
 **Files:**
 - Modify: `backend/core/src/db/cache_reach.rs`
@@ -444,7 +444,7 @@ git commit -m "core: db: cover transitive cache_reach chain in tests"
 
 ---
 
-## Task 4: Reachability — external upstream is skipped
+## Task 4: Reachability - external upstream is skipped
 
 **Files:**
 - Modify: `backend/core/src/db/cache_reach.rs`
@@ -480,7 +480,7 @@ fn external_upstream_skipped() {
             "external upstream must not reach org 1, got: {:?}",
             got
         );
-        let _ = b; // explicitly unused — documents the absence of a path.
+        let _ = b; // explicitly unused - documents the absence of a path.
     });
 }
 ```
@@ -499,7 +499,7 @@ git commit -m "core: db: pin external upstream skip in cache_reach tests"
 
 ---
 
-## Task 5: Reachability — write-only reader excluded
+## Task 5: Reachability - write-only reader excluded
 
 **Files:**
 - Modify: `backend/core/src/db/cache_reach.rs`
@@ -543,7 +543,7 @@ git commit -m "core: db: pin write-only-reader exclusion in cache_reach tests"
 
 ---
 
-## Task 6: Reachability — cycle tolerance
+## Task 6: Reachability - cycle tolerance
 
 **Files:**
 - Modify: `backend/core/src/db/cache_reach.rs`
@@ -610,7 +610,7 @@ git commit -m "core: db: prove cache_reach BFS tolerates upstream cycles"
 
 ---
 
-## Task 7: `find_active_leaders` — new signature, same-org behavior preserved
+## Task 7: `find_active_leaders` - new signature, same-org behavior preserved
 
 **Files:**
 - Modify: `backend/core/src/db/status.rs`
@@ -631,7 +631,7 @@ Edit `backend/core/src/db/status.rs:399` to:
 /// First checks for an in-flight build within `inserting_org` (the previous
 /// behavior). When no same-org candidate exists for a drv, this function
 /// will also consult cache-connected organisations via
-/// [`cache_reach::writer_orgs_reachable_from`] — that pass is added in a
+/// [`cache_reach::writer_orgs_reachable_from`] - that pass is added in a
 /// later task; this step only widens the signature.
 ///
 /// Drvs with no active build are omitted from the result.
@@ -703,7 +703,7 @@ let leader_for_drv =
 
 - [ ] **Step 4: Update existing mock-DB callers in `handler_tests.rs`**
 
-Search `backend/scheduler/src/handler_tests.rs` for `find_active_leaders` references. The existing tests mock the underlying SQL query; they do not call the function directly — only the row-count comments need a glance. No code change is expected here unless a test calls the function directly: if so, pass `fixtures::org_id()` as the new arg.
+Search `backend/scheduler/src/handler_tests.rs` for `find_active_leaders` references. The existing tests mock the underlying SQL query; they do not call the function directly - only the row-count comments need a glance. No code change is expected here unless a test calls the function directly: if so, pass `fixtures::org_id()` as the new arg.
 
 - [ ] **Step 5: Run the existing suite to confirm green**
 
@@ -719,7 +719,7 @@ git commit -m "core: db: widen find_active_leaders signature with inserting_org"
 
 ---
 
-## Task 8: `find_active_leaders` — cross-org pass with tie-break
+## Task 8: `find_active_leaders` - cross-org pass with tie-break
 
 **Files:**
 - Modify: `backend/core/src/db/status.rs`
@@ -814,7 +814,7 @@ mod find_active_leaders_tests {
             let leader_build = bid(10);
 
             // Mock query order (must match the helper's call sequence):
-            //   1. same-org pass: in-flight builds for drv_ids — empty.
+            //   1. same-org pass: in-flight builds for drv_ids - empty.
             //   2. derivation rows for inserting org (resolve drv_id → drv_path).
             //   3. cache_reach: reader org_cache rows.
             //   4. cache_reach: upstream rows.
@@ -908,7 +908,7 @@ mod find_active_leaders_tests {
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p core --lib db::status::find_active_leaders_tests`
-Expected: FAIL — current implementation never consults cross-org.
+Expected: FAIL - current implementation never consults cross-org.
 
 - [ ] **Step 3: Implement the cross-org pass**
 
@@ -1062,7 +1062,7 @@ git commit -m "core: db: extend find_active_leaders with cross-org pass and tie-
 
 ---
 
-## Task 9: `find_active_leaders` — same-org preferred + external_cached cross-org skip
+## Task 9: `find_active_leaders` - same-org preferred + external_cached cross-org skip
 
 **Files:**
 - Modify: `backend/core/src/db/status.rs`
@@ -1135,7 +1135,7 @@ fn cross_org_external_cached_candidate_skipped() {
 - [ ] **Step 2: Run the tests**
 
 Run: `cargo test -p core --lib db::status::find_active_leaders_tests`
-Expected: PASS — the SQL `external_cached = false` filter and the same-org short-circuit already cover these cases.
+Expected: PASS - the SQL `external_cached = false` filter and the same-org short-circuit already cover these cases.
 
 - [ ] **Step 3: Commit**
 
@@ -1146,7 +1146,7 @@ git commit -m "core: db: pin same-org-preferred and external_cached skip rules"
 
 ---
 
-## Task 10: Integration test — cross-org leader set on insert (TDD red)
+## Task 10: Integration test - cross-org leader set on insert (TDD red)
 
 **Files:**
 - Create: `backend/scheduler/tests/cross_org_leader_set_on_insert.rs`
@@ -1245,7 +1245,7 @@ async fn cross_org_leader_set_on_insert() {
     .await
     .unwrap();
 
-    // org_a evaluation (placeholder — needed for the build FK).
+    // org_a evaluation (placeholder - needed for the build FK).
     let eval_a = common::seed_evaluation_for_org(db, org_a.id).await;
     let leader_build = build::ActiveModel {
         id: Set(BuildId::now_v7()),
@@ -1292,7 +1292,7 @@ async fn cross_org_leader_set_on_insert() {
 
 If `common::test_state` and `common::seed_evaluation_for_org` don't exist yet, create them in `backend/scheduler/tests/common/mod.rs` modelled after the helpers used by `backend/web/tests/evaluation_builds_via.rs`.
 
-- [ ] **Step 3: Run the test to verify it fails** (compilation will require Task 7's signature change — which is already in place by now)
+- [ ] **Step 3: Run the test to verify it fails** (compilation will require Task 7's signature change - which is already in place by now)
 
 Run: `cargo test -p scheduler --test cross_org_leader_set_on_insert`
 Expected: PASS (the cross-org pass from Task 8 already implements this).
@@ -1306,7 +1306,7 @@ git commit -m "scheduler: integration test for cross-org leader linkage"
 
 ---
 
-## Task 11: Artefact mirroring — integration test (red)
+## Task 11: Artefact mirroring - integration test (red)
 
 **Files:**
 - Create: `backend/scheduler/tests/cross_org_artefacts_mirrored.rs`
@@ -1424,7 +1424,7 @@ async fn cross_org_artefacts_mirrored() {
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test -p scheduler --test cross_org_artefacts_mirrored`
-Expected: FAIL — `outs.len()` is `0` because today's `propagate_to_followers` doesn't mirror artefacts cross-org.
+Expected: FAIL - `outs.len()` is `0` because today's `propagate_to_followers` doesn't mirror artefacts cross-org.
 
 - [ ] **Step 3: Commit (failing test)**
 
@@ -1435,7 +1435,7 @@ git commit -m "scheduler: failing integration test for cross-org artefact mirror
 
 ---
 
-## Task 12: Artefact mirroring — implementation
+## Task 12: Artefact mirroring - implementation
 
 **Files:**
 - Modify: `backend/scheduler/src/build.rs:176`
@@ -1543,7 +1543,7 @@ Ensure the necessary entity imports (`EDerivationOutput`, `CDerivationOutput`, `
 
 - [ ] **Step 2: Update the comment block on `propagate_to_followers`**
 
-Remove or amend the comment at lines 165-173 that says "Followers always share a `derivation` row with their leader" — that assumption no longer holds. Replace with:
+Remove or amend the comment at lines 165-173 that says "Followers always share a `derivation` row with their leader" - that assumption no longer holds. Replace with:
 
 ```rust
 /// Copy a leader's terminal status (and `log_id`, `build_time_ms`,
@@ -1554,11 +1554,11 @@ Remove or amend the comment at lines 165-173 that says "Followers always share a
 /// Same-org followers share the leader's `derivation` row, so its
 /// `derivation_output` and `build_product` children are already visible to
 /// the follower's evaluation without any copy. Cross-org followers (those
-/// whose `derivation` differs from the leader's — created when the leader
+/// whose `derivation` differs from the leader's - created when the leader
 /// belongs to a cache-connected organisation) have their `derivation_output`
 /// and `build_product` rows mirrored onto the follower's `derivation`.
 ///
-/// `Aborted` is not propagated — when a leader is aborted (its eval was
+/// `Aborted` is not propagated - when a leader is aborted (its eval was
 /// cancelled), callers re-elect a new leader from the followers instead.
 ```
 
@@ -1581,7 +1581,7 @@ git commit -m "scheduler: mirror leader artefacts onto cross-org followers"
 
 ---
 
-## Task 13: Re-elect — same-org-only promotion (red)
+## Task 13: Re-elect - same-org-only promotion (red)
 
 **Files:**
 - Create: `backend/scheduler/tests/cross_org_re_election_same_org_only.rs`
@@ -1634,12 +1634,12 @@ async fn cross_org_re_election_same_org_only() {
 }
 ```
 
-(`gradient_core::db::abort_evaluation` is the existing public entry that internally calls `reelect_leader` — confirm the exact path by grepping for the public surface of `abort_evaluation`.)
+(`gradient_core::db::abort_evaluation` is the existing public entry that internally calls `reelect_leader` - confirm the exact path by grepping for the public surface of `abort_evaluation`.)
 
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test -p scheduler --test cross_org_re_election_same_org_only`
-Expected: FAIL — current `reelect_leader` picks the oldest follower regardless of org, so the cross-org follower could be promoted and become the new leader; even if the same-org one wins, the cross-org follower's `via` would be repointed at the new leader rather than cleared.
+Expected: FAIL - current `reelect_leader` picks the oldest follower regardless of org, so the cross-org follower could be promoted and become the new leader; even if the same-org one wins, the cross-org follower's `via` would be repointed at the new leader rather than cleared.
 
 - [ ] **Step 3: Commit (failing test)**
 
@@ -1650,7 +1650,7 @@ git commit -m "scheduler: failing test for same-org-only leader re-election"
 
 ---
 
-## Task 14: Re-elect — implementation (same-org promote, cross-org orphan)
+## Task 14: Re-elect - implementation (same-org promote, cross-org orphan)
 
 **Files:**
 - Modify: `backend/core/src/db/status.rs` (`reelect_leader` near line 360)
@@ -1701,7 +1701,7 @@ async fn reelect_leader(state: &Arc<ServerState>, leader: &MBuild) -> Result<(),
         }
     }
 
-    // Tie-break: most-advanced status, then oldest created_at — matches
+    // Tie-break: most-advanced status, then oldest created_at - matches
     // `find_active_leaders`.
     fn rank(s: BuildStatus) -> u8 {
         match s {
@@ -1796,7 +1796,7 @@ git commit -m "core: db: restrict reelect_leader to same-org promotion"
 
 ---
 
-## Task 15: Re-elect — all-cross-org orphaning test
+## Task 15: Re-elect - all-cross-org orphaning test
 
 **Files:**
 - Create: `backend/scheduler/tests/cross_org_re_election_all_followers_independent.rs`
@@ -1852,7 +1852,7 @@ git commit -m "scheduler: cover cross-org-only orphaning on leader abort"
 
 ---
 
-## Task 16: Build access widening — failing test
+## Task 16: Build access widening - failing test
 
 **Files:**
 - Create: `backend/web/tests/cross_org_follower_log_visible.rs`
@@ -1926,7 +1926,7 @@ Add the helpers `seed_user_member_of`, `seed_build_completed`, `session_cookie`,
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test -p web --test cross_org_follower_log_visible`
-Expected: FAIL — `resp_b` returns 404 because `BuildAccessContext::load` rejects non-org members.
+Expected: FAIL - `resp_b` returns 404 because `BuildAccessContext::load` rejects non-org members.
 
 - [ ] **Step 3: Commit (failing test)**
 
@@ -1937,7 +1937,7 @@ git commit -m "web: failing test for cross-org follower log access"
 
 ---
 
-## Task 17: Build access widening — implementation
+## Task 17: Build access widening - implementation
 
 **Files:**
 - Modify: `backend/web/src/endpoints/builds/mod.rs`
@@ -2057,7 +2057,7 @@ git commit -m "web: widen build access to cross-cache follower-org members"
 
 ---
 
-## Task 18: Eval-builds endpoint — cross-org leader-row swap
+## Task 18: Eval-builds endpoint - cross-org leader-row swap
 
 **Files:**
 - Create: `backend/web/tests/evaluation_builds_via_cross_org.rs`
@@ -2115,7 +2115,7 @@ async fn evaluation_builds_resolves_cross_org_leader_row() {
 - [ ] **Step 2: Run the test**
 
 Run: `cargo test -p web --test evaluation_builds_via_cross_org`
-Expected: PASS — the leader-row swap in `evals/query.rs` is already org-agnostic (it dereferences `via` without filtering on org), and Task 17 grants the user access to the leader build.
+Expected: PASS - the leader-row swap in `evals/query.rs` is already org-agnostic (it dereferences `via` without filtering on org), and Task 17 grants the user access to the leader build.
 
 - [ ] **Step 3: Commit**
 
@@ -2126,7 +2126,7 @@ git commit -m "web: integration test for cross-org leader-row swap"
 
 ---
 
-## Task 19: API docs — annotate read-only build endpoints
+## Task 19: API docs - annotate read-only build endpoints
 
 **Files:**
 - Modify: `docs/gradient-api.yaml`
@@ -2151,7 +2151,7 @@ description: |
   of that follower organisation are granted read access.
 ```
 
-Do not modify response schemas — there are no shape changes.
+Do not modify response schemas - there are no shape changes.
 
 - [ ] **Step 3: Lint the YAML**
 
@@ -2167,7 +2167,7 @@ git commit -m "docs: api: note cross-cache follower access on build read endpoin
 
 ---
 
-## Task 20: docs/src — architecture note and tests catalogue
+## Task 20: docs/src - architecture note and tests catalogue
 
 **Files:**
 - Modify: `docs/src/scheduler.md` (or the nearest architecture page; check `docs/src/SUMMARY.md` for the precise file)
@@ -2230,22 +2230,22 @@ Append to `docs/src/tests.md` under the appropriate suite-grouping (one paragrap
 ### Cross-cache leader/follower deduplication
 
 - `core/src/db/cache_reach.rs` (unit):
-  - `direct_overlap_reader_sees_writer` — direct cache overlap.
-  - `transitive_internal_chain` — three-hop internal upstream chain.
-  - `external_upstream_skipped` — external (URL) upstreams don't extend reach.
-  - `write_only_reader_excluded` — WriteOnly reader sees nobody.
-  - `cycle_tolerated` — BFS terminates on `cache_upstream` cycles.
+  - `direct_overlap_reader_sees_writer` - direct cache overlap.
+  - `transitive_internal_chain` - three-hop internal upstream chain.
+  - `external_upstream_skipped` - external (URL) upstreams don't extend reach.
+  - `write_only_reader_excluded` - WriteOnly reader sees nobody.
+  - `cycle_tolerated` - BFS terminates on `cache_upstream` cycles.
 - `core/src/db/status.rs::find_active_leaders_tests` (unit):
   - `cross_org_match_when_no_same_org_candidate`.
   - `cross_org_tie_break_most_advanced_then_oldest`.
   - `same_org_preferred_over_cross_org`.
   - `cross_org_external_cached_candidate_skipped`.
-- `scheduler/tests/cross_org_leader_set_on_insert.rs` — end-to-end `via` linkage.
-- `scheduler/tests/cross_org_artefacts_mirrored.rs` — derivation_output/build_product mirror.
-- `scheduler/tests/cross_org_re_election_same_org_only.rs` — same-org promotion.
-- `scheduler/tests/cross_org_re_election_all_followers_independent.rs` — cross-org orphaning.
-- `web/tests/cross_org_follower_log_visible.rs` — auth widening on `GET /builds/{id}/log`.
-- `web/tests/evaluation_builds_via_cross_org.rs` — eval-builds leader-row swap across orgs.
+- `scheduler/tests/cross_org_leader_set_on_insert.rs` - end-to-end `via` linkage.
+- `scheduler/tests/cross_org_artefacts_mirrored.rs` - derivation_output/build_product mirror.
+- `scheduler/tests/cross_org_re_election_same_org_only.rs` - same-org promotion.
+- `scheduler/tests/cross_org_re_election_all_followers_independent.rs` - cross-org orphaning.
+- `web/tests/cross_org_follower_log_visible.rs` - auth widening on `GET /builds/{id}/log`.
+- `web/tests/evaluation_builds_via_cross_org.rs` - eval-builds leader-row swap across orgs.
 ```
 
 - [ ] **Step 3: Commit**
@@ -2257,7 +2257,7 @@ git commit -m "docs: cover cross-cache leader/follower deduplication"
 
 ---
 
-## Task 21: Final sweep — typecheck and lints
+## Task 21: Final sweep - typecheck and lints
 
 **Files:** none new
 

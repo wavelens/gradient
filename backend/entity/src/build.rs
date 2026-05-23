@@ -78,7 +78,7 @@ pub struct Model {
     /// build follows. `None` for leaders (and plain builds). Followers are
     /// skipped by the dispatcher; the leader's terminal status, log_id,
     /// build_time_ms, and worker are copied to followers when the leader
-    /// finishes. Same-organization only — followers always share a `derivation`
+    /// finishes. Same-organization only - followers always share a `derivation`
     /// row with their leader.
     pub via: Option<BuildId>,
     /// `true` when the build's outputs are known to be available from an

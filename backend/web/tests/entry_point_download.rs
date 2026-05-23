@@ -8,8 +8,8 @@
 //! (issue #185).
 //!
 //! The endpoint resolves the entry point against the evaluation pinned in
-//! `project.last_evaluation` — i.e. the evaluation tied to the project's
-//! newest commit — rather than the most recently *completed* evaluation. A
+//! `project.last_evaluation` - i.e. the evaluation tied to the project's
+//! newest commit - rather than the most recently *completed* evaluation. A
 //! retriggered run for an older commit must not shadow the latest one.
 
 use axum::http::StatusCode;
@@ -110,7 +110,7 @@ fn newest_eval_row() -> entity::evaluation::Model {
         status: EvaluationStatus::Completed,
         previous: None,
         next: None,
-        // Older `created_at` than any retriggered run would have — the bug
+        // Older `created_at` than any retriggered run would have - the bug
         // scenario from #185: ordering by `created_at` would pick a different
         // (older-commit) evaluation, but `last_evaluation` must win.
         created_at: test_date(),
@@ -205,7 +205,7 @@ fn returns_404_when_project_has_no_last_evaluation() {
 /// Happy path: with `project.last_evaluation` set, the handler resolves the
 /// entry point against that evaluation and reaches the artefact-serving stage.
 /// Empty `derivation_output` rows cause `serve_hydra_artifact` to return
-/// `None`, surfacing as `404 File` — sufficient to prove the eval pinned in
+/// `None`, surfacing as `404 File` - sufficient to prove the eval pinned in
 /// `last_evaluation` was used.
 #[test]
 fn resolves_entry_point_against_project_last_evaluation() {
@@ -231,7 +231,7 @@ fn resolves_entry_point_against_project_last_evaluation() {
 }
 
 /// When the entry point for `eval` doesn't exist in the newest-commit
-/// evaluation, the response is 404 — there is no fallback to older
+/// evaluation, the response is 404 - there is no fallback to older
 /// evaluations that may still contain a matching entry point.
 #[test]
 fn returns_404_when_entry_point_missing_from_last_evaluation() {

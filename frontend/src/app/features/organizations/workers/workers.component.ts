@@ -75,7 +75,7 @@ export class WorkersComponent implements OnInit {
 
   orgName = '';
   orgDisplayName = signal('');
-  /** The org UUID — shown as peer_id in the register dialog. */
+  /** The org UUID - shown as peer_id in the register dialog. */
   orgId = signal<string>('');
   workers = signal<Worker[]>([]);
   newWorkerId = '';
@@ -191,7 +191,7 @@ export class WorkersComponent implements OnInit {
   requestToggleWorker(worker: Worker): void {
     this.pendingToggleWorker.set(worker);
     if (worker.live && worker.active) {
-      // Worker is connected and being deactivated — warn user
+      // Worker is connected and being deactivated - warn user
       this.showToggleWarningDialog.set(true);
     } else {
       this.confirmToggleWorker();

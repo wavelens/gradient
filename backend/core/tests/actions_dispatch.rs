@@ -8,7 +8,7 @@
 //!
 //! The `core` crate name shadows stdlib `::core`, which breaks `#[tokio::test]`
 //! macro expansion. We use sync `#[test]` + `tokio::runtime::Builder::block_on`
-//! for any async assertion — same pattern as `tests/nar_extract.rs`.
+//! for any async assertion - same pattern as `tests/nar_extract.rs`.
 
 extern crate core as gradient_core;
 

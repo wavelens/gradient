@@ -15,18 +15,18 @@ In the Gradient UI:
 1. Open your organization → **Integrations**.
 2. Click **New integration**.
 3. Fill in:
-    - **Name** — short slug (`production`, `gitea-status`, ...); must be unique
+    - **Name** - short slug (`production`, `gitea-status`, ...); must be unique
       within the organization and kind.
-    - **Kind** — *Inbound* (Gradient receives webhooks) or *Outbound*
+    - **Kind** - *Inbound* (Gradient receives webhooks) or *Outbound*
       (Gradient calls the forge API).
-    - **Forge type** — Gitea / Forgejo / GitLab. (GitHub does not appear here:
+    - **Forge type** - Gitea / Forgejo / GitLab. (GitHub does not appear here:
       its inbound + outbound rows are server-managed; see *GitHub App* below.)
 
 Then, depending on the kind:
 
 - **Inbound**: Gradient generates an HMAC-SHA256 secret (client-side via
   `crypto.getRandomValues`, displayed once). Copy both the secret and the
-  forge-specific webhook URL — the page shows a URL selector so you can switch
+  forge-specific webhook URL - the page shows a URL selector so you can switch
   between `/hooks/gitea/...`, `/hooks/forgejo/...`, and `/hooks/gitlab/...`
   from a single inbound row.
 - **Outbound**: enter the forge base URL (e.g. `https://gitea.example.com`) and
@@ -40,7 +40,7 @@ never returns them again, only a boolean indicating their presence.
 When the GitHub App is installed on an organization, Gradient automatically
 creates two `forge_type=github` integration rows for it: one *inbound* and one
 *outbound*, both named `github`. They appear in the org Integrations list as
-**Server-managed** and cannot be edited or deleted from the UI — their
+**Server-managed** and cannot be edited or deleted from the UI - their
 credentials come from the server's App config and the org's installation id.
 
 The integration name `github` is reserved system-wide for these rows; user-created
@@ -78,12 +78,12 @@ integration's secret, trigger = *Push events*. Gradient compares the
 The GitHub integration uses a single GitHub App registered against your
 Gradient server. There are three roles to consider:
 
-1. **Server operator** — once per Gradient instance, register the App and put
+1. **Server operator** - once per Gradient instance, register the App and put
    its credentials into the server's config. See the
    [GitHub App setup](../development/github-app-setup.md) operator doc.
-2. **Organization admin** — once the server has the App configured, install the
+2. **Organization admin** - once the server has the App configured, install the
    App on the organization's GitHub account.
-3. **GitHub repository owner** — installing the App fires the `installation`
+3. **GitHub repository owner** - installing the App fires the `installation`
    webhook; Gradient stores the installation id on the matching organization
    and seeds the `github-app` inbound + outbound integration rows. Subsequent
    push / pull-request deliveries route to the corresponding Gradient
@@ -97,9 +97,9 @@ server-side. Build statuses are reported back via the App's installation token.
 
 From the Integrations page:
 
-- **Edit** — update name/URL, or paste a new secret/token to replace the
+- **Edit** - update name/URL, or paste a new secret/token to replace the
   existing one. Submitting an empty string for a secret/token **clears** it.
-- **Delete** — removes the row. Any project linked to it has the link cleared
+- **Delete** - removes the row. Any project linked to it has the link cleared
   (`ON DELETE SET NULL`).
 
 ## Inbound URL reference
@@ -114,7 +114,7 @@ where `{forge}` is `gitea`, `forgejo`, or `gitlab`. GitHub deliveries go
 through the App webhook at `/api/v1/hooks/github` and are not per-integration.
 
 A single inbound integration can serve all three Gitea/Forgejo/GitLab forges
-simultaneously — the signature scheme is selected by the `{forge}` path
+simultaneously - the signature scheme is selected by the `{forge}` path
 segment.
 
 ### Webhook response body
@@ -151,9 +151,9 @@ return the standard envelope with a `WebhookResponse` payload describing what ha
 
 The `reason` field for skipped projects is one of:
 
-- `already_in_progress` — an evaluation for the same revision is already queued or running
-- `no_previous_evaluation` — the project has not yet been bootstrapped
-- `db_error` — a per-project persistence failure (the request as a whole still succeeded)
+- `already_in_progress` - an evaluation for the same revision is already queued or running
+- `no_previous_evaluation` - the project has not yet been bootstrapped
+- `db_error` - a per-project persistence failure (the request as a whole still succeeded)
 
 Non-push GitHub App events (`ping`, `installation`, `installation_repositories`, unknown)
 return the same envelope with `event` set accordingly and empty `queued` / `skipped` arrays.
@@ -162,7 +162,7 @@ return the same envelope with `event` set accordingly and empty `queued` / `skip
 
 | Symptom                           | Likely cause                                                                                    |
 |-----------------------------------|-------------------------------------------------------------------------------------------------|
-| `401 Unauthorized` in delivery log | Secret mismatch — re-copy the secret from Gradient or rotate and reconfigure the forge.         |
+| `401 Unauthorized` in delivery log | Secret mismatch - re-copy the secret from Gradient or rotate and reconfigure the forge.         |
 | `404 Not Found`                   | Wrong organization or integration name in the URL, or `{forge}=github` (use the App webhook).   |
 | `200 OK` but no evaluation runs   | No project links to this inbound integration, or the repository URL doesn't match any project.  |
-| `503 Service Unavailable`         | The integration row has no secret set yet — paste or generate one on the Integrations page.     |
+| `503 Service Unavailable`         | The integration row has no secret set yet - paste or generate one on the Integrations page.     |

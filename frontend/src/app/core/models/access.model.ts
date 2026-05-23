@@ -19,7 +19,7 @@ export interface AccessState {
 }
 
 /// Lifts a backend entity into an `AccessState`. `can_trigger` is optional on
-/// the wire — entities without their own trigger permission (caches, orgs)
+/// the wire - entities without their own trigger permission (caches, orgs)
 /// fall back to `can_edit`, preserving the previous single-permission model.
 export function accessFromEntity(e: {
   managed: boolean;

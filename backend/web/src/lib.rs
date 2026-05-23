@@ -49,7 +49,7 @@ use std::sync::Arc;
 /// carry no client-IP signal at all (no `X-Forwarded-For` / `X-Real-IP`,
 /// no `ConnectInfo`) share a single bucket instead of returning 500. This
 /// matters in tests (axum-test has no peer socket) and as a defensive
-/// fallback if `into_make_service_with_connect_info` is ever skipped — a
+/// fallback if `into_make_service_with_connect_info` is ever skipped - a
 /// global bucket is still better than failing requests outright.
 #[derive(Debug, Clone, Copy)]
 struct SmartIpOrFallback;
@@ -76,7 +76,7 @@ impl MakeRequestId for MakeRequestUuid {
     fn make_request_id<B>(&mut self, _request: &Request<B>) -> Option<RequestId> {
         let id = Uuid::now_v7().to_string();
         // `Uuid::now_v7().to_string()` produces ASCII hex+hyphens, always a
-        // valid header value — `from_str` cannot realistically fail.
+        // valid header value - `from_str` cannot realistically fail.
         let value = HeaderValue::from_str(&id).ok()?;
         Some(RequestId::new(value))
     }
@@ -139,9 +139,9 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
 
     // Build one span per request, populated with method, route pattern, and
     // the request-id assigned by `SetRequestIdLayer`. All `tracing` events
-    // emitted while the request is in flight — handler logs, DB queries,
+    // emitted while the request is in flight - handler logs, DB queries,
     // and any task spawned via `Shutdown::spawn` (which inherits the
-    // current span) — are linked to the same id, so a single grep finds
+    // current span) - are linked to the same id, so a single grep finds
     // every line for one request.
     let trace = TraceLayer::new_for_http()
         .make_span_with(|request: &Request<Body>| {
@@ -522,7 +522,7 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         .route("/auth/logout", post(auth::post_logout))
         .route("/health", get(get_health))
         .route("/config", get(get_config))
-        // GitHub App manifest callback — unauthenticated because GitHub's
+        // GitHub App manifest callback - unauthenticated because GitHub's
         // top-level browser redirect carries no bearer token; CSRF is bound
         // via the one-shot manifest state token issued on /admin/github-app/manifest.
         .route(
@@ -547,7 +547,7 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         .layer(axum::Extension(Arc::clone(&scheduler)))
         .layer(axum::Extension(proto_limiter));
 
-    // Metrics endpoint — root-mounted, only when an operator-configured
+    // Metrics endpoint - root-mounted, only when an operator-configured
     // bearer token is present. Uses the same rate-limit tier as
     // auth_sensitive (6 r/s, burst 5).
     if state.config.metrics.is_some() {
@@ -562,7 +562,7 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         app = app.merge(metrics_route);
     }
 
-    // Public NAR cache surface — substituters issue many requests per build,
+    // Public NAR cache surface - substituters issue many requests per build,
     // so the burst is generous (1000 / 1000).
     let cache_routes = Router::new()
         .route(
@@ -590,10 +590,10 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
     app = app.merge(cache_routes).merge(cache_inspect).merge(cache_log);
 
     // Layer order (outer → inner, i.e. last `.layer()` is outermost):
-    //   SetRequestIdLayer    — assigns x-request-id on inbound requests
-    //   TraceLayer           — opens the span (reads the id from headers)
-    //   PropagateRequestIdLayer — copies the id onto the response
-    //   CORS                 — innermost so preflights still get traced
+    //   SetRequestIdLayer    - assigns x-request-id on inbound requests
+    //   TraceLayer           - opens the span (reads the id from headers)
+    //   PropagateRequestIdLayer - copies the id onto the response
+    //   CORS                 - innermost so preflights still get traced
     app.fallback(handle_404)
         .layer(cors)
         .layer(PropagateRequestIdLayer::x_request_id())

@@ -7,7 +7,7 @@
 //! Typed wrappers around the `project_trigger` table's enum/jsonb columns.
 //!
 //! The `cron` crate (v0.12) expects **six-field** expressions:
-//! `sec min hour dom mon dow` — not the five-field POSIX form.
+//! `sec min hour dom mon dow` - not the five-field POSIX form.
 
 use crate::types::ids::IntegrationId;
 use num_enum::{IntoPrimitive, TryFromPrimitive};

@@ -97,7 +97,7 @@ pub async fn get_evaluation(
 
     // Resolve `evaluation.trigger -> project_trigger.trigger_type` so the eval
     // log page can render the correct "Via" badge. `None` here means the run
-    // was started manually (API / UI), not by a project trigger — the frontend
+    // was started manually (API / UI), not by a project trigger - the frontend
     // renders that as "Manual".
     let trigger = if let Some(trigger_id) = evaluation.trigger {
         EProjectTrigger::find_by_id(trigger_id)
@@ -175,7 +175,7 @@ pub async fn get_evaluation_builds(
     // Followers (`via IS NOT NULL`) are stand-ins for a leader build in another
     // evaluation that's doing the actual work. The follower's own `status`,
     // `updated_at`, `build_time_ms` and even `id` are uninteresting until the
-    // leader finishes — surface the leader's row in this list instead so the
+    // leader finishes - surface the leader's row in this list instead so the
     // frontend renders the live build and log endpoints resolve to the right
     // build id. Same-org invariant (see `entity::build::Model::via`) means no
     // cross-org leak.

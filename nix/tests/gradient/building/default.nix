@@ -143,7 +143,7 @@
       print(server.succeed("cat /etc/nix/nix.conf"))
       print(builder.succeed("cat /etc/nix/nix.conf"))
 
-      # Stop the worker — we need to register it before it can authenticate
+      # Stop the worker - we need to register it before it can authenticate
       builder.succeed("systemctl stop gradient-worker")
 
       # Test health endpoint

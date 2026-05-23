@@ -86,7 +86,7 @@ function setup(access: AccessState): ComponentFixture<ProjectDetailComponent> {
   return fixture;
 }
 
-describe('ProjectDetailComponent — access gating', () => {
+describe('ProjectDetailComponent - access gating', () => {
   it('hides Start Evaluation / Restart / Abort when canTrigger is false', () => {
     const fixture = setup({ managed: false, canEdit: false, canTrigger: false });
     expect(findByText(fixture.nativeElement, 'start evaluation')).toBeNull();
@@ -96,7 +96,7 @@ describe('ProjectDetailComponent — access gating', () => {
 
   it('keeps Start Evaluation / Restart / Abort enabled on state-managed projects', () => {
     // Backend permits TriggerEvaluation on managed projects (reject_managed=false),
-    // so AccessService.triggerAccess strips the managed flag — buttons stay live.
+    // so AccessService.triggerAccess strips the managed flag - buttons stay live.
     const fixture = setup({ managed: true, canEdit: true, canTrigger: true });
     const startBtn = findByText(fixture.nativeElement, 'start evaluation') as HTMLButtonElement | null;
     const restartBtn = findByText(fixture.nativeElement, 'restart failed') as HTMLButtonElement | null;

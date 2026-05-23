@@ -364,7 +364,7 @@ fn public_org_allows_anonymous() {
     });
 }
 
-/// Private org rejects anonymous with 404 (not 403 — same as other eval endpoints).
+/// Private org rejects anonymous with 404 (not 403 - same as other eval endpoints).
 #[test]
 fn private_org_rejects_anonymous() {
     rt().block_on(async {

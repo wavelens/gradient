@@ -23,7 +23,7 @@ pub enum Commands {
         #[arg(short, long)]
         url: Option<String>,
         /// Pre-generated token (output of `openssl rand -base64 48`). When omitted the server
-        /// generates one and prints it — store it securely, it cannot be retrieved again.
+        /// generates one and prints it - store it securely, it cannot be retrieved again.
         #[arg(short, long)]
         token: Option<String>,
     },
@@ -66,7 +66,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                     if let Some(tok) = resp.token {
                         out.human(format!("Token:    {}", tok));
                         out.human("");
-                        out.human("Store the token securely — it cannot be retrieved again.");
+                        out.human("Store the token securely - it cannot be retrieved again.");
                     } else if token_provided {
                         out.human("Token was pre-supplied; not echoed back.");
                     }

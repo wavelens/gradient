@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `POST /build-requests/{session}/blobs` — accepts multipart form data
+//! `POST /build-requests/{session}/blobs` - accepts multipart form data
 //! where each part is named by its BLAKE3 hex hash. Verifies hashes,
 //! persists payloads via `nar_storage.put_blob`, and shrinks the session's
 //! `missing` set as blobs arrive.

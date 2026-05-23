@@ -127,7 +127,7 @@ fn make_drv_output(
     }
 }
 
-/// `cached_path` row whose `file_hash` is set — `is_fully_cached()` returns
+/// `cached_path` row whose `file_hash` is set - `is_fully_cached()` returns
 /// true. Used by `eval_result_*` tests that exercise the substituted-status
 /// branch of `insert_build_rows`.
 fn make_fully_cached_path(id: CachedPathId, store_path: &str) -> entity::cached_path::Model {
@@ -432,7 +432,7 @@ async fn eval_result_existing_derivation_reuses_id() {
         .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Building)]])
         // 2. find existing derivations → found it
         .append_query_results([vec![existing_drv]])
-        // (no insert_many derivations or outputs — already exists)
+        // (no insert_many derivations or outputs - already exists)
         // 2a. compute_truly_substituted: load derivation_output → empty
         .append_query_results([Vec::<MDerivationOutput>::new()])
         // 3. insert_many builds (Postgres: uses query_all → query_results)
@@ -482,7 +482,7 @@ async fn eval_result_substituted_derivation_completes_eval() {
         //    the substituted-cache mocks (4a/4b) reference the same `drv_id`
         //    the rest of `insert_build_rows` sees.
         .append_query_results([vec![make_derivation(drv_id, org_id, drv_path)]])
-        // (no insert_many derivations / outputs — already exists)
+        // (no insert_many derivations / outputs - already exists)
         // 4a. compute_truly_substituted: load derivation_output → cached row
         .append_query_results([vec![{
             let mut o = make_drv_output(DerivationOutputId::now_v7(), drv_id, "out", out_path);
@@ -522,7 +522,7 @@ async fn eval_result_substituted_derivation_completes_eval() {
 /// `compute_truly_substituted` matches by hash, not by the
 /// `derivation_output.cached_path` link, so a re-evaluated drv whose
 /// output hash is in `cached_path` (e.g. shared FOD source, manual cache
-/// push) gets marked Substituted on the very first eval pass — the link
+/// push) gets marked Substituted on the very first eval pass - the link
 /// is otherwise only set after a fresh upload runs `mark_nar_stored`.
 #[tokio::test]
 async fn eval_result_substitutes_when_hash_in_cached_path_without_link() {
@@ -541,7 +541,7 @@ async fn eval_result_substitutes_when_hash_in_cached_path_without_link() {
         .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Building)]])
         .append_query_results([vec![make_derivation(drv_id, org_id, drv_path)]])
         // derivation_output: hash matches the cached_path below, but
-        // cached_path link is None and is_cached is false — the row was
+        // cached_path link is None and is_cached is false - the row was
         // inserted by eval before any upload had run.
         .append_query_results([vec![make_drv_output(
             DerivationOutputId::now_v7(),
@@ -781,7 +781,7 @@ async fn build_completed_with_remaining_active() {
         .append_query_results([Vec::<MBuild>::new()])
         // 3. find active builds → still has other_build
         .append_query_results([vec![other_build]])
-        // check_evaluation_done returns early — no further queries
+        // check_evaluation_done returns early - no further queries
         .into_connection();
 
     let state = make_state(db);
@@ -830,7 +830,7 @@ async fn build_completed_with_failed_sibling() {
     assert!(result.is_ok());
 }
 
-/// Eval is not in Building status — check_evaluation_done returns without updating.
+/// Eval is not in Building status - check_evaluation_done returns without updating.
 #[tokio::test]
 async fn build_completed_eval_not_building_noop() {
     let eval_id = EvaluationId::now_v7();
@@ -859,7 +859,7 @@ async fn build_completed_eval_not_building_noop() {
     assert!(result.is_ok());
 }
 
-/// Build ID not found — handler returns Ok(()) without touching eval status.
+/// Build ID not found - handler returns Ok(()) without touching eval status.
 #[tokio::test]
 async fn build_completed_unknown_build_noop() {
     let build_id = BuildId::now_v7();
@@ -874,7 +874,7 @@ async fn build_completed_unknown_build_noop() {
     assert!(result.is_ok());
 }
 
-/// DependencyFailed builds count as failed — if all builds are
+/// DependencyFailed builds count as failed - if all builds are
 /// DependencyFailed/Completed, the eval transitions to Failed.
 #[tokio::test]
 async fn build_completed_dep_failed_siblings_cause_eval_failed() {
@@ -1037,7 +1037,7 @@ async fn build_failed_appends_worker_error_to_log() {
     );
 }
 
-/// Build fails with no Created/Queued dependents — cascade is a no-op.
+/// Build fails with no Created/Queued dependents - cascade is a no-op.
 /// check_evaluation_done sees only the Failed build → eval → Failed.
 #[tokio::test]
 async fn build_failed_no_dependents() {
@@ -1130,7 +1130,7 @@ async fn build_failed_cascade_only_direct_dependents() {
     assert!(result.is_ok());
 }
 
-/// Build job failed for an unknown build ID — handler returns Ok(()) silently.
+/// Build job failed for an unknown build ID - handler returns Ok(()) silently.
 #[tokio::test]
 async fn build_failed_unknown_build_noop() {
     let build_id = BuildId::now_v7();
@@ -1157,7 +1157,7 @@ async fn build_failed_cascade_skips_building_status() {
     // Building → Failed is the valid terminal failure transition per the state machine.
     let build_a = make_build(build_a_id, eval_id, drv_a_id, BuildStatus::Building);
     let build_a_failed = make_build(build_a_id, eval_id, drv_a_id, BuildStatus::Failed);
-    // B is Building (not Created/Queued) — cascade filter excludes it
+    // B is Building (not Created/Queued) - cascade filter excludes it
     let build_b_building = make_build(build_b_id, eval_id, drv_b_id, BuildStatus::Building);
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -1543,7 +1543,7 @@ async fn eval_job_completed_active_builds_remain_noop() {
         .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Building)]])
         // 5. check_evaluation_done: find active builds → has the still-Building one
         .append_query_results([vec![active_build]])
-        // (early return — no further queries)
+        // (early return - no further queries)
         .into_connection();
 
     let state = make_state(db);
@@ -1604,7 +1604,7 @@ async fn eval_job_failed_terminal_eval_noop() {
 /// DB call sequence:
 ///   1. Q: find active builds (Created/Queued/Building) → [buildA(Queued), buildB(Building)]
 ///   2. Q: update buildA → Aborted (UPDATE…RETURNING)
-///      → spawns dispatch_build_event_for_status(Aborted) — returns early (Aborted → return)
+///      → spawns dispatch_build_event_for_status(Aborted) - returns early (Aborted → return)
 ///      → spawns log_finalize (NoopLogStorage → no-op)
 ///   3. Q: update buildB → Aborted
 ///   4. E: update_many eval → Aborted
@@ -1650,7 +1650,7 @@ async fn abort_cascades_to_active_builds() {
 #[tokio::test]
 async fn abort_skips_completed_eval() {
     let eval_id = EvaluationId::now_v7();
-    // Empty MockDatabase — any unexpected DB call would cause an error that,
+    // Empty MockDatabase - any unexpected DB call would cause an error that,
     // if propagated, would surface as a test failure.
     let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
     let state = make_state(db);
@@ -1988,7 +1988,7 @@ async fn action_dispatched_on_build_completed() {
 ///   1–6. update buildA → Failed, cascade buildB → DependencyFailed
 ///   7–12. check_evaluation_done → update eval → Failed, find_by_id(eval)
 ///      → spawns TASK_A: dispatch_build_event_for_status(buildA, Failed)
-///      → spawns TASK_C: dispatch_build_event_for_status(buildB, DependencyFailed) — returns early
+///      → spawns TASK_C: dispatch_build_event_for_status(buildB, DependencyFailed) - returns early
 ///      → spawns TASK_E: dispatch_evaluation_event_for_status(eval, Failed)
 ///
 /// TASK_A: find_by_id(eval), find derivation, find project_actions → []
@@ -2221,7 +2221,7 @@ async fn eval_result_no_entry_points_without_project() {
         substituted: false,
     }];
 
-    // project_id: None — direct build, no entry points
+    // project_id: None - direct build, no entry points
     let eval_job = make_eval_job(eval_id, org_id);
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -2250,7 +2250,7 @@ async fn eval_result_no_entry_points_without_project() {
             drv_id,
             BuildStatus::Created,
         )]])
-        // NO entry point insert, NO project query — skipped when project_id is None
+        // NO entry point insert, NO project query - skipped when project_id is None
         // 6. find Created builds
         .append_query_results([vec![make_build(
             build_id,
@@ -2292,7 +2292,7 @@ async fn eval_result_no_entry_points_without_project() {
 #[tokio::test]
 async fn eval_job_failed_detects_prefetch_error_source() {
     let eval_id = EvaluationId::now_v7();
-    // Evaluation in Fetching status — prefetch failure
+    // Evaluation in Fetching status - prefetch failure
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // 1. find eval
         .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Fetching)]])
@@ -2383,7 +2383,7 @@ async fn eval_result_all_substituted_with_project_completes() {
         //    `drv_path_to_id` carries the test's `drv_id` (lets the
         //    substituted-cache mocks below reference the same id).
         .append_query_results([vec![make_derivation(drv_id, org_id, drv_path)]])
-        // (no insert derivation / outputs — already exists)
+        // (no insert derivation / outputs - already exists)
         // 4a. compute_truly_substituted: load derivation_output → cached row
         .append_query_results([vec![{
             let mut o = make_drv_output(DerivationOutputId::now_v7(), drv_id, "out", out_path);
@@ -2393,7 +2393,7 @@ async fn eval_result_all_substituted_with_project_completes() {
         }]])
         // 4b. compute_truly_substituted: load cached_path → fully cached
         .append_query_results([vec![make_fully_cached_path(cp_id, out_path)]])
-        // 5. insert build (Substituted — not Created!)
+        // 5. insert build (Substituted - not Created!)
         .append_query_results([vec![make_build(
             build_id,
             eval_id,
@@ -2447,7 +2447,7 @@ async fn eval_result_all_substituted_with_project_completes() {
 // ── Group M: Transitive DependencyFailed Cascade ────────────────────────────
 
 /// When build C fails and B depends on C and A depends on B, ALL of them should
-/// be marked DependencyFailed — not just the direct dependent B.
+/// be marked DependencyFailed - not just the direct dependent B.
 /// The cascade walks the derivation_dependency graph transitively (BFS).
 #[tokio::test]
 async fn build_failed_cascades_transitively_through_graph() {
@@ -2543,7 +2543,7 @@ async fn build_failed_cascades_transitively_through_graph() {
 }
 
 // ── Group R: fetch_repository is a stub ─────────────────────────────────────
-// (Worker-side test — lives in worker/src/executor/fetch.rs)
+// (Worker-side test - lives in worker/src/executor/fetch.rs)
 // The current fetch_repository() returns Ok(()) without cloning anything.
 // A proper implementation needs git2 integration.
 // See: worker/src/executor/fetch.rs:42-47

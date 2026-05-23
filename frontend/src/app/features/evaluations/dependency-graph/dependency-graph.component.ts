@@ -40,8 +40,8 @@ interface LayoutNode {
 }
 
 interface LayoutEdge {
-  source: string; // dependency (child in tree — lower level)
-  target: string; // dependent  (parent in tree — higher level)
+  source: string; // dependency (child in tree - lower level)
+  target: string; // dependent  (parent in tree - higher level)
 }
 
 @Component({
@@ -162,8 +162,8 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
     const nodes = this.layoutNodes;
     const edges = this.layoutEdges;
 
-    // deps.get(N)       = what N directly depends on (tree children — built first)
-    // dependents.get(N) = what directly depends on N (tree parents — built after)
+    // deps.get(N)       = what N directly depends on (tree children - built first)
+    // dependents.get(N) = what directly depends on N (tree parents - built after)
     const deps = new Map<string, string[]>();
     const dependents = new Map<string, string[]>();
     for (const n of nodes) { deps.set(n.id, []); dependents.set(n.id, []); }

@@ -10,7 +10,7 @@
 //!
 //! Two organizations are "cache-connected" when the writer org pushes into
 //! a cache that lies in the upstream closure of one of the reader org's
-//! caches. External (URL-based) upstreams are excluded — they don't host
+//! caches. External (URL-based) upstreams are excluded - they don't host
 //! Gradient builds.
 
 use std::collections::{HashSet, VecDeque};

@@ -2,10 +2,10 @@
 
 ## Getting Started
 
-1. **Register / Log in** — `/` redirects to login automatically.
-2. **Create an organization** — organizations own projects, caches, and workers.
-3. **Create a project** — point it at a Git repository and set an evaluation wildcard.
-4. **Configure a worker** — at least one `gradient-worker` must be connected to run jobs. Deploy one co-located on the server or on a dedicated build machine (see [Workers](#workers) below).
+1. **Register / Log in** - `/` redirects to login automatically.
+2. **Create an organization** - organizations own projects, caches, and workers.
+3. **Create a project** - point it at a Git repository and set an evaluation wildcard.
+4. **Configure a worker** - at least one `gradient-worker` must be connected to run jobs. Deploy one co-located on the server or on a dedicated build machine (see [Workers](#workers) below).
 
 ## Evaluation Wildcard
 
@@ -15,13 +15,13 @@ Two wildcard tokens expand attribute names at a given level:
 
 | Token | Behaviour |
 |---|---|
-| `*` | **Recursive** — matches all attribute names at this level and, at the trailing position, descends one additional level. Consecutive `*` segments collapse: `packages.*.*` and `packages.*` are equivalent. |
-| `#` | **Non-recursive** — matches all attribute names at this level but collects only those where `type == "derivation"`. Does not descend further. Use this to target a specific depth precisely. |
+| `*` | **Recursive** - matches all attribute names at this level and, at the trailing position, descends one additional level. Consecutive `*` segments collapse: `packages.*.*` and `packages.*` are equivalent. |
+| `#` | **Non-recursive** - matches all attribute names at this level but collects only those where `type == "derivation"`. Does not descend further. Use this to target a specific depth precisely. |
 
 ### `*` vs `#`
 
 ```
-packages.x86_64-linux.*   # finds packages.*.*.*  — recurses past x86_64-linux into each package
+packages.x86_64-linux.*   # finds packages.*.*.*  - recurses past x86_64-linux into each package
 packages.x86_64-linux.#   # finds packages that are derivations directly under x86_64-linux, no deeper
 ```
 
@@ -35,7 +35,7 @@ Prefix a pattern with `!` to remove matching paths from the set built by the pre
 packages.*,!packages.x86_64-linux.broken
 ```
 
-Exclusion patterns must be exact paths — they cannot contain `*` or `#`.
+Exclusion patterns must be exact paths - they cannot contain `*` or `#`.
 
 ### Examples
 
@@ -43,7 +43,7 @@ Exclusion patterns must be exact paths — they cannot contain `*` or `#`.
 |---|---|
 | `packages.x86_64-linux.#` | Every derivation directly under `packages.x86_64-linux` |
 | `packages.x86_64-linux.*` | Same, but also recurses one level deeper into nested attrsets |
-| `packages.#.#` | Every derivation at exactly depth 2 under `packages` (system → package) across all systems — first `#` expands systems, second `#` expands packages non-recursively |
+| `packages.#.#` | Every derivation at exactly depth 2 under `packages` (system → package) across all systems - first `#` expands systems, second `#` expands packages non-recursively |
 | `checks.x86_64-linux.*` | All checks for x86\_64-linux |
 | `packages.*` | Packages for every system (equivalent to `packages.*.*`) |
 | `packages.*,checks.*` | Packages and checks for every system |
@@ -61,9 +61,9 @@ The evaluation log page shows per-build status, combined ANSI build output, and 
 
 Evaluations can also be triggered automatically:
 
-- **GitHub App** — when the App is installed, push events from GitHub trigger evaluations instantly (no polling). See [GitHub App](../configuration.md#github-app).
-- **Forge webhooks** — for Gitea, Forgejo, GitLab, or GitHub without the App, configure a per-org push webhook. See [Forge Webhooks](../configuration.md#forge-webhooks-gitea-forgejo-gitlab-github-without-app).
-- **Polling** — fallback for projects without webhook configuration; Gradient checks for new commits every 60 seconds.
+- **GitHub App** - when the App is installed, push events from GitHub trigger evaluations instantly (no polling). See [GitHub App](../configuration.md#github-app).
+- **Forge webhooks** - for Gitea, Forgejo, GitLab, or GitHub without the App, configure a per-org push webhook. See [Forge Webhooks](../configuration.md#forge-webhooks-gitea-forgejo-gitlab-github-without-app).
+- **Polling** - fallback for projects without webhook configuration; Gradient checks for new commits every 60 seconds.
 
 ## Members & Roles
 
@@ -93,7 +93,7 @@ roles by ticking individual permissions:
 - Project-level: `createProject`, `editProject`, `triggerEvaluation`.
 
 Permission identifiers and their canonical order are returned by
-`GET /api/v1/orgs/{organization}/roles`'s `available_permissions` field —
+`GET /api/v1/orgs/{organization}/roles`'s `available_permissions` field -
 new capabilities are appended over time and the UI picks them up
 automatically.
 
@@ -110,6 +110,6 @@ The key is scoped to the organization; different organizations use different key
 
 ## Workers
 
-Build capacity is provided by `gradient-worker` processes. The server does not start a worker automatically — at least one must be configured explicitly.
+Build capacity is provided by `gradient-worker` processes. The server does not start a worker automatically - at least one must be configured explicitly.
 
 To run a worker on the server host itself, enable `services.gradient.worker`. Workers authenticate using per-organization tokens. A worker authorized for an org receives only that org's job offers.

@@ -22,7 +22,7 @@
 //! Keyed by `(job_id, store_path)` so multiple concurrent jobs can request the
 //! same path without collision.
 //!
-//! No I/O happens here — decompression and store import are the caller's job.
+//! No I/O happens here - decompression and store import are the caller's job.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -60,8 +60,8 @@ pub struct NarReceiver {
 /// register all paths in a batch *before* sending `NarRequest` on the wire,
 /// then await each pending resolution via [`NarReceiver::await_pending`].
 /// This guarantees a live waiter is in place by the time any server response
-/// arrives — otherwise late `NarPush` / `NarUnavailable` frames would surface
-/// as "no waiter — discarding" warnings.
+/// arrives - otherwise late `NarPush` / `NarUnavailable` frames would surface
+/// as "no waiter - discarding" warnings.
 pub struct PendingNar {
     job_id: String,
     store_path: String,
@@ -114,7 +114,7 @@ impl NarReceiver {
                 reason
             )),
             Ok(Err(_)) => Err(anyhow::anyhow!(
-                "NarPush waiter dropped for {}/{} — connection closed or superseded?",
+                "NarPush waiter dropped for {}/{} - connection closed or superseded?",
                 job_id,
                 store_path
             )),
@@ -174,7 +174,7 @@ impl NarReceiver {
                         %job_id,
                         %store_path,
                         bytes = buf.len(),
-                        "received final NarPush with no waiter — discarding"
+                        "received final NarPush with no waiter - discarding"
                     );
                 }
             }
@@ -203,7 +203,7 @@ impl NarReceiver {
                     %job_id,
                     %store_path,
                     %reason,
-                    "received NarUnavailable/NarAbort with no waiter — discarding"
+                    "received NarUnavailable/NarAbort with no waiter - discarding"
                 );
             }
         }
@@ -285,8 +285,8 @@ mod tests {
         // Regression: a batched `NarRequest` registered every waiter
         // synchronously before the request went on the wire. Server
         // responses that arrived before the caller awaited the batch must
-        // still find a live waiter — otherwise late `NarUnavailable` frames
-        // surface as "no waiter — discarding" warnings and the caller
+        // still find a live waiter - otherwise late `NarUnavailable` frames
+        // surface as "no waiter - discarding" warnings and the caller
         // hangs on the timeout.
         let r = NarReceiver::new();
         let p1 = r.register("job", "/nix/store/a");

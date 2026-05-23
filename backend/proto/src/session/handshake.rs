@@ -8,7 +8,7 @@
 //!
 //! Models the four states of an inbound proto handshake:
 //! `Opening → Greeted → Authenticated → Registered`. The FSM has no I/O
-//! dependency — it only sequences which `ClientMessage`/`ServerMessage`
+//! dependency - it only sequences which `ClientMessage`/`ServerMessage`
 //! pairs are valid at each step. Drivers (e.g. `proto::server::accept` or
 //! gradient-server's existing session handler) feed it observed messages
 //! and act on its emitted intent.
@@ -19,7 +19,7 @@ use crate::messages::{ClientMessage, FailedPeer, GradientCapabilities, PROTO_VER
 use crate::session::frame::{ProtoSocket, recv_server_msg, send_client_msg};
 use crate::traits::{CapabilitiesProvider, PeerAuthority, PeerIdentity, SessionFactory};
 
-/// State markers — zero-sized; the FSM is encoded entirely in the type.
+/// State markers - zero-sized; the FSM is encoded entirely in the type.
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub struct Opening;
 

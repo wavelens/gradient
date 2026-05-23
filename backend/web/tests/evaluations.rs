@@ -12,7 +12,7 @@
 //!
 //! Auth + DB mock query sequence per request:
 //!   1. SELECT session (jti lookup)
-//!   2. SELECT session (UPDATE last_used_at — MockDatabase uses RETURNING path)
+//!   2. SELECT session (UPDATE last_used_at - MockDatabase uses RETURNING path)
 //!   3. SELECT user
 //!   4. SELECT org (load_project)
 //!   5. SELECT project (load_project)
@@ -20,7 +20,7 @@
 //!
 //! Then for the evaluations handler:
 //!   7. SELECT evaluations (filtered by project, ordered, limited)
-//!   8. SELECT project_triggers (batch-load trigger types) — skipped when no triggers
+//!   8. SELECT project_triggers (batch-load trigger types) - skipped when no triggers
 //!   9. SELECT commits (batch-load commit hashes)
 //!  10. SELECT builds (batch-load build counts)
 //!  11. SELECT entry_points (batch-load EP counts, including previous evals)
@@ -218,7 +218,7 @@ fn evaluation_without_trigger_returns_null_trigger() {
         ))
         // 7. SELECT evaluations
         .append_query_results([vec![eval]])
-        // 8. No trigger IDs — trigger query skipped; batch loads follow:
+        // 8. No trigger IDs - trigger query skipped; batch loads follow:
         // 9. SELECT commits
         .append_query_results([vec![commit_row()]])
         // 10. SELECT builds
@@ -317,7 +317,7 @@ fn evaluation_with_deleted_trigger_returns_null() {
         ))
         // 7. SELECT evaluations
         .append_query_results([vec![eval]])
-        // 8. SELECT project_triggers — row not found (deleted trigger)
+        // 8. SELECT project_triggers - row not found (deleted trigger)
         .append_query_results([Vec::<entity::project_trigger::Model>::new()])
         // 9. SELECT commits
         .append_query_results([vec![commit_row()]])

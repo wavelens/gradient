@@ -53,7 +53,7 @@ pub struct RequestedAction {
     pub description: String,
 }
 
-/// Identifier we send for the "approve untrusted PR" button — and pattern-match
+/// Identifier we send for the "approve untrusted PR" button - and pattern-match
 /// on when the forge echoes it back via `check_run.requested_action`.
 pub const APPROVAL_ACTION_ID: &str = "approve-and-run";
 
@@ -94,12 +94,12 @@ pub struct CiReport {
 ///
 /// # Implementors
 ///
-/// - `NoopCiReporter` — silently discards all reports (used when no integration
+/// - `NoopCiReporter` - silently discards all reports (used when no integration
 ///   is configured).
-/// - `RecordingCiReporter` (test-support) — records every call for assertions.
-/// - `GiteaReporter` — Gitea Commit Status API.
-/// - `GitlabReporter` — GitLab Commit Status API.
-/// - `GithubReporter` — GitHub Commit Status API (also works with GitHub Enterprise Server).
+/// - `RecordingCiReporter` (test-support) - records every call for assertions.
+/// - `GiteaReporter` - Gitea Commit Status API.
+/// - `GitlabReporter` - GitLab Commit Status API.
+/// - `GithubReporter` - GitHub Commit Status API (also works with GitHub Enterprise Server).
 #[async_trait]
 pub trait CiReporter: Send + Sync + std::fmt::Debug + 'static {
     /// Report or update a CI status for the given commit.
@@ -1216,7 +1216,7 @@ mod tests {
 
     #[test]
     fn reporter_for_project_unsafe_url_falls_back_to_noop() {
-        // Bad base_url should not crash callers — the factory logs and returns Noop.
+        // Bad base_url should not crash callers - the factory logs and returns Noop.
         let r = reporter_for_project(
             test_client(),
             Some("gitea"),

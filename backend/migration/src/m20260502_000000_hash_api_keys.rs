@@ -8,7 +8,7 @@
 //!
 //! After this migration the column stores a 64-char sha256 hex hash; the auth
 //! lookup hashes the incoming token before querying. Existing tokens stay
-//! valid because we hash in place — clients see no change.
+//! valid because we hash in place - clients see no change.
 
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::{ConnectionTrait, Statement};

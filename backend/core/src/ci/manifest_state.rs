@@ -21,9 +21,9 @@ use crate::ci::github_app_manifest::ManifestResult;
 /// Map of state-token → (initiating superuser id, issuance time). Tokens older
 /// than 10 minutes are pruned on each `issue_state` call.
 ///
-/// The user id is recorded at issuance so the callback — which arrives as an
+/// The user id is recorded at issuance so the callback - which arrives as an
 /// unauthenticated top-level browser redirect from github.com and therefore
-/// carries no `Authorization` header — can recover which superuser initiated
+/// carries no `Authorization` header - can recover which superuser initiated
 /// the manifest flow without trusting query-string input.
 pub type ManifestStateStore = Mutex<HashMap<String, (UserId, Instant)>>;
 

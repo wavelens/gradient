@@ -110,7 +110,7 @@ fn list_roles_returns_builtins_plus_custom() {
         let token = make_token(session_id);
         let custom_id = RoleId::now_v7();
 
-        // GET requires `Member` access, which is membership-existence only —
+        // GET requires `Member` access, which is membership-existence only -
         // no role-row lookup is performed.
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
             .append_query_results([vec![org()]])

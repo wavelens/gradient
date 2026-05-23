@@ -34,7 +34,7 @@ let
     ];
   };
 
-  # Cached dependency layer — only rebuilt when Cargo.lock changes
+  # Cached dependency layer - only rebuilt when Cargo.lock changes
   cargoArtifacts = craneLib.buildDepsOnly commonArgs;
 in
 craneLib.buildPackage (commonArgs // {

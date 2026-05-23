@@ -70,7 +70,7 @@ function buttonsByText(root: HTMLElement, text: string): HTMLButtonElement[] {
   );
 }
 
-describe('ApiKeysComponent — managed-key gating', () => {
+describe('ApiKeysComponent - managed-key gating', () => {
   it('renders Edit / Revoke / Delete enabled for an unmanaged key', () => {
     const fixture = setup([unmanagedKey]);
     const editButtons = buttonsByText(fixture.nativeElement, 'edit');

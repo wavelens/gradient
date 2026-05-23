@@ -181,7 +181,7 @@ export class OrganizationDetailComponent implements OnInit, OnDestroy {
 
   get wildcardInvalid(): boolean {
     const w = this.newProject.wildcard.trim();
-    if (!w) return false; // empty means use default — not invalid
+    if (!w) return false; // empty means use default - not invalid
     const parts = w.split(',').map((p) => p.trim());
     return parts.some((p) => !p || p.startsWith('.') || /\s/.test(p));
   }

@@ -31,7 +31,7 @@ pub(crate) use socket::{MAX_PROTO_MESSAGE_SIZE, ProtoSocket};
 pub(crate) use socket::{HANDSHAKE_TIMEOUT, NAR_PUSH_CHUNK_SIZE};
 
 /// `Retry-After` value returned with a 503 when the proto connection cap is
-/// hit — long enough to absorb a brief surge, short enough that a recovered
+/// hit - long enough to absorb a brief surge, short enough that a recovered
 /// worker reconnects promptly.
 const RETRY_AFTER: HeaderValue = HeaderValue::from_static("10");
 

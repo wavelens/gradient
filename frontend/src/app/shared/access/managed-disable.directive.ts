@@ -46,7 +46,7 @@ export class ManagedDisableDirective implements OnInit {
   }
 
   private tooltip(state: AccessState): string {
-    if (state.managed) return 'Managed by Nix — edit via declarative config';
+    if (state.managed) return 'Managed by Nix - edit via declarative config';
     return 'You have read-only access';
   }
 }

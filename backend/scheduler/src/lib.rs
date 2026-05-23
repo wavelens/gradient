@@ -4,13 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Job scheduler — tracks connected workers and dispatches eval/build jobs.
+//! Job scheduler - tracks connected workers and dispatches eval/build jobs.
 //!
 //! Injected into the axum router as an `Extension<Arc<Scheduler>>`.
 //!
 //! The `Scheduler` impl is split across submodules by concern:
-//! - [`worker_lifecycle`] — connect / disconnect / capability updates
-//! - [`job_handlers`] — queue, assignment, status, completion, log, abort
+//! - [`worker_lifecycle`] - connect / disconnect / capability updates
+//! - [`job_handlers`] - queue, assignment, status, completion, log, abort
 
 pub mod build;
 pub mod ci;
@@ -50,7 +50,7 @@ mod handler_tests;
 #[cfg(test)]
 mod scheduler_tests;
 
-/// The shared scheduler — clone freely (all fields are `Arc`s).
+/// The shared scheduler - clone freely (all fields are `Arc`s).
 #[derive(Clone)]
 pub struct Scheduler {
     /// Shared application state (DB, CLI config, etc.).

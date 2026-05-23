@@ -96,7 +96,7 @@ curl -X PATCH $API/user/keys/$KEY_ID \
 ```
 
 API-key-authenticated requests **cannot** create, edit, revoke, or delete API
-keys — only session-authenticated calls can. This prevents a leaked key from
+keys - only session-authenticated calls can. This prevents a leaked key from
 minting more powerful siblings.
 
 ### Organizations
@@ -119,7 +119,7 @@ Workers are `gradient-worker` processes that connect to the server over WebSocke
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/orgs/{org}/workers` | Register a worker — returns `peer_id` and optionally a one-time `token` |
+| `POST` | `/orgs/{org}/workers` | Register a worker - returns `peer_id` and optionally a one-time `token` |
 | `GET` | `/orgs/{org}/workers` | List registered workers (merges live state) |
 | `DELETE` | `/orgs/{org}/workers/{worker_id}` | Unregister a worker |
 | `GET` | `/admin/workers` | List all currently connected workers (superuser or `GRADIENT_GLOBAL_STATS_PUBLIC`) |
@@ -129,7 +129,7 @@ All endpoints under `/admin/*` require the calling user to have the
 
 **Register a worker:**
 
-`worker_id` must be a **UUID v4**. On a NixOS host running the `gradient-worker` service the worker auto-generates one on first start and persists it to `/var/lib/gradient-worker/worker-id` — read it with:
+`worker_id` must be a **UUID v4**. On a NixOS host running the `gradient-worker` service the worker auto-generates one on first start and persists it to `/var/lib/gradient-worker/worker-id` - read it with:
 
 ```sh
 cat /var/lib/gradient-worker/worker-id
@@ -155,7 +155,7 @@ Response (server-generated token):
 }
 ```
 
-Alternatively, supply a pre-generated token (`openssl rand -base64 48` — exactly 64 standard base64 characters). The server stores its hash and **does not** return it in the response:
+Alternatively, supply a pre-generated token (`openssl rand -base64 48` - exactly 64 standard base64 characters). The server stores its hash and **does not** return it in the response:
 
 ```sh
 curl -X POST https://gradient.example.com/api/v1/orgs/myorg/workers \
@@ -164,7 +164,7 @@ curl -X POST https://gradient.example.com/api/v1/orgs/myorg/workers \
   -d "{\"worker_id\": \"550e8400-e29b-41d4-a716-446655440001\", \"token\": \"$(openssl rand -base64 48)\"}"
 ```
 
-Response (pre-supplied token — no `token` field):
+Response (pre-supplied token - no `token` field):
 
 ```json
 {
@@ -265,7 +265,7 @@ Set `GRADIENT_WORKER_PEERS_FILE` (or the NixOS `peersFile` option) to this path.
 
 ### Nix Binary Cache (root, no `/api/v1` prefix)
 
-Private caches require HTTP Basic Auth (any username, JWT or API key as password — returns `401` without credentials).
+Private caches require HTTP Basic Auth (any username, JWT or API key as password - returns `401` without credentials).
 
 **Substituter surface** (used by `nix`, `nixos-rebuild`, etc.):
 
@@ -282,7 +282,7 @@ Private caches require HTTP Basic Auth (any username, JWT or API key as password
 |---|---|---|
 | `GET` | `/cache/{cache}/ls/{hash}` | JSON tree listing of the NAR (nix-serve `.ls` v1 schema) |
 | `GET` | `/cache/{cache}/serve/{hash}/{path}` | Extract a single file (bytes) or directory (tar.zst) from a NAR |
-| `GET` | `/cache/{cache}/log/{drv}` | Build log for `<drv>.drv` (substituter compat — `nix log`) |
+| `GET` | `/cache/{cache}/log/{drv}` | Build log for `<drv>.drv` (substituter compat - `nix log`) |
 
 The inspection endpoints (`/ls`, `/serve`) are rate-limited at 60 req/min. The `/log` endpoint is rate-limited at ~300 req/min on its own tier. All endpoints return `404` when the hash or derivation is unknown.
 

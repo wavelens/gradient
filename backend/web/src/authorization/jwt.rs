@@ -24,7 +24,7 @@ pub struct Cliams {
     pub exp: usize,
     pub iat: usize,
     pub id: UserId,
-    /// Session id — must match a non-revoked, non-expired row in `session`.
+    /// Session id - must match a non-revoked, non-expired row in `session`.
     pub jti: SessionId,
 }
 

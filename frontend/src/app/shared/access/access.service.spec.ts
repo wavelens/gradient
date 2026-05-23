@@ -61,7 +61,7 @@ describe('AccessService', () => {
     });
 
     it('keeps trigger actions open on a managed project when canTrigger is true', () => {
-      // canEdit can be true on managed projects (caller has EditProject) — the
+      // canEdit can be true on managed projects (caller has EditProject) - the
       // service must still strip the managed flag so [appManagedDisable] does
       // not disable trigger buttons.
       const out = svc.triggerAccess(s(true, true, true));

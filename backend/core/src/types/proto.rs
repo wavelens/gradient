@@ -13,7 +13,7 @@ use serde::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize};
 /// it supports in `ClientMessage::InitConnection`; the server responds with
 /// only the flags it is willing to activate for this session in
 /// `ServerMessage::InitAck`.  Unknown flags in a received message are always
-/// treated as `false` — adding new fields is forwards-compatible.
+/// treated as `false` - adding new fields is forwards-compatible.
 ///
 /// All fields default to `false` so a zeroed struct is a valid
 /// "no features" state.
@@ -23,7 +23,7 @@ pub struct GradientCapabilities {
     /// Peer is the Gradient server itself (coordinator).
     /// Always `true` on the server side, always `false` for external workers.
     pub core: bool,
-    /// Client supports federation — relaying work and NAR traffic between workers and servers.
+    /// Client supports federation - relaying work and NAR traffic between workers and servers.
     pub federate: bool,
     /// Client supports fetching flake inputs and pre-fetching sources.
     pub fetch: bool,
@@ -128,9 +128,9 @@ pub enum EvalMessageLevel {
 pub enum JobUpdateKind {
     Fetching,
     /// Reports the archived flake source path after `FetchFlake` completes.
-    /// `Some(path)` — `nix flake archive` succeeded and the source now lives
+    /// `Some(path)` - `nix flake archive` succeeded and the source now lives
     /// in the cache; the server can hand the path to a subsequent eval-only
-    /// job as `FlakeSource::Cached`. `None` — the worker fell back to a
+    /// job as `FlakeSource::Cached`. `None` - the worker fell back to a
     /// temporary git checkout; no eval-only follow-up is possible.
     FetchResult {
         flake_source: Option<String>,
@@ -139,7 +139,7 @@ pub enum JobUpdateKind {
     EvaluatingDerivations,
     EvalResult {
         derivations: Vec<DiscoveredDerivation>,
-        /// Nix stderr warnings (deprecations, etc.) — informational.
+        /// Nix stderr warnings (deprecations, etc.) - informational.
         warnings: Vec<String>,
         /// Hard errors that prevented derivation resolution (e.g. per-attr
         /// `.drvPath` evaluation failures).  A non-empty list should cause

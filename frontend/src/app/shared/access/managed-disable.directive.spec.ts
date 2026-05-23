@@ -20,7 +20,7 @@ class HostComponent {
   access = signal<AccessState>({ managed: false, canEdit: true, canTrigger: true });
 }
 
-// Mirrors how PrimeNG inputs implement ControlValueAccessor — the directive
+// Mirrors how PrimeNG inputs implement ControlValueAccessor - the directive
 // must call `setDisabledState` on them, since setting the DOM `disabled`
 // property on a component host element does not flow into the component's
 // internal state.

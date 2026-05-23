@@ -206,7 +206,7 @@
 
       print("=== Testing OIDC Callback Processing ===")
 
-      # Test callback with valid authorization code — expect a 302 redirect to the frontend
+      # Test callback with valid authorization code - expect a 302 redirect to the frontend
       callback_response = server.succeed("""
         ${lib.getExe pkgs.curl} -s -i \
           "http://gradient.local/api/v1/auth/oidc/callback?code=test-auth-code"

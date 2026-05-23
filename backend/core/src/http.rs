@@ -29,7 +29,7 @@ pub fn user_agent() -> String {
 /// enabled via crate features; any TLS handshake started before a provider is
 /// installed panics. Binaries must call this **before** any code path opens a
 /// TLS connection (e.g. `tokio_tungstenite::connect_async` for `wss://`,
-/// `reqwest` HTTPS, sea-orm postgres TLS). The call is idempotent — the second
+/// `reqwest` HTTPS, sea-orm postgres TLS). The call is idempotent - the second
 /// install attempt returns `Err`, which we deliberately ignore.
 pub fn init_crypto_provider() {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();

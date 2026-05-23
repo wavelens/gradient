@@ -168,7 +168,7 @@ pub fn verify_gitea_signature(secret: &str, signature_header: &str, body: &[u8])
 mod tests {
     use super::*;
 
-    /// PKCS#1 form of `TEST_RSA_PEM` — same key, `BEGIN RSA PRIVATE KEY` header
+    /// PKCS#1 form of `TEST_RSA_PEM` - same key, `BEGIN RSA PRIVATE KEY` header
     /// (the format GitHub's manifest API returns).
     const TEST_RSA_PEM_PKCS1: &str = "-----BEGIN RSA PRIVATE KEY-----\n\
 MIIEpAIBAAKCAQEAvGqpmY6nUPo1IQU0QWdpgD+9mJ6w0MqGk6ldyOLNlfieQust\n\
@@ -436,7 +436,7 @@ iw88K5/oFeMFr7syCSKTPeQD\n\
 
     #[test]
     fn verify_gitea_signature_empty_header_rejected() {
-        // Empty hex decodes to empty bytes — mac.verify_slice with empty
+        // Empty hex decodes to empty bytes - mac.verify_slice with empty
         // expected bytes must not accept any real signature.
         let body = b"body";
         assert!(!verify_gitea_signature("secret", "", body));

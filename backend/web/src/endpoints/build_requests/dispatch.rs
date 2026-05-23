@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `POST /build-requests/{session}/dispatch` — finalises a build-request
+//! `POST /build-requests/{session}/dispatch` - finalises a build-request
 //! upload session by materialising the staged blobs into a
 //! `/nix/store/<hash>-source` path, persisting `cached_path` metadata,
 //! lazily creating a per-org `build-request` project, and queueing an

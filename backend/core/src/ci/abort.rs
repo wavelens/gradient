@@ -9,7 +9,7 @@
 //! - `AbortKind::Hard` marks the evaluation `Aborted` and every non-terminal
 //!   build under it `Aborted`. The scheduler is expected to drop the
 //!   in-memory job entries via `Scheduler::cancel_evaluation_jobs` once this
-//!   helper returns Ok — that lives in the scheduler crate, not here, since
+//!   helper returns Ok - that lives in the scheduler crate, not here, since
 //!   the abort helper is DB-only.
 //! - `AbortKind::Soft` marks only the evaluation. In-flight builds keep
 //!   running and their outputs land in the cache for the next eval to reuse.

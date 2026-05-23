@@ -221,7 +221,7 @@ pub async fn post_organization_subscribe_cache(
 }
 
 /// Insert null-signature placeholders for every `cached_path` reachable
-/// from a derivation owned by `org_id`, for `cache_id`. Idempotent —
+/// from a derivation owned by `org_id`, for `cache_id`. Idempotent -
 /// existing rows are skipped. Best-effort: errors are logged, not
 /// propagated.
 async fn enqueue_backfill_signatures(

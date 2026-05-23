@@ -167,7 +167,7 @@ impl ProtoSession<Opening> {
                 if registered_peers.is_empty() {
                     debug!(
                         %peer_id,
-                        "server-initiated, no registered peers — open connection accepted"
+                        "server-initiated, no registered peers - open connection accepted"
                     );
                 }
             }
@@ -320,7 +320,7 @@ async fn on_reauth_notify(writer: &ProtoWriter, state: &ServerState, peer_id: &s
     debug!(%peer_id, "server-initiated reauth");
     let registered_peers = lookup_registered_peers(state, peer_id).await;
     if registered_peers.is_empty() && has_any_registrations(state, peer_id).await {
-        info!(%peer_id, "all registrations deactivated — disconnecting worker");
+        info!(%peer_id, "all registrations deactivated - disconnecting worker");
         let _ = send_server_msg(
             writer,
             &ServerMessage::Reject {

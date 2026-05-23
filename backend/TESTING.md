@@ -27,7 +27,7 @@ The deleted tests shared three anti-patterns that made them worthless:
 
 ## What Needs a Mock
 
-### Database — `sea_orm::MockDatabase`
+### Database - `sea_orm::MockDatabase`
 
 Any function that calls into `state.db`. SeaORM's `MockDatabase` replays pre-loaded query results in order; each `.append_query_results([...])` call feeds the next `SELECT`, each `.append_exec_results([...])` feeds the next `INSERT`/`UPDATE`/`DELETE`.
 
@@ -43,13 +43,13 @@ pub fn db_with<T: sea_orm::IntoMockRow>(rows: Vec<T>) -> DatabaseConnection {
 
 Chain multiple `.append_query_results` for handlers that run several queries.
 
-### External Processes — trait injection
+### External Processes - trait injection
 
 `execute_build` (builder) and `check_project_updates` (core) shell out to `nix` and `git`
 via `tokio::process::Command`. These cannot be tested without real binaries **unless** the
 call site is abstracted behind a trait.
 
-Planned refactor — extract a `ProcessRunner` trait and inject it via `ServerState`:
+Planned refactor - extract a `ProcessRunner` trait and inject it via `ServerState`:
 
 ```rust
 // core/src/runner.rs
@@ -62,7 +62,7 @@ pub trait ProcessRunner: Send + Sync {
 Until this refactor is done, do not write tests for code that shells out. Add the trait first,
 then the tests.
 
-### JWT / Secrets — temp files
+### JWT / Secrets - temp files
 
 Handlers that mint or verify JWTs read a secret from a file path in `Cli`. In tests, write a
 known secret to a `tempfile::NamedTempFile` and pass its path. The `test_cli()` helper in
@@ -72,7 +72,7 @@ known secret to a `tempfile::NamedTempFile` and pass its path. The `test_cli()` 
 
 ## What to Test
 
-### Priority 1 — Pure functions (no mocks, fast)
+### Priority 1 - Pure functions (no mocks, fast)
 
 Live in `#[cfg(test)]` blocks inside the source file or in `tests/` integration files.
 
@@ -86,17 +86,17 @@ Live in `#[cfg(test)]` blocks inside the source file or in `tests/` integration 
 
 These run offline with no setup. They should be the majority of tests.
 
-### Priority 2 — HTTP handlers (mock DB + axum-test)
+### Priority 2 - HTTP handlers (mock DB + axum-test)
 
 Requires extracting `create_router(state: Arc<ServerState>) -> Router` from `serve_web` (one-line refactor).
 
 For each endpoint, write tests for:
-1. **Auth enforcement** — 401 without JWT, 403 when caller lacks permission
-2. **Not-found** — 404 when the DB returns no rows
-3. **Validation** — 400 for invalid body fields
-4. **Happy path** — correct status code and key response values
+1. **Auth enforcement** - 401 without JWT, 403 when caller lacks permission
+2. **Not-found** - 404 when the DB returns no rows
+3. **Validation** - 400 for invalid body fields
+4. **Happy path** - correct status code and key response values
 
-Do NOT assert every JSON field — that re-tests serde. Only assert on values the handler itself
+Do NOT assert every JSON field - that re-tests serde. Only assert on values the handler itself
 computes (aggregations, transformations, IDs it creates).
 
 ```rust
@@ -120,13 +120,13 @@ async fn get_project_metrics_empty_returns_empty_points() {
 }
 ```
 
-### Priority 3 — Business logic (mock DB, async)
+### Priority 3 - Business logic (mock DB, async)
 
 | Function | What to cover |
 |---|---|
 | `builder::scheduler::evaluation::gc_old_evaluations` | Keeps exactly `keep` evals; deletes oldest; nulls cross-references before deleting to avoid cascade issues |
-| `web::endpoints::projects` — metrics aggregation | `build_time_total_ms` sums only Completed builds; falls back to timestamp diff when `build_time_ms` is NULL |
-| `web::endpoints::auth` — login | Wrong password → 401; correct → response contains token |
+| `web::endpoints::projects` - metrics aggregation | `build_time_total_ms` sums only Completed builds; falls back to timestamp diff when `build_time_ms` is NULL |
+| `web::endpoints::auth` - login | Wrong password → 401; correct → response contains token |
 
 ---
 
@@ -198,7 +198,7 @@ pub fn db_with<T: sea_orm::IntoMockRow>(rows: Vec<T>) -> DatabaseConnection {
         .into_connection()
 }
 
-// Fixture builders — deterministic values, easy to read in assertions
+// Fixture builders - deterministic values, easy to read in assertions
 pub fn org() -> organization::Model { ... }
 pub fn project(org_id: Uuid) -> project::Model { ... }
 pub fn user() -> user::Model { ... }
@@ -262,7 +262,7 @@ builder/
     gc.rs           ← gc_old_evaluations: keeps N, deletes oldest, safe cascade
 
 entity/
-  (no integration tests — entity crate only defines models and enums)
+  (no integration tests - entity crate only defines models and enums)
   (enum FromStr/Display roundtrips live in #[cfg(test)] blocks in each entity file)
 ```
 
@@ -271,8 +271,8 @@ entity/
 ## Adding a New Test
 
 1. Add the test function to the appropriate file in `tests/`.
-2. Use `common::test_state(db)` — never build `Cli` inline.
+2. Use `common::test_state(db)` - never build `Cli` inline.
 3. For a handler test: pre-load **only** the DB rows that handler will query, in order.
-4. Assert on **computed values** only — not on IDs or timestamps you inserted.
+4. Assert on **computed values** only - not on IDs or timestamps you inserted.
 5. Name the test `<subject>_<condition>_<expected_outcome>`, e.g.
    `get_project_metrics_no_evals_returns_empty_points`.

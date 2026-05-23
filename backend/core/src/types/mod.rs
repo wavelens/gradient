@@ -118,7 +118,7 @@ pub struct ServerState {
     pub email: Arc<dyn EmailSender>,
     pub nar_storage: NarStore,
     /// Shared outbound HTTP client. Reuse this for any outbound request
-    /// made from a handler or background task — never construct a fresh
+    /// made from a handler or background task - never construct a fresh
     /// `reqwest::Client` per call.
     pub http: reqwest::Client,
     /// Issued-but-unconsumed manifest CSRF state tokens with their issuance time.

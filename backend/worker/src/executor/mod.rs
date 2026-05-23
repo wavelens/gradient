@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Task executors — one module per job task type.
+//! Task executors - one module per job task type.
 //!
 //! [`JobExecutor`] is the top-level orchestrator that dispatches to the
 //! appropriate sub-executor based on the job type received from the server.
@@ -79,7 +79,7 @@ async fn query_fetched_paths(updater: &mut JobUpdater, all_paths: Vec<String>) -
 /// before this eval job's `JobCompleted` reaches the server.
 ///
 /// Errors during closure expansion or individual NAR pushes are logged but
-/// not fatal — operators see them in the worker log, and downstream builds
+/// not fatal - operators see them in the worker log, and downstream builds
 /// surface the missing path through their existing prefetch error path.
 async fn push_drv_closure(drv_paths: &[String], updater: &mut JobUpdater, store: &LocalNixStore) {
     if drv_paths.is_empty() {
@@ -103,15 +103,15 @@ async fn push_drv_closure(drv_paths: &[String], updater: &mut JobUpdater, store:
     }
 }
 
-/// Upload one fetched input path's NAR to the cache — either via a presigned
+/// Upload one fetched input path's NAR to the cache - either via a presigned
 /// PUT URL (S3) or via the chunked WS `NarPush` fallback (local storage).
 ///
 /// Errors are logged and swallowed; a failed push for a source path is not
-/// fatal — the build proceeds and fails cleanly if the daemon truly needs it.
+/// fatal - the build proceeds and fails cleanly if the daemon truly needs it.
 async fn push_one_fetched_nar(updater: &mut JobUpdater, cp: &CachedPath, store: &LocalNixStore) {
     match cp.as_info() {
         CachedPathInfo::Cached { .. } => {
-            tracing::debug!(store_path = %cp.path, "skipping NAR push — already cached");
+            tracing::debug!(store_path = %cp.path, "skipping NAR push - already cached");
         }
         CachedPathInfo::Uncached {
             path,
@@ -189,7 +189,7 @@ impl JobExecutor {
     /// Execute a `FlakeJob` (fetch → eval-flake → eval-derivations).
     ///
     /// When `FetchFlake` and eval tasks are in the same job, the local clone
-    /// path from the fetch is reused for evaluation — the repo is cloned
+    /// path from the fetch is reused for evaluation - the repo is cloned
     /// exactly once.
     #[instrument(skip_all, fields(tasks = ?job.tasks))]
     pub async fn execute_flake_job(
@@ -290,7 +290,7 @@ impl JobExecutor {
             if build_task.external_cached {
                 // Optimistic path: the worker reported the outputs as
                 // available from an upstream cache during eval. Pull them
-                // through if we can — `compress_and_push_paths` below will
+                // through if we can - `compress_and_push_paths` below will
                 // land them in our cache. If anything goes wrong (cache
                 // miss, presigned download error, output missing on disk),
                 // fall through to a real local build instead of failing
@@ -337,7 +337,7 @@ impl JobExecutor {
 
             // Import cache-resident inputs the daemon will need. A hard
             // local-store error (e.g. `store.has_path` failing) aborts the
-            // build — we can't safely proceed without knowing what's already
+            // build - we can't safely proceed without knowing what's already
             // in the store. Other prefetch errors (CacheQuery transport,
             // individual NAR downloads) are logged inside `prefetch_inputs`
             // and don't reach here as `Err`.

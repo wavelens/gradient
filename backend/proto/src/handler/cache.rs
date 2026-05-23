@@ -17,7 +17,7 @@ async fn build_local_cache_map(
     state: &ServerState,
     hashes: &[&str],
 ) -> HashMap<String, (Option<i64>, Option<i64>)> {
-    // Source the (file_size, nar_size) pair straight from `cached_path` —
+    // Source the (file_size, nar_size) pair straight from `cached_path` -
     // the worker writes both columns there during NarUploaded, so it's the
     // single authoritative copy.  We still scope the result to outputs the
     // server marks `is_cached`, so an in-flight upload doesn't leak.
@@ -299,7 +299,7 @@ async fn build_uncached_push_entry(
                 %hash,
                 error = %e,
                 "S3 presigned PUT URL generation failed; worker will fall back to \
-                 direct NarPush (this defeats S3 — check S3 credentials / endpoint / \
+                 direct NarPush (this defeats S3 - check S3 credentials / endpoint / \
                  region config)"
             );
             None
@@ -377,12 +377,12 @@ async fn extend_with_upstream_results(
     }
 }
 
-/// Check which store paths are available — in the local Gradient cache or upstream.
+/// Check which store paths are available - in the local Gradient cache or upstream.
 ///
 /// Behaviour depends on `mode`:
-/// - `Normal` — return only locally-cached paths; probe upstream for misses.
-/// - `Pull`   — same as Normal but cached paths include a presigned S3 GET URL.
-/// - `Push`   — return **all** queried paths with `cached` set; skip upstream.
+/// - `Normal` - return only locally-cached paths; probe upstream for misses.
+/// - `Pull`   - same as Normal but cached paths include a presigned S3 GET URL.
+/// - `Push`   - return **all** queried paths with `cached` set; skip upstream.
 ///   Uncached paths include a presigned S3 PUT URL when S3-backed.
 async fn query(
     state: &ServerState,
@@ -544,7 +544,7 @@ async fn lookup_upstream_narinfo(
 /// Parse a narinfo body into a [`CachedPath`] rooted at `base_url`.
 ///
 /// Returns `None` when the body lacks a `URL:` line (without it the worker
-/// has nowhere to download from). All other fields are best-effort —
+/// has nowhere to download from). All other fields are best-effort -
 /// missing/unparseable `NarSize` / `FileSize` are silently dropped; `NarHash`
 /// / `References` / `Deriver` / `Sig` / `CA` default to `None`.
 fn parse_upstream_narinfo(
@@ -809,7 +809,7 @@ mod tests {
         for cp in &result {
             assert!(!cp.cached, "all should be uncached (empty DB): {}", cp.path);
             // Local NAR storage returns None for presigned PUT (no S3); Push
-            // with S3 would populate `url` — that's the only field Push may set
+            // with S3 would populate `url` - that's the only field Push may set
             // beyond `path` + `cached`.
             assert!(cp.url.is_none(), "local store → no presigned URL");
             assert!(cp.file_size.is_none(), "Push carries no file_size");
@@ -827,7 +827,7 @@ mod tests {
 
     #[tokio::test]
     async fn cache_query_rejects_overlong_hash() {
-        // Hash component of 33 chars must be rejected — nix-base32 hashes are
+        // Hash component of 33 chars must be rejected - nix-base32 hashes are
         // exactly 32 chars. Guards against an `== 32` → `>= 32` length-check
         // relaxation.
         let state = make_state();

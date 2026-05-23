@@ -60,7 +60,7 @@ function setup(
   return fixture;
 }
 
-describe('ProjectTriggersComponent — access gating', () => {
+describe('ProjectTriggersComponent - access gating', () => {
   it('hides New Trigger / Edit / Delete / Fire Now buttons under read-only', () => {
     const fixture = setup({ managed: false, canEdit: false, canTrigger: false });
     expect(findByText(fixture.nativeElement, 'new trigger')).toBeNull();

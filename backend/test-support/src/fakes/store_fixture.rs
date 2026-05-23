@@ -17,7 +17,7 @@
 //!     └── bbb-bar.drv
 //! ```
 //!
-//! The `output` file contains a single line — the `/nix/store/…` path of the
+//! The `output` file contains a single line - the `/nix/store/…` path of the
 //! entry-point derivation.  All `.drv` files in `store/` are loaded and parsed
 //! using the existing `parse_drv()` ATerm parser.  A BFS from the entry point
 //! through `inputDrvs` builds the full closure.
@@ -45,13 +45,13 @@ pub struct StoreFixture {
     pub raw_drvs: HashMap<String, Vec<u8>>,
     /// Configured `FakeDerivationResolver` with all drv data loaded.
     pub resolver: FakeDerivationResolver,
-    /// Configured `FakeNixStoreProvider` (initially empty — nothing "built").
+    /// Configured `FakeNixStoreProvider` (initially empty - nothing "built").
     pub store: FakeNixStoreProvider,
 }
 
 /// Load a fixture directory into a [`StoreFixture`].
 ///
-/// 1. Reads `dir/output` — single line with the entry-point `.drv` store path
+/// 1. Reads `dir/output` - single line with the entry-point `.drv` store path
 /// 2. Reads all `.drv` files from `dir/store/`, keying them by `/nix/store/<filename>`
 /// 3. BFS from the entry point through `inputDrvs` to build the full closure
 /// 4. Populates a `FakeDerivationResolver` with the parsed derivation data

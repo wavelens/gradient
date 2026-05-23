@@ -106,7 +106,7 @@ async fn aggregate_traffic<C: sea_orm::ConnectionTrait>(
     back_interval: &str,
 ) -> Result<Vec<CacheMetricPoint>, WebError> {
     // Use generate_series so every bucket in the window is present, including the
-    // current one — this makes the traffic graph always run to "now" with zeros.
+    // current one - this makes the traffic graph always run to "now" with zeros.
     let sql = format!(
         r#"SELECT gs.period,
                   COALESCE(SUM(cm.bytes_sent), 0)::bigint AS bytes,
@@ -284,7 +284,7 @@ mod tests {
     /// Regression for #50: the bucket-update path must be a single atomic
     /// UPSERT, not a SELECT-then-UPDATE. The previous implementation lost
     /// updates whenever two NAR fetches landed in the same minute bucket
-    /// concurrently — both reads saw the same `bytes_sent` and the second
+    /// concurrently - both reads saw the same `bytes_sent` and the second
     /// write clobbered the first.
     #[test]
     fn record_nar_traffic_stmt_is_atomic_upsert() {

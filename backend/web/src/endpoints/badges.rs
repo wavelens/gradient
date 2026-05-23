@@ -465,7 +465,7 @@ mod tests {
 
     #[test]
     fn char_width_includes_space() {
-        // Space is the first entry in the table (idx 32) — the boundary must be
+        // Space is the first entry in the table (idx 32) - the boundary must be
         // inclusive (>=), not exclusive (>), or spaces would silently fall back.
         assert_eq!(char_width(' '), 33);
     }

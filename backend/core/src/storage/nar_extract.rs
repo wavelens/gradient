@@ -12,7 +12,7 @@
 //! level (cheap CPU; large empty regions still compact well).
 //!
 //! Intended for build artefacts (hydra-build-products, manifests, per-path
-//! downloads) where the producer chose a small entry — not for streaming
+//! downloads) where the producer chose a small entry - not for streaming
 //! arbitrarily large outputs.
 
 use async_compression::tokio::bufread::ZstdDecoder;
@@ -64,7 +64,7 @@ pub async fn extract_path_from_nar_bytes(
     extract_path_from_reader(decoder, relative_path).await
 }
 
-/// Compatibility shim — fails with `NotFound` when the path resolves to a
+/// Compatibility shim - fails with `NotFound` when the path resolves to a
 /// directory. Prefer [`extract_path_from_nar_bytes`] in new code.
 pub async fn extract_file_from_nar_bytes(
     compressed: Vec<u8>,
@@ -167,7 +167,7 @@ where
     }
 
     if let Some(c) = collector {
-        // Reached EOF while still in the collector — happens when the matched
+        // Reached EOF while still in the collector - happens when the matched
         // directory is the NAR root and its closing EndDirectory is the final
         // event before stream end (parser emits None after EndDirectory at
         // level 0).
@@ -255,7 +255,7 @@ impl Collector {
     fn finish(self) -> io::Result<Vec<u8>> {
         let tar_bytes = self.builder.into_inner()?;
         // zstd::encode_all is sync; we're already fully buffered, so this is
-        // a normal in-memory transform — no async wrapper buys us anything.
+        // a normal in-memory transform - no async wrapper buys us anything.
         zstd::encode_all(std::io::Cursor::new(tar_bytes), TAR_ZSTD_LEVEL)
     }
 }

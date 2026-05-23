@@ -10,7 +10,7 @@
 //! that came back in `CacheStatus`, decompresses in-memory, constructs a
 //! [`ValidPathInfo`], and calls harmonia's `add_to_store_nar` over the
 //! daemon socket. No on-disk staging, no `nix copy` subprocess, no
-//! signature/key configuration on the worker — the WS transport itself is
+//! signature/key configuration on the worker - the WS transport itself is
 //! authenticated, so we pass `dont_check_sigs: true`.
 //!
 //! `prefetch_inputs` drives an [`InputPrefetcher`] pipeline:
@@ -53,7 +53,7 @@ use crate::proto::job::JobUpdater;
 const HTTP_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(600);
 
 /// How many missing inputs to download + import in parallel before invoking
-/// the build. Conservative — each one streams a NAR into the local daemon
+/// the build. Conservative - each one streams a NAR into the local daemon
 /// and we don't want to swamp the AddToStoreNar queue.
 const PREFETCH_CONCURRENCY: usize = 8;
 
@@ -100,7 +100,7 @@ impl<'a> InputPrefetcher<'a> {
         }
     }
 
-    /// Stage 0 — ensure the build's own `.drv` file is present locally so
+    /// Stage 0 - ensure the build's own `.drv` file is present locally so
     /// `enumerate_inputs` can read it.
     ///
     /// On a build worker that didn't perform the eval, the target drv is not
@@ -109,8 +109,8 @@ impl<'a> InputPrefetcher<'a> {
     /// `BuildJob` carrying only `drv_path` strings. Without this stage,
     /// `enumerate_inputs` fails with `read .drv … No such file or directory`.
     ///
-    /// The fetch must also pull the `.drv`'s reference chain — every
-    /// transitive input_derivation `.drv` plus its input_sources — because
+    /// The fetch must also pull the `.drv`'s reference chain - every
+    /// transitive input_derivation `.drv` plus its input_sources - because
     /// `add_to_store_nar` rejects the build target's `.drv` if any reference
     /// declared in its `ValidPathInfo` is absent from the local store. We use
     /// [`ClosureMode::InputsOnly`] to skip output seeds: the build target's
@@ -141,7 +141,7 @@ impl<'a> InputPrefetcher<'a> {
         Ok(())
     }
 
-    /// Stage 1 — collect every input store path declared by this derivation.
+    /// Stage 1 - collect every input store path declared by this derivation.
     ///
     /// Reads `input_sources` (plain paths) and the output paths of each
     /// `input_derivation` by parsing their `.drv` files.
@@ -188,10 +188,10 @@ impl<'a> InputPrefetcher<'a> {
         Ok(wanted)
     }
 
-    /// Stage 2 — filter `wanted` down to paths absent from the local store.
+    /// Stage 2 - filter `wanted` down to paths absent from the local store.
     ///
     /// A `has_path` failure means we can't tell whether the daemon already
-    /// holds a path — proceeding would either skip an actually-missing input
+    /// holds a path - proceeding would either skip an actually-missing input
     /// (build fails late with "dependency does not exist") or re-import one
     /// the daemon already has (wasted work and confusing logs). Neither is
     /// acceptable, so we fail the build immediately.
@@ -210,7 +210,7 @@ impl<'a> InputPrefetcher<'a> {
         Ok(missing)
     }
 
-    /// Stage 3 — ask the server which missing paths it can serve, then split
+    /// Stage 3 - ask the server which missing paths it can serve, then split
     /// them into two buckets: presigned-URL downloads and `NarRequest` transfers.
     ///
     /// Any path the server reports as `Uncached` is a **hard failure**: the
@@ -261,7 +261,7 @@ impl<'a> InputPrefetcher<'a> {
         Ok((by_url, by_request))
     }
 
-    /// Stage 4a — fetch NARs from the server via `NarRequest` (local-mode cache).
+    /// Stage 4a - fetch NARs from the server via `NarRequest` (local-mode cache).
     async fn fetch_by_request(
         &mut self,
         by_request: Vec<CachedPath>,
@@ -286,7 +286,7 @@ impl<'a> InputPrefetcher<'a> {
         Ok(results)
     }
 
-    /// Stage 4b — download NARs from presigned S3 URLs (S3-backed cache).
+    /// Stage 4b - download NARs from presigned S3 URLs (S3-backed cache).
     ///
     /// A failed download is fatal: silently dropping it would let the build
     /// proceed with a missing input or output and surface later as an opaque
@@ -329,7 +329,7 @@ impl<'a> InputPrefetcher<'a> {
         Ok(results)
     }
 
-    /// Stage 5 — import every downloaded NAR into the local nix-daemon in
+    /// Stage 5 - import every downloaded NAR into the local nix-daemon in
     /// topological order: a path's `references` (from its `CachedPath.references`)
     /// that are also in the download set must finish importing before the
     /// path itself is imported. References already present in the local store
@@ -356,7 +356,7 @@ impl<'a> InputPrefetcher<'a> {
             results.into_iter().map(|(p, b, m)| (p, (b, m))).collect();
 
         // For each path, the subset of its references that are also in the
-        // download set — i.e. the deps we must wait for. Refs already in the
+        // download set - i.e. the deps we must wait for. Refs already in the
         // local store (and thus not downloaded) aren't tracked here.
         let mut pending_deps: HashMap<String, HashSet<String>> = HashMap::new();
         // Reverse edges: when X imports successfully, promote each entry in
@@ -423,7 +423,7 @@ impl<'a> InputPrefetcher<'a> {
 
         if !pending_deps.is_empty() {
             // Should not happen: nix store references are acyclic. If it does,
-            // we've left paths unimported — log so the build failure is
+            // we've left paths unimported - log so the build failure is
             // diagnosable.
             warn!(
                 remaining = pending_deps.len(),
@@ -438,7 +438,7 @@ impl<'a> InputPrefetcher<'a> {
     ///
     /// The drv's declared inputs (`input_sources` + `input_derivation` outputs)
     /// are only the first hop. Each of those paths has its own runtime
-    /// `references` — the transitive closure — which must also be in the
+    /// `references` - the transitive closure - which must also be in the
     /// local store before the daemon can accept the import of a dependent.
     /// We therefore run `CacheQuery Pull` in a loop: on each iteration we
     /// inspect the references of everything we just fetched and queue any
@@ -525,7 +525,7 @@ impl<'a> InputPrefetcher<'a> {
                 .collect();
 
             // For every `.drv` we just fetched, parse it and harvest the
-            // full set of closure-walk seeds — outputs (so downstream builds
+            // full set of closure-walk seeds - outputs (so downstream builds
             // find them), input_derivations (transitive `.drv` prerequisites),
             // and input_sources (plain files the daemon validates as
             // references when accepting the `.drv` NAR). Relying on
@@ -560,7 +560,7 @@ impl<'a> InputPrefetcher<'a> {
             for r in refs {
                 match self.store.has_path(&r).await {
                     Ok(true) => {
-                        // Already in the local store — nothing to do; still
+                        // Already in the local store - nothing to do; still
                         // record it as queried so we don't revisit.
                         tracing::trace!(path = %r, "closure walk: ref already in local store");
                         queried.insert(r);
@@ -646,7 +646,7 @@ pub async fn prefetch_inputs(
 ///    expansion runs as in [`prefetch_inputs`], so any transitive runtime
 ///    references the outputs need also land locally.
 /// 3. Return the output paths so the caller can re-emit them via
-///    `compress_and_push_paths` — those uploads put the bytes into our
+///    `compress_and_push_paths` - those uploads put the bytes into our
 ///    cache and write the `cached_path` rows.
 ///
 /// This bridges the "upstream-only → gradient cache" gap that forced
@@ -658,10 +658,10 @@ pub async fn fetch_external_cached_outputs(
 ) -> Result<Vec<(String, String)>> {
     let mut prefetcher = InputPrefetcher::new(store, task, updater);
 
-    // Step 1 — ensure the .drv is local so we can read its outputs.
+    // Step 1 - ensure the .drv is local so we can read its outputs.
     prefetcher.ensure_self_drv_present().await?;
 
-    // Step 2 — parse the .drv to discover outputs.
+    // Step 2 - parse the .drv to discover outputs.
     let full_drv_path = nix_store_path(&task.drv_path);
     let drv_bytes = tokio::fs::read(&full_drv_path)
         .await
@@ -678,7 +678,7 @@ pub async fn fetch_external_cached_outputs(
         return Ok(Vec::new());
     }
 
-    // Step 3 — fetch any output not already in the local store, plus its
+    // Step 3 - fetch any output not already in the local store, plus its
     // transitive runtime closure (so the daemon will accept the imports).
     let missing = prefetcher
         .filter_missing(outputs.iter().map(|(_, p)| p.clone()).collect())
@@ -693,7 +693,7 @@ pub async fn fetch_external_cached_outputs(
     // whose registry entry exists but whose on-disk NAR is gone (manual
     // deletion, interrupted import, GC race), and our own fetch could leave a
     // path unimported despite returning Ok. Either way, an absent file means
-    // the upcoming NAR-pack step will fail with an opaque IO error — bail now
+    // the upcoming NAR-pack step will fail with an opaque IO error - bail now
     // so the caller can fall back to a real build.
     for (_, path) in &outputs {
         if !tokio::fs::try_exists(path).await.unwrap_or(false) {
@@ -730,7 +730,7 @@ impl<'a> NarImporter<'a> {
     fn decompress(&self, compressed: &[u8]) -> Result<Vec<u8>> {
         // Compression is inferred from the `URL:` field in the narinfo that
         // was rewritten into `meta.url`. When the bytes came in via
-        // `NarRequest` (WebSocket, no URL), we default to zstd — that's
+        // `NarRequest` (WebSocket, no URL), we default to zstd - that's
         // the only format our own cache ever produces.
         let kind = self
             .meta
@@ -798,12 +798,12 @@ impl<'a> NarImporter<'a> {
                 valid_info,
                 decompressed,
                 false, // repair
-                true,  // dont_check_sigs — we trust the authenticated WS transport
+                true,  // dont_check_sigs - we trust the authenticated WS transport
             );
 
             let mut logs = pin!(logs);
             while let Some(_msg) = logs.next().await {
-                // Daemon log frames during import are noisy and not user-facing — drop them.
+                // Daemon log frames during import are noisy and not user-facing - drop them.
             }
 
             logs.await
@@ -958,12 +958,12 @@ async fn extract_single_file_from_nar(nar_bytes: &[u8]) -> Result<Vec<u8>> {
 /// outputs (so downstream builds find them), input derivations (the `.drv`
 /// files this one depends on), and input sources (plain files the daemon
 /// will validate when accepting the `.drv` NAR). Under
-/// [`ClosureMode::InputsOnly`] the outputs are omitted — used when fetching
+/// [`ClosureMode::InputsOnly`] the outputs are omitted - used when fetching
 /// a build target's own `.drv`, whose outputs aren't yet in the cache.
 ///
 /// We re-derive these from the `.drv` content rather than relying solely on
 /// `cached_path.references` because the eval worker can silently store a
-/// `NULL` references column when its `gather_path_meta` query fails —
+/// `NULL` references column when its `gather_path_meta` query fails -
 /// without this fallback the daemon then rejects the `.drv` import with
 /// `path '…' is not valid` for a reference parsed straight out of the
 /// `.drv` text.
@@ -987,7 +987,7 @@ fn drv_closure_seeds(drv: &gradient_core::db::Derivation, mode: ClosureMode) -> 
 }
 
 /// Decompress a `.drv`'s NAR, parse it, and return the closure-walk seeds
-/// (see [`drv_closure_seeds`]). Returns an empty vec on any failure — the
+/// (see [`drv_closure_seeds`]). Returns an empty vec on any failure - the
 /// caller proceeds with what it has so a transient parse problem does not
 /// stall the closure walk.
 async fn drv_closure_seeds_from_compressed_nar(
@@ -1167,7 +1167,7 @@ mod tests {
             detect_compression("https://cache.example/nar/abc.nar"),
             Compression::None
         );
-        // S3 presigned URLs carry a query string — must not confuse the matcher.
+        // S3 presigned URLs carry a query string - must not confuse the matcher.
         assert_eq!(
             detect_compression("https://s3.example/abc.nar.xz?sig=XYZ&exp=1"),
             Compression::Xz
@@ -1388,8 +1388,8 @@ mod tests {
         );
     }
 
-    /// Regression: under [`ClosureMode::InputsOnly`] — used when fetching the
-    /// build target's own `.drv` — declared output paths must be excluded
+    /// Regression: under [`ClosureMode::InputsOnly`] - used when fetching the
+    /// build target's own `.drv` - declared output paths must be excluded
     /// from the closure walk. Including them would force the next
     /// `CacheQuery Pull` to request paths the gradient cache doesn't have
     /// (they're what we're about to build), classifying them `Uncached` and
@@ -1420,7 +1420,7 @@ mod tests {
     }
 
     /// Content-addressed and "deferred" outputs are stored with an empty path
-    /// in the `.drv`. The closure walk must skip them — feeding an empty
+    /// in the `.drv`. The closure walk must skip them - feeding an empty
     /// string into the cache query produces a confusing "invalid store path"
     /// failure several stages downstream.
     #[test]

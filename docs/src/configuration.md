@@ -1,6 +1,6 @@
 # Configuration
 
-Gradient is configured exclusively through its **NixOS module**. There is no configuration file or command-line flags — all options are set in your NixOS configuration under `services.gradient`.
+Gradient is configured exclusively through its **NixOS module**. There is no configuration file or command-line flags - all options are set in your NixOS configuration under `services.gradient`.
 
 ## Minimal Setup
 
@@ -37,12 +37,12 @@ openssl rand -base64 48 > /run/secrets/gradient-crypt
 
 | Option | Default | Description |
 |---|---|---|
-| `domain` | — | Public hostname (required) |
+| `domain` | - | Public hostname (required) |
 | `baseDir` | `/var/lib/gradient` | Data directory |
 | `listenAddr` | `127.0.0.1` | Bind address |
 | `port` | `3000` | HTTP port |
-| `jwtSecretFile` | — | Path to JWT secret file (required) |
-| `cryptSecretFile` | — | Path to encryption secret file (required) |
+| `jwtSecretFile` | - | Path to JWT secret file (required) |
+| `cryptSecretFile` | - | Path to encryption secret file (required) |
 | `metricsTokenFile` | `null` | When set, enables `GET /metrics` (Prometheus exposition). The file's contents must be presented as `Authorization: Bearer <token>` by scrapers. When `null`, the endpoint returns 404. |
 | `databaseUrlFile` | auto | Override the PostgreSQL connection string file |
 | `reportErrors` | `false` | Send errors to Sentry |
@@ -216,7 +216,7 @@ services.gradient.worker = {
 
 ### Remote Workers
 
-Deploy `gradient-worker` on dedicated build machines. First register the worker under an organization — either declaratively via `state.workers` (see below) or via the API. The `worker_id` must be a **UUID v4**. The worker auto-generates one on first start and persists it to `/var/lib/gradient-worker/worker-id`:
+Deploy `gradient-worker` on dedicated build machines. First register the worker under an organization - either declaratively via `state.workers` (see below) or via the API. The `worker_id` must be a **UUID v4**. The worker auto-generates one on first start and persists it to `/var/lib/gradient-worker/worker-id`:
 
 ```sh
 cat /var/lib/gradient-worker/worker-id
@@ -339,10 +339,10 @@ Managed roles cannot be modified or deleted via the API.
 
 Each project may declare per-input flake overrides applied during evaluation fetch. Each entry must set exactly one of:
 
-- `url` — a flake-ref string to replace the input's URL.
-- `keep_url = true` — force an update of the input keeping the URL declared in the project's `flake.nix`.
+- `url` - a flake-ref string to replace the input's URL.
+- `keep_url = true` - force an update of the input keeping the URL declared in the project's `flake.nix`.
 
-Empty `flake_input_overrides = {}` (the default) means no overrides — `flake.lock` is used as-is. Setting the attrset to `{}` from a non-empty state removes all override rows for that project.
+Empty `flake_input_overrides = {}` (the default) means no overrides - `flake.lock` is used as-is. Setting the attrset to `{}` from a non-empty state removes all override rows for that project.
 
 ```nix
 services.gradient.state.projects.my-project = {

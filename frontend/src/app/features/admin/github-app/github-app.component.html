@@ -38,11 +38,11 @@
   } @else {
     @if (credentialsMissing()) {
       <div class="error" data-testid="github-app-credentials-missing">
-        Credentials are no longer available — re-run the manifest flow.
+        Credentials are no longer available - re-run the manifest flow.
       </div>
     } @else if (credentials(); as c) {
       <div class="result-panel">
-        <h2>App created — {{ c.slug }}</h2>
+        <h2>App created - {{ c.slug }}</h2>
         <p><a [href]="c.html_url" target="_blank" rel="noopener">{{ c.html_url }}</a></p>
 
         <div class="credential">

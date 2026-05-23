@@ -20,7 +20,7 @@ use tracing::{error, warn};
 /// Fetches the project and commit for the evaluation, then fires one CI status
 /// report per entry point using the project's configured reporter.
 ///
-/// Failures are logged and swallowed — CI reporting is best-effort.
+/// Failures are logged and swallowed - CI reporting is best-effort.
 pub async fn report_ci_for_entry_points(
     state: Arc<ServerState>,
     project_id: ProjectId,
@@ -106,7 +106,7 @@ pub async fn report_ci_for_entry_points(
     });
 
     // Pre-fetch the build status of each entry point so that builds which are
-    // already in a terminal state (notably `Substituted` — set at insert-time
+    // already in a terminal state (notably `Substituted` - set at insert-time
     // and never routed through `update_build_status`) report a terminal CI
     // status on first POST instead of getting stuck at the initial `Pending`.
     let build_ids: Vec<BuildId> = ep_rows.iter().map(|ep| ep.build).collect();
@@ -162,7 +162,7 @@ pub async fn report_ci_for_entry_points(
 /// Called from every site that creates a `Queued` evaluation via
 /// `apply_trigger` (scheduler trigger dispatch, manual API trigger, forge
 /// webhook fan-out). The report goes out as soon as the evaluation row exists
-/// — before any worker has picked the eval up — so the commit shows a pending
+/// - before any worker has picked the eval up - so the commit shows a pending
 /// check immediately.
 ///
 /// No-op when the evaluation has no project: direct builds and restart flows
@@ -284,7 +284,7 @@ pub async fn report_awaiting_approval_ci(
     });
 
     let description = format!(
-        "Awaiting maintainer approval for PR #{} by {} — click \"Approve and run\" or comment /ci run.",
+        "Awaiting maintainer approval for PR #{} by {} - click \"Approve and run\" or comment /ci run.",
         pr_number, pr_author
     );
 

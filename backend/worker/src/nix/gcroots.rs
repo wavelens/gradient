@@ -12,7 +12,7 @@
 //! realised output via harmonia's `add_indirect_root` for the duration of
 //! the build job. Symlinks live under `gcroots_dir` (default
 //! `/nix/var/nix/gcroots/gradient`) and are removed on handle drop. The
-//! keeper purges leftovers at worker startup — anything still in the dir
+//! keeper purges leftovers at worker startup - anything still in the dir
 //! came from a prior worker that crashed before its handles ran.
 
 use std::path::{Path, PathBuf};
@@ -85,7 +85,7 @@ impl GcRootKeeper {
     ///
     /// Returns an inert handle when the keeper is disabled. Errors creating
     /// the symlink or registering with the daemon are logged and the
-    /// inert handle is returned — bookkeeping failures never fail a build.
+    /// inert handle is returned - bookkeeping failures never fail a build.
     pub async fn add(&self, store_path: &str) -> GcRootHandle {
         let Some(dir) = self.inner.dir.as_ref() else {
             return GcRootHandle::inert();

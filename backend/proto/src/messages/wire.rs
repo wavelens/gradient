@@ -12,13 +12,13 @@
 //! `rkyv::from_bytes`, however, requires the input slice to be aligned to the
 //! archive's required alignment (16 bytes for our message types). Decoding a
 //! bare `&[u8]` therefore fails non-deterministically depending on what the
-//! allocator happened to return — typically presenting as a "malformed
+//! allocator happened to return - typically presenting as a "malformed
 //! message" warning shortly after a reconnect or on busy connections.
 //!
 //! These helpers copy inbound bytes into an [`AlignedVec<16>`] before
 //! decoding, making `ClientMessage` / `ServerMessage` decoding deterministic
 //! regardless of the source buffer's alignment. Every WebSocket-receive path
-//! in the project must funnel through these helpers — open-coding
+//! in the project must funnel through these helpers - open-coding
 //! `rkyv::from_bytes` on raw network bytes is the bug they exist to prevent.
 
 use rkyv::rancor::Error as RkyvError;

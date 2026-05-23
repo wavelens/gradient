@@ -1,6 +1,6 @@
 # Proto
 
-Gradient workers connect to the server over a persistent WebSocket at `/proto`. All messages are binary frames serialized with [rkyv](https://rkyv.org/). WebSocket framing handles message boundaries — no additional length-prefix is needed.
+Gradient workers connect to the server over a persistent WebSocket at `/proto`. All messages are binary frames serialized with [rkyv](https://rkyv.org/). WebSocket framing handles message boundaries - no additional length-prefix is needed.
 
 ```mermaid
 graph LR
@@ -71,16 +71,16 @@ InitConnection {
 ```
 
 The `worker-id` enables:
- - **Reconnect matching** — on reconnect after server restart, the server matches the peer to its previous session and reassigns orphaned jobs immediately instead of waiting for the grace period.
- - **Duplicate detection** — the server rejects a second connection with the same `worker-id`. One WebSocket connection per worker per server instance.
- - **Admin visibility** — the server tracks connected peers by ID for the frontend UI (list workers, their capabilities, assigned jobs, status).
- - **Logging** — all log lines and job assignments reference the peer ID for debugging.
+ - **Reconnect matching** - on reconnect after server restart, the server matches the peer to its previous session and reassigns orphaned jobs immediately instead of waiting for the grace period.
+ - **Duplicate detection** - the server rejects a second connection with the same `worker-id`. One WebSocket connection per worker per server instance.
+ - **Admin visibility** - the server tracks connected peers by ID for the frontend UI (list workers, their capabilities, assigned jobs, status).
+ - **Logging** - all log lines and job assignments reference the peer ID for debugging.
 
 ### Negotiation
 
 **Version:** the server accepts any `client_version == PROTO_VERSION`. If the client sends a other version, the server responds with `Reject { code: 400 }`.
 
-**Capabilities:** each `GradientCapabilities` field is AND-ed — a capability is active only if both sides support it. Two fields are server-authoritative:
+**Capabilities:** each `GradientCapabilities` field is AND-ed - a capability is active only if both sides support it. Two fields are server-authoritative:
 
 | Capability | Who controls |                        Description                           |
 |------------|--------------|--------------------------------------------------------------|
@@ -89,13 +89,13 @@ The `worker-id` enables:
 | `fetch`    | AND          | Prefetch flake inputs and clone repositories                 |
 | `eval`     | AND          | Run Nix flake evaluations                                    |
 | `build`    | AND          | Execute Nix store builds                                     |
-| `cache`    | Server only  | Always `true` on the server — Gradient always serves as a binary cache |
+| `cache`    | Server only  | Always `true` on the server - Gradient always serves as a binary cache |
 
 ---
 
 ## Authorization
 
-Authorization uses a challenge-response flow based on **peers**. A peer is any entity on the server that can register a worker — an **org**, a **cache**, or a **proxy**. The worker doesn't know or care what type of peer it's authenticating against — it just holds `peer_id → token` pairs.
+Authorization uses a challenge-response flow based on **peers**. A peer is any entity on the server that can register a worker - an **org**, a **cache**, or a **proxy**. The worker doesn't know or care what type of peer it's authenticating against - it just holds `peer_id → token` pairs.
 
 Mutual consent: the peer registers the worker ID (peer consents), the worker holds the peer's token (worker consents).
 
@@ -129,14 +129,14 @@ AuthResponse {
 }
 ```
 
-The server validates each token independently. The worker is authorized for every peer whose token is valid. If some tokens fail, the connection continues with the successful peers — only a total failure causes `Reject`.
+The server validates each token independently. The worker is authorized for every peer whose token is valid. If some tokens fail, the connection continues with the successful peers - only a total failure causes `Reject`.
 
 When validating peer tokens, the server additionally checks each authorized peer that is an organization against the `organization_cache` table. If the organization has no subscribed cache, that peer is moved into `failed_peers` with reason `"organization has no cache subscribed"`. If this leaves the authorized peer set empty, the connection is rejected with `401 no valid peer tokens provided`.
 
 What authorization means depends on the peer type:
- - **Org** — worker receives jobs from that org's projects
- - **Cache** — worker can serve/pull from that cache
- - **Proxy** — worker is part of the proxy's pool
+ - **Org** - worker receives jobs from that org's projects
+ - **Cache** - worker can serve/pull from that cache
+ - **Proxy** - worker is part of the proxy's pool
 
 ### Reauth
 
@@ -170,7 +170,7 @@ sequenceDiagram
     S->>W: AuthUpdate { authorized_peers: [A, C], failed_peers: [] }
 ```
 
-If a token fails during reauth, the worker keeps its existing authorizations for that peer (if any) — reauth never revokes already-granted access unless the server explicitly sends a revocation.
+If a token fails during reauth, the worker keeps its existing authorizations for that peer (if any) - reauth never revokes already-granted access unless the server explicitly sends a revocation.
 
 ### Connection uniqueness
 
@@ -180,14 +180,14 @@ The server allows only **one WebSocket connection per worker ID per instance**. 
 
 - Peers (org admins, cache owners, proxy operators) create worker tokens via the web API, scoped to a specific worker ID
 - Workers store tokens in config file or environment (`GRADIENT_WORKER_PEERS="peer_id:token,peer_id:token"`)
-- Keys can be rotated via reauth — no reconnect needed
+- Keys can be rotated via reauth - no reconnect needed
 
 ### Admin visibility
 
 The `GET /api/v1/workers` endpoint shows all connected workers and their status. Access is controlled by:
 
- - **Superuser users** — users with the `superuser` flag set on their account can always access the endpoint
- - **`GRADIENT_GLOBAL_STATS_PUBLIC=true`** — when set, the workers/stats endpoints are publicly visible without authentication
+ - **Superuser users** - users with the `superuser` flag set on their account can always access the endpoint
+ - **`GRADIENT_GLOBAL_STATS_PUBLIC=true`** - when set, the workers/stats endpoints are publicly visible without authentication
 
 The per-org listing `GET /api/v1/orgs/{org}/workers` returns one entry per worker registration owned by that org. The `live` field on each entry is only populated when the worker is currently connected **and** the org's UUID is in the worker's `authorized_peers` set (i.e. the worker actually presented a valid token for this org during the handshake). A worker that registered with several orgs but only authenticated for a subset will therefore appear as connected for the orgs it authenticated for, and as disconnected (`live: null`) for the others.
 
@@ -205,7 +205,7 @@ WorkerCapabilities {
 }
 ```
 
-Architectures are free-form strings (e.g. `"x86_64-linux"`, `"aarch64-linux"`) — not an enum. Custom or unusual platforms (e.g. `"riscv64-linux"`) can be advertised without any code changes.
+Architectures are free-form strings (e.g. `"x86_64-linux"`, `"aarch64-linux"`) - not an enum. Custom or unusual platforms (e.g. `"riscv64-linux"`) can be advertised without any code changes.
 
 The reference worker (`gradient-worker`) auto-detects its host system at startup and uses that as the default `architectures` value (`std::env::consts::ARCH` + OS, with `macos` mapped to `darwin`). Both fields are overridable via env vars / CLI flags so a host with binfmt-emulated architectures or a custom-configured daemon can advertise extras:
 
@@ -214,15 +214,15 @@ GRADIENT_WORKER_ARCHITECTURES=x86_64-linux,aarch64-linux,builtin
 GRADIENT_WORKER_SYSTEM_FEATURES=kvm,big-parallel,nixos-test
 ```
 
-When `GRADIENT_WORKER_ARCHITECTURES` is **set**, it replaces the auto-detected default entirely (so e.g. setting it on an aarch64 host without including `aarch64-linux` will refuse all native builds — list every system you want to accept). `GRADIENT_WORKER_SYSTEM_FEATURES` is empty by default; it should mirror the daemon's `system-features` line in `nix.conf` so the dispatcher doesn't route a `kvm`-requiring build to a worker whose daemon can't run it.
+When `GRADIENT_WORKER_ARCHITECTURES` is **set**, it replaces the auto-detected default entirely (so e.g. setting it on an aarch64 host without including `aarch64-linux` will refuse all native builds - list every system you want to accept). `GRADIENT_WORKER_SYSTEM_FEATURES` is empty by default; it should mirror the daemon's `system-features` line in `nix.conf` so the dispatcher doesn't route a `kvm`-requiring build to a worker whose daemon can't run it.
 
 When the server dispatches a build, it checks that the build's target architecture is present in the worker's `architectures` and all `required_features` are present in the worker's `system_features`. For example, a build targeting `aarch64-linux` with `required_features: ["kvm"]` requires a worker with `"aarch64-linux"` in `architectures` and `"kvm"` in `system_features`. Builds whose `architecture` is the special string `"builtin"` (e.g. `builtin:fetchurl`) are always assignable, regardless of the worker's `architectures` list.
 
 **Federation proxy behavior:** a proxy with `federate` enabled connects upstream as a single worker. It **aggregates** the capabilities of all its downstream workers:
 
- - `GradientCapabilities` (in `InitConnection`) — OR of all downstream workers' capabilities (if any worker can build, the proxy advertises `build`)
- - `system_features` — union of all downstream features (sorted by total capacity)
- - `max_concurrent_builds` — sum of all downstream workers' slots
+ - `GradientCapabilities` (in `InitConnection`) - OR of all downstream workers' capabilities (if any worker can build, the proxy advertises `build`)
+ - `system_features` - union of all downstream features (sorted by total capacity)
+ - `max_concurrent_builds` - sum of all downstream workers' slots
 
 The upstream server sees the proxy as one powerful worker. The proxy handles internal job routing to its downstream workers transparently.
 
@@ -239,7 +239,7 @@ The server uses these to match `RequestJobChunk` to queued builds. A worker that
 
 `WorkerCapabilities` can be re-sent **at any point during the connection** to update the server's view. The server replaces the previous values immediately. This is the primary mechanism for proxies to keep the upstream server in sync when their downstream worker pool changes.
 
-**Example — downstream worker disconnects from a proxy:**
+**Example - downstream worker disconnects from a proxy:**
 
 ```mermaid
 sequenceDiagram
@@ -247,14 +247,14 @@ sequenceDiagram
     participant P as Proxy
     participant S as Server
 
-    Note over P,S: initial state — proxying Worker A + B
+    Note over P,S: initial state - proxying Worker A + B
     WA-xP: disconnect
     Note over P: recalculates aggregated capabilities<br/>aarch64-linux no longer available
     P->>S: WorkerCapabilities { architectures: ["x86_64-linux"], system_features: [...], max_concurrent_builds: N }
     Note over S: immediately stops dispatching<br/>aarch64 builds to this proxy
 ```
 
-The server's handler processes mid-connection `WorkerCapabilities` identically to the initial send — it calls `scheduler.update_worker_capabilities()` which atomically replaces the worker's entry in the pool. Any pending build offers for architectures or features no longer advertised are revoked.
+The server's handler processes mid-connection `WorkerCapabilities` identically to the initial send - it calls `scheduler.update_worker_capabilities()` which atomically replaces the worker's entry in the pool. Any pending build offers for architectures or features no longer advertised are revoked.
 
 Re-sending `WorkerCapabilities` does **not** require reconnecting and does **not** interrupt in-flight jobs. Only future job offers are affected.
 
@@ -286,7 +286,7 @@ The server treats `Draining` as "do not assign new jobs to this worker". The wor
 
 Job dispatch uses **eager push + pull-based claiming**. The server pushes **new** job candidates to eligible workers as they become available. Workers keep all received candidates in memory, score them against the local Nix store, and send back only **new or changed** scores. The server also keeps all scores in memory per worker. Both sides maintain a persistent view of the candidate/score state, enabling efficient delta-based communication and seamless recovery after server restarts.
 
-Jobs are scoped to the worker's authorized peers — a worker only receives candidates from peers (orgs, caches) it has successfully authenticated against.
+Jobs are scoped to the worker's authorized peers - a worker only receives candidates from peers (orgs, caches) it has successfully authenticated against.
 
 ### Dispatch Flow
 
@@ -307,42 +307,42 @@ sequenceDiagram
 
     W1->>S: RequestJob { kind: Build }
     W2->>S: RequestJob { kind: Build }
-    Note over S: Worker B best for J1 — assign
+    Note over S: Worker B best for J1 - assign
     S->>W2: AssignJob { job_id: J1 }
     S->>W1: RevokeJob { job_ids: [J1] }
     Note over W1: removes J1 from local cache
-    Note over S: Worker A best for J2 — assign
+    Note over S: Worker A best for J2 - assign
     S->>W1: AssignJob { job_id: J2 }
-    Note over W1: got AssignJob — still has slots, request again
+    Note over W1: got AssignJob - still has slots, request again
     W1->>S: RequestJob { kind: Build }
-    Note over W2: got AssignJob — still has slots, request again
+    Note over W2: got AssignJob - still has slots, request again
     W2->>S: RequestJob { kind: Build }
 
     Note over S: new job J3 arrives
     S->>W1: JobOffer { candidates: [J3] }
     S->>W2: JobOffer { candidates: [J3] }
     W1->>S: RequestJobChunk { scores: [{J3, missing:0, 0}] }
-    Note over S: Worker A already requested, best score — assign
+    Note over S: Worker A already requested, best score - assign
     S->>W1: AssignJob { job_id: J3 }
     W1->>S: RequestJob { kind: Build }
 ```
 
 ### How It Works
 
- 1. **`JobOffer`** (server → workers, delta-only) — the server pushes only **new** candidates that the worker hasn't seen yet. Workers accumulate candidates in a persistent local cache. Each candidate includes `required_paths` (with optional `CacheInfo` for paths in the server's cache) so workers can score locally. Candidates are paginated at **1 000 entries per message**; `is_final: true` on `JobListChunk` marks the end of the initial list. The server dispatches builds immediately after three events: evaluation result (new builds queued), build completion (dependent builds unlocked), and build failure (cascade frees blocked builds). A background dispatch loop (5-second interval) acts as a safety net.
- 2. **Workers score in the background** — on receiving `JobOffer`, the worker adds candidates to its local cache and scores them against the local Nix store. Scores are kept in memory. After a build completes (populating store paths), the worker re-scores affected candidates whose `required_paths` overlap with the new outputs.
- 3. **`RequestJobChunk`** (worker → server, delta-only) — the worker sends only **new or changed** scores. A score changes when a path becomes available in the local store (e.g. after a build). The server accumulates scores per worker in memory. Scores are paginated at **1 000 entries per message**; `is_final: true` marks the last chunk in each scoring pass. An empty chunk with `is_final: true` signals the end of a pass when no scores changed.
- 4. **`RequestJob`** (worker → server, pull-based) — the worker signals it has capacity for **one** job. `kind` specifies whether it wants a `FlakeJob` or `BuildJob`. The server either responds with `AssignJob` immediately (if a matching job with good scores exists) or marks internally that this worker needs a job and assigns one when available. On receiving `AssignJob`, the worker immediately sends another `RequestJob` if it still has capacity — this naturally fills all available slots. Workers also re-send `RequestJob` every **10 seconds** as a heartbeat if no `AssignJob` arrived, ensuring the server recovers the "worker needs work" state after a restart without persistent storage.
+ 1. **`JobOffer`** (server → workers, delta-only) - the server pushes only **new** candidates that the worker hasn't seen yet. Workers accumulate candidates in a persistent local cache. Each candidate includes `required_paths` (with optional `CacheInfo` for paths in the server's cache) so workers can score locally. Candidates are paginated at **1 000 entries per message**; `is_final: true` on `JobListChunk` marks the end of the initial list. The server dispatches builds immediately after three events: evaluation result (new builds queued), build completion (dependent builds unlocked), and build failure (cascade frees blocked builds). A background dispatch loop (5-second interval) acts as a safety net.
+ 2. **Workers score in the background** - on receiving `JobOffer`, the worker adds candidates to its local cache and scores them against the local Nix store. Scores are kept in memory. After a build completes (populating store paths), the worker re-scores affected candidates whose `required_paths` overlap with the new outputs.
+ 3. **`RequestJobChunk`** (worker → server, delta-only) - the worker sends only **new or changed** scores. A score changes when a path becomes available in the local store (e.g. after a build). The server accumulates scores per worker in memory. Scores are paginated at **1 000 entries per message**; `is_final: true` marks the last chunk in each scoring pass. An empty chunk with `is_final: true` signals the end of a pass when no scores changed.
+ 4. **`RequestJob`** (worker → server, pull-based) - the worker signals it has capacity for **one** job. `kind` specifies whether it wants a `FlakeJob` or `BuildJob`. The server either responds with `AssignJob` immediately (if a matching job with good scores exists) or marks internally that this worker needs a job and assigns one when available. On receiving `AssignJob`, the worker immediately sends another `RequestJob` if it still has capacity - this naturally fills all available slots. Workers also re-send `RequestJob` every **10 seconds** as a heartbeat if no `AssignJob` arrived, ensuring the server recovers the "worker needs work" state after a restart without persistent storage.
 
- 5. **`AssignJob`** (server → winning worker) — the server compares scores across all workers that have requested a job. Lowest `missing_nar_size` wins (fewest bytes to download). Ties are broken by `missing_count`, then by fewest assigned jobs. The server may assign as soon as it sees an optimal score (e.g. `missing_nar_size: 0`).
- 6. **`RevokeJob`** (server → losing workers) — all other workers that had this candidate in their cache are told to remove it. Workers delete the candidate and its score from their local cache.
+ 5. **`AssignJob`** (server → winning worker) - the server compares scores across all workers that have requested a job. Lowest `missing_nar_size` wins (fewest bytes to download). Ties are broken by `missing_count`, then by fewest assigned jobs. The server may assign as soon as it sees an optimal score (e.g. `missing_nar_size: 0`).
+ 6. **`RevokeJob`** (server → losing workers) - all other workers that had this candidate in their cache are told to remove it. Workers delete the candidate and its score from their local cache.
 
 ### Initial Sync
 
 Both sides persist candidate/score state in memory across the connection. On every new connection (including reconnects after a server restart), two startup-only messages perform the initial state sync:
 
- - **`RequestAllCandidates`** (worker → server) — sent **once** by the worker immediately after the handshake completes. The server responds with a paginated `JobListChunk` stream (1 000 entries per message, `is_final: true` on the last) containing all active candidates for this worker. All subsequent candidate updates arrive as delta `JobOffer` messages — `RequestAllCandidates` is not sent again on the same connection.
- - **`RequestAllScores`** (server → worker) — sent **once** by the server during handshake completion to rebuild its in-memory score table. The worker responds with a paginated `RequestJobChunk` stream of all scores from its local cache (`is_final: true` on the last chunk; an empty chunk with `is_final: true` when no scores are cached). All subsequent score updates arrive as delta `RequestJobChunk` messages — `RequestAllScores` is not sent again on the same connection.
+ - **`RequestAllCandidates`** (worker → server) - sent **once** by the worker immediately after the handshake completes. The server responds with a paginated `JobListChunk` stream (1 000 entries per message, `is_final: true` on the last) containing all active candidates for this worker. All subsequent candidate updates arrive as delta `JobOffer` messages - `RequestAllCandidates` is not sent again on the same connection.
+ - **`RequestAllScores`** (server → worker) - sent **once** by the server during handshake completion to rebuild its in-memory score table. The worker responds with a paginated `RequestJobChunk` stream of all scores from its local cache (`is_final: true` on the last chunk; an empty chunk with `is_final: true` when no scores are cached). All subsequent score updates arrive as delta `RequestJobChunk` messages - `RequestAllScores` is not sent again on the same connection.
 
 ```mermaid
 sequenceDiagram
@@ -364,14 +364,14 @@ sequenceDiagram
     W->>S: RequestJob { kind: Build }
     Note over S: assigns best-scoring job
     S->>W: AssignJob { job_id: J2 }
-    Note over W: got AssignJob — still has slots
+    Note over W: got AssignJob - still has slots
     W->>S: RequestJob { kind: Build }
     Note over W: 10s heartbeat, no AssignJob yet
     W->>S: RequestJob { kind: Build }
 ```
 
 ```rust
-// Server → Worker (pushed eagerly, delta-only — only new candidates; paginated at 1 000)
+// Server → Worker (pushed eagerly, delta-only - only new candidates; paginated at 1 000)
 JobOffer {
     candidates: Vec<JobCandidate>,
 }
@@ -397,16 +397,16 @@ RevokeJob {
     job_ids: Vec<Uuid>,
 }
 
-// Server → Worker (startup-only — sent once at handshake completion; ask worker to re-send all scores)
+// Server → Worker (startup-only - sent once at handshake completion; ask worker to re-send all scores)
 RequestAllScores,
 
-// Worker → Server (delta-only — only new or changed scores; paginated at 1 000)
+// Worker → Server (delta-only - only new or changed scores; paginated at 1 000)
 RequestJobChunk {
     scores: Vec<CandidateScore>,        // batch of new/changed scores
     is_final: bool,                     // true on the last chunk of each scoring pass
 }
 
-// Worker → Server (pull-based — "I have capacity for one job")
+// Worker → Server (pull-based - "I have capacity for one job")
 // Sent again immediately after AssignJob if worker still has slots.
 // Re-sent every 10s as heartbeat if no AssignJob arrived.
 RequestJob {
@@ -415,7 +415,7 @@ RequestJob {
 
 enum JobKind { Flake, Build }
 
-// Worker → Server (startup-only — sent once at handshake completion; ask server to re-send all active candidates)
+// Worker → Server (startup-only - sent once at handshake completion; ask server to re-send all active candidates)
 RequestAllCandidates,
 
 CandidateScore {
@@ -428,17 +428,17 @@ CandidateScore {
 
 ### Benefits
 
- - **No scoring round-trip at request time** — workers pre-score candidates as offers arrive and stream score deltas continuously.
- - **Minimal bandwidth** — only new candidates and changed scores are sent. After initial sync, traffic is proportional to changes, not total candidate count.
- - **Early assignment** — server can assign as soon as it sees an optimal score (e.g. `missing: 0`) without waiting for all workers to finish scoring.
- - **Optimal assignment** — server sees all workers' scores before deciding. A worker that already has 90% of the closure cached (lower `missing_nar_size`) gets the job over one that needs everything.
- - **Large build trees handled incrementally** — as evaluation discovers derivations in batches (`EvalResult`), the server pushes new `JobOffer`s immediately. Workers start scoring while evaluation is still in progress.
- - **Re-scoring after builds** — when a build completes and populates the worker's store, affected candidate scores automatically improve. The worker sends updated scores, potentially claiming jobs it previously scored poorly on.
- - **Seamless server restart** — `RequestAllScores` + `RequestAllCandidates` at connection startup rebuild state without re-evaluating everything from scratch. Both are startup-only; all subsequent updates are delta-only.
+ - **No scoring round-trip at request time** - workers pre-score candidates as offers arrive and stream score deltas continuously.
+ - **Minimal bandwidth** - only new candidates and changed scores are sent. After initial sync, traffic is proportional to changes, not total candidate count.
+ - **Early assignment** - server can assign as soon as it sees an optimal score (e.g. `missing: 0`) without waiting for all workers to finish scoring.
+ - **Optimal assignment** - server sees all workers' scores before deciding. A worker that already has 90% of the closure cached (lower `missing_nar_size`) gets the job over one that needs everything.
+ - **Large build trees handled incrementally** - as evaluation discovers derivations in batches (`EvalResult`), the server pushes new `JobOffer`s immediately. Workers start scoring while evaluation is still in progress.
+ - **Re-scoring after builds** - when a build completes and populates the worker's store, affected candidate scores automatically improve. The worker sends updated scores, potentially claiming jobs it previously scored poorly on.
+ - **Seamless server restart** - `RequestAllScores` + `RequestAllCandidates` at connection startup rebuild state without re-evaluating everything from scratch. Both are startup-only; all subsequent updates are delta-only.
 
 ### Edge Cases
 
- - **Single eligible worker:** server skips scoring and sends `AssignJob` directly with the `JobOffer` — no `RequestJobChunk`/`RevokeJob` overhead.
+ - **Single eligible worker:** server skips scoring and sends `AssignJob` directly with the `JobOffer` - no `RequestJobChunk`/`RevokeJob` overhead.
  - **Worker disconnects with cached offers:** the server drops the worker's score entries from memory. On reconnect, `RequestAllScores` rebuilds them.
  - **Stale scores:** if a worker's store changes between scoring and `RequestJobChunk` (e.g. another job populated paths), the worker detects the change and sends an updated score. The server always uses the latest score per worker.
 
@@ -460,13 +460,13 @@ graph LR
 
 | Task | Requires | Input (from server) | Output (from worker) |
 |------|----------|---------------------|----------------------|
-| **FetchFlake** | `fetch` + `source: Repository` | `source.url` + `source.commit`, SSH credential | For each fetched path (source + flake inputs): zstd-compressed NAR uploaded via `NarPush` / S3 PUT, followed by `NarUploaded` with full metadata (`file_hash`, `file_size`, `nar_size`, `nar_hash`, `references`). Closing `FetchResult { flake_source: Option<String> }` reports the archived flake source store path — the server passes it to a subsequent eval-only job as `FlakeSource::Cached { store_path }`. |
-| **EvaluateFlake** | `eval` | `wildcards` (attribute patterns), `timeout` (seconds) | `attrs: Vec<String>` — discovered attribute paths |
-| **EvaluateDerivations** | `eval` | (uses attrs from previous task) | `derivations: Vec<DiscoveredDerivation>` — drv paths, outputs, closure, required features; each produced `.drv` is also pushed (compressed) via `NarUploaded` before the batch is reported |
+| **FetchFlake** | `fetch` + `source: Repository` | `source.url` + `source.commit`, SSH credential | For each fetched path (source + flake inputs): zstd-compressed NAR uploaded via `NarPush` / S3 PUT, followed by `NarUploaded` with full metadata (`file_hash`, `file_size`, `nar_size`, `nar_hash`, `references`). Closing `FetchResult { flake_source: Option<String> }` reports the archived flake source store path - the server passes it to a subsequent eval-only job as `FlakeSource::Cached { store_path }`. |
+| **EvaluateFlake** | `eval` | `wildcards` (attribute patterns), `timeout` (seconds) | `attrs: Vec<String>` - discovered attribute paths |
+| **EvaluateDerivations** | `eval` | (uses attrs from previous task) | `derivations: Vec<DiscoveredDerivation>` - drv paths, outputs, closure, required features; each produced `.drv` is also pushed (compressed) via `NarUploaded` before the batch is reported |
 
 ```rust
 FlakeJob {
-    tasks: Vec<FlakeTask>,               // [FetchFlake, EvaluateFlake, EvaluateDerivations] — subset per worker capability
+    tasks: Vec<FlakeTask>,               // [FetchFlake, EvaluateFlake, EvaluateDerivations] - subset per worker capability
     source: FlakeSource,                 // where to get the flake source (see below)
     wildcards: Vec<String>,              // attribute patterns for EvaluateFlake (e.g. ["packages.*.*"])
     timeout_secs: Option<u64>,           // None = use server default (GRADIENT_EVALUATION_TIMEOUT)
@@ -478,16 +478,16 @@ enum FlakeSource {
     /// server rejects the job.
     Repository { url: String, commit: String },
     /// Use a store path that's already in the cache as the flake source.
-    /// Valid when `FetchFlake` is NOT in `tasks` — an eval-only worker
+    /// Valid when `FetchFlake` is NOT in `tasks` - an eval-only worker
     /// can't clone a repo (no SSH key is delivered without the `fetch`
     /// capability) but can still evaluate an already-archived source.
     Cached { store_path: String },
 }
 ```
 
-When `FetchFlake` and `EvaluateFlake`/`EvaluateDerivations` are in the **same `FlakeJob`**, the worker reuses the local clone from the fetch step for evaluation. The repository is cloned exactly once; subsequent eval tasks reference the source as `path:/nix/store/xxx` — a pure, content-addressed reference. On fallback (temp checkout), `git+file://...?rev=` is used to keep Nix in pure evaluation mode.
+When `FetchFlake` and `EvaluateFlake`/`EvaluateDerivations` are in the **same `FlakeJob`**, the worker reuses the local clone from the fetch step for evaluation. The repository is cloned exactly once; subsequent eval tasks reference the source as `path:/nix/store/xxx` - a pure, content-addressed reference. On fallback (temp checkout), `git+file://...?rev=` is used to keep Nix in pure evaluation mode.
 
-When the tasks are in **separate jobs** — typical for a mix of fetch-only and eval-only workers — the scheduler dispatches FetchFlake as its own job to a `fetch`-capable worker (source = `Repository`), and later dispatches the Evaluate tasks as another job with source = `Cached { store_path }` pointing at the NAR the fetch worker archived into the cache. The eval worker never touches a remote URL and never needs an SSH key.
+When the tasks are in **separate jobs** - typical for a mix of fetch-only and eval-only workers - the scheduler dispatches FetchFlake as its own job to a `fetch`-capable worker (source = `Repository`), and later dispatches the Evaluate tasks as another job with source = `Cached { store_path }` pointing at the NAR the fetch worker archived into the cache. The eval worker never touches a remote URL and never needs an SSH key.
 
 #### FetchFlake
 
@@ -495,17 +495,17 @@ Fetch runs on a worker that has the `fetch` capability. The fetch step performs 
 
  1. **Clone** the repository at the specified commit using libgit2 (handles SSH keys, `git://`, `https://`).
  2. **Archive** the flake source and all locked transitive inputs into the local Nix store by running `nix flake archive --json`. This goes through the nix daemon (subprocess) so network fetching and store-write access work correctly. Returns the nix store source path (e.g. `/nix/store/xxx-source`) and all input store paths.
- 3. **Compress and push every uncached NAR** — the worker sends `CacheQuery { mode: Push }` for every fetched path. For uncached paths, it **zstd-compresses the NAR locally** and uploads via chunked `NarPush` over the WebSocket; on completion it emits `NarUploaded` with the full metadata (`file_hash`, `file_size`, `nar_size`, `nar_hash`, `references`, `deriver`). **NARs are never transmitted uncompressed.**
- 4. **Report `FetchResult`** carrying only the archived flake source store path (not the full input list — the server already has every `cached_path` row from the `NarUploaded` stream). The server hands this path to any subsequent eval-only job via `FlakeSource::Cached { store_path }`.
+ 3. **Compress and push every uncached NAR** - the worker sends `CacheQuery { mode: Push }` for every fetched path. For uncached paths, it **zstd-compresses the NAR locally** and uploads via chunked `NarPush` over the WebSocket; on completion it emits `NarUploaded` with the full metadata (`file_hash`, `file_size`, `nar_size`, `nar_hash`, `references`, `deriver`). **NARs are never transmitted uncompressed.**
+ 4. **Report `FetchResult`** carrying only the archived flake source store path (not the full input list - the server already has every `cached_path` row from the `NarUploaded` stream). The server hands this path to any subsequent eval-only job via `FlakeSource::Cached { store_path }`.
 
-If `nix flake archive` fails (e.g. network unavailable), the worker falls back to the temporary git checkout path, skips step 3 (nothing to push), and sets `flake_source` to `None` to signal the fallback — no follow-up eval-only job can then use `FlakeSource::Cached`.
+If `nix flake archive` fails (e.g. network unavailable), the worker falls back to the temporary git checkout path, skips step 3 (nothing to push), and sets `flake_source` to `None` to signal the fallback - no follow-up eval-only job can then use `FlakeSource::Cached`.
 
 ```rust
 FetchResult {
     /// Nix store path of the archived flake source (e.g.
     /// `/nix/store/xxx-source`). `Some` when `nix flake archive`
     /// succeeded and the source now lives in the cache as a NAR;
-    /// `None` when the worker fell back to a temporary git checkout —
+    /// `None` when the worker fell back to a temporary git checkout -
     /// in that case the server cannot dispatch an eval-only follow-up
     /// job (no `FlakeSource::Cached` path is available).
     flake_source: Option<String>,
@@ -514,7 +514,7 @@ FetchResult {
 
 ##### Flake input overrides
 
-`FlakeJob.input_overrides` is a per-input list applied during `FetchFlake`. Each entry carries `input_name` plus an `url` that is either `Some(<flake-ref>)` (replace URL) or `None` (force-update keeping the project's flake-declared URL — the worker reconstructs the original ref from `nodes.<input>.original` in `flake.lock`).
+`FlakeJob.input_overrides` is a per-input list applied during `FetchFlake`. Each entry carries `input_name` plus an `url` that is either `Some(<flake-ref>)` (replace URL) or `None` (force-update keeping the project's flake-declared URL - the worker reconstructs the original ref from `nodes.<input>.original` in `flake.lock`).
 
 The worker assembles the archive command as:
 
@@ -524,7 +524,7 @@ nix flake archive [--override-input <name> <ref>]... --json <flake-ref>
 
 Empty `input_overrides` ⇒ argv matches the pre-change baseline byte-for-byte.
 
-Before the archive runs, the worker reads `flake.lock`, builds the set of names declared in `nodes.root.inputs`, and drops any override whose `input_name` is not declared. Each dropped override emits one `EvalMessage` with `level = Warning`, `source = "fetch"`, and message `"flake input '<name>' does not exist in this project's flake — override skipped"`. The archive proceeds with the surviving overrides.
+Before the archive runs, the worker reads `flake.lock`, builds the set of names declared in `nodes.root.inputs`, and drops any override whose `input_name` is not declared. Each dropped override emits one `EvalMessage` with `level = Warning`, `source = "fetch"`, and message `"flake input '<name>' does not exist in this project's flake - override skipped"`. The archive proceeds with the surviving overrides.
 
 ```rust
 pub struct FlakeInputOverride {
@@ -533,14 +533,14 @@ pub struct FlakeInputOverride {
 }
 ```
 
-#### EvaluateDerivations — drv caching
+#### EvaluateDerivations - drv caching
 
 Every `.drv` file discovered during `EvaluateDerivations` is a cacheable store path that substituters ask for by `<drv-hash>.narinfo`. The eval worker therefore:
 
  1. Runs `CacheQuery { mode: Push, paths: <new drv paths in wave> }` alongside each `EvalResult` batch.
  2. For uncached drvs, reads the `.drv` file from the local store, packs it into a NAR, **zstd-compresses it**, and uploads via chunked `NarPush` followed by `NarUploaded`.
 
-The server records the drv's `cached_path` row directly from the `NarUploaded` message. The server never re-packs or re-hashes — it trusts the NAR metadata the worker reports.
+The server records the drv's `cached_path` row directly from the `NarUploaded` message. The server never re-packs or re-hashes - it trusts the NAR metadata the worker reports.
 
 
 ```rust
@@ -555,9 +555,9 @@ DiscoveredDerivation {
 }
 ```
 
-`substituted: true` means all outputs for this derivation are already present in the **server's binary cache** — no build needed. The worker determines this by querying the server via `CacheQuery` during the closure walk (see below). The server marks these as `Substituted` (7).
+`substituted: true` means all outputs for this derivation are already present in the **server's binary cache** - no build needed. The worker determines this by querying the server via `CacheQuery` during the closure walk (see below). The server marks these as `Substituted` (7).
 
-The `architecture` field is a free-form Nix system string (e.g. `"x86_64-linux"`, `"aarch64-linux"`, `"builtin"`). `"builtin"` means the derivation uses `builtin:fetchurl` or similar — it can run on any worker regardless of architecture.
+The `architecture` field is a free-form Nix system string (e.g. `"x86_64-linux"`, `"aarch64-linux"`, `"builtin"`). `"builtin"` means the derivation uses `builtin:fetchurl` or similar - it can run on any worker regardless of architecture.
 
 #### Cache Query
 
@@ -566,8 +566,8 @@ The `architecture` field is a free-form Nix system string (e.g. `"x86_64-linux"`
 | Mode | Use case | Server returns |
 |------|----------|----------------|
 | `Normal` | Eval: mark derivations as substituted | Only cached paths (`cached: true`), no URLs, no metadata |
-| `Pull` | Build: fetch required store paths | **All** queried paths. Cached paths carry full import metadata (`nar_hash`, `references`, `signatures`, `deriver`, `ca`) and a presigned S3 GET URL (or `url: None` for local — use `NarRequest`). Uncached paths carry `path` + `cached: false` only, signaling "the server has nothing to offer for this path" — neither in the local cache nor in any configured upstream. Lets the worker hard-fail before importing a dependent with an unsatisfiable reference. |
-| `Push` | Fetch: upload new inputs | **All** queried paths. Cached paths carry only `path` + `cached: true`. Uncached paths carry `path`, `cached: false`, and `url` — a presigned S3 PUT URL on S3-backed stores (`None` on local; worker falls back to `NarPush`). No other metadata, no upstream lookup. |
+| `Pull` | Build: fetch required store paths | **All** queried paths. Cached paths carry full import metadata (`nar_hash`, `references`, `signatures`, `deriver`, `ca`) and a presigned S3 GET URL (or `url: None` for local - use `NarRequest`). Uncached paths carry `path` + `cached: false` only, signaling "the server has nothing to offer for this path" - neither in the local cache nor in any configured upstream. Lets the worker hard-fail before importing a dependent with an unsatisfiable reference. |
+| `Push` | Fetch: upload new inputs | **All** queried paths. Cached paths carry only `path` + `cached: true`. Uncached paths carry `path`, `cached: false`, and `url` - a presigned S3 PUT URL on S3-backed stores (`None` on local; worker falls back to `NarPush`). No other metadata, no upstream lookup. |
 
 ```rust
 // Worker → Server
@@ -578,7 +578,7 @@ CacheQuery {
 }
 
 enum QueryMode {
-    Normal,   // return only cached paths — no URLs, no metadata
+    Normal,   // return only cached paths - no URLs, no metadata
     Pull,     // return cached paths with full import metadata + presigned GET URL
     Push,     // return all paths with path + cached; uncached also gets presigned PUT URL (S3)
 }
@@ -592,7 +592,7 @@ CacheStatus {
 CachedPath {
     path: String,                       // /nix/store/xxx-name
     cached: bool,                       // true = path is in the Gradient cache
-    // — Pull-mode-only fields (None/empty in Normal and Push) —
+    // - Pull-mode-only fields (None/empty in Normal and Push) -
     file_size: Option<u64>,             // compressed NAR size on disk (bytes)
     nar_size: Option<u64>,              // uncompressed NAR size (bytes)
     url: Option<String>,                // presigned S3 GET URL; None = use NarRequest
@@ -606,11 +606,11 @@ CachedPath {
 
 **Field population by mode:**
 
-- `Normal` — `path`, `cached` only (and `cached` is always `true`, since uncached paths are omitted).
-- `Pull` + `cached: true` — every field populated from `cached_path` / `cached_path_signature`; `url` is a presigned S3 GET for S3-backed stores or `None` for local (use `NarRequest`). Upstream hits populate the same fields from the sig-verified upstream narinfo.
-- `Pull` + `cached: false` — `path` + `cached` only, no metadata, no `url`. The server emits this for every queried path it cannot satisfy (neither in the local cache nor in any configured upstream) so the worker can detect "this path is genuinely unavailable" rather than mistaking server omission for "this path was never asked about". Without it, the closure walk treats unanswered references as already-present-locally, then fails opaquely deep inside `add_to_store_nar` when a dependent path is imported with an unsatisfiable reference.
-- `Push` + `cached: true` — only `path` + `cached`; worker skips the path.
-- `Push` + `cached: false` — `path`, `cached`, and `url` (presigned S3 PUT on S3-backed stores; `None` on local, worker falls back to `NarPush`). No other metadata. No upstream lookup in Push mode.
+- `Normal` - `path`, `cached` only (and `cached` is always `true`, since uncached paths are omitted).
+- `Pull` + `cached: true` - every field populated from `cached_path` / `cached_path_signature`; `url` is a presigned S3 GET for S3-backed stores or `None` for local (use `NarRequest`). Upstream hits populate the same fields from the sig-verified upstream narinfo.
+- `Pull` + `cached: false` - `path` + `cached` only, no metadata, no `url`. The server emits this for every queried path it cannot satisfy (neither in the local cache nor in any configured upstream) so the worker can detect "this path is genuinely unavailable" rather than mistaking server omission for "this path was never asked about". Without it, the closure walk treats unanswered references as already-present-locally, then fails opaquely deep inside `add_to_store_nar` when a dependent path is imported with an unsatisfiable reference.
+- `Push` + `cached: true` - only `path` + `cached`; worker skips the path.
+- `Push` + `cached: false` - `path`, `cached`, and `url` (presigned S3 PUT on S3-backed stores; `None` on local, worker falls back to `NarPush`). No other metadata. No upstream lookup in Push mode.
 
 **"Cached" requires fully-stored bytes.** A `cached_path` row only counts as `cached: true` when its `file_hash IS NOT NULL` (`is_fully_cached()`). Placeholder rows for in-flight or aborted uploads are excluded from `CacheStatus` so the worker never receives "yes, fetch via `NarRequest`" for a path the server can't actually serve.
 
@@ -645,14 +645,14 @@ The worker marks derivations as `substituted` for all entries with `cached: true
 
 ### Cache population
 
-The worker is the sole producer of compressed NARs. The server never packs or compresses — it only stores the bytes delivered over `NarPush`/S3 PUT and records the metadata the worker reports.
+The worker is the sole producer of compressed NARs. The server never packs or compresses - it only stores the bytes delivered over `NarPush`/S3 PUT and records the metadata the worker reports.
 
 The flow for getting any store path (fetched flake input, evaluated `.drv`, or build output) into the cache:
 
  1. **Worker produces** the path locally (fetch, eval, or build).
  2. **Worker zstd-compresses** the NAR. The compressed stream is the only form in which a NAR is ever transmitted or stored.
- 3. **Worker uploads** the compressed NAR via `NarPush` (local mode) or S3 PUT (cloud mode), then sends a single `NarUploaded` carrying `file_hash`, `file_size`, `nar_size`, `nar_hash`, `references`, and `deriver` (the full `.drv` path, when the daemon knows one). `nar_hash` and `nar_size` are computed locally over the uncompressed NAR; `file_hash` and `file_size` over the compressed stream. `references` is read from the local nix-daemon via harmonia's `DaemonStore::query_path_info` (no subprocess) — for build outputs this is the runtime reference set scanned out of the NAR; for `.drv` and fetched-source paths it's whatever the daemon records.
- 4. **Server commits atomically on `NarUploaded`**: in local mode it pops the buffered `NarPush` chunks, validates the buffer length against the reported `file_size`, writes the compressed bytes to `nar_storage`, and **only then** records `cached_path` metadata (including `references` as a space-separated hash-name string in the `cached_path.references` column, and `deriver` in `cached_path.deriver` when the worker supplied one). If the size check fails or `nar_storage.put` errors, the server sends `AbortJob` and the build is marked failed — no `cached_path` row ever claims bytes that aren't actually stored. In S3 mode there are no buffered chunks; the worker uploaded directly to object storage and `NarUploaded` only records metadata. No local re-packing, re-compression, or re-hashing ever happens.
+ 3. **Worker uploads** the compressed NAR via `NarPush` (local mode) or S3 PUT (cloud mode), then sends a single `NarUploaded` carrying `file_hash`, `file_size`, `nar_size`, `nar_hash`, `references`, and `deriver` (the full `.drv` path, when the daemon knows one). `nar_hash` and `nar_size` are computed locally over the uncompressed NAR; `file_hash` and `file_size` over the compressed stream. `references` is read from the local nix-daemon via harmonia's `DaemonStore::query_path_info` (no subprocess) - for build outputs this is the runtime reference set scanned out of the NAR; for `.drv` and fetched-source paths it's whatever the daemon records.
+ 4. **Server commits atomically on `NarUploaded`**: in local mode it pops the buffered `NarPush` chunks, validates the buffer length against the reported `file_size`, writes the compressed bytes to `nar_storage`, and **only then** records `cached_path` metadata (including `references` as a space-separated hash-name string in the `cached_path.references` column, and `deriver` in `cached_path.deriver` when the worker supplied one). If the size check fails or `nar_storage.put` errors, the server sends `AbortJob` and the build is marked failed - no `cached_path` row ever claims bytes that aren't actually stored. In S3 mode there are no buffered chunks; the worker uploaded directly to object storage and `NarUploaded` only records metadata. No local re-packing, re-compression, or re-hashing ever happens.
  5. **Signing** is deferred. `mark_nar_stored` inserts one `cached_path_signature` row per org-cache with `signature = NULL`. A background sweep (`cache::cacher::sign_sweep`, ticking every 60 s) finds NULL rows, reads `nar_hash` / `nar_size` / `references` from `cached_path`, computes the narinfo fingerprint, and fills in the signature. New org ↔ cache subscriptions also enqueue NULL rows for every existing `cached_path` the org owns, so the same sweep back-fills signatures without any extra code path.
 
 The server does **not** use `ensure_path` or GC roots. All cached content lives in the NAR store (S3 or local files), not in the server's Nix store.
@@ -702,7 +702,7 @@ Before enqueuing each wave of input-derivation paths, the worker sends `QueryKno
 
  1. Pre-marks all new dep paths as visited (prevents double-enqueuing).
  2. Enqueues **unknown** paths for further BFS traversal.
- 3. For **known** paths, adds a minimal `DiscoveredDerivation` entry (empty outputs/deps) directly to the batch — no further traversal needed. The server-side `DerivationInsertBatch` handles these via its `load_existing_derivations` path and creates build rows normally.
+ 3. For **known** paths, adds a minimal `DiscoveredDerivation` entry (empty outputs/deps) directly to the batch - no further traversal needed. The server-side `DerivationInsertBatch` handles these via its `load_existing_derivations` path and creates build rows normally.
 
 This avoids redundantly re-walking the entire closure of large packages (e.g. stdenv) that were already fully recorded in a previous evaluation of the same org.
 
@@ -711,7 +711,7 @@ sequenceDiagram
     participant W as Worker
     participant S as Server
 
-    Note over W: BFS wave — discovers deps [A, B, C, D]
+    Note over W: BFS wave - discovers deps [A, B, C, D]
     W->>S: QueryKnownDerivations { drv_paths: [A, B, C, D] }
     S->>W: KnownDerivations { known: [A, C] }
     Note over W: A, C → add as minimal DiscoveredDerivation<br/>B, D → enqueue for full BFS traversal
@@ -720,8 +720,8 @@ sequenceDiagram
 The server processes each batch immediately:
 
  1. Insert `derivation`, `derivation_output`, `derivation_dependency` rows.
- 2. Insert `build` rows — `Substituted` for derivations the worker marked as `substituted` (confirmed in cache), `Created` for the rest.
- 3. Create **entry points** for root derivations (those with a non-empty `attr`) — transitive dependencies are not tracked as entry points. Entry points map user-facing packages to their builds for CI reporting and the frontend UI.
+ 2. Insert `build` rows - `Substituted` for derivations the worker marked as `substituted` (confirmed in cache), `Created` for the rest.
+ 3. Create **entry points** for root derivations (those with a non-empty `attr`) - transitive dependencies are not tracked as entry points. Entry points map user-facing packages to their builds for CI reporting and the frontend UI.
  4. Transition non-substituted builds from `Created` → `Queued` and **immediately dispatch** them to the in-memory job tracker. Workers are notified via `JobOffer` without waiting for the background dispatch loop.
 
 This means builds can start **while evaluation is still in progress**, significantly reducing end-to-end latency for large closures.
@@ -730,7 +730,7 @@ This means builds can start **while evaluation is still in progress**, significa
 
 Requires negotiated capability: `build`.
 
-A `BuildJob` carries the **full dependency chain** in topological order — the worker executes them sequentially without round-tripping to the server for each dependency. Dependencies already present in the worker's store are skipped.
+A `BuildJob` carries the **full dependency chain** in topological order - the worker executes them sequentially without round-tripping to the server for each dependency. Dependencies already present in the worker's store are skipped.
 
 ```mermaid
 graph LR
@@ -749,11 +749,11 @@ BuildTask {
 }
 ```
 
-The worker always zstd-compresses before upload — that's invariant.
+The worker always zstd-compresses before upload - that's invariant.
 
 | Task | Requires | Input (from server) | Output (from worker) |
 |------|----------|---------------------|----------------------|
-| **Build** | `build` | `builds` + `required_paths` — full chain with pre-computed closure | Per-build `BuildOutput` via `JobUpdate` |
+| **Build** | `build` | `builds` + `required_paths` - full chain with pre-computed closure | Per-build `BuildOutput` via `JobUpdate` |
 | **Compress + Upload** | `build` | (implicit) | zstd-compressed NAR uploaded via `NarPush` / S3 PUT, followed by `NarUploaded` carrying file/NAR metadata |
 
 **NAR transfer flow:**
@@ -778,11 +778,11 @@ sequenceDiagram
     W->>S: JobCompleted
 ```
 
-The `required_paths` were already sent in `JobCandidate` during the offer phase. The worker cached the missing set while scoring, so `NarRequest` is immediate after `AssignJob` — no second store query needed.
+The `required_paths` were already sent in `JobCandidate` during the offer phase. The worker cached the missing set while scoring, so `NarRequest` is immediate after `AssignJob` - no second store query needed.
 
-The server pre-computes `required_paths` from the evaluation's `derivation_dependency` and `derivation_output` tables — no `.drv` parsing on either side for dependency resolution. The worker parses each `.drv` file locally to construct a `BasicDerivation` and drives the build through harmonia's `BuildDerivation` RPC against the local nix-daemon. The daemon's log stream is consumed in parallel and forwarded to the server via `LogChunk` frames so the build log is captured live.
+The server pre-computes `required_paths` from the evaluation's `derivation_dependency` and `derivation_output` tables - no `.drv` parsing on either side for dependency resolution. The worker parses each `.drv` file locally to construct a `BasicDerivation` and drives the build through harmonia's `BuildDerivation` RPC against the local nix-daemon. The daemon's log stream is consumed in parallel and forwarded to the server via `LogChunk` frames so the build log is captured live.
 
-If any derivation in the chain fails, the worker skips the rest and reports `JobFailed` — the server cascades `DependencyFailed` to downstream builds.
+If any derivation in the chain fails, the worker skips the rest and reports `JobFailed` - the server cascades `DependencyFailed` to downstream builds.
 
 ---
 
@@ -793,7 +793,7 @@ If any derivation in the chain fails, the worker skips the rest and reports `Job
 ```rust
 enum ServerMessage {
     // Handshake + auth
-    AuthChallenge { peers: Vec<Uuid> },          // "these peers registered you — send tokens"
+    AuthChallenge { peers: Vec<Uuid> },          // "these peers registered you - send tokens"
     InitAck { version: u16, capabilities: GradientCapabilities, authorized_peers: Vec<Uuid>, failed_peers: Vec<FailedPeer> },
     AuthUpdate { authorized_peers: Vec<Uuid>, failed_peers: Vec<FailedPeer> },  // reauth result
     Reject { code: u16, reason: String },       // decline connection (closes after send)
@@ -810,14 +810,14 @@ enum ServerMessage {
     // Credentials (sent before or alongside AssignJob)
     Credential { kind: CredentialKind, data: Vec<u8> },
 
-    // NAR transfer — direct mode
+    // NAR transfer - direct mode
     NarPush { job_id: Uuid, store_path: String, data: Vec<u8>, offset: u64, is_final: bool },
 
-    // NAR transfer — failure signals (responses to NarRequest)
+    // NAR transfer - failure signals (responses to NarRequest)
     NarUnavailable { job_id: Uuid, store_path: String, reason: String },  // server cannot serve; no chunks will follow
     NarAbort       { job_id: Uuid, store_path: String, reason: String },  // in-flight transfer aborted; discard partial buffer
 
-    // NAR transfer — S3 mode (batched)
+    // NAR transfer - S3 mode (batched)
     PresignedUpload { job_id: Uuid, store_path: String, url: String, method: String, headers: Vec<(String, String)> },
     PresignedDownload { job_id: Uuid, store_path: String, url: String },
 
@@ -852,7 +852,7 @@ enum ClientMessage {
         scores: Vec<CandidateScore>,
         is_final: bool,                         // true on last chunk of each scoring pass
     },
-    RequestJob { kind: JobKind },               // "I have capacity for one job" — re-sent every 10s as heartbeat
+    RequestJob { kind: JobKind },               // "I have capacity for one job" - re-sent every 10s as heartbeat
     RequestAllCandidates,                       // startup-only: ask server to re-send all active candidates once
     JobUpdate { job_id: Uuid, update: JobUpdateKind },
     JobCompleted { job_id: Uuid },              // all tasks done; results already sent via JobUpdate
@@ -868,10 +868,10 @@ enum ClientMessage {
     NarUploaded {
         job_id: Uuid,
         store_path: String,
-        file_hash: String,     // sha256:<hex> — hash of the compressed NAR file
+        file_hash: String,     // sha256:<hex> - hash of the compressed NAR file
         file_size: u64,        // size in bytes of the compressed NAR file
         nar_size: u64,         // uncompressed NAR size in bytes
-        nar_hash: String,      // sha256:<nix32> or SRI — hash of the uncompressed NAR
+        nar_hash: String,      // sha256:<nix32> or SRI - hash of the uncompressed NAR
         references: Vec<String>, // store-path references in hash-name format (no /nix/store/ prefix);
                                  // sourced from the local daemon via harmonia query_path_info
         deriver: Option<String>, // full /nix/store/*.drv path that produced this output, if any;
@@ -894,7 +894,7 @@ enum ClientMessage {
     /// transport / prefetch / cache problems on the evaluation page directly,
     /// without drilling into individual build logs.
     ///
-    /// **Not** used for build compile failures or user-initiated aborts —
+    /// **Not** used for build compile failures or user-initiated aborts -
     /// those stay confined to the build log and `JobFailed`.  Use this only
     /// for signals the user could not diagnose from a single build's output.
     EvalMessage {
@@ -919,7 +919,7 @@ evaluation that owns the active job.  The server:
    jobs carry this) and inserts into `evaluation_message` via
    `EvalRepo::insert_message`.
 3. If the job is not active (already completed or evicted), the message is
-   silently dropped — late infra signals for a finished job have no useful
+   silently dropped - late infra signals for a finished job have no useful
    destination.
 
 Because `check_evaluation_done` already treats any error-level
@@ -929,7 +929,7 @@ once its builds settle.
 
 Typical producer sites today:
 - worker `prefetch_inputs` (source `"build-prefetch"`) when an input NAR
-  download or daemon import can't complete — the build would otherwise die
+  download or daemon import can't complete - the build would otherwise die
   with "dependency does not exist" in the build log with no evaluation-level
   breadcrumb.
 
@@ -943,7 +943,7 @@ Workers send `JobUpdate` messages to report progress. The server maps these dire
 enum JobUpdateKind {
     // FlakeJob phases → EvaluationStatus
     Fetching,                                           // → Fetching
-    FetchResult {                                       // fetch completed — report archived flake source
+    FetchResult {                                       // fetch completed - report archived flake source
         flake_source: Option<String>,                    // Some = store path the archived flake lives at;
                                                          // None  = worker fell back to a tmp git checkout (no eval-only follow-up possible)
     },
@@ -987,9 +987,9 @@ struct BuildProduct {
 | `EvaluatingFlake` | `evaluation` | `EvaluatingFlake` (1) |
 | `EvaluatingDerivations` | `evaluation` | `EvaluatingDerivation` (2) |
 | `EvalResult` | `evaluation` + `derivation` + `build` + `entry_point` + `evaluation_message` | Inserts rows per batch; substituted → `Substituted` (7), rest → `Created` (0) → `Queued` (1). Creates `entry_point` rows for root derivations (non-empty `attr`). Immediately dispatches ready builds to workers. First `EvalResult` sets eval to `Building` (3). Warnings stored as `evaluation_message` rows with level `Warning`. Errors stored as `evaluation_message` rows with level `Error`; if `derivations` is empty and `errors` is non-empty, evaluation is immediately marked `Failed`. |
-| `Building` | `build` | `Building` (2) — per derivation in chain |
+| `Building` | `build` | `Building` (2) - per derivation in chain |
 | `BuildOutput` | `build` + `derivation_output` | `Completed` (3); updates output hash/size/path |
-| `Compressing` | — | No status change; informational — packing outputs into zstd NARs |
+| `Compressing` | - | No status change; informational - packing outputs into zstd NARs |
 
 `JobCompleted` sets the final terminal status. `JobFailed` sets `Failed` and cascades `DependencyFailed` to downstream builds.
 
@@ -997,7 +997,7 @@ struct BuildProduct {
 
 ## NAR Transfer
 
-Two modes, chosen by the server based on `NarStore` configuration. Both support **batched transfers** — the server sends all NARs for a job at once (e.g. all inputs for a build chain), avoiding per-path round trips.
+Two modes, chosen by the server based on `NarStore` configuration. Both support **batched transfers** - the server sends all NARs for a job at once (e.g. all inputs for a build chain), avoiding per-path round trips.
 
 ### Worker → Server (upload, FetchFlake)
 
@@ -1005,13 +1005,13 @@ Before uploading fetched flake inputs, the worker sends `CacheQuery { mode: Push
 
 The server responds with a single `CacheStatus` containing **all** queried paths:
 
- - `cached: true` — path already in the cache; worker skips it. No URL.
- - `cached: false, url: Some(presigned_put)` — S3 mode; worker uploads directly to S3.
- - `cached: false, url: None` — local mode; worker uses `NarPush` WebSocket frames.
+ - `cached: true` - path already in the cache; worker skips it. No URL.
+ - `cached: false, url: Some(presigned_put)` - S3 mode; worker uploads directly to S3.
+ - `cached: false, url: None` - local mode; worker uses `NarPush` WebSocket frames.
 
 Push responses carry **no** other metadata (no `nar_hash`, `references`, `signatures`, `deriver`, `ca`, `file_size`, `nar_size`), and Push mode **does not** query upstream caches.
 
-**Local mode** — uncached paths have `url: None`; worker uses `NarPush`:
+**Local mode** - uncached paths have `url: None`; worker uses `NarPush`:
 
 ```mermaid
 sequenceDiagram
@@ -1030,7 +1030,7 @@ sequenceDiagram
     Note right of S: stores in NAR storage,<br/>updates cached_path rows
 ```
 
-**S3 mode** — uncached paths have `url: Some(presigned_put)`; worker uploads directly to S3:
+**S3 mode** - uncached paths have `url: Some(presigned_put)`; worker uploads directly to S3:
 
 ```mermaid
 sequenceDiagram
@@ -1049,7 +1049,7 @@ sequenceDiagram
 
 ### Server → Worker (download, BuildJob)
 
-The worker drives NAR requests — it knows what it needs to build, checks its local store, and asks the server for only the missing paths:
+The worker drives NAR requests - it knows what it needs to build, checks its local store, and asks the server for only the missing paths:
 
 ```rust
 // Worker → Server: I need these paths to proceed
@@ -1074,7 +1074,7 @@ sequenceDiagram
 
 ---
 
-NARs are always **zstd-compressed** on the wire and in storage (`*.nar.zst`). Workers decompress before importing into their local Nix store and compress before uploading any path — source, evaluated `.drv`, or build output. The server treats the compressed bytes as opaque: it never decompresses, re-packs, or re-compresses them.
+NARs are always **zstd-compressed** on the wire and in storage (`*.nar.zst`). Workers decompress before importing into their local Nix store and compress before uploading any path - source, evaluated `.drv`, or build output. The server treats the compressed bytes as opaque: it never decompresses, re-packs, or re-compresses them.
 
 ---
 
@@ -1100,14 +1100,14 @@ Default timeouts:
 
 ## Scheduling Priority
 
-The server assigns jobs based on priority. Workers do not need to know the priority — it is purely server-side.
+The server assigns jobs based on priority. Workers do not need to know the priority - it is purely server-side.
 
 **Evaluation queue:** FIFO by `created_at`, up to `max_concurrent_evaluations` (default: 10) in parallel. `force_evaluation` projects are picked up immediately.
 
 **Build queue:** ordered by:
 
- 1. Dependency count descending — builds with more dependents (integration builds) start first
- 2. `updated_at` ascending — older builds drain first
+ 1. Dependency count descending - builds with more dependents (integration builds) start first
+ 2. `updated_at` ascending - older builds drain first
 
 Builds are only eligible when all dependency builds are `Completed` or `Substituted`. The server matches eligible builds to `RequestJobChunk` by checking that the build's target system and required features are all present in the worker's `system_features`.
 
@@ -1115,16 +1115,16 @@ Builds are only eligible when all dependency builds are `Completed` or `Substitu
 
 ## Federation
 
-Federation connects Gradient instances or workers to each other. A server with `federate` enabled can connect to other servers using the same proto protocol — it authenticates using the standard challenge-response, and the remote peer (org, cache, or proxy) sees it as a single worker/cache.
+Federation connects Gradient instances or workers to each other. A server with `federate` enabled can connect to other servers using the same proto protocol - it authenticates using the standard challenge-response, and the remote peer (org, cache, or proxy) sees it as a single worker/cache.
 
 Federation can happen in two ways:
 
- - **`gradient-proxy`** — a lightweight binary that only federates. It has no local orgs, no UI, no database. Workers authenticate to it with a simple proxy-level token. It connects to upstream servers, authenticating against their peers. The proxy **detaches** the worker↔peer relationship: all its workers serve all authorized peers. The proxy itself is a peer — it registers workers and issues them tokens.
- - **A full Gradient server** — a server with its own orgs, projects, and workers. Its orgs and caches are peers that individually control which external workers/servers get tokens, deciding what to expose.
+ - **`gradient-proxy`** - a lightweight binary that only federates. It has no local orgs, no UI, no database. Workers authenticate to it with a simple proxy-level token. It connects to upstream servers, authenticating against their peers. The proxy **detaches** the worker↔peer relationship: all its workers serve all authorized peers. The proxy itself is a peer - it registers workers and issues them tokens.
+ - **A full Gradient server** - a server with its own orgs, projects, and workers. Its orgs and caches are peers that individually control which external workers/servers get tokens, deciding what to expose.
 
 ### How it works
 
-A federation peer connects to a remote server as a regular worker. A peer on the remote server (org, cache, or proxy) registers the federation peer's ID and issues a token — exactly like registering any worker:
+A federation peer connects to a remote server as a regular worker. A peer on the remote server (org, cache, or proxy) registers the federation peer's ID and issues a token - exactly like registering any worker:
 
 ```mermaid
 sequenceDiagram
@@ -1139,7 +1139,7 @@ sequenceDiagram
     Note over S1: Org X sees Server B as a single worker/cache
 ```
 
-From Org X's perspective, Server B is just one worker that happens to have a lot of capacity. Server B internally routes jobs to its own workers and serves its own caches — Org X doesn't see or control that.
+From Org X's perspective, Server B is just one worker that happens to have a lot of capacity. Server B internally routes jobs to its own workers and serves its own caches - Org X doesn't see or control that.
 
 ### `gradient-proxy`
 
@@ -1167,7 +1167,7 @@ upstream:
       org-z:   "tok_org_z"          # Org Z registered proxy-001
 ```
 
-Org X's job arrives → proxy assigns to any available worker. Org Z's job arrives → same pool. The proxy doesn't distinguish — all workers serve all peers.
+Org X's job arrives → proxy assigns to any available worker. Org Z's job arrives → same pool. The proxy doesn't distinguish - all workers serve all peers.
 
 ### Full Gradient server as federation peer
 
@@ -1201,14 +1201,14 @@ Caches behind a federation peer are exposed upstream. When a remote peer's build
 |---|---|---|
 | Workers → peer | Proxy-level token (flat, no orgs) | Challenge-response against server's peers |
 | Peer → upstream | Challenge-response against upstream's peers | Challenge-response against upstream's peers |
-| What's exposed | Everything — all workers, all caches | Per-peer (org/cache) settings |
+| What's exposed | Everything - all workers, all caches | Per-peer (org/cache) settings |
 | Upstream sees peer as | One worker/cache | One worker/cache |
 
 ---
 
 ## Build Artefacts
 
-After a successful build, the worker reads `<output>/nix-support/hydra-build-products` (when present), parses each line into a `BuildProduct { file_type, name, path, size }`, and ships the list on `BuildOutput.products`. The server persists them as `build_product` rows (FK → `derivation_output`, one row per product). The listing endpoint (`GET /api/v1/builds/{id}/downloads`) reads directly from this table — no NAR access. The single-file download endpoint (`GET /api/v1/builds/{id}/download/{filename}`) resolves the requested basename against `build_product.name`, then streams the file out of the output's NAR via `core::storage::nar_extract`.
+After a successful build, the worker reads `<output>/nix-support/hydra-build-products` (when present), parses each line into a `BuildProduct { file_type, name, path, size }`, and ships the list on `BuildOutput.products`. The server persists them as `build_product` rows (FK → `derivation_output`, one row per product). The listing endpoint (`GET /api/v1/builds/{id}/downloads`) reads directly from this table - no NAR access. The single-file download endpoint (`GET /api/v1/builds/{id}/download/{filename}`) resolves the requested basename against `build_product.name`, then streams the file out of the output's NAR via `core::storage::nar_extract`.
 
 Outputs with no `hydra-build-products` file send `products: []` and have no `build_product` rows.
 
@@ -1216,7 +1216,7 @@ Outputs with no `hydra-build-products` file send `products: []` and have no `bui
 
 ## DependencyFailed Cascade
 
-When a build fails (`JobFailed` or `AbortJob`), the server walks reverse `derivation_dependency` edges within the same evaluation and marks all dependent builds as `DependencyFailed` (6). This is a server-side graph walk — workers are not notified about cascaded failures.
+When a build fails (`JobFailed` or `AbortJob`), the server walks reverse `derivation_dependency` edges within the same evaluation and marks all dependent builds as `DependencyFailed` (6). This is a server-side graph walk - workers are not notified about cascaded failures.
 
 The evaluation's final status is determined by aggregating all build statuses:
 
@@ -1234,7 +1234,7 @@ Workers send `LogChunk` messages during task execution. The server appends them 
 LogChunk { job_id: Uuid, task_index: u32, data: Vec<u8> }
 ```
 
-Fire-and-forget — no acknowledgement. WebSocket flow control provides backpressure if the server falls behind.
+Fire-and-forget - no acknowledgement. WebSocket flow control provides backpressure if the server falls behind.
 
 When the server receives `JobCompleted` or `JobFailed`, it **finalizes** the log (uploads to S3 if configured). Workers do not need to wait for finalization.
 
@@ -1250,7 +1250,7 @@ The server sends credentials to workers before tasks that need them:
 
 Credentials are encrypted in transit (TLS). Workers MUST:
 
- - Keep credentials in memory only — never write to disk
+ - Keep credentials in memory only - never write to disk
  - Zeroize memory on drop
  - Discard credentials when the job completes or the connection closes (they are not reused across jobs)
 
@@ -1297,8 +1297,8 @@ When the server restarts (deploy, crash, maintenance), workers experience a WebS
 **Worker behavior:**
 
  1. Detect disconnect (WebSocket close or missed pong).
- 2. **Keep running in-progress jobs** — do not abort immediately. Results are buffered locally.
- 3. **Keep candidate cache and scores in memory** — do not discard.
+ 2. **Keep running in-progress jobs** - do not abort immediately. Results are buffered locally.
+ 3. **Keep candidate cache and scores in memory** - do not discard.
  4. Reconnect with exponential backoff: 1s → 2s → 4s → ... → 60s max, with jitter.
  5. On reconnect, send `InitConnection` + `WorkerCapabilities` (full re-handshake).
  6. Send `JobUpdate`/`JobCompleted`/`JobFailed` for any jobs that progressed or finished during the outage. The server matches these by `job_id`.
@@ -1334,11 +1334,11 @@ sequenceDiagram
     W->>S: RequestJob { kind: Build }
     Note over S: assigns best job
     S->>W: AssignJob { job_id: J2 }
-    Note over W: got AssignJob — still has slots
+    Note over W: got AssignJob - still has slots
     W->>S: RequestJob { kind: Build }
 ```
 
-This means short server restarts (< grace period) cause **zero job loss** — workers buffer results and replay them on reconnect. Score state is rebuilt in a single startup round-trip via `RequestAllScores` + `RequestAllCandidates` (both sent exactly once per connection). The 10-second `RequestJob` heartbeat ensures the server recovers the "worker needs work" state even if it restarts and loses that information.
+This means short server restarts (< grace period) cause **zero job loss** - workers buffer results and replay them on reconnect. Score state is rebuilt in a single startup round-trip via `RequestAllScores` + `RequestAllCandidates` (both sent exactly once per connection). The 10-second `RequestJob` heartbeat ensures the server recovers the "worker needs work" state even if it restarts and loses that information.
 
 ### Graceful Server Shutdown
 
@@ -1358,7 +1358,7 @@ sequenceDiagram
 
 On receiving `ServerMessage::Draining`, workers:
 
- 1. Stop sending `RequestJob` — no new work.
+ 1. Stop sending `RequestJob` - no new work.
  2. Finish in-flight jobs and send results.
  3. After the connection closes, wait before reconnecting (e.g. 30s) to give the server time to restart.
 

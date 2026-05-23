@@ -197,7 +197,7 @@ impl<'a> EvalResultProcessor<'a> {
     /// Insert `ABuild` rows for each newly-discovered derivation.
     ///
     /// `Substituted` status is decided server-side from the actual cache
-    /// state — a drv is Substituted iff *every* `derivation_output` row for
+    /// state - a drv is Substituted iff *every* `derivation_output` row for
     /// it links to a `cached_path` whose `file_hash IS NOT NULL`. The
     /// worker's `substituted` flag is treated as a hint for its own
     /// scheduling and is ignored here, so a stale or lying `cached_path`
@@ -321,7 +321,7 @@ impl<'a> EvalResultProcessor<'a> {
 
     /// Return the subset of `drv_ids` whose every `derivation_output` row's
     /// hash matches a `cached_path` with `file_hash IS NOT NULL`. These are
-    /// the drvs the server can confidently mark `Substituted` — anything
+    /// the drvs the server can confidently mark `Substituted` - anything
     /// else must be built (or substituted later when the bytes show up).
     ///
     /// Matching is by hash rather than the explicit
@@ -526,7 +526,7 @@ impl<'a> EvalResultProcessor<'a> {
             }
         }
 
-        // CI reporting — report per-entry-point status as Pending.
+        // CI reporting - report per-entry-point status as Pending.
         if !entry_points.is_empty() {
             let state_clone = Arc::clone(self.state);
             let repo = self.evaluation.repository.clone();
@@ -587,9 +587,9 @@ async fn expand_substituted_closure(
     // recurse through derivation_dependency until the closure is exhausted.
     // The outer SELECT filters to derivations without a build row yet, and
     // tags each result with the kind of seed it descends from:
-    //  - 'sub' — reached from a `Substituted` (status=7) build; outputs are
+    //  - 'sub' - reached from a `Substituted` (status=7) build; outputs are
     //    in our cache, transitive deps are too (Nix substitution invariant)
-    //  - 'ext' — reached from a `Created + external_cached = true` build;
+    //  - 'ext' - reached from a `Created + external_cached = true` build;
     //    outputs are in upstream only, transitive deps too. New rows for
     //    these get inserted with `external_cached = true` so the worker
     //    fetches them from upstream rather than trying to rebuild.

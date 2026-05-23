@@ -66,7 +66,7 @@ impl<'a> Caller<'a> {
 #[derive(Clone, Copy)]
 pub enum OrgAccess {
     /// Anonymous callers may see public orgs; private orgs require membership
-    /// (i.e. `Permission::ViewOrg`). `label` controls the not-found wording —
+    /// (i.e. `Permission::ViewOrg`). `label` controls the not-found wording -
     /// project endpoints pass `"Project"` so org existence isn't leaked.
     Readable { label: &'static str },
 
@@ -340,7 +340,7 @@ pub async fn load_membership_with_permissions(
         return Ok(None);
     };
     // The `organization_user.role -> role.id` FK is NOT NULL, so a missing
-    // role here means the seed step never ran or the row was hand-deleted —
+    // role here means the seed step never ran or the row was hand-deleted -
     // treat it as "no permissions" rather than panicking.
     let mask = ERole::find_by_id(membership.role)
         .one(&state.web_db)

@@ -6,13 +6,13 @@
 
 //! Adds two indexes that support `dispatch_ready_builds`:
 //!
-//! 1. `idx-build-evaluation-derivation` — composite on `(evaluation,
+//! 1. `idx-build-evaluation-derivation` - composite on `(evaluation,
 //!    derivation)`. The dispatcher's `NOT EXISTS` antijoin correlates each
 //!    candidate's dependency edges back to `build` rows in the same
 //!    evaluation; without this index every dependency lookup degenerates
 //!    into a sequential scan of `build`.
 //!
-//! 2. `idx-build-ready-queue` — partial index `(updated_at) WHERE status = 1
+//! 2. `idx-build-ready-queue` - partial index `(updated_at) WHERE status = 1
 //!    AND via IS NULL`. The dispatcher only ever drives off Queued primary
 //!    builds; this lets the planner walk the queue directly in `updated_at`
 //!    order instead of full-scanning `build` to filter.

@@ -102,7 +102,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   private readonly statusesWithBuilds = new Set<EvaluationStatus>(['Building', 'Waiting', 'Completed', 'Failed', 'Aborted']);
 
   loadEntryPoints(project?: ProjectDetail): void {
-    // When the newest eval is Queued/Evaluating it has no builds yet — fall back to
+    // When the newest eval is Queued/Evaluating it has no builds yet - fall back to
     // the most recent evaluation that actually has entry points.
     const evalWithBuilds = project?.last_evaluations?.find(e => this.statusesWithBuilds.has(e.status));
     this.projectsService.getEntryPoints(this.orgName, this.projectName, evalWithBuilds?.id).subscribe({

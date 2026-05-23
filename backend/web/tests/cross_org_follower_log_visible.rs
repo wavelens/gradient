@@ -11,7 +11,7 @@
 //! able to read the leader build's log endpoint. A member of an entirely
 //! unrelated org (no follower link) must receive 404.
 //!
-//! Mock query sequence — positive case (private leader-org, follower-org member):
+//! Mock query sequence - positive case (private leader-org, follower-org member):
 //!   Auth prefix (authorize_optional):
 //!     1. SELECT session           (decode_jwt)
 //!     2. SELECT session           (update last_used_at, returning)
@@ -20,7 +20,7 @@
 //!     4. SELECT build             (leader build by id)
 //!     5. SELECT evaluation        (leader build's evaluation)
 //!     6. SELECT project           (leader evaluation's project)
-//!     7. SELECT organization      (leader org — private)
+//!     7. SELECT organization      (leader org - private)
 //!   Direct membership check (private org → is_org_member → load_org_membership):
 //!     8. SELECT organization_user (leader org × user → empty → not a direct member)
 //!   follower_orgs_accessible:
@@ -267,7 +267,7 @@ fn follower_org_member_gets_leader_log() {
 }
 
 /// A member of an unrelated org (no follower build pointing at this leader)
-/// must receive 404 — the leader build is invisible to them.
+/// must receive 404 - the leader build is invisible to them.
 #[test]
 fn unrelated_org_member_cannot_read_leader_log() {
     let sid = session_id();

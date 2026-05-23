@@ -27,7 +27,7 @@ use uuid::Uuid;
 
 fn member_only_membership() -> organization_user::Model {
     // BASE_ROLE_VIEW grants ManageIntegrations today (see permissions::view_mask),
-    // but the summary endpoint must work even without that — so we use a
+    // but the summary endpoint must work even without that - so we use a
     // synthetic role id that we never load. `OrgAccess::Member` does not
     // dereference the role.
     organization_user::Model {

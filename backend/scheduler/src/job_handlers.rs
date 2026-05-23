@@ -118,7 +118,7 @@ impl Scheduler {
         {
             let pool = self.worker_pool.read().await;
             if !pool.has_capacity(peer_id, &kind) {
-                debug!(%peer_id, ?kind, "RequestJob ignored — worker at capacity");
+                debug!(%peer_id, ?kind, "RequestJob ignored - worker at capacity");
                 return None;
             }
         }
@@ -161,7 +161,7 @@ impl Scheduler {
         None
     }
 
-    /// Record candidate scores from a worker. Does NOT assign — the worker
+    /// Record candidate scores from a worker. Does NOT assign - the worker
     /// explicitly signals capacity via `RequestJob`. Scores are used later
     /// by `request_job` to pick the best candidate.
     pub async fn record_scores(&self, peer_id: &str, scores: Vec<CandidateScore>) {
@@ -305,7 +305,7 @@ impl Scheduler {
                 Some(PendingJob::Eval(j)) => j.clone(),
                 Some(_) => anyhow::bail!("job {} is not an eval job", job_id),
                 None => {
-                    warn!(%job_id, "eval result for unknown job — ignoring");
+                    warn!(%job_id, "eval result for unknown job - ignoring");
                     return Ok(());
                 }
             }
@@ -329,7 +329,7 @@ impl Scheduler {
         // Accumulate dep edges to flush later (at eval-job-completed) when
         // every derivation row is guaranteed to be in the DB. The BFS walks
         // roots→leaves, so batch N may contain a derivation whose dep lands
-        // in batch N+1 — inserting the edge now would FK-fail or silently
+        // in batch N+1 - inserting the edge now would FK-fail or silently
         // skip the dep because the row doesn't exist yet.
         let eval_id = job.evaluation_id;
         let dep_pairs: Vec<(String, Vec<String>)> = derivations
@@ -365,7 +365,7 @@ impl Scheduler {
                 Some(PendingJob::Build(j)) => j.clone(),
                 Some(_) => anyhow::bail!("job {} is not a build job", job_id),
                 None => {
-                    warn!(%job_id, "build output for unknown job — ignoring");
+                    warn!(%job_id, "build output for unknown job - ignoring");
                     return Ok(());
                 }
             }
@@ -453,7 +453,7 @@ impl Scheduler {
                     // Common shortly after a build finishes: a few in-flight
                     // log lines from the worker arrive after the job has
                     // already been removed from the active tracker. Not an
-                    // error — just lost output, log at debug.
+                    // error - just lost output, log at debug.
                     debug!(%job_id, task_index, bytes = bytes_len, "log chunk dropped: no active job (likely race with completion)");
                     return Ok(());
                 }

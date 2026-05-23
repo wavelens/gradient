@@ -66,7 +66,7 @@ async fn validate_integration(
     Ok(())
 }
 
-/// `GET /projects/{organization}/{project}/integration` — current link row
+/// `GET /projects/{organization}/{project}/integration` - current link row
 /// (returns nulls when no link exists).
 pub async fn get_project_integration(
     state: State<Arc<ServerState>>,
@@ -100,7 +100,7 @@ pub async fn get_project_integration(
     Ok(ok_json(message))
 }
 
-/// `PUT /projects/{organization}/{project}/integration` — upsert the link row.
+/// `PUT /projects/{organization}/{project}/integration` - upsert the link row.
 pub async fn put_project_integration(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -148,7 +148,7 @@ pub async fn put_project_integration(
     Ok(ok_json(ProjectIntegrationResponse::from(updated)))
 }
 
-/// `DELETE /projects/{organization}/{project}/integration` — remove link row.
+/// `DELETE /projects/{organization}/{project}/integration` - remove link row.
 pub async fn delete_project_integration(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,

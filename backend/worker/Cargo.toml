@@ -3,7 +3,7 @@
 
 [package]
 name        = "worker"
-description = "Gradient build worker — connects to a Gradient server via /proto and executes jobs locally"
+description = "Gradient build worker - connects to a Gradient server via /proto and executes jobs locally"
 version.workspace    = true
 edition.workspace    = true
 license.workspace    = true

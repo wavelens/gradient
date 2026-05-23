@@ -6,7 +6,7 @@
 
 //! Server-side cache maintenance.
 //!
-//! The server no longer packs, compresses, or signs NARs — the worker does
+//! The server no longer packs, compresses, or signs NARs - the worker does
 //! all of that locally and uploads the compressed bytes with metadata and
 //! per-cache signatures attached. This module only runs periodic cleanup /
 //! GC passes against the cache's DB and NAR store.
@@ -38,7 +38,7 @@ pub async fn cache_loop(state: Arc<ServerState>) {
         None
     };
 
-    // No per-output work anymore — the worker uploads+signs. This loop only
+    // No per-output work anymore - the worker uploads+signs. This loop only
     // runs maintenance. Tick every hour; nothing is latency-sensitive.
     let mut interval = time::interval(Duration::from_secs(3600));
     let cancel = state.shutdown.token();

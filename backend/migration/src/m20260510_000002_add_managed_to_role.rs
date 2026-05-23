@@ -6,7 +6,7 @@
 
 //! Adds `managed` to the `role` table so state-managed custom roles (defined
 //! in `gradient-state.nix`) can be marked as such. Existing rows default to
-//! `false`, preserving today's behavior — the three built-in roles
+//! `false`, preserving today's behavior - the three built-in roles
 //! (Admin/Write/View) and any user-created custom roles remain unmanaged.
 
 use sea_orm_migration::prelude::*;

@@ -12,12 +12,12 @@
 //!
 //! The connection state is encoded in the type parameter `S`:
 //!
-//! - [`Worker<Connected>`] — holds an active [`ProtoConnection`].  Call
+//! - [`Worker<Connected>`] - holds an active [`ProtoConnection`].  Call
 //!   [`run`](Worker::run) to enter the dispatch loop.  `run` consumes `self`
 //!   and always returns a [`Worker<Disconnected>`] (plus the disconnect
 //!   reason) so the caller can decide whether to reconnect.
 //!
-//! - [`Worker<Disconnected>`] — no active connection.  Call
+//! - [`Worker<Disconnected>`] - no active connection.  Call
 //!   [`reconnect`](Worker::reconnect) to obtain a fresh `Worker<Connected>`.
 
 mod dispatch;
@@ -56,9 +56,9 @@ pub struct Worker<S> {
     executor: JobExecutor,
     scorer: JobScorer,
     credentials: CredentialStore,
-    /// Local cache of job candidates — updated on `JobListChunk` / `JobOffer`.
+    /// Local cache of job candidates - updated on `JobListChunk` / `JobOffer`.
     candidates: Arc<Mutex<HashMap<String, JobCandidate>>>,
-    /// Last known score per candidate — used for delta filtering.
+    /// Last known score per candidate - used for delta filtering.
     last_scores: Arc<Mutex<HashMap<String, proto::messages::CandidateScore>>>,
     /// Connection state: [`Connected`] or [`Disconnected`].
     conn_state: S,
@@ -136,7 +136,7 @@ impl Worker<Disconnected> {
             Err(e) => return Err((e, self)),
         };
         // Reuse the same handshake + capability-advertise + initial-request
-        // sequence as a fresh connect — the server has no prior state for
+        // sequence as a fresh connect - the server has no prior state for
         // this worker after a restart, so reconnect must re-publish
         // architectures, system_features, and max_concurrent_builds.
         if let Err(e) = perform_setup(&mut conn, &self.config, "reconnect").await {

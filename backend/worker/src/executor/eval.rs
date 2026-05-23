@@ -4,13 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Evaluation tasks — Nix flake attribute discovery and derivation closure walk.
+//! Evaluation tasks - Nix flake attribute discovery and derivation closure walk.
 //!
 //! The worker uses an in-process `EvalWorkerPool` (subprocess pool running the
 //! Nix C API isolated from Tokio) to do the actual evaluation.  The results are
 //! transmitted back to the server as [`DiscoveredDerivation`] structs.
 //!
-//! No database access occurs here — all DB writes are done server-side when the
+//! No database access occurs here - all DB writes are done server-side when the
 //! server receives the `EvalResult` [`JobUpdateKind`].
 
 use std::collections::{HashSet, VecDeque};
@@ -28,7 +28,7 @@ use tracing::{debug, info, warn};
 
 /// Abort error returned from the eval pipeline when the dispatch loop fires
 /// the watch signal in response to a server-side `AbortJob`. Bubbles up as a
-/// regular `Err`, which the worker translates into `JobFailed` — the server's
+/// regular `Err`, which the worker translates into `JobFailed` - the server's
 /// `handle_eval_job_failed` then no-ops because the eval is already
 /// `Aborted` from the API call.
 const ABORT_ERR: &str = "evaluation aborted by server";
@@ -160,7 +160,7 @@ async fn mark_substituted(batch: &mut [DiscoveredDerivation], updater: &mut dyn 
 /// Build the flake reference string from a job and an optional local checkout.
 ///
 /// When `FetchFlake` archived the repo into the Nix store the returned path
-/// starts with `/nix/store/` — content-addressed and immutable, valid in pure
+/// starts with `/nix/store/` - content-addressed and immutable, valid in pure
 /// eval mode.  For a temporary `/tmp/` checkout we use `git+file://?rev=` to
 /// stay pure (bare `path:/tmp/...` would allow impure `builtins.fetchGit`
 /// calls that bypass `builtins.tryEval`).
@@ -169,7 +169,7 @@ fn build_flake_url(job: &FlakeJob, local_flake_path: Option<&str>) -> String {
         if path.starts_with("/nix/store/") {
             return format!("path:{}", path);
         }
-        // A tmp git checkout — pair it with the commit from source when we
+        // A tmp git checkout - pair it with the commit from source when we
         // know we're on a Repository source; else fall back to a bare
         // `path:` reference.
         if let FlakeSource::Repository { commit, .. } = &job.source {
@@ -190,7 +190,7 @@ fn build_flake_url(job: &FlakeJob, local_flake_path: Option<&str>) -> String {
 
 /// Read and parse every `.drv` in `wave` concurrently, preserving BFS order.
 ///
-/// A read or parse failure is a hard error — silently dropping a derivation
+/// A read or parse failure is a hard error - silently dropping a derivation
 /// drops its entire dep subtree, causing the dispatcher to release the parent
 /// prematurely and the nix-daemon to die with "1 dependency failed".
 async fn parse_drv_wave(
@@ -387,7 +387,7 @@ impl<'a> ClosureWalker<'a> {
         // Enqueue unknown deps; add known deps to the batch directly.
         for dep in new_deps {
             if known_set.contains(&dep) {
-                // Server already has the full subtree — report the derivation
+                // Server already has the full subtree - report the derivation
                 // (so a build row is created) but skip further traversal.
                 self.batch.push(DiscoveredDerivation {
                     attr: String::new(),
@@ -396,7 +396,7 @@ impl<'a> ClosureWalker<'a> {
                     dependencies: vec![],
                     architecture: String::new(),
                     required_features: vec![],
-                    substituted: true, // already built — skip dispatch
+                    substituted: true, // already built - skip dispatch
                 });
             } else {
                 self.queue.push_back((None, dep));
@@ -581,7 +581,7 @@ mod tests {
     /// Set up resolver and drv_reader from a StoreFixture.
     /// Tests don't fire abort: hand back a receiver from a sender we drop on
     /// the floor. `is_aborted` reads `*borrow_and_update()` which stays
-    /// `false` (the initial value) — the sender being dropped doesn't flip
+    /// `false` (the initial value) - the sender being dropped doesn't flip
     /// it, so abort never triggers in tests.
     fn never_abort() -> watch::Receiver<bool> {
         let (_tx, rx) = watch::channel(false);
@@ -775,7 +775,7 @@ mod tests {
 
     /// When the abort watch is flipped before eval starts, the function
     /// returns immediately without doing any work. Regression guard for
-    /// "aborting jobs does not work when in EvaluatingDerivation state" —
+    /// "aborting jobs does not work when in EvaluatingDerivation state" -
     /// previously `evaluate_derivations_with` ignored the abort signal
     /// entirely.
     #[tokio::test]

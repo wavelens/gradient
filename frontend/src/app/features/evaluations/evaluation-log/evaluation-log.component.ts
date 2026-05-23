@@ -71,7 +71,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private initialBuildId: string | null = null;
   private initialShowEval = false;
 
-  // Derived from backend totals — accurate regardless of how many builds are loaded.
+  // Derived from backend totals - accurate regardless of how many builds are loaded.
   completedBuildsCount = computed(() => this.totalBuildsCount() - this.activeBuildsCount());
 
   queuedCount = computed(() =>
@@ -300,7 +300,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     });
   }
 
-  /** Triggered by scroll proximity — pre-fetches next page before user hits bottom. */
+  /** Triggered by scroll proximity - pre-fetches next page before user hits bottom. */
   loadMoreBuilds(): void {
     if (this.loadingMore || this.builds().length >= this.totalBuilds) return;
     this.doLoadMore();
@@ -313,7 +313,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
     this.evalService.getBuilds(this.evaluationId, this.PAGE_SIZE, offset).subscribe({
       next: (result) => {
-        // Do NOT update totalBuildsCount / activeBuildsCount here — those metric signals
+        // Do NOT update totalBuildsCount / activeBuildsCount here - those metric signals
         // are owned exclusively by loadBuilds() to avoid jumps from concurrent responses.
         this.totalBuilds = result.total;
         if (result.builds.length > 0) {
@@ -424,7 +424,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       if (response.ok) {
         const data = await response.json();
         if (!data.error && typeof data.message === 'string' && data.message !== '') {
-          // data.message is already a decoded JS string — split directly to preserve blank lines
+          // data.message is already a decoded JS string - split directly to preserve blank lines
           const lines = (data.message as string).split('\n');
           // Trim a single trailing empty string produced by a final newline
           if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
@@ -759,7 +759,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       return '';
     }
     if (build.status === 'Building') {
-      this.tick(); // reactive dependency — re-evaluated every second
+      this.tick(); // reactive dependency - re-evaluated every second
       const ts = build.updated_at;
       const start = new Date(ts.includes('Z') || ts.includes('+') ? ts : ts + 'Z');
       return this.formatMs(Math.max(0, Date.now() - start.getTime()));

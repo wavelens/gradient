@@ -128,7 +128,7 @@ fn to_response(m: MProjectAction) -> ActionResponse {
     }
 }
 
-/// `GET /projects/{org}/{project}/actions` — list all actions for the project.
+/// `GET /projects/{org}/{project}/actions` - list all actions for the project.
 pub async fn list_actions(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -153,7 +153,7 @@ pub async fn list_actions(
     Ok(ok_json(rows.into_iter().map(to_response).collect()))
 }
 
-/// `POST /projects/{org}/{project}/actions` — create a new action. For
+/// `POST /projects/{org}/{project}/actions` - create a new action. For
 /// `send_web_request` configs the supplied plaintext token is returned
 /// exactly once in the response and stored encrypted with the server's
 /// crypt key; all later reads omit it entirely.

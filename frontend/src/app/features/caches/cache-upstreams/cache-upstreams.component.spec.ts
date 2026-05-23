@@ -69,7 +69,7 @@ function setup(access: AccessState): ComponentFixture<CacheUpstreamsComponent> {
   return fixture;
 }
 
-describe('CacheUpstreamsComponent — access gating', () => {
+describe('CacheUpstreamsComponent - access gating', () => {
   it('renders the upstream list under read-only access', () => {
     const fixture = setup({ managed: false, canEdit: false, canTrigger: false });
     expect(fixture.nativeElement.textContent).toContain('Upstream A');

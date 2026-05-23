@@ -70,7 +70,7 @@ pub struct StateProject {
     #[serde(default)]
     pub outbound_integration: Option<String>,
     /// Declarative trigger list. `None` leaves existing triggers untouched
-    /// (back-compat). `Some([])` is an error — a project must have at least one.
+    /// (back-compat). `Some([])` is an error - a project must have at least one.
     #[serde(default)]
     pub triggers: Option<Vec<StateTrigger>>,
     /// Concurrency policy for this project. Defaults to `soft_abort` when omitted.
@@ -189,7 +189,7 @@ pub struct StateApiKey {
     pub key_file: String,
     pub owned_by: String,
     /// Capability identifiers (matching `Permission::as_wire_name`) the key
-    /// should grant. Required — there is no safe default.
+    /// should grant. Required - there is no safe default.
     pub permissions: Vec<String>,
     /// Optional organization name to pin the key to. `None` = unscoped.
     #[serde(default)]
@@ -200,10 +200,10 @@ pub struct StateApiKey {
 pub struct StateRole {
     pub name: String,
     /// Organization the role belongs to. State-managed roles are always
-    /// org-scoped — there is no way to define a global state-managed role.
+    /// org-scoped - there is no way to define a global state-managed role.
     pub organization: String,
     /// Capability identifiers (matching `Permission::as_wire_name`) the role
-    /// grants. Required — there is no safe default.
+    /// grants. Required - there is no safe default.
     pub permissions: Vec<String>,
 }
 
@@ -348,7 +348,7 @@ impl StateConfiguration {
                 // the App-install hook (see `ensure_github_app_integrations`)
                 // and are never declared in state.integrations. The
                 // provisioning layer accepts them without a state entry, so
-                // the validator must too — apply-time will catch the case
+                // the validator must too - apply-time will catch the case
                 // where the org has no GitHub App installed.
                 if int_name == crate::ci::GITHUB_APP_INTEGRATION_NAME
                     && !self.integrations.contains_key(int_name)
@@ -773,7 +773,7 @@ mod tests {
 
     #[test]
     fn state_project_silently_ignores_legacy_force_evaluation_field() {
-        // Old state files may still set `force_evaluation` — serde drops
+        // Old state files may still set `force_evaluation` - serde drops
         // unknown fields by default, so parsing must keep working.
         let json = r#"{
             "projects": {

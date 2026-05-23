@@ -100,7 +100,7 @@ fn lookup_id<T: Copy>(map: &HashMap<String, T>, name: &str, kind: &str) -> Resul
 /// integration by name. Auto-managed GitHub App rows are seeded once per org as
 /// **two** integrations sharing `name = "github"` (one `Inbound`, one
 /// `Outbound`), so a collect that ignores `kind` collapses them into a single
-/// arbitrary entry — sometimes the outbound id, which makes the webhook
+/// arbitrary entry - sometimes the outbound id, which makes the webhook
 /// resolver's inbound lookup miss and the trigger never fires.
 async fn inbound_integrations_by_name<C: ConnectionTrait>(
     db: &C,
@@ -136,7 +136,7 @@ async fn resolve_integration_id(
                 name, kind, project_name
             )
         })?;
-    // Auto-managed `forge_type=github` rows aren't declarable in state — they
+    // Auto-managed `forge_type=github` rows aren't declarable in state - they
     // are seeded by the App-install hook and the seeding migration. Accept
     // references to them without requiring an explicit state.integrations entry.
     let is_github_managed = row.forge_type == i16::from(ForgeType::GitHub);
@@ -154,7 +154,7 @@ async fn resolve_integration_id(
 
 /// Names of state-managed rows that must remain `managed` after reconciliation.
 ///
-/// Each set is built from the value's `name` (or `username`) field — the same
+/// Each set is built from the value's `name` (or `username`) field - the same
 /// field every `apply_*` writes to the DB row. Using the attrset key here
 /// instead would delete or unmanage rows whose Nix-side `name = "…"` was
 /// overridden away from the attrset key (e.g. `projects.foo = { name = "main"; }`).
@@ -1468,7 +1468,7 @@ fn trigger_key(cfg: &TriggerConfig) -> String {
 
 /// Validate the contents of a user password credential file. The file must
 /// contain an argon2 PHC hash (e.g. produced by `gradient-server hash` or the
-/// `argon2 -id -e` CLI). The plaintext password is never stored — the server
+/// `argon2 -id -e` CLI). The plaintext password is never stored - the server
 /// only accepts the pre-hashed PHC string and passes it through to the DB.
 fn parse_password_phc(contents: &str, path: &str) -> Result<String, DynError> {
     let phc = contents.trim().to_string();
@@ -1883,7 +1883,7 @@ mod keep_set_tests {
 
     /// Regression: `gradient-state.nix` lets users override an entity's
     /// `name`/`username` away from the attrset key. The cleanup pass must look
-    /// up DB rows by the same `name` the `apply_*` functions wrote — using the
+    /// up DB rows by the same `name` the `apply_*` functions wrote - using the
     /// attrset key here would unmanage or delete the row we just inserted.
     #[test]
     fn keep_sets_track_inner_name_not_attrset_key() {

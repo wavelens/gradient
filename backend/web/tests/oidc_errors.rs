@@ -25,7 +25,7 @@ use uuid::Uuid;
 use web::create_router;
 
 /// Boots a `TestServer` with OIDC enabled but pointing at an unreachable
-/// discovery URL (`127.0.0.1:1` — reserved, refuses immediately).
+/// discovery URL (`127.0.0.1:1` - reserved, refuses immediately).
 fn server_with_broken_oidc() -> TestServer {
     let tmp = std::env::temp_dir();
     let suffix = Uuid::now_v7();
@@ -123,7 +123,7 @@ fn oauth_authorize_get_callback_does_not_leak_idp_error() {
     rt.block_on(async {
         let s = server_with_broken_oidc();
         // Even with code+state present, the missing CSRF cookie short-circuits
-        // before we reach the IdP. That branch is already safe — this test
+        // before we reach the IdP. That branch is already safe - this test
         // locks in that the response body shape stays stable and clean.
         let res = s
             .get("/api/v1/auth/oauth/authorize?code=abc&state=xyz")

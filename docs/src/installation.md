@@ -47,7 +47,7 @@ In your `configuration.nix`:
     frontend.enable = true;
     domain        = "gradient.example.com";
 
-    # Secrets — we recommend sops-nix or agenix
+    # Secrets - we recommend sops-nix or agenix
     cryptSecretFile = "/var/lib/gradient/crypt-secret"; # base64-encoded password
     jwtSecretFile   = "/var/lib/gradient/jwt-secret";   # random alphanumeric RS256 secret
 
@@ -89,6 +89,6 @@ Gradient will start automatically and be available at `https://gradient.example.
 
 1. Navigate to `https://gradient.example.com/account/register` to create the first user account.
 2. Log in and create an organization.
-3. Create a Nix cache (optional — required for binary cache serving).
+3. Create a Nix cache (optional - required for binary cache serving).
 4. Create your first project pointing to a Git repository.
-5. Trigger an evaluation — a connected `gradient-worker` will fetch, evaluate, and build.
+5. Trigger an evaluation - a connected `gradient-worker` will fetch, evaluate, and build.

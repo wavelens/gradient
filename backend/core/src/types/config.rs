@@ -19,7 +19,7 @@ use super::cli::{
 };
 use ipnet::IpNet;
 
-/// OIDC configuration — only present when `oidc_enabled` is true and all
+/// OIDC configuration - only present when `oidc_enabled` is true and all
 /// required fields are configured.
 #[derive(Debug, Clone)]
 pub struct OidcConfig {
@@ -32,7 +32,7 @@ pub struct OidcConfig {
     pub required: bool,
 }
 
-/// Email/SMTP configuration — only present when `email_enabled` is true and
+/// Email/SMTP configuration - only present when `email_enabled` is true and
 /// all required fields are configured.
 #[derive(Debug, Clone)]
 pub struct EmailConfig {
@@ -47,7 +47,7 @@ pub struct EmailConfig {
     pub require_verification: bool,
 }
 
-/// GitHub App configuration — only present when all three fields are set.
+/// GitHub App configuration - only present when all three fields are set.
 ///
 /// Required together: the App ID and private key are needed to generate
 /// short-lived JWTs for API authentication, and the webhook secret is needed
@@ -64,7 +64,7 @@ pub struct GitHubAppConfig {
     pub webhook_secret_file: String,
 }
 
-/// Metrics endpoint configuration — only present when `metrics_token_file`
+/// Metrics endpoint configuration - only present when `metrics_token_file`
 /// is set and the file contains a non-empty token. The token is loaded once
 /// at startup; rotation requires a server restart.
 #[derive(Debug, Clone)]
@@ -81,7 +81,7 @@ pub struct NetworkConfig {
     pub local_ips: Vec<IpNet>,
 }
 
-/// S3 / object-storage configuration — only present when `s3_bucket` is set.
+/// S3 / object-storage configuration - only present when `s3_bucket` is set.
 #[derive(Debug, Clone)]
 pub struct S3Config {
     pub bucket: String,
@@ -178,7 +178,7 @@ impl Cli {
 /// parser DTO.
 ///
 /// Optional features (`oidc`, `email`, `s3`, `github_app`) are `None` when
-/// disabled or incompletely configured — the `Some` variant guarantees the
+/// disabled or incompletely configured - the `Some` variant guarantees the
 /// feature is fully usable.
 #[derive(Debug, Clone)]
 pub struct RuntimeConfig {

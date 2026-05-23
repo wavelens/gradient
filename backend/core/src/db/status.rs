@@ -37,7 +37,7 @@ pub async fn update_build_status(
         Ok(_) => {}
         Err(e) => {
             // Loud: a rejected transition usually means the build is stuck
-            // in a state the next event can't legally move it from — e.g.
+            // in a state the next event can't legally move it from - e.g.
             // a JobFailed arriving while the build is still `Queued`
             // because the worker's `Building` JobUpdate was lost / never
             // sent. Without this we'd silently drop the failure and the UI
@@ -47,7 +47,7 @@ pub async fn update_build_status(
                 from = ?build.status,
                 to = ?status,
                 error = %e,
-                "Skipping invalid build status transition — investigate: status update lost or out of order"
+                "Skipping invalid build status transition - investigate: status update lost or out of order"
             );
             return build;
         }
@@ -166,7 +166,7 @@ pub async fn update_evaluation_status(
 
     match update_result {
         Ok(res) if res.rows_affected == 0 => {
-            // Row was concurrently transitioned to a terminal state —
+            // Row was concurrently transitioned to a terminal state -
             // honor it and return the fresh value instead of clobbering.
             return EEvaluation::find_by_id(evaluation.id)
                 .one(&state.worker_db)
@@ -213,7 +213,7 @@ pub async fn update_evaluation_status(
 
 /// Records an error-level `evaluation_message` row and transitions the evaluation status.
 ///
-/// `source` identifies where the error originated — e.g. `"flake-prefetch"`,
+/// `source` identifies where the error originated - e.g. `"flake-prefetch"`,
 /// `"nix-eval"`, `"nix-eval:packages.x86_64-linux.hello"`, `"db-insert"`.
 pub async fn update_evaluation_status_with_error(
     state: Arc<ServerState>,
@@ -224,7 +224,7 @@ pub async fn update_evaluation_status_with_error(
 ) -> MEvaluation {
     // If the evaluation is already in a terminal state (e.g. it was
     // aborted while we were running), don't record a spurious error or
-    // overwrite the status — just return the current row.
+    // overwrite the status - just return the current row.
     if matches!(
         evaluation.status,
         EvaluationStatus::Aborted | EvaluationStatus::Failed | EvaluationStatus::Completed
@@ -319,7 +319,7 @@ pub async fn abort_evaluation(state: Arc<ServerState>, evaluation: MEvaluation) 
         };
 
         if has_followers && build.status == BuildStatus::Building {
-            // Already running on a worker — let it finish so followers in
+            // Already running on a worker - let it finish so followers in
             // other (non-aborted) evaluations get the result.
             continue;
         }

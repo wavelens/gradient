@@ -15,7 +15,7 @@ Key functions inside each crate.
 
 **Generic forges** (`POST /api/v1/hooks/{forge}/{org}/{integration_name}`):
 - `{forge}` ∈ `gitea`, `forgejo`, `gitlab`. GitHub deliveries route to the App webhook above.
-- Looks up the integration by `(organization, kind=inbound, name=integration_name)` — `forge_type` is **not** part of the filter, so one inbound row can serve all three generic forges.
+- Looks up the integration by `(organization, kind=inbound, name=integration_name)` - `forge_type` is **not** part of the filter, so one inbound row can serve all three generic forges.
 - Decrypts `integration.secret` (same `crypt_secret_file` infrastructure as SSH keys).
 - Picks the HMAC scheme from the `{forge}` path segment (`X-Gitea-Signature`, `X-Gitlab-Token`, etc).
 - `push` → calls `trigger_evaluation` for each matching project.
@@ -45,13 +45,13 @@ Converts the repository URL and commit hash into a Nix flake reference: `git+htt
 
 **2. EvaluateFlake + EvaluateDerivations** (if `eval` capability)
 
-Expands the evaluation wildcard into attribute paths, resolves each to a `.drv` path via the Nix C API, and walks the dependency closure via BFS. During the walk the worker sends **incremental `EvalResult` batches** as derivations are discovered — the server inserts rows immediately without waiting for the full walk.
+Expands the evaluation wildcard into attribute paths, resolves each to a `.drv` path via the Nix C API, and walks the dependency closure via BFS. During the walk the worker sends **incremental `EvalResult` batches** as derivations are discovered - the server inserts rows immediately without waiting for the full walk.
 
 Wildcard segments:
 
-- `*` — **recursive**: matches any attribute name and, when at the trailing position, descends one additional level to recover derivations hidden by consecutive-wildcard collapsing (`packages.*.*` and `packages.*` are equivalent).
-- `#` — **non-recursive**: matches any attribute name at exactly that depth and checks `type == "derivation"` without descending further.
-- `!prefix` — **exclusion**: removes exact paths from the collected set.
+- `*` - **recursive**: matches any attribute name and, when at the trailing position, descends one additional level to recover derivations hidden by consecutive-wildcard collapsing (`packages.*.*` and `packages.*` are equivalent).
+- `#` - **non-recursive**: matches any attribute name at exactly that depth and checks `type == "derivation"` without descending further.
+- `!prefix` - **exclusion**: removes exact paths from the collected set.
 
 **3. Server-side batch insert** (on each `EvalResult` batch)
 
@@ -75,7 +75,7 @@ evaluation:  Queued → Fetching → EvaluatingFlake → EvaluatingDerivation �
 
 The proto scheduler's dispatch loop (`proto::scheduler::dispatch`) polls for eligible builds and pushes `JobOffer` messages to connected workers with the `build` capability.
 
-**Eligibility:** a build is eligible only when every dependent derivation already has a `build` row in the same evaluation with status `Completed` (3) or `Substituted` (7) — enforced via a double `NOT EXISTS` antijoin against `derivation_dependency` and `build`. Two indexes back the hot path: `idx-build-ready-queue` (partial, `status = 1 AND via IS NULL`) drives the outer queue scan in `updated_at` order, and `idx-build-evaluation-derivation` (composite on `evaluation, derivation`) lets the dependency lookup be index-only instead of seq-scanning `build` once per candidate.
+**Eligibility:** a build is eligible only when every dependent derivation already has a `build` row in the same evaluation with status `Completed` (3) or `Substituted` (7) - enforced via a double `NOT EXISTS` antijoin against `derivation_dependency` and `build`. Two indexes back the hot path: `idx-build-ready-queue` (partial, `status = 1 AND via IS NULL`) drives the outer queue scan in `updated_at` order, and `idx-build-evaluation-derivation` (composite on `evaluation, derivation`) lets the dependency lookup be index-only instead of seq-scanning `build` once per candidate.
 
 **Worker matching:** `JobOffer` is sent to workers whose `WorkerCapabilities` include the build's target architecture and all required features from `derivation_feature`. Workers score each candidate against their local store (missing required paths) and stream scores back via `RequestJobChunk`. The server assigns to the worker with the lowest `missing` count; ties broken by fewest assigned jobs.
 
@@ -106,11 +106,11 @@ Each cache has a dedicated Ed25519 signing key encrypted in the database (using 
 
 **Narinfo** (`GET /cache/{cache}/{hash}.narinfo`)
 
-Constructs a `NixPathInfo` response from `derivation_output` + `cached_path` + `cached_path_signature`. Sizes, hashes, and references are read directly from the DB row the worker populated when it uploaded the NAR — the server never re-packs or re-hashes a NAR.
+Constructs a `NixPathInfo` response from `derivation_output` + `cached_path` + `cached_path_signature`. Sizes, hashes, and references are read directly from the DB row the worker populated when it uploaded the NAR - the server never re-packs or re-hashes a NAR.
 
 When the hash doesn't match any `derivation_output`, narinfo falls back to the `cached_path` table. This covers `.drv` files and any other standalone store path the worker pushed.
 
-**Worker-side signing.** All packing, zstd compression, and Ed25519 signing happen on the worker. Before dispatching a `FlakeJob` or `BuildJob`, the server sends one `Credential { kind: SigningKey }` per cache owned by the job's org that has a `private_key` configured. The worker accumulates the keys and signs every path it uploads (fetched flake input, evaluated `.drv`, built output) once per key. Signatures arrive via `FetchedInput.signatures` or `JobUpdate::Signed`; the server stores each entry in `cached_path_signature` keyed by the cache named in the signature. A cache added after a path was uploaded has no signature for that path until it is re-uploaded — there is no server-side backfill.
+**Worker-side signing.** All packing, zstd compression, and Ed25519 signing happen on the worker. Before dispatching a `FlakeJob` or `BuildJob`, the server sends one `Credential { kind: SigningKey }` per cache owned by the job's org that has a `private_key` configured. The worker accumulates the keys and signs every path it uploads (fetched flake input, evaluated `.drv`, built output) once per key. Signatures arrive via `FetchedInput.signatures` or `JobUpdate::Signed`; the server stores each entry in `cached_path_signature` keyed by the cache named in the signature. A cache added after a path was uploaded has no signature for that path until it is re-uploaded - there is no server-side backfill.
 
 **Closure presence** (`cache_derivation`)
 
@@ -122,7 +122,7 @@ This makes "is the full closure of build B available in cache C" a single DB loo
 
 ## Dependency Graph API
 
-`GET /builds/{build}/graph` — BFS from the requested build, capped at 500 nodes. The graph is stored on derivations, so the BFS walks `derivation_dependency` and resolves each visited derivation back to a `build` row in the same evaluation for UI display:
+`GET /builds/{build}/graph` - BFS from the requested build, capped at 500 nodes. The graph is stored on derivations, so the BFS walks `derivation_dependency` and resolves each visited derivation back to a `build` row in the same evaluation for UI display:
 
 ```
 root_drv = build.derivation
@@ -142,7 +142,7 @@ while queue not empty and nodes.len() < 500:
     if next_batch not empty: queue.push(next_batch)
 ```
 
-Returned `DependencyEdge { source, target }` are build IDs — `source` is the dependency's build and `target` is the dependent's build, so `source` must be built before `target`.
+Returned `DependencyEdge { source, target }` are build IDs - `source` is the dependency's build and `target` is the dependent's build, so `source` must be built before `target`.
 
 Batching the BFS (one DB round-trip per level) keeps the query count proportional to graph depth rather than node count.
 
@@ -150,11 +150,11 @@ Batching the BFS (one DB round-trip per level) keeps the query count proportiona
 
 ## Authentication
 
-**JWT** — `HS256` signed with `GRADIENT_JWT_SECRET`. Payload contains `sub: user_uuid`. Regular tokens expire after 24 hours; `remember_me` tokens after 30 days. Generated in `web::authorization::encode_jwt`.
+**JWT** - `HS256` signed with `GRADIENT_JWT_SECRET`. Payload contains `sub: user_uuid`. Regular tokens expire after 24 hours; `remember_me` tokens after 30 days. Generated in `web::authorization::encode_jwt`.
 
-**API keys** — 32 random bytes encoded as hex, stored hashed in `api.key`, prefixed with `GRAD` when returned to the user. The `authorization::authorize` middleware accepts both token types in the `Authorization: Bearer` header.
+**API keys** - 32 random bytes encoded as hex, stored hashed in `api.key`, prefixed with `GRAD` when returned to the user. The `authorization::authorize` middleware accepts both token types in the `Authorization: Bearer` header.
 
-**OIDC** — `oidc_login_create` starts the PKCE flow and stores the verifier in the database. `oidc_login_verify` exchanges the code, fetches user info, upserts the user row, and returns a JWT. Endpoint discovery is automatic from `GRADIENT_OIDC_DISCOVERY_URL/.well-known/openid-configuration`.
+**OIDC** - `oidc_login_create` starts the PKCE flow and stores the verifier in the database. `oidc_login_verify` exchanges the code, fetches user info, upserts the user row, and returns a JWT. Endpoint discovery is automatic from `GRADIENT_OIDC_DISCOVERY_URL/.well-known/openid-configuration`.
 
 ---
 
@@ -169,7 +169,7 @@ Workers authenticate to the server using a challenge-response flow:
 5. The worker responds with `AuthResponse { tokens: {peer_id: token} }`.
 6. The server validates each token by comparing `sha256(token)` against the stored hash. The worker is authorized for all peers that pass.
 
-A worker may be authorized for multiple orgs simultaneously — it sees job candidates from all its authorized peers.
+A worker may be authorized for multiple orgs simultaneously - it sees job candidates from all its authorized peers.
 
 ---
 

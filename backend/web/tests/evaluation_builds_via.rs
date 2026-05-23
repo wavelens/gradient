@@ -7,7 +7,7 @@
 //! Integration tests for `GET /evals/{evaluation}/builds`.
 //!
 //! Verifies that follower builds (`via IS NOT NULL`) surface the leader build's
-//! row in the response — the follower's own `id`/`status`/`updated_at` are
+//! row in the response - the follower's own `id`/`status`/`updated_at` are
 //! stand-in placeholders and the frontend needs the leader's data to render the
 //! live build and resolve the log endpoint to the right build id.
 //!
@@ -16,10 +16,10 @@
 //!   2. SELECT project                (EvalAccessContext::load)
 //!   3. SELECT organization           (EvalAccessContext::load, public=true)
 //!   4. SELECT builds                 (filter by evaluation)
-//!   5. SELECT builds                 (filter by id in [via_ids]) — only when at least one follower exists
+//!   5. SELECT builds                 (filter by id in [via_ids]) - only when at least one follower exists
 //!   6. SELECT derivations            (filter by id in [drv_ids])
 //!   7. SELECT derivation_outputs     (filter by derivation in [drv_ids])
-//!   8. SELECT build_products         (filter by derivation_output in [output_ids]) — skipped when no outputs
+//!   8. SELECT build_products         (filter by derivation_output in [output_ids]) - skipped when no outputs
 
 use axum_test::TestServer;
 use entity::build::BuildStatus;
@@ -195,7 +195,7 @@ fn make_state(db: sea_orm::DatabaseConnection) -> Arc<ServerState> {
 }
 
 /// A follower build in the evaluation must be returned with the leader's `id`,
-/// `status`, `updated_at` and `build_time_ms` — not the follower's stand-in row.
+/// `status`, `updated_at` and `build_time_ms` - not the follower's stand-in row.
 /// The derivation path is shared, so `name` stays the same.
 #[test]
 fn follower_build_is_replaced_with_leader_row() {
@@ -247,7 +247,7 @@ fn follower_build_is_replaced_with_leader_row() {
     });
 }
 
-/// A plain build (`via IS NULL`) skips the leader resolution entirely — the
+/// A plain build (`via IS NULL`) skips the leader resolution entirely - the
 /// extra SELECT must not be issued (MockDatabase would otherwise return junk
 /// from the next-appended row and corrupt the response). Validates the
 /// `leader_ids.is_empty()` short-circuit.

@@ -184,7 +184,7 @@ async fn dispatch_queued_eval_skips_already_enqueued() {
         // Second dispatch:
         // 5. find Queued evaluations (same eval still Queued in DB)
         .append_query_results([vec![make_eval_queued(eval_id, commit_id, Some(project_id))]])
-        // No commit/project lookup — contains_job check short-circuits
+        // No commit/project lookup - contains_job check short-circuits
         .into_connection();
 
     let scheduler = make_scheduler(db);
@@ -214,7 +214,7 @@ async fn dispatch_queued_eval_skips_missing_commit() {
         .append_query_results([vec![make_eval_queued(eval_id, commit_id, Some(project_id))]])
         // 2. find commit → None
         .append_query_results([Vec::<entity::commit::Model>::new()])
-        // No project lookup — skipped after missing commit
+        // No project lookup - skipped after missing commit
         .into_connection();
 
     let scheduler = make_scheduler(db);
@@ -237,13 +237,13 @@ async fn dispatch_queued_eval_without_project_is_skipped() {
     let commit_id = CommitId::now_v7();
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        // 1. find Queued evaluations — project: None
+        // 1. find Queued evaluations - project: None
         .append_query_results([vec![make_eval_queued(eval_id, commit_id, None)]])
         // 2. find commit
         .append_query_results([vec![make_commit(commit_id)]])
-        // 3. snapshot flake input overrides (none) — runs even when project: None
+        // 3. snapshot flake input overrides (none) - runs even when project: None
         .append_query_results([Vec::<entity::evaluation_flake_input_override::Model>::new()])
-        // No project lookup — organization_id_for_eval bails on None project
+        // No project lookup - organization_id_for_eval bails on None project
         .into_connection();
 
     let scheduler = make_scheduler(db);
@@ -377,7 +377,7 @@ async fn dispatch_once_no_triggers_is_noop() {
 }
 
 /// A trigger whose `last_fired_at` is recent (within interval) must not cause
-/// an evaluation — the `dispatch_once` loop skips it as not-due.
+/// an evaluation - the `dispatch_once` loop skips it as not-due.
 ///
 /// We verify this by asserting no project lookup follows the trigger query,
 /// which means no evaluation creation path is entered. If the mock DB were
@@ -388,7 +388,7 @@ async fn dispatch_once_skips_trigger_within_interval() {
     let trigger_id = ProjectTriggerId::now_v7();
     let org_id = OrganizationId::now_v7();
 
-    // last_fired_at = now (0 seconds ago) — interval = 60 s → not due
+    // last_fired_at = now (0 seconds ago) - interval = 60 s → not due
     let recent = gradient_core::types::now();
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -420,7 +420,7 @@ async fn dispatch_once_skips_trigger_within_interval() {
 async fn dispatch_skips_follower_builds() {
     // The ready-builds SQL has `AND b.via IS NULL`, so a follower row never
     // makes it into the result set. We model that by returning an empty list
-    // from the raw SQL — the test asserts the dispatcher then enqueues nothing.
+    // from the raw SQL - the test asserts the dispatcher then enqueues nothing.
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([Vec::<MBuild>::new()])
         .into_connection();

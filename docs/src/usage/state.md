@@ -14,17 +14,17 @@ Managed-resource and read-only access show up consistently across the dashboard:
 
 - **State-managed resources** show form fields and write buttons (Save,
   Delete, etc.) as visible but disabled, with a hover tooltip ("Managed
-  by Nix — edit via declarative config") so you can see what the
+  by Nix - edit via declarative config") so you can see what the
   resource looks like and what actions exist, you just can't trigger
   them here. Update the Nix config instead.
 - **Read-only access** (your organization role doesn't grant write
   permission) shows form fields as disabled with a "You have read-only
-  access" tooltip; write buttons are **hidden entirely** — they don't
+  access" tooltip; write buttons are **hidden entirely** - they don't
   exist for you. Contact an organization admin to make changes.
 
 The pages themselves are always navigable. A state-managed cache's
 upstreams subpage, for example, is reachable so you can see what
-upstreams are configured — only the Add / Edit / Delete controls are
+upstreams are configured - only the Add / Edit / Delete controls are
 gated.
 
 ## Users
@@ -64,13 +64,13 @@ nix shell nixpkgs#libargon2 -c \
   > /run/secrets/alice-password
 ```
 
-> **Do not** feed the password via a bash herestring (`<<< "mypassword"`) —
+> **Do not** feed the password via a bash herestring (`<<< "mypassword"`) -
 > herestrings append a trailing newline, so `argon2` would hash
 > `mypassword\n` and later logins with `mypassword` would fail. Use
 > `printf %s` (no `\n`) or `gradient hash`.
 
 At server startup, the file content is validated to start with `$argon2`
-and stored verbatim — the server never sees the plaintext password.
+and stored verbatim - the server never sees the plaintext password.
 
 Set `password_file = null` (or omit it) for users that authenticate
 exclusively via OIDC. Provisioning a user *with* a password and then
@@ -84,7 +84,7 @@ must be declared without one.
 |---|---|---|
 | `username` | `<attrset key>` | Unique username |
 | `name` | `<username>` | Display name |
-| `email` | — | Email address (required) |
+| `email` | - | Email address (required) |
 | `password_file` | `null` | Argon2id PHC hash file. `null` for OIDC-only accounts |
 | `email_verified` | `true` | Mark the email as verified at provision time |
 | `superuser` | `false` | Grant instance-wide admin |
@@ -117,10 +117,10 @@ ssh-keygen -t ed25519 -N "" -f /run/secrets/acme-ssh-key
 | `name` | `<attrset key>` | Unique organization name |
 | `display_name` | `<name>` | Display name |
 | `description` | `null` | Optional description |
-| `private_key_file` | — | Path to SSH private key (required) |
+| `private_key_file` | - | Path to SSH private key (required) |
 | `public` | `false` | Visible to all users |
 | `github_installation_id` | `null` | GitHub App installation id to bind to this org (look it up on the App's "Install App" page on GitHub). Setting this enables outbound CI status reporting and webhook routing. When `null`, the field is left untouched on update so a webhook-recorded id survives reconciliation |
-| `created_by` | — | Username of creator (required) |
+| `created_by` | - | Username of creator (required) |
 
 ## Projects
 
@@ -145,17 +145,17 @@ services.gradient.state.projects = {
 | Option | Default | Description |
 |---|---|---|
 | `name` | `<attrset key>` | Unique project name |
-| `organization` | — | Owning organization (required) |
+| `organization` | - | Owning organization (required) |
 | `display_name` | `<name>` | Display name |
 | `description` | `null` | Optional description |
-| `repository` | — | Git URL (required) |
+| `repository` | - | Git URL (required) |
 | `wildcard` | `packages.x86_64-linux.*` | Attr-path pattern picked up by the evaluator. The legacy name `evaluation_wildcard` is still accepted as an alias |
 | `active` | `true` | Disable to pause polling/evaluations without deleting |
 | `keep_evaluations` | `30` | Number of completed evaluations to retain per project. Must be at least 1. Capped at runtime by the global `services.gradient.settings.keepEvaluations` |
 | `concurrency` | `"skip"` | Policy for handling new trigger events while an evaluation is in flight (`hard_abort`, `soft_abort`, `skip`, `all`). Applies to all triggers on the project |
 | `sign_cache` | `true` | When `false`, build outputs from this project are pushed to the cache but their narinfo signatures are left empty. External Nix clients won't trust them, keeping the project's outputs private even when the cache itself is public. A path co-produced by another `sign_cache=true` project is still signed |
 | `outbound_integration` | `null` | Name of an `outbound` integration that receives CI status reports |
-| `created_by` | — | Username of creator (required) |
+| `created_by` | - | Username of creator (required) |
 
 `outbound_integration` must reference an entry in `services.gradient.state.integrations` belonging to the same organization. See [Integrations](#integrations) below.
 
@@ -192,15 +192,15 @@ services.gradient.state.integrations = {
 |---|---|---|
 | `name` | `<attrset key>` | Unique within `(organization, kind)` |
 | `display_name` | `null` (= `name`) | Human-readable label |
-| `organization` | — | Owning organization (required) |
-| `kind` | — | `inbound` (forge → Gradient) or `outbound` (Gradient → forge) |
-| `forge_type` | — | `gitea`, `forgejo`, `gitlab`, or `github` |
+| `organization` | - | Owning organization (required) |
+| `kind` | - | `inbound` (forge → Gradient) or `outbound` (Gradient → forge) |
+| `forge_type` | - | `gitea`, `forgejo`, `gitlab`, or `github` |
 | `secret_file` | `null` | HMAC secret for inbound webhooks. Encrypted into the DB at startup |
 | `endpoint_url` | `null` | Base URL of the forge API. Outbound only |
 | `access_token_file` | `null` | API token for outbound. Ignored for GitHub outbound (uses the GitHub App credentials) |
-| `created_by` | — | Username of creator (required) |
+| `created_by` | - | Username of creator (required) |
 
-A single inbound integration row serves Gitea, Forgejo and GitLab simultaneously — the actual forge is selected by the `/hooks/{forge}/{org}` URL path. The `forge_type` field is display metadata for inbound entries.
+A single inbound integration row serves Gitea, Forgejo and GitLab simultaneously - the actual forge is selected by the `/hooks/{forge}/{org}` URL path. The `forge_type` field is display metadata for inbound entries.
 
 ## Caches
 
@@ -242,7 +242,7 @@ nix-store --generate-binary-cache-key main-cache \
 
 `nix-store` writes the keys with a `<name>:` prefix (e.g.
 `main-cache:AbCd…`). The state provisioner expects the **raw base64
-payload only** — strip the `main-cache:` prefix before wiring the file
+payload only** - strip the `main-cache:` prefix before wiring the file
 into `signing_key_file`:
 
 ```sh
@@ -263,11 +263,11 @@ Without this, startup fails with
 | `active` | `true` | Set false to disable serving without deleting |
 | `priority` | `10` | Higher wins when multiple caches contain the same path |
 | `local_priority` | `null` | Alternate priority returned in `nix-cache-info` for clients whose IP matches `services.gradient.settings.localIps`. Null or 0 disables the override. |
-| `signing_key_file` | — | Path to the (de-prefixed) base64 Ed25519 signing key (required) |
+| `signing_key_file` | - | Path to the (de-prefixed) base64 Ed25519 signing key (required) |
 | `organizations` | `[]` | Organization names allowed to use this cache |
 | `public` | `false` | Available to every organization |
 | `upstreams` | `[ cache.nixos.org ]` | Substituters consulted on cache miss. See below |
-| `created_by` | — | Username of creator (required) |
+| `created_by` | - | Username of creator (required) |
 
 When `local_priority` is set to a non-null, non-zero integer, clients whose resolved IP falls within the `services.gradient.settings.localIps` CIDR list receive that value as the `Priority` field in the `nix-cache-info` response instead of the regular `priority`. This allows LAN clients to prefer a local cache over remote substituters without altering the priority seen by external clients. Null or 0 disables the override entirely.
 
@@ -281,7 +281,7 @@ Each entry in `upstreams` is one of:
 | `cache_name` | string | (`internal`) Name of the Gradient cache to subscribe to |
 | `display_name` | string \| null | Optional label. Defaults to `cache_name` for `internal`, required for `external` |
 | `mode` | `"ReadWrite"` \| `"ReadOnly"` \| `"WriteOnly"` | (`internal` only) Subscription mode. Defaults to `ReadWrite`. Ignored for `external`, which is always `ReadOnly` |
-| `url` | string | (`external`) Substituter URL — e.g. `https://cache.nixos.org` |
+| `url` | string | (`external`) Substituter URL - e.g. `https://cache.nixos.org` |
 | `public_key` | string | (`external`) Trusted public key in `<name>:<base64>` form |
 
 Outbound requests to `external` substituters (and to every other HTTP target the
@@ -308,7 +308,7 @@ Managed roles are immutable through the role-management API: `PATCH` and
 unmarks the role (or deletes it, when `settings.deleteState = true`).
 
 Role names must not collide with the built-in roles (`Admin`, `Write`,
-`View`) or with another state-managed role in the same organization —
+`View`) or with another state-managed role in the same organization -
 startup fails on collision.
 
 ### Role options
@@ -316,8 +316,8 @@ startup fails on collision.
 | Option | Default | Description |
 |---|---|---|
 | `name` | `<attrset key>` | Role name. Must be unique within the organization and must not collide with a built-in role |
-| `organization` | — | Owning organization name (required) |
-| `permissions` | — | List of capability identifiers granted by the role (required, see `GET /user/keys/permissions` for the catalogue) |
+| `organization` | - | Owning organization name (required) |
+| `permissions` | - | List of capability identifiers granted by the role (required, see `GET /user/keys/permissions` for the catalogue) |
 
 ## API Keys
 
@@ -327,7 +327,7 @@ services.gradient.state.api_keys = {
     key_file     = "/run/secrets/ci-api-key";
     owned_by     = "alice";
     permissions  = [ "viewOrg" "triggerEvaluation" ];
-    organization = "acme";        # optional — omit for an unscoped key
+    organization = "acme";        # optional - omit for an unscoped key
   };
 };
 ```
@@ -345,7 +345,7 @@ printf %s "$TOKEN" | sha256sum | cut -d' ' -f1 > /run/secrets/ci-api-key
 Hand `GRAD$TOKEN` to the user/CI pipeline; the server will hash it on the way
 in and compare against the digest in `key_file`.
 
-The `permissions` list is **required** — there is no safe default. When
+The `permissions` list is **required** - there is no safe default. When
 `organization` is set, the key is rejected for every other org (404, so org
 existence isn't leaked).
 
@@ -354,9 +354,9 @@ existence isn't leaked).
 | Option | Default | Description |
 |---|---|---|
 | `name` | `<attrset key>` | Unique key name |
-| `key_file` | — | Path to a file containing the lowercase 64-char SHA-256 hex digest of the token (required) |
-| `owned_by` | — | Username that owns the key (required) |
-| `permissions` | — | Capability identifiers the key grants (required, non-empty). See `GET /user/keys/permissions` for the catalogue |
+| `key_file` | - | Path to a file containing the lowercase 64-char SHA-256 hex digest of the token (required) |
+| `owned_by` | - | Username that owns the key (required) |
+| `permissions` | - | Capability identifiers the key grants (required, non-empty). See `GET /user/keys/permissions` for the catalogue |
 | `organization` | `null` | Organization name to pin the key to. Omit for an unscoped key |
 
 ## Workers
@@ -375,7 +375,7 @@ services.gradient.state.workers = {
     # Optional: have the server dial the worker instead of waiting for it.
     # url = "wss://builder-1.example.com/proto";
 
-    # Per-registration capability gates — clear one to refuse the capability
+    # Per-registration capability gates - clear one to refuse the capability
     # for this worker even if the worker advertises it.
     enable_fetch = true;
     enable_eval  = true;
@@ -384,13 +384,13 @@ services.gradient.state.workers = {
 };
 ```
 
-The token file must contain a single plaintext token — the server hashes it and stores the result, the plaintext is never persisted:
+The token file must contain a single plaintext token - the server hashes it and stores the result, the plaintext is never persisted:
 
 ```sh
 openssl rand -base64 48 > /run/secrets/builder-1-token
 ```
 
-`worker_id` is required and must match the `GRADIENT_WORKER_ID` environment variable (or `workerId` option) on the worker machine. Unlike API registration, state-managed workers are not restricted to UUID v4 — any stable string is accepted, though using a UUID is conventional.
+`worker_id` is required and must match the `GRADIENT_WORKER_ID` environment variable (or `workerId` option) on the worker machine. Unlike API registration, state-managed workers are not restricted to UUID v4 - any stable string is accepted, though using a UUID is conventional.
 
 To ensure the worker uses the same ID that was pre-registered, set `workerId` in the worker module:
 
@@ -405,21 +405,21 @@ State-managed worker registrations are deleted automatically when removed from `
 | Option | Default | Description |
 |---|---|---|
 | `display_name` | `<attrset key>` | Display name shown in the workers list |
-| `worker_id` | — | Persistent worker identity. Must match the worker's `GRADIENT_WORKER_ID` (required) |
-| `organizations` | — | List of organizations the worker is registered under. One row per (worker_id, organization). Must contain at least one entry (required) |
-| `token_file` | — | Plaintext token file. Hashed at provision time (required) |
+| `worker_id` | - | Persistent worker identity. Must match the worker's `GRADIENT_WORKER_ID` (required) |
+| `organizations` | - | List of organizations the worker is registered under. One row per (worker_id, organization). Must contain at least one entry (required) |
+| `token_file` | - | Plaintext token file. Hashed at provision time (required) |
 | `url` | `null` | When set, the server dials the worker at this WebSocket URL instead of waiting for an inbound connection |
 | `enable_fetch` | `true` | Server-side gate for the `fetch` capability |
 | `enable_eval` | `true` | Server-side gate for the `eval` capability |
 | `enable_build` | `true` | Server-side gate for the `build` capability |
-| `created_by` | — | Username of creator (required) |
+| `created_by` | - | Username of creator (required) |
 
 ## Triggers
 
 Each project can have one or more triggers that decide *when* an evaluation runs.
 Triggers are configurable via the API or declaratively in state files.
 
-The concurrency policy — what happens when a new trigger event arrives while an evaluation is already in flight — is a **project-level** setting, not per-trigger. Set it on the project with `concurrency` (see [Project options](#project-options) above).
+The concurrency policy - what happens when a new trigger event arrives while an evaluation is already in flight - is a **project-level** setting, not per-trigger. Set it on the project with `concurrency` (see [Project options](#project-options) above).
 
 ```nix
 services.gradient.state.projects.my-project = {
@@ -457,23 +457,23 @@ services.gradient.state.projects.my-project = {
 
 ### Trigger types
 
-- **polling** — periodically check the git repository for new commits. `interval_secs` minimum 10, default 300. Each cycle is jittered by up to 10% of `interval_secs` (deterministic per trigger and cycle) so that triggers created together don't pile onto the same upstream tick. **branch** (optional) — track a specific branch; leave unset to follow the remote HEAD (the repo's default branch).
-- **reporter_push** — fires on forge push events. Filters: `branches`, `tags` (glob patterns; empty = match all), `releases_only` (only fires on explicit forge release events).
-- **reporter_pull_request** — fires on PR/MR events. Filters: `branches`, `actions` (default: opened/synchronize/reopened).
-- **time** — fires on a six-field cron schedule (UTC). Re-evaluates the project HEAD even if the commit hasn't changed.
+- **polling** - periodically check the git repository for new commits. `interval_secs` minimum 10, default 300. Each cycle is jittered by up to 10% of `interval_secs` (deterministic per trigger and cycle) so that triggers created together don't pile onto the same upstream tick. **branch** (optional) - track a specific branch; leave unset to follow the remote HEAD (the repo's default branch).
+- **reporter_push** - fires on forge push events. Filters: `branches`, `tags` (glob patterns; empty = match all), `releases_only` (only fires on explicit forge release events).
+- **reporter_pull_request** - fires on PR/MR events. Filters: `branches`, `actions` (default: opened/synchronize/reopened).
+- **time** - fires on a six-field cron schedule (UTC). Re-evaluates the project HEAD even if the commit hasn't changed.
 
 ### Concurrency policies
 
 Each project has a single concurrency policy that applies to all of its triggers:
 
-- **hard_abort** — cancel the in-flight evaluation and its in-flight builds, then start a new evaluation. Workers running affected builds receive cancellation through the existing job lifecycle.
-- **soft_abort** — mark the in-flight evaluation `Aborted` so the new one becomes canonical, but let already-running builds finish; their cached outputs flow into the new evaluation.
-- **skip** — discard the new trigger event; keep the running evaluation.
-- **all** — run a new evaluation alongside the in-flight one. The new eval is flagged `concurrent` so it bypasses the "one active eval per project" guard while leaving that guard intact for `hard_abort` / `soft_abort` / `skip`.
+- **hard_abort** - cancel the in-flight evaluation and its in-flight builds, then start a new evaluation. Workers running affected builds receive cancellation through the existing job lifecycle.
+- **soft_abort** - mark the in-flight evaluation `Aborted` so the new one becomes canonical, but let already-running builds finish; their cached outputs flow into the new evaluation.
+- **skip** - discard the new trigger event; keep the running evaluation.
+- **all** - run a new evaluation alongside the in-flight one. The new eval is flagged `concurrent` so it bypasses the "one active eval per project" guard while leaving that guard intact for `hard_abort` / `soft_abort` / `skip`.
 
 ### Defaults
 
 - New projects automatically get a default `polling` trigger (interval 300s). Existing projects were backfilled by the same logic during the migration.
-- Concurrency defaults to `soft_abort` — a new trigger event marks the running evaluation Aborted while letting its in-flight builds finish; the new evaluation reuses any cached outputs they produce. Switch to `hard_abort` to also cancel the running builds, `skip` to drop the new event, or `all` to run multiple evaluations concurrently.
+- Concurrency defaults to `soft_abort` - a new trigger event marks the running evaluation Aborted while letting its in-flight builds finish; the new evaluation reuses any cached outputs they produce. Switch to `hard_abort` to also cancel the running builds, `skip` to drop the new event, or `all` to run multiple evaluations concurrently.
 
 The implicit fallback poll for projects with an inbound integration (the legacy `WEBHOOK_BACKUP_POLL_SECS` behavior) has been removed; webhook-driven projects must declare an explicit `reporter_push` trigger to receive evaluations from forge pushes.

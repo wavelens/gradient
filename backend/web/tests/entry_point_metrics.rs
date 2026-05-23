@@ -7,7 +7,7 @@
 //! Integration tests for `GET /projects/{org}/{project}/entry-point-metrics`.
 //!
 //! The metrics endpoint must surface a point whenever an `entry_point` row
-//! exists for the requested `eval` attribute path — including the common case
+//! exists for the requested `eval` attribute path - including the common case
 //! where the owning evaluation is still in progress but the entry-point's
 //! build has already finished (Completed or Substituted). The empty state on
 //! the frontend should appear only when no `entry_point` row exists at all.
@@ -120,7 +120,7 @@ fn building_eval_row() -> entity::evaluation::Model {
         commit: commit_id(),
         wildcard: "*".into(),
         // The user's scenario: evaluation has NOT reached the terminal
-        // Completed state yet — other builds are still running.
+        // Completed state yet - other builds are still running.
         status: EvaluationStatus::Building,
         previous: None,
         next: None,
@@ -222,7 +222,7 @@ fn returns_point_when_eval_is_in_progress_but_build_is_completed() {
     });
 }
 
-/// Mirror of the Completed test but for Substituted entries — these have
+/// Mirror of the Completed test but for Substituted entries - these have
 /// `build_time_ms = None` and need to surface in the response so the recent
 /// fix (#119) keeps working end-to-end.
 #[test]
@@ -261,7 +261,7 @@ fn returns_point_when_eval_is_in_progress_but_build_is_substituted() {
 }
 
 /// Sanity check that the empty-state branch only fires when no matching
-/// `entry_point` row exists at all — i.e. there is nothing to plot.
+/// `entry_point` row exists at all - i.e. there is nothing to plot.
 #[test]
 fn returns_empty_points_when_no_entry_point_matches() {
     let rt = tokio::runtime::Builder::new_current_thread()

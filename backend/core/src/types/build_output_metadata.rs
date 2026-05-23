@@ -20,12 +20,12 @@ use super::proto::BuildOutput;
 /// Obtain via [`BuildOutput::nar_metadata`].
 #[derive(Debug, Clone, PartialEq)]
 pub enum BuildOutputMetadata<'a> {
-    /// The NAR has not yet been processed — `nar_size` and `nar_hash` are both
+    /// The NAR has not yet been processed - `nar_size` and `nar_hash` are both
     /// absent. This is the normal state immediately after a build completes,
     /// before the worker compresses and hashes the output NAR.
     Pending,
 
-    /// Both `nar_size` and `nar_hash` are present — the NAR has been
+    /// Both `nar_size` and `nar_hash` are present - the NAR has been
     /// compressed, hashed, and (typically) uploaded to the cache.
     Available {
         /// Uncompressed NAR size in bytes.

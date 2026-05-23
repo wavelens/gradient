@@ -7,15 +7,15 @@
 //! Single-letter prefix aliases for sea-orm entity types.
 //!
 //! Mapping:
-//! - `E*` → `entity::*::Entity` — the type carrying `find()`, `insert()`, etc.
-//! - `M*` → `entity::*::Model` — a fully-loaded row.
-//! - `A*` → `entity::*::ActiveModel` — for inserts/updates.
-//! - `C*` → `entity::*::Column` — column references for filters.
+//! - `E*` → `entity::*::Entity` - the type carrying `find()`, `insert()`, etc.
+//! - `M*` → `entity::*::Model` - a fully-loaded row.
+//! - `A*` → `entity::*::ActiveModel` - for inserts/updates.
+//! - `C*` → `entity::*::Column` - column references for filters.
 //!
 //! These aliases are pervasive in older code; new code may prefer the
 //! canonical `entity::api::Entity` form, which is what sea-orm tutorials use
 //! and what ripgrep on `Entity` will surface. Migrating callers is tracked
-//! separately — keeping the aliases here avoids a 1000+ site mass rename.
+//! separately - keeping the aliases here avoids a 1000+ site mass rename.
 
 use entity::*;
 use serde::{Deserialize, Serialize};
@@ -190,7 +190,7 @@ pub type CWebhook = webhook::Column;
 pub type CWebhookDelivery = webhook_delivery::Column;
 pub type CWorkerRegistration = worker_registration::Column;
 
-// `R*` (Relation) aliases removed — sea-orm relations are referenced via the
+// `R*` (Relation) aliases removed - sea-orm relations are referenced via the
 // `Entity::has_many` / `belongs_to` builder API rather than the `Relation`
 // enum directly. The aliases were unused outside this file. If a future
 // caller needs a relation type, prefer `entity::api::Relation`.
