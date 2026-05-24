@@ -56,6 +56,12 @@ pub const FORGE_STATUS_EVENTS: &[&str] = &[
     "build.started",
     "build.completed",
     "build.failed",
+    "build.substituted",
+    "evaluation.queued",
+    "evaluation.started",
+    "evaluation.completed",
+    "evaluation.failed",
+    "evaluation.aborted",
     "evaluation.action_required",
 ];
 pub const MAX_BODY_BYTES: usize = 64 * 1024;
@@ -75,6 +81,12 @@ pub fn forge_status_for_event(event: &str) -> Option<CiStatus> {
         "build.started" => Some(CiStatus::Running),
         "build.completed" => Some(CiStatus::Success),
         "build.failed" => Some(CiStatus::Failure),
+        "build.substituted" => Some(CiStatus::Success),
+        "evaluation.queued" => Some(CiStatus::Pending),
+        "evaluation.started" => Some(CiStatus::Running),
+        "evaluation.completed" => Some(CiStatus::Success),
+        "evaluation.failed" => Some(CiStatus::Failure),
+        "evaluation.aborted" => Some(CiStatus::Error),
         "evaluation.action_required" => Some(CiStatus::ActionRequired),
         _ => None,
     }
