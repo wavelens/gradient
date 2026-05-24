@@ -387,6 +387,29 @@ async fn build_ci_report_from_payload(
     })
 }
 
+/// Find the project's first active `ForgeStatusReport` action and build a
+/// `CiReporter` from its integration. Used by the PR-approval trust probe to
+/// reuse the same forge credentials Actions already use for status reporting.
+pub async fn reporter_for_project(
+    state: &Arc<ServerState>,
+    project_id: ProjectId,
+) -> Result<Option<Arc<dyn CiReporter>>> {
+    let action = EProjectAction::find()
+        .filter(CProjectAction::Project.eq(project_id))
+        .filter(CProjectAction::Active.eq(true))
+        .filter(CProjectAction::ActionType.eq(ActionType::ForgeStatusReport.to_i16()))
+        .one(&state.worker_db)
+        .await
+        .context("loading forge_status_report action")?;
+    let Some(action) = action else { return Ok(None); };
+    let cfg: ActionConfig = serde_json::from_value(action.config.clone())
+        .context("decoding action config")?;
+    let ActionConfig::ForgeStatusReport { integration_id } = cfg else {
+        return Ok(None);
+    };
+    Ok(Some(build_reporter_for_integration(state, integration_id).await?))
+}
+
 async fn build_reporter_for_integration(
     state: &Arc<ServerState>,
     integration_id: IntegrationId,

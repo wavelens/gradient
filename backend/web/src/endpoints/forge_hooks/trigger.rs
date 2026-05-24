@@ -703,19 +703,32 @@ async fn find_eval_by_check_id(
         .flatten()
 }
 
-/// Trust probe for the approval-unpark flows. Currently always fail-closed:
-/// the legacy per-project outbound reporter that backed `is_repo_writer` has
-/// been removed and the replacement (`ForgeStatusReport` actions) does not yet
-/// expose a permission API. Approval clicks/`/ci run` comments are therefore
-/// rejected at this layer; maintainers can still trigger via the forge UI.
+/// Trust probe for the approval-unpark flows. Resolves the project's active
+/// `ForgeStatusReport` action and asks the forge whether `sender` has write
+/// permission on `owner/repo`. Fails closed if no such action is configured,
+/// the reporter can't be built, or the forge probe errors.
 async fn sender_is_trusted(
-    _state: &Arc<ServerState>,
-    _project_id: ProjectId,
-    _owner: &str,
-    _repo: &str,
-    _sender: &str,
+    state: &Arc<ServerState>,
+    project_id: ProjectId,
+    owner: &str,
+    repo: &str,
+    sender: &str,
 ) -> bool {
-    false
+    let reporter = match gradient_core::ci::actions::reporter_for_project(state, project_id).await {
+        Ok(Some(r)) => r,
+        Ok(None) => return false,
+        Err(e) => {
+            warn!(error = %e, %project_id, "resolving ForgeStatusReport action for trust probe");
+            return false;
+        }
+    };
+    match reporter.is_repo_writer(owner, repo, sender).await {
+        Ok(b) => b,
+        Err(e) => {
+            warn!(error = %e, %project_id, "is_repo_writer probe failed");
+            false
+        }
+    }
 }
 
 // ── Approval unpark: `/ci run` comment on Gitea/Forgejo/GitLab + GitHub ────
