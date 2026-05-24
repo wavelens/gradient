@@ -112,6 +112,75 @@ pub async fn dispatch_evaluation_event(
     dispatch_event(state, project_id, event, payload).await;
 }
 
+/// Dispatch the first forge-status event for a freshly-created evaluation.
+///
+/// Replaces the legacy `spawn_pending_ci_for_eval` reporter that was removed
+/// alongside the per-project outbound integration: an eval row that has just
+/// been INSERTed (Queued, or Waiting+Approval/NoCache/Workers due to the
+/// trigger-time gates) never transitions through `update_evaluation_status`,
+/// so `dispatch_evaluation_event_for_status` would not fire for it. Without
+/// this helper, the commit shows no Gradient check at all until an eval
+/// worker actually starts processing it.
+///
+/// Maps the eval's creation-time state to the matching event:
+/// - `Queued` → `evaluation.queued` (Pending).
+/// - `Waiting + Approval` → `evaluation.action_required` (ActionRequired,
+///   carries the maintainer-approval description).
+/// - `Waiting + NoCache` → `evaluation.queued` (Pending, "no cache" description).
+/// - `Waiting + Workers` → `evaluation.queued` (Pending, "no eval-capable
+///   worker" description). Issue #268.
+pub async fn dispatch_evaluation_created(
+    state: &Arc<ServerState>,
+    eval: &crate::types::MEvaluation,
+) {
+    use crate::types::waiting_reason::WaitingReason;
+    use entity::evaluation::EvaluationStatus;
+
+    let Some(project_id) = eval.project else {
+        return;
+    };
+
+    let reason = eval
+        .waiting_reason
+        .as_ref()
+        .and_then(WaitingReason::from_json);
+
+    let (event, description) = match (eval.status, reason) {
+        (EvaluationStatus::Queued, _) => ("evaluation.queued", None),
+        (EvaluationStatus::Waiting, Some(WaitingReason::Approval { .. })) => (
+            "evaluation.action_required",
+            Some("Awaiting maintainer approval for external contributor PR."),
+        ),
+        (EvaluationStatus::Waiting, Some(WaitingReason::NoCache)) => (
+            "evaluation.queued",
+            Some("Waiting for a writable cache subscription before this evaluation can run."),
+        ),
+        (
+            EvaluationStatus::Waiting,
+            Some(WaitingReason::Workers {
+                connected_workers: 0,
+                ..
+            }),
+        ) => (
+            "evaluation.queued",
+            Some("Waiting for an eval-capable worker to be registered on the organisation."),
+        ),
+        _ => return,
+    };
+
+    let mut payload = serde_json::json!({
+        "evaluation_id": eval.id,
+        "project_id": eval.project,
+        "repository": eval.repository,
+        "status": event,
+    });
+    if let Some(text) = description {
+        payload["description"] = JsonValue::String(text.to_string());
+    }
+
+    dispatch_evaluation_event(state, project_id, event, payload).await;
+}
+
 pub async fn dispatch_build_event(
     state: &Arc<ServerState>,
     project_id: ProjectId,

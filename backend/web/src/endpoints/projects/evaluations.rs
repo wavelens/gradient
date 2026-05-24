@@ -242,7 +242,8 @@ pub async fn post_project_evaluate(
     })?;
 
     let eval = gradient_core::ci::park_if_no_cache(&state.web_db, eval, project.organization).await?;
-    gradient_core::ci::park_if_no_workers(&state.web_db, eval, project.organization).await?;
+    let eval = gradient_core::ci::park_if_no_workers(&state.web_db, eval, project.organization).await?;
+    gradient_core::ci::actions::dispatch_evaluation_created(&state, &eval).await;
 
     Ok(ok_json("Evaluation started".to_string()))
 }
