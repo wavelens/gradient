@@ -233,6 +233,7 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
                         .await;
                 }
                 info!(project = %project.name, trigger_id = %trig.id, evaluation_id = %eval.id, "trigger created evaluation");
+                gradient_core::ci::actions::dispatch_evaluation_created(state, &eval).await;
             }
             Ok(other) => {
                 debug!(project = %project.name, trigger_id = %trig.id, ?other, "trigger applied without creating eval");
