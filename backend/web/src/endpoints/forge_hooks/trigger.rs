@@ -397,6 +397,7 @@ where
         } else {
             None
         };
+        let was_gated = gate_approval.is_some();
 
         match apply_trigger(
             &state.web_db,
@@ -428,6 +429,19 @@ where
                     evaluation_id = %eval.id,
                     "forge webhook trigger fired"
                 );
+                if was_gated {
+                    let payload = serde_json::json!({
+                        "evaluation_id": eval.id.to_string(),
+                        "description": "Awaiting maintainer approval for external contributor PR.",
+                    });
+                    gradient_core::ci::actions::dispatch_evaluation_event(
+                        state,
+                        project.id,
+                        "evaluation.action_required",
+                        payload,
+                    )
+                    .await;
+                }
                 outcome.queued.push(QueuedEvaluation {
                     project_id: project.id,
                     project_name: project.name.clone(),

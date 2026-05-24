@@ -8,16 +8,16 @@
 
 use crate::ci::integration_lookup::{ForgeType, IntegrationKind};
 use crate::ci::reporter::{
-    CiReport, CiReporter, CiStatus, GiteaReporter, GithubAppReporter, GithubReporter,
-    GitlabReporter,
+    APPROVAL_ACTION_ID, CiReport, CiReporter, CiStatus, GiteaReporter, GithubAppReporter,
+    GithubReporter, GitlabReporter, RequestedAction,
 };
 use crate::ci::{parse_owner_repo, reporting};
 use crate::types::input::{load_secret_bytes, vec_to_hex};
 use crate::types::{
     ActionConfig, ActionType, AProjectActionDelivery, BuildId, CEntryPoint, CIntegration,
     CProjectAction, EBuild, ECommit, EEntryPoint, EEvaluation, EIntegration, EOrganization,
-    EProject, EProjectAction, IntegrationId, MProjectAction, ProjectActionDeliveryId, ProjectId,
-    ServerState,
+    EProject, EProjectAction, EvaluationId, IntegrationId, MProjectAction,
+    ProjectActionDeliveryId, ProjectId, ServerState,
 };
 use anyhow::{Context, Result, anyhow};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
@@ -52,7 +52,12 @@ pub fn decrypt_secret_with_file(
     decrypt_action_secret(ciphertext, key.expose()).map(crate::types::SecretString::new)
 }
 
-pub const FORGE_STATUS_EVENTS: &[&str] = &["build.started", "build.completed", "build.failed"];
+pub const FORGE_STATUS_EVENTS: &[&str] = &[
+    "build.started",
+    "build.completed",
+    "build.failed",
+    "evaluation.action_required",
+];
 pub const MAX_BODY_BYTES: usize = 64 * 1024;
 
 pub fn matches_event(action: &MProjectAction, event: &str) -> bool {
@@ -70,7 +75,19 @@ pub fn forge_status_for_event(event: &str) -> Option<CiStatus> {
         "build.started" => Some(CiStatus::Running),
         "build.completed" => Some(CiStatus::Success),
         "build.failed" => Some(CiStatus::Failure),
+        "evaluation.action_required" => Some(CiStatus::ActionRequired),
         _ => None,
+    }
+}
+
+fn requested_actions_for(status: CiStatus) -> Vec<RequestedAction> {
+    match status {
+        CiStatus::ActionRequired => vec![RequestedAction {
+            identifier: APPROVAL_ACTION_ID.to_string(),
+            label: "Approve and run".to_string(),
+            description: "Run CI for this PR from an external contributor.".to_string(),
+        }],
+        _ => Vec::new(),
     }
 }
 
@@ -282,11 +299,40 @@ async fn execute_forge_status_report(
         .report(&report)
         .await
         .context("forge status report failed")?;
+    if let (Some(new_id), Some(eid)) = (
+        new_id,
+        payload.get("evaluation_id").and_then(|v| v.as_str()),
+    ) && let Ok(evaluation_id) = eid.parse::<EvaluationId>()
+    {
+        persist_evaluation_check_id(state, evaluation_id, new_id).await;
+    }
     let body = new_id.map(|id| format!("{{\"check_run_id\":{}}}", id));
     Ok(ExecutorOk {
         status_code: Some(200),
         response_body: body,
     })
+}
+
+async fn persist_evaluation_check_id(
+    state: &Arc<ServerState>,
+    evaluation_id: EvaluationId,
+    check_run_id: i64,
+) {
+    use sea_orm::IntoActiveModel;
+    let Ok(Some(eval)) = EEvaluation::find_by_id(evaluation_id)
+        .one(&state.worker_db)
+        .await
+    else {
+        return;
+    };
+    if eval.repo_check_id == Some(check_run_id) {
+        return;
+    }
+    let mut active = eval.into_active_model();
+    active.repo_check_id = Set(Some(check_run_id));
+    if let Err(e) = active.update(&state.worker_db).await {
+        warn!(error = %e, %evaluation_id, "persisting evaluation repo_check_id");
+    }
 }
 
 async fn build_ci_report_from_payload(
@@ -295,6 +341,8 @@ async fn build_ci_report_from_payload(
     status: CiStatus,
 ) -> Result<CiReport> {
     let s = |k: &str| payload.get(k).and_then(|v| v.as_str()).map(String::from);
+
+    let requested_actions = requested_actions_for(status.clone());
 
     if let (Some(owner), Some(repo), Some(sha), Some(context)) =
         (s("owner"), s("repo"), s("sha"), s("context"))
@@ -308,26 +356,39 @@ async fn build_ci_report_from_payload(
             description: s("description"),
             details_url: s("details_url"),
             existing_check_id: payload.get("check_run_id").and_then(|v| v.as_i64()),
-            requested_actions: Vec::new(),
+            requested_actions,
         });
     }
 
-    let build_id: BuildId = s("build_id")
-        .ok_or_else(|| anyhow!("payload missing both 'build_id' and the full owner/repo/sha/context set"))?
-        .parse()
-        .map_err(|_| anyhow!("invalid build_id"))?;
+    let (evaluation, build) = if let Some(eid) = s("evaluation_id") {
+        let evaluation_id: EvaluationId = eid
+            .parse()
+            .map_err(|_| anyhow!("invalid evaluation_id"))?;
+        let evaluation = EEvaluation::find_by_id(evaluation_id)
+            .one(&state.worker_db)
+            .await
+            .context("loading evaluation")?
+            .ok_or_else(|| anyhow!("evaluation {} not found", evaluation_id))?;
+        (evaluation, None)
+    } else {
+        let build_id: BuildId = s("build_id")
+            .ok_or_else(|| anyhow!("payload missing 'build_id', 'evaluation_id', and the full owner/repo/sha/context set"))?
+            .parse()
+            .map_err(|_| anyhow!("invalid build_id"))?;
 
-    let build = EBuild::find_by_id(build_id)
-        .one(&state.worker_db)
-        .await
-        .context("loading build")?
-        .ok_or_else(|| anyhow!("build {} not found", build_id))?;
+        let build = EBuild::find_by_id(build_id)
+            .one(&state.worker_db)
+            .await
+            .context("loading build")?
+            .ok_or_else(|| anyhow!("build {} not found", build_id))?;
 
-    let evaluation = EEvaluation::find_by_id(build.evaluation)
-        .one(&state.worker_db)
-        .await
-        .context("loading evaluation")?
-        .ok_or_else(|| anyhow!("evaluation {} not found", build.evaluation))?;
+        let evaluation = EEvaluation::find_by_id(build.evaluation)
+            .one(&state.worker_db)
+            .await
+            .context("loading evaluation")?
+            .ok_or_else(|| anyhow!("evaluation {} not found", build.evaluation))?;
+        (evaluation, Some(build))
+    };
 
     let project_id = evaluation
         .project
@@ -348,11 +409,14 @@ async fn build_ci_report_from_payload(
     let (owner, repo) = parse_owner_repo(&evaluation.repository)
         .ok_or_else(|| anyhow!("could not parse owner/repo from {}", evaluation.repository))?;
 
-    let entry_points = EEntryPoint::find()
-        .filter(CEntryPoint::Build.eq(build.id))
-        .all(&state.worker_db)
-        .await
-        .context("loading entry points")?;
+    let entry_points = match &build {
+        Some(b) => EEntryPoint::find()
+            .filter(CEntryPoint::Build.eq(b.id))
+            .all(&state.worker_db)
+            .await
+            .context("loading entry points")?,
+        None => Vec::new(),
+    };
 
     let org_name = EOrganization::find_by_id(project.organization)
         .one(&state.worker_db)
@@ -382,8 +446,10 @@ async fn build_ci_report_from_payload(
         status,
         description: s("description"),
         details_url,
-        existing_check_id: payload.get("check_run_id").and_then(|v| v.as_i64()),
-        requested_actions: Vec::new(),
+        existing_check_id: evaluation
+            .repo_check_id
+            .or_else(|| payload.get("check_run_id").and_then(|v| v.as_i64())),
+        requested_actions,
     })
 }
 
