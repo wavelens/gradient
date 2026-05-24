@@ -59,8 +59,6 @@ pub(super) struct GitLabPushPayload {
 pub(super) struct GitLabProject {
     pub http_url: String,
     pub ssh_url: Option<String>,
-    #[serde(default)]
-    pub path_with_namespace: Option<String>,
 }
 
 // ── GitHub PR payload ──────────────────────────────────────────────────────
@@ -254,10 +252,6 @@ pub(super) struct ParsedPullRequestEvent {
     /// from a fork). `false` when same-repo. `None` when the payload lacks
     /// enough information to decide - callers should treat as untrusted.
     pub is_fork: Option<bool>,
-    /// Owner segment of the base repository's `full_name` (`owner/repo`).
-    pub base_owner: Option<String>,
-    /// Repo segment of the base repository's `full_name`.
-    pub base_repo: Option<String>,
 }
 
 /// Release/tag event. `commit_hash` is the SHA the tag points at.
@@ -345,16 +339,6 @@ fn gitlab_project_urls(project: &GitLabProject) -> Vec<String> {
         urls.push(ssh.clone());
     }
     urls
-}
-
-/// Splits `"owner/repo"` (or `"group/subgroup/repo"` for GitLab) into
-/// `(owner_path, repo)`. Returns `None` if the string lacks a `/`.
-fn split_full_name(full_name: &str) -> Option<(String, String)> {
-    let (owner, repo) = full_name.rsplit_once('/')?;
-    if owner.is_empty() || repo.is_empty() {
-        return None;
-    }
-    Some((owner.to_string(), repo.to_string()))
 }
 
 // ── ParsedPushEvent impl ───────────────────────────────────────────────────
@@ -459,11 +443,6 @@ impl ParsedPullRequestEvent {
             (Some(h), Some(b)) => Some(h != b),
             _ => None,
         };
-        let (base_owner, base_repo) = base_full
-            .as_deref()
-            .and_then(split_full_name)
-            .map(|(o, r)| (Some(o), Some(r)))
-            .unwrap_or((None, None));
         let pr_author = payload
             .pull_request
             .user
@@ -480,8 +459,6 @@ impl ParsedPullRequestEvent {
             pr_number: payload.pull_request.number,
             pr_author,
             is_fork,
-            base_owner,
-            base_repo,
         })
     }
 
@@ -521,11 +498,6 @@ impl ParsedPullRequestEvent {
             (Some(h), Some(b)) => Some(h != b),
             _ => None,
         };
-        let (base_owner, base_repo) = base_full
-            .as_deref()
-            .and_then(split_full_name)
-            .map(|(o, r)| (Some(o), Some(r)))
-            .unwrap_or((None, None));
         let pr_author = payload
             .pull_request
             .user
@@ -539,8 +511,6 @@ impl ParsedPullRequestEvent {
             pr_number: payload.pull_request.number,
             pr_author,
             is_fork,
-            base_owner,
-            base_repo,
         })
     }
 
@@ -565,13 +535,6 @@ impl ParsedPullRequestEvent {
             (Some(src), Some(tgt)) => Some(src != tgt),
             _ => None,
         };
-        let (base_owner, base_repo) = payload
-            .project
-            .path_with_namespace
-            .as_deref()
-            .and_then(split_full_name)
-            .map(|(o, r)| (Some(o), Some(r)))
-            .unwrap_or((None, None));
         let pr_author = payload.user.as_ref().and_then(|u| u.username.clone());
         Some(Self {
             commit_hash,
@@ -581,8 +544,6 @@ impl ParsedPullRequestEvent {
             pr_number: payload.object_attributes.iid,
             pr_author,
             is_fork,
-            base_owner,
-            base_repo,
         })
     }
 }
@@ -753,8 +714,6 @@ mod tests {
         assert_eq!(ev.pr_number, Some(42));
         assert_eq!(ev.pr_author.as_deref(), Some("external-contrib"));
         assert_eq!(ev.is_fork, Some(true));
-        assert_eq!(ev.base_owner.as_deref(), Some("org"));
-        assert_eq!(ev.base_repo.as_deref(), Some("repo"));
     }
 
     #[test]
@@ -811,8 +770,6 @@ mod tests {
         assert_eq!(ev.pr_number, Some(11));
         assert_eq!(ev.pr_author.as_deref(), Some("external"));
         assert_eq!(ev.is_fork, Some(true));
-        assert_eq!(ev.base_owner.as_deref(), Some("group"));
-        assert_eq!(ev.base_repo.as_deref(), Some("repo"));
     }
 
     #[test]

@@ -232,7 +232,6 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
                         .cancel_evaluation_jobs(aborted_id, &aborted_builds)
                         .await;
                 }
-                super::ci::spawn_pending_ci_for_eval(Arc::clone(state), &eval);
                 info!(project = %project.name, trigger_id = %trig.id, evaluation_id = %eval.id, "trigger created evaluation");
             }
             Ok(other) => {
