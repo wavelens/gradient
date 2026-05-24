@@ -66,7 +66,7 @@ fn matches_event_forge_status_report_ignores_stored_events() {
         );
     }
     assert!(!matches_event(&action, "build.queued"));
-    assert!(!matches_event(&action, "evaluation.completed"));
+    assert!(!matches_event(&action, "evaluation.waiting"));
 }
 
 #[test]
@@ -83,7 +83,31 @@ fn forge_status_mapping_complete() {
         forge_status_for_event("build.failed"),
         Some(CiStatus::Failure)
     ));
-    assert!(forge_status_for_event("evaluation.queued").is_none());
+    assert!(matches!(
+        forge_status_for_event("build.substituted"),
+        Some(CiStatus::Success)
+    ));
+    assert!(matches!(
+        forge_status_for_event("evaluation.queued"),
+        Some(CiStatus::Pending)
+    ));
+    assert!(matches!(
+        forge_status_for_event("evaluation.completed"),
+        Some(CiStatus::Success)
+    ));
+    assert!(matches!(
+        forge_status_for_event("evaluation.failed"),
+        Some(CiStatus::Failure)
+    ));
+    assert!(matches!(
+        forge_status_for_event("evaluation.aborted"),
+        Some(CiStatus::Error)
+    ));
+    assert!(matches!(
+        forge_status_for_event("evaluation.action_required"),
+        Some(CiStatus::ActionRequired)
+    ));
+    assert!(forge_status_for_event("evaluation.waiting").is_none());
 }
 
 #[test]
