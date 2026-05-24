@@ -177,6 +177,16 @@ pub async fn post_org_worker(
     // the new peer registration without requiring a reconnect.
     scheduler.request_reauth(&worker_id_str).await;
 
+    // Re-queue any evaluations parked because the org had no eval-capable
+    // worker registration. No-op when the new row isn't eval-capable.
+    if let Err(e) = gradient_core::ci::unpark_no_workers_for_org(&state.web_db, org.id).await {
+        tracing::warn!(
+            error = %e,
+            org_id = %org.id,
+            "failed to unpark no-workers evaluations after worker registration",
+        );
+    }
+
     Ok(ok_json(RegisterWorkerResponse {
         peer_id: org.id,
         token: if return_token { Some(token) } else { None },
@@ -316,6 +326,20 @@ pub async fn patch_org_worker(
     // are now inactive).
     if body.active.is_some() || caps_changed {
         scheduler.request_reauth(&worker_id).await;
+    }
+
+    // Toggling `active` on or enabling the `eval` capability may newly satisfy
+    // the no-workers gate. The unpark is self-guarded against the org still
+    // lacking an eval-capable registration, so calling unconditionally here
+    // is safe.
+    if (matches!(body.active, Some(true)) || matches!(body.enable_eval, Some(true)))
+        && let Err(e) = gradient_core::ci::unpark_no_workers_for_org(&state.web_db, org.id).await
+    {
+        tracing::warn!(
+            error = %e,
+            org_id = %org.id,
+            "failed to unpark no-workers evaluations after worker patch",
+        );
     }
 
     Ok(ok_json(format!("worker '{}' updated", worker_id)))
