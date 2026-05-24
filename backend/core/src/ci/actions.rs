@@ -658,7 +658,23 @@ mod tests {
             forge_status_for_event("build.failed"),
             Some(CiStatus::Failure)
         ));
-        assert!(forge_status_for_event("evaluation.failed").is_none());
+        assert!(matches!(
+            forge_status_for_event("evaluation.queued"),
+            Some(CiStatus::Pending)
+        ));
+        assert!(matches!(
+            forge_status_for_event("evaluation.completed"),
+            Some(CiStatus::Success)
+        ));
+        assert!(matches!(
+            forge_status_for_event("evaluation.failed"),
+            Some(CiStatus::Failure)
+        ));
+        assert!(matches!(
+            forge_status_for_event("evaluation.action_required"),
+            Some(CiStatus::ActionRequired)
+        ));
+        assert!(forge_status_for_event("evaluation.waiting").is_none());
     }
 
     #[test]
@@ -674,8 +690,10 @@ mod tests {
         assert!(matches_event(&a, "build.started"));
         assert!(matches_event(&a, "build.completed"));
         assert!(matches_event(&a, "build.failed"));
+        assert!(matches_event(&a, "evaluation.completed"));
+        assert!(matches_event(&a, "evaluation.action_required"));
         assert!(!matches_event(&a, "build.queued"));
-        assert!(!matches_event(&a, "evaluation.completed"));
+        assert!(!matches_event(&a, "evaluation.waiting"));
     }
 
     #[test]
