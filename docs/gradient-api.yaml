@@ -5991,8 +5991,14 @@ components:
         Populated only when `status == "Waiting"`. Tagged by `kind`:
 
         - `workers`: no connected worker can satisfy the pending builds'
-          `(architecture, required_features)` combos. Refreshed whenever the
-          scheduler reconciles the evaluation against the live worker pool.
+          `(architecture, required_features)` combos. Also used at evaluation
+          creation time with `connected_workers: 0` when the project's
+          organisation has no active worker registration with `enable_eval`
+          (issue #268) - the eval would otherwise be stranded in `Queued`
+          forever, because the build-dispatch reconciler can only act on
+          builds the eval phase has not yet produced. Refreshed whenever
+          the scheduler reconciles the evaluation against the live worker
+          pool.
         - `approval`: the PR comes from a contributor who is not a forge
           repo writer, and the trigger has `require_approval = true`. The
           evaluation stays parked until a maintainer clicks "Approve and
