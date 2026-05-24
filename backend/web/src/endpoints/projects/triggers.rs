@@ -198,7 +198,7 @@ pub async fn create(
         organization,
         project,
         ProjectAccess::Require {
-            permission: Permission::EditProject,
+            permission: Permission::ManageTriggers,
             reject_managed: false,
         },
     )
@@ -272,7 +272,7 @@ pub async fn update(
         organization,
         project,
         ProjectAccess::Require {
-            permission: Permission::EditProject,
+            permission: Permission::ManageTriggers,
             reject_managed: false,
         },
     )
@@ -321,7 +321,7 @@ pub async fn delete_one(
         organization,
         project,
         ProjectAccess::Require {
-            permission: Permission::EditProject,
+            permission: Permission::ManageTriggers,
             reject_managed: false,
         },
     )
