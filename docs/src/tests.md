@@ -2440,6 +2440,28 @@ immediately. Coverage:
 - `core/src/ci/apply.rs::no_writable_cache_parks_evaluation_in_waiting_no_cache`
   - `apply_trigger` parks newly-created evals as `NoCache` when the org
   has no writable cache subscription.
+- `core/src/ci/apply.rs::no_eval_capable_worker_parks_evaluation_in_waiting_workers`
+  (issue #268) - `apply_trigger` parks newly-created evals as
+  `Workers { connected_workers: 0 }` when the org has no active worker
+  registration with `enable_eval` set. Without this gate the eval
+  would sit `Queued` forever - the build-dispatch reconciler only
+  acts on builds, which don't exist yet, and the connected-worker
+  count alone doesn't distinguish "no eval-capable worker" from
+  "build-only worker connected".
+- `core/src/db/org_workers.rs::org_has_eval_capable_worker_registration` -
+  returns true iff the org has at least one `worker_registration` row
+  with `active = true AND enable_eval = true`. Consumed by both the
+  park-on-create gate and the unpark short-circuit.
+- `core/src/ci/unpark.rs::unpark_no_workers_*` - re-queues evals
+  parked with `Workers { connected_workers: 0 }` once an
+  eval-capable registration appears in the org; no-op when the org
+  still has no eval-capable registration.
+- `scheduler/src/build.rs::pre_build_target_queued_no_eval_capable_workers_stalls`
+  (issue #268) - regression test confirming the reconciler stalls a
+  Queued eval to `Waiting + Workers { connected_workers: 0 }` when
+  the eval-capable count is zero, even if total connected workers
+  are non-zero (the runtime caller passes the eval-capable count,
+  not the total).
 - `web/src/endpoints/forge_hooks/events.rs` - extraction of
   `pr_number`, `pr_author`, `is_fork`, `base_owner`, `base_repo` from
   GitHub / Gitea / GitLab payloads.
