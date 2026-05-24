@@ -10,7 +10,7 @@
 
 use super::abort::{AbortKind, abort_evaluation};
 use super::trigger::{TriggerError, trigger_evaluation};
-use crate::db::org_has_writable_cache;
+use crate::db::{org_has_eval_capable_worker_registration, org_has_writable_cache};
 use crate::types::triggers::{ConcurrencyPolicy, TriggerType};
 use crate::types::waiting_reason::WaitingReason;
 use crate::types::*;
@@ -159,6 +159,7 @@ pub async fn apply_trigger<C: ConnectionTrait>(
 
     let eval = park_if_pending_approval(db, eval, input.gate_approval.as_ref()).await?;
     let eval = park_if_no_cache(db, eval, project.organization).await?;
+    let eval = park_if_no_workers(db, eval, project.organization).await?;
     Ok(ApplyOutcome::Created {
         evaluation: eval,
         aborted_evaluation,
@@ -215,10 +216,41 @@ pub async fn park_if_no_cache<C: ConnectionTrait>(
     ae.update(db).await
 }
 
+/// Move a freshly-created `Queued` evaluation into `Waiting` with
+/// `WaitingReason::Workers { connected_workers: 0, .. }` when the project's
+/// organisation has no active worker registration with the `eval` capability
+/// gate enabled. Returns the evaluation unchanged when at least one such
+/// registration exists.
+///
+/// Without this gate the eval row would sit in `Queued` indefinitely: the
+/// build-dispatch reconciler only stalls Queued evaluations when **zero**
+/// workers are connected, not when connected workers all lack `eval`. The
+/// row is unparked by `unpark_no_workers_for_org` whenever a worker
+/// registration is created or its `enable_eval` / `active` flags flip on.
+pub async fn park_if_no_workers<C: ConnectionTrait>(
+    db: &C,
+    eval: MEvaluation,
+    organization: OrganizationId,
+) -> Result<MEvaluation, sea_orm::DbErr> {
+    if eval.status != EvaluationStatus::Queued {
+        return Ok(eval);
+    }
+    if org_has_eval_capable_worker_registration(db, organization).await? {
+        return Ok(eval);
+    }
+    let mut ae: AEvaluation = eval.into();
+    ae.status = Set(EvaluationStatus::Waiting);
+    ae.waiting_reason = Set(Some(
+        WaitingReason::workers(Vec::new(), 0, Vec::new()).to_json(),
+    ));
+    ae.updated_at = Set(crate::types::now());
+    ae.update(db).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::ids::{CacheId, OrganizationCacheId, UserId};
+    use crate::types::ids::{CacheId, OrganizationCacheId, UserId, WorkerRegistrationId};
     use chrono::NaiveDateTime;
     use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
     use uuid::Uuid;
@@ -336,6 +368,30 @@ mod tests {
             .append_query_results([vec![cache]])
     }
 
+    fn worker_registration_row(active: bool, enable_eval: bool) -> entity::worker_registration::Model {
+        entity::worker_registration::Model {
+            id: WorkerRegistrationId::now_v7(),
+            peer_id: OrganizationId::nil(),
+            worker_id: "00000000-0000-4000-8000-000000000001".into(),
+            token_hash: String::new(),
+            managed: false,
+            url: None,
+            active,
+            enable_fetch: true,
+            enable_eval,
+            enable_build: true,
+            display_name: String::new(),
+            created_by: Some(UserId::nil()),
+            created_at: NaiveDateTime::default(),
+        }
+    }
+
+    /// Append the single query `org_has_eval_capable_worker_registration`
+    /// issues for the "eval-capable worker exists" path.
+    fn with_eval_worker(db: MockDatabase) -> MockDatabase {
+        db.append_query_results([vec![worker_registration_row(true, true)]])
+    }
+
     #[tokio::test]
     async fn skips_when_same_commit_as_last_eval() {
         let prev_eval_id = EvaluationId::now_v7();
@@ -410,7 +466,7 @@ mod tests {
                 last_insert_id: 0,
                 rows_affected: 1,
             }]);
-        let db = with_writable_cache(db).into_connection();
+        let db = with_eval_worker(with_writable_cache(db)).into_connection();
 
         let res = apply_trigger(
             &db,
@@ -529,7 +585,7 @@ mod tests {
                 last_insert_id: 0,
                 rows_affected: 1,
             }]);
-        let db = with_writable_cache(db).into_connection();
+        let db = with_eval_worker(with_writable_cache(db)).into_connection();
 
         let res = apply_trigger(
             &db,
@@ -625,7 +681,7 @@ mod tests {
                 last_insert_id: 0,
                 rows_affected: 1,
             }]);
-        let db = with_writable_cache(db).into_connection();
+        let db = with_eval_worker(with_writable_cache(db)).into_connection();
 
         let res = apply_trigger(
             &db,
@@ -713,7 +769,7 @@ mod tests {
                 last_insert_id: 0,
                 rows_affected: 1,
             }]);
-        let db = with_writable_cache(db).into_connection();
+        let db = with_eval_worker(with_writable_cache(db)).into_connection();
 
         let res = apply_trigger(
             &db,
@@ -904,5 +960,101 @@ mod tests {
             .and_then(WaitingReason::from_json)
             .expect("waiting_reason must be set");
         assert!(matches!(reason, WaitingReason::NoCache));
+    }
+
+    /// When the project's organisation has a writable cache but no active
+    /// worker registration with `enable_eval`, `apply_trigger` parks the
+    /// freshly-created evaluation in `Waiting + Workers { connected_workers: 0 }`.
+    /// Without this gate the eval would sit `Queued` forever - the
+    /// build-dispatch reconciler only stalls Queued evals when zero workers
+    /// are connected, not when connected workers lack `eval`.
+    #[tokio::test]
+    async fn no_eval_capable_worker_parks_evaluation_in_waiting_workers() {
+        use crate::types::waiting_reason::WaitingReason;
+        let project = make_project_with_last_eval(None);
+        let new_eval_id = EvaluationId::now_v7();
+        let new_commit_id = CommitId::now_v7();
+        let trig = ProjectTriggerId::now_v7();
+        let new_hash = vec![1u8; 20];
+
+        let parked_eval = {
+            let mut m = make_eval(
+                new_eval_id,
+                project.id,
+                new_commit_id,
+                EvaluationStatus::Waiting,
+            );
+            m.trigger = Some(trig);
+            m.waiting_reason = Some(WaitingReason::workers(Vec::new(), 0, Vec::new()).to_json());
+            m
+        };
+
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            // Concurrency check: no in-flight
+            .append_query_results([Vec::<entity::evaluation::Model>::new()])
+            // trigger_evaluation: in-progress guard
+            .append_query_results([Vec::<entity::evaluation::Model>::new()])
+            // trigger_evaluation: commit insert
+            .append_query_results([vec![make_commit(new_commit_id, new_hash.clone())]])
+            // trigger_evaluation: eval insert (initially Queued)
+            .append_query_results([vec![{
+                let mut m = make_eval(
+                    new_eval_id,
+                    project.id,
+                    new_commit_id,
+                    EvaluationStatus::Queued,
+                );
+                m.trigger = Some(trig);
+                m
+            }]])
+            // snapshot flake input overrides (none)
+            .append_query_results([Vec::<entity::project_flake_input_override::Model>::new()])
+            // trigger_evaluation: project update read-back + exec
+            .append_query_results([vec![project.clone()]])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }]);
+        // park_if_no_cache: writable cache exists → returns unchanged.
+        let db = with_writable_cache(db)
+            // park_if_no_workers: no eval-capable registration → park.
+            .append_query_results([Vec::<entity::worker_registration::Model>::new()])
+            // Park: update eval read-back + exec, returns the parked row.
+            .append_query_results([vec![parked_eval.clone()]])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            .into_connection();
+
+        let res = apply_trigger(
+            &db,
+            &project,
+            input(trig, TriggerType::Polling, new_hash, false),
+        )
+        .await
+        .unwrap();
+
+        let ApplyOutcome::Created { evaluation, .. } = res else {
+            panic!("expected Created, got {res:?}");
+        };
+        assert_eq!(evaluation.status, EvaluationStatus::Waiting);
+        let reason = evaluation
+            .waiting_reason
+            .as_ref()
+            .and_then(WaitingReason::from_json)
+            .expect("waiting_reason must be set");
+        match reason {
+            WaitingReason::Workers {
+                connected_workers,
+                unmet,
+                available_architectures,
+            } => {
+                assert_eq!(connected_workers, 0);
+                assert!(unmet.is_empty());
+                assert!(available_architectures.is_empty());
+            }
+            other => panic!("expected Workers, got {other:?}"),
+        }
     }
 }
