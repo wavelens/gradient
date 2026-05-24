@@ -56,6 +56,8 @@ pub enum Permission {
     EditProject,
     /// Trigger an evaluation / build run.
     TriggerEvaluation,
+    /// CRUD on project triggers.
+    ManageTriggers,
 }
 
 /// A bitmask over [`Permission`] capabilities. Stored on `role.permission`.
@@ -78,6 +80,7 @@ impl Permission {
         Permission::CreateProject,
         Permission::EditProject,
         Permission::TriggerEvaluation,
+        Permission::ManageTriggers,
     ];
 
     /// Stable bit position in the `role.permission` bitmask.
@@ -99,6 +102,7 @@ impl Permission {
             Permission::CreateProject => 10,
             Permission::EditProject => 11,
             Permission::TriggerEvaluation => 12,
+            Permission::ManageTriggers => 13,
         };
         1_i64 << pos
     }
@@ -119,6 +123,7 @@ impl Permission {
             Permission::CreateProject => "createProject",
             Permission::EditProject => "editProject",
             Permission::TriggerEvaluation => "triggerEvaluation",
+            Permission::ManageTriggers => "manageTriggers",
         }
     }
 
@@ -179,6 +184,7 @@ pub fn write_mask() -> PermissionMask {
         CreateProject,
         EditProject,
         TriggerEvaluation,
+        ManageTriggers,
     ])
 }
 
