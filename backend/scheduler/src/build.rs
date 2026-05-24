@@ -428,6 +428,7 @@ impl<'a> BuildStateHandler<'a> {
     pub async fn reconcile_waiting_state(
         &self,
         worker_caps: &[(Vec<String>, Vec<String>)],
+        eval_capable_workers: usize,
     ) -> Result<()> {
         let evals = EEvaluation::find()
             .filter(CEvaluation::Status.is_in(vec![
@@ -478,7 +479,7 @@ impl<'a> BuildStateHandler<'a> {
                     | EvaluationStatus::EvaluatingFlake
                     | EvaluationStatus::EvaluatingDerivation
                     | EvaluationStatus::Waiting => {
-                        match decide_pre_build_target(eval.status, worker_caps.len()) {
+                        match decide_pre_build_target(eval.status, eval_capable_workers) {
                             Some(pair) => pair,
                             None => continue,
                         }
@@ -515,6 +516,7 @@ impl<'a> BuildStateHandler<'a> {
                     to = ?target,
                     pending = pending_builds.len(),
                     workers = worker_caps.len(),
+                    eval_workers = eval_capable_workers,
                     "reconciling evaluation waiting state"
                 );
             }
@@ -542,14 +544,16 @@ impl<'a> BuildStateHandler<'a> {
 /// have its waiting reason refreshed; `None` when it is actively progressing
 /// and must be left alone.
 ///
-/// Active pre-build states (`Fetching`, `EvaluatingFlake`,
-/// `EvaluatingDerivation`) are owned by an eval worker. They may only stall
-/// into `Waiting` if every worker has disconnected - they must never be
-/// reset back to `Queued`, which the `EvalStateMachine` forbids and which
-/// would clobber the worker's in-flight progress.
+/// `eval_capable_workers` is the count of connected workers whose negotiated
+/// `GradientCapabilities` includes `eval`. Pre-build states cannot make
+/// progress unless that count is non-zero - even a fleet of build-only
+/// workers leaves the eval stuck in `Queued`. Active pre-build states
+/// (`Fetching`, `EvaluatingFlake`, `EvaluatingDerivation`) are owned by an
+/// eval worker; they only stall into `Waiting` when every eval-capable
+/// worker has disconnected, and they must never be reset back to `Queued`.
 fn decide_pre_build_target(
     current: EvaluationStatus,
-    connected_workers: usize,
+    eval_capable_workers: usize,
 ) -> Option<(EvaluationStatus, Option<WaitingReason>)> {
     let stall = || {
         (
@@ -561,7 +565,7 @@ fn decide_pre_build_target(
             }),
         )
     };
-    match (current, connected_workers) {
+    match (current, eval_capable_workers) {
         (EvaluationStatus::Waiting, 0) => Some(stall()),
         (EvaluationStatus::Waiting, _) => Some((EvaluationStatus::Queued, None)),
         (
@@ -653,9 +657,10 @@ pub(crate) async fn check_evaluation_done(
 pub async fn reconcile_waiting_state(
     state: &Arc<ServerState>,
     worker_caps: &[(Vec<String>, Vec<String>)],
+    eval_capable_workers: usize,
 ) -> Result<()> {
     BuildStateHandler::new(state)
-        .reconcile_waiting_state(worker_caps)
+        .reconcile_waiting_state(worker_caps, eval_capable_workers)
         .await
 }
 
@@ -1081,6 +1086,22 @@ mod waiting_reason_tests {
             assert_eq!(target, EvaluationStatus::Waiting);
             assert!(reason.is_some());
         }
+    }
+
+    /// Regression for issue #268: a Queued evaluation in an org whose only
+    /// connected workers lack the `eval` capability must stall to Waiting.
+    /// The caller in `BuildStateHandler::reconcile_waiting_state` passes the
+    /// eval-capable count - not total connected workers - so the function
+    /// sees `0` here and produces the same `Workers { connected_workers: 0 }`
+    /// reason as the no-workers-at-all path.
+    #[test]
+    fn pre_build_target_queued_no_eval_capable_workers_stalls() {
+        let (target, reason) = decide_pre_build_target(EvaluationStatus::Queued, 0)
+            .expect("stall must produce a transition");
+        assert_eq!(target, EvaluationStatus::Waiting);
+        let reason = reason.expect("stall target must carry a reason");
+        let (_, connected_workers, _) = workers_view(&reason);
+        assert_eq!(connected_workers, 0);
     }
 
     #[test]
