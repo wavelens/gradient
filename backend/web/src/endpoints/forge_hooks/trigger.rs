@@ -10,7 +10,7 @@ use super::response::{QueuedEvaluation, SkippedProject, WebhookTriggerOutcome};
 use entity::project_trigger as ept;
 use gradient_core::ci::{
     APPROVAL_ACTION_ID, ApplyInput, ApplyOutcome, ApprovalInfo, ForgeType, apply_trigger,
-    find_approval_gated_eval, resolve_outbound_reporter_for_project, unpark_approval,
+    find_approval_gated_eval, unpark_approval,
 };
 use gradient_core::types::triggers::{TriggerConfig, TriggerType};
 use gradient_core::types::*;
@@ -31,8 +31,6 @@ pub(super) struct PullRequestApprovalContext {
     pub pr_number: Option<u64>,
     pub pr_author: Option<String>,
     pub is_fork: Option<bool>,
-    pub base_owner: Option<String>,
-    pub base_repo: Option<String>,
 }
 
 // ── GitHub installation payload ────────────────────────────────────────────
@@ -395,7 +393,7 @@ where
             .unwrap_or_default();
 
         let gate_approval = if pr_require_approval {
-            decide_pr_gate(state, project.id, approval_ctx.as_ref()).await
+            decide_pr_gate(approval_ctx.as_ref()).await
         } else {
             None
         };
@@ -425,7 +423,6 @@ where
                         .cancel_evaluation_jobs(aborted_id, &aborted_builds)
                         .await;
                 }
-                scheduler::ci::spawn_pending_ci_for_eval(Arc::clone(state), &eval);
                 info!(
                     project_id = %project.id,
                     evaluation_id = %eval.id,
@@ -470,51 +467,19 @@ where
 
 /// Resolves whether a PR webhook fire should be gated on maintainer approval.
 ///
-/// Returns `Some(ApprovalInfo)` when the evaluation must be parked in
-/// `Waiting + Approval`; `None` when the PR can proceed immediately (same-repo
-/// PR, or the contributor is a confirmed repo writer).
-///
-/// Fail-closed semantics: when `is_fork` is unknown (the payload didn't carry
-/// enough information) or the trust probe errors / can't run for lack of
-/// metadata, the gate engages. Maintainers who hit a false positive can still
-/// approve via the forge UI / `/ci run` comment.
+/// Fail-closed: returns `Some(ApprovalInfo)` whenever the PR is (or might be) a
+/// fork, deferring the trust decision to maintainers via the forge UI / `/ci
+/// run` comment. Same-repo PRs (`is_fork == Some(false)`) bypass the gate.
 async fn decide_pr_gate(
-    state: &Arc<ServerState>,
-    project_id: ProjectId,
     ctx: Option<&PullRequestApprovalContext>,
 ) -> Option<ApprovalInfo> {
     let ctx = ctx?;
     if matches!(ctx.is_fork, Some(false)) {
         return None;
     }
-    let pr_number = ctx.pr_number.unwrap_or(0);
-    let pr_author = ctx.pr_author.clone().unwrap_or_default();
-
-    if let (Some(owner), Some(repo), Some(author)) = (
-        ctx.base_owner.as_deref(),
-        ctx.base_repo.as_deref(),
-        ctx.pr_author.as_deref(),
-    ) && !author.is_empty()
-    {
-        let reporter = resolve_outbound_reporter_for_project(state, project_id).await;
-        match reporter.is_repo_writer(owner, repo, author).await {
-            Ok(true) => return None,
-            Ok(false) => {}
-            Err(e) => {
-                warn!(
-                    error = %e,
-                    %project_id,
-                    pr_number,
-                    %author,
-                    "PR trust probe failed - parking pending approval"
-                );
-            }
-        }
-    }
-
     Some(ApprovalInfo {
-        pr_number,
-        pr_author,
+        pr_number: ctx.pr_number.unwrap_or(0),
+        pr_author: ctx.pr_author.clone().unwrap_or_default(),
     })
 }
 
@@ -709,13 +674,12 @@ pub(super) async fn handle_github_check_run(
     }
 
     match unpark_approval(&state.web_db, eval.id).await {
-        Ok(Some(unparked)) => {
+        Ok(Some(_)) => {
             info!(
                 evaluation_id = %eval.id,
                 sender = %sender.login,
                 "PR approval gate cleared via GitHub action"
             );
-            scheduler::ci::spawn_pending_ci_for_eval(Arc::clone(state), &unparked);
         }
         Ok(None) => {
             warn!(
@@ -739,26 +703,19 @@ async fn find_eval_by_check_id(
         .flatten()
 }
 
+/// Trust probe for the approval-unpark flows. Currently always fail-closed:
+/// the legacy per-project outbound reporter that backed `is_repo_writer` has
+/// been removed and the replacement (`ForgeStatusReport` actions) does not yet
+/// expose a permission API. Approval clicks/`/ci run` comments are therefore
+/// rejected at this layer; maintainers can still trigger via the forge UI.
 async fn sender_is_trusted(
-    state: &Arc<ServerState>,
-    project_id: ProjectId,
-    owner: &str,
-    repo: &str,
-    sender: &str,
+    _state: &Arc<ServerState>,
+    _project_id: ProjectId,
+    _owner: &str,
+    _repo: &str,
+    _sender: &str,
 ) -> bool {
-    let reporter = resolve_outbound_reporter_for_project(state, project_id).await;
-    match reporter.is_repo_writer(owner, repo, sender).await {
-        Ok(b) => b,
-        Err(e) => {
-            warn!(
-                error = %e,
-                %project_id,
-                sender,
-                "is_repo_writer probe failed during approval unpark"
-            );
-            false
-        }
-    }
+    false
 }
 
 // ── Approval unpark: `/ci run` comment on Gitea/Forgejo/GitLab + GitHub ────
@@ -954,14 +911,13 @@ pub(super) async fn handle_issue_comment(
             continue;
         }
         match unpark_approval(&state.web_db, eval.id).await {
-            Ok(Some(unparked)) => {
+            Ok(Some(_)) => {
                 info!(
                     evaluation_id = %eval.id,
                     pr_number,
                     %sender,
                     "PR approval gate cleared via /ci run comment"
                 );
-                scheduler::ci::spawn_pending_ci_for_eval(Arc::clone(state), &unparked);
                 unparked_any = true;
             }
             Ok(None) => {}

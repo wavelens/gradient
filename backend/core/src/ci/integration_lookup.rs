@@ -11,12 +11,10 @@
 //! reference an integration id directly (issue #262); the per-project link
 //! table is gone.
 
-use super::reporter::{CiReporter, NoopCiReporter};
 use crate::types::*;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
-use std::sync::Arc;
 use tracing::warn;
 
 /// Numeric encoding of `integration.kind`.
@@ -47,16 +45,6 @@ impl ForgeType {
             _ => None,
         }
     }
-}
-
-/// Compatibility shim for entry-point CI reporting paths that have not yet
-/// been migrated to `ForgeStatusReport` actions. Always returns
-/// [`NoopCiReporter`] now that the `project_integration` link table is gone.
-pub async fn resolve_outbound_reporter_for_project(
-    _state: &Arc<ServerState>,
-    _project_id: ProjectId,
-) -> Arc<dyn CiReporter> {
-    Arc::new(NoopCiReporter)
 }
 
 /// Stable name used for the auto-managed `forge_type=github` integration rows.

@@ -13,7 +13,6 @@
 //! - [`job_handlers`] - queue, assignment, status, completion, log, abort
 
 pub mod build;
-pub mod ci;
 pub mod dispatch;
 pub mod eval;
 pub mod jobs;

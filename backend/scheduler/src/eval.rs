@@ -24,9 +24,7 @@ use sea_orm::{ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrde
 use tracing::{debug, error, info};
 
 use super::build::check_evaluation_done;
-use super::ci::report_ci_for_entry_points;
 use super::jobs::PendingEvalJob;
-use gradient_core::ci::CiStatus;
 use gradient_core::types::proto::DiscoveredDerivation;
 
 const BATCH_SIZE: usize = 1000;
@@ -470,10 +468,7 @@ impl<'a> EvalResultProcessor<'a> {
         }
     }
 
-    /// Insert project entry points, report CI status, and schedule GC.
-    ///
-    /// Only called when the evaluation belongs to a project (not a standalone
-    /// one-shot eval).
+    /// Insert project entry points and schedule per-project evaluation GC.
     async fn process_entry_points(
         &self,
         project_id: ProjectId,
@@ -491,18 +486,15 @@ impl<'a> EvalResultProcessor<'a> {
         let drv_id_to_build: HashMap<DerivationId, BuildId> =
             eval_builds.iter().map(|b| (b.derivation, b.id)).collect();
 
-        let mut entry_points: Vec<(BuildId, String)> = Vec::new();
         let mut active_entry_points: Vec<AEntryPoint> = Vec::new();
 
         for d in derivations {
-            // Only root derivations (with a non-empty attr) are entry points.
             if d.attr.is_empty() {
                 continue;
             }
             if let Some(&drv_id) = drv_path_to_id.get(&d.drv_path)
                 && let Some(&build_id) = drv_id_to_build.get(&drv_id)
             {
-                entry_points.push((build_id, d.attr.clone()));
                 active_entry_points.push(AEntryPoint {
                     id: Set(EntryPointId::now_v7()),
                     project: Set(project_id),
@@ -524,26 +516,6 @@ impl<'a> EvalResultProcessor<'a> {
                     error!(error = %e, "failed to insert entry points");
                 }
             }
-        }
-
-        // CI reporting - report per-entry-point status as Pending.
-        if !entry_points.is_empty() {
-            let state_clone = Arc::clone(self.state);
-            let repo = self.evaluation.repository.clone();
-            let commit_id = self.evaluation.commit;
-            let evaluation_id = self.evaluation_id;
-            self.state.shutdown.spawn(async move {
-                report_ci_for_entry_points(
-                    state_clone,
-                    project_id,
-                    commit_id,
-                    &repo,
-                    evaluation_id,
-                    &entry_points,
-                    CiStatus::Pending,
-                )
-                .await;
-            });
         }
 
         // GC: remove old evaluations beyond keep_evaluations for this project.

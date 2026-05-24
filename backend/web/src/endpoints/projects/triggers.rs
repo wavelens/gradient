@@ -412,7 +412,6 @@ pub async fn fire_now(
                     .cancel_evaluation_jobs(aborted_id, &aborted_builds)
                     .await;
             }
-            scheduler::ci::spawn_pending_ci_for_eval(Arc::clone(&state), &eval);
             serde_json::json!({
                 "outcome": "Created",
                 "evaluation_id": eval.id,

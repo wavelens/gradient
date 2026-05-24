@@ -26,7 +26,7 @@ use gradient_core::types::*;
 use crate::Scheduler;
 use crate::jobs::{Assignment, PendingBuildJob, PendingEvalJob, PendingJob, WorkerBuildCaps};
 use crate::worker_pool::WorkerInfo;
-use crate::{build, ci, dispatch, eval};
+use crate::{build, dispatch, eval};
 
 impl Scheduler {
     // ── Job queue ─────────────────────────────────────────────────────────────
@@ -186,10 +186,10 @@ impl Scheduler {
         job_id: &str,
         new_status: entity::evaluation::EvaluationStatus,
     ) {
-        let (evaluation_id, project_id) = {
+        let evaluation_id = {
             let tracker = self.job_tracker.read().await;
             match tracker.active_job(job_id) {
-                Some(PendingJob::Eval(j)) => (j.evaluation_id, j.project_id),
+                Some(PendingJob::Eval(j)) => j.evaluation_id,
                 _ => return,
             }
         };
@@ -198,25 +198,6 @@ impl Scheduler {
             .await
         {
             Ok(Some(eval)) => {
-                // Report CI "Running" when evaluation starts (first status transition).
-                if new_status == entity::evaluation::EvaluationStatus::Fetching
-                    && let Some(pid) = project_id
-                {
-                    let state = Arc::clone(&self.state);
-                    let repo = eval.repository.clone();
-                    let commit_id = eval.commit;
-                    self.state.shutdown.spawn(async move {
-                        ci::report_ci_for_evaluation(
-                            state,
-                            pid,
-                            commit_id,
-                            &repo,
-                            evaluation_id,
-                            gradient_core::ci::CiStatus::Running,
-                        )
-                        .await;
-                    });
-                }
                 gradient_core::db::update_evaluation_status(
                     Arc::clone(&self.state),
                     eval,

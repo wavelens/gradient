@@ -251,8 +251,6 @@ fn approval_context_from(parsed: &ParsedPullRequestEvent) -> trigger::PullReques
         pr_number: parsed.pr_number,
         pr_author: parsed.pr_author.clone(),
         is_fork: parsed.is_fork,
-        base_owner: parsed.base_owner.clone(),
-        base_repo: parsed.base_repo.clone(),
     }
 }
 

@@ -695,9 +695,8 @@ Specs (vitest + jsdom):
 CI check names reported to GitHub/Gitea now include the organization
 and project so multiple Gradient instances/projects sharing a forge
 repository remain distinguishable. Helpers live in
-`backend/core/src/ci/reporting.rs` and are reused by the scheduler
-(`backend/scheduler/src/ci.rs`) and the core reporters
-(`backend/core/src/ci/reporting.rs`):
+`backend/core/src/ci/reporting.rs` and are reused by the
+`ForgeStatusReport` action dispatcher (`backend/core/src/ci/actions.rs`):
 
 - Evaluation roll-up: `Gradient Evaluation {org}/{project}` (e.g.
   `Gradient Evaluation wavelens/my-project`).
@@ -823,14 +822,11 @@ Unit tests (`cargo test -p core --tests ci::reporter`):
 statuses to GitLab via `POST {base_url}/api/v4/projects/{id}/statuses/{sha}`,
 where `id` is the URL-encoded `owner/repo` path (also covers nested
 groups such as `group/sub/repo`). Authenticates with `PRIVATE-TOKEN`,
-which accepts personal, project, and group access tokens.
-
-`resolve_outbound_reporter_for_project` (in
-`backend/core/src/ci/integration_lookup.rs`) now constructs a
-`GitlabReporter` for `ForgeType::GitLab` integrations instead of
-returning a silent `NoopCiReporter`. Missing `endpoint_url` or access
-token still falls back to `NoopCiReporter`, but with a `warn!` log so
-operators can tell something is misconfigured.
+which accepts personal, project, and group access tokens. The
+`ForgeStatusReport` action dispatcher in `backend/core/src/ci/actions.rs`
+resolves the integration row and constructs a `GitlabReporter` (or the
+appropriate forge-specific reporter) per dispatch — the legacy per-project
+lookup helper has been removed.
 
 Unit tests (`cargo test -p core --tests ci::reporter`):
 
@@ -1700,26 +1696,13 @@ Tests (`cargo test -p worker executor::build::tests`):
   Regression for substituted/external-cached builds whose artefacts never
   reached the `build_product` table.
 
-## CI pending status fires at queue time (#117)
+## CI pending status fires at queue time (#117, superseded by #262)
 
-The top-level `gradient` CI status used to first appear on a commit only
-when a worker picked the evaluation up and it transitioned `Queued →
-Fetching`. During the gap between insert and worker pickup the commit
-showed no status, hiding that work had been scheduled. The scheduler now
-spawns a `Pending` report from `scheduler::ci::spawn_pending_ci_for_eval`
-at every site that creates a `Queued` evaluation via `apply_trigger`
-(scheduler trigger dispatch, manual API fire, forge webhook fan-out). The
-existing `Running`-on-`Fetching` transition is preserved and updates the
-same check run id.
-
-Tests (`cargo test -p scheduler --tests ci::tests`):
-
-- `pending_ci_skips_when_eval_has_no_project` - direct builds and other
-  project-less evaluations don't get a CI report; the helper returns
-  without spawning so the shutdown tracker stays empty.
-- `pending_ci_spawns_task_when_eval_has_project` - when the evaluation
-  has a project, the helper registers a task on the shutdown tracker so
-  `cancel_and_drain` covers the in-flight report on shutdown.
+Per-event CI status reporting from the scheduler/web layer has been
+removed in favour of `ForgeStatusReport` actions (issue #262). Deployments
+that want a `Pending` check on the commit at queue time must configure a
+`ForgeStatusReport` action subscribed to `evaluation.queued`; the
+scheduler no longer spawns reports unconditionally.
 
 ## Enum primitive conversions via `num_enum` (#80)
 

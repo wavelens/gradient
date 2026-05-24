@@ -195,21 +195,14 @@ pub async fn post_organization_subscribe_cache(
     // Re-queue any evaluations parked with WaitingReason::NoCache for this
     // org. Only ReadWrite/WriteOnly subscriptions unblock builds; ReadOnly
     // subscriptions leave the org without anywhere to push outputs.
-    if unparks_builds {
-        match gradient_core::ci::unpark_no_cache_for_org(&state.web_db, org.id).await {
-            Ok(unparked) => {
-                for eval in &unparked {
-                    scheduler::ci::spawn_pending_ci_for_eval(Arc::clone(&state), eval);
-                }
-            }
-            Err(e) => {
-                tracing::warn!(
-                    error = %e,
-                    org_id = %org.id,
-                    "failed to unpark no-cache evaluations after cache subscription",
-                );
-            }
-        }
+    if unparks_builds
+        && let Err(e) = gradient_core::ci::unpark_no_cache_for_org(&state.web_db, org.id).await
+    {
+        tracing::warn!(
+            error = %e,
+            org_id = %org.id,
+            "failed to unpark no-cache evaluations after cache subscription",
+        );
     }
 
     // Enqueue signing of every cached path the org already owns for this
