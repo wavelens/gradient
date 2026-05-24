@@ -94,6 +94,10 @@ pub(super) struct GitHubPRRef {
 pub(super) struct GitHubRepoStub {
     #[serde(default)]
     pub full_name: Option<String>,
+    #[serde(default)]
+    pub clone_url: Option<String>,
+    #[serde(default)]
+    pub ssh_url: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -150,6 +154,10 @@ pub(super) struct GiteaPRRef {
 pub(super) struct GiteaRepoStub {
     #[serde(default)]
     pub full_name: Option<String>,
+    #[serde(default)]
+    pub clone_url: Option<String>,
+    #[serde(default)]
+    pub ssh_url: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -196,6 +204,16 @@ pub(super) struct GitLabMRAttributes {
     pub source_project_id: Option<u64>,
     #[serde(default)]
     pub target_project_id: Option<u64>,
+    #[serde(default)]
+    pub source: Option<GitLabMRSource>,
+}
+
+#[derive(Deserialize)]
+pub(super) struct GitLabMRSource {
+    #[serde(default)]
+    pub git_http_url: Option<String>,
+    #[serde(default)]
+    pub git_ssh_url: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -433,12 +451,8 @@ impl ParsedPullRequestEvent {
             .and_then(|b| b.repo.as_ref())
             .and_then(|r| r.full_name.clone())
             .or_else(|| payload.repository.full_name.clone());
-        let head_full = payload
-            .pull_request
-            .head
-            .repo
-            .as_ref()
-            .and_then(|r| r.full_name.clone());
+        let head_repo = payload.pull_request.head.repo.as_ref();
+        let head_full = head_repo.and_then(|r| r.full_name.clone());
         let is_fork = match (head_full.as_deref(), base_full.as_deref()) {
             (Some(h), Some(b)) => Some(h != b),
             _ => None,
@@ -448,12 +462,16 @@ impl ParsedPullRequestEvent {
             .user
             .as_ref()
             .and_then(|u| u.login.clone());
+        let mut repository_urls = Vec::with_capacity(4);
+        if let (Some(true), Some(repo)) = (is_fork, head_repo) {
+            if let Some(url) = repo.clone_url.clone() { repository_urls.push(url); }
+            if let Some(url) = repo.ssh_url.clone() { repository_urls.push(url); }
+        }
+        repository_urls.push(payload.repository.clone_url);
+        repository_urls.push(payload.repository.ssh_url);
         Some(Self {
             commit_hash,
-            repository_urls: vec![
-                payload.repository.clone_url,
-                payload.repository.ssh_url,
-            ],
+            repository_urls,
             action: payload.action,
             branch: Some(payload.pull_request.head.branch),
             pr_number: payload.pull_request.number,
@@ -488,12 +506,8 @@ impl ParsedPullRequestEvent {
             .and_then(|b| b.repo.as_ref())
             .and_then(|r| r.full_name.clone())
             .or_else(|| payload.repository.full_name.clone());
-        let head_full = payload
-            .pull_request
-            .head
-            .repo
-            .as_ref()
-            .and_then(|r| r.full_name.clone());
+        let head_repo = payload.pull_request.head.repo.as_ref();
+        let head_full = head_repo.and_then(|r| r.full_name.clone());
         let is_fork = match (head_full.as_deref(), base_full.as_deref()) {
             (Some(h), Some(b)) => Some(h != b),
             _ => None,
@@ -503,9 +517,15 @@ impl ParsedPullRequestEvent {
             .user
             .as_ref()
             .and_then(|u| u.username.clone().or_else(|| u.login.clone()));
+        let mut repository_urls = Vec::with_capacity(4);
+        if let (Some(true), Some(repo)) = (is_fork, head_repo) {
+            if let Some(url) = repo.clone_url.clone() { repository_urls.push(url); }
+            if let Some(url) = repo.ssh_url.clone() { repository_urls.push(url); }
+        }
+        repository_urls.extend(gitea_repo_urls(&payload.repository));
         Some(Self {
             commit_hash,
-            repository_urls: gitea_repo_urls(&payload.repository),
+            repository_urls,
             action: payload.action,
             branch,
             pr_number: payload.pull_request.number,
@@ -536,9 +556,15 @@ impl ParsedPullRequestEvent {
             _ => None,
         };
         let pr_author = payload.user.as_ref().and_then(|u| u.username.clone());
+        let mut repository_urls = Vec::with_capacity(4);
+        if let (Some(true), Some(src)) = (is_fork, payload.object_attributes.source.as_ref()) {
+            if let Some(url) = src.git_http_url.clone() { repository_urls.push(url); }
+            if let Some(url) = src.git_ssh_url.clone() { repository_urls.push(url); }
+        }
+        repository_urls.extend(gitlab_project_urls(&payload.project));
         Some(Self {
             commit_hash,
-            repository_urls: gitlab_project_urls(&payload.project),
+            repository_urls,
             action,
             branch: Some(payload.object_attributes.source_branch),
             pr_number: payload.object_attributes.iid,
