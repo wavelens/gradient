@@ -21,7 +21,7 @@ pub mod unpark;
 pub use self::abort::{AbortKind, abort_evaluation};
 pub use self::apply::{
     ApplyError, ApplyInput, ApplyOutcome, ApprovalInfo, apply_trigger, park_if_no_cache,
-    park_if_pending_approval,
+    park_if_no_workers, park_if_pending_approval,
 };
 pub use self::github_app::*;
 pub use self::http_validation::validate_webhook_url;
@@ -29,4 +29,6 @@ pub use self::integration_lookup::*;
 pub use self::reporter::*;
 pub use self::reporting::*;
 pub use self::trigger::*;
-pub use self::unpark::{find_approval_gated_eval, unpark_approval, unpark_no_cache_for_org};
+pub use self::unpark::{
+    find_approval_gated_eval, unpark_approval, unpark_no_cache_for_org, unpark_no_workers_for_org,
+};

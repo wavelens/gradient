@@ -12,7 +12,14 @@
 //! [`unpark_no_cache_for_org`] right after inserting the subscription row;
 //! the caller is also responsible for re-emitting the `Pending` CI status
 //! for each unparked evaluation.
+//!
+//! `Workers { connected_workers: 0 }` parks: triggered when the project's
+//! organisation had no active `eval`-capable worker registration. Caller
+//! (`orgs/workers.rs::{post,patch}_org_worker`) invokes
+//! [`unpark_no_workers_for_org`] when a registration is created or its
+//! `active`/`enable_eval` flags transition to `true`.
 
+use crate::db::org_has_eval_capable_worker_registration;
 use crate::types::ids::OrganizationId;
 use crate::types::waiting_reason::WaitingReason;
 use crate::types::*;
@@ -27,6 +34,44 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, Query
 pub async fn unpark_no_cache_for_org<C: ConnectionTrait>(
     db: &C,
     organization: OrganizationId,
+) -> Result<Vec<MEvaluation>, sea_orm::DbErr> {
+    unpark_for_org(db, organization, |r| matches!(r, WaitingReason::NoCache)).await
+}
+
+/// Flip every evaluation parked with `WaitingReason::Workers { connected_workers: 0 }`
+/// for projects in `organization` back to `Queued`. The zero-workers shape
+/// is what `park_if_no_workers` writes when the org has no active
+/// `eval`-capable worker registration at all; other `Workers { .. }` parks
+/// (capability mismatch, transient runtime stall) are owned by the
+/// build-dispatch reconciler and are left alone.
+///
+/// No-op when the organisation still has no active `eval`-capable worker
+/// registration - callers in the worker endpoints invoke this unconditionally
+/// after any registration touch, and this guard prevents a churn of
+/// re-queue → reconciler re-park when nothing actionable changed.
+pub async fn unpark_no_workers_for_org<C: ConnectionTrait>(
+    db: &C,
+    organization: OrganizationId,
+) -> Result<Vec<MEvaluation>, sea_orm::DbErr> {
+    if !org_has_eval_capable_worker_registration(db, organization).await? {
+        return Ok(Vec::new());
+    }
+    unpark_for_org(db, organization, |r| {
+        matches!(
+            r,
+            WaitingReason::Workers {
+                connected_workers: 0,
+                ..
+            }
+        )
+    })
+    .await
+}
+
+async fn unpark_for_org<C: ConnectionTrait, F: Fn(&WaitingReason) -> bool>(
+    db: &C,
+    organization: OrganizationId,
+    matches_reason: F,
 ) -> Result<Vec<MEvaluation>, sea_orm::DbErr> {
     let project_ids: Vec<ProjectId> = EProject::find()
         .filter(CProject::Organization.eq(organization))
@@ -52,7 +97,7 @@ pub async fn unpark_no_cache_for_org<C: ConnectionTrait>(
             e.waiting_reason
                 .as_ref()
                 .and_then(WaitingReason::from_json)
-                .is_some_and(|r| matches!(r, WaitingReason::NoCache))
+                .is_some_and(|r| matches_reason(&r))
         })
         .collect();
 
@@ -171,5 +216,106 @@ mod tests {
             .append_query_results([vec![parked.clone()]])
             .into_connection();
         assert!(unpark_approval(&db, parked.id).await.unwrap().is_none());
+    }
+
+    fn make_project(org: OrganizationId) -> entity::project::Model {
+        entity::project::Model {
+            id: ProjectId::now_v7(),
+            organization: org,
+            name: "p".into(),
+            active: true,
+            display_name: String::new(),
+            description: String::new(),
+            repository: String::new(),
+            wildcard: "*".into(),
+            last_evaluation: None,
+            last_check_at: NaiveDateTime::default(),
+            force_evaluation: false,
+            created_by: crate::types::ids::UserId::nil(),
+            created_at: NaiveDateTime::default(),
+            managed: false,
+            keep_evaluations: 10,
+            concurrency: 3,
+            sign_cache: true,
+        }
+    }
+
+    fn eval_capable_registration() -> entity::worker_registration::Model {
+        entity::worker_registration::Model {
+            id: crate::types::ids::WorkerRegistrationId::now_v7(),
+            peer_id: OrganizationId::nil(),
+            worker_id: "00000000-0000-4000-8000-000000000001".into(),
+            token_hash: String::new(),
+            managed: false,
+            url: None,
+            active: true,
+            enable_fetch: true,
+            enable_eval: true,
+            enable_build: true,
+            display_name: String::new(),
+            created_by: Some(crate::types::ids::UserId::nil()),
+            created_at: NaiveDateTime::default(),
+        }
+    }
+
+    #[tokio::test]
+    async fn unpark_no_workers_requeues_zero_workers_park_and_skips_other_workers_parks() {
+        let org = OrganizationId::now_v7();
+        let project = make_project(org);
+
+        let stranded = {
+            let mut e = waiting_eval(WaitingReason::workers(Vec::new(), 0, Vec::new()));
+            e.project = Some(project.id);
+            e
+        };
+        // A Workers park with connected_workers > 0 represents a capability
+        // mismatch the runtime reconciler manages; the registration unpark
+        // path must leave it alone.
+        let capability_mismatch = {
+            let mut e = waiting_eval(WaitingReason::workers(
+                Vec::new(),
+                1,
+                vec!["aarch64-linux".into()],
+            ));
+            e.project = Some(project.id);
+            e
+        };
+
+        let mut requeued = stranded.clone();
+        requeued.status = EvaluationStatus::Queued;
+        requeued.waiting_reason = None;
+
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            // Gate: org has an eval-capable registration → continue
+            .append_query_results([vec![eval_capable_registration()]])
+            // Fetch org's projects
+            .append_query_results([vec![project.clone()]])
+            // Fetch Waiting evals across those projects
+            .append_query_results([vec![stranded.clone(), capability_mismatch.clone()]])
+            // Update the one matching row → only `stranded` is touched
+            .append_query_results([vec![requeued.clone()]])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            .into_connection();
+
+        let out = unpark_no_workers_for_org(&db, org).await.unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].id, stranded.id);
+        assert_eq!(out[0].status, EvaluationStatus::Queued);
+        assert!(out[0].waiting_reason.is_none());
+    }
+
+    #[tokio::test]
+    async fn unpark_no_workers_is_noop_when_no_eval_capable_registration() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            // Gate query: no eval-capable registration → short-circuit
+            .append_query_results([Vec::<entity::worker_registration::Model>::new()])
+            .into_connection();
+        let out = unpark_no_workers_for_org(&db, OrganizationId::now_v7())
+            .await
+            .unwrap();
+        assert!(out.is_empty());
     }
 }
