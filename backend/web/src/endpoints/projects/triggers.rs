@@ -401,6 +401,18 @@ pub async fn fire_now(
         .await
         .map_err(|e| WebError::internal(e.to_string()))?;
 
+    // Stamp last_fired_at so the UI reflects the manual fire alongside the
+    // outcome - mirrors the touch in the webhook fan-out path.
+    {
+        let now = gradient_core::types::now();
+        let mut active: entity::project_trigger::ActiveModel = row.clone().into();
+        active.last_fired_at = Set(Some(now));
+        active.updated_at = Set(now);
+        if let Err(e) = active.update(&state.web_db).await {
+            tracing::warn!(error = %e, trigger_id = %row.id, "failed to stamp trigger last_fired_at");
+        }
+    }
+
     let body = match outcome {
         ApplyOutcome::Created {
             evaluation: eval,
@@ -412,6 +424,7 @@ pub async fn fire_now(
                     .cancel_evaluation_jobs(aborted_id, &aborted_builds)
                     .await;
             }
+            gradient_core::ci::actions::dispatch_evaluation_created(&state, &eval).await;
             serde_json::json!({
                 "outcome": "Created",
                 "evaluation_id": eval.id,

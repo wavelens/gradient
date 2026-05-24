@@ -276,6 +276,24 @@ fn org_cache_row() -> entity::organization_cache::Model {
     }
 }
 
+fn worker_registration_row() -> entity::worker_registration::Model {
+    entity::worker_registration::Model {
+        id: gradient_core::types::ids::WorkerRegistrationId::now_v7(),
+        peer_id: org_id(),
+        worker_id: "00000000-0000-4000-8000-000000000001".into(),
+        token_hash: String::new(),
+        managed: false,
+        url: None,
+        active: true,
+        enable_fetch: true,
+        enable_eval: true,
+        enable_build: true,
+        display_name: String::new(),
+        created_by: Some(gradient_core::types::ids::UserId::nil()),
+        created_at: fixture_date(),
+    }
+}
+
 /// Build a `project_trigger` row with the given config.
 fn trigger_row(cfg: TriggerConfig) -> entity::project_trigger::Model {
     entity::project_trigger::Model {
@@ -321,7 +339,10 @@ fn reporter_pr_trigger(actions: Vec<&str>) -> TriggerConfig {
 
 /// Mock DB chain for a successful `apply_trigger` call with no prior evaluation
 /// (skips same-commit dedup) and no in-flight evaluation. Includes the
-/// `org_has_writable_cache` lookup that runs after the eval is created.
+/// `org_has_writable_cache` lookup that runs after the eval is created,
+/// the `org_has_eval_capable_worker_registration` lookup that follows it,
+/// the `touch_trigger_last_fired` update on the trigger row, and the
+/// `dispatch_evaluation_created` lookup of project actions.
 fn apply_trigger_db_chain(db: MockDatabase) -> MockDatabase {
     db.append_query_results([Vec::<entity::evaluation::Model>::new()]) // in-flight check
         .append_query_results([Vec::<entity::evaluation::Model>::new()]) // trigger_evaluation: in-progress check
@@ -335,6 +356,13 @@ fn apply_trigger_db_chain(db: MockDatabase) -> MockDatabase {
         }]) // UPDATE project
         .append_query_results([vec![org_cache_row()]]) // org_has_writable_cache: subscription rows
         .append_query_results([vec![cache_row()]]) // org_has_writable_cache: active cache rows
+        .append_query_results([vec![worker_registration_row()]]) // org_has_eval_capable_worker_registration
+        .append_query_results([vec![trigger_row(reporter_push_trigger(vec![]))]]) // touch_trigger_last_fired: SELECT for UPDATE
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }]) // touch_trigger_last_fired: UPDATE
+        .append_query_results([Vec::<entity::project_action::Model>::new()]) // dispatch_evaluation_created: project_action lookup
 }
 
 // ── Test 1: Generic forge - no matching trigger (Gitea) ───────────────────────

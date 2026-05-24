@@ -397,9 +397,8 @@ where
         } else {
             None
         };
-        let was_gated = gate_approval.is_some();
 
-        match apply_trigger(
+        let apply_result = apply_trigger(
             &state.web_db,
             &project,
             ApplyInput {
@@ -412,8 +411,13 @@ where
                 gate_approval,
             },
         )
-        .await
-        {
+        .await;
+        // Touch the trigger row's `last_fired_at` for any outcome (created /
+        // skipped / errored). Without this the UI shows "Last fired: never"
+        // for triggers that only fire via webhook, since the polling loop
+        // (the only other touch site) doesn't visit reporter triggers.
+        touch_trigger_last_fired(state, &trig).await;
+        match apply_result {
             Ok(ApplyOutcome::Created {
                 evaluation: eval,
                 aborted_evaluation,
@@ -429,19 +433,7 @@ where
                     evaluation_id = %eval.id,
                     "forge webhook trigger fired"
                 );
-                if was_gated {
-                    let payload = serde_json::json!({
-                        "evaluation_id": eval.id.to_string(),
-                        "description": "Awaiting maintainer approval for external contributor PR.",
-                    });
-                    gradient_core::ci::actions::dispatch_evaluation_event(
-                        state,
-                        project.id,
-                        "evaluation.action_required",
-                        payload,
-                    )
-                    .await;
-                }
+                gradient_core::ci::actions::dispatch_evaluation_created(state, &eval).await;
                 outcome.queued.push(QueuedEvaluation {
                     project_id: project.id,
                     project_name: project.name.clone(),
@@ -499,18 +491,41 @@ async fn decide_pr_gate(
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
+/// Stamp `last_fired_at` on the trigger row so the project-triggers UI can
+/// show when the webhook last considered it. Best-effort: a DB error here
+/// must not derail the rest of the webhook fan-out.
+async fn touch_trigger_last_fired(state: &Arc<ServerState>, trig: &ept::Model) {
+    let now = gradient_core::types::now();
+    let mut active: ept::ActiveModel = trig.clone().into();
+    active.last_fired_at = Set(Some(now));
+    active.updated_at = Set(now);
+    if let Err(e) = active.update(&state.web_db).await {
+        warn!(error = %e, trigger_id = %trig.id, "failed to stamp trigger last_fired_at");
+    }
+}
+
 async fn load_active_triggers_for_integration(
     state: &Arc<ServerState>,
     integration_id: IntegrationId,
     trigger_type: TriggerType,
 ) -> Result<Vec<ept::Model>, sea_orm::DbErr> {
+    // Match active triggers of the right type for any project in the
+    // organisation that owns this integration. The historical
+    // `config->>'integration_id' = $1` filter was fragile: the GitHub App
+    // seed migration creates fresh integration rows, so any trigger created
+    // before that migration carries a stale UUID and silently stops
+    // matching its own org's webhooks. Org-level matching is safe because
+    // each org has at most one inbound integration per forge_type, which is
+    // already disambiguated by the webhook route.
     let stmt = Statement::from_sql_and_values(
         DbBackend::Postgres,
         format!(
-            "SELECT * FROM project_trigger \
-             WHERE active = true \
-               AND trigger_type = {} \
-               AND (config->>'integration_id')::uuid = $1",
+            "SELECT pt.* FROM project_trigger pt \
+             JOIN project p ON pt.project = p.id \
+             JOIN integration i ON i.organization = p.organization \
+             WHERE pt.active = true \
+               AND pt.trigger_type = {} \
+               AND i.id = $1",
             i16::from(trigger_type),
         ),
         [Value::Uuid(Some(Box::new(integration_id.into_inner())))],
