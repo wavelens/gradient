@@ -34,6 +34,9 @@ export class ApiService {
       })
       .pipe(
         map((response) => {
+          if (response === null || response === undefined) {
+            return undefined as T;
+          }
           if (response.error) {
             throw new Error(response.message as string);
           }
