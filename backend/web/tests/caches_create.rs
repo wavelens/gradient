@@ -18,8 +18,9 @@
 //! not something we can prove with mocks. The two tests here are the
 //! strongest sequencing guarantee mocks can provide.
 
-use entity::{cache, cache_upstream, ids::*};
+use entity::{cache, cache_upstream, cache_user, ids::*};
 use gradient_core::types::SessionId;
+use gradient_core::types::consts::BASE_CACHE_ROLE_ADMIN_ID;
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 use serde_json::{Value, json};
 use test_support::fixtures::{test_date, user, user_id};
@@ -47,6 +48,15 @@ fn cache_row(name: &str) -> cache::Model {
         created_by: user_id(),
         created_at: test_date(),
         managed: false,
+    }
+}
+
+fn cache_user_row(cache_id: CacheId) -> cache_user::Model {
+    cache_user::Model {
+        id: CacheUserId::now_v7(),
+        cache: cache_id,
+        user: user_id(),
+        role: BASE_CACHE_ROLE_ADMIN_ID,
     }
 }
 
@@ -115,12 +125,18 @@ fn put_cache_creates_cache_and_default_upstream() {
         let token = make_token(session_id);
         let inserted = cache_row("fresh");
         let upstream = cache_upstream_row(inserted.id);
+        let creator_admin = cache_user_row(inserted.id);
 
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
             .append_query_results::<cache::Model, _, _>([Vec::<cache::Model>::new()])
             .append_query_results([vec![inserted]])
             .append_query_results([vec![upstream]])
+            .append_query_results([vec![creator_admin]])
             .append_exec_results([
+                MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 1,
+                },
                 MockExecResult {
                     last_insert_id: 0,
                     rows_affected: 1,
