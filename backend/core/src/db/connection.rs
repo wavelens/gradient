@@ -18,8 +18,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use tracing::log::LevelFilter;
 
-use crate::permissions::{admin_mask, view_mask, write_mask};
-use crate::types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID};
+use crate::permissions::{admin_mask, cache_admin_mask, cache_view_mask, cache_write_mask, view_mask, write_mask};
+use crate::types::consts::{BASE_CACHE_ROLE_ADMIN_ID, BASE_CACHE_ROLE_VIEW_ID, BASE_CACHE_ROLE_WRITE_ID, BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID};
 use crate::types::*;
 
 fn db_url(cli: &Cli) -> Result<String> {
@@ -160,6 +160,10 @@ async fn update_db(db: &DatabaseConnection) -> Result<(), DbErr> {
     seed_builtin_role(db, BASE_ROLE_WRITE_ID, "Write", write_mask()).await?;
     seed_builtin_role(db, BASE_ROLE_VIEW_ID, "View", view_mask()).await?;
 
+    seed_builtin_cache_role(db, BASE_CACHE_ROLE_ADMIN_ID, "Admin", cache_admin_mask()).await?;
+    seed_builtin_cache_role(db, BASE_CACHE_ROLE_WRITE_ID, "Write", cache_write_mask()).await?;
+    seed_builtin_cache_role(db, BASE_CACHE_ROLE_VIEW_ID, "View", cache_view_mask()).await?;
+
     Ok(())
 }
 
@@ -190,6 +194,35 @@ async fn seed_builtin_role(
         }
         Some(existing) if existing.permission != permission || existing.name != name => {
             let mut active: ARole = existing.into();
+            active.name = Set(name.to_string());
+            active.permission = Set(permission);
+            active.update(db).await?;
+        }
+        Some(_) => {}
+    }
+    Ok(())
+}
+
+async fn seed_builtin_cache_role(
+    db: &DatabaseConnection,
+    role_id: RoleId,
+    name: &str,
+    permission: i64,
+) -> Result<(), DbErr> {
+    match ECacheRole::find_by_id(role_id).one(db).await? {
+        None => {
+            ACacheRole {
+                id: Set(role_id),
+                name: Set(name.to_string()),
+                cache: Set(None),
+                permission: Set(permission),
+                managed: Set(false),
+            }
+            .insert(db)
+            .await?;
+        }
+        Some(existing) if existing.permission != permission || existing.name != name => {
+            let mut active: ACacheRole = existing.into();
             active.name = Set(name.to_string());
             active.permission = Set(permission);
             active.update(db).await?;
