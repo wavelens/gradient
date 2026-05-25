@@ -1,0 +1,276 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<div class="container">
+  <div class="page-header">
+    <div>
+      <div class="breadcrumb">
+        <a routerLink="/caches" class="breadcrumb-link">Caches</a>
+        <span class="breadcrumb-separator">/</span>
+        <a [routerLink]="['/caches', cacheName]" class="breadcrumb-link">{{ cacheName }}</a>
+        <span class="breadcrumb-separator">/</span>
+        <a [routerLink]="['/caches', cacheName, 'settings']" class="breadcrumb-link">Settings</a>
+        <span class="breadcrumb-separator">/</span>
+        <span class="breadcrumb-current">Members & Roles</span>
+      </div>
+      <h1>Members & Roles</h1>
+    </div>
+  </div>
+
+  <!-- Members -->
+  <div class="settings-section">
+    <div class="section-header">
+      <h2>Members</h2>
+      <button
+        *appWritable="access()"
+        pButton
+        label="Add Member"
+        icon="pi pi-plus"
+        severity="secondary"
+        (click)="openAddMemberDialog()"
+        [disabled]="rolesLoading() || roles().length === 0"
+        [appManagedDisable]="access()"
+      ></button>
+    </div>
+    @if (membersLoading()) {
+      <app-loading-spinner message="Loading members..." />
+    } @else {
+      <div class="settings-card">
+        @if (members().length > 0) {
+          <div class="members-list">
+            @for (member of members(); track member.id) {
+              <div class="member-row">
+                <div class="member-info">
+                  <span class="material-symbols-outlined">person</span>
+                  <div class="member-username">{{ member.id }}</div>
+                </div>
+                <div class="member-actions">
+                  <select
+                    class="role-select"
+                    [ngModel]="member.name"
+                    [disabled]="updatingRole() === member.id || removingMember() !== null || rolesLoading()"
+                    [appManagedDisable]="access()"
+                    (ngModelChange)="updateMemberRole(member.id, $event)"
+                  >
+                    @for (role of roles(); track role.id) {
+                      <option [value]="role.name">{{ role.name }}</option>
+                    }
+                  </select>
+                  <button
+                    *appWritable="access()"
+                    pButton
+                    icon="pi pi-times"
+                    severity="danger"
+                    size="small"
+                    [loading]="removingMember() === member.id"
+                    [disabled]="removingMember() !== null || updatingRole() !== null"
+                    [appManagedDisable]="access()"
+                    (click)="removeMember(member.id)"
+                  ></button>
+                </div>
+              </div>
+            }
+          </div>
+        } @else {
+          <p class="text-secondary">No members found.</p>
+        }
+      </div>
+    }
+  </div>
+
+  <!-- Roles -->
+  <div class="settings-section">
+    <div class="section-header">
+      <h2>Roles</h2>
+      <button
+        *appWritable="access()"
+        pButton
+        label="New Role"
+        icon="pi pi-plus"
+        severity="secondary"
+        (click)="openCreateRoleDialog()"
+        [disabled]="rolesLoading() || availablePermissions().length === 0"
+        [appManagedDisable]="access()"
+      ></button>
+    </div>
+    @if (rolesLoading()) {
+      <app-loading-spinner message="Loading roles..." />
+    } @else {
+      <div class="settings-card">
+        @if (roles().length > 0) {
+          <div class="roles-list">
+            @for (role of roles(); track role.id) {
+              <div class="role-row">
+                <div class="role-info">
+                  <div class="role-name">
+                    {{ role.name }}
+                    @if (role.builtin) {
+                      <span class="role-badge">Built-in</span>
+                    }
+                  </div>
+                  <div class="role-permissions">
+                    {{ rolePermissionLabel(role) }}
+                  </div>
+                </div>
+                <div class="role-actions">
+                  @if (!role.builtin) {
+                    <button
+                      *appWritable="access()"
+                      pButton
+                      icon="pi pi-pencil"
+                      severity="secondary"
+                      size="small"
+                      [disabled]="savingRole() || deletingRole() !== null"
+                      [appManagedDisable]="access()"
+                      (click)="openEditRoleDialog(role)"
+                    ></button>
+                    <button
+                      *appWritable="access()"
+                      pButton
+                      icon="pi pi-trash"
+                      severity="danger"
+                      size="small"
+                      [loading]="deletingRole() === role.id"
+                      [disabled]="deletingRole() !== null"
+                      [appManagedDisable]="access()"
+                      (click)="deleteRole(role)"
+                    ></button>
+                  }
+                </div>
+              </div>
+            }
+          </div>
+        } @else {
+          <p class="text-secondary">No roles found.</p>
+        }
+      </div>
+    }
+  </div>
+</div>
+
+<!-- Add Member Dialog -->
+<p-dialog
+  header="Add Member"
+  [(visible)]="showAddMemberDialog"
+  [modal]="true"
+  [style]="{ width: '420px' }"
+  [draggable]="false"
+  [resizable]="false"
+>
+  <div class="dialog-content">
+    @if (memberError()) {
+      <div class="dialog-error">
+        <span class="material-symbols-outlined">error</span>
+        {{ memberError() }}
+      </div>
+    }
+    <div class="form-group">
+      <label for="member-name">Username</label>
+      <p-autoComplete
+        id="member-name"
+        [(ngModel)]="newMember.user"
+        [suggestions]="userSuggestions()"
+        (completeMethod)="onUserSearch($event)"
+        placeholder="Enter username"
+        styleClass="w-full"
+        [forceSelection]="false"
+        appendTo="body"
+        (keyup.enter)="addMember()"
+      />
+    </div>
+    <div class="form-group">
+      <label for="member-role">Role</label>
+      <select id="member-role" [(ngModel)]="newMember.role" class="role-select">
+        @for (role of roles(); track role.id) {
+          <option [value]="role.name">{{ role.name }}</option>
+        }
+      </select>
+    </div>
+  </div>
+  <ng-template pTemplate="footer">
+    <button
+      pButton
+      label="Cancel"
+      severity="secondary"
+      (click)="showAddMemberDialog.set(false)"
+      [disabled]="addingMember()"
+    ></button>
+    <button
+      pButton
+      label="Add"
+      (click)="addMember()"
+      [disabled]="!newMember.user || !newMember.role || addingMember()"
+      [loading]="addingMember()"
+    ></button>
+  </ng-template>
+</p-dialog>
+
+<!-- Role Dialog (Create/Edit) -->
+<p-dialog
+  [header]="editingRole() ? 'Edit Role' : 'New Role'"
+  [(visible)]="showRoleDialog"
+  [modal]="true"
+  [style]="{ width: '520px' }"
+  [draggable]="false"
+  [resizable]="false"
+>
+  <div class="dialog-content">
+    @if (roleError()) {
+      <div class="dialog-error">
+        <span class="material-symbols-outlined">error</span>
+        {{ roleError() }}
+      </div>
+    }
+    <div class="form-group">
+      <label for="role-name">Name</label>
+      <input
+        pInputText
+        id="role-name"
+        [(ngModel)]="roleForm.name"
+        class="w-full"
+        placeholder="e.g. releaser"
+      />
+      <small class="text-secondary">Lowercase letters, digits, and hyphens.</small>
+    </div>
+    <div class="form-group">
+      <label>Permissions</label>
+      <div class="permissions-grid">
+        @for (perm of availablePermissions(); track perm.id) {
+          <label class="permission-row">
+            <p-checkbox
+              [(ngModel)]="roleForm.permissions[perm.id]"
+              [binary]="true"
+            />
+            <span class="permission-label">
+              {{ perm.id }}
+              @if (perm.mutating) {
+                <span class="permission-tag mutating">mutating</span>
+              } @else {
+                <span class="permission-tag readonly">read-only</span>
+              }
+            </span>
+          </label>
+        }
+      </div>
+    </div>
+  </div>
+  <ng-template pTemplate="footer">
+    <button
+      pButton
+      label="Cancel"
+      severity="secondary"
+      (click)="showRoleDialog.set(false)"
+      [disabled]="savingRole()"
+    ></button>
+    <button
+      pButton
+      [label]="editingRole() ? 'Save' : 'Create'"
+      (click)="saveRole()"
+      [disabled]="!roleForm.name.trim() || savingRole()"
+      [loading]="savingRole()"
+    ></button>
+  </ng-template>
+</p-dialog>

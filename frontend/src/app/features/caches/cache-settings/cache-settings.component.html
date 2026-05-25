@@ -144,6 +144,20 @@
       </div>
     </div>
 
+    <!-- Members & Roles -->
+    <div class="settings-section">
+      <h2>Members & Roles</h2>
+      <div class="settings-card">
+        <div class="nav-row">
+          <div>
+            <h3>Members & Roles</h3>
+            <p class="text-secondary">Manage who has access to this cache and what they can do</p>
+          </div>
+          <a pButton label="Manage Members" icon="pi pi-users" severity="secondary" [routerLink]="['/caches', cacheName, 'members-roles']"></a>
+        </div>
+      </div>
+    </div>
+
     @if (access().canEdit) {
       <!-- Danger Zone -->
       <div class="settings-section danger-section">

@@ -204,6 +204,15 @@ export const routes: Routes = [
             (m) => m.CacheNarsComponent,
           ),
       },
+      {
+        path: 'members-roles',
+        title: 'Cache Members & Roles',
+        canActivate: [authGuard],
+        loadComponent: () =>
+          import('./features/caches/members-roles/cache-members-roles.component').then(
+            (m) => m.CacheMembersRolesComponent,
+          ),
+      },
     ],
   },
 
