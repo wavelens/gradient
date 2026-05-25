@@ -4,62 +4,35 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::authorization::MaybeUser;
+use crate::access::{CacheAccess, Caller, load_cache};
+use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult};
-use crate::helpers::{OptionExt, ok_json};
+use crate::helpers::ok_json;
+use crate::permissions::CachePermission;
 use axum::Extension;
 use axum::Json;
 use axum::extract::{Path, State};
-use gradient_core::db::get_any_cache_by_name;
 use gradient_core::sources::{format_cache_key, format_cache_public_key};
 use gradient_core::types::*;
 use std::sync::Arc;
 
-// ── Access helpers ────────────────────────────────────────────────────────────
-
-/// Load a cache visible to `user_id`: owned caches and public caches.
-async fn load_cache_for_owner(
-    state: &Arc<ServerState>,
-    user_id: UserId,
-    cache_name: String,
-) -> WebResult<MCache> {
-    let cache = get_any_cache_by_name(Arc::clone(state), cache_name)
-        .await?
-        .or_not_found("Cache")?;
-
-    if !cache.public && cache.created_by != user_id {
-        return Err(WebError::not_found("Cache"));
-    }
-
-    Ok(cache)
-}
-
-/// Load a cache visible to `maybe_user`: public caches, or owned if authenticated.
-async fn load_cache_readable(
-    state: &Arc<ServerState>,
-    maybe_user: &Option<MUser>,
-    cache_name: String,
-) -> WebResult<MCache> {
-    let cache = get_any_cache_by_name(Arc::clone(state), cache_name)
-        .await?
-        .or_not_found("Cache")?;
-
-    let allowed = cache.public || matches!(maybe_user, Some(u) if u.id == cache.created_by);
-    if !allowed {
-        return Err(WebError::not_found("Cache"));
-    }
-
-    Ok(cache)
-}
-
-// ── Handlers ──────────────────────────────────────────────────────────────────
-
 pub async fn get_cache_key(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path(cache): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let cache = load_cache_for_owner(&state, user.id, cache).await?;
+    let cache = load_cache(
+        &state,
+        Caller::User(&user),
+        api_key.as_ref(),
+        cache,
+        CacheAccess::Require {
+            permission: CachePermission::ManageCacheKeys,
+            reject_managed: false,
+        },
+    )
+    .await?;
 
     let cache_key = format_cache_key(
         &state.config.secrets.crypt_secret_file,
@@ -77,9 +50,17 @@ pub async fn get_cache_key(
 pub async fn get_cache_public_key(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path(cache): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let cache = load_cache_readable(&state, &maybe_user, cache).await?;
+    let cache = load_cache(
+        &state,
+        Caller::from_option(&maybe_user),
+        api_key.as_ref(),
+        cache,
+        CacheAccess::Readable,
+    )
+    .await?;
 
     let public_key = format_cache_public_key(
         &state.config.secrets.crypt_secret_file,

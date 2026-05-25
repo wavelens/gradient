@@ -41,10 +41,20 @@ async fn try_authenticate_basic(state: &Arc<ServerState>, headers: &HeaderMap) -
 }
 
 /// Returns true if `user` is allowed to read `cache`.
-/// Access is granted when the user is the cache owner or belongs to any
-/// organization that subscribes to the cache.
+/// Access is granted when the user is the cache owner, holds a direct
+/// cache-user role, or belongs to any organization that subscribes to the cache.
 async fn user_can_access_cache(state: &Arc<ServerState>, cache: &MCache, user: &MUser) -> bool {
     if cache.created_by == user.id {
+        return true;
+    }
+
+    let direct = ECacheUser::find()
+        .filter(CCacheUser::Cache.eq(cache.id))
+        .filter(CCacheUser::User.eq(user.id))
+        .one(&state.web_db)
+        .await
+        .unwrap_or(None);
+    if direct.is_some() {
         return true;
     }
 

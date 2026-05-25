@@ -4,13 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::access::{CacheAccess, Caller, load_cache};
+use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
+use crate::permissions::CachePermission;
 use axum::Extension;
 use axum::Json;
 use axum::extract::{Path, State};
 use entity::organization_cache::CacheSubscriptionMode;
-use gradient_core::db::get_cache_by_name;
 use gradient_core::types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
@@ -54,18 +56,6 @@ pub struct PatchUpstreamRequest {
     pub public_key: Option<String>,
 }
 
-// ── Access helpers ────────────────────────────────────────────────────────────
-
-async fn load_cache_for_user(
-    state: &Arc<ServerState>,
-    user_id: UserId,
-    cache_name: String,
-) -> WebResult<MCache> {
-    get_cache_by_name(Arc::clone(state), user_id, cache_name)
-        .await?
-        .or_not_found("Cache")
-}
-
 async fn load_upstream(
     state: &Arc<ServerState>,
     cache_id: CacheId,
@@ -78,14 +68,23 @@ async fn load_upstream(
         .or_not_found("Upstream cache")
 }
 
-// ── Handlers ──────────────────────────────────────────────────────────────────
-
 pub async fn get_cache_upstreams(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path(cache): Path<String>,
 ) -> WebResult<Json<BaseResponse<Vec<UpstreamCacheItem>>>> {
-    let cache = load_cache_for_user(&state, user.id, cache).await?;
+    let cache = load_cache(
+        &state,
+        Caller::User(&user),
+        api_key.as_ref(),
+        cache,
+        CacheAccess::Require {
+            permission: CachePermission::ViewCache,
+            reject_managed: false,
+        },
+    )
+    .await?;
 
     let upstreams = ECacheUpstream::find()
         .filter(CCacheUpstream::Cache.eq(cache.id))
@@ -108,10 +107,21 @@ pub async fn get_cache_upstreams(
 pub async fn put_cache_upstream(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path(cache): Path<String>,
     Json(body): Json<AddUpstreamRequest>,
 ) -> WebResult<Json<BaseResponse<CacheUpstreamId>>> {
-    let cache = load_cache_for_user(&state, user.id, cache).await?;
+    let cache = load_cache(
+        &state,
+        Caller::User(&user),
+        api_key.as_ref(),
+        cache,
+        CacheAccess::Require {
+            permission: CachePermission::ManageCacheUpstreams,
+            reject_managed: true,
+        },
+    )
+    .await?;
 
     let record = match body {
         AddUpstreamRequest::Internal {
@@ -119,7 +129,14 @@ pub async fn put_cache_upstream(
             display_name,
             mode,
         } => {
-            let upstream = load_cache_for_user(&state, user.id, cache_name).await?;
+            let upstream = load_cache(
+                &state,
+                Caller::User(&user),
+                api_key.as_ref(),
+                cache_name,
+                CacheAccess::Readable,
+            )
+            .await?;
             if upstream.id == cache.id {
                 return Err(WebError::bad_request(
                     "A cache cannot be its own upstream".to_string(),
@@ -158,10 +175,21 @@ pub async fn put_cache_upstream(
 pub async fn patch_cache_upstream(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path((cache, upstream_id)): Path<(String, CacheUpstreamId)>,
     Json(body): Json<PatchUpstreamRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let cache = load_cache_for_user(&state, user.id, cache).await?;
+    let cache = load_cache(
+        &state,
+        Caller::User(&user),
+        api_key.as_ref(),
+        cache,
+        CacheAccess::Require {
+            permission: CachePermission::ManageCacheUpstreams,
+            reject_managed: true,
+        },
+    )
+    .await?;
     let record = load_upstream(&state, cache.id, upstream_id).await?;
 
     let is_external = matches!(
@@ -174,7 +202,6 @@ pub async fn patch_cache_upstream(
         active.display_name = Set(name);
     }
     if is_external {
-        // External upstreams are always ReadOnly
         active.mode = Set(CacheSubscriptionMode::ReadOnly);
         if let Some(url) = body.url {
             active.url = Set(Some(url));
@@ -194,9 +221,20 @@ pub async fn patch_cache_upstream(
 pub async fn delete_cache_upstream(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path((cache, upstream_id)): Path<(String, CacheUpstreamId)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let cache = load_cache_for_user(&state, user.id, cache).await?;
+    let cache = load_cache(
+        &state,
+        Caller::User(&user),
+        api_key.as_ref(),
+        cache,
+        CacheAccess::Require {
+            permission: CachePermission::ManageCacheUpstreams,
+            reject_managed: true,
+        },
+    )
+    .await?;
     let record = load_upstream(&state, cache.id, upstream_id).await?;
 
     let active: ACacheUpstream = record.into();
