@@ -15,9 +15,8 @@ use crate::ci::{parse_owner_repo, reporting};
 use crate::types::input::{load_secret_bytes, vec_to_hex};
 use crate::types::{
     AProjectActionDelivery, ActionConfig, ActionType, BuildId, CEntryPoint, CIntegration,
-    CProjectAction, EBuild, ECommit, EDerivation, EEntryPoint, EEvaluation, EIntegration,
-    EOrganization, EProject, EProjectAction, EvaluationId, IntegrationId, MProjectAction,
-    ProjectActionDeliveryId,
+    CProjectAction, EBuild, ECommit, EEntryPoint, EEvaluation, EIntegration, EOrganization,
+    EProject, EProjectAction, EvaluationId, IntegrationId, MProjectAction, ProjectActionDeliveryId,
     ProjectId, ServerState,
 };
 use anyhow::{Context, Result, anyhow};
@@ -388,7 +387,15 @@ async fn execute_forge_status_report(
     let ci_status = forge_status_for_event(event)
         .ok_or_else(|| anyhow!("event '{}' has no forge status mapping", event))?;
 
-    let report = build_ci_report_from_payload(state, event, payload, ci_status).await?;
+    let Some(report) = build_ci_report_from_payload(state, event, payload, ci_status).await? else {
+        // Build event for an intermediate dependency (no entry_point row).
+        // Nothing to post - the entry-point check covers the user-visible
+        // status.
+        return Ok(ExecutorOk {
+            status_code: Some(204),
+            response_body: None,
+        });
+    };
     let context_key = report.context.clone();
     let reporter = build_reporter_for_integration(state, integration_id).await?;
     let new_id = reporter
@@ -451,12 +458,15 @@ fn check_run_id_for_context(eval: &crate::types::MEvaluation, context: &str) -> 
         .and_then(|v| v.as_i64())
 }
 
+/// Returns `Ok(None)` when the event is a per-build status update for a
+/// build that has no `entry_point` row - those are intermediate dependency
+/// builds, not user-visible CI targets, so we skip the forge POST.
 async fn build_ci_report_from_payload(
     state: &Arc<ServerState>,
     event: &str,
     payload: &JsonValue,
     status: CiStatus,
-) -> Result<CiReport> {
+) -> Result<Option<CiReport>> {
     let s = |k: &str| payload.get(k).and_then(|v| v.as_str()).map(String::from);
 
     let requested_actions = requested_actions_for(status.clone());
@@ -464,7 +474,7 @@ async fn build_ci_report_from_payload(
     if let (Some(owner), Some(repo), Some(sha), Some(context)) =
         (s("owner"), s("repo"), s("sha"), s("context"))
     {
-        return Ok(CiReport {
+        return Ok(Some(CiReport {
             owner,
             repo,
             sha,
@@ -474,7 +484,7 @@ async fn build_ci_report_from_payload(
             details_url: s("details_url"),
             existing_check_id: payload.get("check_run_id").and_then(|v| v.as_i64()),
             requested_actions,
-        });
+        }));
     }
 
     // `build_id` takes precedence over `evaluation_id` even when both are
@@ -545,24 +555,11 @@ async fn build_ci_report_from_payload(
         None => Vec::new(),
     };
 
-    // Fallback discriminator for builds that have no entry-point row (no
-    // `gradient.entry_points` config, or a derivation not matched by the
-    // wildcard). Without this every build event would collapse onto the
-    // Evaluation context and the per-build check would never appear.
-    let build_label = match &build {
-        Some(b) => {
-            if let Some(ep) = entry_points.first() {
-                Some(ep.eval.clone())
-            } else {
-                let drv = EDerivation::find_by_id(b.derivation)
-                    .one(&state.worker_db)
-                    .await
-                    .context("loading derivation for build label")?;
-                drv.map(|d| format!("{}.{}", d.name, d.architecture))
-            }
-        }
-        None => None,
-    };
+    // Only builds linked to a declared entry point get their own forge check.
+    // Intermediate dependency builds (e.g. `__assert_fail-builder`) share the
+    // entry-point check's status implicitly via the eval roll-up; emitting
+    // one check per derivation would spam the PR with per-dependency noise.
+    let entry_point_eval = entry_points.first().map(|ep| ep.eval.clone());
 
     let org_name = EOrganization::find_by_id(project.organization)
         .one(&state.worker_db)
@@ -573,16 +570,16 @@ async fn build_ci_report_from_payload(
 
     // Pick the check-run name based on which phase fired the event so the
     // Approval, Evaluation, and per-Build checks each show as their own line
-    // on the PR. Falls back to a generic project-scoped name for events
-    // outside the three known families.
+    // on the PR. A Build event for an intermediate dep (no entry_point row)
+    // produces `None` so the caller can skip the report entirely.
     let context = match reporting::check_context_kind_for_event(event) {
         Some(reporting::CheckContextKind::Approval) => {
             reporting::approval_check_context(&project.name)
         }
-        Some(reporting::CheckContextKind::Build) => build_label
-            .as_deref()
-            .map(|label| reporting::build_check_context(&project.name, label))
-            .unwrap_or_else(|| reporting::evaluation_check_context(&project.name)),
+        Some(reporting::CheckContextKind::Build) => match entry_point_eval.as_deref() {
+            Some(label) => reporting::build_check_context(&project.name, label),
+            None => return Ok(None),
+        },
         Some(reporting::CheckContextKind::Evaluation) | None => {
             reporting::evaluation_check_context(&project.name)
         }
@@ -595,7 +592,7 @@ async fn build_ci_report_from_payload(
         )
     });
 
-    Ok(CiReport {
+    Ok(Some(CiReport {
         owner,
         repo,
         sha: vec_to_hex(&commit.hash),
@@ -606,7 +603,7 @@ async fn build_ci_report_from_payload(
         existing_check_id: check_run_id_for_context(&evaluation, &context)
             .or_else(|| payload.get("check_run_id").and_then(|v| v.as_i64())),
         requested_actions,
-    })
+    }))
 }
 
 /// Find the project's first active `ForgeStatusReport` action and build a
@@ -1052,7 +1049,8 @@ mod tests {
             let report =
                 build_ci_report_from_payload(&state, "build.started", &payload, CiStatus::Running)
                     .await
-                    .expect("fast path should succeed");
+                    .expect("fast path should succeed")
+                    .expect("fast path always emits a report");
             assert_eq!(report.owner, "acme");
             assert_eq!(report.repo, "widgets");
             assert_eq!(report.sha, "deadbeef");
