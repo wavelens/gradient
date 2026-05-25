@@ -354,6 +354,13 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
                 .patch(caches::roles::patch_cache_role)
                 .delete(caches::roles::delete_cache_role),
         )
+        .route(
+            "/caches/{cache}/members",
+            get(caches::members::get_cache_members)
+                .post(caches::members::post_cache_member)
+                .patch(caches::members::patch_cache_member)
+                .delete(caches::members::delete_cache_member),
+        )
         .route("/user", get(user::get).delete(user::delete))
         .route("/user/search", get(user::get_search))
         .route(
