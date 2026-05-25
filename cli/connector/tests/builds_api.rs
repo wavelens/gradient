@@ -19,7 +19,11 @@ async fn get_build_returns_response() {
         .mount(&server)
         .await;
 
-    let client = Client::builder().base_url(server.uri()).token("t").build().unwrap();
+    let client = Client::builder()
+        .base_url(server.uri())
+        .token("t")
+        .build()
+        .unwrap();
     let build = client.builds().get("b1").await.unwrap();
     assert_eq!(build.id, "b1");
     assert_eq!(build.status, "Succeeded");
@@ -34,7 +38,15 @@ async fn download_file_returns_bytes() {
         .mount(&server)
         .await;
 
-    let client = Client::builder().base_url(server.uri()).token("t").build().unwrap();
-    let bytes = client.builds().download_file("b1", "result.tar.gz").await.unwrap();
+    let client = Client::builder()
+        .base_url(server.uri())
+        .token("t")
+        .build()
+        .unwrap();
+    let bytes = client
+        .builds()
+        .download_file("b1", "result.tar.gz")
+        .await
+        .unwrap();
     assert_eq!(&bytes[..], b"binary-data");
 }

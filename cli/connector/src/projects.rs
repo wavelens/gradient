@@ -122,134 +122,363 @@ pub struct ProjectsApi<'a>(pub(crate) &'a Client);
 
 impl ProjectsApi<'_> {
     pub async fn list(&self, org: &str) -> Result<PaginatedListResponse, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("projects/{org}"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("projects/{org}"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
     pub async fn available(&self, org: &str) -> Result<PaginatedListResponse, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("projects/{org}/available"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("projects/{org}/available"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
     pub async fn get(&self, org: &str, proj: &str) -> Result<ProjectResponse, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("projects/{org}/{proj}"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("projects/{org}/{proj}"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
-    pub async fn create(&self, org: &str, proj: &str, body: MakeProjectRequest) -> Result<String, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::PUT, &format!("projects/{org}/{proj}"), true)?
-            .json(&body);
+    pub async fn create(
+        &self,
+        org: &str,
+        proj: &str,
+        body: MakeProjectRequest,
+    ) -> Result<String, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::PUT,
+            &format!("projects/{org}/{proj}"),
+            true,
+        )?
+        .json(&body);
         http::decode(req.send().await?).await
     }
 
-    pub async fn update(&self, org: &str, proj: &str, body: PatchProjectRequest) -> Result<String, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::PATCH, &format!("projects/{org}/{proj}"), true)?
-            .json(&body);
+    pub async fn update(
+        &self,
+        org: &str,
+        proj: &str,
+        body: PatchProjectRequest,
+    ) -> Result<String, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::PATCH,
+            &format!("projects/{org}/{proj}"),
+            true,
+        )?
+        .json(&body);
         http::decode(req.send().await?).await
     }
 
     pub async fn delete(&self, org: &str, proj: &str) -> Result<String, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::DELETE, &format!("projects/{org}/{proj}"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::DELETE,
+            &format!("projects/{org}/{proj}"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
     pub async fn details(&self, org: &str, proj: &str) -> Result<ProjectDetails, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("projects/{org}/{proj}/details"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("projects/{org}/{proj}/details"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
-    pub async fn entry_points(&self, org: &str, proj: &str) -> Result<Vec<EntryPoint>, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("projects/{org}/{proj}/entry-points"), true)?;
+    pub async fn entry_points(
+        &self,
+        org: &str,
+        proj: &str,
+    ) -> Result<Vec<EntryPoint>, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("projects/{org}/{proj}/entry-points"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
     pub async fn check_repository(&self, org: &str, proj: &str) -> Result<String, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::POST, &format!("projects/{org}/{proj}/check-repository"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::POST,
+            &format!("projects/{org}/{proj}/check-repository"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
     pub async fn evaluate(&self, org: &str, proj: &str) -> Result<String, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::POST, &format!("projects/{org}/{proj}/evaluate"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::POST,
+            &format!("projects/{org}/{proj}/evaluate"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
-    pub async fn evaluations(&self, org: &str, proj: &str) -> Result<Vec<EvaluationSummary>, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("projects/{org}/{proj}/evaluations"), true)?;
+    pub async fn evaluations(
+        &self,
+        org: &str,
+        proj: &str,
+    ) -> Result<Vec<EvaluationSummary>, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("projects/{org}/{proj}/evaluations"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
     pub async fn enable(&self, org: &str, proj: &str) -> Result<String, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::POST, &format!("projects/{org}/{proj}/active"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::POST,
+            &format!("projects/{org}/{proj}/active"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
     pub async fn disable(&self, org: &str, proj: &str) -> Result<String, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::DELETE, &format!("projects/{org}/{proj}/active"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::DELETE,
+            &format!("projects/{org}/{proj}/active"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
-    pub async fn integration(&self, org: &str, proj: &str) -> Result<ProjectIntegration, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("projects/{org}/{proj}/integration"), true)?;
+    pub async fn integration(
+        &self,
+        org: &str,
+        proj: &str,
+    ) -> Result<ProjectIntegration, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("projects/{org}/{proj}/integration"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
     pub async fn metrics(&self, org: &str, proj: &str) -> Result<ProjectMetrics, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("projects/{org}/{proj}/metrics"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("projects/{org}/{proj}/metrics"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
-    pub async fn entry_point_metrics(&self, org: &str, proj: &str) -> Result<Vec<EntryPointMetrics>, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("projects/{org}/{proj}/entry-point-metrics"), true)?;
+    pub async fn entry_point_metrics(
+        &self,
+        org: &str,
+        proj: &str,
+    ) -> Result<Vec<EntryPointMetrics>, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("projects/{org}/{proj}/entry-point-metrics"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
-    pub async fn entry_point_downloads(&self, org: &str, proj: &str, eval: &str, filename: &str) -> Result<bytes::Bytes, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("projects/{org}/{proj}/entry-point-downloads?eval={eval}&filename={filename}"), false)?;
+    pub async fn entry_point_downloads(
+        &self,
+        org: &str,
+        proj: &str,
+        eval: &str,
+        filename: &str,
+    ) -> Result<bytes::Bytes, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("projects/{org}/{proj}/entry-point-downloads?eval={eval}&filename={filename}"),
+            false,
+        )?;
         let res = req.send().await?;
         let status = res.status();
         if status == reqwest::StatusCode::UNAUTHORIZED {
             return Err(ConnectorError::Unauthorized);
         }
         if !status.is_success() {
-            return Err(ConnectorError::Api { status, message: res.text().await.unwrap_or_default() });
+            return Err(ConnectorError::Api {
+                status,
+                message: res.text().await.unwrap_or_default(),
+            });
         }
         Ok(res.bytes().await?)
     }
 
     pub async fn badge(&self, org: &str, proj: &str) -> Result<String, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("projects/{org}/{proj}/badge"), false)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("projects/{org}/{proj}/badge"),
+            false,
+        )?;
         http::decode_raw_string(req.send().await?).await
     }
 
     pub async fn triggers(&self, org: &str, proj: &str) -> Result<Vec<Trigger>, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("projects/{org}/{proj}/triggers"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("projects/{org}/{proj}/triggers"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
-    pub async fn create_trigger(&self, org: &str, proj: &str, body: MakeTriggerRequest) -> Result<String, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::POST, &format!("projects/{org}/{proj}/triggers"), true)?
-            .json(&body);
+    pub async fn create_trigger(
+        &self,
+        org: &str,
+        proj: &str,
+        body: MakeTriggerRequest,
+    ) -> Result<String, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::POST,
+            &format!("projects/{org}/{proj}/triggers"),
+            true,
+        )?
+        .json(&body);
         http::decode(req.send().await?).await
     }
 
-    pub async fn get_trigger(&self, org: &str, proj: &str, id: &str) -> Result<Trigger, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("projects/{org}/{proj}/triggers/{id}"), true)?;
+    pub async fn get_trigger(
+        &self,
+        org: &str,
+        proj: &str,
+        id: &str,
+    ) -> Result<Trigger, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("projects/{org}/{proj}/triggers/{id}"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
-    pub async fn update_trigger(&self, org: &str, proj: &str, id: &str, body: PatchTriggerRequest) -> Result<String, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::PATCH, &format!("projects/{org}/{proj}/triggers/{id}"), true)?
-            .json(&body);
+    pub async fn update_trigger(
+        &self,
+        org: &str,
+        proj: &str,
+        id: &str,
+        body: PatchTriggerRequest,
+    ) -> Result<String, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::PATCH,
+            &format!("projects/{org}/{proj}/triggers/{id}"),
+            true,
+        )?
+        .json(&body);
         http::decode(req.send().await?).await
     }
 
-    pub async fn delete_trigger(&self, org: &str, proj: &str, id: &str) -> Result<String, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::DELETE, &format!("projects/{org}/{proj}/triggers/{id}"), true)?;
+    pub async fn delete_trigger(
+        &self,
+        org: &str,
+        proj: &str,
+        id: &str,
+    ) -> Result<String, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::DELETE,
+            &format!("projects/{org}/{proj}/triggers/{id}"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
-    pub async fn test_trigger(&self, org: &str, proj: &str, id: &str) -> Result<String, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::POST, &format!("projects/{org}/{proj}/triggers/{id}/test"), true)?;
+    pub async fn test_trigger(
+        &self,
+        org: &str,
+        proj: &str,
+        id: &str,
+    ) -> Result<String, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::POST,
+            &format!("projects/{org}/{proj}/triggers/{id}/test"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 }

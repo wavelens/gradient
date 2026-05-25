@@ -66,7 +66,12 @@ pub enum Commands {
 
 pub async fn handle(cmd: Commands, out: Output) {
     match cmd {
-        Commands::Create { name, display_name, description, priority } => {
+        Commands::Create {
+            name,
+            display_name,
+            description,
+            priority,
+        } => {
             let input_fields = [
                 ("Name", name),
                 ("Display Name", display_name),
@@ -86,12 +91,16 @@ pub async fn handle(cmd: Commands, out: Output) {
             };
 
             let client = client_from_config(out);
-            match client.caches().create(MakeCacheRequest {
-                name,
-                display_name: input.get("Display Name").unwrap().clone(),
-                description: input.get("Description").unwrap().clone(),
-                priority,
-            }).await {
+            match client
+                .caches()
+                .create(MakeCacheRequest {
+                    name,
+                    display_name: input.get("Display Name").unwrap().clone(),
+                    description: input.get("Description").unwrap().clone(),
+                    priority,
+                })
+                .await
+            {
                 Ok(_) => {
                     out.ok(&serde_json::json!({"created": true}));
                     out.human("Cache created.");
@@ -117,7 +126,12 @@ pub async fn handle(cmd: Commands, out: Output) {
             }
         }
 
-        Commands::Edit { name, display_name, description, priority } => {
+        Commands::Edit {
+            name,
+            display_name,
+            description,
+            priority,
+        } => {
             let input_fields = [
                 ("Display Name", display_name),
                 ("Description", description),
@@ -135,12 +149,16 @@ pub async fn handle(cmd: Commands, out: Output) {
             };
 
             let client = client_from_config(out);
-            match client.caches().create(MakeCacheRequest {
-                name,
-                display_name: input.get("Display Name").unwrap().clone(),
-                description: input.get("Description").unwrap().clone(),
-                priority,
-            }).await {
+            match client
+                .caches()
+                .create(MakeCacheRequest {
+                    name,
+                    display_name: input.get("Display Name").unwrap().clone(),
+                    description: input.get("Description").unwrap().clone(),
+                    priority,
+                })
+                .await
+            {
                 Ok(_) => {
                     out.ok(&serde_json::json!({"updated": true}));
                     out.human("Cache updated.");
@@ -171,7 +189,12 @@ pub async fn handle(cmd: Commands, out: Output) {
             }
         }
 
-        Commands::InstallNetrc { server, token, cache, netrc_file } => {
+        Commands::InstallNetrc {
+            server,
+            token,
+            cache,
+            netrc_file,
+        } => {
             let token = match token {
                 Some(t) if !t.is_empty() => t,
                 _ => {
@@ -223,7 +246,10 @@ pub async fn handle(cmd: Commands, out: Output) {
             }
 
             fs::write(&netrc_file, &updated).unwrap_or_else(|e| {
-                out.err(ExitKind::Api, format!("Failed to write '{}': {}", netrc_file, e));
+                out.err(
+                    ExitKind::Api,
+                    format!("Failed to write '{}': {}", netrc_file, e),
+                );
             });
 
             out.human(format!(

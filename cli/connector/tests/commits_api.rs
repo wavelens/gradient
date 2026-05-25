@@ -11,13 +11,19 @@ async fn get_commit_returns_response() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/api/v1/commits/c1"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(ok(serde_json::json!({
-            "id": "c1", "message": "feat: add thing", "hash": "abc123", "author_name": "Alice"
-        }))))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(ok(serde_json::json!({
+                "id": "c1", "message": "feat: add thing", "hash": "abc123", "author_name": "Alice"
+            }))),
+        )
         .mount(&server)
         .await;
 
-    let client = Client::builder().base_url(server.uri()).token("t").build().unwrap();
+    let client = Client::builder()
+        .base_url(server.uri())
+        .token("t")
+        .build()
+        .unwrap();
     let commit = client.commits().get("c1").await.unwrap();
     assert_eq!(commit.id, "c1");
     assert_eq!(commit.author_name, "Alice");

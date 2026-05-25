@@ -15,7 +15,11 @@ async fn list_admin_workers_returns_vec() {
         .mount(&server)
         .await;
 
-    let client = Client::builder().base_url(server.uri()).token("t").build().unwrap();
+    let client = Client::builder()
+        .base_url(server.uri())
+        .token("t")
+        .build()
+        .unwrap();
     let workers = client.admin().workers().await.unwrap();
     assert!(workers.is_empty());
 }

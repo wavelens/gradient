@@ -32,7 +32,10 @@ pub async fn handle_download(
         None => pick_latest_evaluation(&client, project.as_deref(), out).await,
     };
 
-    out.human(format!("Fetching artefact tree for evaluation {}...", eval_id));
+    out.human(format!(
+        "Fetching artefact tree for evaluation {}...",
+        eval_id
+    ));
 
     let tree = match client.evals().artefacts(&eval_id).await {
         Ok(t) => t,
@@ -68,7 +71,10 @@ pub async fn handle_download(
 
     if !out_dir.exists() {
         std::fs::create_dir_all(&out_dir).unwrap_or_else(|e| {
-            out.err(ExitKind::Api, format!("Failed to create {}: {}", out_dir.display(), e));
+            out.err(
+                ExitKind::Api,
+                format!("Failed to create {}: {}", out_dir.display(), e),
+            );
         });
     }
 
@@ -78,20 +84,33 @@ pub async fn handle_download(
         let p = &flat[idx];
         let display_name = product_filename(p.product);
         out.human(format!("Downloading {}...", display_name));
-        let bytes = match client.builds().download_file(&p.build_id, &display_name).await {
+        let bytes = match client
+            .builds()
+            .download_file(&p.build_id, &display_name)
+            .await
+        {
             Ok(b) => b,
-            Err(e) => out.err(to_exit_kind(&e), format!("Failed to download {}: {}", display_name, e)),
+            Err(e) => out.err(
+                to_exit_kind(&e),
+                format!("Failed to download {}: {}", display_name, e),
+            ),
         };
         let dest = out_dir.join(safe_relative_name(&display_name));
         if let Some(parent) = dest.parent()
             && !parent.as_os_str().is_empty()
         {
             std::fs::create_dir_all(parent).unwrap_or_else(|e| {
-                out.err(ExitKind::Api, format!("Failed to create {}: {}", parent.display(), e));
+                out.err(
+                    ExitKind::Api,
+                    format!("Failed to create {}: {}", parent.display(), e),
+                );
             });
         }
         std::fs::write(&dest, bytes).unwrap_or_else(|e| {
-            out.err(ExitKind::Api, format!("Failed to write {}: {}", dest.display(), e));
+            out.err(
+                ExitKind::Api,
+                format!("Failed to write {}: {}", dest.display(), e),
+            );
         });
         out.human(format!("  wrote {}", dest.display()));
         downloaded.push(dest.display().to_string());
@@ -142,7 +161,11 @@ fn safe_relative_name(name: &str) -> PathBuf {
             _ => buf.push(comp.as_os_str()),
         }
     }
-    if buf.as_os_str().is_empty() { PathBuf::from("download") } else { buf }
+    if buf.as_os_str().is_empty() {
+        PathBuf::from("download")
+    } else {
+        buf
+    }
 }
 
 fn interactive_select(flat: &[FlatProduct<'_>]) -> Vec<usize> {
@@ -154,10 +177,16 @@ fn interactive_select(flat: &[FlatProduct<'_>]) -> Vec<usize> {
             p.attr,
             p.output_name,
             p.product.path,
-            p.product.size.map(|s| format!(" ({})", human_size(s))).unwrap_or_default(),
+            p.product
+                .size
+                .map(|s| format!(" ({})", human_size(s)))
+                .unwrap_or_default(),
         );
     }
-    print!("\nSelect products (comma-separated 1-{}, ranges like 1-3, or 'all'): ", flat.len());
+    print!(
+        "\nSelect products (comma-separated 1-{}, ranges like 1-3, or 'all'): ",
+        flat.len()
+    );
     io::stdout().flush().unwrap();
     let mut input = String::new();
     io::stdin().read_line(&mut input).unwrap();
@@ -182,8 +211,14 @@ fn parse_selection_spec(spec: &str, total: usize) -> Result<Vec<usize>, String> 
             continue;
         }
         if let Some((lo, hi)) = part.split_once('-') {
-            let lo: usize = lo.trim().parse().map_err(|_| format!("invalid index '{}'", lo))?;
-            let hi: usize = hi.trim().parse().map_err(|_| format!("invalid index '{}'", hi))?;
+            let lo: usize = lo
+                .trim()
+                .parse()
+                .map_err(|_| format!("invalid index '{}'", lo))?;
+            let hi: usize = hi
+                .trim()
+                .parse()
+                .map_err(|_| format!("invalid index '{}'", hi))?;
             if lo == 0 || hi == 0 || lo > total || hi > total || lo > hi {
                 return Err(format!("range '{}' out of bounds 1..={}", part, total));
             }
@@ -191,7 +226,9 @@ fn parse_selection_spec(spec: &str, total: usize) -> Result<Vec<usize>, String> 
                 out.insert(i - 1);
             }
         } else {
-            let n: usize = part.parse().map_err(|_| format!("invalid index '{}'", part))?;
+            let n: usize = part
+                .parse()
+                .map_err(|_| format!("invalid index '{}'", part))?;
             if n == 0 || n > total {
                 return Err(format!("index '{}' out of bounds 1..={}", n, total));
             }
@@ -239,7 +276,11 @@ fn human_size(bytes: i64) -> String {
         value /= 1024.0;
         i += 1;
     }
-    if i == 0 { format!("{} {}", bytes, UNITS[0]) } else { format!("{:.1} {}", value, UNITS[i]) }
+    if i == 0 {
+        format!("{} {}", bytes, UNITS[0])
+    } else {
+        format!("{:.1} {}", value, UNITS[i])
+    }
 }
 
 async fn pick_latest_evaluation(
@@ -253,7 +294,10 @@ async fn pick_latest_evaluation(
         Err(e) => out.err(to_exit_kind(&e), e),
     };
     let latest = evaluations.into_iter().next().unwrap_or_else(|| {
-        out.err(ExitKind::Api, format!("No evaluations found for {}/{}.", organization, project));
+        out.err(
+            ExitKind::Api,
+            format!("No evaluations found for {}/{}.", organization, project),
+        );
     });
     out.human(format!(
         "Using latest evaluation {} for project {}/{}.",
@@ -271,7 +315,10 @@ fn resolve_project(arg: Option<&str>, out: Output) -> (String, String) {
             .unwrap_or_else(|| {
                 out.err(
                     ExitKind::Usage,
-                    format!("--project '{}' has no org prefix and no organization is selected.", spec),
+                    format!(
+                        "--project '{}' has no org prefix and no organization is selected.",
+                        spec
+                    ),
                 );
             });
         return (organization, spec.to_string());
@@ -349,10 +396,14 @@ mod tests {
     fn select_multiple_attrs() {
         let tree = make_tree();
         let flat = flatten_products(&tree);
-        let sel = select_by_attrs(&flat, &[
-            "packages.x86_64-linux.my-app".to_string(),
-            "packages.x86_64-linux.cli".to_string(),
-        ]).unwrap();
+        let sel = select_by_attrs(
+            &flat,
+            &[
+                "packages.x86_64-linux.my-app".to_string(),
+                "packages.x86_64-linux.cli".to_string(),
+            ],
+        )
+        .unwrap();
         assert_eq!(sel, vec![0, 1]);
     }
 

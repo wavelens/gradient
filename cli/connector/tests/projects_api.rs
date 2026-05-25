@@ -11,14 +11,20 @@ async fn list_projects_returns_paginated() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/api/v1/projects/my-org"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(ok(serde_json::json!({
-            "items": [{"id": "p1", "name": "proj"}],
-            "total": 1, "page": 1, "per_page": 10
-        }))))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(ok(serde_json::json!({
+                "items": [{"id": "p1", "name": "proj"}],
+                "total": 1, "page": 1, "per_page": 10
+            }))),
+        )
         .mount(&server)
         .await;
 
-    let client = Client::builder().base_url(server.uri()).token("t").build().unwrap();
+    let client = Client::builder()
+        .base_url(server.uri())
+        .token("t")
+        .build()
+        .unwrap();
     let res = client.projects().list("my-org").await.unwrap();
     assert_eq!(res.items.len(), 1);
 }
@@ -32,7 +38,11 @@ async fn badge_returns_svg_string() {
         .mount(&server)
         .await;
 
-    let client = Client::builder().base_url(server.uri()).token("t").build().unwrap();
+    let client = Client::builder()
+        .base_url(server.uri())
+        .token("t")
+        .build()
+        .unwrap();
     let svg = client.projects().badge("org", "proj").await.unwrap();
     assert!(svg.contains("<svg>"));
 }

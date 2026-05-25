@@ -55,29 +55,73 @@ pub struct WorkersApi<'a>(pub(crate) &'a Client);
 
 impl WorkersApi<'_> {
     pub async fn list(&self, org: &str) -> Result<Vec<Worker>, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("orgs/{org}/workers"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("orgs/{org}/workers"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
-    pub async fn create(&self, org: &str, body: MakeWorkerRequest) -> Result<RegisterWorkerResponse, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::POST, &format!("orgs/{org}/workers"), true)?
-            .json(&body);
+    pub async fn create(
+        &self,
+        org: &str,
+        body: MakeWorkerRequest,
+    ) -> Result<RegisterWorkerResponse, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::POST,
+            &format!("orgs/{org}/workers"),
+            true,
+        )?
+        .json(&body);
         http::decode(req.send().await?).await
     }
 
     pub async fn get(&self, org: &str, worker_id: &str) -> Result<Worker, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("orgs/{org}/workers/{worker_id}"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("orgs/{org}/workers/{worker_id}"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
-    pub async fn update(&self, org: &str, worker_id: &str, body: PatchWorkerRequest) -> Result<String, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::PATCH, &format!("orgs/{org}/workers/{worker_id}"), true)?
-            .json(&body);
+    pub async fn update(
+        &self,
+        org: &str,
+        worker_id: &str,
+        body: PatchWorkerRequest,
+    ) -> Result<String, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::PATCH,
+            &format!("orgs/{org}/workers/{worker_id}"),
+            true,
+        )?
+        .json(&body);
         http::decode(req.send().await?).await
     }
 
     pub async fn delete(&self, org: &str, worker_id: &str) -> Result<String, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::DELETE, &format!("orgs/{org}/workers/{worker_id}"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::DELETE,
+            &format!("orgs/{org}/workers/{worker_id}"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 }

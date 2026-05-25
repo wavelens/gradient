@@ -15,7 +15,14 @@ pub struct CommitsApi<'a>(pub(crate) &'a Client);
 
 impl CommitsApi<'_> {
     pub async fn get(&self, commit: &str) -> Result<CommitResponse, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("commits/{commit}"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("commits/{commit}"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 }

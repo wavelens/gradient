@@ -88,64 +88,154 @@ pub struct UserApi<'a>(pub(crate) &'a Client);
 
 impl UserApi<'_> {
     pub async fn get(&self) -> Result<UserResponse, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, "user", true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            "user",
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
-    pub async fn update_settings(&self, body: PatchUserSettingsRequest) -> Result<String, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::PATCH, "user/settings", true)?
-            .json(&body);
+    pub async fn update_settings(
+        &self,
+        body: PatchUserSettingsRequest,
+    ) -> Result<String, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::PATCH,
+            "user/settings",
+            true,
+        )?
+        .json(&body);
         http::decode(req.send().await?).await
     }
 
     pub async fn keys(&self) -> Result<Vec<ApiKey>, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, "user/keys", true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            "user/keys",
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
-    pub async fn create_key(&self, body: MakeApiKeyRequest) -> Result<CreatedApiKey, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::POST, "user/keys", true)?
-            .json(&body);
+    pub async fn create_key(
+        &self,
+        body: MakeApiKeyRequest,
+    ) -> Result<CreatedApiKey, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::POST,
+            "user/keys",
+            true,
+        )?
+        .json(&body);
         http::decode(req.send().await?).await
     }
 
     pub async fn key_permissions(&self) -> Result<Vec<String>, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, "user/keys/permissions", true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            "user/keys/permissions",
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
     pub async fn get_key(&self, api_id: &str) -> Result<ApiKey, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("user/keys/{api_id}"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("user/keys/{api_id}"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
     pub async fn delete_key(&self, api_id: &str) -> Result<String, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::DELETE, &format!("user/keys/{api_id}"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::DELETE,
+            &format!("user/keys/{api_id}"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
     pub async fn revoke_key(&self, api_id: &str) -> Result<String, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::POST, &format!("user/keys/{api_id}/revoke"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::POST,
+            &format!("user/keys/{api_id}/revoke"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
     pub async fn sessions(&self) -> Result<Vec<Session>, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, "user/sessions", true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            "user/sessions",
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
     pub async fn delete_session(&self, session_id: &str) -> Result<String, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::DELETE, &format!("user/sessions/{session_id}"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::DELETE,
+            &format!("user/sessions/{session_id}"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
     pub async fn audit_log(&self) -> Result<Vec<AuditEntry>, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, "user/audit-log", true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            "user/audit-log",
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
     pub async fn search(&self, query: &str) -> Result<Vec<UserSearchResult>, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("user/search?q={query}"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("user/search?q={query}"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 }

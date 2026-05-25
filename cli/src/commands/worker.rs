@@ -38,7 +38,12 @@ pub enum Commands {
 
 pub async fn handle(cmd: Commands, out: Output) {
     match cmd {
-        Commands::Register { worker_id, display_name, url, token } => {
+        Commands::Register {
+            worker_id,
+            display_name,
+            url,
+            token,
+        } => {
             let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
                 Some(id) => id,
                 _ => out.err(
@@ -50,15 +55,22 @@ pub async fn handle(cmd: Commands, out: Output) {
             let token_provided = token.is_some();
             let client = client_from_config(out);
 
-            match client.workers().create(&organization, MakeWorkerRequest {
-                worker_id,
-                display_name,
-                url,
-                token,
-                enable_fetch: None,
-                enable_eval: None,
-                enable_build: None,
-            }).await {
+            match client
+                .workers()
+                .create(
+                    &organization,
+                    MakeWorkerRequest {
+                        worker_id,
+                        display_name,
+                        url,
+                        token,
+                        enable_fetch: None,
+                        enable_eval: None,
+                        enable_build: None,
+                    },
+                )
+                .await
+            {
                 Ok(resp) => {
                     out.ok(&resp);
                     out.human("Worker registered.");
@@ -92,8 +104,13 @@ pub async fn handle(cmd: Commands, out: Output) {
                         out.human("No workers registered.");
                     } else {
                         for w in workers {
-                            let status = if w.live.is_some() { "online" } else { "offline" };
-                            let url_part = w.url.map(|u| format!(" (url: {})", u)).unwrap_or_default();
+                            let status = if w.live.is_some() {
+                                "online"
+                            } else {
+                                "offline"
+                            };
+                            let url_part =
+                                w.url.map(|u| format!(" (url: {})", u)).unwrap_or_default();
                             out.human(format!(
                                 "{} \"{}\": {} [{}]{}",
                                 w.worker_id, w.display_name, w.registered_at, status, url_part

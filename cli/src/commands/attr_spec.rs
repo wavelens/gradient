@@ -36,7 +36,10 @@ mod tests {
 
     #[test]
     fn parse_multiple_attrs_comma_separated() {
-        assert_eq!(parse("#a,#b,c"), Ok(vec!["a".into(), "b".into(), "c".into()]));
+        assert_eq!(
+            parse("#a,#b,c"),
+            Ok(vec!["a".into(), "b".into(), "c".into()])
+        );
     }
 
     #[test]

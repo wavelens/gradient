@@ -2,7 +2,11 @@ use connector::Client;
 
 #[tokio::test]
 async fn all_accessors_compile() {
-    let client = Client::builder().base_url("http://localhost").token("t").build().unwrap();
+    let client = Client::builder()
+        .base_url("http://localhost")
+        .token("t")
+        .build()
+        .unwrap();
     let _ = client.admin();
     let _ = client.auth();
     let _ = client.build_requests();

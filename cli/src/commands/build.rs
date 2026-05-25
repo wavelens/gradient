@@ -36,22 +36,30 @@ pub async fn handle_build(
     let client = client_from_config(out);
 
     let cwd = std::env::current_dir().unwrap_or_else(|e| {
-        if !quiet { out.progress(format!("Failed to read current directory: {}", e)); }
+        if !quiet {
+            out.progress(format!("Failed to read current directory: {}", e));
+        }
         exit(1);
     });
 
     let repo = git2::Repository::discover(&cwd).unwrap_or_else(|e| {
-        if !quiet { out.progress(format!("Not in a git repository: {}", e)); }
+        if !quiet {
+            out.progress(format!("Not in a git repository: {}", e));
+        }
         exit(1);
     });
 
     let workdir = repo.workdir().map(Path::to_path_buf).unwrap_or_else(|| {
-        if !quiet { out.progress("Bare repositories are not supported."); }
+        if !quiet {
+            out.progress("Bare repositories are not supported.");
+        }
         exit(1);
     });
 
     let index = repo.index().unwrap_or_else(|e| {
-        if !quiet { out.progress(format!("Failed to read git index: {}", e)); }
+        if !quiet {
+            out.progress(format!("Failed to read git index: {}", e));
+        }
         exit(1);
     });
 
@@ -66,35 +74,53 @@ pub async fn handle_build(
             continue;
         }
         match hash_file(&abs) {
-            Ok((hash, size)) => entries.push(TrackedFile { path, hash, size, abs }),
+            Ok((hash, size)) => entries.push(TrackedFile {
+                path,
+                hash,
+                size,
+                abs,
+            }),
             Err(e) => {
-                if !quiet { out.progress(format!("Failed to hash {}: {}", abs.display(), e)); }
+                if !quiet {
+                    out.progress(format!("Failed to hash {}: {}", abs.display(), e));
+                }
                 exit(1);
             }
         }
     }
 
     if entries.is_empty() {
-        if !quiet { out.progress("No tracked files to upload."); }
+        if !quiet {
+            out.progress("No tracked files to upload.");
+        }
         exit(1);
     }
 
     if !quiet {
-        out.human(format!("Sending manifest for {} tracked files...", entries.len()));
+        out.human(format!(
+            "Sending manifest for {} tracked files...",
+            entries.len()
+        ));
     }
 
     let manifest_req = BuildManifestRequest {
         organization,
         files: entries
             .iter()
-            .map(|e| ManifestFile { path: e.path.clone(), hash: e.hash.clone(), size: e.size })
+            .map(|e| ManifestFile {
+                path: e.path.clone(),
+                hash: e.hash.clone(),
+                size: e.size,
+            })
             .collect(),
     };
 
     let manifest = match client.build_requests().submit_manifest(manifest_req).await {
         Ok(m) => m,
         Err(e) => {
-            if !quiet { out.progress(format!("Manifest rejected: {}", e)); }
+            if !quiet {
+                out.progress(format!("Manifest rejected: {}", e));
+            }
             exit(1);
         }
     };
@@ -121,14 +147,22 @@ pub async fn handle_build(
                     form = form.part(entry.hash.clone(), part);
                 }
                 Err(e) => {
-                    if !quiet { out.progress(format!("Failed to read {}: {}", entry.abs.display(), e)); }
+                    if !quiet {
+                        out.progress(format!("Failed to read {}: {}", entry.abs.display(), e));
+                    }
                     exit(1);
                 }
             }
         }
 
-        if let Err(e) = client.build_requests().upload_blobs(&manifest.session, form).await {
-            if !quiet { out.progress(format!("Failed to upload blobs: {}", e)); }
+        if let Err(e) = client
+            .build_requests()
+            .upload_blobs(&manifest.session, form)
+            .await
+        {
+            if !quiet {
+                out.progress(format!("Failed to upload blobs: {}", e));
+            }
             exit(1);
         }
     }
@@ -140,7 +174,9 @@ pub async fn handle_build(
     {
         Ok(d) => d,
         Err(e) => {
-            if !quiet { out.progress(format!("Failed to dispatch build request: {}", e)); }
+            if !quiet {
+                out.progress(format!("Failed to dispatch build request: {}", e));
+            }
             exit(1);
         }
     };
@@ -166,7 +202,9 @@ pub async fn handle_build(
     let stream = match evals.stream_builds(&dispatch.evaluation).await {
         Ok(s) => s,
         Err(e) => {
-            if !quiet { out.progress(format!("Failed to stream evaluation logs: {}", e)); }
+            if !quiet {
+                out.progress(format!("Failed to stream evaluation logs: {}", e));
+            }
             return;
         }
     };

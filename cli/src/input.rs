@@ -20,7 +20,10 @@ pub fn client_from_config(out: Output) -> Client {
         .get(&ConfigKey::Server)
         .and_then(|v| v.clone())
         .unwrap_or_else(|| {
-            out.err(ExitKind::Usage, "Server URL not set. Use `gradient config server <url>`.");
+            out.err(
+                ExitKind::Usage,
+                "Server URL not set. Use `gradient config server <url>`.",
+            );
         });
     let token = cfg
         .get(&ConfigKey::AuthToken)
@@ -30,7 +33,8 @@ pub fn client_from_config(out: Output) -> Client {
     if let Some(t) = token {
         b = b.token(t);
     }
-    b.build().unwrap_or_else(|e| out.err(ExitKind::Api, format!("client init failed: {}", e)))
+    b.build()
+        .unwrap_or_else(|e| out.err(ExitKind::Api, format!("client init failed: {}", e)))
 }
 
 pub fn handle_input(values: Vec<(String, Option<String>)>, skip: bool) -> HashMap<String, String> {
@@ -52,7 +56,11 @@ pub fn handle_input(values: Vec<(String, Option<String>)>, skip: bool) -> HashMa
             format!(
                 "{}: {}\n",
                 k,
-                if let Some(val) = v { val.clone() } else { "".to_string() }
+                if let Some(val) = v {
+                    val.clone()
+                } else {
+                    "".to_string()
+                }
             )
         })
         .collect();
@@ -63,7 +71,10 @@ pub fn handle_input(values: Vec<(String, Option<String>)>, skip: bool) -> HashMa
     file.write_all(input_fields.as_bytes()).unwrap();
 
     let editor = std::env::var("EDITOR").unwrap();
-    let output = Command::new(editor.clone()).arg(name.clone()).status().unwrap();
+    let output = Command::new(editor.clone())
+        .arg(name.clone())
+        .status()
+        .unwrap();
 
     if !output.success() {
         println!("Failed to open editor {}", editor);

@@ -108,126 +108,309 @@ pub struct CachesApi<'a>(pub(crate) &'a Client);
 
 impl CachesApi<'_> {
     pub async fn list(&self) -> Result<PaginatedListResponse, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, "caches", true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            "caches",
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
     pub async fn create(&self, body: MakeCacheRequest) -> Result<String, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::PUT, "caches", true)?
-            .json(&body);
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::PUT,
+            "caches",
+            true,
+        )?
+        .json(&body);
         http::decode(req.send().await?).await
     }
 
     pub async fn available(&self) -> Result<PaginatedListResponse, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, "caches/available", true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            "caches/available",
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
     pub async fn get(&self, cache: &str) -> Result<CacheResponse, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("caches/{cache}"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("caches/{cache}"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
-    pub async fn update(&self, cache: &str, body: PatchCacheRequest) -> Result<String, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::PATCH, &format!("caches/{cache}"), true)?
-            .json(&body);
+    pub async fn update(
+        &self,
+        cache: &str,
+        body: PatchCacheRequest,
+    ) -> Result<String, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::PATCH,
+            &format!("caches/{cache}"),
+            true,
+        )?
+        .json(&body);
         http::decode(req.send().await?).await
     }
 
     pub async fn delete(&self, cache: &str) -> Result<String, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::DELETE, &format!("caches/{cache}"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::DELETE,
+            &format!("caches/{cache}"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
     pub async fn active(&self, cache: &str) -> Result<bool, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("caches/{cache}/active"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("caches/{cache}/active"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
     pub async fn set_active(&self, cache: &str, active: bool) -> Result<String, ConnectorError> {
         let method = if active { Method::PUT } else { Method::DELETE };
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), method, &format!("caches/{cache}/active"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            method,
+            &format!("caches/{cache}/active"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
     pub async fn public(&self, cache: &str) -> Result<bool, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("caches/{cache}/public"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("caches/{cache}/public"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
     pub async fn set_public(&self, cache: &str, public: bool) -> Result<String, ConnectorError> {
         let method = if public { Method::PUT } else { Method::DELETE };
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), method, &format!("caches/{cache}/public"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            method,
+            &format!("caches/{cache}/public"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
     pub async fn key(&self, cache: &str) -> Result<String, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("caches/{cache}/key"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("caches/{cache}/key"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
     pub async fn public_key(&self, cache: &str) -> Result<String, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("caches/{cache}/public-key"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("caches/{cache}/public-key"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
     pub async fn stats(&self, cache: &str) -> Result<CacheStats, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("caches/{cache}/stats"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("caches/{cache}/stats"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
     pub async fn upstreams(&self, cache: &str) -> Result<Vec<Upstream>, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("caches/{cache}/upstreams"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("caches/{cache}/upstreams"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
-    pub async fn add_upstream(&self, cache: &str, body: serde_json::Value) -> Result<String, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::POST, &format!("caches/{cache}/upstreams"), true)?
-            .json(&body);
+    pub async fn add_upstream(
+        &self,
+        cache: &str,
+        body: serde_json::Value,
+    ) -> Result<String, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::POST,
+            &format!("caches/{cache}/upstreams"),
+            true,
+        )?
+        .json(&body);
         http::decode(req.send().await?).await
     }
 
     pub async fn get_upstream(&self, cache: &str, id: &str) -> Result<Upstream, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("caches/{cache}/upstreams/{id}"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("caches/{cache}/upstreams/{id}"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
-    pub async fn update_upstream(&self, cache: &str, id: &str, body: serde_json::Value) -> Result<String, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::PATCH, &format!("caches/{cache}/upstreams/{id}"), true)?
-            .json(&body);
+    pub async fn update_upstream(
+        &self,
+        cache: &str,
+        id: &str,
+        body: serde_json::Value,
+    ) -> Result<String, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::PATCH,
+            &format!("caches/{cache}/upstreams/{id}"),
+            true,
+        )?
+        .json(&body);
         http::decode(req.send().await?).await
     }
 
     pub async fn delete_upstream(&self, cache: &str, id: &str) -> Result<String, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::DELETE, &format!("caches/{cache}/upstreams/{id}"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::DELETE,
+            &format!("caches/{cache}/upstreams/{id}"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
-    pub async fn nars_list(&self, cache: &str, q: NarListQuery) -> Result<NarListResponse, ConnectorError> {
+    pub async fn nars_list(
+        &self,
+        cache: &str,
+        q: NarListQuery,
+    ) -> Result<NarListResponse, ConnectorError> {
         let mut qs: Vec<(&str, String)> = Vec::new();
-        if let Some(v) = q.hash { qs.push(("hash", v)); }
-        if let Some(v) = q.package { qs.push(("package", v)); }
-        if let Some(v) = q.sort { qs.push(("sort", v)); }
-        if let Some(v) = q.order { qs.push(("order", v)); }
-        if let Some(v) = q.page { qs.push(("page", v.to_string())); }
-        if let Some(v) = q.per_page { qs.push(("per_page", v.to_string())); }
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("caches/{cache}/nars"), true)?
-            .query(&qs);
+        if let Some(v) = q.hash {
+            qs.push(("hash", v));
+        }
+        if let Some(v) = q.package {
+            qs.push(("package", v));
+        }
+        if let Some(v) = q.sort {
+            qs.push(("sort", v));
+        }
+        if let Some(v) = q.order {
+            qs.push(("order", v));
+        }
+        if let Some(v) = q.page {
+            qs.push(("page", v.to_string()));
+        }
+        if let Some(v) = q.per_page {
+            qs.push(("per_page", v.to_string()));
+        }
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("caches/{cache}/nars"),
+            true,
+        )?
+        .query(&qs);
         http::decode(req.send().await?).await
     }
 
     pub async fn nar_show(&self, cache: &str, hash: &str) -> Result<NarDetail, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("caches/{cache}/nars/{hash}"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("caches/{cache}/nars/{hash}"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
     pub async fn nars_stats(&self, cache: &str) -> Result<NarStats, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("caches/{cache}/nars/stats"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("caches/{cache}/nars/stats"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
     pub async fn nar_delete(&self, cache: &str, hash: &str) -> Result<(), ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::DELETE, &format!("caches/{cache}/nars/{hash}"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::DELETE,
+            &format!("caches/{cache}/nars/{hash}"),
+            true,
+        )?;
         let resp = req.send().await?;
         let status = resp.status();
         if status == reqwest::StatusCode::UNAUTHORIZED {

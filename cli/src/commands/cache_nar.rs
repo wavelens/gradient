@@ -43,9 +43,24 @@ pub enum Commands {
 
 pub async fn handle(cmd: Commands, out: Output) {
     match cmd {
-        Commands::List { cache, hash, package, sort, order, page, per_page } => {
+        Commands::List {
+            cache,
+            hash,
+            package,
+            sort,
+            order,
+            page,
+            per_page,
+        } => {
             let client = client_from_config(out);
-            let q = NarListQuery { hash, package, sort, order, page, per_page };
+            let q = NarListQuery {
+                hash,
+                package,
+                sort,
+                order,
+                page,
+                per_page,
+            };
             match client.caches().nars_list(&cache, q).await {
                 Ok(res) => {
                     out.ok(&res);
@@ -102,7 +117,10 @@ pub async fn handle(cmd: Commands, out: Output) {
         Commands::Delete { cache, hash, yes } => {
             if !yes {
                 if out.is_json() {
-                    out.err(ExitKind::Usage, "Refusing to delete without --yes in --json mode");
+                    out.err(
+                        ExitKind::Usage,
+                        "Refusing to delete without --yes in --json mode",
+                    );
                 }
                 let mut stderr = std::io::stderr();
                 write!(stderr, "Delete NAR {hash} from cache '{cache}'? [y/N]: ").ok();

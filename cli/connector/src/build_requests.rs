@@ -39,21 +39,53 @@ pub struct DispatchResponse {
 pub struct BuildRequestsApi<'a>(pub(crate) &'a Client);
 
 impl BuildRequestsApi<'_> {
-    pub async fn submit_manifest(&self, body: BuildManifestRequest) -> Result<BuildSession, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::POST, "build-requests/manifest", true)?
-            .json(&body);
+    pub async fn submit_manifest(
+        &self,
+        body: BuildManifestRequest,
+    ) -> Result<BuildSession, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::POST,
+            "build-requests/manifest",
+            true,
+        )?
+        .json(&body);
         http::decode(req.send().await?).await
     }
 
-    pub async fn upload_blobs(&self, session: &str, form: reqwest::multipart::Form) -> Result<String, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::POST, &format!("build-requests/{session}/blobs"), true)?
-            .multipart(form);
+    pub async fn upload_blobs(
+        &self,
+        session: &str,
+        form: reqwest::multipart::Form,
+    ) -> Result<String, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::POST,
+            &format!("build-requests/{session}/blobs"),
+            true,
+        )?
+        .multipart(form);
         http::decode(req.send().await?).await
     }
 
-    pub async fn dispatch(&self, session: &str, body: DispatchRequest) -> Result<DispatchResponse, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::POST, &format!("build-requests/{session}/dispatch"), true)?
-            .json(&body);
+    pub async fn dispatch(
+        &self,
+        session: &str,
+        body: DispatchRequest,
+    ) -> Result<DispatchResponse, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::POST,
+            &format!("build-requests/{session}/dispatch"),
+            true,
+        )?
+        .json(&body);
         http::decode(req.send().await?).await
     }
 }

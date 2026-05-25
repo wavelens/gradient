@@ -16,9 +16,14 @@ async fn basic_login_returns_token() {
         .await;
 
     let client = Client::builder().base_url(server.uri()).build().unwrap();
-    let token = client.auth().basic_login(
-        connector::auth::MakeLoginRequest { loginname: "user".into(), password: "pass".into() }
-    ).await.unwrap();
+    let token = client
+        .auth()
+        .basic_login(connector::auth::MakeLoginRequest {
+            loginname: "user".into(),
+            password: "pass".into(),
+        })
+        .await
+        .unwrap();
     assert_eq!(token, "abc");
 }
 

@@ -34,19 +34,43 @@ pub struct AdminApi<'a>(pub(crate) &'a Client);
 
 impl AdminApi<'_> {
     pub async fn workers(&self) -> Result<Vec<AdminWorker>, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, "admin/workers", true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            "admin/workers",
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
-    pub async fn github_app_manifest(&self, host: Option<&str>) -> Result<GitHubAppManifest, ConnectorError> {
+    pub async fn github_app_manifest(
+        &self,
+        host: Option<&str>,
+    ) -> Result<GitHubAppManifest, ConnectorError> {
         let body = serde_json::json!({ "host": host });
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::POST, "admin/github-app/manifest", true)?
-            .json(&body);
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::POST,
+            "admin/github-app/manifest",
+            true,
+        )?
+        .json(&body);
         http::decode(req.send().await?).await
     }
 
     pub async fn github_app_credentials(&self) -> Result<GitHubAppCredentials, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, "admin/github-app/credentials", true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            "admin/github-app/credentials",
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 }

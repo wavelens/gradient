@@ -102,5 +102,10 @@ async fn download_json_without_args_exits_with_missing_argument() {
     let stdout = String::from_utf8(output.stdout).unwrap();
     let env: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
     assert_eq!(env["error"], true);
-    assert!(env["message"].as_str().unwrap().contains("missing argument"));
+    assert!(
+        env["message"]
+            .as_str()
+            .unwrap()
+            .contains("missing argument")
+    );
 }

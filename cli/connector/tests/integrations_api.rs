@@ -15,7 +15,11 @@ async fn list_integrations_returns_vec() {
         .mount(&server)
         .await;
 
-    let client = Client::builder().base_url(server.uri()).token("t").build().unwrap();
+    let client = Client::builder()
+        .base_url(server.uri())
+        .token("t")
+        .build()
+        .unwrap();
     let integrations = client.integrations().list("my-org").await.unwrap();
     assert!(integrations.is_empty());
 }
@@ -29,7 +33,11 @@ async fn summary_returns_vec() {
         .mount(&server)
         .await;
 
-    let client = Client::builder().base_url(server.uri()).token("t").build().unwrap();
+    let client = Client::builder()
+        .base_url(server.uri())
+        .token("t")
+        .build()
+        .unwrap();
     let summaries = client.integrations().summary("my-org").await.unwrap();
     assert!(summaries.is_empty());
 }

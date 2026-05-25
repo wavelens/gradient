@@ -828,13 +828,22 @@ mod tests {
 
     #[test]
     fn matches_event_forge_status_ignores_stored_events() {
-        let a = action_with(ActionType::ForgeStatusReport, vec!["build.queued"]);
+        // The stored `events` list is irrelevant for ForgeStatusReport - the
+        // hardcoded FORGE_STATUS_EVENTS set drives matching. Seed the row
+        // with an event that is NOT in that set so we can verify the action
+        // still fires for every event that IS, regardless of what's stored.
+        let a = action_with(ActionType::ForgeStatusReport, vec!["evaluation.waiting"]);
+        assert!(matches_event(&a, "build.queued"));
         assert!(matches_event(&a, "build.started"));
         assert!(matches_event(&a, "build.completed"));
         assert!(matches_event(&a, "build.failed"));
+        assert!(matches_event(&a, "build.substituted"));
+        assert!(matches_event(&a, "evaluation.queued"));
         assert!(matches_event(&a, "evaluation.completed"));
         assert!(matches_event(&a, "evaluation.action_required"));
-        assert!(!matches_event(&a, "build.queued"));
+        assert!(matches_event(&a, "evaluation.approval_granted"));
+        // Not a forge-status event - must not match even though it IS the
+        // event we stored on the row.
         assert!(!matches_event(&a, "evaluation.waiting"));
     }
 

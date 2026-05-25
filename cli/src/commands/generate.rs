@@ -19,8 +19,14 @@ pub async fn handle(cmd: Commands, out: Output) {
             let (private_key, public_key) = generate_api_key_pair();
             out.human("Generated API key pair:");
             out.human("");
-            out.human(format!("Private Key (for state configuration): {}", private_key));
-            out.human(format!("Public Key (for API authentication): {}", public_key));
+            out.human(format!(
+                "Private Key (for state configuration): {}",
+                private_key
+            ));
+            out.human(format!(
+                "Public Key (for API authentication): {}",
+                public_key
+            ));
             out.human("");
             out.human("Save the private key to a file and reference it in key_file.");
             out.human(

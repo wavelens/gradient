@@ -54,39 +54,101 @@ pub struct WebhooksApi<'a>(pub(crate) &'a Client);
 
 impl WebhooksApi<'_> {
     pub async fn list(&self, org: &str) -> Result<Vec<Webhook>, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("webhook/{org}"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("webhook/{org}"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
-    pub async fn create(&self, org: &str, body: MakeWebhookRequest) -> Result<Webhook, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::PUT, &format!("webhook/{org}"), true)?
-            .json(&body);
+    pub async fn create(
+        &self,
+        org: &str,
+        body: MakeWebhookRequest,
+    ) -> Result<Webhook, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::PUT,
+            &format!("webhook/{org}"),
+            true,
+        )?
+        .json(&body);
         http::decode(req.send().await?).await
     }
 
     pub async fn get(&self, org: &str, webhook: &str) -> Result<Webhook, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("webhook/{org}/{webhook}"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("webhook/{org}/{webhook}"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
-    pub async fn update(&self, org: &str, webhook: &str, body: PatchWebhookRequest) -> Result<Webhook, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::PATCH, &format!("webhook/{org}/{webhook}"), true)?
-            .json(&body);
+    pub async fn update(
+        &self,
+        org: &str,
+        webhook: &str,
+        body: PatchWebhookRequest,
+    ) -> Result<Webhook, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::PATCH,
+            &format!("webhook/{org}/{webhook}"),
+            true,
+        )?
+        .json(&body);
         http::decode(req.send().await?).await
     }
 
     pub async fn delete(&self, org: &str, webhook: &str) -> Result<bool, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::DELETE, &format!("webhook/{org}/{webhook}"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::DELETE,
+            &format!("webhook/{org}/{webhook}"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
     pub async fn test(&self, org: &str, webhook: &str) -> Result<bool, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::POST, &format!("webhook/{org}/{webhook}/test"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::POST,
+            &format!("webhook/{org}/{webhook}/test"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
-    pub async fn deliveries(&self, org: &str, webhook: &str) -> Result<PaginatedDeliveries, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("webhook/{org}/{webhook}/deliveries"), true)?;
+    pub async fn deliveries(
+        &self,
+        org: &str,
+        webhook: &str,
+    ) -> Result<PaginatedDeliveries, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("webhook/{org}/{webhook}/deliveries"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 }

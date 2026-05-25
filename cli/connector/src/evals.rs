@@ -81,41 +81,90 @@ pub struct EvalsApi<'a>(pub(crate) &'a Client);
 
 impl EvalsApi<'_> {
     pub async fn get(&self, id: &str) -> Result<EvaluationResponse, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("evals/{id}"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("evals/{id}"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
     pub async fn restart(&self, id: &str) -> Result<String, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::POST, &format!("evals/{id}"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::POST,
+            &format!("evals/{id}"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
     pub async fn builds(&self, id: &str) -> Result<PaginatedBuilds, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("evals/{id}/builds"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("evals/{id}/builds"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
-    pub async fn stream_builds(&self, id: &str) -> Result<impl Stream<Item = Result<String, ConnectorError>>, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::POST, &format!("evals/{id}/builds"), true)?;
+    pub async fn stream_builds(
+        &self,
+        id: &str,
+    ) -> Result<impl Stream<Item = Result<String, ConnectorError>>, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::POST,
+            &format!("evals/{id}/builds"),
+            true,
+        )?;
         let res = req.send().await?;
         let status = res.status();
         if !status.is_success() {
-            return Err(ConnectorError::Api { status, message: res.text().await? });
+            return Err(ConnectorError::Api {
+                status,
+                message: res.text().await?,
+            });
         }
-        Ok(res.json_nl_stream::<String>(1_024_000)
-            .map(|r| r.map_err(|e| ConnectorError::Api {
+        Ok(res.json_nl_stream::<String>(1_024_000).map(|r| {
+            r.map_err(|e| ConnectorError::Api {
                 status: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
                 message: e.to_string(),
-            })))
+            })
+        }))
     }
 
     pub async fn messages(&self, id: &str) -> Result<Vec<EvalMessage>, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("evals/{id}/messages"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("evals/{id}/messages"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
     pub async fn artefacts(&self, id: &str) -> Result<ArtefactTree, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("evals/{id}/artefacts"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("evals/{id}/artefacts"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 }

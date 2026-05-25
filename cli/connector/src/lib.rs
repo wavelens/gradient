@@ -34,26 +34,62 @@ struct ClientInner {
 }
 
 impl Client {
-    pub fn builder() -> ClientBuilder { ClientBuilder::default() }
+    pub fn builder() -> ClientBuilder {
+        ClientBuilder::default()
+    }
 
-    pub(crate) fn http(&self) -> &reqwest::Client { &self.inner.http }
-    pub(crate) fn base_url(&self) -> &str { &self.inner.base_url }
-    pub(crate) fn token(&self) -> Option<&str> { self.inner.token.as_deref() }
+    pub(crate) fn http(&self) -> &reqwest::Client {
+        &self.inner.http
+    }
+    pub(crate) fn base_url(&self) -> &str {
+        &self.inner.base_url
+    }
+    pub(crate) fn token(&self) -> Option<&str> {
+        self.inner.token.as_deref()
+    }
 
-    pub fn admin(&self) -> admin::AdminApi<'_> { admin::AdminApi(self) }
-    pub fn auth(&self) -> auth::AuthApi<'_> { auth::AuthApi(self) }
-    pub fn build_requests(&self) -> build_requests::BuildRequestsApi<'_> { build_requests::BuildRequestsApi(self) }
-    pub fn builds(&self) -> builds::BuildsApi<'_> { builds::BuildsApi(self) }
-    pub fn caches(&self) -> caches::CachesApi<'_> { caches::CachesApi(self) }
-    pub fn commits(&self) -> commits::CommitsApi<'_> { commits::CommitsApi(self) }
-    pub fn evals(&self) -> evals::EvalsApi<'_> { evals::EvalsApi(self) }
-    pub fn integrations(&self) -> integrations::IntegrationsApi<'_> { integrations::IntegrationsApi(self) }
-    pub fn orgs(&self) -> orgs::OrgsApi<'_> { orgs::OrgsApi(self) }
-    pub fn projects(&self) -> projects::ProjectsApi<'_> { projects::ProjectsApi(self) }
-    pub fn server(&self) -> server::ServerApi<'_> { server::ServerApi(self) }
-    pub fn user(&self) -> user::UserApi<'_> { user::UserApi(self) }
-    pub fn webhooks(&self) -> webhooks::WebhooksApi<'_> { webhooks::WebhooksApi(self) }
-    pub fn workers(&self) -> workers::WorkersApi<'_> { workers::WorkersApi(self) }
+    pub fn admin(&self) -> admin::AdminApi<'_> {
+        admin::AdminApi(self)
+    }
+    pub fn auth(&self) -> auth::AuthApi<'_> {
+        auth::AuthApi(self)
+    }
+    pub fn build_requests(&self) -> build_requests::BuildRequestsApi<'_> {
+        build_requests::BuildRequestsApi(self)
+    }
+    pub fn builds(&self) -> builds::BuildsApi<'_> {
+        builds::BuildsApi(self)
+    }
+    pub fn caches(&self) -> caches::CachesApi<'_> {
+        caches::CachesApi(self)
+    }
+    pub fn commits(&self) -> commits::CommitsApi<'_> {
+        commits::CommitsApi(self)
+    }
+    pub fn evals(&self) -> evals::EvalsApi<'_> {
+        evals::EvalsApi(self)
+    }
+    pub fn integrations(&self) -> integrations::IntegrationsApi<'_> {
+        integrations::IntegrationsApi(self)
+    }
+    pub fn orgs(&self) -> orgs::OrgsApi<'_> {
+        orgs::OrgsApi(self)
+    }
+    pub fn projects(&self) -> projects::ProjectsApi<'_> {
+        projects::ProjectsApi(self)
+    }
+    pub fn server(&self) -> server::ServerApi<'_> {
+        server::ServerApi(self)
+    }
+    pub fn user(&self) -> user::UserApi<'_> {
+        user::UserApi(self)
+    }
+    pub fn webhooks(&self) -> webhooks::WebhooksApi<'_> {
+        webhooks::WebhooksApi(self)
+    }
+    pub fn workers(&self) -> workers::WorkersApi<'_> {
+        workers::WorkersApi(self)
+    }
 
     pub async fn health(&self) -> Result<String, ConnectorError> {
         let req = http::request(
@@ -92,7 +128,9 @@ impl ClientBuilder {
     }
 
     pub fn build(self) -> Result<Client, String> {
-        let base_url = self.base_url.ok_or_else(|| "base_url is required".to_string())?;
+        let base_url = self
+            .base_url
+            .ok_or_else(|| "base_url is required".to_string())?;
         let http = reqwest::Client::builder()
             .timeout(self.timeout.unwrap_or(Duration::from_secs(30)))
             .redirect(reqwest::redirect::Policy::none())
@@ -100,7 +138,13 @@ impl ClientBuilder {
             .use_preconfigured_tls(rustls_config())
             .build()
             .map_err(|e| format!("failed to build HTTP client: {e}"))?;
-        Ok(Client { inner: Arc::new(ClientInner { http, base_url, token: self.token }) })
+        Ok(Client {
+            inner: Arc::new(ClientInner {
+                http,
+                base_url,
+                token: self.token,
+            }),
+        })
     }
 }
 

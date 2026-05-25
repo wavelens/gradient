@@ -8,7 +8,9 @@ use crate::config::*;
 use crate::input::{client_from_config, handle_input};
 use crate::output::{ExitKind, Output, to_exit_kind};
 use clap::Subcommand;
-use connector::orgs::{AddUserRequest, MakeOrganizationRequest, PatchOrganizationRequest, RemoveUserRequest};
+use connector::orgs::{
+    AddUserRequest, MakeOrganizationRequest, PatchOrganizationRequest, RemoveUserRequest,
+};
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
@@ -75,7 +77,11 @@ pub async fn handle(cmd: Commands, out: Output) {
             out.human("Organization selected.");
         }
 
-        Commands::Create { name, display_name, description } => {
+        Commands::Create {
+            name,
+            display_name,
+            description,
+        } => {
             let input_fields = [
                 ("Name", name),
                 ("Display Name", display_name),
@@ -89,11 +95,15 @@ pub async fn handle(cmd: Commands, out: Output) {
             let name = input.get("Name").unwrap().clone();
 
             let client = client_from_config(out);
-            match client.orgs().create(MakeOrganizationRequest {
-                name: name.clone(),
-                display_name: input.get("Display Name").unwrap().clone(),
-                description: input.get("Description").unwrap().clone(),
-            }).await {
+            match client
+                .orgs()
+                .create(MakeOrganizationRequest {
+                    name: name.clone(),
+                    display_name: input.get("Display Name").unwrap().clone(),
+                    description: input.get("Description").unwrap().clone(),
+                })
+                .await
+            {
                 Ok(_) => {
                     set_get_value(ConfigKey::SelectedOrganization, Some(name), true);
                     out.ok(&serde_json::json!({"created": true}));
@@ -137,7 +147,11 @@ pub async fn handle(cmd: Commands, out: Output) {
             }
         }
 
-        Commands::Edit { new_name, display_name, description } => {
+        Commands::Edit {
+            new_name,
+            display_name,
+            description,
+        } => {
             let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
                 Some(id) => id,
                 None => out.err(ExitKind::Usage, "Organization is required for command."),
@@ -151,8 +165,14 @@ pub async fn handle(cmd: Commands, out: Output) {
 
             let input_fields = [
                 ("Name", Some(new_name.unwrap_or(current.name))),
-                ("Display Name", Some(display_name.unwrap_or(current.display_name))),
-                ("Description", Some(description.unwrap_or(current.description))),
+                (
+                    "Display Name",
+                    Some(display_name.unwrap_or(current.display_name)),
+                ),
+                (
+                    "Description",
+                    Some(description.unwrap_or(current.description)),
+                ),
             ]
             .iter()
             .map(|(k, v)| (k.to_string(), v.clone()))
@@ -160,11 +180,18 @@ pub async fn handle(cmd: Commands, out: Output) {
 
             let input = handle_input(input_fields, true);
 
-            match client.orgs().update(&organization, PatchOrganizationRequest {
-                name: input.get("Name").cloned(),
-                display_name: input.get("Display Name").cloned(),
-                description: input.get("Description").cloned(),
-            }).await {
+            match client
+                .orgs()
+                .update(
+                    &organization,
+                    PatchOrganizationRequest {
+                        name: input.get("Name").cloned(),
+                        display_name: input.get("Display Name").cloned(),
+                        description: input.get("Description").cloned(),
+                    },
+                )
+                .await
+            {
                 Ok(_) => {
                     out.ok(&serde_json::json!({"updated": true}));
                     out.human("Organization updated.");
@@ -198,31 +225,43 @@ pub async fn handle(cmd: Commands, out: Output) {
             let client = client_from_config(out);
 
             match cmd {
-                UserCommands::List => {
-                    match client.orgs().users(&organization).await {
-                        Ok(users) => {
-                            out.ok(&users);
-                            if users.is_empty() {
-                                out.human("You have no users.");
-                            } else {
-                                for user in users {
-                                    out.human(format!("{}: {}", user.name, user.id));
-                                }
+                UserCommands::List => match client.orgs().users(&organization).await {
+                    Ok(users) => {
+                        out.ok(&users);
+                        if users.is_empty() {
+                            out.human("You have no users.");
+                        } else {
+                            for user in users {
+                                out.human(format!("{}: {}", user.name, user.id));
                             }
                         }
-                        Err(e) => out.err(to_exit_kind(&e), e),
                     }
-                }
+                    Err(e) => out.err(to_exit_kind(&e), e),
+                },
 
                 UserCommands::Add { user, role } => {
-                    if role.as_deref().map(|r| r != "View" && r != "Write" && r != "Admin").unwrap_or(false) {
-                        out.err(ExitKind::Usage, "Role must be either 'View', 'Write' or 'Admin'.");
+                    if role
+                        .as_deref()
+                        .map(|r| r != "View" && r != "Write" && r != "Admin")
+                        .unwrap_or(false)
+                    {
+                        out.err(
+                            ExitKind::Usage,
+                            "Role must be either 'View', 'Write' or 'Admin'.",
+                        );
                     }
 
-                    match client.orgs().add_user(&organization, AddUserRequest {
-                        user,
-                        role: role.unwrap_or_else(|| "Write".to_string()),
-                    }).await {
+                    match client
+                        .orgs()
+                        .add_user(
+                            &organization,
+                            AddUserRequest {
+                                user,
+                                role: role.unwrap_or_else(|| "Write".to_string()),
+                            },
+                        )
+                        .await
+                    {
                         Ok(_) => {
                             out.ok(&serde_json::json!({"added": true}));
                             out.human("User added.");
@@ -232,7 +271,11 @@ pub async fn handle(cmd: Commands, out: Output) {
                 }
 
                 UserCommands::Remove { user } => {
-                    match client.orgs().remove_user(&organization, RemoveUserRequest { user }).await {
+                    match client
+                        .orgs()
+                        .remove_user(&organization, RemoveUserRequest { user })
+                        .await
+                    {
                         Ok(_) => {
                             out.ok(&serde_json::json!({"removed": true}));
                             out.human("User removed.");
@@ -252,25 +295,21 @@ pub async fn handle(cmd: Commands, out: Output) {
             let client = client_from_config(out);
 
             match cmd {
-                SshCommands::Show => {
-                    match client.orgs().ssh_key(&organization).await {
-                        Ok(key) => {
-                            out.ok(&serde_json::json!({"public_key": key}));
-                            out.human(format!("Public Key: {}", key));
-                        }
-                        Err(e) => out.err(to_exit_kind(&e), e),
+                SshCommands::Show => match client.orgs().ssh_key(&organization).await {
+                    Ok(key) => {
+                        out.ok(&serde_json::json!({"public_key": key}));
+                        out.human(format!("Public Key: {}", key));
                     }
-                }
+                    Err(e) => out.err(to_exit_kind(&e), e),
+                },
 
-                SshCommands::Recreate => {
-                    match client.orgs().regenerate_ssh(&organization).await {
-                        Ok(key) => {
-                            out.ok(&serde_json::json!({"public_key": key}));
-                            out.human(format!("New Public Key: {}", key));
-                        }
-                        Err(e) => out.err(to_exit_kind(&e), e),
+                SshCommands::Recreate => match client.orgs().regenerate_ssh(&organization).await {
+                    Ok(key) => {
+                        out.ok(&serde_json::json!({"public_key": key}));
+                        out.human(format!("New Public Key: {}", key));
                     }
-                }
+                    Err(e) => out.err(to_exit_kind(&e), e),
+                },
             }
         }
 
@@ -283,21 +322,19 @@ pub async fn handle(cmd: Commands, out: Output) {
             let client = client_from_config(out);
 
             match cmd {
-                CacheCommands::List => {
-                    match client.orgs().subscriptions(&organization).await {
-                        Ok(caches) => {
-                            out.ok(&caches);
-                            if caches.is_empty() {
-                                out.human("You have no caches subscribed.");
-                            } else {
-                                for cache in caches {
-                                    out.human(format!("{}: {}", cache.name, cache.id));
-                                }
+                CacheCommands::List => match client.orgs().subscriptions(&organization).await {
+                    Ok(caches) => {
+                        out.ok(&caches);
+                        if caches.is_empty() {
+                            out.human("You have no caches subscribed.");
+                        } else {
+                            for cache in caches {
+                                out.human(format!("{}: {}", cache.name, cache.id));
                             }
                         }
-                        Err(e) => out.err(to_exit_kind(&e), e),
                     }
-                }
+                    Err(e) => out.err(to_exit_kind(&e), e),
+                },
 
                 CacheCommands::Add { cache } => {
                     match client.orgs().subscribe(&organization, &cache).await {

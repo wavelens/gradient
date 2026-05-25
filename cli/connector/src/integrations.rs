@@ -50,34 +50,85 @@ pub struct IntegrationsApi<'a>(pub(crate) &'a Client);
 
 impl IntegrationsApi<'_> {
     pub async fn list(&self, org: &str) -> Result<Vec<Integration>, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("orgs/{org}/integrations"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("orgs/{org}/integrations"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
-    pub async fn create(&self, org: &str, body: MakeIntegrationRequest) -> Result<Integration, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::PUT, &format!("orgs/{org}/integrations"), true)?
-            .json(&body);
+    pub async fn create(
+        &self,
+        org: &str,
+        body: MakeIntegrationRequest,
+    ) -> Result<Integration, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::PUT,
+            &format!("orgs/{org}/integrations"),
+            true,
+        )?
+        .json(&body);
         http::decode(req.send().await?).await
     }
 
     pub async fn summary(&self, org: &str) -> Result<Vec<IntegrationSummary>, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("orgs/{org}/integrations/summary"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("orgs/{org}/integrations/summary"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
     pub async fn get(&self, org: &str, id: &str) -> Result<Integration, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::GET, &format!("orgs/{org}/integrations/{id}"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("orgs/{org}/integrations/{id}"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 
-    pub async fn update(&self, org: &str, id: &str, body: PatchIntegrationRequest) -> Result<Integration, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::PATCH, &format!("orgs/{org}/integrations/{id}"), true)?
-            .json(&body);
+    pub async fn update(
+        &self,
+        org: &str,
+        id: &str,
+        body: PatchIntegrationRequest,
+    ) -> Result<Integration, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::PATCH,
+            &format!("orgs/{org}/integrations/{id}"),
+            true,
+        )?
+        .json(&body);
         http::decode(req.send().await?).await
     }
 
     pub async fn delete_one(&self, org: &str, id: &str) -> Result<bool, ConnectorError> {
-        let req = http::request(self.0.http(), self.0.base_url(), self.0.token(), Method::DELETE, &format!("orgs/{org}/integrations/{id}"), true)?;
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::DELETE,
+            &format!("orgs/{org}/integrations/{id}"),
+            true,
+        )?;
         http::decode(req.send().await?).await
     }
 }

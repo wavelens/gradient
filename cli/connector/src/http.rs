@@ -23,7 +23,10 @@ pub(crate) async fn decode<T: DeserializeOwned>(res: Response) -> Result<T, Conn
     }
 
     if let Ok(env) = serde_json::from_slice::<Envelope<String>>(&bytes) {
-        return Err(ConnectorError::Api { status, message: env.message });
+        return Err(ConnectorError::Api {
+            status,
+            message: env.message,
+        });
     }
 
     Err(ConnectorError::Api {
@@ -33,7 +36,11 @@ pub(crate) async fn decode<T: DeserializeOwned>(res: Response) -> Result<T, Conn
 }
 
 pub(crate) fn build_url(base: &str, path: &str) -> String {
-    format!("{}/api/v1/{}", base.trim_end_matches('/'), path.trim_start_matches('/'))
+    format!(
+        "{}/api/v1/{}",
+        base.trim_end_matches('/'),
+        path.trim_start_matches('/')
+    )
 }
 
 pub(crate) async fn decode_raw_string(res: Response) -> Result<String, ConnectorError> {
@@ -42,7 +49,10 @@ pub(crate) async fn decode_raw_string(res: Response) -> Result<String, Connector
         return Err(ConnectorError::Unauthorized);
     }
     if !status.is_success() {
-        return Err(ConnectorError::Api { status, message: res.text().await.unwrap_or_default() });
+        return Err(ConnectorError::Api {
+            status,
+            message: res.text().await.unwrap_or_default(),
+        });
     }
     Ok(res.text().await?)
 }

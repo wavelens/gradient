@@ -149,14 +149,22 @@ pub async fn run_cli() -> std::io::Result<()> {
             }
         }
 
-        MainCommands::Register { username, name, email, password } => {
+        MainCommands::Register {
+            username,
+            name,
+            email,
+            password,
+        } => {
             if out.is_json() && password.is_none() {
                 out.err(ExitKind::Usage, "missing argument: --password");
             }
 
             let server_url = set_get_value(ConfigKey::Server, None, true);
             if server_url.is_none() {
-                out.err(ExitKind::Usage, "Server URL not set. Use `gradient config server <url>`.");
+                out.err(
+                    ExitKind::Usage,
+                    "Server URL not set. Use `gradient config server <url>`.",
+                );
             }
 
             let input_fields = [("Username", username), ("Name", name), ("Email", email)]
@@ -168,12 +176,16 @@ pub async fn run_cli() -> std::io::Result<()> {
             let pw = password.unwrap_or_else(ask_for_password);
 
             let client = client_from_config(out);
-            match client.auth().register(MakeUserRequest {
-                username: input.get("Username").unwrap().clone(),
-                name: input.get("Name").unwrap().clone(),
-                email: input.get("Email").unwrap().clone(),
-                password: pw,
-            }).await {
+            match client
+                .auth()
+                .register(MakeUserRequest {
+                    username: input.get("Username").unwrap().clone(),
+                    name: input.get("Name").unwrap().clone(),
+                    email: input.get("Email").unwrap().clone(),
+                    password: pw,
+                })
+                .await
+            {
                 Ok(_) => {
                     out.ok(&serde_json::json!({"registered": true}));
                     out.human("Registration successful. Please log in.");
@@ -196,10 +208,14 @@ pub async fn run_cli() -> std::io::Result<()> {
             let pw = password.unwrap_or_else(ask_for_password);
 
             let client = client_from_config(out);
-            match client.auth().basic_login(MakeLoginRequest {
-                loginname: username,
-                password: pw,
-            }).await {
+            match client
+                .auth()
+                .basic_login(MakeLoginRequest {
+                    loginname: username,
+                    password: pw,
+                })
+                .await
+            {
                 Ok(token) => {
                     set_get_value(ConfigKey::AuthToken, Some(token), true).unwrap();
                     out.ok(&serde_json::json!({"logged_in": true}));
@@ -229,10 +245,20 @@ pub async fn run_cli() -> std::io::Result<()> {
             out.human("Logged out.");
         }
 
-        MainCommands::Build { target, system, organization, no_stream, quiet } => {
-            build::handle_build(target, system, organization, no_stream, quiet, out).await
-        }
-        MainCommands::Download { flake_ref, evaluation, project, products, out: out_dir } => {
+        MainCommands::Build {
+            target,
+            system,
+            organization,
+            no_stream,
+            quiet,
+        } => build::handle_build(target, system, organization, no_stream, quiet, out).await,
+        MainCommands::Download {
+            flake_ref,
+            evaluation,
+            project,
+            products,
+            out: out_dir,
+        } => {
             download::handle_download(flake_ref, evaluation, project, products, out_dir, out).await
         }
         MainCommands::Organization { cmd } => organization::handle(cmd, out).await,

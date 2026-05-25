@@ -102,13 +102,17 @@ mod tests {
 
     #[test]
     fn success_envelope_serializes() {
-        let buf = Output::new(true).render_ok_to_string(&"hello".to_string()).unwrap();
+        let buf = Output::new(true)
+            .render_ok_to_string(&"hello".to_string())
+            .unwrap();
         assert_eq!(buf.trim(), r#"{"error":false,"message":"hello"}"#);
     }
 
     #[test]
     fn failure_envelope_serializes() {
-        let buf = Output::new(true).render_err_to_string("missing arg").unwrap();
+        let buf = Output::new(true)
+            .render_err_to_string("missing arg")
+            .unwrap();
         assert_eq!(buf.trim(), r#"{"error":true,"message":"missing arg"}"#);
     }
 }

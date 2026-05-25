@@ -144,7 +144,10 @@ pub async fn handle(cmd: Commands, out: Output) {
                             match item {
                                 Ok(line) => {
                                     if out.is_json() {
-                                        println!("{}", serde_json::json!({"error": false, "message": line}));
+                                        println!(
+                                            "{}",
+                                            serde_json::json!({"error": false, "message": line})
+                                        );
                                     } else {
                                         print!("{}", line);
                                     }
@@ -162,7 +165,13 @@ pub async fn handle(cmd: Commands, out: Output) {
             todo!();
         }
 
-        Commands::Create { name, display_name, description, repository, wildcard } => {
+        Commands::Create {
+            name,
+            display_name,
+            description,
+            repository,
+            wildcard,
+        } => {
             let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
                 Some(id) => id,
                 _ => out.err(ExitKind::Usage, "Organization is required for command."),
@@ -183,13 +192,21 @@ pub async fn handle(cmd: Commands, out: Output) {
             let name = input.get("Name").unwrap().clone();
 
             let client = client_from_config(out);
-            match client.projects().create(&organization, &name, MakeProjectRequest {
-                name: name.clone(),
-                display_name: input.get("Display Name").unwrap().clone(),
-                description: input.get("Description").unwrap().clone(),
-                repository: input.get("Repository").unwrap().clone(),
-                wildcard: input.get("Wildcard").unwrap().clone(),
-            }).await {
+            match client
+                .projects()
+                .create(
+                    &organization,
+                    &name,
+                    MakeProjectRequest {
+                        name: name.clone(),
+                        display_name: input.get("Display Name").unwrap().clone(),
+                        description: input.get("Description").unwrap().clone(),
+                        repository: input.get("Repository").unwrap().clone(),
+                        wildcard: input.get("Wildcard").unwrap().clone(),
+                    },
+                )
+                .await
+            {
                 Ok(_) => {
                     set_get_value(
                         ConfigKey::SelectedProject,
@@ -226,7 +243,13 @@ pub async fn handle(cmd: Commands, out: Output) {
             }
         }
 
-        Commands::Edit { new_name, display_name, description, repository, wildcard } => {
+        Commands::Edit {
+            new_name,
+            display_name,
+            description,
+            repository,
+            wildcard,
+        } => {
             let (organization, project) =
                 match set_get_value(ConfigKey::SelectedProject, None, true) {
                     Some(id) => {
@@ -244,8 +267,14 @@ pub async fn handle(cmd: Commands, out: Output) {
 
             let input_fields = [
                 ("Name", Some(new_name.unwrap_or(current.name))),
-                ("Display Name", Some(display_name.unwrap_or(current.display_name))),
-                ("Description", Some(description.unwrap_or(current.description))),
+                (
+                    "Display Name",
+                    Some(display_name.unwrap_or(current.display_name)),
+                ),
+                (
+                    "Description",
+                    Some(description.unwrap_or(current.description)),
+                ),
                 ("Repository", Some(repository.unwrap_or(current.repository))),
                 ("Wildcard", Some(wildcard.unwrap_or(current.wildcard))),
             ]
@@ -255,13 +284,21 @@ pub async fn handle(cmd: Commands, out: Output) {
 
             let input = handle_input(input_fields, false);
 
-            match client.projects().update(&organization, &project, PatchProjectRequest {
-                name: input.get("Name").cloned(),
-                display_name: input.get("Display Name").cloned(),
-                description: input.get("Description").cloned(),
-                repository: input.get("Repository").cloned(),
-                wildcard: input.get("Wildcard").cloned(),
-            }).await {
+            match client
+                .projects()
+                .update(
+                    &organization,
+                    &project,
+                    PatchProjectRequest {
+                        name: input.get("Name").cloned(),
+                        display_name: input.get("Display Name").cloned(),
+                        description: input.get("Description").cloned(),
+                        repository: input.get("Repository").cloned(),
+                        wildcard: input.get("Wildcard").cloned(),
+                    },
+                )
+                .await
+            {
                 Ok(_) => {
                     out.ok(&serde_json::json!({"updated": true}));
                     out.human("Project updated.");
