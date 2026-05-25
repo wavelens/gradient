@@ -12,12 +12,15 @@
 //! GC passes against the cache's DB and NAR store.
 
 mod cleanup;
+mod deep_gc;
 mod invalidate;
 mod sign_sweep;
 
+pub use self::deep_gc::{DeepGcReport, run_deep_gc};
+
 pub use self::cleanup::{
-    cleanup_expired_upload_sessions, cleanup_old_evaluations, cleanup_orphaned_cache_files,
-    cleanup_stale_build_request_blobs, cleanup_stale_cached_nars,
+    CleanupReport, cleanup_expired_upload_sessions, cleanup_old_evaluations,
+    cleanup_orphaned_cache_files, cleanup_stale_build_request_blobs, cleanup_stale_cached_nars,
 };
 pub use self::invalidate::invalidate_cache_for_path;
 pub use self::sign_sweep::sign_missing_signatures;
@@ -52,10 +55,9 @@ pub async fn cache_loop(state: Arc<ServerState>) {
             _ = interval.tick() => {}
         }
 
-        if let Err(e) = cleanup_orphaned_cache_files(Arc::clone(&state)).await {
-            error!(error = ?e, "Cache cleanup failed");
-        } else {
-            info!("Cache cleanup completed successfully");
+        match cleanup_orphaned_cache_files(Arc::clone(&state)).await {
+            Ok(report) => info!(?report, "Cache cleanup completed"),
+            Err(e) => error!(error = ?e, "Cache cleanup failed"),
         }
         if let Err(e) = cleanup_old_evaluations(Arc::clone(&state)).await {
             error!(error = ?e, "Evaluation GC failed");

@@ -11,10 +11,21 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, IntoActiveModel,
     QueryFilter, Statement,
 };
+use serde::Serialize;
 use std::collections::HashSet;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
+
+/// Per-pass counters returned by `cleanup_orphaned_cache_files`. The deep-GC
+/// sweep threads these into its progress report; the hourly loop just logs
+/// the result.
+#[derive(Debug, Default, Clone, Copy, Serialize)]
+pub struct CleanupReport {
+    pub orphan_nars_scanned: u64,
+    pub orphan_nars_removed: u64,
+    pub zombie_cached_paths_purged: u64,
+}
 
 /// Build-request blob TTL pass: drops `build_request_blob` rows whose
 /// `last_used_at` is older than `nar_ttl_hours` and removes the underlying
@@ -240,7 +251,7 @@ pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
     Ok(())
 }
 
-pub async fn cleanup_orphaned_cache_files(state: Arc<ServerState>) -> Result<()> {
+pub async fn cleanup_orphaned_cache_files(state: Arc<ServerState>) -> Result<CleanupReport> {
     let keep = active_hashes(&state).await?;
 
     let on_disk = state
@@ -250,7 +261,10 @@ pub async fn cleanup_orphaned_cache_files(state: Arc<ServerState>) -> Result<()>
         .context("Failed to list NAR store")?;
     let on_disk_set: HashSet<String> = on_disk.iter().cloned().collect();
 
-    let mut removed = 0usize;
+    let mut report = CleanupReport {
+        orphan_nars_scanned: on_disk.len() as u64,
+        ..Default::default()
+    };
     for hash in &on_disk {
         if keep.contains(hash) {
             continue;
@@ -259,17 +273,16 @@ pub async fn cleanup_orphaned_cache_files(state: Arc<ServerState>) -> Result<()>
             error!(hash = %hash, error = %e, "Failed to remove orphaned NAR");
         } else {
             debug!(hash = %hash, "Removed orphaned NAR");
-            removed += 1;
+            report.orphan_nars_removed += 1;
         }
     }
 
-    if removed > 0 {
-        info!(count = removed, "Removed orphaned NAR files");
+    if report.orphan_nars_removed > 0 {
+        info!(count = report.orphan_nars_removed, "Removed orphaned NAR files");
     }
 
-    purge_zombie_cached_paths(&state, &on_disk_set).await?;
-
-    Ok(())
+    report.zombie_cached_paths_purged = purge_zombie_cached_paths(&state, &on_disk_set).await?;
+    Ok(report)
 }
 
 /// Drop `cached_path` rows whose `file_hash IS NOT NULL` but whose NAR is no
@@ -282,14 +295,14 @@ pub async fn cleanup_orphaned_cache_files(state: Arc<ServerState>) -> Result<()>
 async fn purge_zombie_cached_paths(
     state: &Arc<ServerState>,
     on_disk: &HashSet<String>,
-) -> Result<()> {
+) -> Result<u64> {
     let rows = ECachedPath::find()
         .filter(CCachedPath::FileHash.is_not_null())
         .all(&state.worker_db)
         .await
         .context("Failed to load cached_path rows for zombie purge")?;
 
-    let mut purged = 0usize;
+    let mut purged = 0u64;
     for row in rows {
         if on_disk.contains(&row.hash) {
             continue;
@@ -311,7 +324,7 @@ async fn purge_zombie_cached_paths(
         );
     }
 
-    Ok(())
+    Ok(purged)
 }
 
 /// Returns the set of NAR-storage hashes that must NOT be garbage-collected by
