@@ -790,6 +790,7 @@ dependencies = [
  "ring",
  "sea-orm",
  "sentry",
+ "serde",
  "serde_json",
  "tempfile",
  "test-support",
