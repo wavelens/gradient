@@ -113,6 +113,7 @@ mod m20260524_000002_drop_table_webhook_delivery;
 mod m20260524_000003_drop_table_webhook;
 mod m20260524_000004_drop_table_project_integration;
 mod m20260525_000000_create_table_cache_role;
+mod m20260525_000001_create_table_cache_user;
 
 pub struct Migrator;
 
@@ -227,6 +228,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260524_000003_drop_table_webhook::Migration),
             Box::new(m20260524_000004_drop_table_project_integration::Migration),
             Box::new(m20260525_000000_create_table_cache_role::Migration),
+            Box::new(m20260525_000001_create_table_cache_user::Migration),
         ]
     }
 }
