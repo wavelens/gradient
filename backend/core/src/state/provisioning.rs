@@ -799,8 +799,54 @@ impl<'a> StateApplicator<'a> {
                     state_cache.name, e
                 )
             })?;
+
+            // Always guarantee the `created_by` user has the Admin cache role.
+            // The API path (`PUT /caches`) inserts this row at creation time;
+            // state-managed provisioning was leaving it out, so a config with
+            // an empty `members` list ended up with no admin at all - even
+            // the listed creator could not load the cache.
+            self.ensure_cache_creator_admin(cache_id, created_by_id, &state_cache.name)
+                .await
+                .map_err(|e| {
+                    format!(
+                        "Failed to ensure cache creator is admin for '{}': {}",
+                        state_cache.name, e
+                    )
+                })?;
         }
 
+        Ok(())
+    }
+
+    /// Idempotently insert a `cache_user` row pinning `created_by_id` to the
+    /// Admin built-in role. Skips when the user already has any membership in
+    /// this cache (state-declared members win - we don't overwrite their
+    /// role even if they're the creator).
+    async fn ensure_cache_creator_admin(
+        &self,
+        cache_id: CacheId,
+        created_by_id: UserId,
+        cache_name: &str,
+    ) -> Result<(), DynError> {
+        let existing = ECacheUser::find()
+            .filter(CCacheUser::Cache.eq(cache_id))
+            .filter(CCacheUser::User.eq(created_by_id))
+            .one(self.db)
+            .await?;
+        if existing.is_some() {
+            return Ok(());
+        }
+        let active = ACacheUser {
+            id: Set(CacheUserId::now_v7()),
+            cache: Set(cache_id),
+            user: Set(created_by_id),
+            role: Set(BASE_CACHE_ROLE_ADMIN_ID),
+        };
+        active.insert(self.db).await?;
+        tracing::info!(
+            cache = %cache_name,
+            "Added cache creator as Admin (state-managed cache)"
+        );
         Ok(())
     }
 
