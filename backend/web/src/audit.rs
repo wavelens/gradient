@@ -48,6 +48,9 @@ pub mod events {
     pub const CACHE_ROLE_CREATE: &str = "cache.role.create";
     pub const CACHE_ROLE_UPDATE: &str = "cache.role.update";
     pub const CACHE_ROLE_DELETE: &str = "cache.role.delete";
+    pub const CACHE_MEMBER_CREATE: &str = "cache.member.create";
+    pub const CACHE_MEMBER_UPDATE: &str = "cache.member.update";
+    pub const CACHE_MEMBER_DELETE: &str = "cache.member.delete";
 }
 
 /// Caller context derived from the inbound HTTP request - used to enrich

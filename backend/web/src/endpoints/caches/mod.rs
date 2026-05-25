@@ -8,6 +8,7 @@ mod build_log;
 mod helpers;
 mod keys;
 mod management;
+pub mod members;
 mod nar;
 mod narinfo;
 mod narlist;
