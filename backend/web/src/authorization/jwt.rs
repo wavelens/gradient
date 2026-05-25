@@ -181,6 +181,7 @@ async fn decode_api_key(
         api_id: api_key.id,
         mask: api_key.permission,
         organization: api_key.organization,
+        cache_permission_mask: None,
     };
     let user_id = api_key.owned_by;
 
