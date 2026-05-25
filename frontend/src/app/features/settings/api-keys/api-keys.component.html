@@ -53,7 +53,7 @@
                     {{ key.permissions.length }} permission{{ key.permissions.length === 1 ? '' : 's' }}
                   </span>
                   <span class="badge badge-org">
-                    {{ key.organization ?? 'Any org' }}
+                    {{ scopeBadge(key) }}
                   </span>
                   <span>
                     Last used: {{ key.last_used_at ? (key.last_used_at | date: 'medium') : 'never' }}
@@ -148,25 +148,54 @@
   <p-divider />
 
   <div class="form-group">
-    <label for="key-organization">Organization</label>
-    <p-select
-      inputId="key-organization"
-      [options]="orgOptions()"
+    <label>Scope</label>
+    <p-selectbutton
+      [options]="scopeOptions"
+      [(ngModel)]="formScope"
       optionLabel="label"
       optionValue="value"
-      [(ngModel)]="formOrganization"
-      placeholder="Any organization"
-      appendTo="body"
-      styleClass="w-full"
+      (ngModelChange)="onScopeChange()"
     />
   </div>
+
+  @if (formScope === 'organization') {
+    <div class="form-group">
+      <label for="key-organization">Organization</label>
+      <p-select
+        inputId="key-organization"
+        [options]="orgOptions()"
+        optionLabel="label"
+        optionValue="value"
+        [(ngModel)]="formOrganization"
+        placeholder="Any organization"
+        appendTo="body"
+        styleClass="w-full"
+      />
+    </div>
+  }
+
+  @if (formScope === 'cache') {
+    <div class="form-group">
+      <label for="key-cache">Cache</label>
+      <p-select
+        inputId="key-cache"
+        [options]="cacheOptions()"
+        optionLabel="label"
+        optionValue="value"
+        [(ngModel)]="formCache"
+        placeholder="Select a cache"
+        appendTo="body"
+        styleClass="w-full"
+      />
+    </div>
+  }
 
   <p-divider />
 
   <div class="form-group">
     <label>Permissions</label>
     <div class="permission-grid">
-      @for (p of availablePermissions(); track p.id) {
+      @for (p of activePermissions(); track p.id) {
         <div class="permission-row">
           <p-checkbox
             [(ngModel)]="formPermissions[p.id]"

@@ -41,13 +41,15 @@ export class UserService {
     expiresInDays?: number | null,
     permissions: string[] = ['viewOrg'],
     organization: string | null = null,
+    cache: string | null = null,
   ): Observable<string> {
     const body: {
       name: string;
       expires_in_days?: number;
       permissions: string[];
       organization: string | null;
-    } = { name, permissions, organization };
+      cache: string | null;
+    } = { name, permissions, organization, cache };
     if (expiresInDays !== null && expiresInDays !== undefined) {
       body.expires_in_days = expiresInDays;
     }
@@ -60,15 +62,20 @@ export class UserService {
       name?: string;
       permissions?: string[];
       organization?: string | null;
+      cache?: string | null;
     },
   ): Observable<ApiKey> {
     return this.api.patch<ApiKey>(`user/keys/${apiId}`, body);
   }
 
-  getApiKeyPermissions(): Observable<{ available_permissions: PermissionDescriptor[] }> {
-    return this.api.get<{ available_permissions: PermissionDescriptor[] }>(
-      'user/keys/permissions',
-    );
+  getApiKeyPermissions(): Observable<{
+    available_permissions: PermissionDescriptor[];
+    availableCache: PermissionDescriptor[];
+  }> {
+    return this.api.get<{
+      available_permissions: PermissionDescriptor[];
+      availableCache: PermissionDescriptor[];
+    }>('user/keys/permissions');
   }
 
   deleteApiKey(name: string): Observable<string> {
