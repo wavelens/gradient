@@ -4,15 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::access::{Caller, OrgAccess, load_org};
+use crate::access::{CacheAccess, Caller, OrgAccess, load_cache, load_org};
 use crate::authorization::MaybeApiKey;
-use crate::error::{WebError, WebResult};
-use crate::helpers::{OptionExt, ok_json};
+use crate::error::{WebResult, WebError};
+use crate::helpers::ok_json;
 use crate::permissions::Permission;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use entity::organization_cache::CacheSubscriptionMode;
-use gradient_core::db::get_any_cache_by_name;
+use gradient_core::permissions::CachePermission;
 use gradient_core::types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, QueryFilter};
@@ -29,27 +29,6 @@ pub struct CacheSubscriptionItem {
     pub id: CacheId,
     pub name: String,
     pub mode: CacheSubscriptionMode,
-}
-
-// ── Access helpers ────────────────────────────────────────────────────────────
-
-/// Load a public or owned cache by name; verify the requesting user may subscribe to it.
-async fn load_subscribable_cache(
-    state: &Arc<ServerState>,
-    cache_name: String,
-    user_id: UserId,
-) -> WebResult<MCache> {
-    let cache = get_any_cache_by_name(Arc::clone(state), cache_name)
-        .await?
-        .or_not_found("Cache")?;
-
-    if !cache.public && cache.created_by != user_id {
-        return Err(WebError::forbidden(
-            "You don't have permission to subscribe to this cache. The cache is private and you are not the owner.".to_string(),
-        ));
-    }
-
-    Ok(cache)
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
@@ -157,7 +136,17 @@ pub async fn post_organization_subscribe_cache(
     )
     .await?;
 
-    let cache = load_subscribable_cache(&state, cache, user.id).await?;
+    let cache = load_cache(
+        &state,
+        Caller::User(&user),
+        api_key.as_ref(),
+        cache,
+        CacheAccess::Require {
+            permission: CachePermission::ManageCacheSubscriptions,
+            reject_managed: false,
+        },
+    )
+    .await?;
 
     let already = EOrganizationCache::find()
         .filter(
@@ -299,7 +288,17 @@ pub async fn delete_organization_subscribe_cache(
     )
     .await?;
 
-    let cache = load_subscribable_cache(&state, cache, user.id).await?;
+    let cache = load_cache(
+        &state,
+        Caller::User(&user),
+        api_key.as_ref(),
+        cache,
+        CacheAccess::Require {
+            permission: CachePermission::ManageCacheSubscriptions,
+            reject_managed: false,
+        },
+    )
+    .await?;
 
     let record = EOrganizationCache::find()
         .filter(
