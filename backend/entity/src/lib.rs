@@ -14,6 +14,7 @@ pub mod build_request_blob;
 pub mod cache;
 pub mod cache_derivation;
 pub mod cache_metric;
+pub mod cache_role;
 pub mod cache_upstream;
 pub mod cached_path;
 pub mod cached_path_signature;
