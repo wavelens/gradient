@@ -22,14 +22,15 @@
 use crate::authorization::ApiKeyContext;
 use crate::error::{WebError, WebResult};
 use crate::helpers::OptionExt;
-use crate::permissions::{Permission, PermissionMask, mask_grants};
+use crate::permissions::{CachePermission, Permission, PermissionMask, cache_mask_grants, mask_grants};
 use gradient_core::db::{
     get_any_cache_by_name, get_any_organization_by_name, get_any_project_by_name,
 };
-use gradient_core::types::ids::{IntegrationId, OrganizationId, UserId};
+use gradient_core::types::ids::{CacheId, IntegrationId, OrganizationId, UserId};
 use gradient_core::types::{
-    CIntegration, COrganizationUser, EIntegration, EOrganizationUser, ERole, MCache,
-    MIntegration, MOrganization, MOrganizationUser, MProject, MUser, ServerState,
+    CCacheUser, CIntegration, COrganizationUser, ECacheRole, ECacheUser, EIntegration,
+    EOrganizationUser, ERole, MCache, MIntegration, MOrganization, MOrganizationUser, MProject,
+    MUser, ServerState,
 };
 use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter};
 use std::sync::Arc;
@@ -100,10 +101,18 @@ pub enum ProjectAccess {
 
 #[derive(Clone, Copy)]
 pub enum CacheAccess {
-    /// Caller must own the cache.
-    Owned,
-    /// Caller must own the cache and the cache must not be state-managed.
-    Editable,
+    /// Anonymous callers may see public caches; private caches require an
+    /// authenticated member (with `ViewCache`). NAR routes still grant
+    /// anonymous read via `cache.public` separately, before `load_cache`
+    /// is hit.
+    Readable,
+    /// Caller must hold `permission` on the cache.
+    Require {
+        permission: CachePermission,
+        reject_managed: bool,
+    },
+    /// Caller must be a member (any role). Used for member/role listing.
+    Member { reject_managed: bool },
 }
 
 // ── Org loader ───────────────────────────────────────────────────────────────
@@ -215,22 +224,48 @@ pub async fn load_project(
 
 pub async fn load_cache(
     state: &Arc<ServerState>,
-    user_id: UserId,
+    caller: Caller<'_>,
+    api_key: Option<&ApiKeyContext>,
     cache_name: String,
     access: CacheAccess,
 ) -> WebResult<MCache> {
+    let label = "Cache";
+
     let cache = get_any_cache_by_name(Arc::clone(state), cache_name)
         .await?
-        .or_not_found("Cache")?;
+        .or_not_found(label)?;
 
-    if cache.created_by != user_id {
-        return Err(WebError::not_found("Cache"));
-    }
-
-    if matches!(access, CacheAccess::Editable) && cache.managed {
-        return Err(WebError::forbidden(
-            "Cannot modify state-managed cache. This cache is managed by configuration and cannot be edited through the API.",
-        ));
+    match access {
+        CacheAccess::Readable => {
+            if !cache.public {
+                let visible = match caller.user_id() {
+                    Some(uid) => is_cache_member(state, uid, cache.id, api_key).await?,
+                    None => false,
+                };
+                if !visible {
+                    return Err(WebError::not_found(label));
+                }
+            }
+        }
+        CacheAccess::Member { reject_managed } => {
+            let uid = caller.user_id().ok_or_else(|| WebError::not_found(label))?;
+            if !is_cache_member(state, uid, cache.id, api_key).await? {
+                return Err(WebError::not_found(label));
+            }
+            if reject_managed {
+                reject_managed_cache(&cache)?;
+            }
+        }
+        CacheAccess::Require {
+            permission,
+            reject_managed,
+        } => {
+            let uid = caller.user_id().ok_or_else(|| WebError::not_found(label))?;
+            require_cache_permission(state, uid, cache.id, permission, label, api_key).await?;
+            if reject_managed {
+                reject_managed_cache(&cache)?;
+            }
+        }
     }
 
     Ok(cache)
@@ -368,6 +403,71 @@ fn reject_managed_org(org: &MOrganization) -> WebResult<()> {
     if org.managed {
         return Err(WebError::forbidden(
             "Cannot modify state-managed organization. This organization is managed by configuration and cannot be edited through the API.",
+        ));
+    }
+    Ok(())
+}
+
+async fn is_cache_member(
+    state: &Arc<ServerState>,
+    user_id: UserId,
+    cache_id: CacheId,
+    _api_key: Option<&ApiKeyContext>,
+) -> WebResult<bool> {
+    let row = ECacheUser::find()
+        .filter(CCacheUser::Cache.eq(cache_id))
+        .filter(CCacheUser::User.eq(user_id))
+        .one(&state.web_db)
+        .await?;
+    Ok(row.is_some())
+}
+
+async fn cache_role_mask(
+    state: &Arc<ServerState>,
+    user_id: UserId,
+    cache_id: CacheId,
+) -> WebResult<Option<i64>> {
+    let mem = ECacheUser::find()
+        .filter(CCacheUser::Cache.eq(cache_id))
+        .filter(CCacheUser::User.eq(user_id))
+        .one(&state.web_db)
+        .await?;
+    let Some(mem) = mem else { return Ok(None) };
+    let role = ECacheRole::find_by_id(mem.role)
+        .one(&state.web_db)
+        .await?
+        .ok_or_else(|| WebError::not_found("Cache Role"))?;
+    Ok(Some(role.permission))
+}
+
+async fn require_cache_permission(
+    state: &Arc<ServerState>,
+    user_id: UserId,
+    cache_id: CacheId,
+    permission: CachePermission,
+    label: &'static str,
+    api_key: Option<&ApiKeyContext>,
+) -> WebResult<()> {
+    let role_mask = cache_role_mask(state, user_id, cache_id)
+        .await?
+        .ok_or_else(|| WebError::not_found(label))?;
+    let key_mask = api_key
+        .and_then(|k| k.cache_permission_mask)
+        .unwrap_or(i64::MAX);
+    let effective = role_mask & key_mask;
+    if !cache_mask_grants(effective, permission) {
+        return Err(WebError::forbidden(format!(
+            "Missing cache permission `{}`.",
+            permission.as_wire_name()
+        )));
+    }
+    Ok(())
+}
+
+fn reject_managed_cache(cache: &MCache) -> WebResult<()> {
+    if cache.managed {
+        return Err(WebError::forbidden(
+            "Cannot modify state-managed cache. This cache is managed by configuration and cannot be edited through the API.",
         ));
     }
     Ok(())
@@ -832,6 +932,7 @@ mod tests {
             api_id: entity::ids::ApiId::new(uuid!("a0000000-0000-0000-0000-000000000099")),
             mask,
             organization: org,
+            cache_permission_mask: None,
         }
     }
 

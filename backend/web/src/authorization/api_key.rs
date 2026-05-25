@@ -25,6 +25,9 @@ pub struct ApiKeyContext {
     /// `None` for unscoped keys; `Some(id)` pins the key to a single org -
     /// requests for any other org are short-circuited as not-found.
     pub organization: Option<OrganizationId>,
+    /// Cache-permission mask. `None` means unrestricted (i64::MAX). Task 17
+    /// wires this from the `api.cache_permission` DB column.
+    pub cache_permission_mask: Option<i64>,
 }
 
 /// Extension type inserted on every authenticated request.
@@ -84,6 +87,7 @@ mod tests {
             organization: Some(OrganizationId::new(uuid!(
                 "a0000000-0000-0000-0000-000000000020"
             ))),
+            cache_permission_mask: None,
         };
         let wrapped = MaybeApiKey::from_key(ctx);
         assert_eq!(wrapped.as_ref(), Some(&ctx));
@@ -116,6 +120,7 @@ mod tests {
                 api_id,
                 mask: mask_from(&[Permission::ViewOrg, Permission::TriggerEvaluation]),
                 organization: None,
+                cache_permission_mask: None,
             },
         };
         let ctx = outcome.api_key_context().expect("present");
