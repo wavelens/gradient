@@ -134,34 +134,97 @@ async fn store_installation_id(state: &Arc<ServerState>, payload: &GitHubInstall
     }
 }
 
-// ── GitHub App: resolve installation → integration ─────────────────────────
+// ── GitHub App: resolve installation + repository URL → integrations ───────
 
-/// Look up the inbound GitHub integration for a GitHub App `installation_id`.
+/// Canonical form for matching `project.repository` against the URLs reported
+/// by a forge webhook. Strips a trailing `.git`, drops a single trailing slash,
+/// and rewrites `git@host:owner/repo` SSH URLs to the `https://host/owner/repo`
+/// shape so the two webhook variants and the user-stored project URL collapse
+/// to one identity.
+pub(super) fn normalize_repo_url(url: &str) -> String {
+    let s = url.trim().trim_end_matches('/');
+    let s = s.strip_suffix(".git").unwrap_or(s);
+    if let Some(rest) = s.strip_prefix("git@")
+        && let Some((host, path)) = rest.split_once(':')
+    {
+        return format!("https://{}/{}", host, path);
+    }
+    s.to_string()
+}
+
+/// Resolve a GitHub App webhook to the set of inbound GitHub integrations
+/// whose org owns a project matching one of the webhook's `repository_urls`.
 ///
-/// Returns `None` when no org owns the given installation or the org has no
-/// inbound GitHub integration configured.
-pub(super) async fn resolve_github_integration_id(
+/// A single GitHub App installation can serve multiple Gradient orgs whenever
+/// those orgs each track repositories hosted under the same GitHub account
+/// (you can only install the App once per GitHub account, but each gradient
+/// org gets its own `github_installation_id` pointing at it). Matching purely
+/// on `installation_id` therefore returns one arbitrary org and silently
+/// drops the others — adding the repo-URL gate is what makes multi-org
+/// installations fire the correct subset.
+///
+/// Returns an empty vec when no org carries this installation, when no
+/// matching project exists, or when an org's inbound GitHub integration row
+/// is missing.
+pub(super) async fn resolve_github_app_targets(
     state: &Arc<ServerState>,
     installation_id: i64,
-) -> Option<IntegrationId> {
+    repository_urls: &[String],
+) -> Vec<IntegrationId> {
     use gradient_core::ci::IntegrationKind;
+    use std::collections::HashSet;
 
-    let org = EOrganization::find()
+    let candidate_orgs = EOrganization::find()
         .filter(COrganization::GithubInstallationId.eq(installation_id))
-        .one(&state.web_db)
+        .all(&state.web_db)
         .await
-        .ok()
-        .flatten()?;
+        .unwrap_or_default();
 
-    EIntegration::find()
-        .filter(CIntegration::Organization.eq(org.id))
-        .filter(CIntegration::Kind.eq(i16::from(IntegrationKind::Inbound)))
-        .filter(CIntegration::ForgeType.eq(i16::from(gradient_core::ci::ForgeType::GitHub)))
-        .one(&state.web_db)
-        .await
-        .ok()
-        .flatten()
-        .map(|i| i.id)
+    if candidate_orgs.is_empty() {
+        return Vec::new();
+    }
+
+    let webhook_urls: HashSet<String> = repository_urls
+        .iter()
+        .map(|u| normalize_repo_url(u))
+        .collect();
+
+    let mut integrations = Vec::new();
+    for org in candidate_orgs {
+        let projects = match EProject::find()
+            .filter(CProject::Organization.eq(org.id))
+            .all(&state.web_db)
+            .await
+        {
+            Ok(rows) => rows,
+            Err(e) => {
+                warn!(error = %e, org_id = %org.id, "resolve_github_app_targets: project lookup failed");
+                continue;
+            }
+        };
+        let has_match = projects
+            .iter()
+            .any(|p| webhook_urls.contains(&normalize_repo_url(&p.repository)));
+        if !has_match {
+            continue;
+        }
+        let integration = EIntegration::find()
+            .filter(CIntegration::Organization.eq(org.id))
+            .filter(CIntegration::Kind.eq(i16::from(IntegrationKind::Inbound)))
+            .filter(CIntegration::ForgeType.eq(i16::from(gradient_core::ci::ForgeType::GitHub)))
+            .one(&state.web_db)
+            .await
+            .ok()
+            .flatten();
+        match integration {
+            Some(i) => integrations.push(i.id),
+            None => warn!(
+                org_id = %org.id,
+                "resolve_github_app_targets: org has matching project but no inbound github integration row"
+            ),
+        }
+    }
+    integrations
 }
 
 // ── Ref kind ───────────────────────────────────────────────────────────────
@@ -908,8 +971,8 @@ pub(super) async fn handle_issue_comment(
         return;
     };
 
-    let integration_id = match integration_id {
-        Some(id) => id,
+    let integration_ids: Vec<IntegrationId> = match integration_id {
+        Some(id) => vec![id],
         None => {
             let installation_id = match github_installation_id_from_comment_body(body) {
                 Some(id) => id,
@@ -918,52 +981,57 @@ pub(super) async fn handle_issue_comment(
                     return;
                 }
             };
-            match resolve_github_integration_id(state, installation_id).await {
-                Some(id) => id,
-                None => {
-                    warn!(installation_id, "comment webhook (github): no integration");
-                    return;
-                }
+            let repo_urls = vec![
+                format!("https://github.com/{owner_repo}"),
+                format!("https://github.com/{owner_repo}.git"),
+                format!("git@github.com:{owner_repo}.git"),
+            ];
+            let targets = resolve_github_app_targets(state, installation_id, &repo_urls).await;
+            if targets.is_empty() {
+                warn!(installation_id, %owner_repo, "comment webhook (github): no integration matched");
+                return;
             }
-        }
-    };
-
-    let project_ids = match active_project_ids_for_integration(state, integration_id).await {
-        Ok(rows) => rows,
-        Err(e) => {
-            warn!(error = %e, "comment webhook: failed to load project list");
-            return;
+            targets
         }
     };
 
     let mut unparked_any = false;
-    for project_id in project_ids {
-        let Ok(Some(eval)) =
-            find_approval_gated_eval(&state.web_db, project_id, pr_number).await
-        else {
-            continue;
+    for integration_id in integration_ids {
+        let project_ids = match active_project_ids_for_integration(state, integration_id).await {
+            Ok(rows) => rows,
+            Err(e) => {
+                warn!(error = %e, "comment webhook: failed to load project list");
+                continue;
+            }
         };
-        if !sender_is_trusted(state, project_id, owner, repo, &sender).await {
-            warn!(
-                project_id = %project_id,
-                pr_number,
-                %sender,
-                "Rejecting /ci run - sender is not a repo writer"
-            );
-            continue;
-        }
-        match unpark_approval(&state.web_db, eval.id).await {
-            Ok(Some(_)) => {
-                info!(
-                    evaluation_id = %eval.id,
+        for project_id in project_ids {
+            let Ok(Some(eval)) =
+                find_approval_gated_eval(&state.web_db, project_id, pr_number).await
+            else {
+                continue;
+            };
+            if !sender_is_trusted(state, project_id, owner, repo, &sender).await {
+                warn!(
+                    project_id = %project_id,
                     pr_number,
                     %sender,
-                    "PR approval gate cleared via /ci run comment"
+                    "Rejecting /ci run - sender is not a repo writer"
                 );
-                unparked_any = true;
+                continue;
             }
-            Ok(None) => {}
-            Err(e) => warn!(error = %e, evaluation_id = %eval.id, "Failed to unpark approval gate"),
+            match unpark_approval(&state.web_db, eval.id).await {
+                Ok(Some(_)) => {
+                    info!(
+                        evaluation_id = %eval.id,
+                        pr_number,
+                        %sender,
+                        "PR approval gate cleared via /ci run comment"
+                    );
+                    unparked_any = true;
+                }
+                Ok(None) => {}
+                Err(e) => warn!(error = %e, evaluation_id = %eval.id, "Failed to unpark approval gate"),
+            }
         }
     }
     if !unparked_any {
@@ -1044,7 +1112,52 @@ async fn active_project_ids_for_integration(
 #[cfg(test)]
 mod tests {
     use super::super::WebhookTriggerOutcome;
-    use super::{glob_match_pattern, glob_matches, is_ci_run_command};
+    use super::{glob_match_pattern, glob_matches, is_ci_run_command, normalize_repo_url};
+
+    #[test]
+    fn normalize_strips_dot_git_suffix() {
+        assert_eq!(
+            normalize_repo_url("https://github.com/owner/repo.git"),
+            "https://github.com/owner/repo"
+        );
+    }
+
+    #[test]
+    fn normalize_strips_trailing_slash() {
+        assert_eq!(
+            normalize_repo_url("https://github.com/owner/repo/"),
+            "https://github.com/owner/repo"
+        );
+    }
+
+    #[test]
+    fn normalize_rewrites_ssh_to_https() {
+        assert_eq!(
+            normalize_repo_url("git@github.com:owner/repo.git"),
+            "https://github.com/owner/repo"
+        );
+    }
+
+    #[test]
+    fn normalize_passes_through_canonical_form() {
+        assert_eq!(
+            normalize_repo_url("https://github.com/owner/repo"),
+            "https://github.com/owner/repo"
+        );
+    }
+
+    #[test]
+    fn normalize_collapses_url_variants() {
+        let canonical = normalize_repo_url("https://github.com/owner/repo");
+        for url in [
+            "https://github.com/owner/repo.git",
+            "https://github.com/owner/repo/",
+            "git@github.com:owner/repo.git",
+            "  https://github.com/owner/repo  ",
+        ] {
+            assert_eq!(normalize_repo_url(url), canonical, "input was {url}");
+        }
+    }
 
     #[test]
     fn ci_run_command_matches_canonical_form() {

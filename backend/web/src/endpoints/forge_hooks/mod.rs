@@ -43,7 +43,7 @@ use crate::helpers::ok_json;
 
 use events::{ParsedPullRequestEvent, ParsedPushEvent, ParsedReleaseEvent};
 use trigger::{
-    PushRefKind, handle_github_installation, resolve_github_integration_id,
+    PushRefKind, handle_github_installation, resolve_github_app_targets,
     trigger_pr_for_integration, trigger_push_for_integration, trigger_release_for_integration,
 };
 
@@ -188,13 +188,15 @@ async fn dispatch_github_app_push(
         warn!("GitHub App push: missing installation_id");
         return WebhookTriggerOutcome::default();
     };
-    let Some(integration_id) = resolve_github_integration_id(state, installation_id).await else {
+    let targets = resolve_github_app_targets(state, installation_id, &parsed.repository_urls).await;
+    if targets.is_empty() {
         warn!(
             installation_id,
-            "GitHub App push: no integration found for installation"
+            urls = ?parsed.repository_urls,
+            "GitHub App push: no integration owns a project matching the webhook's repository"
         );
         return WebhookTriggerOutcome::default();
-    };
+    }
     let ref_name = parsed.ref_name.clone();
     let is_tag = parsed.is_tag;
     let ref_kind = if is_tag {
@@ -202,16 +204,23 @@ async fn dispatch_github_app_push(
     } else {
         PushRefKind::Branch(&ref_name)
     };
-    trigger_push_for_integration(
-        state,
-        scheduler,
-        integration_id,
-        ref_kind,
-        parsed.commit_hash,
-        parsed.commit_message,
-        parsed.author_name,
-    )
-    .await
+    let mut combined = WebhookTriggerOutcome::default();
+    for integration_id in targets {
+        let outcome = trigger_push_for_integration(
+            state,
+            scheduler,
+            integration_id,
+            ref_kind,
+            parsed.commit_hash.clone(),
+            parsed.commit_message.clone(),
+            parsed.author_name.clone(),
+        )
+        .await;
+        combined.projects_scanned += outcome.projects_scanned;
+        combined.queued.extend(outcome.queued);
+        combined.skipped.extend(outcome.skipped);
+    }
+    combined
 }
 
 async fn dispatch_github_app_pr(
@@ -224,26 +233,35 @@ async fn dispatch_github_app_pr(
         warn!("GitHub App pull_request: missing installation_id");
         return WebhookTriggerOutcome::default();
     };
-    let Some(integration_id) = resolve_github_integration_id(state, installation_id).await else {
+    let targets = resolve_github_app_targets(state, installation_id, &parsed.repository_urls).await;
+    if targets.is_empty() {
         warn!(
             installation_id,
-            "GitHub App pull_request: no integration found for installation"
+            urls = ?parsed.repository_urls,
+            "GitHub App pull_request: no integration owns a project matching the webhook's repository"
         );
         return WebhookTriggerOutcome::default();
-    };
+    }
     let approval_ctx = approval_context_from(&parsed);
-    trigger_pr_for_integration(
-        state,
-        scheduler,
-        integration_id,
-        parsed.branch.as_deref(),
-        &parsed.action,
-        parsed.commit_hash,
-        None,
-        None,
-        approval_ctx,
-    )
-    .await
+    let mut combined = WebhookTriggerOutcome::default();
+    for integration_id in targets {
+        let outcome = trigger_pr_for_integration(
+            state,
+            scheduler,
+            integration_id,
+            parsed.branch.as_deref(),
+            &parsed.action,
+            parsed.commit_hash.clone(),
+            None,
+            None,
+            approval_ctx.clone(),
+        )
+        .await;
+        combined.projects_scanned += outcome.projects_scanned;
+        combined.queued.extend(outcome.queued);
+        combined.skipped.extend(outcome.skipped);
+    }
+    combined
 }
 
 fn approval_context_from(parsed: &ParsedPullRequestEvent) -> trigger::PullRequestApprovalContext {
@@ -264,23 +282,32 @@ async fn dispatch_github_app_release(
         warn!("GitHub App release: missing installation_id");
         return WebhookTriggerOutcome::default();
     };
-    let Some(integration_id) = resolve_github_integration_id(state, installation_id).await else {
+    let targets = resolve_github_app_targets(state, installation_id, &parsed.repository_urls).await;
+    if targets.is_empty() {
         warn!(
             installation_id,
-            "GitHub App release: no integration found for installation"
+            urls = ?parsed.repository_urls,
+            "GitHub App release: no integration owns a project matching the webhook's repository"
         );
         return WebhookTriggerOutcome::default();
-    };
-    trigger_release_for_integration(
-        state,
-        scheduler,
-        integration_id,
-        parsed.tag.as_deref(),
-        parsed.commit_hash,
-        None,
-        None,
-    )
-    .await
+    }
+    let mut combined = WebhookTriggerOutcome::default();
+    for integration_id in targets {
+        let outcome = trigger_release_for_integration(
+            state,
+            scheduler,
+            integration_id,
+            parsed.tag.as_deref(),
+            parsed.commit_hash.clone(),
+            None,
+            None,
+        )
+        .await;
+        combined.projects_scanned += outcome.projects_scanned;
+        combined.queued.extend(outcome.queued);
+        combined.skipped.extend(outcome.skipped);
+    }
+    combined
 }
 
 // ── Generic forge webhook ──────────────────────────────────────────────────
