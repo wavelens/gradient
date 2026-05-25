@@ -401,6 +401,7 @@ pub async fn post_keys(
         revoked_at: Set(None),
         permission: Set(mask),
         organization: Set(org_pin),
+        cache: Set(None),
     };
     let inserted = api_key.insert(&state.web_db).await?;
 
