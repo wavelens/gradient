@@ -270,6 +270,12 @@ pub(super) struct ParsedPullRequestEvent {
     /// from a fork). `false` when same-repo. `None` when the payload lacks
     /// enough information to decide - callers should treat as untrusted.
     pub is_fork: Option<bool>,
+    /// Clone URL of the PR head repo when the PR is from a fork. Used by
+    /// `apply_trigger` to override the evaluation's `repository` field so
+    /// the worker fetches the commit from the fork (where it actually
+    /// exists) rather than the base repo. `None` for same-repo PRs and
+    /// for payloads that lack a `head.repo.clone_url`.
+    pub head_repo_clone_url: Option<String>,
 }
 
 /// Release/tag event. `commit_hash` is the SHA the tag points at.
@@ -463,8 +469,12 @@ impl ParsedPullRequestEvent {
             .as_ref()
             .and_then(|u| u.login.clone());
         let mut repository_urls = Vec::with_capacity(4);
+        let mut head_repo_clone_url: Option<String> = None;
         if let (Some(true), Some(repo)) = (is_fork, head_repo) {
-            if let Some(url) = repo.clone_url.clone() { repository_urls.push(url); }
+            if let Some(url) = repo.clone_url.clone() {
+                head_repo_clone_url = Some(url.clone());
+                repository_urls.push(url);
+            }
             if let Some(url) = repo.ssh_url.clone() { repository_urls.push(url); }
         }
         repository_urls.push(payload.repository.clone_url);
@@ -477,6 +487,7 @@ impl ParsedPullRequestEvent {
             pr_number: payload.pull_request.number,
             pr_author,
             is_fork,
+            head_repo_clone_url,
         })
     }
 
@@ -518,8 +529,12 @@ impl ParsedPullRequestEvent {
             .as_ref()
             .and_then(|u| u.username.clone().or_else(|| u.login.clone()));
         let mut repository_urls = Vec::with_capacity(4);
+        let mut head_repo_clone_url: Option<String> = None;
         if let (Some(true), Some(repo)) = (is_fork, head_repo) {
-            if let Some(url) = repo.clone_url.clone() { repository_urls.push(url); }
+            if let Some(url) = repo.clone_url.clone() {
+                head_repo_clone_url = Some(url.clone());
+                repository_urls.push(url);
+            }
             if let Some(url) = repo.ssh_url.clone() { repository_urls.push(url); }
         }
         repository_urls.extend(gitea_repo_urls(&payload.repository));
@@ -531,6 +546,7 @@ impl ParsedPullRequestEvent {
             pr_number: payload.pull_request.number,
             pr_author,
             is_fork,
+            head_repo_clone_url,
         })
     }
 
@@ -557,8 +573,12 @@ impl ParsedPullRequestEvent {
         };
         let pr_author = payload.user.as_ref().and_then(|u| u.username.clone());
         let mut repository_urls = Vec::with_capacity(4);
+        let mut head_repo_clone_url: Option<String> = None;
         if let (Some(true), Some(src)) = (is_fork, payload.object_attributes.source.as_ref()) {
-            if let Some(url) = src.git_http_url.clone() { repository_urls.push(url); }
+            if let Some(url) = src.git_http_url.clone() {
+                head_repo_clone_url = Some(url.clone());
+                repository_urls.push(url);
+            }
             if let Some(url) = src.git_ssh_url.clone() { repository_urls.push(url); }
         }
         repository_urls.extend(gitlab_project_urls(&payload.project));
@@ -570,6 +590,7 @@ impl ParsedPullRequestEvent {
             pr_number: payload.object_attributes.iid,
             pr_author,
             is_fork,
+            head_repo_clone_url,
         })
     }
 }

@@ -243,6 +243,7 @@ async fn dispatch_github_app_pr(
         return WebhookTriggerOutcome::default();
     }
     let approval_ctx = approval_context_from(&parsed);
+    let head_clone = parsed.head_repo_clone_url.clone();
     let mut combined = WebhookTriggerOutcome::default();
     for integration_id in targets {
         let outcome = trigger_pr_for_integration(
@@ -255,6 +256,7 @@ async fn dispatch_github_app_pr(
             None,
             None,
             approval_ctx.clone(),
+            head_clone.clone(),
         )
         .await;
         combined.projects_scanned += outcome.projects_scanned;
@@ -425,6 +427,7 @@ pub async fn forge_webhook(
             };
             let urls = parsed.repository_urls.clone();
             let approval_ctx = approval_context_from(&parsed);
+            let head_clone = parsed.head_repo_clone_url.clone();
             let outcome = trigger_pr_for_integration(
                 &state,
                 &scheduler,
@@ -435,6 +438,7 @@ pub async fn forge_webhook(
                 None,
                 None,
                 approval_ctx,
+                head_clone,
             )
             .await;
             WebhookResponse {

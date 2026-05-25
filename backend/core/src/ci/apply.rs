@@ -58,6 +58,11 @@ pub struct ApplyInput {
     /// trigger). `apply_trigger` parks the resulting evaluation in
     /// `Waiting + WaitingReason::Approval` instead of `Queued`.
     pub gate_approval: Option<ApprovalInfo>,
+    /// Override the evaluation's `repository` URL. Used by the PR webhook layer
+    /// so commits on a fork are fetched from the fork's clone URL instead of
+    /// `project.repository` (which only has the base repo's history). `None`
+    /// falls back to `project.repository`.
+    pub repository_override: Option<String>,
 }
 
 /// Identification of the pull request a maintainer must approve before the
@@ -143,6 +148,7 @@ pub async fn apply_trigger<C: ConnectionTrait>(
         input.author_name,
         Some(input.trigger_id),
         concurrent_flag,
+        input.repository_override,
     )
     .await
     {
@@ -330,6 +336,7 @@ mod tests {
             author_name: None,
             manual,
             gate_approval: None,
+            repository_override: None,
         }
     }
 
@@ -857,6 +864,7 @@ mod tests {
                 pr_number: 42,
                 pr_author: "external-contrib".into(),
             }),
+            repository_override: None,
         };
         let res = apply_trigger(&db, &project, applied).await.unwrap();
 

@@ -39,6 +39,7 @@ pub enum TriggerError {
 /// - Inserts a `Commit` row, then an `Evaluation` row with status `Queued`.
 /// - Sets `project.force_evaluation = true` and resets `last_check_at` so the
 ///   scheduler picks it up immediately on its next tick.
+#[allow(clippy::too_many_arguments)]
 pub async fn trigger_evaluation<C: ConnectionTrait>(
     db: &C,
     project: &MProject,
@@ -47,6 +48,7 @@ pub async fn trigger_evaluation<C: ConnectionTrait>(
     author_name: Option<String>,
     trigger: Option<crate::types::ids::ProjectTriggerId>,
     concurrent: bool,
+    repository_override: Option<String>,
 ) -> Result<MEvaluation, TriggerError> {
     if !concurrent {
         let in_progress = EEvaluation::find()
@@ -93,7 +95,7 @@ pub async fn trigger_evaluation<C: ConnectionTrait>(
     let aevaluation = AEvaluation {
         id: Set(EvaluationId::now_v7()),
         project: Set(Some(project.id)),
-        repository: Set(project.repository.clone()),
+        repository: Set(repository_override.unwrap_or_else(|| project.repository.clone())),
         commit: Set(commit.id),
         wildcard: Set(project.wildcard.clone()),
         status: Set(EvaluationStatus::Queued),
@@ -403,7 +405,7 @@ mod tests {
             .into_connection();
 
         let result =
-            trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None, false).await;
+            trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None, false, None).await;
         assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
         assert_eq!(result.unwrap().status, EvaluationStatus::Queued);
     }
@@ -444,7 +446,7 @@ mod tests {
             .into_connection();
 
         let result =
-            trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None, false).await;
+            trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None, false, None).await;
         assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
     }
 
@@ -459,7 +461,7 @@ mod tests {
             .into_connection();
 
         let result =
-            trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None, false).await;
+            trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None, false, None).await;
         assert!(matches!(result, Err(TriggerError::AlreadyInProgress)));
     }
 
@@ -479,7 +481,7 @@ mod tests {
                 .append_query_results([vec![make_eval(EvaluationId::now_v7(), status)]])
                 .into_connection();
             let result =
-                trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None, false).await;
+                trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None, false, None).await;
             assert!(
                 matches!(result, Err(TriggerError::AlreadyInProgress)),
                 "{status:?} should block trigger"
@@ -546,7 +548,7 @@ mod tests {
             .into_connection();
 
         let result =
-            trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None, false).await;
+            trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None, false, None).await;
         assert!(result.is_ok(), "terminal eval should not block new trigger");
     }
 
@@ -580,7 +582,7 @@ mod tests {
             .into_connection();
 
         let result =
-            trigger_evaluation(&db, &project, vec![0u8; 20], None, None, Some(trig), false).await;
+            trigger_evaluation(&db, &project, vec![0u8; 20], None, None, Some(trig), false, None).await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap().trigger, Some(trig));
     }

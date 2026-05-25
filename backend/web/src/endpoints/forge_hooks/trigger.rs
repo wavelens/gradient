@@ -277,6 +277,7 @@ pub(super) async fn trigger_push_for_integration(
             _ => FilterResult::Skip,
         },
         None,
+        None,
     )
     .await
 }
@@ -292,6 +293,7 @@ pub(super) async fn trigger_pr_for_integration(
     commit_message: Option<String>,
     author_name: Option<String>,
     approval_ctx: PullRequestApprovalContext,
+    head_repo_clone_url: Option<String>,
 ) -> WebhookTriggerOutcome {
     let action_owned = action.to_string();
     let branch_owned = branch.map(str::to_string);
@@ -327,6 +329,7 @@ pub(super) async fn trigger_pr_for_integration(
             _ => FilterResult::Skip,
         },
         Some(approval_ctx),
+        head_repo_clone_url,
     )
     .await
 }
@@ -370,6 +373,7 @@ pub(super) async fn trigger_release_for_integration(
             _ => FilterResult::Skip,
         },
         None,
+        None,
     )
     .await
 }
@@ -399,6 +403,7 @@ async fn fan_out_triggers<F>(
     author_name: Option<String>,
     filter: F,
     approval_ctx: Option<PullRequestApprovalContext>,
+    repository_override: Option<String>,
 ) -> WebhookTriggerOutcome
 where
     F: Fn(&TriggerConfig) -> FilterResult,
@@ -472,6 +477,7 @@ where
                 author_name: author_name.clone(),
                 manual: false,
                 gate_approval,
+                repository_override: repository_override.clone(),
             },
         )
         .await;
