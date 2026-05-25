@@ -14,16 +14,20 @@ import { InputTextModule } from 'primeng/inputtext';
 import { CheckboxModule } from 'primeng/checkbox';
 import { DividerModule } from 'primeng/divider';
 import { SelectModule } from 'primeng/select';
+import { SelectButtonModule } from 'primeng/selectbutton';
 import { TooltipModule } from 'primeng/tooltip';
 import { UserService } from '@core/services/user.service';
 import { OrganizationsService } from '@core/services/organizations.service';
+import { CachesService } from '@core/services/caches.service';
 import { ApiKey } from '@core/models';
 import { PermissionDescriptor } from '@core/models/permission.model';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { ManagedDisableDirective } from '@shared/access';
 import { AccessState } from '@core/models';
 
-interface OrgOption {
+type ScopeType = 'none' | 'organization' | 'cache';
+
+interface SelectOption {
   label: string;
   value: string | null;
 }
@@ -41,6 +45,7 @@ interface OrgOption {
     CheckboxModule,
     DividerModule,
     SelectModule,
+    SelectButtonModule,
     TooltipModule,
     LoadingSpinnerComponent,
     ManagedDisableDirective,
@@ -51,6 +56,7 @@ interface OrgOption {
 export class ApiKeysComponent implements OnInit {
   private userService = inject(UserService);
   private organizationsService = inject(OrganizationsService);
+  private cachesService = inject(CachesService);
 
   loading = signal(true);
   creating = signal(false);
@@ -60,7 +66,15 @@ export class ApiKeysComponent implements OnInit {
 
   keys = signal<ApiKey[]>([]);
   availablePermissions = signal<PermissionDescriptor[]>([]);
-  orgOptions = signal<OrgOption[]>([{ label: 'Any organization', value: null }]);
+  availableCachePermissions = signal<PermissionDescriptor[]>([]);
+  orgOptions = signal<SelectOption[]>([{ label: 'Any organization', value: null }]);
+  cacheOptions = signal<SelectOption[]>([]);
+
+  scopeOptions: { label: string; value: ScopeType }[] = [
+    { label: 'None', value: 'none' },
+    { label: 'Organization', value: 'organization' },
+    { label: 'Cache', value: 'cache' },
+  ];
 
   showDialog = signal(false);
   editingKey = signal<ApiKey | null>(null);
@@ -71,21 +85,32 @@ export class ApiKeysComponent implements OnInit {
   formName = '';
   formExpiresInDays: number | null = null;
   formPermissions: Record<string, boolean> = {};
+  formScope: ScopeType = 'none';
   formOrganization: string | null = null;
+  formCache: string | null = null;
 
   ngOnInit(): void {
     this.loadKeys();
     this.userService.getApiKeyPermissions().subscribe({
-      next: (response) => this.availablePermissions.set(response.available_permissions),
+      next: (response) => {
+        this.availablePermissions.set(response.available_permissions);
+        this.availableCachePermissions.set(response.availableCache);
+      },
       error: () => {},
     });
     this.organizationsService.getOrganizations(1, 100).subscribe({
       next: (paginated) => {
-        const options: OrgOption[] = [
+        const options: SelectOption[] = [
           { label: 'Any organization', value: null },
           ...paginated.items.map((o) => ({ label: o.name, value: o.name })),
         ];
         this.orgOptions.set(options);
+      },
+      error: () => {},
+    });
+    this.cachesService.getCaches().subscribe({
+      next: (caches) => {
+        this.cacheOptions.set(caches.map((c) => ({ label: c.display_name || c.name, value: c.name })));
       },
       error: () => {},
     });
@@ -106,9 +131,11 @@ export class ApiKeysComponent implements OnInit {
     this.editingKey.set(null);
     this.formName = '';
     this.formExpiresInDays = null;
+    this.formScope = 'none';
+    this.formOrganization = null;
+    this.formCache = null;
     this.formPermissions = this.permissionTemplate(false);
     this.formPermissions['viewOrg'] = true;
-    this.formOrganization = null;
     this.errorMessage.set(null);
     this.showDialog.set(true);
   }
@@ -119,9 +146,36 @@ export class ApiKeysComponent implements OnInit {
     this.formExpiresInDays = null;
     this.formPermissions = this.permissionTemplate(false);
     for (const p of key.permissions) this.formPermissions[p] = true;
-    this.formOrganization = key.organization;
+    if (key.cache) {
+      this.formScope = 'cache';
+      this.formCache = key.cache;
+      this.formOrganization = null;
+    } else if (key.organization) {
+      this.formScope = 'organization';
+      this.formOrganization = key.organization;
+      this.formCache = null;
+    } else {
+      this.formScope = 'none';
+      this.formOrganization = null;
+      this.formCache = null;
+    }
     this.errorMessage.set(null);
     this.showDialog.set(true);
+  }
+
+  onScopeChange(): void {
+    this.formOrganization = null;
+    this.formCache = null;
+    const isCacheScope = this.formScope === 'cache';
+    const perms = isCacheScope ? this.availableCachePermissions() : this.availablePermissions();
+    const out: Record<string, boolean> = {};
+    for (const p of perms) out[p.id] = false;
+    this.formPermissions = out;
+    if (!isCacheScope) this.formPermissions['viewOrg'] = true;
+  }
+
+  activePermissions(): PermissionDescriptor[] {
+    return this.formScope === 'cache' ? this.availableCachePermissions() : this.availablePermissions();
   }
 
   private permissionTemplate(value: boolean): Record<string, boolean> {
@@ -147,15 +201,13 @@ export class ApiKeysComponent implements OnInit {
       this.errorMessage.set('Select at least one permission.');
       return;
     }
+    const organization = this.formScope === 'organization' ? this.formOrganization : null;
+    const cache = this.formScope === 'cache' ? this.formCache : null;
     const editing = this.editingKey();
     if (editing) {
       this.saving.set(true);
       this.userService
-        .updateApiKey(editing.id, {
-          name,
-          permissions: perms,
-          organization: this.formOrganization,
-        })
+        .updateApiKey(editing.id, { name, permissions: perms, organization, cache })
         .subscribe({
           next: () => {
             this.saving.set(false);
@@ -170,7 +222,7 @@ export class ApiKeysComponent implements OnInit {
     } else {
       this.creating.set(true);
       this.userService
-        .createApiKey(name, this.formExpiresInDays, perms, this.formOrganization)
+        .createApiKey(name, this.formExpiresInDays, perms, organization, cache)
         .subscribe({
           next: (keyValue) => {
             this.creating.set(false);
@@ -216,6 +268,12 @@ export class ApiKeysComponent implements OnInit {
   permissionTooltip(key: ApiKey): string {
     if (key.permissions.length === 0) return 'No permissions';
     return key.permissions.join(', ');
+  }
+
+  scopeBadge(key: ApiKey): string {
+    if (key.cache) return key.cache;
+    if (key.organization) return key.organization;
+    return 'Any org';
   }
 
   rowAccess(key: ApiKey): AccessState {
