@@ -18,7 +18,6 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use chrono::NaiveDateTime;
-use gradient_core::db::get_any_cache_by_name;
 use gradient_core::types::*;
 use sea_orm::{ColumnTrait, EntityTrait, FromQueryResult, QueryFilter};
 use serde::{Deserialize, Serialize};
@@ -92,32 +91,23 @@ pub struct NarAvailable {
 const DEFAULT_PER_PAGE: u64 = 50;
 const MAX_PER_PAGE: u64 = 200;
 
-async fn resolve_visible_cache(
-    state: &Arc<ServerState>,
-    maybe_user: &Option<MUser>,
-    cache_name: String,
-) -> WebResult<MCache> {
-    let cache: MCache = get_any_cache_by_name(Arc::clone(state), cache_name)
-        .await?
-        .or_not_found("Cache")?;
-    if !cache.public {
-        match maybe_user {
-            Some(u) if u.id == cache.created_by => {}
-            _ => return Err(WebError::not_found("Cache")),
-        }
-    }
-    Ok(cache)
-}
-
 pub async fn list(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path(cache_name): Path<String>,
     Query(q): Query<ListQuery>,
 ) -> WebResult<Json<BaseResponse<NarListResponse>>> {
     use sea_orm::{DatabaseBackend, Statement};
 
-    let cache = resolve_visible_cache(&state, &maybe_user, cache_name).await?;
+    let cache = load_cache(
+        &state,
+        Caller::from_option(&maybe_user),
+        api_key.as_ref(),
+        cache_name,
+        CacheAccess::Readable,
+    )
+    .await?;
     let per_page = q.per_page.unwrap_or(DEFAULT_PER_PAGE).clamp(1, MAX_PER_PAGE);
     let page = q.page.unwrap_or(1).max(1);
     let offset = (page - 1) * per_page;
@@ -204,9 +194,17 @@ pub async fn list(
 pub async fn show(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path((cache_name, hash)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<NarDetail>>> {
-    let cache = resolve_visible_cache(&state, &maybe_user, cache_name).await?;
+    let cache = load_cache(
+        &state,
+        Caller::from_option(&maybe_user),
+        api_key.as_ref(),
+        cache_name,
+        CacheAccess::Readable,
+    )
+    .await?;
     let cp = ECachedPath::find()
         .filter(CCachedPath::Hash.eq(&hash))
         .one(&state.web_db)
@@ -245,10 +243,18 @@ pub async fn show(
 pub async fn stats(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path(cache_name): Path<String>,
 ) -> WebResult<Json<BaseResponse<NarStats>>> {
     use sea_orm::{DatabaseBackend, FromQueryResult, Statement};
-    let cache = resolve_visible_cache(&state, &maybe_user, cache_name).await?;
+    let cache = load_cache(
+        &state,
+        Caller::from_option(&maybe_user),
+        api_key.as_ref(),
+        cache_name,
+        CacheAccess::Readable,
+    )
+    .await?;
 
     #[derive(FromQueryResult)]
     struct Row {
@@ -287,10 +293,18 @@ pub async fn stats(
 pub async fn available(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path(cache_name): Path<String>,
     Query(q): Query<std::collections::HashMap<String, String>>,
 ) -> WebResult<Json<BaseResponse<NarAvailable>>> {
-    let cache = resolve_visible_cache(&state, &maybe_user, cache_name).await?;
+    let cache = load_cache(
+        &state,
+        Caller::from_option(&maybe_user),
+        api_key.as_ref(),
+        cache_name,
+        CacheAccess::Readable,
+    )
+    .await?;
     let hash = q.get("hash").cloned().unwrap_or_default();
     if hash.is_empty() {
         return Err(WebError::bad_request("missing ?hash="));

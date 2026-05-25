@@ -9,14 +9,13 @@ use crate::access::{CacheAccess, Caller, load_cache};
 use crate::audit::{RequestInfo, events, record as audit_record};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult};
-use crate::helpers::{OptionExt, ok_json};
+use crate::helpers::ok_json;
 use crate::permissions::CachePermission;
 use axum::Extension;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use chrono::NaiveDateTime;
 use entity::organization_cache::CacheSubscriptionMode;
-use gradient_core::db::get_any_cache_by_name;
 use gradient_core::sources::{format_cache_public_key, generate_signing_key};
 use gradient_core::types::input::{check_index_name, validate_display_name};
 use gradient_core::types::*;
@@ -218,18 +217,17 @@ pub async fn get_public_caches(
 pub async fn get_cache(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path(cache): Path<String>,
 ) -> WebResult<Json<BaseResponse<CacheResponse>>> {
-    let cache: MCache = get_any_cache_by_name(state.0.clone(), cache.clone())
-        .await?
-        .or_not_found("Cache")?;
-
-    if !cache.public {
-        match &maybe_user {
-            Some(user) if cache.created_by == user.id => {}
-            _ => return Err(WebError::not_found("Cache")),
-        }
-    }
+    let cache = load_cache(
+        &state,
+        Caller::from_option(&maybe_user),
+        api_key.as_ref(),
+        cache,
+        CacheAccess::Readable,
+    )
+    .await?;
 
     let public_key = format_cache_public_key(
         &state.config.secrets.crypt_secret_file,
@@ -241,7 +239,32 @@ pub async fn get_cache(
         WebError::internal("Failed to derive public key")
     })?;
 
-    let can_edit = matches!(&maybe_user, Some(u) if u.id == cache.created_by);
+    let can_edit = match &maybe_user {
+        Some(u) => {
+            let mem = ECacheUser::find()
+                .filter(CCacheUser::Cache.eq(cache.id))
+                .filter(CCacheUser::User.eq(u.id))
+                .one(&state.web_db)
+                .await
+                .unwrap_or(None);
+            if let Some(m) = mem {
+                let role = ECacheRole::find_by_id(m.role)
+                    .one(&state.web_db)
+                    .await
+                    .unwrap_or(None);
+                role.map(|r| {
+                    crate::permissions::cache_mask_grants(
+                        r.permission,
+                        CachePermission::ManageCacheSettings,
+                    )
+                })
+                .unwrap_or(false)
+            } else {
+                false
+            }
+        }
+        None => false,
+    };
 
     Ok(ok_json(CacheResponse {
         id: cache.id,
