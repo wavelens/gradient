@@ -479,7 +479,9 @@ mod tests {
     use crate::authorization::ApiKeyContext;
     use gradient_core::permissions::mask_from;
     use gradient_core::storage::{EmailSender, NarStore};
-    use gradient_core::types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID};
+    use gradient_core::types::consts::{
+        BASE_CACHE_ROLE_VIEW_ID, BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID,
+    };
     use gradient_core::types::ids::{OrganizationUserId, ProjectId, RoleId};
     use gradient_core::types::{RuntimeConfig, WebDb, WorkerDb};
     use sea_orm::{DatabaseBackend, MockDatabase};
@@ -1193,6 +1195,145 @@ mod tests {
             .await
             .expect_err("non-member must be rejected");
             assert!(matches!(err, WebError::NotFound(..)));
+        });
+    }
+
+    fn cache_fixture_public(managed: bool) -> entity::cache::Model {
+        let mut c = cache_fixture(managed);
+        c.public = true;
+        c
+    }
+
+    fn cache_role_view_fixture() -> entity::cache_role::Model {
+        entity::cache_role::Model {
+            id: BASE_CACHE_ROLE_VIEW_ID,
+            name: "View".into(),
+            cache: None,
+            permission: crate::permissions::cache_view_mask(),
+            managed: true,
+        }
+    }
+
+    fn cache_view_api_key(user_id: UserId) -> ApiKeyContext {
+        let _ = user_id;
+        ApiKeyContext {
+            api_id: entity::ids::ApiId::new(uuid!("a0000000-0000-0000-0000-000000000099")),
+            mask: i64::MAX,
+            organization: None,
+            cache_permission_mask: Some(crate::permissions::cache_view_mask()),
+        }
+    }
+
+    #[test]
+    fn cache_readable_allows_public_anon() {
+        run(async {
+            let db = MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([vec![cache_fixture_public(false)]])
+                .into_connection();
+            let state = make_state(db);
+            let r = load_cache(
+                &state,
+                Caller::Anon,
+                None,
+                "test-cache".into(),
+                CacheAccess::Readable,
+            )
+            .await;
+            assert!(r.is_ok(), "anon read on public cache must succeed: {:?}", r.err());
+        });
+    }
+
+    #[test]
+    fn cache_readable_blocks_anon_on_private() {
+        run(async {
+            let db = MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([vec![cache_fixture(false)]])
+                .into_connection();
+            let state = make_state(db);
+            let err = load_cache(
+                &state,
+                Caller::Anon,
+                None,
+                "test-cache".into(),
+                CacheAccess::Readable,
+            )
+            .await
+            .expect_err("anon on private cache must be rejected");
+            assert!(matches!(err, WebError::NotFound(..)));
+        });
+    }
+
+    #[test]
+    fn cache_member_allows_member() {
+        run(async {
+            let user = user_fixture();
+            let db = MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([vec![cache_fixture(false)]])
+                .append_query_results([vec![cache_member_fixture()]])
+                .into_connection();
+            let state = make_state(db);
+            let r = load_cache(
+                &state,
+                Caller::User(&user),
+                None,
+                "test-cache".into(),
+                CacheAccess::Member { reject_managed: false },
+            )
+            .await;
+            assert!(r.is_ok(), "member access must succeed: {:?}", r.err());
+        });
+    }
+
+    #[test]
+    fn cache_require_blocks_when_role_lacks_permission() {
+        run(async {
+            let user = user_fixture();
+            let db = MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([vec![cache_fixture(false)]])
+                .append_query_results([vec![cache_member_fixture()]])
+                .append_query_results([vec![cache_role_view_fixture()]])
+                .into_connection();
+            let state = make_state(db);
+            let err = load_cache(
+                &state,
+                Caller::User(&user),
+                None,
+                "test-cache".into(),
+                CacheAccess::Require {
+                    permission: CachePermission::WriteStore,
+                    reject_managed: false,
+                },
+            )
+            .await
+            .expect_err("View role must lack WriteStore");
+            assert!(matches!(err, WebError::Forbidden(..)));
+        });
+    }
+
+    #[test]
+    fn cache_require_intersects_with_api_key_mask() {
+        run(async {
+            let user = user_fixture();
+            let api_key = cache_view_api_key(user.id);
+            let db = MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([vec![cache_fixture(false)]])
+                .append_query_results([vec![cache_member_fixture()]])
+                .append_query_results([vec![cache_role_fixture()]])
+                .into_connection();
+            let state = make_state(db);
+            let err = load_cache(
+                &state,
+                Caller::User(&user),
+                Some(&api_key),
+                "test-cache".into(),
+                CacheAccess::Require {
+                    permission: CachePermission::WriteStore,
+                    reject_managed: false,
+                },
+            )
+            .await
+            .expect_err("API key View mask must block WriteStore even with Admin role");
+            assert!(matches!(err, WebError::Forbidden(..)));
         });
     }
 }
