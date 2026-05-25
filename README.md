@@ -1,17 +1,19 @@
-# Gradient
+<h1 align="center">Gradient - Modern Nix-CI System</h1>
 
 <p align="center">
-  <a href="https://gradient.wavelens.io/organization/gradient/project/main">
-    <img src="https://gradient.wavelens.io/api/v1/projects/gradient/main/badge" alt="Gradient Badge">
-  </a>
-  <br>
-  <strong>Modern Nix-CI System</strong>
+  <a href="https://gradient.wavelens.io">🚀 Demo Instance</a>
+  •
+  <a href="https://wavelens.github.io/gradient">📖 Documentation</a>
+  •
+  <a href="https://wavelens.github.io/gradient-search">🔍 Options Search</a>
+  •
+  <a href="https://petstore.swagger.io/?url=https://raw.githubusercontent.com/wavelens/gradient/master/docs/gradient-api.yaml">🛠️ API Docs</a>
+  •
+  <sup><a href="https://gradient.wavelens.io/organization/gradient/project/main">
+    <img src="https://gradient.wavelens.io/api/v1/projects/gradient/main/badge" alt="Gradient Badge" align="middle">
+  </a></sup>
 </p>
 
----
-
-| [🚀 Demo Instance](https://gradient.wavelens.io) | [📖 Documentation](https://wavelens.github.io/gradient) | [🔍 Options Search](https://wavelens.github.io/gradient-search) | [🛠️ API Docs](https://petstore.swagger.io/?url=https://raw.githubusercontent.com/wavelens/gradient/master/docs/gradient-api.yaml) |
-| :---: | :---: | :---: | :---: |
 
 > [!IMPORTANT]
 > If you are interested in contributing, please read the [Contributing Guidelines](CONTRIBUTING.md) for more information.
