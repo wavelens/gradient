@@ -8,6 +8,7 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { ApiService } from './api.service';
 import { Cache } from '@core/models';
+import { CacheMemberItem, CacheRole, CacheRoleListResponse } from '@core/models/cache-permission.model';
 
 export type CacheSubscriptionMode = 'ReadWrite' | 'ReadOnly' | 'WriteOnly';
 
@@ -202,5 +203,37 @@ export class CachesService {
 
   deleteCacheNar(cache: string, hash: string): Observable<void> {
     return this.api.delete<void>(`caches/${cache}/nars/${hash}`);
+  }
+
+  getMembers(cache: string): Observable<CacheMemberItem[]> {
+    return this.api.get<CacheMemberItem[]>(`caches/${cache}/members`);
+  }
+
+  addMember(cache: string, user: string, role: string): Observable<string> {
+    return this.api.post<string>(`caches/${cache}/members`, { user, role });
+  }
+
+  updateMember(cache: string, user: string, role: string): Observable<string> {
+    return this.api.patch<string>(`caches/${cache}/members`, { user, role });
+  }
+
+  removeMember(cache: string, user: string): Observable<string> {
+    return this.api.delete<string>(`caches/${cache}/members`, { user });
+  }
+
+  getRoles(cache: string): Observable<CacheRoleListResponse> {
+    return this.api.get<CacheRoleListResponse>(`caches/${cache}/roles`);
+  }
+
+  createRole(cache: string, data: { name: string; permissions: string[] }): Observable<CacheRole> {
+    return this.api.post<CacheRole>(`caches/${cache}/roles`, data);
+  }
+
+  updateRole(cache: string, roleId: string, data: { name?: string; permissions?: string[] }): Observable<CacheRole> {
+    return this.api.patch<CacheRole>(`caches/${cache}/roles/${roleId}`, data);
+  }
+
+  deleteRole(cache: string, roleId: string): Observable<boolean> {
+    return this.api.delete<boolean>(`caches/${cache}/roles/${roleId}`);
   }
 }
