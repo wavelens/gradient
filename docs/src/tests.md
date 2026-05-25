@@ -2562,3 +2562,12 @@ Run with: `pnpm --dir frontend exec ng test --watch=false`
 - `action-deliveries.component.spec.ts` - popup renders paginated delivery rows; clicking a row fetches and displays detail bodies.
 - `action-form.component.spec.ts` - form switches config fields on `type` change; SMTP-disabled state hides `send_mail` option and shows a warning; one-time token is displayed after create/regenerate and cleared on modal close.
 - `project-actions.component.spec.ts` - list page loads actions on init, calls delete service on confirm, links to form modal.
+
+## Cache roles & permissions (issue #265)
+
+- `backend/core/src/permissions.rs` — `CachePermission` bitmask unit tests
+- `backend/web/src/access.rs` — `load_cache` access matrix tests
+- `backend/web/tests/cache_roles.rs` — role CRUD endpoint tests
+- `backend/web/tests/cache_members.rs` — member CRUD endpoint tests
+- `backend/web/tests/cache_subscription_gate.rs` — bilateral subscription tests
+- `backend/web/tests/cache_api_key_pinning.rs` — cache-pinned API key tests
