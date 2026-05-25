@@ -85,7 +85,7 @@ pub struct Model {
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
     pub flake_source: Option<String>,
-    pub repo_check_id: Option<i64>,
+    pub check_run_ids: Option<Json>,
     pub waiting_reason: Option<serde_json::Value>,
     pub trigger: Option<ProjectTriggerId>,
     pub concurrent: bool,

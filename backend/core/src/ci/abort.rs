@@ -89,7 +89,7 @@ mod tests {
             created_at: chrono::NaiveDateTime::default(),
             updated_at: chrono::NaiveDateTime::default(),
             flake_source: None,
-            repo_check_id: None,
+            check_run_ids: None,
             waiting_reason: None,
             trigger: None,
             concurrent: false,

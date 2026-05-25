@@ -20,10 +20,13 @@ Actions are per-project. Three types ship in v1:
 | `evaluation.completed` | Evaluation completed successfully |
 | `evaluation.failed` | Evaluation failed |
 | `evaluation.aborted` | Evaluation was aborted |
+| `evaluation.action_required` | Evaluation parked waiting for maintainer approval on a fork PR |
+| `evaluation.approval_granted` | Maintainer cleared the approval gate (clears the `Awaiting Approval` check) |
 | `build.queued` | Build enters the queue |
 | `build.started` | Build starts executing on a worker |
 | `build.completed` | Build completed successfully |
 | `build.failed` | Build failed |
+| `build.substituted` | Build output came from an upstream cache substitution |
 
 An action with an empty `events` list never fires. `forge_status_report` ignores the `events` list — it is hard-wired to `build.started`, `build.completed`, and `build.failed`.
 
@@ -79,7 +82,7 @@ Token management: the plaintext token is revealed exactly once — on create or 
 
 ## Forge Status Report
 
-Posts a commit status (pending / success / failure) back to the forge. Fires on `build.started → pending`, `build.completed → success`, `build.failed → failure`.
+Posts commit status (pending / success / failure / action-required) back to the forge as three separate check runs per PR — `gradient/{project}: Awaiting Approval` (fork-PR gate), `gradient/{project}: Evaluation` (eval phase), and `gradient/{project}: Build {entry_point}` (per-entry-point). Each check is updated in place as the phase progresses; the Awaiting Approval check flips to Success when a maintainer clears the gate.
 
 **Config fields:**
 

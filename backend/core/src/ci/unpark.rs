@@ -181,7 +181,7 @@ mod tests {
             created_at: NaiveDateTime::default(),
             updated_at: NaiveDateTime::default(),
             flake_source: None,
-            repo_check_id: None,
+            check_run_ids: None,
             waiting_reason: Some(reason.to_json()),
             trigger: None,
             concurrent: false,

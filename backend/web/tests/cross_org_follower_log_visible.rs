@@ -137,7 +137,7 @@ fn evaluation_row(id: EvaluationId, project: ProjectId) -> entity::evaluation::M
         created_at: test_date(),
         updated_at: test_date(),
         flake_source: None,
-        repo_check_id: None,
+        check_run_ids: None,
         waiting_reason: None,
         trigger: None,
         concurrent: false,

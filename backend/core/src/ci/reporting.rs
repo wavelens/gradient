@@ -22,14 +22,49 @@ pub fn format_check_scope(org_name: Option<&str>, project_name: &str) -> String 
     }
 }
 
+/// CI check name for the maintainer-approval gate (Awaiting Approval).
+pub fn approval_check_context(project_name: &str) -> String {
+    format!("gradient/{}: Awaiting Approval", project_name)
+}
+
 /// CI check name for the per-evaluation roll-up status.
-pub fn evaluation_check_context(scope: &str) -> String {
-    format!("Gradient Evaluation {}", scope)
+pub fn evaluation_check_context(project_name: &str) -> String {
+    format!("gradient/{}: Evaluation", project_name)
 }
 
 /// CI check name for a single entry-point build under an evaluation.
-pub fn build_check_context(scope: &str, entry_point: &str) -> String {
-    format!("Gradient Build {}: {}", scope, entry_point)
+pub fn build_check_context(project_name: &str, entry_point: &str) -> String {
+    format!("gradient/{}: Build {}", project_name, entry_point)
+}
+
+/// Map an event name to the check-context family it reports to.
+/// Used by the reporter to pick the right slot in `evaluation.check_run_ids`
+/// so the Approval, Evaluation, and Build checks each get their own check_run_id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CheckContextKind {
+    /// `Awaiting Approval` gate, cleared when a maintainer approves.
+    Approval,
+    /// Per-evaluation roll-up status (Queued → Running → terminal).
+    Evaluation,
+    /// Per-entry-point build status.
+    Build,
+}
+
+/// Classify a dispatch event into the check-context family it should report to.
+pub fn check_context_kind_for_event(event: &str) -> Option<CheckContextKind> {
+    match event {
+        "evaluation.action_required" => Some(CheckContextKind::Approval),
+        "evaluation.approval_granted" => Some(CheckContextKind::Approval),
+        "evaluation.queued"
+        | "evaluation.started"
+        | "evaluation.completed"
+        | "evaluation.failed"
+        | "evaluation.aborted" => Some(CheckContextKind::Evaluation),
+        "build.started" | "build.completed" | "build.failed" | "build.substituted" => {
+            Some(CheckContextKind::Build)
+        }
+        _ => None,
+    }
 }
 
 /// Maps an [`EvaluationStatus`] to the [`CiStatus`] reported to external forges.
@@ -83,27 +118,26 @@ mod tests {
     }
 
     #[test]
+    fn approval_context_format() {
+        assert_eq!(
+            approval_check_context("my-project"),
+            "gradient/my-project: Awaiting Approval"
+        );
+    }
+
+    #[test]
     fn evaluation_context_format() {
         assert_eq!(
-            evaluation_check_context("wavelens/my-project"),
-            "Gradient Evaluation wavelens/my-project"
+            evaluation_check_context("my-project"),
+            "gradient/my-project: Evaluation"
         );
     }
 
     #[test]
     fn build_context_format() {
         assert_eq!(
-            build_check_context("wavelens/my-project", "my-package"),
-            "Gradient Build wavelens/my-project: my-package"
-        );
-    }
-
-    #[test]
-    fn build_context_falls_back_when_org_missing() {
-        let scope = format_check_scope(None, "solo-project");
-        assert_eq!(
-            build_check_context(&scope, "pkg"),
-            "Gradient Build solo-project: pkg"
+            build_check_context("my-project", "my-package"),
+            "gradient/my-project: Build my-package"
         );
     }
 

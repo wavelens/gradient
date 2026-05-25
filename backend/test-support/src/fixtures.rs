@@ -165,7 +165,7 @@ pub fn eval_at(id: EvaluationId, offset_secs: i64) -> evaluation::Model {
         created_at,
         updated_at: created_at,
         flake_source: None,
-        repo_check_id: None,
+        check_run_ids: None,
         waiting_reason: None,
         trigger: None,
         concurrent: false,

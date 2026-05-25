@@ -63,6 +63,7 @@ pub const FORGE_STATUS_EVENTS: &[&str] = &[
     "evaluation.failed",
     "evaluation.aborted",
     "evaluation.action_required",
+    "evaluation.approval_granted",
 ];
 pub const MAX_BODY_BYTES: usize = 64 * 1024;
 
@@ -88,6 +89,10 @@ pub fn forge_status_for_event(event: &str) -> Option<CiStatus> {
         "evaluation.failed" => Some(CiStatus::Failure),
         "evaluation.aborted" => Some(CiStatus::Error),
         "evaluation.action_required" => Some(CiStatus::ActionRequired),
+        // Approval click clears the Awaiting-Approval gate. We post Success
+        // on the same check so the maintainer sees it turn green and the
+        // PR's required-checks count drops the gate.
+        "evaluation.approval_granted" => Some(CiStatus::Success),
         _ => None,
     }
 }
@@ -374,7 +379,8 @@ async fn execute_forge_status_report(
     let ci_status = forge_status_for_event(event)
         .ok_or_else(|| anyhow!("event '{}' has no forge status mapping", event))?;
 
-    let report = build_ci_report_from_payload(state, payload, ci_status).await?;
+    let report = build_ci_report_from_payload(state, event, payload, ci_status).await?;
+    let context_key = report.context.clone();
     let reporter = build_reporter_for_integration(state, integration_id).await?;
     let new_id = reporter
         .report(&report)
@@ -385,7 +391,7 @@ async fn execute_forge_status_report(
         payload.get("evaluation_id").and_then(|v| v.as_str()),
     ) && let Ok(evaluation_id) = eid.parse::<EvaluationId>()
     {
-        persist_evaluation_check_id(state, evaluation_id, new_id).await;
+        persist_evaluation_check_id(state, evaluation_id, &context_key, new_id).await;
     }
     let body = new_id.map(|id| format!("{{\"check_run_id\":{}}}", id));
     Ok(ExecutorOk {
@@ -394,9 +400,13 @@ async fn execute_forge_status_report(
     })
 }
 
+/// Upsert `check_run_id` into `evaluation.check_run_ids` under the given
+/// context name. Keeps every (Awaiting Approval / Evaluation / Build {ep})
+/// check id distinct so subsequent PATCHes don't stomp the wrong check run.
 async fn persist_evaluation_check_id(
     state: &Arc<ServerState>,
     evaluation_id: EvaluationId,
+    context: &str,
     check_run_id: i64,
 ) {
     use sea_orm::IntoActiveModel;
@@ -406,18 +416,35 @@ async fn persist_evaluation_check_id(
     else {
         return;
     };
-    if eval.repo_check_id == Some(check_run_id) {
+    let mut map = eval
+        .check_run_ids
+        .as_ref()
+        .and_then(|v| v.as_object().cloned())
+        .unwrap_or_default();
+    if map.get(context).and_then(|v| v.as_i64()) == Some(check_run_id) {
         return;
     }
+    map.insert(context.to_string(), JsonValue::from(check_run_id));
     let mut active = eval.into_active_model();
-    active.repo_check_id = Set(Some(check_run_id));
+    active.check_run_ids = Set(Some(JsonValue::Object(map)));
     if let Err(e) = active.update(&state.worker_db).await {
-        warn!(error = %e, %evaluation_id, "persisting evaluation repo_check_id");
+        warn!(error = %e, %evaluation_id, "persisting evaluation check_run_ids");
     }
+}
+
+/// Read a check_run_id previously stored under `context` in
+/// `evaluation.check_run_ids`.
+fn check_run_id_for_context(eval: &crate::types::MEvaluation, context: &str) -> Option<i64> {
+    eval.check_run_ids
+        .as_ref()
+        .and_then(|v| v.as_object())
+        .and_then(|m| m.get(context))
+        .and_then(|v| v.as_i64())
 }
 
 async fn build_ci_report_from_payload(
     state: &Arc<ServerState>,
+    event: &str,
     payload: &JsonValue,
     status: CiStatus,
 ) -> Result<CiReport> {
@@ -511,11 +538,22 @@ async fn build_ci_report_from_payload(
         .flatten()
         .map(|o| o.name);
 
-    let scope = reporting::format_check_scope(org_name.as_deref(), &project.name);
-    let context = entry_points
-        .first()
-        .map(|ep| reporting::build_check_context(&scope, &ep.eval))
-        .unwrap_or_else(|| format!("gradient/{}", project.name));
+    // Pick the check-run name based on which phase fired the event so the
+    // Awaiting-Approval, Evaluation, and Build checks each show as their own
+    // line on the PR. Falls back to a generic project-scoped name for events
+    // outside the three known families.
+    let context = match reporting::check_context_kind_for_event(event) {
+        Some(reporting::CheckContextKind::Approval) => {
+            reporting::approval_check_context(&project.name)
+        }
+        Some(reporting::CheckContextKind::Build) => entry_points
+            .first()
+            .map(|ep| reporting::build_check_context(&project.name, &ep.eval))
+            .unwrap_or_else(|| reporting::evaluation_check_context(&project.name)),
+        Some(reporting::CheckContextKind::Evaluation) | None => {
+            reporting::evaluation_check_context(&project.name)
+        }
+    };
 
     let details_url = org_name.as_ref().map(|org| {
         format!(
@@ -528,12 +566,11 @@ async fn build_ci_report_from_payload(
         owner,
         repo,
         sha: vec_to_hex(&commit.hash),
-        context,
+        context: context.clone(),
         status,
         description: s("description"),
         details_url,
-        existing_check_id: evaluation
-            .repo_check_id
+        existing_check_id: check_run_id_for_context(&evaluation, &context)
             .or_else(|| payload.get("check_run_id").and_then(|v| v.as_i64())),
         requested_actions,
     })
@@ -915,9 +952,10 @@ mod tests {
                 "details_url": "https://example.com/log/1",
                 "check_run_id": 99,
             });
-            let report = build_ci_report_from_payload(&state, &payload, CiStatus::Running)
-                .await
-                .expect("fast path should succeed");
+            let report =
+                build_ci_report_from_payload(&state, "build.started", &payload, CiStatus::Running)
+                    .await
+                    .expect("fast path should succeed");
             assert_eq!(report.owner, "acme");
             assert_eq!(report.repo, "widgets");
             assert_eq!(report.sha, "deadbeef");
@@ -931,9 +969,10 @@ mod tests {
     fn build_ci_report_errors_when_payload_empty() {
         run(async {
             let state = make_state();
-            let err = build_ci_report_from_payload(&state, &json!({}), CiStatus::Running)
-                .await
-                .unwrap_err();
+            let err =
+                build_ci_report_from_payload(&state, "build.started", &json!({}), CiStatus::Running)
+                    .await
+                    .unwrap_err();
             assert!(err.to_string().contains("build_id"), "error: {err}");
         });
     }
@@ -943,9 +982,10 @@ mod tests {
         run(async {
             let state = make_state();
             let payload = json!({ "build_id": "not-a-uuid" });
-            let err = build_ci_report_from_payload(&state, &payload, CiStatus::Running)
-                .await
-                .unwrap_err();
+            let err =
+                build_ci_report_from_payload(&state, "build.started", &payload, CiStatus::Running)
+                    .await
+                    .unwrap_err();
             assert!(err.to_string().contains("invalid build_id"), "error: {err}");
         });
     }

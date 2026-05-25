@@ -137,7 +137,7 @@ fn eval_row(project: ProjectId, commit: CommitId) -> entity::evaluation::Model {
         created_at: now,
         updated_at: now,
         flake_source: None,
-        repo_check_id: None,
+        check_run_ids: None,
         waiting_reason: None,
         trigger: None,
         concurrent: false,

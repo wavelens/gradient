@@ -153,7 +153,7 @@ pub async fn post_dispatch(
         created_at: Set(now_ts),
         updated_at: Set(now_ts),
         flake_source: Set(None),
-        repo_check_id: Set(None),
+        check_run_ids: Set(None),
         waiting_reason: Set(None),
         trigger: Set(None),
         concurrent: Set(false),

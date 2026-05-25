@@ -772,12 +772,13 @@ pub(super) async fn handle_github_check_run(
     }
 
     match unpark_approval(&state.web_db, eval.id).await {
-        Ok(Some(_)) => {
+        Ok(Some(unparked)) => {
             info!(
                 evaluation_id = %eval.id,
                 sender = %sender.login,
                 "PR approval gate cleared via GitHub action"
             );
+            dispatch_approval_granted(state, &unparked).await;
         }
         Ok(None) => {
             warn!(
@@ -789,12 +790,57 @@ pub(super) async fn handle_github_check_run(
     }
 }
 
+/// Flip the `Awaiting Approval` check to Success once the gate is cleared.
+async fn dispatch_approval_granted(state: &Arc<ServerState>, eval: &MEvaluation) {
+    let Some(project_id) = eval.project else {
+        return;
+    };
+    let payload = serde_json::json!({
+        "evaluation_id": eval.id,
+        "project_id": project_id,
+        "status": "evaluation.approval_granted",
+    });
+    gradient_core::ci::actions::dispatch_evaluation_event(
+        state,
+        project_id,
+        "evaluation.approval_granted",
+        payload,
+    )
+    .await;
+}
+
 async fn find_eval_by_check_id(
     state: &Arc<ServerState>,
     check_id: i64,
 ) -> Option<MEvaluation> {
-    EEvaluation::find()
-        .filter(CEvaluation::RepoCheckId.eq(check_id))
+    // `evaluation.check_run_ids` is a JSON map keyed by check-context name
+    // (Awaiting Approval / Evaluation / Build {ep}). Any of the stored ids
+    // can match the clicked check, so we scan the map's values.
+    use sea_orm::{DatabaseBackend, FromQueryResult, Statement};
+
+    #[derive(FromQueryResult)]
+    struct Row {
+        id: uuid::Uuid,
+    }
+
+    let row = Row::find_by_statement(Statement::from_sql_and_values(
+        DatabaseBackend::Postgres,
+        r#"SELECT id FROM evaluation
+           WHERE check_run_ids IS NOT NULL
+             AND EXISTS (
+                 SELECT 1
+                 FROM jsonb_each(check_run_ids) AS kv
+                 WHERE (kv.value)::text::bigint = $1
+             )
+           LIMIT 1"#,
+        [sea_orm::Value::BigInt(Some(check_id))],
+    ))
+    .one(&state.web_db)
+    .await
+    .ok()
+    .flatten()?;
+
+    EEvaluation::find_by_id(entity::ids::EvaluationId::new(row.id))
         .one(&state.web_db)
         .await
         .ok()
@@ -1026,13 +1072,14 @@ pub(super) async fn handle_issue_comment(
                 continue;
             }
             match unpark_approval(&state.web_db, eval.id).await {
-                Ok(Some(_)) => {
+                Ok(Some(unparked)) => {
                     info!(
                         evaluation_id = %eval.id,
                         pr_number,
                         %sender,
                         "PR approval gate cleared via /ci run comment"
                     );
+                    dispatch_approval_granted(state, &unparked).await;
                     unparked_any = true;
                 }
                 Ok(None) => {}
