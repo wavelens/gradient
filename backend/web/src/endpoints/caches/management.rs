@@ -5,11 +5,12 @@
  */
 
 use super::helpers::cleanup_nars_for_orgs;
-use crate::access::{CacheAccess, load_cache};
+use crate::access::{CacheAccess, Caller, load_cache};
 use crate::audit::{RequestInfo, events, record as audit_record};
-use crate::authorization::MaybeUser;
+use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
+use crate::permissions::CachePermission;
 use axum::Extension;
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -189,6 +190,15 @@ pub async fn put(
     .insert(&tx)
     .await?;
 
+    ACacheUser {
+        id: Set(CacheUserId::now_v7()),
+        cache: Set(cache.id),
+        user: Set(user.id),
+        role: Set(BASE_CACHE_ROLE_ADMIN_ID),
+    }
+    .insert(&tx)
+    .await?;
+
     tx.commit().await?;
 
     Ok(ok_json(cache.id.to_string()))
@@ -253,10 +263,21 @@ pub async fn get_cache(
 pub async fn patch_cache(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path(cache): Path<String>,
     Json(body): Json<PatchCacheRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let cache = load_cache(&state, user.id, cache, CacheAccess::Editable).await?;
+    let cache = load_cache(
+        &state,
+        Caller::User(&user),
+        api_key.as_ref(),
+        cache,
+        CacheAccess::Require {
+            permission: CachePermission::ManageCacheSettings,
+            reject_managed: true,
+        },
+    )
+    .await?;
     let mut acache: ACache = cache.into();
 
     if let Some(name) = body.name {
@@ -309,9 +330,20 @@ pub async fn delete_cache(
     state: State<Arc<ServerState>>,
     info: RequestInfo,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path(cache): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let cache = load_cache(&state, user.id, cache, CacheAccess::Editable).await?;
+    let cache = load_cache(
+        &state,
+        Caller::User(&user),
+        api_key.as_ref(),
+        cache,
+        CacheAccess::Require {
+            permission: CachePermission::DeleteCache,
+            reject_managed: true,
+        },
+    )
+    .await?;
     let cache_id = cache.id;
     let cache_name = cache.name.clone();
 
@@ -351,9 +383,20 @@ pub async fn delete_cache(
 pub async fn post_cache_active(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path(cache): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let cache = load_cache(&state, user.id, cache, CacheAccess::Editable).await?;
+    let cache = load_cache(
+        &state,
+        Caller::User(&user),
+        api_key.as_ref(),
+        cache,
+        CacheAccess::Require {
+            permission: CachePermission::ManageCacheSettings,
+            reject_managed: true,
+        },
+    )
+    .await?;
     let mut acache: ACache = cache.into();
     acache.active = Set(true);
     acache.update(&state.web_db).await?;
@@ -364,9 +407,20 @@ pub async fn post_cache_active(
 pub async fn delete_cache_active(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path(cache): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let cache = load_cache(&state, user.id, cache, CacheAccess::Editable).await?;
+    let cache = load_cache(
+        &state,
+        Caller::User(&user),
+        api_key.as_ref(),
+        cache,
+        CacheAccess::Require {
+            permission: CachePermission::ManageCacheSettings,
+            reject_managed: true,
+        },
+    )
+    .await?;
     let mut acache: ACache = cache.into();
     acache.active = Set(false);
     acache.update(&state.web_db).await?;
@@ -377,9 +431,20 @@ pub async fn delete_cache_active(
 pub async fn post_cache_public(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path(cache): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let cache = load_cache(&state, user.id, cache, CacheAccess::Editable).await?;
+    let cache = load_cache(
+        &state,
+        Caller::User(&user),
+        api_key.as_ref(),
+        cache,
+        CacheAccess::Require {
+            permission: CachePermission::ManageCacheSettings,
+            reject_managed: true,
+        },
+    )
+    .await?;
     let mut acache: ACache = cache.into();
     acache.public = Set(true);
     acache.update(&state.web_db).await?;
@@ -390,9 +455,20 @@ pub async fn post_cache_public(
 pub async fn delete_cache_public(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path(cache): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let cache = load_cache(&state, user.id, cache, CacheAccess::Editable).await?;
+    let cache = load_cache(
+        &state,
+        Caller::User(&user),
+        api_key.as_ref(),
+        cache,
+        CacheAccess::Require {
+            permission: CachePermission::ManageCacheSettings,
+            reject_managed: true,
+        },
+    )
+    .await?;
     let mut acache: ACache = cache.into();
     acache.public = Set(false);
     acache.update(&state.web_db).await?;
