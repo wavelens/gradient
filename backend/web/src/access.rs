@@ -124,6 +124,12 @@ pub async fn load_org(
     org_name: String,
     access: OrgAccess,
 ) -> WebResult<MOrganization> {
+    if api_key.is_some_and(|k| k.cache_pin.is_some()) {
+        return Err(WebError::forbidden(
+            "Cache-pinned API key cannot be used on this endpoint.",
+        ));
+    }
+
     let label = match access {
         OrgAccess::Readable { label } => label,
         _ => "Organization",
@@ -179,6 +185,12 @@ pub async fn load_project(
     project_name: String,
     access: ProjectAccess,
 ) -> WebResult<(MOrganization, MProject)> {
+    if api_key.is_some_and(|k| k.cache_pin.is_some()) {
+        return Err(WebError::forbidden(
+            "Cache-pinned API key cannot be used on this endpoint.",
+        ));
+    }
+
     let label = "Project";
 
     let (org, project) = get_any_project_by_name(Arc::clone(state), org_name, project_name)
@@ -234,6 +246,13 @@ pub async fn load_cache(
     let cache = get_any_cache_by_name(Arc::clone(state), cache_name)
         .await?
         .or_not_found(label)?;
+
+    if let Some(key) = api_key
+        && let Some(pin) = key.cache_pin
+        && pin != cache.id
+    {
+        return Err(WebError::forbidden("API key is pinned to a different cache."));
+    }
 
     match access {
         CacheAccess::Readable => {
@@ -934,6 +953,7 @@ mod tests {
             api_id: entity::ids::ApiId::new(uuid!("a0000000-0000-0000-0000-000000000099")),
             mask,
             organization: org,
+            cache_pin: None,
             cache_permission_mask: None,
         }
     }
@@ -1220,6 +1240,7 @@ mod tests {
             api_id: entity::ids::ApiId::new(uuid!("a0000000-0000-0000-0000-000000000099")),
             mask: i64::MAX,
             organization: None,
+            cache_pin: None,
             cache_permission_mask: Some(crate::permissions::cache_view_mask()),
         }
     }

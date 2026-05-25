@@ -4,12 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::access::{CacheAccess, Caller, load_cache};
 use crate::audit::{RequestInfo, events, record as audit_record};
 use crate::authorization::{MaybeApiKey, generate_api_key, hash_api_key};
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::{
-    PermissionEntry, available_permissions, mask_to_vec, parse_permission_list,
+    CachePermission, PermissionEntry, available_cache_permissions, available_permissions,
+    mask_to_vec, parse_cache_permission_list, parse_permission_list,
 };
 use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
@@ -47,16 +49,14 @@ pub struct ApiKeyRequest {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct CreateApiKeyRequest {
     pub name: String,
-    /// Lifetime in days. `None` means the key never expires.
     #[serde(default)]
     pub expires_in_days: Option<u32>,
-    /// Capability identifiers (matching `Permission::as_wire_name`) the new
-    /// key should grant. Must be non-empty.
     pub permissions: Vec<String>,
-    /// Optional organization name to pin the key to. `None` = key works in
-    /// every org the owning user belongs to (legacy behavior).
     #[serde(default)]
     pub organization: Option<String>,
+    /// Optional cache name to pin the key to. Mutually exclusive with `organization`.
+    #[serde(default)]
+    pub cache: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -96,6 +96,8 @@ pub struct ApiKeyInfo {
 #[derive(Serialize, Debug)]
 pub struct ApiKeyPermissionsResponse {
     pub available_permissions: Vec<PermissionEntry>,
+    #[serde(rename = "availableCache")]
+    pub available_cache: Vec<PermissionEntry>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -331,6 +333,7 @@ pub async fn get_key_permissions()
 -> WebResult<Json<BaseResponse<ApiKeyPermissionsResponse>>> {
     Ok(ok_json(ApiKeyPermissionsResponse {
         available_permissions: available_permissions(),
+        available_cache: available_cache_permissions(),
     }))
 }
 
@@ -364,13 +367,11 @@ pub async fn post_keys(
 ) -> WebResult<Json<BaseResponse<String>>> {
     forbid_via_api_key(&api_key_caller)?;
 
-    let mask = parse_permission_list(&body.permissions, "GET /user/keys/permissions")?;
-    if mask == 0 {
+    if body.cache.is_some() && body.organization.is_some() {
         return Err(WebError::bad_request(
-            "At least one permission is required for an API key.",
+            "API key cannot pin to both an organization and a cache.",
         ));
     }
-    let org_pin = resolve_org_pin(&state, user.id, body.organization.clone()).await?;
 
     let existing_api_key = EApi::find()
         .filter(
@@ -388,6 +389,36 @@ pub async fn post_keys(
         .expires_in_days
         .map(|days| gradient_core::types::now() + Duration::days(days as i64));
 
+    let (mask, org_pin, cache_pin) = if let Some(cache_name) = body.cache.clone() {
+        let cache = load_cache(
+            &state,
+            Caller::User(&user),
+            None,
+            cache_name,
+            CacheAccess::Require {
+                permission: CachePermission::ManageCacheMembers,
+                reject_managed: false,
+            },
+        )
+        .await?;
+        let m = parse_cache_permission_list(&body.permissions, "GET /user/keys/permissions")?;
+        if m == 0 {
+            return Err(WebError::bad_request(
+                "At least one permission is required for an API key.",
+            ));
+        }
+        (m, None, Some(cache.id))
+    } else {
+        let m = parse_permission_list(&body.permissions, "GET /user/keys/permissions")?;
+        if m == 0 {
+            return Err(WebError::bad_request(
+                "At least one permission is required for an API key.",
+            ));
+        }
+        let org = resolve_org_pin(&state, user.id, body.organization.clone()).await?;
+        (m, org, None)
+    };
+
     let raw_key = generate_api_key();
     let api_key = AApi {
         id: Set(ApiId::now_v7()),
@@ -401,7 +432,7 @@ pub async fn post_keys(
         revoked_at: Set(None),
         permission: Set(mask),
         organization: Set(org_pin),
-        cache: Set(None),
+        cache: Set(cache_pin),
     };
     let inserted = api_key.insert(&state.web_db).await?;
 
@@ -416,6 +447,7 @@ pub async fn post_keys(
             "expires_in_days": body.expires_in_days,
             "permissions_mask": mask,
             "organization_id": org_pin.map(|id| id.to_string()),
+            "cache_id": cache_pin.map(|id| id.to_string()),
         })),
     )
     .await;
