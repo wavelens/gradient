@@ -30,6 +30,7 @@ pub struct ListItem {
 
 pub type ListResponse = Vec<ListItem>;
 
+pub type EAdminTask = admin_task::Entity;
 pub type EApi = api::Entity;
 pub type EAuditLog = audit_log::Entity;
 pub type EBuild = build::Entity;
@@ -69,6 +70,7 @@ pub type EUploadSession = upload_session::Entity;
 pub type EUser = user::Entity;
 pub type EWorkerRegistration = worker_registration::Entity;
 
+pub type MAdminTask = admin_task::Model;
 pub type MApi = api::Model;
 pub type MAuditLog = audit_log::Model;
 pub type MBuild = build::Model;
@@ -108,6 +110,7 @@ pub type MUploadSession = upload_session::Model;
 pub type MUser = user::Model;
 pub type MWorkerRegistration = worker_registration::Model;
 
+pub type AAdminTask = admin_task::ActiveModel;
 pub type AApi = api::ActiveModel;
 pub type AAuditLog = audit_log::ActiveModel;
 pub type ABuild = build::ActiveModel;
@@ -147,6 +150,7 @@ pub type AUploadSession = upload_session::ActiveModel;
 pub type AUser = user::ActiveModel;
 pub type AWorkerRegistration = worker_registration::ActiveModel;
 
+pub type CAdminTask = admin_task::Column;
 pub type CApi = api::Column;
 pub type CAuditLog = audit_log::Column;
 pub type CBuild = build::Column;
@@ -190,6 +194,7 @@ pub type CWorkerRegistration = worker_registration::Column;
 // `Entity::has_many` / `belongs_to` builder API rather than the `Relation`
 // enum directly. The aliases were unused outside this file. If a future
 // caller needs a relation type, prefer `entity::api::Relation`.
+pub use admin_task::{AdminTaskKind, AdminTaskStatus};
 pub use evaluation_message::MessageLevel;
 
 /// Convenience bundle for code that needs the attempt fields (`MBuild`) and

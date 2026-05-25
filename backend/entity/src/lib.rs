@@ -6,6 +6,7 @@
 
 pub mod ids;
 
+pub mod admin_task;
 pub mod api;
 pub mod audit_log;
 pub mod build;

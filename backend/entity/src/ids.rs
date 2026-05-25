@@ -81,6 +81,7 @@ macro_rules! id_newtype {
     };
 }
 
+id_newtype!(AdminTaskId);
 id_newtype!(ApiId);
 id_newtype!(BuildId);
 id_newtype!(BuildProductId);

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+pub mod admin_tasks;
 pub mod cache_reach;
 pub mod cache_upstream;
 pub mod connection;
