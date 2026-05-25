@@ -477,7 +477,27 @@ async fn build_ci_report_from_payload(
         });
     }
 
-    let (evaluation, build) = if let Some(eid) = s("evaluation_id") {
+    // `build_id` takes precedence over `evaluation_id` even when both are
+    // present: the build-status dispatch (status.rs:dispatch_build_event_for_status)
+    // emits a payload carrying BOTH so downstream actions can correlate the
+    // build to its eval, but the forge reporter must load the build so it
+    // can pick the per-build check context. Falling back to the
+    // evaluation-only path here would land every build event on the
+    // Evaluation check.
+    let (evaluation, build) = if let Some(bid) = s("build_id") {
+        let build_id: BuildId = bid.parse().map_err(|_| anyhow!("invalid build_id"))?;
+        let build = EBuild::find_by_id(build_id)
+            .one(&state.worker_db)
+            .await
+            .context("loading build")?
+            .ok_or_else(|| anyhow!("build {} not found", build_id))?;
+        let evaluation = EEvaluation::find_by_id(build.evaluation)
+            .one(&state.worker_db)
+            .await
+            .context("loading evaluation")?
+            .ok_or_else(|| anyhow!("evaluation {} not found", build.evaluation))?;
+        (evaluation, Some(build))
+    } else if let Some(eid) = s("evaluation_id") {
         let evaluation_id: EvaluationId =
             eid.parse().map_err(|_| anyhow!("invalid evaluation_id"))?;
         let evaluation = EEvaluation::find_by_id(evaluation_id)
@@ -487,23 +507,9 @@ async fn build_ci_report_from_payload(
             .ok_or_else(|| anyhow!("evaluation {} not found", evaluation_id))?;
         (evaluation, None)
     } else {
-        let build_id: BuildId = s("build_id")
-            .ok_or_else(|| anyhow!("payload missing 'build_id', 'evaluation_id', and the full owner/repo/sha/context set"))?
-            .parse()
-            .map_err(|_| anyhow!("invalid build_id"))?;
-
-        let build = EBuild::find_by_id(build_id)
-            .one(&state.worker_db)
-            .await
-            .context("loading build")?
-            .ok_or_else(|| anyhow!("build {} not found", build_id))?;
-
-        let evaluation = EEvaluation::find_by_id(build.evaluation)
-            .one(&state.worker_db)
-            .await
-            .context("loading evaluation")?
-            .ok_or_else(|| anyhow!("evaluation {} not found", build.evaluation))?;
-        (evaluation, Some(build))
+        anyhow::bail!(
+            "payload missing 'build_id', 'evaluation_id', and the full owner/repo/sha/context set"
+        );
     };
 
     let project_id = evaluation
