@@ -188,6 +188,7 @@ fn revoked_api_key_is_rejected() {
             revoked_at: Some(now),
             permission: gradient_core::permissions::admin_mask(),
             organization: None,
+            cache: None,
         };
 
         let s = server_with(|db| db.append_query_results([vec![key]]));
@@ -218,6 +219,7 @@ fn expired_api_key_is_rejected() {
             revoked_at: None,
             permission: gradient_core::permissions::admin_mask(),
             organization: None,
+            cache: None,
         };
 
         let s = server_with(|db| db.append_query_results([vec![key]]));
@@ -305,6 +307,7 @@ fn api_key_with_only_view_cannot_trigger_evaluation() {
             revoked_at: None,
             permission: mask_from(&[Permission::ViewOrg]),
             organization: None,
+            cache: None,
         };
         let admin_membership = entity::organization_user::Model {
             id: entity::ids::OrganizationUserId::now_v7(),
@@ -390,6 +393,7 @@ fn api_key_pinned_to_other_org_is_invisible() {
             revoked_at: None,
             permission: mask_from(Permission::ALL),
             organization: Some(pinned_elsewhere),
+            cache: None,
         };
 
         let s = server_with(|db| {
@@ -429,6 +433,7 @@ fn api_key_cannot_create_api_keys() {
             revoked_at: None,
             permission: gradient_core::permissions::admin_mask(),
             organization: None,
+            cache: None,
         };
 
         let s = server_with(|db| {
