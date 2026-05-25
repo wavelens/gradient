@@ -13,20 +13,18 @@
 //! to short-circuit on a pinned-org mismatch.
 
 use crate::permissions::PermissionMask;
+use gradient_core::types::ids::CacheId;
 use gradient_core::types::{ApiId, OrganizationId, UserId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ApiKeyContext {
-    /// The id of the `api` row this request was authenticated against.
     pub api_id: ApiId,
-    /// The key's permission bitmask. The access layer intersects this with
-    /// the user's role-derived mask before granting any capability.
     pub mask: PermissionMask,
-    /// `None` for unscoped keys; `Some(id)` pins the key to a single org -
-    /// requests for any other org are short-circuited as not-found.
+    /// `None` = unscoped; `Some(id)` pins the key to a single org.
     pub organization: Option<OrganizationId>,
-    /// Cache-permission mask. `None` means unrestricted (i64::MAX). Task 17
-    /// wires this from the `api.cache_permission` DB column.
+    /// `None` = unscoped; `Some(id)` pins the key to a single cache.
+    pub cache_pin: Option<CacheId>,
+    /// Cache-permission mask. `None` means unrestricted (i64::MAX).
     pub cache_permission_mask: Option<i64>,
 }
 
@@ -87,6 +85,7 @@ mod tests {
             organization: Some(OrganizationId::new(uuid!(
                 "a0000000-0000-0000-0000-000000000020"
             ))),
+            cache_pin: None,
             cache_permission_mask: None,
         };
         let wrapped = MaybeApiKey::from_key(ctx);
@@ -120,6 +119,7 @@ mod tests {
                 api_id,
                 mask: mask_from(&[Permission::ViewOrg, Permission::TriggerEvaluation]),
                 organization: None,
+                cache_pin: None,
                 cache_permission_mask: None,
             },
         };
