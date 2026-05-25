@@ -159,6 +159,7 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
             s3.access_key_id.as_deref(),
             secret.as_deref(),
             &s3.prefix,
+            s3.virtual_hosted_style,
         ) {
             Ok(s) => s,
             Err(e) => {

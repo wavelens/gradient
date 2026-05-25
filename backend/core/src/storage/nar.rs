@@ -59,6 +59,7 @@ impl NarStore {
     ///
     /// `access_key_id` and `secret_access_key` are optional; when absent the AWS SDK
     /// falls back to instance profiles / environment variables.
+    #[allow(clippy::too_many_arguments)]
     pub fn s3(
         bucket: &str,
         region: &str,
@@ -66,6 +67,7 @@ impl NarStore {
         access_key_id: Option<&str>,
         secret_access_key: Option<&str>,
         prefix: &str,
+        virtual_hosted_style: bool,
     ) -> Result<Self> {
         let mut builder = object_store::aws::AmazonS3Builder::new()
             .with_bucket_name(bucket)
@@ -74,7 +76,7 @@ impl NarStore {
         if let Some(ep) = endpoint {
             builder = builder
                 .with_endpoint(ep)
-                .with_virtual_hosted_style_request(false)
+                .with_virtual_hosted_style_request(virtual_hosted_style)
                 .with_allow_http(true);
         }
         if let Some(key) = access_key_id {

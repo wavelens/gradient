@@ -326,6 +326,21 @@ in {
           type = lib.types.str;
           default = "";
         };
+
+        virtualHostedStyle = lib.mkOption {
+          description = ''
+            Use virtual-hosted-style requests
+            (`https://<bucket>.<endpoint>/key`) when a custom endpoint is
+            configured. Defaults to `false`, which produces path-style URLs
+            (`https://<endpoint>/<bucket>/key`) — required by MinIO,
+            Garage, and most self-hosted S3-compatible backends. Set to
+            `true` for providers that demand virtual-hosted addressing
+            (Cloudflare R2 with a custom domain, certain Backblaze B2
+            setups). Ignored when `endpoint` is null (AWS direct).
+          '';
+          type = lib.types.bool;
+          default = false;
+        };
       };
 
       settings = {
@@ -613,6 +628,7 @@ in {
         GRADIENT_S3_BUCKET = cfg.s3.bucket;
         GRADIENT_S3_REGION = cfg.s3.region;
         GRADIENT_S3_PREFIX = cfg.s3.prefix;
+        GRADIENT_S3_VIRTUAL_HOSTED_STYLE = lib.boolToString cfg.s3.virtualHostedStyle;
       } // lib.optionalAttrs (cfg.s3.enable && cfg.s3.endpoint != null) {
         GRADIENT_S3_ENDPOINT = cfg.s3.endpoint;
       } // lib.optionalAttrs (cfg.s3.enable && cfg.s3.accessKeyId != null) {

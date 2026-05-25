@@ -91,6 +91,10 @@ pub struct S3Config {
     pub access_key_id: Option<String>,
     pub secret_access_key_file: Option<String>,
     pub prefix: String,
+    /// Use virtual-hosted-style addressing when a custom endpoint is set.
+    /// `false` (default) requests path-style URLs — MinIO/Garage/most
+    /// self-hosted backends require this. No effect on AWS direct.
+    pub virtual_hosted_style: bool,
 }
 
 impl Cli {
@@ -144,6 +148,7 @@ impl Cli {
             access_key_id: self.s3.s3_access_key_id.clone(),
             secret_access_key_file: self.s3.s3_secret_access_key_file.clone(),
             prefix: self.s3.s3_prefix.clone(),
+            virtual_hosted_style: self.s3.s3_virtual_hosted_style,
         })
     }
 

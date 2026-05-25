@@ -26,6 +26,19 @@ pub struct S3Args {
     /// Key prefix within the S3 bucket (e.g. "gradient/").
     #[arg(long, env = "GRADIENT_S3_PREFIX", default_value = "")]
     pub s3_prefix: String,
+    /// Use virtual-hosted-style requests (`https://<bucket>.<endpoint>/key`)
+    /// when a custom endpoint is set. Defaults to `false` so the URL is
+    /// path-style (`https://<endpoint>/<bucket>/key`) — required by MinIO,
+    /// Garage, and most self-hosted S3-compatible backends. Set to `true`
+    /// for providers that demand virtual-hosted addressing (Cloudflare R2
+    /// with a custom domain, some Backblaze B2 setups). Has no effect on
+    /// AWS direct (no endpoint set).
+    #[arg(
+        long,
+        env = "GRADIENT_S3_VIRTUAL_HOSTED_STYLE",
+        default_value_t = false
+    )]
+    pub s3_virtual_hosted_style: bool,
 }
 
 impl Default for S3Args {
@@ -37,6 +50,7 @@ impl Default for S3Args {
             s3_access_key_id: None,
             s3_secret_access_key_file: None,
             s3_prefix: String::new(),
+            s3_virtual_hosted_style: false,
         }
     }
 }
