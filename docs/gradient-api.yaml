@@ -683,7 +683,7 @@ paths:
                     properties:
                       message:
                         type: object
-                        required: [available_permissions]
+                        required: [available_permissions, availableCache]
                         properties:
                           available_permissions:
                             type: array
@@ -693,6 +693,17 @@ paths:
                               properties:
                                 id: { type: string }
                                 mutating: { type: boolean }
+                          availableCache:
+                            type: array
+                            description: Catalogue of cache-scoped capabilities for cache-pinned API keys.
+                            items:
+                              type: object
+                              required: [id, mutating]
+                              properties:
+                                id:
+                                  $ref: '#/components/schemas/CachePermissionId'
+                                mutating:
+                                  type: boolean
         '401':
           $ref: '#/components/responses/Unauthorized'
 
@@ -1459,7 +1470,9 @@ paths:
     post:
       tags: [orgs]
       summary: Subscribe to cache
-      description: Adds a binary cache to the organization's list of substituters.
+      description: |
+        Adds a binary cache to the organization's list of substituters.
+        Requires `manageSubscriptions` on the organization AND `manageCacheSubscriptions` on the cache.
       operationId: subscribeOrgToCache
       responses:
         '200':
@@ -1477,7 +1490,9 @@ paths:
     delete:
       tags: [orgs]
       summary: Unsubscribe from cache
-      description: Removes a binary cache from the organization's substituters.
+      description: |
+        Removes a binary cache from the organization's substituters.
+        Requires `manageSubscriptions` on the organization AND `manageCacheSubscriptions` on the cache.
       operationId: unsubscribeOrgFromCache
       responses:
         '200':
@@ -3800,7 +3815,7 @@ paths:
     patch:
       tags: [caches]
       summary: Update cache
-      description: Updates one or more cache fields. Managed caches cannot be edited via the API.
+      description: Updates one or more cache fields. Requires `manageCacheSettings`. Managed caches cannot be edited via the API.
       operationId: patchCache
       requestBody:
         required: true
@@ -3828,7 +3843,7 @@ paths:
     delete:
       tags: [caches]
       summary: Delete cache
-      description: Deletes the cache. Managed caches cannot be deleted via the API.
+      description: Deletes the cache. Requires `deleteCache`. Managed caches cannot be deleted via the API.
       operationId: deleteCache
       responses:
         '200':
@@ -3928,9 +3943,8 @@ paths:
         Returns the Nix-format secret signing key string for the cache, e.g.:
         `gradient.example.com-mycache:AAAA...` (base64-encoded 64-byte ed25519 keypair)
 
-        This key is used internally by Gradient to sign store paths uploaded to the cache.
-        Keep it secret - do not add it to `nix.conf`.
-        To configure Nix clients, use the public key from `GET /caches/{cache}/public-key` instead.
+        Requires `manageCacheKeys`. Keep the secret key private — do not add it to `nix.conf`.
+        To configure Nix clients use the public key from `GET /caches/{cache}/public-key` instead.
       operationId: getCacheKey
       responses:
         '200':
@@ -4006,7 +4020,7 @@ paths:
       summary: List cached NARs
       description: |-
         Returns a paginated list of NARs (cached store paths) currently signed by this cache.
-        Public caches are open; private caches require the owner's bearer token.
+        Public caches allow anonymous access; otherwise requires `readStore`.
       operationId: listCacheNars
       parameters:
         - name: hash
@@ -4079,7 +4093,7 @@ paths:
       summary: NAR aggregate statistics
       description: |-
         Returns aggregate counts and sizes for all NARs signed by this cache.
-        Public caches are open; private caches require the owner's bearer token.
+        Public caches allow anonymous access; otherwise requires `readStore`.
       operationId: getCacheNarStats
       responses:
         '200':
@@ -4150,7 +4164,7 @@ paths:
       description: |-
         Returns full metadata for a NAR signed by this cache, including references,
         deriver, content-addressed flag, fetch count, and signature presence.
-        Public caches are open; private caches require the owner's bearer token.
+        Public caches allow anonymous access; otherwise requires `readStore`.
       operationId: getCacheNar
       responses:
         '200':
@@ -4178,8 +4192,8 @@ paths:
         `cached_path` row is removed in the same transaction, any matching
         `derivation_output.is_cached` rows are flipped to `false`, and the NAR
         blob is garbage-collected asynchronously after the response. Requires
-        cache-owner authentication. Allowed on state-managed caches - NAR content
-        is operational data, distinct from cache configuration.
+        `writeStore`. Allowed on state-managed caches — NAR content is operational
+        data, distinct from cache configuration.
       operationId: deleteCacheNar
       security:
         - bearerAuth: []
@@ -4197,7 +4211,7 @@ paths:
     get:
       tags: [caches]
       summary: List upstream caches
-      description: Returns all upstream caches configured for this cache (both internal Gradient caches and external binary caches).
+      description: Returns all upstream caches configured for this cache (both internal Gradient caches and external binary caches). Requires `viewCache`.
       operationId: listCacheUpstreams
       security:
         - bearerAuth: []
@@ -4227,6 +4241,8 @@ paths:
 
         - **internal** - another Gradient-managed cache (referenced by name). Supports ReadOnly / ReadWrite / WriteOnly modes.
         - **external** - an arbitrary Nix binary cache URL. Always ReadOnly.
+
+        Requires `manageCacheUpstreams`.
       operationId: addCacheUpstream
       security:
         - bearerAuth: []
@@ -4272,6 +4288,7 @@ paths:
       description: |-
         Updates an upstream entry. For external upstreams the mode is always forced to ReadOnly;
         `url` and `public_key` may be updated. For internal upstreams only `mode` and `display_name` apply.
+        Requires `manageCacheUpstreams`.
       operationId: patchCacheUpstream
       security:
         - bearerAuth: []
@@ -4307,6 +4324,270 @@ paths:
                 $ref: '#/components/schemas/StringResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /caches/{cache}/members:
+    parameters:
+      - $ref: '#/components/parameters/CacheSlug'
+    get:
+      tags: [caches]
+      summary: List cache members
+      description: Returns all members of the cache and their assigned roles. Requires `viewCache`.
+      operationId: listCacheMembers
+      responses:
+        '200':
+          description: Member list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/CacheMemberItem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [caches]
+      summary: Add cache member
+      description: Adds a user to the cache with the given role. Requires `manageCacheMembers`.
+      operationId: addCacheMember
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddCacheMemberRequest'
+      responses:
+        '200':
+          description: Member added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    patch:
+      tags: [caches]
+      summary: Update cache member role
+      description: Changes the role of an existing cache member. Requires `manageCacheMembers`.
+      operationId: patchCacheMember
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddCacheMemberRequest'
+      responses:
+        '200':
+          description: Role updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [caches]
+      summary: Remove cache member
+      description: |
+        Removes a user from the cache. Requires `manageCacheMembers`. The last
+        Admin cannot be removed (`409`).
+      operationId: removeCacheMember
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RemoveCacheMemberRequest'
+      responses:
+        '200':
+          description: Member removed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /caches/{cache}/roles:
+    parameters:
+      - $ref: '#/components/parameters/CacheSlug'
+    get:
+      tags: [caches]
+      summary: List cache roles
+      description: |
+        Returns the three built-in roles (Admin/Write/View) plus any custom roles
+        owned by this cache, along with the full catalogue of cache permissions.
+        Visible to any cache member (`viewCache`).
+      operationId: listCacheRoles
+      responses:
+        '200':
+          description: Role catalogue
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/CacheRoleListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [caches]
+      summary: Create custom cache role
+      description: |
+        Creates a new role scoped to this cache. Requires `manageCacheRoles`.
+        The role's permission set is chosen from the capabilities returned by
+        `GET /caches/{cache}/roles` → `available_permissions`.
+      operationId: createCacheRole
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCacheRoleRequest'
+      responses:
+        '200':
+          description: Role created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/CacheRoleResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /caches/{cache}/roles/{role_id}:
+    parameters:
+      - $ref: '#/components/parameters/CacheSlug'
+      - name: role_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Role identifier (UUIDv7).
+    get:
+      tags: [caches]
+      summary: Fetch a cache role
+      operationId: getCacheRole
+      responses:
+        '200':
+          description: Role
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/CacheRoleResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [caches]
+      summary: Update a custom cache role
+      description: |
+        Renames a custom role and/or replaces its permission set. Built-in roles
+        (Admin/Write/View) are immutable (`403`). Requires `manageCacheRoles`.
+      operationId: patchCacheRole
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchCacheRoleRequest'
+      responses:
+        '200':
+          description: Role updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/CacheRoleResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      tags: [caches]
+      summary: Delete a custom cache role
+      description: |
+        Deletes a custom cache role. Built-in roles cannot be deleted (`403`).
+        A role still assigned to members cannot be deleted until those members
+        are reassigned (`400`). Requires `manageCacheRoles`.
+      operationId: deleteCacheRole
+      responses:
+        '200':
+          description: Role deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BoolResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -5220,7 +5501,14 @@ components:
           nullable: true
           description: |-
             Optional organization name to pin the key to. When set, the key is
-            rejected for any other organization.
+            rejected for any other organization. Mutually exclusive with `cache`.
+        cache:
+          type: string
+          nullable: true
+          description: |-
+            Optional cache name to pin the key to. When set, the key carries
+            cache-scoped permissions and is rejected for any other cache.
+            Mutually exclusive with `organization`.
 
     ApiKeyInfo:
       type: object
@@ -7315,3 +7603,125 @@ components:
           type: string
           nullable: true
           description: Symlink target (symlinks only)
+
+    CachePermissionId:
+      type: string
+      description: |
+        A cache capability identifier (camelCase). The full set is enumerated by
+        `GET /caches/{cache}/roles` → `available_permissions`.
+      enum:
+        - viewCache
+        - readStore
+        - writeStore
+        - manageCacheSettings
+        - manageCacheKeys
+        - manageCacheUpstreams
+        - manageCacheMembers
+        - manageCacheRoles
+        - manageCacheSubscriptions
+        - deleteCache
+
+    CacheRoleResponse:
+      type: object
+      required: [id, name, builtin, managed, permissions]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: ci-pusher
+        cache:
+          type: string
+          format: uuid
+          nullable: true
+          description: "`null` for built-in roles; the owning cache id for custom roles."
+        builtin:
+          type: boolean
+          description: True for the three immutable system roles (Admin/Write/View).
+        managed:
+          type: boolean
+          description: True for state-managed roles defined in the NixOS state file.
+        permissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/CachePermissionId'
+
+    CacheRoleListResponse:
+      type: object
+      required: [roles, available_permissions]
+      properties:
+        roles:
+          type: array
+          items:
+            $ref: '#/components/schemas/CacheRoleResponse'
+        available_permissions:
+          type: array
+          description: Catalogue of every capability a custom cache role may grant.
+          items:
+            type: object
+            required: [id, mutating]
+            properties:
+              id:
+                $ref: '#/components/schemas/CachePermissionId'
+              mutating:
+                type: boolean
+
+    CreateCacheRoleRequest:
+      type: object
+      required: [name, permissions]
+      properties:
+        name:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9-]*[a-z0-9]$'
+          example: ci-pusher
+        permissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/CachePermissionId'
+
+    PatchCacheRoleRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9-]*[a-z0-9]$'
+        permissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/CachePermissionId'
+
+    CacheMemberItem:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+          description: Username of the member.
+          example: alice
+        name:
+          type: string
+          description: Name of the role the member currently holds.
+          example: Admin
+
+    AddCacheMemberRequest:
+      type: object
+      required: [user, role]
+      properties:
+        user:
+          type: string
+          description: Username of the user to add.
+          example: alice
+        role:
+          type: string
+          description: Role name to assign (built-in or custom).
+          example: Write
+
+    RemoveCacheMemberRequest:
+      type: object
+      required: [user]
+      properties:
+        user:
+          type: string
+          description: Username of the member to remove.
+          example: alice
