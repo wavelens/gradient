@@ -6499,6 +6499,7 @@ dependencies = [
  "base64",
  "blake3",
  "bytes",
+ "cache",
  "chrono",
  "core",
  "email_address",

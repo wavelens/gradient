@@ -2571,3 +2571,8 @@ Run with: `pnpm --dir frontend exec ng test --watch=false`
 - `backend/web/tests/cache_members.rs` — member CRUD endpoint tests
 - `backend/web/tests/cache_subscription_gate.rs` — bilateral subscription tests
 - `backend/web/tests/cache_api_key_pinning.rs` — cache-pinned API key tests
+
+## Admin tasks & deep GC (issue #271)
+
+- `backend/core/src/db/admin_tasks.rs` — DB helper unit tests: insert/find/mark transitions, unique-violation detection, startup recovery `mark_all_active_failed`.
+- `backend/cache/src/cacher/deep_gc.rs` — sweep unit tests: blob pass removes orphan blob, blob pass purges zombie row, log pass removes orphan log, `DeepGcReport` serialises with snake_case keys.
