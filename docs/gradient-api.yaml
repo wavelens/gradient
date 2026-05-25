@@ -3533,6 +3533,112 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /admin/maintenance/deep-gc:
+    post:
+      tags: [admin]
+      summary: Start a deep GC sweep
+      description: |
+        Starts an asynchronous reconciliation between the database and every
+        storage backend (NAR files, build-request blobs, build logs). Returns
+        `202` immediately with the task id; poll
+        `GET /admin/tasks/{task_id}` for progress and final state.
+
+        Returns `409 Conflict` if a `deep_gc` task is already `pending` or
+        `running`.
+
+        Requires `superuser`.
+      operationId: startDeepGc
+      security:
+        - bearerAuth: []
+      responses:
+        '202':
+          description: Sweep accepted
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: object
+                        required: [task_id, status]
+                        properties:
+                          task_id:
+                            type: string
+                            format: uuid
+                          status:
+                            type: string
+                            enum: [pending]
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: A deep_gc task is already active.
+
+  /admin/tasks:
+    get:
+      tags: [admin]
+      summary: List recent admin tasks
+      description: |
+        Returns the 50 newest admin tasks ordered by `created_at` descending.
+        Requires `superuser`.
+      operationId: listAdminTasks
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Admin task list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/AdminTask'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/tasks/{task_id}:
+    get:
+      tags: [admin]
+      summary: Get one admin task
+      operationId: getAdminTask
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: task_id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Admin task
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/AdminTask'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /admin/github-app/manifest:
     post:
       tags: [admin]
@@ -5111,6 +5217,58 @@ components:
             message: "Server Name already exists"
 
   schemas:
+
+    # ── Admin ─────────────────────────────────────────────────────────────────
+
+    AdminTaskKind:
+      type: string
+      enum: [deep_gc]
+      description: |
+        The kind of administrative task. Only `deep_gc` is currently defined.
+
+    AdminTaskStatus:
+      type: string
+      enum: [pending, running, completed, failed]
+      description: |
+        Lifecycle status for an admin task. `failed` includes the case where
+        the server was restarted while the task was running.
+
+    AdminTask:
+      type: object
+      required: [id, kind, status, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        kind:
+          $ref: '#/components/schemas/AdminTaskKind'
+        status:
+          $ref: '#/components/schemas/AdminTaskStatus'
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+        progress:
+          type: object
+          additionalProperties: true
+          nullable: true
+          description: |
+            Free-form JSON object emitted by the sweep. For `deep_gc` this
+            mirrors `DeepGcReport` (counts per pass).
+        error:
+          type: string
+          nullable: true
+        created_by:
+          type: string
+          format: uuid
+          nullable: true
 
     # ── Common wrappers ───────────────────────────────────────────────────────
 

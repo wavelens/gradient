@@ -601,6 +601,18 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
         state.config.server.ip.clone(),
         state.config.server.port.clone()
     );
+
+    // Free the partial unique index from any admin_task left in Pending/Running
+    // by a previous process. Sweeps are idempotent so the operator can re-issue.
+    match gradient_core::db::admin_tasks::mark_all_active_failed(&state.worker_db).await {
+        Ok(n) if n > 0 => tracing::warn!(
+            tasks_marked_failed = n,
+            "marked stale admin tasks Failed (server restart)"
+        ),
+        Ok(_) => {}
+        Err(e) => tracing::error!(error = ?e, "failed to clear stale admin tasks"),
+    }
+
     let app = create_router(Arc::clone(&state));
 
     let listener = tokio::net::TcpListener::bind(&server_url)

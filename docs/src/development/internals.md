@@ -176,3 +176,36 @@ A worker may be authorized for multiple orgs simultaneously - it sees job candid
 ## State-Managed Resources
 
 See [Declarative State](../usage/state.md#state-managed-resources).
+
+---
+
+## Admin tasks and the deep GC sweep
+
+Long-running administrative operations are tracked in the `admin_task`
+table. Each row has a `kind` (currently only `deep_gc`) and a `status`
+(`pending` → `running` → `completed`/`failed`). A partial unique index on
+`(kind) WHERE status IN (pending, running)` enforces that at most one
+active task per kind exists; a concurrent `POST` collides on the index
+and the endpoint returns `409 Conflict`.
+
+`POST /admin/maintenance/deep-gc` inserts a `pending` row and spawns the
+sweep via `Shutdown::spawn`. The sweep runs three passes — NAR, blob,
+log — each bidirectionally reconciling its storage backend against the
+DB:
+
+1. **NAR pass** reuses `cleanup_orphaned_cache_files`: removes
+   `cache_storage` files with no live DB reference and `cached_path`
+   rows whose NAR is gone.
+2. **Blob pass** lists `build-request-blobs/...` from `nar_storage` and
+   `build_request_blob` rows. Orphans on either side are removed.
+3. **Log pass** lists `BuildId`s from `log_storage`. Orphan logs (no
+   matching `build` row) are deleted. The DB→storage direction is
+   intentionally skipped because a `build` row without a log is a
+   legitimate state.
+
+Counters are flushed to `admin_task.progress` between passes.
+
+When the server restarts, any non-terminal admin task is marked `failed`
+with `error = "server restarted before completion"` before the web layer
+accepts traffic. Operators re-issue the POST to start a fresh sweep;
+each pass is idempotent.

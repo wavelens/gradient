@@ -8,6 +8,8 @@
 //! `require_superuser`.
 
 pub mod github_app;
+pub mod maintenance;
+pub mod tasks;
 pub mod workers;
 
 use axum::Router;
@@ -26,4 +28,7 @@ pub fn admin_router() -> Router<Arc<ServerState>> {
         .route("/workers", get(workers::get_workers))
         .route("/github-app/manifest", post(github_app::request_manifest))
         .route("/github-app/credentials", get(github_app::credentials))
+        .route("/maintenance/deep-gc", post(maintenance::start_deep_gc))
+        .route("/tasks", get(tasks::list_tasks))
+        .route("/tasks/{task_id}", get(tasks::get_task))
 }

@@ -18,6 +18,7 @@ workspace = true
 gradient-core = { workspace = true }
 proto         = { workspace = true }
 scheduler     = { workspace = true }
+cache         = { workspace = true }
 entity        = { workspace = true }
 
 anyhow        = { workspace = true }
