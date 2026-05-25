@@ -34,6 +34,10 @@ pub trait LogStorage: Send + Sync + std::fmt::Debug {
 
     /// Permanently delete the log for `build_id` from all backing stores.
     fn delete<'a>(&'a self, build_id: BuildId) -> BoxFuture<'a, Result<()>>;
+
+    /// Enumerate every `BuildId` that currently has a log in this backend.
+    /// Used by the deep-GC sweep to find orphan logs.
+    fn list_logs<'a>(&'a self) -> BoxFuture<'a, Result<Vec<BuildId>>>;
 }
 
 #[derive(Debug)]
@@ -86,6 +90,28 @@ impl LogStorage for FileLogStorage {
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
                 Err(e) => Err(e.into()),
             }
+        })
+    }
+
+    fn list_logs<'a>(&'a self) -> BoxFuture<'a, Result<Vec<BuildId>>> {
+        Box::pin(async move {
+            let mut out = Vec::new();
+            let mut entries = match fs::read_dir(&self.logs_dir).await {
+                Ok(e) => e,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(out),
+                Err(e) => return Err(e.into()),
+            };
+            while let Some(entry) = entries.next_entry().await? {
+                let name = entry.file_name();
+                let Some(s) = name.to_str() else { continue };
+                let Some(stem) = s.strip_suffix(".log") else {
+                    continue;
+                };
+                if let Ok(id) = stem.parse::<uuid::Uuid>() {
+                    out.push(BuildId::new(id));
+                }
+            }
+            Ok(out)
         })
     }
 }
@@ -176,6 +202,33 @@ impl LogStorage for S3LogStorage {
                 Ok(_) | Err(object_store::Error::NotFound { .. }) => Ok(()),
                 Err(e) => Err(e.into()),
             }
+        })
+    }
+
+    fn list_logs<'a>(&'a self) -> BoxFuture<'a, Result<Vec<BuildId>>> {
+        Box::pin(async move {
+            use futures::StreamExt as _;
+            let mut local = self.local.list_logs().await?;
+            let prefix = ObjectPath::from(format!("{}logs", self.prefix));
+            let mut stream = self.object_store.list(Some(&prefix));
+            let mut seen: std::collections::HashSet<BuildId> = local.iter().copied().collect();
+            while let Some(item) = stream.next().await {
+                let meta = item?;
+                let p = meta.location.to_string();
+                let Some(name) = p.split('/').next_back() else {
+                    continue;
+                };
+                let Some(stem) = name.strip_suffix(".log") else {
+                    continue;
+                };
+                if let Ok(id) = stem.parse::<uuid::Uuid>() {
+                    let bid = BuildId::new(id);
+                    if seen.insert(bid) {
+                        local.push(bid);
+                    }
+                }
+            }
+            Ok(local)
         })
     }
 }

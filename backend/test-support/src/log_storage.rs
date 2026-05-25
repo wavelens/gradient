@@ -26,6 +26,9 @@ impl LogStorage for NoopLogStorage {
     fn delete<'a>(&'a self, _build_id: BuildId) -> BoxFuture<'a, Result<()>> {
         Box::pin(async { Ok(()) })
     }
+    fn list_logs<'a>(&'a self) -> BoxFuture<'a, Result<Vec<BuildId>>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
 }
 
 /// Recording log storage: keeps every `(build_id, text)` append in memory so
@@ -78,6 +81,21 @@ impl LogStorage for RecordingLogStorage {
                 .expect("recording log mutex")
                 .retain(|(b, _)| *b != build_id);
             Ok(())
+        })
+    }
+
+    fn list_logs<'a>(&'a self) -> BoxFuture<'a, Result<Vec<BuildId>>> {
+        Box::pin(async move {
+            use std::collections::HashSet;
+            let entries = self.entries.lock().expect("recording log mutex");
+            let mut seen: HashSet<BuildId> = HashSet::new();
+            let mut out = Vec::new();
+            for (b, _) in entries.iter() {
+                if seen.insert(*b) {
+                    out.push(*b);
+                }
+            }
+            Ok(out)
         })
     }
 }
@@ -134,6 +152,18 @@ impl LogStorage for InMemoryLogStorage {
                 .expect("in-memory log mutex")
                 .remove(&build_id);
             Ok(())
+        })
+    }
+
+    fn list_logs<'a>(&'a self) -> BoxFuture<'a, Result<Vec<BuildId>>> {
+        Box::pin(async move {
+            Ok(self
+                .store
+                .lock()
+                .expect("in-memory log mutex")
+                .keys()
+                .copied()
+                .collect())
         })
     }
 }
