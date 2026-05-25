@@ -549,6 +549,32 @@
     };
   };
 
+  cacheMemberType = types.submodule {
+    options = {
+      user = mkOption {
+        type = types.str;
+        description = "Username (resolved at provision time).";
+      };
+      role = mkOption {
+        type = types.str;
+        description = "Role name (built-in `Admin`/`Write`/`View` or a custom role declared on this cache).";
+      };
+    };
+  };
+
+  cacheRoleType = types.submodule {
+    options = {
+      name = mkOption {
+        type = types.str;
+        description = "Custom role name (must not collide with built-ins).";
+      };
+      permissions = mkOption {
+        type = types.listOf types.str;
+        description = "Cache capability identifiers (camelCase). One of: viewCache, readStore, writeStore, manageCacheSettings, manageCacheKeys, manageCacheUpstreams, manageCacheMembers, manageCacheRoles, manageCacheSubscriptions, deleteCache.";
+      };
+    };
+  };
+
   cacheType = types.submodule ({ config, name, ... }: {
     options = {
       name = mkOption {
@@ -629,6 +655,18 @@
             }
           ]
         '';
+      };
+
+      members = mkOption {
+        type = types.listOf cacheMemberType;
+        default = [];
+        description = "Users with direct role assignments on this cache.";
+      };
+
+      roles = mkOption {
+        type = types.listOf cacheRoleType;
+        default = [];
+        description = "Custom roles available on this cache.";
       };
 
       public = mkOption {
