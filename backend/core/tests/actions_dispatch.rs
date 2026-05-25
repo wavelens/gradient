@@ -57,7 +57,11 @@ fn matches_event_send_web_request_filters_by_events() {
 
 #[test]
 fn matches_event_forge_status_report_ignores_stored_events() {
-    let action = action_with(ActionType::ForgeStatusReport, json!(["build.queued"]));
+    // Seed the stored events with something that is NOT in
+    // FORGE_STATUS_EVENTS so we can verify the action still matches every
+    // forge-status event (proving the stored list is disregarded) and does
+    // NOT match the unrelated event it was seeded with.
+    let action = action_with(ActionType::ForgeStatusReport, json!(["evaluation.waiting"]));
     for ev in FORGE_STATUS_EVENTS {
         assert!(
             matches_event(&action, ev),
@@ -65,7 +69,6 @@ fn matches_event_forge_status_report_ignores_stored_events() {
             ev
         );
     }
-    assert!(!matches_event(&action, "build.queued"));
     assert!(!matches_event(&action, "evaluation.waiting"));
 }
 
