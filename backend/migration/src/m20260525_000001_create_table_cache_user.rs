@@ -11,6 +11,15 @@ use sea_orm_migration::prelude::*;
 pub struct Migration;
 
 const ADMIN_ID: &str = "00000000-0000-0000-0000-000000000011";
+const WRITE_ID: &str = "00000000-0000-0000-0000-000000000012";
+const VIEW_ID: &str = "00000000-0000-0000-0000-000000000013";
+
+// Mirror of cache_admin_mask/cache_write_mask/cache_view_mask in
+// `core::permissions`. Kept in sync by the `seed_builtin_cache_role` startup
+// pass, which refreshes the bitmask on every boot.
+const ADMIN_MASK: i64 = 1023; // bits 0-9
+const WRITE_MASK: i64 = 7; // ViewCache | ReadStore | WriteStore
+const VIEW_MASK: i64 = 3; // ViewCache | ReadStore
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
@@ -62,6 +71,28 @@ impl MigrationTrait for Migration {
 
         let db = manager.get_connection();
         let backend = db.get_database_backend();
+
+        // Seed the three built-in cache roles before the backfill. The
+        // startup pass `seed_builtin_cache_role` refreshes these on every
+        // boot, but it runs AFTER migrations - so the backfill below would
+        // otherwise fail the FK to `cache_role.id` on a fresh deployment.
+        let seed = format!(
+            r#"
+            INSERT INTO cache_role (id, name, cache, permission, managed) VALUES
+                ('{admin}'::uuid, 'Admin', NULL, {admin_mask}, FALSE),
+                ('{write}'::uuid, 'Write', NULL, {write_mask}, FALSE),
+                ('{view}'::uuid,  'View',  NULL, {view_mask},  FALSE)
+            ON CONFLICT (id) DO NOTHING;
+            "#,
+            admin = ADMIN_ID,
+            write = WRITE_ID,
+            view = VIEW_ID,
+            admin_mask = ADMIN_MASK,
+            write_mask = WRITE_MASK,
+            view_mask = VIEW_MASK,
+        );
+        db.execute(Statement::from_string(backend, seed)).await?;
+
         let sql = format!(
             r#"
             INSERT INTO cache_user (id, cache, "user", role)
