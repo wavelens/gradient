@@ -9,11 +9,13 @@
 //! a random `Uuid`.
 
 use entity::ids::{
-    CacheId, CacheUpstreamId, CommitId, EvaluationId, OrganizationCacheId, OrganizationId,
-    ProjectId, UserId,
+    CacheId, CacheUpstreamId, CacheUserId, CommitId, EvaluationId, OrganizationCacheId,
+    OrganizationId, ProjectId, UserId,
 };
 use entity::organization_cache::CacheSubscriptionMode;
 use entity::*;
+use gradient_core::types::consts::BASE_CACHE_ROLE_ADMIN_ID;
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, DatabaseConnection, DbErr};
 use uuid::Uuid;
 
 pub fn org_id() -> OrganizationId {
@@ -168,4 +170,23 @@ pub fn eval_at(id: EvaluationId, offset_secs: i64) -> evaluation::Model {
         trigger: None,
         concurrent: false,
     }
+}
+
+/// Insert an Admin `cache_user` row for `user_id` on `cache_id`. Call this after
+/// inserting a cache fixture to satisfy the invariant that every cache has at
+/// least one Admin member.
+pub async fn insert_cache_creator_admin(
+    db: &DatabaseConnection,
+    cache_id: CacheId,
+    user_id: UserId,
+) -> Result<(), DbErr> {
+    cache_user::ActiveModel {
+        id: Set(CacheUserId::now_v7()),
+        cache: Set(cache_id),
+        user: Set(user_id),
+        role: Set(BASE_CACHE_ROLE_ADMIN_ID),
+    }
+    .insert(db)
+    .await?;
+    Ok(())
 }
