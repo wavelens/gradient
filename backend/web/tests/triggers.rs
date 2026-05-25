@@ -845,7 +845,10 @@ fn list_reporter_trigger_includes_integration_metadata() {
         let body: Value = res.json();
         let item = &body["message"][0];
         assert_eq!(item["type"], "reporter_push");
-        assert_eq!(item["integration"]["id"], github_integration_id().to_string());
+        assert_eq!(
+            item["integration"]["id"],
+            github_integration_id().to_string()
+        );
         assert_eq!(item["integration"]["name"], "github");
         assert_eq!(item["integration"]["display_name"], "GitHub");
         assert_eq!(item["integration"]["forge_type"], "github");

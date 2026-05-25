@@ -6,7 +6,7 @@
 
 use crate::access::{CacheAccess, Caller, OrgAccess, load_cache, load_org};
 use crate::authorization::MaybeApiKey;
-use crate::error::{WebResult, WebError};
+use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::permissions::Permission;
 use axum::extract::{Path, State};

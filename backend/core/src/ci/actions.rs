@@ -14,10 +14,10 @@ use crate::ci::reporter::{
 use crate::ci::{parse_owner_repo, reporting};
 use crate::types::input::{load_secret_bytes, vec_to_hex};
 use crate::types::{
-    ActionConfig, ActionType, AProjectActionDelivery, BuildId, CEntryPoint, CIntegration,
+    AProjectActionDelivery, ActionConfig, ActionType, BuildId, CEntryPoint, CIntegration,
     CProjectAction, EBuild, ECommit, EEntryPoint, EEvaluation, EIntegration, EOrganization,
-    EProject, EProjectAction, EvaluationId, IntegrationId, MProjectAction,
-    ProjectActionDeliveryId, ProjectId, ServerState,
+    EProject, EProjectAction, EvaluationId, IntegrationId, MProjectAction, ProjectActionDeliveryId,
+    ProjectId, ServerState,
 };
 use anyhow::{Context, Result, anyhow};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
@@ -36,8 +36,8 @@ pub fn decrypt_action_secret(ciphertext: &str, crypt_key: &[u8]) -> Result<Strin
 
 /// Load the server's crypt key from `crypt_secret_file` and encrypt `plaintext`.
 pub fn encrypt_secret_with_file(crypt_secret_file: &str, plaintext: &str) -> Result<String> {
-    let key = load_secret_bytes(crypt_secret_file)
-        .map_err(|e| anyhow!("loading crypt key: {}", e))?;
+    let key =
+        load_secret_bytes(crypt_secret_file).map_err(|e| anyhow!("loading crypt key: {}", e))?;
     encrypt_action_secret(plaintext, key.expose())
 }
 
@@ -47,8 +47,8 @@ pub fn decrypt_secret_with_file(
     crypt_secret_file: &str,
     ciphertext: &str,
 ) -> Result<crate::types::SecretString> {
-    let key = load_secret_bytes(crypt_secret_file)
-        .map_err(|e| anyhow!("loading crypt key: {}", e))?;
+    let key =
+        load_secret_bytes(crypt_secret_file).map_err(|e| anyhow!("loading crypt key: {}", e))?;
     decrypt_action_secret(ciphertext, key.expose()).map(crate::types::SecretString::new)
 }
 
@@ -272,7 +272,10 @@ pub async fn execute_action(
 
     let duration_ms = i32::try_from(started.elapsed().as_millis()).unwrap_or(i32::MAX);
     let success = match &result {
-        Ok(ok) => ok.status_code.map(|c| (200..300).contains(&c)).unwrap_or(true),
+        Ok(ok) => ok
+            .status_code
+            .map(|c| (200..300).contains(&c))
+            .unwrap_or(true),
         Err(_) => false,
     };
     let (response_status, response_body, error_message) = match &result {
@@ -332,7 +335,10 @@ async fn execute_send_mail(
     }
     let subject = render_subject(subject_template, event, payload);
     let body = render_default_body(event, payload);
-    let r = state.email.send_action_mail(recipients, &subject, &body).await?;
+    let r = state
+        .email
+        .send_action_mail(recipients, &subject, &body)
+        .await?;
     Ok(ExecutorOk {
         status_code: Some(r.status_code),
         response_body: Some(r.server_response),
@@ -469,9 +475,8 @@ async fn build_ci_report_from_payload(
     }
 
     let (evaluation, build) = if let Some(eid) = s("evaluation_id") {
-        let evaluation_id: EvaluationId = eid
-            .parse()
-            .map_err(|_| anyhow!("invalid evaluation_id"))?;
+        let evaluation_id: EvaluationId =
+            eid.parse().map_err(|_| anyhow!("invalid evaluation_id"))?;
         let evaluation = EEvaluation::find_by_id(evaluation_id)
             .one(&state.worker_db)
             .await
@@ -590,13 +595,17 @@ pub async fn reporter_for_project(
         .one(&state.worker_db)
         .await
         .context("loading forge_status_report action")?;
-    let Some(action) = action else { return Ok(None); };
-    let cfg: ActionConfig = serde_json::from_value(action.config.clone())
-        .context("decoding action config")?;
+    let Some(action) = action else {
+        return Ok(None);
+    };
+    let cfg: ActionConfig =
+        serde_json::from_value(action.config.clone()).context("decoding action config")?;
     let ActionConfig::ForgeStatusReport { integration_id } = cfg else {
         return Ok(None);
     };
-    Ok(Some(build_reporter_for_integration(state, integration_id).await?))
+    Ok(Some(
+        build_reporter_for_integration(state, integration_id).await?,
+    ))
 }
 
 async fn build_reporter_for_integration(
@@ -854,7 +863,13 @@ mod tests {
     #[test]
     fn forge_status_payload_includes_optional_fields() {
         let p = forge_status_payload(
-            "o", "r", "s", "c", Some("desc"), Some("https://x"), Some(42),
+            "o",
+            "r",
+            "s",
+            "c",
+            Some("desc"),
+            Some("https://x"),
+            Some(42),
         );
         assert_eq!(p["description"], "desc");
         assert_eq!(p["details_url"], "https://x");
@@ -878,10 +893,17 @@ mod tests {
         #[derive(Debug)]
         struct NoopLog;
         impl LogStorage for NoopLog {
-            fn append<'a>(&'a self, _: entity::ids::BuildId, _: &'a str) -> BoxFuture<'a, anyhow::Result<()>> {
+            fn append<'a>(
+                &'a self,
+                _: entity::ids::BuildId,
+                _: &'a str,
+            ) -> BoxFuture<'a, anyhow::Result<()>> {
                 Box::pin(async { Ok(()) })
             }
-            fn read<'a>(&'a self, _: entity::ids::BuildId) -> BoxFuture<'a, anyhow::Result<String>> {
+            fn read<'a>(
+                &'a self,
+                _: entity::ids::BuildId,
+            ) -> BoxFuture<'a, anyhow::Result<String>> {
                 Box::pin(async { Ok(String::new()) })
             }
             fn delete<'a>(&'a self, _: entity::ids::BuildId) -> BoxFuture<'a, anyhow::Result<()>> {
@@ -896,11 +918,37 @@ mod tests {
         struct NoopEmail;
         #[async_trait::async_trait]
         impl EmailSender for NoopEmail {
-            fn is_enabled(&self) -> bool { false }
-            async fn send_verification_email(&self, _: &str, _: &str, _: &str, _: &str) -> anyhow::Result<()> { Ok(()) }
-            async fn send_password_reset_email(&self, _: &str, _: &str, _: &str, _: &str) -> anyhow::Result<()> { Ok(()) }
-            async fn send_action_mail(&self, _: &[String], _: &str, _: &str) -> anyhow::Result<crate::storage::email::MailDeliveryResult> {
-                Ok(crate::storage::email::MailDeliveryResult { status_code: 0, server_response: String::new() })
+            fn is_enabled(&self) -> bool {
+                false
+            }
+            async fn send_verification_email(
+                &self,
+                _: &str,
+                _: &str,
+                _: &str,
+                _: &str,
+            ) -> anyhow::Result<()> {
+                Ok(())
+            }
+            async fn send_password_reset_email(
+                &self,
+                _: &str,
+                _: &str,
+                _: &str,
+                _: &str,
+            ) -> anyhow::Result<()> {
+                Ok(())
+            }
+            async fn send_action_mail(
+                &self,
+                _: &[String],
+                _: &str,
+                _: &str,
+            ) -> anyhow::Result<crate::storage::email::MailDeliveryResult> {
+                Ok(crate::storage::email::MailDeliveryResult {
+                    status_code: 0,
+                    server_response: String::new(),
+                })
             }
         }
 
@@ -909,8 +957,14 @@ mod tests {
             server: crate::types::ServerArgs::default(),
             database: crate::types::DatabaseArgs::default(),
             eval: crate::types::EvalArgs::default(),
-            storage: crate::types::StorageArgs { base_path: "/tmp/gradient-test".into(), ..Default::default() },
-            secrets: crate::types::SecretsArgs { crypt_secret_file: "test-secret".into(), jwt_secret_file: "test-jwt".into() },
+            storage: crate::types::StorageArgs {
+                base_path: "/tmp/gradient-test".into(),
+                ..Default::default()
+            },
+            secrets: crate::types::SecretsArgs {
+                crypt_secret_file: "test-secret".into(),
+                jwt_secret_file: "test-jwt".into(),
+            },
             limits: crate::types::LimitsArgs::default(),
             registration: crate::types::RegistrationArgs::default(),
             proto: crate::types::ProtoArgs::default(),
@@ -925,13 +979,19 @@ mod tests {
         let nar_storage = NarStore::local(&config.storage.base_path).expect("nar store");
         Arc::new(crate::types::ServerState {
             web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
-            worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
+            worker_db: WorkerDb::new(
+                MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
+            ),
             config,
             log_storage: std::sync::Arc::new(NoopLog),
             email: std::sync::Arc::new(NoopEmail) as std::sync::Arc<dyn EmailSender>,
             nar_storage,
-            manifest_state: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-            pending_credentials: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            manifest_state: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
+            pending_credentials: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
             http: crate::http::build_client().expect("http client"),
             shutdown: crate::shutdown::Shutdown::new(),
             jwt_secret: SecretString::new("test-jwt-secret".to_string()),
@@ -969,10 +1029,14 @@ mod tests {
     fn build_ci_report_errors_when_payload_empty() {
         run(async {
             let state = make_state();
-            let err =
-                build_ci_report_from_payload(&state, "build.started", &json!({}), CiStatus::Running)
-                    .await
-                    .unwrap_err();
+            let err = build_ci_report_from_payload(
+                &state,
+                "build.started",
+                &json!({}),
+                CiStatus::Running,
+            )
+            .await
+            .unwrap_err();
             assert!(err.to_string().contains("build_id"), "error: {err}");
         });
     }

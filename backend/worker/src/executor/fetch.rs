@@ -141,7 +141,10 @@ pub async fn fetch_repository(
     }
 
     if !applied_overrides.is_empty() {
-        info!(count = applied_overrides.len(), "applying flake input overrides");
+        info!(
+            count = applied_overrides.len(),
+            "applying flake input overrides"
+        );
     }
 
     // Archive the flake source and all locked inputs into the nix store via a
@@ -410,10 +413,8 @@ fn flake_ref_from_lock_original(original: &serde_json::Value) -> anyhow::Result<
 
     Ok(match ty {
         "github" | "gitlab" | "sourcehut" => {
-            let owner = str_field("owner")
-                .with_context(|| format!("{ty} node missing 'owner'"))?;
-            let repo = str_field("repo")
-                .with_context(|| format!("{ty} node missing 'repo'"))?;
+            let owner = str_field("owner").with_context(|| format!("{ty} node missing 'owner'"))?;
+            let repo = str_field("repo").with_context(|| format!("{ty} node missing 'repo'"))?;
             match str_field("ref") {
                 Some(r) => format!("{ty}:{owner}/{repo}/{r}"),
                 None => format!("{ty}:{owner}/{repo}"),
@@ -448,7 +449,10 @@ pub struct OverrideInput {
 
 impl From<&gradient_core::types::proto::FlakeInputOverride> for OverrideInput {
     fn from(o: &gradient_core::types::proto::FlakeInputOverride) -> Self {
-        Self { input_name: o.input_name.clone(), url: o.url.clone() }
+        Self {
+            input_name: o.input_name.clone(),
+            url: o.url.clone(),
+        }
     }
 }
 
@@ -474,10 +478,7 @@ fn resolve_overrides(
         let ref_str = match &o.url {
             Some(u) => u.clone(),
             None => {
-                let root_key = lock
-                    .get("root")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("root");
+                let root_key = lock.get("root").and_then(|v| v.as_str()).unwrap_or("root");
                 let node_key = lock
                     .get("nodes")
                     .and_then(|n| n.get(root_key))
@@ -491,9 +492,7 @@ fn resolve_overrides(
                     .get("nodes")
                     .and_then(|n| n.get(node_key))
                     .and_then(|n| n.get("original"))
-                    .with_context(|| {
-                        format!("flake.lock missing nodes.{node_key}.original")
-                    })?;
+                    .with_context(|| format!("flake.lock missing nodes.{node_key}.original"))?;
                 flake_ref_from_lock_original(original)?
             }
         };
@@ -508,10 +507,7 @@ fn declared_inputs_from_lock(
     lock: &serde_json::Value,
 ) -> anyhow::Result<std::collections::HashSet<String>> {
     use anyhow::Context;
-    let root_key = lock
-        .get("root")
-        .and_then(|v| v.as_str())
-        .unwrap_or("root");
+    let root_key = lock.get("root").and_then(|v| v.as_str()).unwrap_or("root");
     let root = lock
         .get("nodes")
         .and_then(|n| n.get(root_key))
@@ -710,7 +706,10 @@ mod tests {
     #[test]
     fn build_archive_argv_appends_override_input_flags() {
         let overrides = [
-            ("nixpkgs".to_owned(), "github:NixOS/nixpkgs/nixos-unstable".to_owned()),
+            (
+                "nixpkgs".to_owned(),
+                "github:NixOS/nixpkgs/nixos-unstable".to_owned(),
+            ),
             ("utils".to_owned(), "flake:flake-utils".to_owned()),
         ];
         let argv = super::build_archive_argv("git+file:///tmp/x?rev=abc", &overrides);
@@ -770,9 +769,14 @@ mod tests {
             input_name: "nixpkgs".into(),
             url: Some("github:NixOS/nixpkgs/nixos-unstable".into()),
         }];
-        let (applied, warnings) =
-            super::resolve_overrides(&overrides, &declared, &lock).unwrap();
-        assert_eq!(applied, vec![("nixpkgs".to_owned(), "github:NixOS/nixpkgs/nixos-unstable".to_owned())]);
+        let (applied, warnings) = super::resolve_overrides(&overrides, &declared, &lock).unwrap();
+        assert_eq!(
+            applied,
+            vec![(
+                "nixpkgs".to_owned(),
+                "github:NixOS/nixpkgs/nixos-unstable".to_owned()
+            )]
+        );
         assert!(warnings.is_empty());
     }
 
@@ -791,9 +795,14 @@ mod tests {
             input_name: "nixpkgs".into(),
             url: None,
         }];
-        let (applied, warnings) =
-            super::resolve_overrides(&overrides, &declared, &lock).unwrap();
-        assert_eq!(applied, vec![("nixpkgs".to_owned(), "github:NixOS/nixpkgs/nixos-unstable".to_owned())]);
+        let (applied, warnings) = super::resolve_overrides(&overrides, &declared, &lock).unwrap();
+        assert_eq!(
+            applied,
+            vec![(
+                "nixpkgs".to_owned(),
+                "github:NixOS/nixpkgs/nixos-unstable".to_owned()
+            )]
+        );
         assert!(warnings.is_empty());
     }
 
@@ -806,8 +815,7 @@ mod tests {
             input_name: "missing".into(),
             url: Some("github:x/y".into()),
         }];
-        let (applied, warnings) =
-            super::resolve_overrides(&overrides, &declared, &lock).unwrap();
+        let (applied, warnings) = super::resolve_overrides(&overrides, &declared, &lock).unwrap();
         assert!(applied.is_empty());
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("missing"));

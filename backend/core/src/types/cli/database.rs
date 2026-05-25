@@ -16,19 +16,11 @@ pub struct DatabaseArgs {
     /// Maximum connections the scheduler / worker / cache pool may open.
     /// Total Postgres connections per gradient-server process is
     /// `database_max_connections + database_web_max_connections`.
-    #[arg(
-        long,
-        env = "GRADIENT_DATABASE_MAX_CONNECTIONS",
-        default_value_t = 32
-    )]
+    #[arg(long, env = "GRADIENT_DATABASE_MAX_CONNECTIONS", default_value_t = 32)]
     pub database_max_connections: u32,
 
     /// Minimum connections kept warm in the scheduler / worker / cache pool.
-    #[arg(
-        long,
-        env = "GRADIENT_DATABASE_MIN_CONNECTIONS",
-        default_value_t = 2
-    )]
+    #[arg(long, env = "GRADIENT_DATABASE_MIN_CONNECTIONS", default_value_t = 2)]
     pub database_min_connections: u32,
 
     /// Maximum connections the axum HTTP pool may open.

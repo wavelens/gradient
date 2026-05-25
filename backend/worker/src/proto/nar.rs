@@ -70,10 +70,7 @@ struct PathMeta {
 /// rejects the import with `path '…' is not valid`. Failing here keeps the
 /// blame at the right layer and lets the caller retry instead of poisoning
 /// the cache.
-async fn resolve_path_meta(
-    store: Option<&LocalNixStore>,
-    store_path: &str,
-) -> Result<PathMeta> {
+async fn resolve_path_meta(store: Option<&LocalNixStore>, store_path: &str) -> Result<PathMeta> {
     let Some(s) = store else {
         return Ok(PathMeta::default());
     };

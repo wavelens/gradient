@@ -27,8 +27,7 @@ use axum::extract::{Path, State};
 use axum::http::HeaderMap;
 use gradient_core::ci::actions::decrypt_secret_with_file;
 use gradient_core::ci::{
-    ForgeType, IntegrationKind, verify_gitea_signature,
-    verify_github_signature,
+    ForgeType, IntegrationKind, verify_gitea_signature, verify_github_signature,
 };
 use gradient_core::types::input::load_secret;
 use gradient_core::types::*;
@@ -144,14 +143,7 @@ pub async fn github_app_webhook(
             WebhookResponse::empty(&event)
         }
         "issue_comment" => {
-            trigger::handle_issue_comment(
-                &state,
-                &scheduler,
-                ForgeType::GitHub,
-                None,
-                &body,
-            )
-            .await;
+            trigger::handle_issue_comment(&state, &scheduler, ForgeType::GitHub, None, &body).await;
             WebhookResponse::empty(&event)
         }
         other => WebhookResponse::empty(other),

@@ -122,7 +122,9 @@ impl LocalNixStore {
                 guard.mark_ok();
                 Ok(valid)
             }
-            Err(e) => Err(anyhow::anyhow!("is_valid_path failed for {store_path}: {e}")),
+            Err(e) => Err(anyhow::anyhow!(
+                "is_valid_path failed for {store_path}: {e}"
+            )),
         }
     }
 
@@ -176,8 +178,7 @@ impl LocalNixStore {
     /// records the link and treats its target as alive for GC purposes
     /// until the link is removed.
     pub async fn add_indirect_root(&self, gcroot_symlink: &std::path::Path) -> Result<()> {
-        let bytes =
-            bytes::Bytes::copy_from_slice(gcroot_symlink.as_os_str().as_encoded_bytes());
+        let bytes = bytes::Bytes::copy_from_slice(gcroot_symlink.as_os_str().as_encoded_bytes());
 
         let mut guard = self.scoped().await?;
         match guard.client().add_indirect_root(&bytes).await {

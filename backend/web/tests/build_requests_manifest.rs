@@ -282,7 +282,9 @@ fn happy_path_returns_session_and_missing() {
             "session is not a UUID: {session_str}"
         );
 
-        let missing = body["message"]["missing"].as_array().expect("missing array");
+        let missing = body["message"]["missing"]
+            .as_array()
+            .expect("missing array");
         let missing_set: std::collections::HashSet<&str> =
             missing.iter().map(|v| v.as_str().unwrap()).collect();
         assert_eq!(missing.len(), 2);

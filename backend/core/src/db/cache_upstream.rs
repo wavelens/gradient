@@ -5,9 +5,7 @@
  */
 
 use anyhow::Result;
-use entity::cache_upstream::{
-    Column as CCacheUpstream, Entity as ECacheUpstream,
-};
+use entity::cache_upstream::{Column as CCacheUpstream, Entity as ECacheUpstream};
 use entity::organization_cache::{
     CacheSubscriptionMode, Column as COrganizationCache, Entity as EOrganizationCache,
 };
@@ -54,7 +52,11 @@ mod tests {
     use sea_orm::{DatabaseBackend, MockDatabase};
     use uuid::Uuid;
 
-    fn org_cache_row(org: OrganizationId, cache: CacheId, mode: CacheSubscriptionMode) -> organization_cache::Model {
+    fn org_cache_row(
+        org: OrganizationId,
+        cache: CacheId,
+        mode: CacheSubscriptionMode,
+    ) -> organization_cache::Model {
         organization_cache::Model {
             id: crate::types::ids::OrganizationCacheId::now_v7(),
             organization: org,
@@ -92,7 +94,9 @@ mod tests {
             ]])
             .into_connection();
 
-        let urls = upstream_urls_for_org(&db, org).await.expect("helper succeeds");
+        let urls = upstream_urls_for_org(&db, org)
+            .await
+            .expect("helper succeeds");
         assert_eq!(
             urls,
             vec![
@@ -110,7 +114,9 @@ mod tests {
             .append_query_results([Vec::<organization_cache::Model>::new()])
             .into_connection();
 
-        let urls = upstream_urls_for_org(&db, org).await.expect("helper succeeds");
+        let urls = upstream_urls_for_org(&db, org)
+            .await
+            .expect("helper succeeds");
         assert!(urls.is_empty());
     }
 }

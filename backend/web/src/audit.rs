@@ -68,9 +68,8 @@ impl RequestInfo {
         peer: IpAddr,
         trusted_proxies: &[ipnet::IpNet],
     ) -> Self {
-        let ip = Some(
-            crate::client_ip::resolve_client_ip(headers, peer, trusted_proxies).to_string(),
-        );
+        let ip =
+            Some(crate::client_ip::resolve_client_ip(headers, peer, trusted_proxies).to_string());
         let user_agent = headers
             .get(axum::http::header::USER_AGENT)
             .and_then(|v| v.to_str().ok())

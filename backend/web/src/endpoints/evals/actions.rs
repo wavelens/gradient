@@ -25,7 +25,8 @@ pub async fn post_evaluation(
     Json(body): Json<MakeEvaluationRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let api_key_ref = api_key.as_ref();
-    let ctx = EvalAccessContext::load(&state, evaluation_id, &Some(user.clone()), api_key_ref).await?;
+    let ctx =
+        EvalAccessContext::load(&state, evaluation_id, &Some(user.clone()), api_key_ref).await?;
 
     // Mutations require explicit org membership even when the org is public.
     if !is_org_member(&state, user.id, ctx.organization_id, api_key_ref).await? {

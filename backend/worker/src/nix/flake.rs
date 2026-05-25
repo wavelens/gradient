@@ -388,7 +388,10 @@ mod tests {
             "!packages.x86_64-linux.broken".to_string(),
         ];
         let (literal_attrs, eval_patterns) = partition_for_eval(&patterns);
-        assert_eq!(literal_attrs, vec!["packages.x86_64-linux.hello".to_string()]);
+        assert_eq!(
+            literal_attrs,
+            vec!["packages.x86_64-linux.hello".to_string()]
+        );
         assert!(eval_patterns.is_empty());
     }
 
@@ -408,7 +411,10 @@ mod tests {
             "!packages.x86_64-linux.broken".to_string(),
         ];
         let (literal_attrs, eval_patterns) = partition_for_eval(&patterns);
-        assert_eq!(literal_attrs, vec!["packages.x86_64-linux.hello".to_string()]);
+        assert_eq!(
+            literal_attrs,
+            vec!["packages.x86_64-linux.hello".to_string()]
+        );
         assert_eq!(
             eval_patterns,
             vec![

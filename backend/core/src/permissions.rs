@@ -443,7 +443,10 @@ mod tests {
     #[test]
     fn cache_write_mask_excludes_admin_only() {
         let mask = cache_write_mask();
-        assert!(!cache_mask_grants(mask, CachePermission::ManageCacheSettings));
+        assert!(!cache_mask_grants(
+            mask,
+            CachePermission::ManageCacheSettings
+        ));
         assert!(!cache_mask_grants(mask, CachePermission::ManageCacheRoles));
         assert!(!cache_mask_grants(mask, CachePermission::DeleteCache));
         assert!(cache_mask_grants(mask, CachePermission::WriteStore));

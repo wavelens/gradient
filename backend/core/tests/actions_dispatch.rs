@@ -137,4 +137,3 @@ fn forge_status_payload_carries_optional_fields() {
     assert_eq!(p["details_url"], "https://example.com/log");
     assert_eq!(p["check_run_id"], 7);
 }
-

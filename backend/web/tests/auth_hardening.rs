@@ -76,7 +76,8 @@ fn server_with(web_db_setup: impl FnOnce(MockDatabase) -> MockDatabase) -> TestS
         web_db: WebDb::new(db.into_connection()),
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config,
-        log_storage: Arc::new(NoopLogStorage),        email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
+        log_storage: Arc::new(NoopLogStorage),
+        email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
         nar_storage,
         manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
@@ -378,9 +379,8 @@ fn api_key_pinned_to_other_org_is_invisible() {
     rt.block_on(async {
         let raw = "y".repeat(64);
         let now = Utc::now().naive_utc();
-        let pinned_elsewhere = entity::ids::OrganizationId::new(uuid::uuid!(
-            "ffffffff-ffff-ffff-ffff-ffffffffffff"
-        ));
+        let pinned_elsewhere =
+            entity::ids::OrganizationId::new(uuid::uuid!("ffffffff-ffff-ffff-ffff-ffffffffffff"));
         let key = api::Model {
             id: ApiId::now_v7(),
             owned_by: user_id(),

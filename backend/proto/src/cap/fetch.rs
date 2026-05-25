@@ -42,12 +42,7 @@ mod tests {
     }
     #[async_trait]
     impl FetchClient for Noop {
-        async fn on_fetch_result(
-            &self,
-            _: String,
-            _: String,
-            _: Option<String>,
-        ) -> Result<()> {
+        async fn on_fetch_result(&self, _: String, _: String, _: Option<String>) -> Result<()> {
             Ok(())
         }
     }
@@ -59,6 +54,8 @@ mod tests {
         assert!(!p.is_empty());
 
         let c: &dyn FetchClient = &Noop;
-        c.on_fetch_result("p".into(), "j".into(), None).await.unwrap();
+        c.on_fetch_result("p".into(), "j".into(), None)
+            .await
+            .unwrap();
     }
 }

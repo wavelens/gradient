@@ -46,10 +46,8 @@ impl DerivationInsertBatch {
         derivations: &[DiscoveredDerivation],
         existing: &[MDerivation],
     ) -> Self {
-        let mut drv_path_to_id: HashMap<String, DerivationId> = existing
-            .iter()
-            .map(|d| (d.drv_path(), d.id))
-            .collect();
+        let mut drv_path_to_id: HashMap<String, DerivationId> =
+            existing.iter().map(|d| (d.drv_path(), d.id)).collect();
 
         let now = gradient_core::types::now();
         let mut new_derivations: Vec<ADerivation> = Vec::new();
@@ -224,13 +222,16 @@ impl<'a> EvalResultProcessor<'a> {
             .filter(|id| !truly_substituted.contains(id))
             .collect();
 
-        let leader_for_drv =
-            find_active_leaders(&self.state.worker_db, self.organization_id, &buildable_drv_ids)
-                .await
-                .unwrap_or_else(|e| {
-                    error!(error = %e, "failed to query active leaders");
-                    HashMap::new()
-                });
+        let leader_for_drv = find_active_leaders(
+            &self.state.worker_db,
+            self.organization_id,
+            &buildable_drv_ids,
+        )
+        .await
+        .unwrap_or_else(|e| {
+            error!(error = %e, "failed to query active leaders");
+            HashMap::new()
+        });
 
         let log_source_for_substituted = self
             .find_log_sources(truly_substituted.iter().copied().collect())
@@ -336,20 +337,14 @@ impl<'a> EvalResultProcessor<'a> {
     /// log of its own; without this lookup the log endpoint sees
     /// `log_id = NULL` and falls back to the new build's id, which has no
     /// stored log.
-    async fn find_log_sources(
-        &self,
-        drv_ids: Vec<DerivationId>,
-    ) -> HashMap<DerivationId, BuildId> {
+    async fn find_log_sources(&self, drv_ids: Vec<DerivationId>) -> HashMap<DerivationId, BuildId> {
         let mut out: HashMap<DerivationId, BuildId> = HashMap::new();
         if drv_ids.is_empty() {
             return out;
         }
         let prior = match EBuild::find()
             .filter(CBuild::Derivation.is_in(drv_ids))
-            .filter(
-                CBuild::Status
-                    .is_in([BuildStatus::Completed, BuildStatus::Substituted]),
-            )
+            .filter(CBuild::Status.is_in([BuildStatus::Completed, BuildStatus::Substituted]))
             .order_by_desc(CBuild::CreatedAt)
             .all(&self.state.worker_db)
             .await
@@ -606,9 +601,13 @@ async fn expand_substituted_closure(
     let mut builds: Vec<ABuild> = Vec::with_capacity(rows.len());
     let mut spawn_inputs: Vec<(BuildId, DerivationId)> = Vec::new();
     for row in &rows {
-        let Ok(drv_id_uuid) = row.try_get::<uuid::Uuid>("", "drv_id") else { continue; };
+        let Ok(drv_id_uuid) = row.try_get::<uuid::Uuid>("", "drv_id") else {
+            continue;
+        };
         let drv_id: DerivationId = drv_id_uuid.into();
-        let Ok(kind) = row.try_get::<String>("", "kind") else { continue; };
+        let Ok(kind) = row.try_get::<String>("", "kind") else {
+            continue;
+        };
         let (status, external_cached) = if kind == "sub" {
             (BuildStatus::Substituted, false)
         } else {
@@ -661,7 +660,9 @@ async fn expand_substituted_closure(
         };
 
         for (build_id, drv_id) in spawn_inputs {
-            let Some(drv_path) = paths.get(&drv_id).cloned() else { continue; };
+            let Some(drv_path) = paths.get(&drv_id).cloned() else {
+                continue;
+            };
             let state = Arc::clone(state);
             tokio::spawn(async move {
                 if let Err(e) = crate::log_substitution::substitute_log(
@@ -925,4 +926,3 @@ pub async fn handle_eval_job_failed(
     }
     Ok(())
 }
-

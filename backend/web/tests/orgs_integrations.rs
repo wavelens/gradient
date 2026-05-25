@@ -174,7 +174,13 @@ fn summary_endpoint_excludes_credential_state() {
         let body: Value = res.json();
         for item in body["message"].as_array().unwrap() {
             let obj = item.as_object().unwrap();
-            for forbidden in ["secret", "endpoint_url", "access_token", "has_secret", "has_access_token"] {
+            for forbidden in [
+                "secret",
+                "endpoint_url",
+                "access_token",
+                "has_secret",
+                "has_access_token",
+            ] {
                 assert!(
                     !obj.contains_key(forbidden),
                     "summary leaked `{forbidden}`: {obj:?}"
@@ -196,12 +202,9 @@ fn summary_endpoint_rejects_non_member() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let db = with_auth(
-            MockDatabase::new(DatabaseBackend::Postgres),
-            session_id,
-        )
-        .append_query_results([vec![org()]])
-        .append_query_results([Vec::<organization_user::Model>::new()]);
+        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+            .append_query_results([vec![org()]])
+            .append_query_results([Vec::<organization_user::Model>::new()]);
 
         let server = make_test_server(db.into_connection());
         let res = server

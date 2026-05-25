@@ -97,4 +97,3 @@ pub struct EvaluationMessageResponse {
     pub created_at: chrono::NaiveDateTime,
     pub entry_points: Vec<EntryPointId>,
 }
-

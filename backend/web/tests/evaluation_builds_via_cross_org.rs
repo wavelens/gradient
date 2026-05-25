@@ -198,7 +198,8 @@ fn make_server(db: sea_orm::DatabaseConnection) -> TestServer {
         web_db: WebDb::new(db),
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config,
-        log_storage: Arc::new(NoopLogStorage),        email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
+        log_storage: Arc::new(NoopLogStorage),
+        email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
         nar_storage,
         manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
@@ -233,17 +234,20 @@ fn evaluation_builds_resolves_cross_org_leader_row() {
     run(async {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             // Auth prefix (authorize_optional)
-            .append_query_results([vec![session.clone()]])  // 1. SELECT session
-            .append_query_results([vec![session]])          // 2. UPDATE session (returning)
-            .append_query_results([vec![user()]])           // 3. SELECT user
+            .append_query_results([vec![session.clone()]]) // 1. SELECT session
+            .append_query_results([vec![session]]) // 2. UPDATE session (returning)
+            .append_query_results([vec![user()]]) // 3. SELECT user
             // EvalAccessContext::load
-            .append_query_results([vec![evaluation_row(follower_eval_id(), follower_project_id())]]) // 4. SELECT evaluation
+            .append_query_results([vec![evaluation_row(
+                follower_eval_id(),
+                follower_project_id(),
+            )]]) // 4. SELECT evaluation
             .append_query_results([vec![project_row(follower_project_id(), follower_org_id())]]) // 5. SELECT project
             .append_query_results([vec![private_org(follower_org_id(), "org-b")]]) // 6. SELECT organization
             .append_query_results([vec![follower_org_membership()]]) // 7. SELECT organization_user (member)
             // get_evaluation_builds
             .append_query_results([vec![follower_build_row()]]) // 8. SELECT builds (eval = follower_eval_id)
-            .append_query_results([vec![leader_build_row()]])  // 9. SELECT builds (id in [leader_build_id])
+            .append_query_results([vec![leader_build_row()]]) // 9. SELECT builds (id in [leader_build_id])
             .append_query_results([vec![leader_derivation_row()]]) // 10. SELECT derivations (id in [leader_drv_id])
             .append_query_results([Vec::<entity::derivation_output::Model>::new()]) // 11. SELECT derivation_outputs (empty)
             .into_connection();
@@ -259,9 +263,7 @@ fn evaluation_builds_resolves_cross_org_leader_row() {
 
         res.assert_status_ok();
         let body: serde_json::Value = res.json();
-        let builds = body["message"]["builds"]
-            .as_array()
-            .expect("builds array");
+        let builds = body["message"]["builds"].as_array().expect("builds array");
         assert_eq!(builds.len(), 1);
 
         let item = &builds[0];

@@ -34,7 +34,11 @@ pub fn validate_manifest_path(path: &str) -> WebResult<()> {
 }
 
 pub fn decode_blake3_hex(hash: &str) -> WebResult<Vec<u8>> {
-    if hash.len() != 64 || !hash.chars().all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)) {
+    if hash.len() != 64
+        || !hash
+            .chars()
+            .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
+    {
         return Err(WebError::bad_request(format!(
             "Hash must be 64-char lowercase hex: {}",
             hash

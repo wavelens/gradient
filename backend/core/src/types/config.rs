@@ -423,7 +423,7 @@ mod tests {
         let cli = base_cli();
         let cfg = cli.network_config().expect("default CIDR lists parse");
         assert_eq!(cfg.trusted_proxies.len(), 2); // 127.0.0.1/32 + ::1/128
-        assert_eq!(cfg.local_ips.len(), 1);       // 10.0.0.0/8
+        assert_eq!(cfg.local_ips.len(), 1); // 10.0.0.0/8
     }
 
     #[test]

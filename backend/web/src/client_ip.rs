@@ -83,49 +83,70 @@ mod tests {
     fn untrusted_peer_no_xff_returns_peer() {
         let trusted = nets(&["127.0.0.1/32"]);
         let h = HeaderMap::new();
-        assert_eq!(resolve_client_ip(&h, ip("8.8.8.8"), &trusted), ip("8.8.8.8"));
+        assert_eq!(
+            resolve_client_ip(&h, ip("8.8.8.8"), &trusted),
+            ip("8.8.8.8")
+        );
     }
 
     #[test]
     fn untrusted_peer_with_xff_ignores_xff() {
         let trusted = nets(&["127.0.0.1/32"]);
         let h = headers_with_xff("10.0.0.5");
-        assert_eq!(resolve_client_ip(&h, ip("8.8.8.8"), &trusted), ip("8.8.8.8"));
+        assert_eq!(
+            resolve_client_ip(&h, ip("8.8.8.8"), &trusted),
+            ip("8.8.8.8")
+        );
     }
 
     #[test]
     fn trusted_peer_no_xff_returns_peer() {
         let trusted = nets(&["127.0.0.1/32"]);
         let h = HeaderMap::new();
-        assert_eq!(resolve_client_ip(&h, ip("127.0.0.1"), &trusted), ip("127.0.0.1"));
+        assert_eq!(
+            resolve_client_ip(&h, ip("127.0.0.1"), &trusted),
+            ip("127.0.0.1")
+        );
     }
 
     #[test]
     fn trusted_peer_single_xff_returns_xff() {
         let trusted = nets(&["127.0.0.1/32"]);
         let h = headers_with_xff("10.0.0.5");
-        assert_eq!(resolve_client_ip(&h, ip("127.0.0.1"), &trusted), ip("10.0.0.5"));
+        assert_eq!(
+            resolve_client_ip(&h, ip("127.0.0.1"), &trusted),
+            ip("10.0.0.5")
+        );
     }
 
     #[test]
     fn trusted_peer_multi_xff_stops_at_first_untrusted_from_right() {
         let trusted = nets(&["127.0.0.1/32"]);
         let h = headers_with_xff("10.0.0.5, 127.0.0.1");
-        assert_eq!(resolve_client_ip(&h, ip("127.0.0.1"), &trusted), ip("10.0.0.5"));
+        assert_eq!(
+            resolve_client_ip(&h, ip("127.0.0.1"), &trusted),
+            ip("10.0.0.5")
+        );
     }
 
     #[test]
     fn trusted_peer_all_xff_trusted_returns_leftmost() {
         let trusted = nets(&["127.0.0.0/8"]);
         let h = headers_with_xff("127.0.0.7, 127.0.0.8");
-        assert_eq!(resolve_client_ip(&h, ip("127.0.0.1"), &trusted), ip("127.0.0.7"));
+        assert_eq!(
+            resolve_client_ip(&h, ip("127.0.0.1"), &trusted),
+            ip("127.0.0.7")
+        );
     }
 
     #[test]
     fn malformed_xff_entries_are_skipped() {
         let trusted = nets(&["127.0.0.1/32"]);
         let h = headers_with_xff("garbage, 10.0.0.5");
-        assert_eq!(resolve_client_ip(&h, ip("127.0.0.1"), &trusted), ip("10.0.0.5"));
+        assert_eq!(
+            resolve_client_ip(&h, ip("127.0.0.1"), &trusted),
+            ip("10.0.0.5")
+        );
     }
 
     #[test]
@@ -139,7 +160,10 @@ mod tests {
     fn empty_xff_string_returns_peer() {
         let trusted = nets(&["127.0.0.1/32"]);
         let h = headers_with_xff("");
-        assert_eq!(resolve_client_ip(&h, ip("127.0.0.1"), &trusted), ip("127.0.0.1"));
+        assert_eq!(
+            resolve_client_ip(&h, ip("127.0.0.1"), &trusted),
+            ip("127.0.0.1")
+        );
     }
 
     #[test]
@@ -164,6 +188,9 @@ mod tests {
     fn all_malformed_xff_returns_peer() {
         let trusted = nets(&["127.0.0.1/32"]);
         let h = headers_with_xff("garbage, also-garbage");
-        assert_eq!(resolve_client_ip(&h, ip("127.0.0.1"), &trusted), ip("127.0.0.1"));
+        assert_eq!(
+            resolve_client_ip(&h, ip("127.0.0.1"), &trusted),
+            ip("127.0.0.1")
+        );
     }
 }

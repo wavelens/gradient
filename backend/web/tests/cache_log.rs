@@ -30,11 +30,12 @@ fn log_returns_text_for_completed_build_in_cache() {
             ))
             .await;
         resp.assert_status_ok();
-        assert!(resp
-            .header("content-type")
-            .to_str()
-            .unwrap()
-            .starts_with("text/plain"));
+        assert!(
+            resp.header("content-type")
+                .to_str()
+                .unwrap()
+                .starts_with("text/plain")
+        );
         assert_eq!(resp.text(), expected_log);
     });
 }

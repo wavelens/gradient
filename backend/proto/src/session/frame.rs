@@ -346,10 +346,7 @@ pub async fn recv_server_msg(socket: &mut ProtoSocket) -> anyhow::Result<ServerM
 }
 
 /// Peer-role helper: send a [`ClientMessage`] on the socket.
-pub async fn send_client_msg(
-    socket: &mut ProtoSocket,
-    msg: &ClientMessage,
-) -> anyhow::Result<()> {
+pub async fn send_client_msg(socket: &mut ProtoSocket, msg: &ClientMessage) -> anyhow::Result<()> {
     socket
         .send_client_msg(msg)
         .await

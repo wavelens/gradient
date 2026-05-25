@@ -56,6 +56,8 @@ mod tests {
         let _ = s.aggregated_capabilities("p".into()).await.unwrap();
 
         let c: &dyn FederateClient = &Noop;
-        c.on_aggregate_changed("p".into(), GradientCapabilities::default()).await.unwrap();
+        c.on_aggregate_changed("p".into(), GradientCapabilities::default())
+            .await
+            .unwrap();
     }
 }

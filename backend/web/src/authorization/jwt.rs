@@ -182,7 +182,11 @@ async fn decode_api_key(
         mask: api_key.permission,
         organization: api_key.organization,
         cache_pin: api_key.cache,
-        cache_permission_mask: if api_key.cache.is_some() { Some(api_key.permission) } else { None },
+        cache_permission_mask: if api_key.cache.is_some() {
+            Some(api_key.permission)
+        } else {
+            None
+        },
     };
     let user_id = api_key.owned_by;
 

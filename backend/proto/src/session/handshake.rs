@@ -15,7 +15,9 @@
 
 use anyhow::Context;
 
-use crate::messages::{ClientMessage, FailedPeer, GradientCapabilities, PROTO_VERSION, ServerMessage};
+use crate::messages::{
+    ClientMessage, FailedPeer, GradientCapabilities, PROTO_VERSION, ServerMessage,
+};
 use crate::session::frame::{ProtoSocket, recv_server_msg, send_client_msg};
 use crate::traits::{CapabilitiesProvider, PeerAuthority, PeerIdentity, SessionFactory};
 
@@ -209,9 +211,7 @@ where
     let greeted = match on_init_connection(Opening, init, PROTO_VERSION) {
         Ok(g) => g,
         Err(Intent::Reject(reason)) => {
-            socket
-                .send_reject(400, reason.clone())
-                .await;
+            socket.send_reject(400, reason.clone()).await;
             anyhow::bail!("handshake rejected: {reason}");
         }
         Err(other) => anyhow::bail!("unexpected intent during init: {other:?}"),

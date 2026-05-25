@@ -149,16 +149,12 @@ async fn follower_orgs_accessible(
         .all(&state.web_db)
         .await?;
 
-    let mut org_ids: std::collections::HashSet<OrganizationId> =
-        std::collections::HashSet::new();
+    let mut org_ids: std::collections::HashSet<OrganizationId> = std::collections::HashSet::new();
     for ev in evals {
         let Some(project_id) = ev.project else {
             continue;
         };
-        if let Some(p) = EProject::find_by_id(project_id)
-            .one(&state.web_db)
-            .await?
-        {
+        if let Some(p) = EProject::find_by_id(project_id).one(&state.web_db).await? {
             org_ids.insert(p.organization);
         }
     }

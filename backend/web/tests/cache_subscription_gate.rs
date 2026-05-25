@@ -26,9 +26,7 @@
 //!   9. SELECT cache_role (bitmask)  — only when member exists
 
 use entity::{cache, cache_role, cache_user, ids::*, organization_cache, organization_user, role};
-use gradient_core::permissions::{
-    admin_mask, cache_admin_mask, cache_view_mask, mask_from,
-};
+use gradient_core::permissions::{admin_mask, cache_admin_mask, cache_view_mask, mask_from};
 use gradient_core::types::SessionId;
 use gradient_core::types::consts::{
     BASE_CACHE_ROLE_ADMIN_ID, BASE_CACHE_ROLE_VIEW_ID, BASE_ROLE_ADMIN_ID,
@@ -233,7 +231,10 @@ fn subscribe_succeeds_when_both_granted() {
             .append_query_results([Vec::<organization_cache::Model>::new()])
             // insert organization_cache row
             .append_query_results([vec![inserted_link]])
-            .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
             // unpark_no_cache_for_org: projects query → empty (short-circuits)
             .append_query_results([Vec::<entity::project::Model>::new()])
             // enqueue_backfill_signatures: derivations query → empty (short-circuits)

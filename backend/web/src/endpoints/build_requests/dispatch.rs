@@ -105,8 +105,13 @@ pub async fn post_dispatch(
 
     let staging = TempDir::new()
         .map_err(|e| WebError::internal(format!("Failed to create staging dir: {}", e)))?;
-    materialise_staging(&state, &session.organization.into_inner(), &manifest, staging.path())
-        .await?;
+    materialise_staging(
+        &state,
+        &session.organization.into_inner(),
+        &manifest,
+        staging.path(),
+    )
+    .await?;
 
     let nar = materialise_source_nar(staging.path())
         .await
@@ -276,9 +281,12 @@ async fn queue_signature_placeholders<C: ConnectionTrait>(
 
     let _ = ECachedPathSignature::insert_many(rows)
         .on_conflict(
-            OnConflict::columns([CCachedPathSignature::CachedPath, CCachedPathSignature::Cache])
-                .do_nothing()
-                .to_owned(),
+            OnConflict::columns([
+                CCachedPathSignature::CachedPath,
+                CCachedPathSignature::Cache,
+            ])
+            .do_nothing()
+            .to_owned(),
         )
         .do_nothing()
         .exec(tx)
@@ -309,9 +317,7 @@ async fn ensure_build_request_project<C: ConnectionTrait>(
         name: Set(BUILD_REQUEST_PROJECT_NAME.to_string()),
         active: Set(true),
         display_name: Set("Build Requests".to_string()),
-        description: Set(
-            "Server-managed project for `gradient build` submissions.".to_string(),
-        ),
+        description: Set("Server-managed project for `gradient build` submissions.".to_string()),
         repository: Set(BUILD_REQUEST_PROJECT_NAME.to_string()),
         wildcard: Set("*".to_string()),
         last_evaluation: Set(None),

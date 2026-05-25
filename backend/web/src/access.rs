@@ -22,7 +22,9 @@
 use crate::authorization::ApiKeyContext;
 use crate::error::{WebError, WebResult};
 use crate::helpers::OptionExt;
-use crate::permissions::{CachePermission, Permission, PermissionMask, cache_mask_grants, mask_grants};
+use crate::permissions::{
+    CachePermission, Permission, PermissionMask, cache_mask_grants, mask_grants,
+};
 use gradient_core::db::{
     get_any_cache_by_name, get_any_organization_by_name, get_any_project_by_name,
 };
@@ -251,7 +253,9 @@ pub async fn load_cache(
         && let Some(pin) = key.cache_pin
         && pin != cache.id
     {
-        return Err(WebError::forbidden("API key is pinned to a different cache."));
+        return Err(WebError::forbidden(
+            "API key is pinned to a different cache.",
+        ));
     }
 
     match access {
@@ -1192,7 +1196,11 @@ mod tests {
                 write_store_access(),
             )
             .await;
-            assert!(r.is_ok(), "WriteStore must allow managed cache: {:?}", r.err());
+            assert!(
+                r.is_ok(),
+                "WriteStore must allow managed cache: {:?}",
+                r.err()
+            );
         });
     }
 
@@ -1260,7 +1268,11 @@ mod tests {
                 CacheAccess::Readable,
             )
             .await;
-            assert!(r.is_ok(), "anon read on public cache must succeed: {:?}", r.err());
+            assert!(
+                r.is_ok(),
+                "anon read on public cache must succeed: {:?}",
+                r.err()
+            );
         });
     }
 
@@ -1298,7 +1310,9 @@ mod tests {
                 Caller::User(&user),
                 None,
                 "test-cache".into(),
-                CacheAccess::Member { reject_managed: false },
+                CacheAccess::Member {
+                    reject_managed: false,
+                },
             )
             .await;
             assert!(r.is_ok(), "member access must succeed: {:?}", r.err());

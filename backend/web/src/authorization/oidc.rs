@@ -341,9 +341,7 @@ async fn create_or_update_user(
         .context("Database error while checking for OIDC username/email collision")?;
 
     if collision.is_some() {
-        bail!(
-            "An account already exists with this username or email."
-        );
+        bail!("An account already exists with this username or email.");
     }
 
     let user = AUser {

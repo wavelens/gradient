@@ -23,7 +23,9 @@ fn ls_returns_v1_tree_with_null_offsets() {
         let server = TestServer::new(create_router(Arc::clone(&state)));
 
         let resp = server
-            .get(&format!("/cache/{FIXTURE_CACHE_NAME}/ls/{FIXTURE_PATH_HASH}"))
+            .get(&format!(
+                "/cache/{FIXTURE_CACHE_NAME}/ls/{FIXTURE_PATH_HASH}"
+            ))
             .await;
         resp.assert_status_ok();
         let body: Value = resp.json();
@@ -36,7 +38,10 @@ fn ls_returns_v1_tree_with_null_offsets() {
         assert_eq!(hello["type"], "regular");
         assert!(hello["narOffset"].is_null());
         assert_eq!(hello["size"].as_u64().unwrap(), 2);
-        assert!(hello.get("executable").is_none(), "non-exec omits the field");
+        assert!(
+            hello.get("executable").is_none(),
+            "non-exec omits the field"
+        );
 
         let exec = &bin["entries"]["exec"];
         assert_eq!(exec["type"], "regular");
@@ -77,7 +82,9 @@ fn private_cache_ls_requires_auth() {
         let server = TestServer::new(create_router(Arc::clone(&state)));
 
         let resp = server
-            .get(&format!("/cache/{FIXTURE_CACHE_NAME}/ls/{FIXTURE_PATH_HASH}"))
+            .get(&format!(
+                "/cache/{FIXTURE_CACHE_NAME}/ls/{FIXTURE_PATH_HASH}"
+            ))
             .await;
         resp.assert_status(StatusCode::UNAUTHORIZED);
     });

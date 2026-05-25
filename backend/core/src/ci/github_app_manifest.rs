@@ -172,7 +172,13 @@ mod tests {
         assert_eq!(m["default_permissions"]["pull_requests"], "write");
         assert_eq!(
             m["default_events"],
-            json!(["push", "pull_request", "release", "check_run", "issue_comment"])
+            json!([
+                "push",
+                "pull_request",
+                "release",
+                "check_run",
+                "issue_comment"
+            ])
         );
     }
 

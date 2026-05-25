@@ -29,13 +29,41 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(UploadSession::Organization).uuid().not_null())
-                    .col(ColumnDef::new(UploadSession::Manifest).json_binary().not_null())
-                    .col(ColumnDef::new(UploadSession::Missing).json_binary().not_null())
-                    .col(ColumnDef::new(UploadSession::TotalSize).big_integer().not_null())
-                    .col(ColumnDef::new(UploadSession::CreatedAt).date_time().not_null())
-                    .col(ColumnDef::new(UploadSession::ExpiresAt).date_time().not_null())
-                    .col(ColumnDef::new(UploadSession::DispatchedAt).date_time().null())
+                    .col(
+                        ColumnDef::new(UploadSession::Organization)
+                            .uuid()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(UploadSession::Manifest)
+                            .json_binary()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(UploadSession::Missing)
+                            .json_binary()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(UploadSession::TotalSize)
+                            .big_integer()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(UploadSession::CreatedAt)
+                            .date_time()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(UploadSession::ExpiresAt)
+                            .date_time()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(UploadSession::DispatchedAt)
+                            .date_time()
+                            .null(),
+                    )
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk-upload_session-organization")

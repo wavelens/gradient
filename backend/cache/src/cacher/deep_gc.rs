@@ -60,9 +60,7 @@ pub async fn run_deep_gc(state: Arc<ServerState>, task_id: AdminTaskId) {
         return finish_failed(state, task_id, e, report).await;
     }
 
-    if let Err(e) =
-        admin_tasks::mark_completed(&state.worker_db, task_id, report.to_json()).await
-    {
+    if let Err(e) = admin_tasks::mark_completed(&state.worker_db, task_id, report.to_json()).await {
         error!(error = ?e, %task_id, "deep_gc: mark_completed failed");
     } else {
         info!(?report, %task_id, "deep_gc completed");
@@ -70,8 +68,7 @@ pub async fn run_deep_gc(state: Arc<ServerState>, task_id: AdminTaskId) {
 }
 
 async fn flush_progress(state: &Arc<ServerState>, task_id: AdminTaskId, report: &DeepGcReport) {
-    if let Err(e) =
-        admin_tasks::update_progress(&state.worker_db, task_id, report.to_json()).await
+    if let Err(e) = admin_tasks::update_progress(&state.worker_db, task_id, report.to_json()).await
     {
         warn!(error = ?e, %task_id, "deep_gc: progress flush failed");
     }
@@ -103,11 +100,7 @@ async fn pass_nars(state: Arc<ServerState>, report: &mut DeepGcReport) -> Result
 }
 
 async fn pass_blobs(state: Arc<ServerState>, report: &mut DeepGcReport) -> Result<()> {
-    let on_disk = state
-        .nar_storage
-        .list_blobs()
-        .await
-        .context("list_blobs")?;
+    let on_disk = state.nar_storage.list_blobs().await.context("list_blobs")?;
     report.blobs_scanned = on_disk.len() as u64;
     let on_disk_set: HashSet<(uuid::Uuid, [u8; 32])> = on_disk.iter().copied().collect();
 
@@ -244,9 +237,9 @@ mod tests {
             .unwrap();
 
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results::<entity::build_request_blob::Model, _, _>([
-                Vec::<entity::build_request_blob::Model>::new(),
-            ])
+            .append_query_results::<entity::build_request_blob::Model, _, _>([Vec::<
+                entity::build_request_blob::Model,
+            >::new()])
             .into_connection();
         let state = make_state(nar, Arc::new(NoopLogStorage), db);
 
@@ -297,18 +290,17 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let nar_dir = tmp.path().join("nars");
         std::fs::create_dir_all(&nar_dir).unwrap();
-        let log: Arc<dyn LogStorage> =
-            Arc::new(FileLogStorage::new(tmp.path()).await.unwrap());
+        let log: Arc<dyn LogStorage> = Arc::new(FileLogStorage::new(tmp.path()).await.unwrap());
         let bid = BuildId::now_v7();
         log.append(bid, "orphan").await.unwrap();
 
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results::<entity::build::Model, _, _>([
-                Vec::<entity::build::Model>::new(),
-            ])
-            .append_query_results::<entity::build::Model, _, _>([
-                Vec::<entity::build::Model>::new(),
-            ])
+            .append_query_results::<entity::build::Model, _, _>(
+                [Vec::<entity::build::Model>::new()],
+            )
+            .append_query_results::<entity::build::Model, _, _>(
+                [Vec::<entity::build::Model>::new()],
+            )
             .into_connection();
         let nar = NarStore::local(tmp.path().to_str().unwrap()).unwrap();
         let state = make_state(nar, log, db);

@@ -5,10 +5,10 @@
 
 //! Integration tests: `?json` flag on text-format cache endpoints.
 
+use axum::http::StatusCode;
 use axum_test::TestServer;
 use serde_json::Value;
 use std::sync::Arc;
-use axum::http::StatusCode;
 use test_support::cache_fixture::{
     FIXTURE_CACHE_NAME, FIXTURE_PATH_HASH, private_cache_state, public_cache_state,
     public_cache_with_narinfo,
@@ -114,12 +114,19 @@ fn narinfo_json_returns_object_with_pascal_case_keys() {
         let server = TestServer::new(create_router(Arc::clone(&state)));
 
         let resp = server
-            .get(&format!("/cache/{FIXTURE_CACHE_NAME}/{FIXTURE_PATH_HASH}.narinfo"))
+            .get(&format!(
+                "/cache/{FIXTURE_CACHE_NAME}/{FIXTURE_PATH_HASH}.narinfo"
+            ))
             .add_query_param("json", "")
             .await;
         resp.assert_status_ok();
         let body: Value = resp.json();
-        assert!(body["StorePath"].as_str().unwrap().starts_with("/nix/store/"));
+        assert!(
+            body["StorePath"]
+                .as_str()
+                .unwrap()
+                .starts_with("/nix/store/")
+        );
         assert!(body["URL"].as_str().unwrap().starts_with("nar/"));
         assert!(body["NarHash"].as_str().unwrap().starts_with("sha256:"));
     });

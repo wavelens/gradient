@@ -242,8 +242,10 @@ pub async fn post_project_evaluate(
         gradient_core::ci::TriggerError::Db(db_err) => WebError::from(db_err),
     })?;
 
-    let eval = gradient_core::ci::park_if_no_cache(&state.web_db, eval, project.organization).await?;
-    let eval = gradient_core::ci::park_if_no_workers(&state.web_db, eval, project.organization).await?;
+    let eval =
+        gradient_core::ci::park_if_no_cache(&state.web_db, eval, project.organization).await?;
+    let eval =
+        gradient_core::ci::park_if_no_workers(&state.web_db, eval, project.organization).await?;
     gradient_core::ci::actions::dispatch_evaluation_created(&state, &eval).await;
 
     Ok(ok_json("Evaluation started".to_string()))
@@ -310,8 +312,22 @@ pub async fn get_project_details(
 
     let (can_edit, can_trigger) = match &maybe_user {
         Some(user) => (
-            has_permission(&state, user.id, organization.id, Permission::EditProject, api_key_ref).await?,
-            has_permission(&state, user.id, organization.id, Permission::TriggerEvaluation, api_key_ref).await?,
+            has_permission(
+                &state,
+                user.id,
+                organization.id,
+                Permission::EditProject,
+                api_key_ref,
+            )
+            .await?,
+            has_permission(
+                &state,
+                user.id,
+                organization.id,
+                Permission::TriggerEvaluation,
+                api_key_ref,
+            )
+            .await?,
         ),
         None => (false, false),
     };
@@ -562,9 +578,7 @@ async fn serve_hydra_artifact(
             }
         };
 
-        let hash = output
-            .map(|o| o.hash.as_str())
-            .unwrap_or("");
+        let hash = output.map(|o| o.hash.as_str()).unwrap_or("");
         if hash.is_empty() {
             continue;
         }

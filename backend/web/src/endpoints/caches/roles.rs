@@ -123,7 +123,10 @@ pub async fn get_cache_roles(
         .await?;
 
     Ok(ok_json(CacheRoleListResponse {
-        roles: roles.into_iter().map(CacheRoleResponse::from_model).collect(),
+        roles: roles
+            .into_iter()
+            .map(CacheRoleResponse::from_model)
+            .collect(),
         available_permissions: available_cache_permissions(),
     }))
 }
@@ -278,8 +281,10 @@ pub async fn patch_cache_role(
     }
 
     if let Some(perms) = body.permissions {
-        active.permission =
-            Set(parse_cache_permission_list(&perms, "GET /caches/{cache}/roles")?);
+        active.permission = Set(parse_cache_permission_list(
+            &perms,
+            "GET /caches/{cache}/roles",
+        )?);
     }
 
     let updated = active.update(&state.web_db).await?;

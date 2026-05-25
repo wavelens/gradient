@@ -240,8 +240,7 @@ pub async fn get_evaluation_builds(
 
     let offset = query.offset.unwrap_or(0).min(total);
     let limit = query.limit.unwrap_or(total.saturating_sub(offset));
-    let page_slice: Vec<&(u32, &str, &MBuild)> =
-        sorted.iter().skip(offset).take(limit).collect();
+    let page_slice: Vec<&(u32, &str, &MBuild)> = sorted.iter().skip(offset).take(limit).collect();
 
     // Hydrate `has_artefacts` only for the page. Bounded by `limit`, so the
     // `IN` clause is safe regardless of evaluation size.

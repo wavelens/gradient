@@ -36,10 +36,10 @@ use gradient_core::executer::path_utils::nix_store_path;
 use gradient_core::types::CachedPathInfo;
 use harmonia_protocol::valid_path_info::{UnkeyedValidPathInfo, ValidPathInfo};
 use harmonia_store_path::{StoreDir, StorePath};
-use harmonia_utils_signature::Signature;
 use harmonia_store_remote::DaemonStore as _;
 use harmonia_utils_hash::Hash;
 use harmonia_utils_hash::fmt::Any;
+use harmonia_utils_signature::Signature;
 use proto::messages::{BuildTask, CachedPath, EvalMessageLevel, QueryMode};
 use sha2::{Digest as _, Sha256};
 use tracing::{debug, error, info, warn};
@@ -968,8 +968,9 @@ async fn extract_single_file_from_nar(nar_bytes: &[u8]) -> Result<Vec<u8>> {
 /// `path '…' is not valid` for a reference parsed straight out of the
 /// `.drv` text.
 fn drv_closure_seeds(drv: &gradient_core::db::Derivation, mode: ClosureMode) -> Vec<String> {
-    let mut out =
-        Vec::with_capacity(drv.outputs.len() + drv.input_derivations.len() + drv.input_sources.len());
+    let mut out = Vec::with_capacity(
+        drv.outputs.len() + drv.input_derivations.len() + drv.input_sources.len(),
+    );
     if matches!(mode, ClosureMode::FollowOutputs) {
         for o in &drv.outputs {
             if !o.path.is_empty() {

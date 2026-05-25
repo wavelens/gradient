@@ -475,7 +475,9 @@ impl ParsedPullRequestEvent {
                 head_repo_clone_url = Some(url.clone());
                 repository_urls.push(url);
             }
-            if let Some(url) = repo.ssh_url.clone() { repository_urls.push(url); }
+            if let Some(url) = repo.ssh_url.clone() {
+                repository_urls.push(url);
+            }
         }
         repository_urls.push(payload.repository.clone_url);
         repository_urls.push(payload.repository.ssh_url);
@@ -504,12 +506,11 @@ impl ParsedPullRequestEvent {
             "gitea",
             "pull_request.head.sha",
         )?;
-        let branch = payload
+        let branch = payload.pull_request.head.branch.clone().or(payload
             .pull_request
             .head
-            .branch
-            .clone()
-            .or(payload.pull_request.head.name.clone());
+            .name
+            .clone());
         let base_full = payload
             .pull_request
             .base
@@ -535,7 +536,9 @@ impl ParsedPullRequestEvent {
                 head_repo_clone_url = Some(url.clone());
                 repository_urls.push(url);
             }
-            if let Some(url) = repo.ssh_url.clone() { repository_urls.push(url); }
+            if let Some(url) = repo.ssh_url.clone() {
+                repository_urls.push(url);
+            }
         }
         repository_urls.extend(gitea_repo_urls(&payload.repository));
         Some(Self {
@@ -579,7 +582,9 @@ impl ParsedPullRequestEvent {
                 head_repo_clone_url = Some(url.clone());
                 repository_urls.push(url);
             }
-            if let Some(url) = src.git_ssh_url.clone() { repository_urls.push(url); }
+            if let Some(url) = src.git_ssh_url.clone() {
+                repository_urls.push(url);
+            }
         }
         repository_urls.extend(gitlab_project_urls(&payload.project));
         Some(Self {

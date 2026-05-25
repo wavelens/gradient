@@ -16,8 +16,8 @@ use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::permissions::Permission;
 use axum::Extension;
-use axum::extract::{Multipart, Path, State};
 use axum::Json;
+use axum::extract::{Multipart, Path, State};
 use gradient_core::types::ids::{BuildRequestBlobId, UploadSessionId};
 use gradient_core::types::{
     ABuildRequestBlob, AUploadSession, BaseResponse, EUploadSession, MUser, ServerState, now,
@@ -99,10 +99,7 @@ pub async fn post_blobs(
 
         let actual = blake3::hash(&data);
         if actual.as_bytes() != hash_bytes.as_slice() {
-            return Err(WebError::bad_request(format!(
-                "hash mismatch for {}",
-                name
-            )));
+            return Err(WebError::bad_request(format!("hash mismatch for {}", name)));
         }
 
         let mut hash_array = [0u8; 32];

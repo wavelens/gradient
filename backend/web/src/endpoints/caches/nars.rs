@@ -108,7 +108,10 @@ pub async fn list(
         CacheAccess::Readable,
     )
     .await?;
-    let per_page = q.per_page.unwrap_or(DEFAULT_PER_PAGE).clamp(1, MAX_PER_PAGE);
+    let per_page = q
+        .per_page
+        .unwrap_or(DEFAULT_PER_PAGE)
+        .clamp(1, MAX_PER_PAGE);
     let page = q.page.unwrap_or(1).max(1);
     let offset = (page - 1) * per_page;
 
@@ -121,9 +124,8 @@ pub async fn list(
     };
 
     let mut where_clauses = vec!["cps.cache = $1".to_string()];
-    let mut values: Vec<sea_orm::Value> = vec![sea_orm::Value::Uuid(Some(Box::new(
-        cache.id.into_inner(),
-    )))];
+    let mut values: Vec<sea_orm::Value> =
+        vec![sea_orm::Value::Uuid(Some(Box::new(cache.id.into_inner())))];
 
     if let Some(prefix) = q.hash.as_deref().filter(|s| !s.is_empty()) {
         let n = values.len() + 1;
@@ -133,7 +135,9 @@ pub async fn list(
     if let Some(needle) = q.package.as_deref().filter(|s| !s.is_empty()) {
         let n = values.len() + 1;
         where_clauses.push(format!("cp.package LIKE ${n}"));
-        values.push(sea_orm::Value::String(Some(Box::new(format!("%{needle}%")))));
+        values.push(sea_orm::Value::String(Some(Box::new(format!(
+            "%{needle}%"
+        )))));
     }
     let where_sql = where_clauses.join(" AND ");
 

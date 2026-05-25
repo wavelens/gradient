@@ -104,8 +104,22 @@ pub async fn get(
     let per_page = params.per_page();
     let (can_edit, can_trigger) = match &maybe_user {
         Some(user) => (
-            has_permission(&state, user.id, organization.id, Permission::EditProject, api_key_ref).await?,
-            has_permission(&state, user.id, organization.id, Permission::TriggerEvaluation, api_key_ref).await?,
+            has_permission(
+                &state,
+                user.id,
+                organization.id,
+                Permission::EditProject,
+                api_key_ref,
+            )
+            .await?,
+            has_permission(
+                &state,
+                user.id,
+                organization.id,
+                Permission::TriggerEvaluation,
+                api_key_ref,
+            )
+            .await?,
         ),
         None => (false, false),
     };
@@ -295,8 +309,22 @@ pub async fn get_project(
 
     let (can_edit, can_trigger) = match &maybe_user {
         Some(user) => (
-            has_permission(&state, user.id, organization.id, Permission::EditProject, api_key_ref).await?,
-            has_permission(&state, user.id, organization.id, Permission::TriggerEvaluation, api_key_ref).await?,
+            has_permission(
+                &state,
+                user.id,
+                organization.id,
+                Permission::EditProject,
+                api_key_ref,
+            )
+            .await?,
+            has_permission(
+                &state,
+                user.id,
+                organization.id,
+                Permission::TriggerEvaluation,
+                api_key_ref,
+            )
+            .await?,
         ),
         None => (false, false),
     };
@@ -635,8 +663,14 @@ pub async fn post_project_transfer(
 
     // Only an org member with EditProject permission, or the current owner,
     // may transfer ownership.
-    let is_admin =
-        has_permission(&state, user.id, organization.id, Permission::EditProject, api_key_ref).await?;
+    let is_admin = has_permission(
+        &state,
+        user.id,
+        organization.id,
+        Permission::EditProject,
+        api_key_ref,
+    )
+    .await?;
     let is_owner = project.created_by == user.id;
     if !is_admin && !is_owner {
         return Err(WebError::forbidden(

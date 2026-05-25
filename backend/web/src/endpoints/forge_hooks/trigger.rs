@@ -110,12 +110,8 @@ async fn store_installation_id(state: &Arc<ServerState>, payload: &GitHubInstall
             return;
         }
         info!(installation_id, org_name = %github_login, "GitHub App installed on organization");
-        if let Err(e) = gradient_core::ci::ensure_github_app_integrations(
-            &state.web_db,
-            org_id,
-            creator,
-        )
-        .await
+        if let Err(e) =
+            gradient_core::ci::ensure_github_app_integrations(&state.web_db, org_id, creator).await
         {
             warn!(error = %e, %org_id, "Failed to materialise GitHub App integration rows");
         }
@@ -545,9 +541,7 @@ where
 /// Fail-closed: returns `Some(ApprovalInfo)` whenever the PR is (or might be) a
 /// fork, deferring the trust decision to maintainers via the forge UI / `/ci
 /// run` comment. Same-repo PRs (`is_fork == Some(false)`) bypass the gate.
-async fn decide_pr_gate(
-    ctx: Option<&PullRequestApprovalContext>,
-) -> Option<ApprovalInfo> {
+async fn decide_pr_gate(ctx: Option<&PullRequestApprovalContext>) -> Option<ApprovalInfo> {
     let ctx = ctx?;
     if matches!(ctx.is_fork, Some(false)) {
         return None;
@@ -746,7 +740,10 @@ pub(super) async fn handle_github_check_run(
         return;
     };
     let Some((owner, repo)) = full_name.split_once('/') else {
-        warn!(full_name, "GitHub check_run.requested_action: malformed repo full_name");
+        warn!(
+            full_name,
+            "GitHub check_run.requested_action: malformed repo full_name"
+        );
         return;
     };
 
@@ -809,10 +806,7 @@ async fn dispatch_approval_granted(state: &Arc<ServerState>, eval: &MEvaluation)
     .await;
 }
 
-async fn find_eval_by_check_id(
-    state: &Arc<ServerState>,
-    check_id: i64,
-) -> Option<MEvaluation> {
+async fn find_eval_by_check_id(state: &Arc<ServerState>, check_id: i64) -> Option<MEvaluation> {
     // `evaluation.check_run_ids` is a JSON map keyed by check-context name
     // (Awaiting Approval / Evaluation / Build {ep}). Any of the stored ids
     // can match the clicked check, so we scan the map's values.
@@ -978,9 +972,7 @@ pub(super) async fn handle_issue_comment(
             let comment_body = attrs.note.unwrap_or_default();
             let pr_number = payload.merge_request.and_then(|m| m.iid);
             let sender = payload.user.and_then(|u| u.username.or(u.login));
-            let owner_repo = payload
-                .project
-                .and_then(|p| p.path_with_namespace);
+            let owner_repo = payload.project.and_then(|p| p.path_with_namespace);
             (comment_body, pr_number, sender, owner_repo)
         }
         _ => {
@@ -989,10 +981,7 @@ pub(super) async fn handle_issue_comment(
             if payload.action.as_deref() != Some("created") {
                 return;
             }
-            let comment_body = payload
-                .comment
-                .and_then(|c| c.body)
-                .unwrap_or_default();
+            let comment_body = payload.comment.and_then(|c| c.body).unwrap_or_default();
             let pr_number = payload
                 .pull_request
                 .or(payload.issue)
@@ -1083,7 +1072,9 @@ pub(super) async fn handle_issue_comment(
                     unparked_any = true;
                 }
                 Ok(None) => {}
-                Err(e) => warn!(error = %e, evaluation_id = %eval.id, "Failed to unpark approval gate"),
+                Err(e) => {
+                    warn!(error = %e, evaluation_id = %eval.id, "Failed to unpark approval gate")
+                }
             }
         }
     }
@@ -1093,7 +1084,10 @@ pub(super) async fn handle_issue_comment(
 }
 
 fn debug_no_match(pr_number: u64) {
-    tracing::debug!(pr_number, "/ci run comment had no matching parked evaluation");
+    tracing::debug!(
+        pr_number,
+        "/ci run comment had no matching parked evaluation"
+    );
 }
 
 /// Lifts `/ci run` from a comment body. The command must appear on its own

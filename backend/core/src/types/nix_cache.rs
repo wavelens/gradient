@@ -122,7 +122,9 @@ pub fn parse_narinfo_body(body: &str) -> Result<NixPathInfo, NarInfoParseError> 
     let mut sig: Option<String> = None;
 
     for line in body.lines() {
-        let Some((k, v)) = line.split_once(':') else { continue };
+        let Some((k, v)) = line.split_once(':') else {
+            continue;
+        };
         let k = k.trim();
         let v = v.trim();
         if k == "Sig" {
@@ -308,10 +310,7 @@ mod tests {
             file_size: 1234,
             nar_hash: "sha256:bbbb".into(),
             nar_size: 5678,
-            references: vec![
-                "/nix/store/dep1-foo".into(),
-                "/nix/store/dep2-bar".into(),
-            ],
+            references: vec!["/nix/store/dep1-foo".into(), "/nix/store/dep2-bar".into()],
             sig: "cache.example:abcdef".into(),
             deriver: Some("/nix/store/zzz-foo.drv".into()),
             ca: None,

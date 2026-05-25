@@ -48,7 +48,9 @@ impl MaybeApiKey {
 /// Result of decoding a request token: a session JWT or an API key.
 #[derive(Debug, Clone)]
 pub enum DecodedRequest {
-    Session { user_id: UserId },
+    Session {
+        user_id: UserId,
+    },
     ApiKey {
         user_id: UserId,
         context: ApiKeyContext,

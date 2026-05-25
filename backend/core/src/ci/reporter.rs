@@ -116,12 +116,7 @@ pub trait CiReporter: Send + Sync + std::fmt::Debug + 'static {
     /// Default impl returns `Ok(false)`: implementations that cannot probe
     /// the forge for permissions should fail closed so untrusted PRs are
     /// always parked for approval.
-    async fn is_repo_writer(
-        &self,
-        _owner: &str,
-        _repo: &str,
-        _username: &str,
-    ) -> Result<bool> {
+    async fn is_repo_writer(&self, _owner: &str, _repo: &str, _username: &str) -> Result<bool> {
         Ok(false)
     }
 }
@@ -242,12 +237,7 @@ impl CiReporter for GiteaReporter {
         Ok(None)
     }
 
-    async fn is_repo_writer(
-        &self,
-        owner: &str,
-        repo: &str,
-        username: &str,
-    ) -> Result<bool> {
+    async fn is_repo_writer(&self, owner: &str, repo: &str, username: &str) -> Result<bool> {
         let url = format!(
             "{}/api/v1/repos/{}/{}/collaborators/{}/permission",
             self.base_url, owner, repo, username
@@ -400,12 +390,7 @@ impl CiReporter for GitlabReporter {
         Ok(None)
     }
 
-    async fn is_repo_writer(
-        &self,
-        owner: &str,
-        repo: &str,
-        username: &str,
-    ) -> Result<bool> {
+    async fn is_repo_writer(&self, owner: &str, repo: &str, username: &str) -> Result<bool> {
         let project_id = gitlab_project_id(owner, repo);
         let encoded_username: String =
             url::form_urlencoded::byte_serialize(username.as_bytes()).collect();
@@ -558,12 +543,7 @@ impl CiReporter for GithubReporter {
         Ok(None)
     }
 
-    async fn is_repo_writer(
-        &self,
-        owner: &str,
-        repo: &str,
-        username: &str,
-    ) -> Result<bool> {
+    async fn is_repo_writer(&self, owner: &str, repo: &str, username: &str) -> Result<bool> {
         let url = format!(
             "{}/repos/{}/{}/collaborators/{}/permission",
             self.base_url, owner, repo, username
@@ -826,12 +806,7 @@ impl CiReporter for GithubAppReporter {
         }
     }
 
-    async fn is_repo_writer(
-        &self,
-        owner: &str,
-        repo: &str,
-        username: &str,
-    ) -> Result<bool> {
+    async fn is_repo_writer(&self, owner: &str, repo: &str, username: &str) -> Result<bool> {
         let token = crate::ci::github_app::get_installation_token(
             &self.client,
             self.app_id,
@@ -860,11 +835,7 @@ impl CiReporter for GithubAppReporter {
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!(
-                "GitHub App permission query returned {}: {}",
-                status,
-                body
-            );
+            anyhow::bail!("GitHub App permission query returned {}: {}", status, body);
         }
         let parsed: GithubPermissionResponse = resp
             .json()

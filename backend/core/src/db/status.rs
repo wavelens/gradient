@@ -361,16 +361,14 @@ pub(crate) async fn reelect_leader(
         return Ok(());
     }
 
-    let follower_drv_ids: Vec<DerivationId> =
-        all_followers.iter().map(|f| f.derivation).collect();
-    let drv_org: std::collections::HashMap<DerivationId, OrganizationId> =
-        EDerivation::find()
-            .filter(CDerivation::Id.is_in(follower_drv_ids))
-            .all(&state.worker_db)
-            .await?
-            .into_iter()
-            .map(|d| (d.id, d.organization))
-            .collect();
+    let follower_drv_ids: Vec<DerivationId> = all_followers.iter().map(|f| f.derivation).collect();
+    let drv_org: std::collections::HashMap<DerivationId, OrganizationId> = EDerivation::find()
+        .filter(CDerivation::Id.is_in(follower_drv_ids))
+        .all(&state.worker_db)
+        .await?
+        .into_iter()
+        .map(|d| (d.id, d.organization))
+        .collect();
 
     let mut same_org: Vec<MBuild> = Vec::new();
     let mut cross_org: Vec<MBuild> = Vec::new();
@@ -401,8 +399,7 @@ pub(crate) async fn reelect_leader(
         active.via = Set(None);
         active.update(&state.worker_db).await?;
 
-        let same_org_remaining_ids: Vec<BuildId> =
-            same_org.iter().skip(1).map(|f| f.id).collect();
+        let same_org_remaining_ids: Vec<BuildId> = same_org.iter().skip(1).map(|f| f.id).collect();
         if !same_org_remaining_ids.is_empty() {
             EBuild::update_many()
                 .col_expr(CBuild::Via, sea_orm::sea_query::Expr::value(new_leader.id))
@@ -728,10 +725,17 @@ mod reelect_leader_tests {
         #[derive(Debug)]
         struct NoopLog;
         impl LogStorage for NoopLog {
-            fn append<'a>(&'a self, _: entity::ids::BuildId, _: &'a str) -> BoxFuture<'a, anyhow::Result<()>> {
+            fn append<'a>(
+                &'a self,
+                _: entity::ids::BuildId,
+                _: &'a str,
+            ) -> BoxFuture<'a, anyhow::Result<()>> {
                 Box::pin(async { Ok(()) })
             }
-            fn read<'a>(&'a self, _: entity::ids::BuildId) -> BoxFuture<'a, anyhow::Result<String>> {
+            fn read<'a>(
+                &'a self,
+                _: entity::ids::BuildId,
+            ) -> BoxFuture<'a, anyhow::Result<String>> {
                 Box::pin(async { Ok(String::new()) })
             }
             fn delete<'a>(&'a self, _: entity::ids::BuildId) -> BoxFuture<'a, anyhow::Result<()>> {
@@ -746,11 +750,37 @@ mod reelect_leader_tests {
         struct NoopEmail;
         #[async_trait::async_trait]
         impl EmailSender for NoopEmail {
-            fn is_enabled(&self) -> bool { false }
-            async fn send_verification_email(&self, _: &str, _: &str, _: &str, _: &str) -> anyhow::Result<()> { Ok(()) }
-            async fn send_password_reset_email(&self, _: &str, _: &str, _: &str, _: &str) -> anyhow::Result<()> { Ok(()) }
-            async fn send_action_mail(&self, _: &[String], _: &str, _: &str) -> anyhow::Result<crate::storage::email::MailDeliveryResult> {
-                Ok(crate::storage::email::MailDeliveryResult { status_code: 0, server_response: String::new() })
+            fn is_enabled(&self) -> bool {
+                false
+            }
+            async fn send_verification_email(
+                &self,
+                _: &str,
+                _: &str,
+                _: &str,
+                _: &str,
+            ) -> anyhow::Result<()> {
+                Ok(())
+            }
+            async fn send_password_reset_email(
+                &self,
+                _: &str,
+                _: &str,
+                _: &str,
+                _: &str,
+            ) -> anyhow::Result<()> {
+                Ok(())
+            }
+            async fn send_action_mail(
+                &self,
+                _: &[String],
+                _: &str,
+                _: &str,
+            ) -> anyhow::Result<crate::storage::email::MailDeliveryResult> {
+                Ok(crate::storage::email::MailDeliveryResult {
+                    status_code: 0,
+                    server_response: String::new(),
+                })
             }
         }
 
@@ -759,8 +789,14 @@ mod reelect_leader_tests {
             server: crate::types::ServerArgs::default(),
             database: crate::types::DatabaseArgs::default(),
             eval: crate::types::EvalArgs::default(),
-            storage: crate::types::StorageArgs { base_path: "/tmp/gradient-test".into(), ..Default::default() },
-            secrets: crate::types::SecretsArgs { crypt_secret_file: "test-secret".into(), jwt_secret_file: "test-jwt".into() },
+            storage: crate::types::StorageArgs {
+                base_path: "/tmp/gradient-test".into(),
+                ..Default::default()
+            },
+            secrets: crate::types::SecretsArgs {
+                crypt_secret_file: "test-secret".into(),
+                jwt_secret_file: "test-jwt".into(),
+            },
             limits: crate::types::LimitsArgs::default(),
             registration: crate::types::RegistrationArgs::default(),
             proto: crate::types::ProtoArgs::default(),
@@ -780,8 +816,12 @@ mod reelect_leader_tests {
             log_storage: std::sync::Arc::new(NoopLog),
             email: std::sync::Arc::new(NoopEmail) as std::sync::Arc<dyn EmailSender>,
             nar_storage,
-            manifest_state: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-            pending_credentials: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            manifest_state: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
+            pending_credentials: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
             http: crate::http::build_client().expect("http client"),
             shutdown: crate::shutdown::Shutdown::new(),
             jwt_secret: SecretString::new("test-jwt-secret".to_string()),
@@ -807,8 +847,12 @@ mod reelect_leader_tests {
             let leader = build(bid(10), leader_drv, None, BuildStatus::Queued);
             let same_org_follower =
                 build(bid(11), same_org_drv, Some(leader.id), BuildStatus::Created);
-            let cross_org_follower =
-                build(bid(12), cross_org_drv, Some(leader.id), BuildStatus::Created);
+            let cross_org_follower = build(
+                bid(12),
+                cross_org_drv,
+                Some(leader.id),
+                BuildStatus::Created,
+            );
 
             // Query sequence:
             //   1. EDerivation::find_by_id(leader.derivation) → drv with org(1)
@@ -819,10 +863,7 @@ mod reelect_leader_tests {
             // No "remaining same-org" update_many: only one same-org follower → skip(1) is empty.
             let db = MockDatabase::new(DatabaseBackend::Postgres)
                 .append_query_results([vec![drv_row(leader_drv, org(1))]])
-                .append_query_results([vec![
-                    same_org_follower.clone(),
-                    cross_org_follower.clone(),
-                ]])
+                .append_query_results([vec![same_org_follower.clone(), cross_org_follower.clone()]])
                 .append_query_results([vec![
                     drv_row(same_org_drv, org(1)),
                     drv_row(cross_org_drv, org(2)),

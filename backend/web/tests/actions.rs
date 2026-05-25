@@ -13,9 +13,7 @@
 use axum_test::TestServer;
 use entity::{ids::*, organization_user, project, project_action, project_action_delivery};
 use gradient_core::storage::{EmailSender, NarStore};
-use gradient_core::types::{
-    RuntimeConfig, SecretString, ServerState, SessionId, WebDb, WorkerDb,
-};
+use gradient_core::types::{RuntimeConfig, SecretString, ServerState, SessionId, WebDb, WorkerDb};
 use sea_orm::{DatabaseBackend, MockDatabase};
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -26,7 +24,6 @@ use test_support::log_storage::NoopLogStorage;
 use test_support::web::{TEST_JWT_SECRET, live_session, make_test_server_with, make_token};
 use uuid::Uuid;
 use web::create_router;
-
 
 // ── Fixture helpers ────────────────────────────────────────────────────────────
 
@@ -159,7 +156,8 @@ fn server_with_email(
         web_db: WebDb::new(db),
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config,
-        log_storage: Arc::new(NoopLogStorage),        email,
+        log_storage: Arc::new(NoopLogStorage),
+        email,
         nar_storage,
         manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
@@ -323,10 +321,7 @@ fn create_send_web_request_returns_token_once() {
         res.assert_status_ok();
         let body: Value = res.json();
         assert_eq!(body["error"], false);
-        assert_eq!(
-            body["message"]["action"]["action_type"],
-            "send_web_request"
-        );
+        assert_eq!(body["message"]["action"]["action_type"], "send_web_request");
         assert_eq!(body["message"]["token"], "supersecret");
         assert!(
             body["message"]["action"]["config"].get("token").is_none(),
@@ -585,8 +580,14 @@ fn list_deliveries_excludes_bodies() {
         assert_eq!(body["error"], false);
         let items = body["message"].as_array().expect("array");
         assert_eq!(items.len(), 1);
-        assert!(items[0].get("request_body").is_none(), "list must not expose request_body");
-        assert!(items[0].get("response_body").is_none(), "list must not expose response_body");
+        assert!(
+            items[0].get("request_body").is_none(),
+            "list must not expose request_body"
+        );
+        assert!(
+            items[0].get("response_body").is_none(),
+            "list must not expose response_body"
+        );
         assert_eq!(items[0]["event"], "build.completed");
         assert_eq!(items[0]["success"], true);
     });

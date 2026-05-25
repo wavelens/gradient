@@ -387,7 +387,8 @@ impl BuildDispatchMaps {
     /// Resolve the organization that owns this evaluation (used as `peer_id`
     /// to route the job only to workers registered by that org).
     fn resolve_peer_id(&self, eval: &MEvaluation) -> Option<OrganizationId> {
-        eval.project.and_then(|pid| self.projects.get(&pid).copied())
+        eval.project
+            .and_then(|pid| self.projects.get(&pid).copied())
     }
 
     /// Return the required Nix system features for `derivation_id`.

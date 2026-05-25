@@ -58,12 +58,7 @@ mod tests {
 
     #[async_trait]
     impl BuildClient for Noop {
-        async fn on_build_output(
-            &self,
-            _: String,
-            _: String,
-            _: Vec<BuildOutput>,
-        ) -> Result<()> {
+        async fn on_build_output(&self, _: String, _: String, _: Vec<BuildOutput>) -> Result<()> {
             Ok(())
         }
     }
@@ -77,6 +72,8 @@ mod tests {
         s.abort_build("j1".into()).await.unwrap();
 
         let c: &dyn BuildClient = &Noop;
-        c.on_build_output("p1".into(), "j1".into(), vec![]).await.unwrap();
+        c.on_build_output("p1".into(), "j1".into(), vec![])
+            .await
+            .unwrap();
     }
 }

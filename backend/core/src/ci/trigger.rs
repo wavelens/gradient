@@ -481,7 +481,8 @@ mod tests {
                 .append_query_results([vec![make_eval(EvaluationId::now_v7(), status)]])
                 .into_connection();
             let result =
-                trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None, false, None).await;
+                trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None, false, None)
+                    .await;
             assert!(
                 matches!(result, Err(TriggerError::AlreadyInProgress)),
                 "{status:?} should block trigger"
@@ -581,8 +582,17 @@ mod tests {
             }])
             .into_connection();
 
-        let result =
-            trigger_evaluation(&db, &project, vec![0u8; 20], None, None, Some(trig), false, None).await;
+        let result = trigger_evaluation(
+            &db,
+            &project,
+            vec![0u8; 20],
+            None,
+            None,
+            Some(trig),
+            false,
+            None,
+        )
+        .await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap().trigger, Some(trig));
     }
@@ -789,8 +799,12 @@ mod tests {
             .append_query_results([vec![leader]])
             // INSERT new build (with via=leader_id).
             .append_query_results([vec![{
-                let mut b =
-                    make_build_drv(BuildId::now_v7(), new_eval_id, shared_drv, BuildStatus::Queued);
+                let mut b = make_build_drv(
+                    BuildId::now_v7(),
+                    new_eval_id,
+                    shared_drv,
+                    BuildStatus::Queued,
+                );
                 b.via = Some(leader_id);
                 b
             }]])

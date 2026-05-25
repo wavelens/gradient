@@ -75,17 +75,32 @@ where
     while let Some(ev) = stream.next().await {
         let ev = ev?;
         match ev {
-            NarEvent::File { name, executable, size, mut reader } => {
+            NarEvent::File {
+                name,
+                executable,
+                size,
+                mut reader,
+            } => {
                 tokio::io::copy(&mut reader, &mut tokio::io::sink()).await?;
-                let node = FileTree::Regular { executable, size, nar_offset: None };
+                let node = FileTree::Regular {
+                    executable,
+                    size,
+                    nar_offset: None,
+                };
                 insert_node(&mut stack, &mut result, bytes_to_str(&name)?, node);
             }
             NarEvent::Symlink { name, target } => {
-                let node = FileTree::Symlink { target: bytes_to_str(&target)? };
+                let node = FileTree::Symlink {
+                    target: bytes_to_str(&target)?,
+                };
                 insert_node(&mut stack, &mut result, bytes_to_str(&name)?, node);
             }
             NarEvent::StartDirectory { name } => {
-                let name_opt = if name.is_empty() { None } else { Some(bytes_to_str(&name)?) };
+                let name_opt = if name.is_empty() {
+                    None
+                } else {
+                    Some(bytes_to_str(&name)?)
+                };
                 stack.push((name_opt, BTreeMap::new()));
             }
             NarEvent::EndDirectory => {
@@ -105,7 +120,12 @@ where
     result.ok_or_else(|| io::Error::other("NAR ended without root"))
 }
 
-fn insert_node(stack: &mut [DirFrame], result: &mut Option<FileTree>, name: String, node: FileTree) {
+fn insert_node(
+    stack: &mut [DirFrame],
+    result: &mut Option<FileTree>,
+    name: String,
+    node: FileTree,
+) {
     if let Some((_, entries)) = stack.last_mut() {
         entries.insert(name, Box::new(node));
     } else {

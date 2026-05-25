@@ -115,7 +115,12 @@ pub fn org_cache_link(
     cache: CacheId,
     mode: CacheSubscriptionMode,
 ) -> organization_cache::Model {
-    organization_cache::Model { id, organization: org, cache, mode }
+    organization_cache::Model {
+        id,
+        organization: org,
+        cache,
+        mode,
+    }
 }
 
 pub fn internal_upstream(

@@ -306,8 +306,10 @@ pub async fn patch_organization_role(
     }
 
     if let Some(perms) = body.permissions {
-        active.permission =
-            Set(parse_permission_list(&perms, "GET /orgs/{organization}/roles")?);
+        active.permission = Set(parse_permission_list(
+            &perms,
+            "GET /orgs/{organization}/roles",
+        )?);
     }
 
     let updated = active.update(&state.web_db).await?;

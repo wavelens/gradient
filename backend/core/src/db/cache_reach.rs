@@ -59,7 +59,9 @@ pub async fn writer_orgs_reachable_from<C: ConnectionTrait>(
             if edge.cache != cache_id {
                 continue;
             }
-            let Some(up) = edge.upstream_cache else { continue };
+            let Some(up) = edge.upstream_cache else {
+                continue;
+            };
             if closure.insert(up) {
                 queue.push_back(up);
             }
@@ -239,7 +241,11 @@ mod tests {
                 .into_connection();
 
             let got = writer_orgs_reachable_from(&db, org(2)).await.unwrap();
-            assert!(got.is_empty(), "WriteOnly reader must see nobody, got: {:?}", got);
+            assert!(
+                got.is_empty(),
+                "WriteOnly reader must see nobody, got: {:?}",
+                got
+            );
             let _ = x;
         });
     }
@@ -285,7 +291,11 @@ mod tests {
                 .into_connection();
 
             let got = writer_orgs_reachable_from(&db, org(2)).await.unwrap();
-            assert!(got.contains(&org(1)), "cycle must still include reachable writer, got: {:?}", got);
+            assert!(
+                got.contains(&org(1)),
+                "cycle must still include reachable writer, got: {:?}",
+                got
+            );
         });
     }
 }

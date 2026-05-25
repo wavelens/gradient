@@ -124,8 +124,16 @@ fn list_returns_builtins_and_available_permissions() {
         assert_eq!(body["error"], false);
         let roles = body["message"]["roles"].as_array().expect("roles");
         assert!(roles.len() >= 2);
-        assert!(roles.iter().any(|r| r["name"] == "Admin" && r["builtin"] == true));
-        assert!(roles.iter().any(|r| r["name"] == "pusher" && r["builtin"] == false));
+        assert!(
+            roles
+                .iter()
+                .any(|r| r["name"] == "Admin" && r["builtin"] == true)
+        );
+        assert!(
+            roles
+                .iter()
+                .any(|r| r["name"] == "pusher" && r["builtin"] == false)
+        );
         let perms = body["message"]["available_permissions"]
             .as_array()
             .expect("available_permissions");
@@ -180,7 +188,12 @@ fn create_role_rejects_unknown_permission() {
 
         res.assert_status(axum::http::StatusCode::BAD_REQUEST);
         let body: Value = res.json();
-        assert!(body["message"].as_str().unwrap().contains("notARealPermission"));
+        assert!(
+            body["message"]
+                .as_str()
+                .unwrap()
+                .contains("notARealPermission")
+        );
     });
 }
 

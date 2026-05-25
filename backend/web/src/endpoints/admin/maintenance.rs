@@ -29,8 +29,7 @@ pub async fn start_deep_gc(
     Extension(user): Extension<MUser>,
 ) -> WebResult<(StatusCode, Json<BaseResponse<StartDeepGcResponse>>)> {
     require_superuser(&user)?;
-    match admin_tasks::insert_pending(&state.worker_db, AdminTaskKind::DeepGc, Some(user.id))
-        .await
+    match admin_tasks::insert_pending(&state.worker_db, AdminTaskKind::DeepGc, Some(user.id)).await
     {
         Ok(task) => {
             info!(task_id = %task.id, "deep_gc: spawning sweep");

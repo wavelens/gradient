@@ -26,7 +26,8 @@ pub async fn post_evaluation_builds(
     Path(evaluation_id): Path<EvaluationId>,
 ) -> Result<StreamBodyAs<'static>, WebError> {
     let api_key_ref = api_key.as_ref();
-    let ctx = EvalAccessContext::load(&state, evaluation_id, &Some(user.clone()), api_key_ref).await?;
+    let ctx =
+        EvalAccessContext::load(&state, evaluation_id, &Some(user.clone()), api_key_ref).await?;
 
     // Streaming log access requires org membership (not just public read access).
     if !is_org_member(&state, user.id, ctx.organization_id, api_key_ref).await? {

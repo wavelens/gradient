@@ -17,7 +17,17 @@ use serde::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize};
 ///
 /// All fields default to `false` so a zeroed struct is a valid
 /// "no features" state.
-#[derive(Archive, Serialize, Deserialize, SerdeSerialize, SerdeDeserialize, Debug, Clone, PartialEq, Default)]
+#[derive(
+    Archive,
+    Serialize,
+    Deserialize,
+    SerdeSerialize,
+    SerdeDeserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Default,
+)]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct GradientCapabilities {
     /// Peer is the Gradient server itself (coordinator).

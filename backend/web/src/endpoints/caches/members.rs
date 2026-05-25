@@ -81,7 +81,10 @@ pub async fn get_cache_members(
     .await?;
 
     let cache_users = ECacheUser::find()
-        .join(JoinType::InnerJoin, entity::cache_user::Relation::User.def())
+        .join(
+            JoinType::InnerJoin,
+            entity::cache_user::Relation::User.def(),
+        )
         .select_also(entity::user::Entity)
         .filter(CCacheUser::Cache.eq(cache.id))
         .all(&state.web_db)

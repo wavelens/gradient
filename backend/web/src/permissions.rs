@@ -40,10 +40,7 @@ pub fn available_permissions() -> Vec<PermissionEntry> {
 /// Empty input is allowed at this layer (matches role semantics); call sites
 /// that require non-empty (e.g. API-key creation) must check the resulting
 /// mask themselves.
-pub fn parse_permission_list(
-    wire: &[String],
-    catalogue_hint: &str,
-) -> WebResult<PermissionMask> {
+pub fn parse_permission_list(wire: &[String], catalogue_hint: &str) -> WebResult<PermissionMask> {
     let mut perms = Vec::with_capacity(wire.len());
     for w in wire {
         let parsed = Permission::from_wire_name(w).ok_or_else(|| {

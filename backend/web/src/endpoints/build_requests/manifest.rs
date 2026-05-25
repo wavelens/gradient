@@ -131,18 +131,15 @@ pub async fn post_manifest(
         .map(hex::encode)
         .collect();
 
-    let manifest_value = serde_json::to_value(&body.files).map_err(|e| {
-        WebError::internal(format!("Failed to serialise manifest: {}", e))
-    })?;
-    let missing_value = serde_json::to_value(&missing_hex).map_err(|e| {
-        WebError::internal(format!("Failed to serialise missing list: {}", e))
-    })?;
+    let manifest_value = serde_json::to_value(&body.files)
+        .map_err(|e| WebError::internal(format!("Failed to serialise manifest: {}", e)))?;
+    let missing_value = serde_json::to_value(&missing_hex)
+        .map_err(|e| WebError::internal(format!("Failed to serialise missing list: {}", e)))?;
 
     let session_id = UploadSessionId::now_v7();
     let expires_at = now_ts
-        + Duration::from_std(UPLOAD_SESSION_TTL).map_err(|e| {
-            WebError::internal(format!("Invalid UPLOAD_SESSION_TTL: {}", e))
-        })?;
+        + Duration::from_std(UPLOAD_SESSION_TTL)
+            .map_err(|e| WebError::internal(format!("Invalid UPLOAD_SESSION_TTL: {}", e)))?;
 
     AUploadSession {
         id: Set(session_id),

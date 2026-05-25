@@ -29,7 +29,12 @@ impl MigrationTrait for Migration {
                 Table::create()
                     .table(CacheUser::Table)
                     .if_not_exists()
-                    .col(ColumnDef::new(CacheUser::Id).uuid().not_null().primary_key())
+                    .col(
+                        ColumnDef::new(CacheUser::Id)
+                            .uuid()
+                            .not_null()
+                            .primary_key(),
+                    )
                     .col(ColumnDef::new(CacheUser::Cache).uuid().not_null())
                     .col(ColumnDef::new(CacheUser::User).uuid().not_null())
                     .col(ColumnDef::new(CacheUser::Role).uuid().not_null())

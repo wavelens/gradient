@@ -335,13 +335,14 @@ async fn extend_with_upstream_results(
 
     const UPSTREAM_LOOKUP_CONCURRENCY: usize = 16;
 
-    let upstream_urls = match gradient_core::db::upstream_urls_for_org(&state.worker_db, org_id).await {
-        Ok(urls) => urls,
-        Err(e) => {
-            warn!(%org_id, error = %e, "CacheQuery upstream lookup failed");
-            return;
-        }
-    };
+    let upstream_urls =
+        match gradient_core::db::upstream_urls_for_org(&state.worker_db, org_id).await {
+            Ok(urls) => urls,
+            Err(e) => {
+                warn!(%org_id, error = %e, "CacheQuery upstream lookup failed");
+                return;
+            }
+        };
     if upstream_urls.is_empty() {
         return;
     }

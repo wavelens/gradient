@@ -71,8 +71,11 @@ fn make_state(
     Arc::new(ServerState {
         web_db: WebDb::new(db),
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
-        config: std::sync::Arc::new(gradient_core::types::RuntimeConfig::from_cli(&cli).expect("valid test config")),
-        log_storage: Arc::new(NoopLogStorage),        email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
+        config: std::sync::Arc::new(
+            gradient_core::types::RuntimeConfig::from_cli(&cli).expect("valid test config"),
+        ),
+        log_storage: Arc::new(NoopLogStorage),
+        email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
         nar_storage,
         manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
@@ -198,7 +201,12 @@ fn github_integration_row() -> entity::integration::Model {
 }
 
 fn project_row() -> entity::project::Model {
-    project_row_with(project_id(), org_id(), "test-project", "https://gitea.example.com/test-org/repo")
+    project_row_with(
+        project_id(),
+        org_id(),
+        "test-project",
+        "https://gitea.example.com/test-org/repo",
+    )
 }
 
 fn project_row_with(
@@ -229,7 +237,12 @@ fn project_row_with(
 }
 
 fn github_project_row() -> entity::project::Model {
-    project_row_with(project_id(), org_id(), "test-project", "https://github.com/gh-org/repo")
+    project_row_with(
+        project_id(),
+        org_id(),
+        "test-project",
+        "https://github.com/gh-org/repo",
+    )
 }
 
 fn eval_row(status: EvaluationStatus) -> entity::evaluation::Model {
@@ -1075,9 +1088,8 @@ async fn github_app_webhook_multi_org_routes_to_matching_org_inner() {
     // Two orgs share installation_id=9999. Org A's projects don't match
     // the webhook's repo URL; org B has the matching project. Only org B's
     // integration should fire.
-    let org_a_id = OrganizationId::new(
-        Uuid::parse_str("a0000000-0000-0000-0000-0000000000aa").unwrap(),
-    );
+    let org_a_id =
+        OrganizationId::new(Uuid::parse_str("a0000000-0000-0000-0000-0000000000aa").unwrap());
     let mut org_a = org_row_with_installation("org-a", 9999);
     org_a.id = org_a_id;
     let org_b = org_row_with_installation("gh-org", 9999);

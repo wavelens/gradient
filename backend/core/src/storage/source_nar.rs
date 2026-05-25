@@ -17,8 +17,8 @@ use futures::StreamExt as _;
 use harmonia_file_nar::NarByteStream;
 use harmonia_store_content_address::{ContentAddress, make_store_path_from_ca};
 use harmonia_store_path::{StoreDir, StorePathName};
-use harmonia_utils_hash::{Algorithm, Hash, Sha256};
 use harmonia_utils_hash::fmt::CommonHash as _;
+use harmonia_utils_hash::{Algorithm, Hash, Sha256};
 use std::path::Path;
 
 pub struct SourceNar {
@@ -46,7 +46,9 @@ pub async fn materialise_source_nar(staging_dir: &Path) -> Result<SourceNar> {
     let nar_hash_sri = raw_hash.as_sri().to_string();
 
     let store_dir = StoreDir::default();
-    let name: StorePathName = "source".parse().expect("'source' is a valid store path name");
+    let name: StorePathName = "source"
+        .parse()
+        .expect("'source' is a valid store path name");
     let hash_for_ca = Hash::new(Algorithm::SHA256, raw_hash.digest_bytes());
     let ca = ContentAddress::NixArchive(hash_for_ca);
     let store_path_obj = make_store_path_from_ca(&store_dir, name, ca);
@@ -81,8 +83,12 @@ mod tests {
     #[tokio::test]
     async fn deterministic_store_path() {
         let dir = make_staging_dir();
-        let a = materialise_source_nar(dir.path()).await.expect("first call");
-        let b = materialise_source_nar(dir.path()).await.expect("second call");
+        let a = materialise_source_nar(dir.path())
+            .await
+            .expect("first call");
+        let b = materialise_source_nar(dir.path())
+            .await
+            .expect("second call");
         assert_eq!(a.store_path, b.store_path);
         assert_eq!(a.nar_hash_nix32, b.nar_hash_nix32);
     }
@@ -90,7 +96,9 @@ mod tests {
     #[tokio::test]
     async fn store_path_ends_in_source() {
         let dir = make_staging_dir();
-        let result = materialise_source_nar(dir.path()).await.expect("materialise");
+        let result = materialise_source_nar(dir.path())
+            .await
+            .expect("materialise");
         assert!(
             result.store_path.ends_with("-source"),
             "store path should end with '-source', got: {}",
@@ -101,7 +109,9 @@ mod tests {
     #[tokio::test]
     async fn store_path_shape() {
         let dir = make_staging_dir();
-        let result = materialise_source_nar(dir.path()).await.expect("materialise");
+        let result = materialise_source_nar(dir.path())
+            .await
+            .expect("materialise");
         assert!(result.store_path.starts_with("/nix/store/"));
         let base = result.store_path.strip_prefix("/nix/store/").unwrap();
         let (hash_part, name_part) = base.split_once('-').expect("store path has dash");

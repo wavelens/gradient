@@ -78,10 +78,7 @@ pub(crate) async fn resolve_effective_hash_db<C: ConnectionTrait>(
     db: &C,
     path_hash: &str,
 ) -> WebResult<String> {
-    let candidates = [
-        format!("blake3:{path_hash}"),
-        format!("sha256:{path_hash}"),
-    ];
+    let candidates = [format!("blake3:{path_hash}"), format!("sha256:{path_hash}")];
 
     let by_cached_path = ECachedPath::find()
         .filter(CCachedPath::FileHash.is_in(candidates))

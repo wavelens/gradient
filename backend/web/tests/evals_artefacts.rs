@@ -200,7 +200,11 @@ fn output_lib() -> entity::derivation_output::Model {
     }
 }
 
-fn product_for(id: BuildProductId, output: DerivationOutputId, path: &str) -> entity::build_product::Model {
+fn product_for(
+    id: BuildProductId,
+    output: DerivationOutputId,
+    path: &str,
+) -> entity::build_product::Model {
     entity::build_product::Model {
         id,
         derivation_output: output,
@@ -222,7 +226,8 @@ fn make_state(db: sea_orm::DatabaseConnection) -> Arc<ServerState> {
         config: Arc::new(
             gradient_core::types::RuntimeConfig::from_cli(&cli).expect("valid test config"),
         ),
-        log_storage: Arc::new(NoopLogStorage),        email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
+        log_storage: Arc::new(NoopLogStorage),
+        email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
         nar_storage,
         manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
@@ -260,7 +265,12 @@ fn empty_eval_returns_empty_tree() {
         let body: Value = res.json();
         assert_eq!(body["error"], false);
         assert_eq!(body["message"]["evaluation"], eval_id().to_string());
-        assert!(body["message"]["entry_points"].as_array().unwrap().is_empty());
+        assert!(
+            body["message"]["entry_points"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
     });
 }
 

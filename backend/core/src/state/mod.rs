@@ -480,10 +480,7 @@ impl StateConfiguration {
                 for wire in &role.permissions {
                     if crate::permissions::CachePermission::from_wire_name(wire).is_none() {
                         errors.push(ValidationError {
-                            field: format!(
-                                "caches.{}.roles.{}.permissions",
-                                cache.name, role.name
-                            ),
+                            field: format!("caches.{}.roles.{}.permissions", cache.name, role.name),
                             message: format!("Unknown cache permission '{}'", wire),
                         });
                     }
@@ -659,7 +656,14 @@ pub async fn load_and_apply_state(
 
     tracing::info!("State configuration validated successfully");
 
-    provisioning::apply_state_to_database(db, &config, crypt_secret_file, delete_state, email_enabled).await?;
+    provisioning::apply_state_to_database(
+        db,
+        &config,
+        crypt_secret_file,
+        delete_state,
+        email_enabled,
+    )
+    .await?;
 
     Ok(())
 }
@@ -948,7 +952,9 @@ mod tests {
         let v = cfg.validate();
         assert!(!v.is_valid);
         assert!(
-            v.errors.iter().any(|e| e.field == "projects.web.actions.a.type"),
+            v.errors
+                .iter()
+                .any(|e| e.field == "projects.web.actions.a.type"),
             "expected unknown-type error, got: {:?}",
             v.errors
         );
@@ -984,7 +990,9 @@ mod tests {
         let v = cfg.validate();
         assert!(!v.is_valid);
         assert!(
-            v.errors.iter().any(|e| e.message.contains("Duplicate action name")),
+            v.errors
+                .iter()
+                .any(|e| e.message.contains("Duplicate action name")),
             "expected duplicate-name error, got: {:?}",
             v.errors
         );
@@ -1019,7 +1027,9 @@ mod tests {
         let v = cfg.validate();
         assert!(!v.is_valid);
         assert!(
-            v.errors.iter().any(|e| e.field == "projects.web.actions.x.events"),
+            v.errors
+                .iter()
+                .any(|e| e.field == "projects.web.actions.x.events"),
             "expected forge_status_report-events error, got: {:?}",
             v.errors
         );
@@ -1124,10 +1134,9 @@ mod tests {
         let v = cfg.validate();
         assert!(!v.is_valid);
         assert!(
-            v.errors
-                .iter()
-                .any(|e| e.field == "workers.550e8400-e29b-41d4-a716-446655440001.organizations"
-                    && e.message.contains("at least one")),
+            v.errors.iter().any(|e| e.field
+                == "workers.550e8400-e29b-41d4-a716-446655440001.organizations"
+                && e.message.contains("at least one")),
             "expected at-least-one-org error, got: {:?}",
             v.errors
         );
@@ -1139,10 +1148,9 @@ mod tests {
         let v = cfg.validate();
         assert!(!v.is_valid);
         assert!(
-            v.errors
-                .iter()
-                .any(|e| e.field == "workers.550e8400-e29b-41d4-a716-446655440001.organizations"
-                    && e.message.contains("'ghost'")),
+            v.errors.iter().any(|e| e.field
+                == "workers.550e8400-e29b-41d4-a716-446655440001.organizations"
+                && e.message.contains("'ghost'")),
             "expected unknown-org error mentioning 'ghost', got: {:?}",
             v.errors
         );

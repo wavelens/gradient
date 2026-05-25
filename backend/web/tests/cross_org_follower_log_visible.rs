@@ -195,7 +195,8 @@ fn make_server(db: sea_orm::DatabaseConnection) -> TestServer {
         web_db: WebDb::new(db),
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config,
-        log_storage: Arc::new(NoopLogStorage),        email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
+        log_storage: Arc::new(NoopLogStorage),
+        email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
         nar_storage,
         manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
@@ -230,9 +231,9 @@ fn follower_org_member_gets_leader_log() {
 
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             // Auth prefix (authorize_optional)
-            .append_query_results([vec![session.clone()]])   // 1. SELECT session
-            .append_query_results([vec![session]])           // 2. UPDATE session (returning)
-            .append_query_results([vec![user()]])            // 3. SELECT user
+            .append_query_results([vec![session.clone()]]) // 1. SELECT session
+            .append_query_results([vec![session]]) // 2. UPDATE session (returning)
+            .append_query_results([vec![user()]]) // 3. SELECT user
             // BuildAccessContext::load_unguarded
             .append_query_results([vec![leader_build_row()]]) // 4. SELECT build
             .append_query_results([vec![evaluation_row(leader_eval_id(), leader_project_id())]]) // 5. SELECT evaluation
@@ -242,7 +243,7 @@ fn follower_org_member_gets_leader_log() {
             .append_query_results([Vec::<entity::organization_user::Model>::new()]) // 8. SELECT organization_user (empty)
             // follower_orgs_accessible
             .append_query_results([vec![follower_build_row()]]) // 9. SELECT build WHERE via=leader
-            .append_query_results([vec![follower_eval]])         // 10. SELECT evaluation WHERE id IN [...]
+            .append_query_results([vec![follower_eval]]) // 10. SELECT evaluation WHERE id IN [...]
             .append_query_results([vec![project_row(follower_project_id(), follower_org_id())]]) // 11. SELECT project
             .append_query_results([vec![follower_org_membership()]]) // 12. SELECT organization_user (member of follower-org)
             .into_connection();
@@ -258,7 +259,10 @@ fn follower_org_member_gets_leader_log() {
 
         res.assert_status_ok();
         let body: serde_json::Value = res.json();
-        assert_eq!(body["error"], false, "follower-org member must get 200 with log");
+        assert_eq!(
+            body["error"], false,
+            "follower-org member must get 200 with log"
+        );
     });
 }
 
@@ -273,9 +277,9 @@ fn unrelated_org_member_cannot_read_leader_log() {
     run(async {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             // Auth prefix
-            .append_query_results([vec![session.clone()]])   // 1. SELECT session
-            .append_query_results([vec![session]])           // 2. UPDATE session
-            .append_query_results([vec![user()]])            // 3. SELECT user
+            .append_query_results([vec![session.clone()]]) // 1. SELECT session
+            .append_query_results([vec![session]]) // 2. UPDATE session
+            .append_query_results([vec![user()]]) // 3. SELECT user
             // BuildAccessContext::load_unguarded
             .append_query_results([vec![leader_build_row()]]) // 4. SELECT build
             .append_query_results([vec![evaluation_row(leader_eval_id(), leader_project_id())]]) // 5. SELECT evaluation

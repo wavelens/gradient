@@ -294,10 +294,7 @@ fn rejects_session_not_found() {
 
         let server = make_test_server(db.into_connection());
 
-        let form = MultipartForm::new().add_part(
-            "a".repeat(64),
-            Part::bytes(b"whatever".to_vec()),
-        );
+        let form = MultipartForm::new().add_part("a".repeat(64), Part::bytes(b"whatever".to_vec()));
 
         let res = server
             .post(&blobs_url(upload))
@@ -308,4 +305,3 @@ fn rejects_session_not_found() {
         res.assert_status(StatusCode::NOT_FOUND);
     });
 }
-

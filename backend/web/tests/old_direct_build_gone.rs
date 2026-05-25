@@ -31,7 +31,8 @@ fn make_state() -> Arc<ServerState> {
         config: std::sync::Arc::new(
             gradient_core::types::RuntimeConfig::from_cli(&cli).expect("valid test config"),
         ),
-        log_storage: Arc::new(NoopLogStorage),        email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
+        log_storage: Arc::new(NoopLogStorage),
+        email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
         nar_storage,
         manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),

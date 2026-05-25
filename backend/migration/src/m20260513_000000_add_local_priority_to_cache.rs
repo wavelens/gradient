@@ -16,7 +16,11 @@ impl MigrationTrait for Migration {
             .alter_table(
                 Table::alter()
                     .table(Alias::new("cache"))
-                    .add_column(ColumnDef::new(Alias::new("local_priority")).integer().null())
+                    .add_column(
+                        ColumnDef::new(Alias::new("local_priority"))
+                            .integer()
+                            .null(),
+                    )
                     .to_owned(),
             )
             .await

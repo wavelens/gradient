@@ -18,8 +18,8 @@ use anyhow::Result;
 use entity::build::{ActiveModel as ABuild, BuildStatus, Column as CBuild, Entity as EBuild};
 use entity::derivation::Entity as EDerivation;
 use futures::StreamExt;
-use gradient_core::types::ids::{BuildId, DerivationId};
 use gradient_core::types::ServerState;
+use gradient_core::types::ids::{BuildId, DerivationId};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
 };
@@ -78,18 +78,16 @@ pub async fn substitute_log(
         }
     };
 
-    let upstream_urls = match gradient_core::db::upstream_urls_for_org(
-        &state.worker_db,
-        derivation.organization,
-    )
-    .await
-    {
-        Ok(urls) => urls,
-        Err(e) => {
-            warn!(%build_id, error = %e, "substitute_log: upstream URL lookup failed");
-            return Ok(());
-        }
-    };
+    let upstream_urls =
+        match gradient_core::db::upstream_urls_for_org(&state.worker_db, derivation.organization)
+            .await
+        {
+            Ok(urls) => urls,
+            Err(e) => {
+                warn!(%build_id, error = %e, "substitute_log: upstream URL lookup failed");
+                return Ok(());
+            }
+        };
 
     if upstream_urls.is_empty() {
         debug!(%build_id, "substitute_log: no upstream URLs configured");
@@ -220,7 +218,10 @@ async fn set_log_id(state: &Arc<ServerState>, build_id: BuildId, log_id: BuildId
 
     // Backfills followers whose `via = build_id` are visible now; followers inserted after this UPDATE remain unset.
     if let Err(e) = EBuild::update_many()
-        .col_expr(CBuild::LogId, sea_orm::sea_query::Expr::value(log_id.into_inner()))
+        .col_expr(
+            CBuild::LogId,
+            sea_orm::sea_query::Expr::value(log_id.into_inner()),
+        )
         .filter(CBuild::Via.eq(build_id))
         .filter(CBuild::LogId.is_null())
         .exec(&state.worker_db)
@@ -270,22 +271,43 @@ mod tests {
         let prior_log = BuildId::new(Uuid::now_v7());
         let new_id = BuildId::new(Uuid::now_v7());
 
-        let prior = make_build(prior_id, drv, BuildStatus::Completed, Some(prior_log), false);
+        let prior = make_build(
+            prior_id,
+            drv,
+            BuildStatus::Completed,
+            Some(prior_log),
+            false,
+        );
         let new = make_build(new_id, drv, BuildStatus::Substituted, None, false);
 
         let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
             .append_query_results([vec![new.clone()]])
             .append_query_results([vec![prior.clone()]])
             .append_query_results([vec![new.clone()]])
-            .append_exec_results([sea_orm::MockExecResult { last_insert_id: 0, rows_affected: 1 }])
-            .append_query_results([vec![build::Model { log_id: Some(prior_log), ..new.clone() }]])
-            .append_exec_results([sea_orm::MockExecResult { last_insert_id: 0, rows_affected: 0 }])
+            .append_exec_results([sea_orm::MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            .append_query_results([vec![build::Model {
+                log_id: Some(prior_log),
+                ..new.clone()
+            }]])
+            .append_exec_results([sea_orm::MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 0,
+            }])
             .into_connection();
 
         let state = test_state(db);
-        substitute_log(state, new_id, drv, "/nix/store/x-test.drv".to_string(), false)
-            .await
-            .expect("substitute_log returns Ok");
+        substitute_log(
+            state,
+            new_id,
+            drv,
+            "/nix/store/x-test.drv".to_string(),
+            false,
+        )
+        .await
+        .expect("substitute_log returns Ok");
     }
 
     #[tokio::test]
@@ -301,12 +323,20 @@ mod tests {
             .into_connection();
 
         let state = test_state(db);
-        substitute_log(state, new_id, drv, "/nix/store/x-test.drv".to_string(), false)
-            .await
-            .expect("substitute_log returns Ok");
+        substitute_log(
+            state,
+            new_id,
+            drv,
+            "/nix/store/x-test.drv".to_string(),
+            false,
+        )
+        .await
+        .expect("substitute_log returns Ok");
     }
 
-    fn test_state_with_recording_storage(db: sea_orm::DatabaseConnection) -> (Arc<ServerState>, Arc<RecordingLogStorage>) {
+    fn test_state_with_recording_storage(
+        db: sea_orm::DatabaseConnection,
+    ) -> (Arc<ServerState>, Arc<RecordingLogStorage>) {
         let storage = Arc::new(RecordingLogStorage::new());
         let state = test_state_with_log_storage(db, storage.clone());
         (state, storage)
@@ -352,7 +382,11 @@ mod tests {
         server
     }
 
-    fn make_derivation(drv_id: DerivationId, org: OrganizationId, drv_path: String) -> entity::derivation::Model {
+    fn make_derivation(
+        drv_id: DerivationId,
+        org: OrganizationId,
+        drv_path: String,
+    ) -> entity::derivation::Model {
         let stripped = gradient_core::executer::strip_nix_store_prefix(&drv_path);
         let (hash, name) = gradient_core::sources::parse_drv_hash_name(&stripped)
             .unwrap_or_else(|_| ("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(), "x".into()));
@@ -373,22 +407,43 @@ mod tests {
         let prior_log = BuildId::new(Uuid::now_v7());
         let new_id = BuildId::new(Uuid::now_v7());
 
-        let prior = make_build(prior_id, drv_id, BuildStatus::Completed, Some(prior_log), false);
+        let prior = make_build(
+            prior_id,
+            drv_id,
+            BuildStatus::Completed,
+            Some(prior_log),
+            false,
+        );
         let new = make_build(new_id, drv_id, BuildStatus::Substituted, None, false);
 
         let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
             .append_query_results([vec![new.clone()]])
             .append_query_results([vec![prior.clone()]])
             .append_query_results([vec![new.clone()]])
-            .append_exec_results([sea_orm::MockExecResult { last_insert_id: 0, rows_affected: 1 }])
-            .append_query_results([vec![build::Model { log_id: Some(prior_log), ..new.clone() }]])
-            .append_exec_results([sea_orm::MockExecResult { last_insert_id: 0, rows_affected: 2 }])
+            .append_exec_results([sea_orm::MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            .append_query_results([vec![build::Model {
+                log_id: Some(prior_log),
+                ..new.clone()
+            }]])
+            .append_exec_results([sea_orm::MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 2,
+            }])
             .into_connection();
 
         let state = test_state(db);
-        substitute_log(state, new_id, drv_id, "/nix/store/x-test.drv".to_string(), false)
-            .await
-            .expect("Ok");
+        substitute_log(
+            state,
+            new_id,
+            drv_id,
+            "/nix/store/x-test.drv".to_string(),
+            false,
+        )
+        .await
+        .expect("Ok");
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -412,9 +467,18 @@ mod tests {
         let db = seed_upstream_urls(db, org, &[&upstream.uri()]);
         let db = db
             .append_query_results([vec![build.clone()]])
-            .append_exec_results([sea_orm::MockExecResult { last_insert_id: 0, rows_affected: 1 }])
-            .append_query_results([vec![build::Model { log_id: Some(build_id), ..build.clone() }]])
-            .append_exec_results([sea_orm::MockExecResult { last_insert_id: 0, rows_affected: 0 }])
+            .append_exec_results([sea_orm::MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            .append_query_results([vec![build::Model {
+                log_id: Some(build_id),
+                ..build.clone()
+            }]])
+            .append_exec_results([sea_orm::MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 0,
+            }])
             .into_connection();
 
         let (state, storage) = test_state_with_recording_storage(db);
@@ -451,9 +515,18 @@ mod tests {
         let db = seed_upstream_urls(db, org, &[&u404.uri(), &u200.uri()]);
         let db = db
             .append_query_results([vec![build.clone()]])
-            .append_exec_results([sea_orm::MockExecResult { last_insert_id: 0, rows_affected: 1 }])
-            .append_query_results([vec![build::Model { log_id: Some(build_id), ..build.clone() }]])
-            .append_exec_results([sea_orm::MockExecResult { last_insert_id: 0, rows_affected: 0 }])
+            .append_exec_results([sea_orm::MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            .append_query_results([vec![build::Model {
+                log_id: Some(build_id),
+                ..build.clone()
+            }]])
+            .append_exec_results([sea_orm::MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 0,
+            }])
             .into_connection();
 
         let (state, storage) = test_state_with_recording_storage(db);
@@ -517,9 +590,18 @@ mod tests {
         let db = seed_upstream_urls(db, org, &[&upstream.uri()]);
         let db = db
             .append_query_results([vec![build.clone()]])
-            .append_exec_results([sea_orm::MockExecResult { last_insert_id: 0, rows_affected: 1 }])
-            .append_query_results([vec![build::Model { log_id: Some(build_id), ..build.clone() }]])
-            .append_exec_results([sea_orm::MockExecResult { last_insert_id: 0, rows_affected: 0 }])
+            .append_exec_results([sea_orm::MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            .append_query_results([vec![build::Model {
+                log_id: Some(build_id),
+                ..build.clone()
+            }]])
+            .append_exec_results([sea_orm::MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 0,
+            }])
             .into_connection();
 
         let (state, storage) = test_state_with_recording_storage(db);
@@ -558,7 +640,10 @@ mod tests {
         substitute_log(state, build_id, drv_id, drv_path, true)
             .await
             .expect("Ok");
-        assert!(storage.entries().is_empty(), "empty 200 should not be persisted");
+        assert!(
+            storage.entries().is_empty(),
+            "empty 200 should not be persisted"
+        );
     }
 
     #[tokio::test]
@@ -566,7 +651,13 @@ mod tests {
         let drv_id = DerivationId::new(Uuid::now_v7());
         let build_id = BuildId::new(Uuid::now_v7());
         let existing_log = BuildId::new(Uuid::now_v7());
-        let build = make_build(build_id, drv_id, BuildStatus::Substituted, Some(existing_log), false);
+        let build = make_build(
+            build_id,
+            drv_id,
+            BuildStatus::Substituted,
+            Some(existing_log),
+            false,
+        );
 
         // Only the initial load is staged. If substitute_log made any further
         // queries or exec calls, MockDatabase would panic for missing entries.
@@ -575,9 +666,15 @@ mod tests {
             .into_connection();
 
         let state = test_state(db);
-        substitute_log(state, build_id, drv_id, "/nix/store/x-test.drv".to_string(), true)
-            .await
-            .expect("Ok");
+        substitute_log(
+            state,
+            build_id,
+            drv_id,
+            "/nix/store/x-test.drv".to_string(),
+            true,
+        )
+        .await
+        .expect("Ok");
     }
 
     #[tokio::test]
@@ -595,8 +692,14 @@ mod tests {
             .into_connection();
 
         let state = test_state(db);
-        substitute_log(state, build_id, drv_id, "/nix/store/x-test.drv".to_string(), false)
-            .await
-            .expect("substitute_log must return Ok even on dedup miss");
+        substitute_log(
+            state,
+            build_id,
+            drv_id,
+            "/nix/store/x-test.drv".to_string(),
+            false,
+        )
+        .await
+        .expect("substitute_log must return Ok even on dedup miss");
     }
 }

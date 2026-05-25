@@ -760,10 +760,17 @@ impl<'a> DispatchContext<'a> {
 
     async fn on_query_known_derivations(&mut self, job_id: String, drv_paths: Vec<String>) -> bool {
         debug!(peer_id = %self.peer_id, %job_id, count = drv_paths.len(), "QueryKnownDerivations");
-        let stripped: Vec<String> = drv_paths.iter().map(|p| strip_nix_store_prefix(p)).collect();
+        let stripped: Vec<String> = drv_paths
+            .iter()
+            .map(|p| strip_nix_store_prefix(p))
+            .collect();
         let hashes: Vec<String> = stripped
             .iter()
-            .filter_map(|p| gradient_core::sources::parse_drv_hash_name(p).ok().map(|(h, _)| h))
+            .filter_map(|p| {
+                gradient_core::sources::parse_drv_hash_name(p)
+                    .ok()
+                    .map(|(h, _)| h)
+            })
             .collect::<std::collections::HashSet<_>>()
             .into_iter()
             .collect();

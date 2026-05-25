@@ -154,8 +154,11 @@ fn make_state(db: sea_orm::DatabaseConnection) -> Arc<ServerState> {
     Arc::new(ServerState {
         web_db: WebDb::new(db),
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
-        config: Arc::new(gradient_core::types::RuntimeConfig::from_cli(&cli).expect("valid test config")),
-        log_storage: Arc::new(NoopLogStorage),        email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
+        config: Arc::new(
+            gradient_core::types::RuntimeConfig::from_cli(&cli).expect("valid test config"),
+        ),
+        log_storage: Arc::new(NoopLogStorage),
+        email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
         nar_storage,
         manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
@@ -205,9 +208,7 @@ fn returns_point_when_eval_is_in_progress_but_build_is_completed() {
 
         res.assert_status_ok();
         let body: Value = res.json();
-        let points = body["message"]["points"]
-            .as_array()
-            .expect("points array");
+        let points = body["message"]["points"].as_array().expect("points array");
         assert_eq!(
             points.len(),
             1,
@@ -247,9 +248,7 @@ fn returns_point_when_eval_is_in_progress_but_build_is_substituted() {
 
         res.assert_status_ok();
         let body: Value = res.json();
-        let points = body["message"]["points"]
-            .as_array()
-            .expect("points array");
+        let points = body["message"]["points"].as_array().expect("points array");
         assert_eq!(points.len(), 1, "expected one point, got: {body:#?}");
         assert_eq!(points[0]["build_status"], "Substituted");
         assert_eq!(points[0]["build_time_ms"], serde_json::Value::Null);
@@ -279,9 +278,7 @@ fn returns_empty_points_when_no_entry_point_matches() {
 
         res.assert_status_ok();
         let body: Value = res.json();
-        let points = body["message"]["points"]
-            .as_array()
-            .expect("points array");
+        let points = body["message"]["points"].as_array().expect("points array");
         assert!(points.is_empty());
     });
 }

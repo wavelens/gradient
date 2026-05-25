@@ -178,8 +178,11 @@ fn make_state(db: sea_orm::DatabaseConnection) -> Arc<ServerState> {
     Arc::new(ServerState {
         web_db: WebDb::new(db),
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
-        config: Arc::new(gradient_core::types::RuntimeConfig::from_cli(&cli).expect("valid test config")),
-        log_storage: Arc::new(NoopLogStorage),        email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
+        config: Arc::new(
+            gradient_core::types::RuntimeConfig::from_cli(&cli).expect("valid test config"),
+        ),
+        log_storage: Arc::new(NoopLogStorage),
+        email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
         nar_storage,
         manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
@@ -217,9 +220,7 @@ fn follower_build_is_replaced_with_leader_row() {
 
         res.assert_status_ok();
         let body: Value = res.json();
-        let builds = body["message"]["builds"]
-            .as_array()
-            .expect("builds array");
+        let builds = body["message"]["builds"].as_array().expect("builds array");
         assert_eq!(builds.len(), 1);
 
         let item = &builds[0];
@@ -278,9 +279,7 @@ fn plain_build_returns_own_row_without_extra_query() {
 
         res.assert_status_ok();
         let body: Value = res.json();
-        let builds = body["message"]["builds"]
-            .as_array()
-            .expect("builds array");
+        let builds = body["message"]["builds"].as_array().expect("builds array");
         assert_eq!(builds.len(), 1);
 
         let item = &builds[0];

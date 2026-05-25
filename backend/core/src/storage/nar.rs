@@ -262,12 +262,7 @@ impl NarStore {
         ))
     }
 
-    pub async fn put_blob(
-        &self,
-        org: uuid::Uuid,
-        hash: &[u8; 32],
-        data: Vec<u8>,
-    ) -> Result<()> {
+    pub async fn put_blob(&self, org: uuid::Uuid, hash: &[u8; 32], data: Vec<u8>) -> Result<()> {
         self.inner
             .put(&self.blob_path(org, hash), PutPayload::from(data))
             .await

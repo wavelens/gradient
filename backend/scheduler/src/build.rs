@@ -144,7 +144,11 @@ impl<'a> BuildStateHandler<'a> {
                     }
                 };
                 if let Err(e) = crate::log_substitution::substitute_log(
-                    state, leader_id, derivation_id, drv_path, true,
+                    state,
+                    leader_id,
+                    derivation_id,
+                    drv_path,
+                    true,
                 )
                 .await
                 {
@@ -289,8 +293,11 @@ impl<'a> BuildStateHandler<'a> {
                     }
                 }
 
-                let (new_outputs, new_products) =
-                    build_cross_org_artefact_rows(follower.derivation, &leader_outputs, &leader_products);
+                let (new_outputs, new_products) = build_cross_org_artefact_rows(
+                    follower.derivation,
+                    &leader_outputs,
+                    &leader_products,
+                );
 
                 for out in new_outputs {
                     if let Err(e) = out.insert(&self.state.worker_db).await {
@@ -677,8 +684,8 @@ pub(crate) fn build_cross_org_artefact_rows(
     leader_outputs: &[MDerivationOutput],
     leader_products: &[MBuildProduct],
 ) -> (Vec<ADerivationOutput>, Vec<ABuildProduct>) {
-    use std::collections::HashMap;
     use entity::ids::{BuildProductId, DerivationOutputId};
+    use std::collections::HashMap;
 
     let mut old_to_new: HashMap<DerivationOutputId, DerivationOutputId> = HashMap::new();
     let new_outputs: Vec<ADerivationOutput> = leader_outputs
@@ -1124,7 +1131,11 @@ mod cross_org_mirror_tests {
     use super::*;
     use entity::ids::{BuildProductId, DerivationId, DerivationOutputId};
 
-    fn output_fixture(id: DerivationOutputId, derivation: DerivationId, hash: &str) -> MDerivationOutput {
+    fn output_fixture(
+        id: DerivationOutputId,
+        derivation: DerivationId,
+        hash: &str,
+    ) -> MDerivationOutput {
         MDerivationOutput {
             id,
             derivation,
@@ -1199,6 +1210,9 @@ mod cross_org_mirror_tests {
             build_cross_org_artefact_rows(follower_drv, &leader_outputs, &leader_products);
 
         assert!(new_outputs.is_empty());
-        assert!(new_products.is_empty(), "orphan product must not be inserted");
+        assert!(
+            new_products.is_empty(),
+            "orphan product must not be inserted"
+        );
     }
 }

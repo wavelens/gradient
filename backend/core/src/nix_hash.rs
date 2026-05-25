@@ -117,8 +117,7 @@ mod tests {
         0x9d, 0x85,
     ];
     const BLAKE3_ABC_NIX32: &str = "11cxppanr71mzl1xnyax8rccaj5milx2fx9vnvzk6la672nb6dv4";
-    const BLAKE3_ABC_HEX: &str =
-        "6437b3ac38465133ffb63b75273a8db548c558465d79db03fd359c6cd5bd9d85";
+    const BLAKE3_ABC_HEX: &str = "6437b3ac38465133ffb63b75273a8db548c558465d79db03fd359c6cd5bd9d85";
 
     #[test]
     fn nix32_encode_zeros_all_zero_chars() {

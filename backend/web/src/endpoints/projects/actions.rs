@@ -12,6 +12,7 @@ use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::Permission;
+use axum::extract::Query;
 use axum::extract::{Path, State};
 use axum::{Extension, Json, Router};
 use chrono::Utc;
@@ -21,19 +22,17 @@ use gradient_core::ci::http_validation::validate_webhook_url;
 use gradient_core::types::actions::{ActionConfig, ActionType};
 use gradient_core::types::input::load_secret_bytes;
 use gradient_core::types::*;
-use axum::extract::Query;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, Order, QueryFilter, QueryOrder, QuerySelect};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, EntityTrait, Order, QueryFilter, QueryOrder, QuerySelect,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::sync::Arc;
 
 pub fn router() -> Router<Arc<ServerState>> {
     Router::new()
-        .route(
-            "/",
-            axum::routing::get(list_actions).post(create_action),
-        )
+        .route("/", axum::routing::get(list_actions).post(create_action))
         .route(
             "/{id}",
             axum::routing::get(read_action)
@@ -262,21 +261,22 @@ pub async fn create_action(
     };
 
     let now = Utc::now().naive_utc();
-    let am = AProjectAction {
-        id: Set(ProjectActionId::now_v7()),
-        project: Set(proj.id),
-        name: Set(body.name),
-        action_type: Set(stored_config.action_type().to_i16()),
-        config: Set(serde_json::to_value(&stored_config)
-            .map_err(|e| WebError::internal(e.to_string()))?),
-        events: Set(serde_json::to_value(&body.events)
-            .map_err(|e| WebError::internal(e.to_string()))?),
-        active: Set(body.active),
-        last_fired_at: Set(None),
-        created_by: Set(user.id),
-        created_at: Set(now),
-        updated_at: Set(now),
-    };
+    let am =
+        AProjectAction {
+            id: Set(ProjectActionId::now_v7()),
+            project: Set(proj.id),
+            name: Set(body.name),
+            action_type: Set(stored_config.action_type().to_i16()),
+            config: Set(serde_json::to_value(&stored_config)
+                .map_err(|e| WebError::internal(e.to_string()))?),
+            events: Set(serde_json::to_value(&body.events)
+                .map_err(|e| WebError::internal(e.to_string()))?),
+            active: Set(body.active),
+            last_fired_at: Set(None),
+            created_by: Set(user.id),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
     let m = am
         .insert(&state.web_db)
         .await
@@ -353,7 +353,9 @@ pub async fn update_action(
 
     if let Some(ref new_cfg) = body.config {
         if new_cfg.action_type() != existing_type {
-            return Err(WebError::unprocessable_entity("action_type cannot be changed"));
+            return Err(WebError::unprocessable_entity(
+                "action_type cannot be changed",
+            ));
         }
         match new_cfg {
             ActionConfig::SendMail { recipients, .. } if recipients.is_empty() => {
@@ -405,16 +407,19 @@ pub async fn update_action(
         // For send_web_request, token: None means preserve the existing encrypted token.
         let stored_cfg = match new_cfg {
             ActionConfig::SendWebRequest { url, token: None } => {
-                let existing_config: ActionConfig = serde_json::from_value(
-                    active.config.as_ref().clone(),
-                )
-                .map_err(|e| WebError::internal(e.to_string()))?;
-                let existing_token = if let ActionConfig::SendWebRequest { token, .. } = existing_config {
-                    token
-                } else {
-                    None
-                };
-                ActionConfig::SendWebRequest { url, token: existing_token }
+                let existing_config: ActionConfig =
+                    serde_json::from_value(active.config.as_ref().clone())
+                        .map_err(|e| WebError::internal(e.to_string()))?;
+                let existing_token =
+                    if let ActionConfig::SendWebRequest { token, .. } = existing_config {
+                        token
+                    } else {
+                        None
+                    };
+                ActionConfig::SendWebRequest {
+                    url,
+                    token: existing_token,
+                }
             }
             ActionConfig::SendWebRequest {
                 url,
@@ -431,16 +436,16 @@ pub async fn update_action(
             }
             other => other,
         };
-        active.config = Set(serde_json::to_value(&stored_cfg)
-            .map_err(|e| WebError::internal(e.to_string()))?);
+        active.config =
+            Set(serde_json::to_value(&stored_cfg).map_err(|e| WebError::internal(e.to_string()))?);
     }
 
     if let Some(name) = body.name {
         active.name = Set(name);
     }
     if let Some(evs) = body.events {
-        active.events = Set(serde_json::to_value(&evs)
-            .map_err(|e| WebError::internal(e.to_string()))?);
+        active.events =
+            Set(serde_json::to_value(&evs).map_err(|e| WebError::internal(e.to_string()))?);
     }
     if let Some(a) = body.active {
         active.active = Set(a);
@@ -688,7 +693,9 @@ pub async fn list_deliveries(
         .all(&state.web_db)
         .await?;
 
-    Ok(ok_json(rows.into_iter().map(to_delivery_list_item).collect()))
+    Ok(ok_json(
+        rows.into_iter().map(to_delivery_list_item).collect(),
+    ))
 }
 
 pub async fn get_delivery(

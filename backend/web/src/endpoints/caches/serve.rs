@@ -41,7 +41,10 @@ pub async fn serve(
                 .unwrap_or("dir");
             let disp = format!("attachment; filename=\"{}.tar.zst\"", basename);
             Response::builder()
-                .header(header::CONTENT_TYPE, HeaderValue::from_static("application/zstd"))
+                .header(
+                    header::CONTENT_TYPE,
+                    HeaderValue::from_static("application/zstd"),
+                )
                 .header(
                     header::CONTENT_DISPOSITION,
                     HeaderValue::from_str(&disp).unwrap_or(HeaderValue::from_static("attachment")),

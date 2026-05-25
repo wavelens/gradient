@@ -34,23 +34,14 @@ pub trait CacheServer: Send + Sync {
 
     /// Accept an incoming NAR push for `path_hash`. Implementations write
     /// the streamed bytes to durable storage and return on completion.
-    async fn write_nar(
-        &self,
-        peer_id: String,
-        path_hash: String,
-        bytes: Vec<u8>,
-    ) -> Result<()>;
+    async fn write_nar(&self, peer_id: String, path_hash: String, bytes: Vec<u8>) -> Result<()>;
 }
 
 #[async_trait]
 pub trait CacheClient: Send + Sync {
     /// Called when an upstream cache server confirms it has stored a pushed NAR.
-    async fn on_cache_status(
-        &self,
-        peer_id: String,
-        path_hash: String,
-        cached: bool,
-    ) -> Result<()>;
+    async fn on_cache_status(&self, peer_id: String, path_hash: String, cached: bool)
+    -> Result<()>;
 }
 
 #[cfg(test)]
@@ -85,11 +76,16 @@ mod tests {
     #[tokio::test]
     async fn noop_drives() {
         let s: &dyn CacheServer = &Noop;
-        let _ = s.query_paths("p".into(), vec![], QueryMode::Normal).await.unwrap();
+        let _ = s
+            .query_paths("p".into(), vec![], QueryMode::Normal)
+            .await
+            .unwrap();
         let _ = s.read_nar("p".into(), "h".into()).await.unwrap();
         s.write_nar("p".into(), "h".into(), vec![]).await.unwrap();
 
         let c: &dyn CacheClient = &Noop;
-        c.on_cache_status("p".into(), "h".into(), true).await.unwrap();
+        c.on_cache_status("p".into(), "h".into(), true)
+            .await
+            .unwrap();
     }
 }

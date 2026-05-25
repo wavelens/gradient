@@ -29,11 +29,27 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(BuildRequestBlob::Organization).uuid().not_null())
+                    .col(
+                        ColumnDef::new(BuildRequestBlob::Organization)
+                            .uuid()
+                            .not_null(),
+                    )
                     .col(ColumnDef::new(BuildRequestBlob::Hash).binary().not_null())
-                    .col(ColumnDef::new(BuildRequestBlob::Size).big_integer().not_null())
-                    .col(ColumnDef::new(BuildRequestBlob::CreatedAt).date_time().not_null())
-                    .col(ColumnDef::new(BuildRequestBlob::LastUsedAt).date_time().not_null())
+                    .col(
+                        ColumnDef::new(BuildRequestBlob::Size)
+                            .big_integer()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(BuildRequestBlob::CreatedAt)
+                            .date_time()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(BuildRequestBlob::LastUsedAt)
+                            .date_time()
+                            .not_null(),
+                    )
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk-build_request_blob-organization")

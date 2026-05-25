@@ -437,10 +437,7 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             "/evals/{evaluation}/builds",
             get(evals::get_evaluation_builds),
         )
-        .route(
-            "/evals/{evaluation}/artefacts",
-            get(evals::get_artefacts),
-        )
+        .route("/evals/{evaluation}/artefacts", get(evals::get_artefacts))
         .route("/builds/{build}", get(builds::get_build))
         .route("/builds/{build}/log", get(builds::get_build_log))
         .route(
@@ -580,7 +577,10 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         .route("/cache/{cache}/log/{drv}", get(caches::log))
         .route_layer(GovernorLayer::new(rl_per_second(1, 300)));
 
-    app = app.merge(cache_routes).merge(cache_inspect).merge(cache_log);
+    app = app
+        .merge(cache_routes)
+        .merge(cache_inspect)
+        .merge(cache_log);
 
     // Layer order (outer → inner, i.e. last `.layer()` is outermost):
     //   SetRequestIdLayer    - assigns x-request-id on inbound requests

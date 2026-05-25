@@ -314,7 +314,10 @@ fn project_name_allows_similar() {
 #[test]
 fn project_name_inherits_index_rules() {
     use gradient_core::types::input::{InputError, check_project_name};
-    assert_eq!(check_project_name("Build-Request"), Err(InputError::NameNotLowercase));
+    assert_eq!(
+        check_project_name("Build-Request"),
+        Err(InputError::NameNotLowercase)
+    );
     assert_eq!(check_project_name(""), Err(InputError::NameEmpty));
 }
 

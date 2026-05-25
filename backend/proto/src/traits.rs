@@ -161,11 +161,7 @@ pub trait PeerAuthority: Send + Sync {
 /// object lives for the lifetime of the session.
 #[async_trait]
 pub trait SessionFactory: Send + Sync {
-    async fn on_registered(
-        &self,
-        peer_id: String,
-        negotiated: GradientCapabilities,
-    ) -> Result<()>;
+    async fn on_registered(&self, peer_id: String, negotiated: GradientCapabilities) -> Result<()>;
 }
 
 #[cfg(test)]

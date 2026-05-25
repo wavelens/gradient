@@ -277,10 +277,7 @@ fn create_invalid_input_name_rejects_400() {
         let body: Value = res.json();
         assert_eq!(body["error"], true);
         assert!(
-            body["message"]
-                .as_str()
-                .unwrap()
-                .contains("input_name"),
+            body["message"].as_str().unwrap().contains("input_name"),
             "expected input_name in message, got: {}",
             body["message"]
         );
@@ -320,10 +317,7 @@ fn patch_updates_url_and_returns_new_row() {
         res.assert_status_ok();
         let body: Value = res.json();
         assert_eq!(body["error"], false);
-        assert_eq!(
-            body["message"]["url"],
-            "github:NixOS/nixpkgs/nixos-24.05"
-        );
+        assert_eq!(body["message"]["url"], "github:NixOS/nixpkgs/nixos-24.05");
     });
 }
 

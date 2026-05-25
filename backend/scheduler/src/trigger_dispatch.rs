@@ -314,7 +314,10 @@ mod tests {
         let last = dt("2026-05-06 10:00:00");
         let a = polling_jitter_secs(id, last, 600);
         let b = polling_jitter_secs(id, last, 600);
-        assert_eq!(a, b, "same (trigger_id, last_fired_at) must yield same jitter");
+        assert_eq!(
+            a, b,
+            "same (trigger_id, last_fired_at) must yield same jitter"
+        );
     }
 
     #[test]

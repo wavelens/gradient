@@ -329,8 +329,7 @@ fn api_key_info(
     }
 }
 
-pub async fn get_key_permissions()
--> WebResult<Json<BaseResponse<ApiKeyPermissionsResponse>>> {
+pub async fn get_key_permissions() -> WebResult<Json<BaseResponse<ApiKeyPermissionsResponse>>> {
     Ok(ok_json(ApiKeyPermissionsResponse {
         available_permissions: available_permissions(),
         available_cache: available_cache_permissions(),

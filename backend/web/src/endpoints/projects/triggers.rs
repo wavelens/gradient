@@ -225,7 +225,8 @@ pub async fn create(
     .insert(&state.web_db)
     .await?;
 
-    let integrations = load_integrations_for_triggers(&state.web_db, std::slice::from_ref(&row)).await?;
+    let integrations =
+        load_integrations_for_triggers(&state.web_db, std::slice::from_ref(&row)).await?;
     Ok(ok_json(TriggerOut::build(row, &integrations)))
 }
 
@@ -253,7 +254,8 @@ pub async fn read(
         .await?
         .or_not_found("Trigger")?;
 
-    let integrations = load_integrations_for_triggers(&state.web_db, std::slice::from_ref(&row)).await?;
+    let integrations =
+        load_integrations_for_triggers(&state.web_db, std::slice::from_ref(&row)).await?;
     Ok(ok_json(TriggerOut::build(row, &integrations)))
 }
 
@@ -303,7 +305,8 @@ pub async fn update(
 
     let updated = active.update(&state.web_db).await?;
 
-    let integrations = load_integrations_for_triggers(&state.web_db, std::slice::from_ref(&updated)).await?;
+    let integrations =
+        load_integrations_for_triggers(&state.web_db, std::slice::from_ref(&updated)).await?;
     Ok(ok_json(TriggerOut::build(updated, &integrations)))
 }
 

@@ -21,18 +21,14 @@ pub struct NetworkArgs {
     #[arg(
         long,
         env = "GRADIENT_TRUSTED_PROXIES",
-        default_value = "127.0.0.1/32,::1/128",
+        default_value = "127.0.0.1/32,::1/128"
     )]
     pub trusted_proxies: String,
 
     /// Comma-separated CIDR allowlist whose resolved client IPs receive a
     /// cache's `local_priority` (when set and non-zero). Defaults to the
     /// RFC1918 10/8 block.
-    #[arg(
-        long,
-        env = "GRADIENT_LOCAL_IPS",
-        default_value = "10.0.0.0/8",
-    )]
+    #[arg(long, env = "GRADIENT_LOCAL_IPS", default_value = "10.0.0.0/8")]
     pub local_ips: String,
 }
 

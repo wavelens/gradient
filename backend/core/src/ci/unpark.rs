@@ -158,7 +158,9 @@ pub async fn find_approval_gated_eval(
         e.waiting_reason
             .as_ref()
             .and_then(WaitingReason::from_json)
-            .is_some_and(|r| matches!(r, WaitingReason::Approval { pr_number: n, .. } if n == pr_number))
+            .is_some_and(
+                |r| matches!(r, WaitingReason::Approval { pr_number: n, .. } if n == pr_number),
+            )
     }))
 }
 

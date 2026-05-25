@@ -57,7 +57,11 @@ pub async fn cleanup_stale_build_request_blobs(state: Arc<ServerState>) -> Resul
             warn!(error = %e, %blob_id, "failed to delete build_request_blob row");
             continue;
         }
-        if let Err(e) = state.nar_storage.delete_blob(org_id.into_inner(), &hash).await {
+        if let Err(e) = state
+            .nar_storage
+            .delete_blob(org_id.into_inner(), &hash)
+            .await
+        {
             warn!(error = %e, %blob_id, "failed to delete build-request blob payload");
         }
         removed += 1;
@@ -278,7 +282,10 @@ pub async fn cleanup_orphaned_cache_files(state: Arc<ServerState>) -> Result<Cle
     }
 
     if report.orphan_nars_removed > 0 {
-        info!(count = report.orphan_nars_removed, "Removed orphaned NAR files");
+        info!(
+            count = report.orphan_nars_removed,
+            "Removed orphaned NAR files"
+        );
     }
 
     report.zombie_cached_paths_purged = purge_zombie_cached_paths(&state, &on_disk_set).await?;

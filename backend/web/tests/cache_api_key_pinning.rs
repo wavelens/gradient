@@ -58,7 +58,10 @@ fn cache_row() -> cache::Model {
 }
 
 fn private_cache_row() -> cache::Model {
-    cache::Model { public: false, ..cache_row() }
+    cache::Model {
+        public: false,
+        ..cache_row()
+    }
 }
 
 fn pinned_api_key(raw: &str, pin: CacheId, permission: i64) -> api::Model {
@@ -81,7 +84,10 @@ fn pinned_api_key(raw: &str, pin: CacheId, permission: i64) -> api::Model {
 
 fn api_key_db(db: MockDatabase, key: &api::Model) -> MockDatabase {
     db.append_query_results([vec![key.clone()]])
-        .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
         .append_query_results([vec![key.clone()]])
         .append_query_results([vec![user()]])
 }

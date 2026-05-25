@@ -459,27 +459,29 @@ impl<'a> StateApplicator<'a> {
                 let inbound_integrations_by_name =
                     inbound_integrations_by_name(self.db, org_id).await?;
 
-                apply_project_triggers(self.db, &project_row, triggers, &inbound_integrations_by_name)
-                    .await
-                    .map_err(|e| {
-                        format!(
-                            "Failed to apply triggers for project '{}': {}",
-                            state_project.name, e
-                        )
-                    })?;
+                apply_project_triggers(
+                    self.db,
+                    &project_row,
+                    triggers,
+                    &inbound_integrations_by_name,
+                )
+                .await
+                .map_err(|e| {
+                    format!(
+                        "Failed to apply triggers for project '{}': {}",
+                        state_project.name, e
+                    )
+                })?;
             }
 
-            self.apply_flake_input_overrides(
-                project_row.id,
-                &state_project.flake_input_overrides,
-            )
-            .await
-            .map_err(|e| {
-                format!(
-                    "Failed to apply flake input overrides for project '{}': {}",
-                    state_project.name, e
-                )
-            })?;
+            self.apply_flake_input_overrides(project_row.id, &state_project.flake_input_overrides)
+                .await
+                .map_err(|e| {
+                    format!(
+                        "Failed to apply flake input overrides for project '{}': {}",
+                        state_project.name, e
+                    )
+                })?;
 
             self.apply_project_actions(
                 project_row.id,
@@ -518,10 +520,8 @@ impl<'a> StateApplicator<'a> {
             .filter(CProjectAction::Project.eq(project_id))
             .all(self.db)
             .await?;
-        let existing_by_name: HashMap<String, MProjectAction> = existing
-            .into_iter()
-            .map(|r| (r.name.clone(), r))
-            .collect();
+        let existing_by_name: HashMap<String, MProjectAction> =
+            existing.into_iter().map(|r| (r.name.clone(), r)).collect();
 
         let now = now();
         let mut declared: HashSet<String> = HashSet::new();
@@ -625,8 +625,10 @@ impl<'a> StateApplicator<'a> {
             .all(self.db)
             .await?;
 
-        let existing_map: HashMap<String, pfio::Model> =
-            existing.into_iter().map(|r| (r.input_name.clone(), r)).collect();
+        let existing_map: HashMap<String, pfio::Model> = existing
+            .into_iter()
+            .map(|r| (r.input_name.clone(), r))
+            .collect();
 
         let now = chrono::Utc::now().naive_utc();
 
@@ -940,28 +942,27 @@ impl<'a> StateApplicator<'a> {
         let mut declared_members: HashSet<UserId> = HashSet::new();
         for entry in members {
             let user_id = user_map.get(&entry.user).copied().ok_or_else(|| {
-                format!(
-                    "Cache '{}' member '{}' not found",
-                    cache_name, entry.user
-                )
+                format!("Cache '{}' member '{}' not found", cache_name, entry.user)
             })?;
 
             let role_id = match entry.role.as_str() {
                 "Admin" => BASE_CACHE_ROLE_ADMIN_ID,
                 "Write" => BASE_CACHE_ROLE_WRITE_ID,
                 "View" => BASE_CACHE_ROLE_VIEW_ID,
-                name => ECacheRole::find()
-                    .filter(CCacheRole::Cache.eq(cache_id))
-                    .filter(CCacheRole::Name.eq(name))
-                    .one(self.db)
-                    .await?
-                    .ok_or_else(|| {
-                        format!(
-                            "Cache '{}' member '{}' references unknown role '{}'",
-                            cache_name, entry.user, name
-                        )
-                    })?
-                    .id,
+                name => {
+                    ECacheRole::find()
+                        .filter(CCacheRole::Cache.eq(cache_id))
+                        .filter(CCacheRole::Name.eq(name))
+                        .one(self.db)
+                        .await?
+                        .ok_or_else(|| {
+                            format!(
+                                "Cache '{}' member '{}' references unknown role '{}'",
+                                cache_name, entry.user, name
+                            )
+                        })?
+                        .id
+                }
             };
 
             let existing = ECacheUser::find()
@@ -1039,10 +1040,7 @@ impl<'a> StateApplicator<'a> {
 
     // ── apply_roles ───────────────────────────────────────────────────────────
 
-    async fn apply_roles(
-        &self,
-        state_roles: &HashMap<String, StateRole>,
-    ) -> Result<(), DynError> {
+    async fn apply_roles(&self, state_roles: &HashMap<String, StateRole>) -> Result<(), DynError> {
         let org_lookup = self.org_lookup().await?;
 
         for state_role in state_roles.values() {
@@ -1402,8 +1400,8 @@ impl<'a> StateApplicator<'a> {
         }
         let label = format!("integration {} file", suffix);
         let (plain, _) = read_credential("integration", int_name, suffix, &label)?;
-        let encrypted = encrypt_secret_with_file(self.crypt_secret_file, plain.trim())
-            .map_err(|e| {
+        let encrypted =
+            encrypt_secret_with_file(self.crypt_secret_file, plain.trim()).map_err(|e| {
                 format!(
                     "Failed to encrypt {} for integration '{}': {}",
                     suffix, int_name, e

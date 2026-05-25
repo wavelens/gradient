@@ -375,7 +375,10 @@ mod tests {
             .append_query_results([vec![cache]])
     }
 
-    fn worker_registration_row(active: bool, enable_eval: bool) -> entity::worker_registration::Model {
+    fn worker_registration_row(
+        active: bool,
+        enable_eval: bool,
+    ) -> entity::worker_registration::Model {
         entity::worker_registration::Model {
             id: WorkerRegistrationId::now_v7(),
             peer_id: OrganizationId::nil(),

@@ -17,10 +17,19 @@ impl MigrationTrait for Migration {
                 Table::create()
                     .table(CacheRole::Table)
                     .if_not_exists()
-                    .col(ColumnDef::new(CacheRole::Id).uuid().not_null().primary_key())
+                    .col(
+                        ColumnDef::new(CacheRole::Id)
+                            .uuid()
+                            .not_null()
+                            .primary_key(),
+                    )
                     .col(ColumnDef::new(CacheRole::Name).string().not_null())
                     .col(ColumnDef::new(CacheRole::Cache).uuid())
-                    .col(ColumnDef::new(CacheRole::Permission).big_integer().not_null())
+                    .col(
+                        ColumnDef::new(CacheRole::Permission)
+                            .big_integer()
+                            .not_null(),
+                    )
                     .col(
                         ColumnDef::new(CacheRole::Managed)
                             .boolean()

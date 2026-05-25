@@ -58,7 +58,8 @@ pub async fn authorize(
         .get::<ConnectInfo<SocketAddr>>()
         .map(|c| c.0.ip())
         .unwrap_or_else(|| IpAddr::V4(Ipv4Addr::UNSPECIFIED));
-    let info = RequestInfo::from_request(req.headers(), peer, &state.config.network.trusted_proxies);
+    let info =
+        RequestInfo::from_request(req.headers(), peer, &state.config.network.trusted_proxies);
     let method = req.method().as_str().to_string();
     let path = req.uri().path().to_string();
 

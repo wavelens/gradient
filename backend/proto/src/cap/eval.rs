@@ -84,6 +84,8 @@ mod tests {
         s.abort_eval("j1".into()).await.unwrap();
 
         let c: &dyn EvalClient = &Noop;
-        c.on_eval_result("p1".into(), "j1".into(), vec![], vec![], vec![]).await.unwrap();
+        c.on_eval_result("p1".into(), "j1".into(), vec![], vec![], vec![])
+            .await
+            .unwrap();
     }
 }

@@ -90,9 +90,7 @@ impl GcRootKeeper {
         let Some(dir) = self.inner.dir.as_ref() else {
             return GcRootHandle::inert();
         };
-        let hash_name = store_path
-            .strip_prefix("/nix/store/")
-            .unwrap_or(store_path);
+        let hash_name = store_path.strip_prefix("/nix/store/").unwrap_or(store_path);
         let symlink = dir.join(hash_name);
 
         if let Err(e) = create_symlink_idempotent(&symlink, store_path).await {
@@ -151,9 +149,7 @@ mod tests {
     fn disabled_keeper() -> GcRootKeeper {
         GcRootKeeper::new(
             "",
-            Arc::new(
-                LocalNixStore::connect_at("/var/empty/gradient-nonexistent.sock", 1).unwrap(),
-            ),
+            Arc::new(LocalNixStore::connect_at("/var/empty/gradient-nonexistent.sock", 1).unwrap()),
         )
     }
 
@@ -182,9 +178,7 @@ mod tests {
 
         let keeper = GcRootKeeper::new(
             dir.to_str().unwrap(),
-            Arc::new(
-                LocalNixStore::connect_at("/var/empty/gradient-nonexistent.sock", 1).unwrap(),
-            ),
+            Arc::new(LocalNixStore::connect_at("/var/empty/gradient-nonexistent.sock", 1).unwrap()),
         );
         keeper.purge_all().await.unwrap();
 
@@ -198,9 +192,7 @@ mod tests {
         let dir = tmp.path().join("not-yet-created");
         let keeper = GcRootKeeper::new(
             dir.to_str().unwrap(),
-            Arc::new(
-                LocalNixStore::connect_at("/var/empty/gradient-nonexistent.sock", 1).unwrap(),
-            ),
+            Arc::new(LocalNixStore::connect_at("/var/empty/gradient-nonexistent.sock", 1).unwrap()),
         );
         keeper.purge_all().await.unwrap();
         assert!(dir.is_dir());

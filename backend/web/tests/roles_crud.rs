@@ -443,4 +443,3 @@ fn delete_unused_custom_role_succeeds() {
         res.assert_status_ok();
     });
 }
-

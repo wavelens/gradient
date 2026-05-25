@@ -153,11 +153,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 Table::alter()
                     .table(Derivation::Table)
-                    .modify_column(
-                        ColumnDef::new(Derivation::DerivationPath)
-                            .text()
-                            .not_null(),
-                    )
+                    .modify_column(ColumnDef::new(Derivation::DerivationPath).text().not_null())
                     .to_owned(),
             )
             .await?;
