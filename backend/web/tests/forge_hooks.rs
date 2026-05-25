@@ -198,14 +198,23 @@ fn github_integration_row() -> entity::integration::Model {
 }
 
 fn project_row() -> entity::project::Model {
+    project_row_with(project_id(), org_id(), "test-project", "https://gitea.example.com/test-org/repo")
+}
+
+fn project_row_with(
+    id: ProjectId,
+    organization: OrganizationId,
+    name: &str,
+    repository: &str,
+) -> entity::project::Model {
     entity::project::Model {
-        id: project_id(),
-        organization: org_id(),
-        name: "test-project".into(),
+        id,
+        organization,
+        name: name.into(),
         active: true,
         display_name: "Test Project".into(),
         description: String::new(),
-        repository: "https://gitea.example.com/test-org/repo".into(),
+        repository: repository.into(),
         wildcard: "*".into(),
         last_evaluation: None,
         last_check_at: fixture_date(),
@@ -217,6 +226,10 @@ fn project_row() -> entity::project::Model {
         concurrency: 3,
         sign_cache: true,
     }
+}
+
+fn github_project_row() -> entity::project::Model {
+    project_row_with(project_id(), org_id(), "test-project", "https://github.com/gh-org/repo")
 }
 
 fn eval_row(status: EvaluationStatus) -> entity::evaluation::Model {
@@ -875,19 +888,21 @@ async fn github_app_webhook_push_fires_trigger_inner() {
     let gh_secret_path = temp_secret_file(gh_secret);
 
     // Mock chain:
-    // resolve_github_integration_id:
-    //   1. SELECT org by installation_id → org row (with installation_id=9999)
-    //   2. SELECT inbound GitHub integration for org → integration row
+    // resolve_github_app_targets:
+    //   1. SELECT orgs by installation_id (.all) → [org row]
+    //   2. SELECT projects for org (.all) → [project row matching webhook url]
+    //   3. SELECT inbound GitHub integration (.one) → integration row
     // fan_out_triggers:
-    //   3. load_active_triggers → [reporter_push trigger]
-    //   4. EProject::find_by_id → project row
-    //   5. org_name_for → org row
-    //   6–11. apply_trigger chain
+    //   4. load_active_triggers → [reporter_push trigger]
+    //   5. EProject::find_by_id → project row
+    //   6. org_name_for → org row
+    //   7+. apply_trigger chain
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![org_row_with_installation("gh-org", 9999)]])
+        .append_query_results([vec![github_project_row()]])
         .append_query_results([vec![github_integration_row()]])
         .append_query_results([vec![trigger_row(reporter_push_trigger(vec![]))]])
-        .append_query_results([vec![project_row()]])
+        .append_query_results([vec![github_project_row()]])
         .append_query_results([vec![org_row("gh-org")]]);
     let db = apply_trigger_db_chain(db).into_connection();
 
@@ -1040,4 +1055,131 @@ async fn github_app_webhook_not_configured_inner() {
     let json: Value = response.json();
     assert_eq!(json["error"], true);
     assert_eq!(json["message"], "github app integration not configured");
+}
+
+// ── Test 15: GitHub App - multi-org installation routes by repo URL ─────────
+
+#[test]
+fn github_app_webhook_multi_org_routes_to_matching_org() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async { github_app_webhook_multi_org_routes_to_matching_org_inner().await });
+}
+
+async fn github_app_webhook_multi_org_routes_to_matching_org_inner() {
+    let gh_secret = "github-webhook-secret";
+    let gh_secret_path = temp_secret_file(gh_secret);
+
+    // Two orgs share installation_id=9999. Org A's projects don't match
+    // the webhook's repo URL; org B has the matching project. Only org B's
+    // integration should fire.
+    let org_a_id = OrganizationId::new(
+        Uuid::parse_str("a0000000-0000-0000-0000-0000000000aa").unwrap(),
+    );
+    let mut org_a = org_row_with_installation("org-a", 9999);
+    org_a.id = org_a_id;
+    let org_b = org_row_with_installation("gh-org", 9999);
+
+    let org_a_project = project_row_with(
+        ProjectId::new(Uuid::parse_str("a0000000-0000-0000-0000-0000000000ab").unwrap()),
+        org_a_id,
+        "unrelated",
+        "https://github.com/org-a/different-repo",
+    );
+    let org_b_project = github_project_row();
+
+    // Mock chain:
+    // resolve_github_app_targets:
+    //   1. orgs.all by installation_id → [org A, org B]
+    //   2. projects.all for org A → [org_a_project]   (no URL match → skipped)
+    //   3. projects.all for org B → [org_b_project]   (URL matches)
+    //   4. integration.one for org B → github_integration_row
+    // fan_out_triggers for org B's integration:
+    //   5. load_active_triggers → [trigger]
+    //   6. EProject::find_by_id → org_b_project
+    //   7. org_name_for → org B row
+    //   8+. apply_trigger chain
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![org_a.clone(), org_b.clone()]])
+        .append_query_results([vec![org_a_project]])
+        .append_query_results([vec![org_b_project.clone()]])
+        .append_query_results([vec![github_integration_row()]])
+        .append_query_results([vec![trigger_row(reporter_push_trigger(vec![]))]])
+        .append_query_results([vec![org_b_project.clone()]])
+        .append_query_results([vec![org_row("gh-org")]]);
+    let db = apply_trigger_db_chain(db).into_connection();
+
+    let state = make_state(db, None, Some(gh_secret_path));
+    let router = create_router(state);
+    let server = TestServer::new(router);
+
+    let body = GITHUB_PUSH_BODY.as_bytes();
+    let sig = github_signature(gh_secret, body);
+
+    let response = server
+        .post("/api/v1/hooks/github")
+        .add_header("X-Hub-Signature-256", &sig)
+        .add_header("X-GitHub-Event", "push")
+        .bytes(body.into())
+        .await;
+
+    response.assert_status_ok();
+    let json: Value = response.json();
+    let msg = &json["message"];
+    assert_eq!(msg["projects_scanned"], 1);
+    let queued = msg["queued"].as_array().unwrap();
+    assert_eq!(queued.len(), 1);
+    assert_eq!(queued[0]["organization"], "gh-org");
+}
+
+// ── Test 16: GitHub App - no project matches webhook repo URL ───────────────
+
+#[test]
+fn github_app_webhook_no_matching_repo_returns_zero() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async { github_app_webhook_no_matching_repo_returns_zero_inner().await });
+}
+
+async fn github_app_webhook_no_matching_repo_returns_zero_inner() {
+    let gh_secret = "github-webhook-secret";
+    let gh_secret_path = temp_secret_file(gh_secret);
+
+    // Org has the installation but no project with a matching repo URL.
+    let unrelated = project_row_with(
+        project_id(),
+        org_id(),
+        "unrelated",
+        "https://github.com/somewhere/else",
+    );
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![org_row_with_installation("gh-org", 9999)]])
+        .append_query_results([vec![unrelated]])
+        .into_connection();
+
+    let state = make_state(db, None, Some(gh_secret_path));
+    let router = create_router(state);
+    let server = TestServer::new(router);
+
+    let body = GITHUB_PUSH_BODY.as_bytes();
+    let sig = github_signature(gh_secret, body);
+
+    let response = server
+        .post("/api/v1/hooks/github")
+        .add_header("X-Hub-Signature-256", &sig)
+        .add_header("X-GitHub-Event", "push")
+        .bytes(body.into())
+        .await;
+
+    response.assert_status_ok();
+    let json: Value = response.json();
+    let msg = &json["message"];
+    assert_eq!(msg["projects_scanned"], 0);
+    assert!(msg["queued"].as_array().unwrap().is_empty());
+    assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
