@@ -317,6 +317,42 @@ impl NarStore {
         }
         Ok(hashes)
     }
+
+    /// Lists every build-request blob currently in storage. Returns
+    /// `(org, hash)` pairs reconstructed from the
+    /// `build-request-blobs/<org-uuid>/<shard>/<full-hex>` path layout. Entries
+    /// whose name does not match the layout are skipped.
+    pub async fn list_blobs(&self) -> Result<Vec<(uuid::Uuid, [u8; 32])>> {
+        let prefix = Path::from(format!("{}build-request-blobs", self.prefix));
+        let mut stream = self.inner.list(Some(&prefix));
+        let mut out = Vec::new();
+        while let Some(item) = stream.next().await {
+            let meta = item.context("Failed to list build-request-blobs")?;
+            let p = meta.location.to_string();
+            let parts: Vec<&str> = p.split('/').collect();
+            if parts.len() < 3 {
+                continue;
+            }
+            let hash_hex = parts[parts.len() - 1];
+            let org_part = parts[parts.len() - 3];
+            let Ok(org) = uuid::Uuid::parse_str(org_part) else {
+                tracing::debug!(path = %p, "skipping blob with non-uuid org dir");
+                continue;
+            };
+            let Ok(hash_vec) = hex::decode(hash_hex) else {
+                tracing::debug!(path = %p, "skipping blob with non-hex name");
+                continue;
+            };
+            if hash_vec.len() != 32 {
+                tracing::debug!(path = %p, "skipping blob with non-32-byte hash");
+                continue;
+            }
+            let mut hash = [0u8; 32];
+            hash.copy_from_slice(&hash_vec);
+            out.push((org, hash));
+        }
+        Ok(out)
+    }
 }
 
 impl std::fmt::Debug for NarStore {

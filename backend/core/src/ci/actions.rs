@@ -845,6 +845,9 @@ mod tests {
             fn delete<'a>(&'a self, _: entity::ids::BuildId) -> BoxFuture<'a, anyhow::Result<()>> {
                 Box::pin(async { Ok(()) })
             }
+            fn list_logs<'a>(&'a self) -> BoxFuture<'a, anyhow::Result<Vec<entity::ids::BuildId>>> {
+                Box::pin(async { Ok(Vec::new()) })
+            }
         }
 
         #[derive(Debug)]
