@@ -6,11 +6,12 @@
 //! Tooling-facing NAR management surface under `/api/v1/caches/{cache}/nars`.
 
 use super::helpers::delete_nar_from_cache;
-use crate::access::{CacheAccess, load_cache};
+use crate::access::{CacheAccess, Caller, load_cache};
 use crate::audit::{RequestInfo, events, record as audit_record};
-use crate::authorization::MaybeUser;
+use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
+use crate::permissions::CachePermission;
 use axum::Extension;
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -315,9 +316,20 @@ pub async fn delete(
     state: State<Arc<ServerState>>,
     info: RequestInfo,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path((cache_name, hash)): Path<(String, String)>,
 ) -> WebResult<impl IntoResponse> {
-    let cache = load_cache(&state, user.id, cache_name.clone(), CacheAccess::Owned).await?;
+    let cache = load_cache(
+        &state,
+        Caller::User(&user),
+        api_key.as_ref(),
+        cache_name.clone(),
+        CacheAccess::Require {
+            permission: CachePermission::WriteStore,
+            reject_managed: false,
+        },
+    )
+    .await?;
     let (cp, outcome) = delete_nar_from_cache(&state, cache.id, &hash).await?;
     audit_record(
         &state.web_db,

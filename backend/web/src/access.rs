@@ -1070,18 +1070,59 @@ mod tests {
         }
     }
 
+    fn manage_settings_access() -> CacheAccess {
+        CacheAccess::Require {
+            permission: CachePermission::ManageCacheSettings,
+            reject_managed: true,
+        }
+    }
+
+    fn write_store_access() -> CacheAccess {
+        CacheAccess::Require {
+            permission: CachePermission::WriteStore,
+            reject_managed: false,
+        }
+    }
+
+    fn cache_member_fixture() -> entity::cache_user::Model {
+        entity::cache_user::Model {
+            id: gradient_core::types::ids::CacheUserId::new(uuid!(
+                "a0000000-0000-0000-0000-000000000030"
+            )),
+            cache: gradient_core::types::ids::CacheId::new(uuid!(
+                "a0000000-0000-0000-0000-000000000020"
+            )),
+            user: UserId::new(uuid!("a0000000-0000-0000-0000-000000000004")),
+            role: gradient_core::types::consts::BASE_CACHE_ROLE_ADMIN_ID,
+        }
+    }
+
+    fn cache_role_fixture() -> entity::cache_role::Model {
+        entity::cache_role::Model {
+            id: gradient_core::types::consts::BASE_CACHE_ROLE_ADMIN_ID,
+            name: "Admin".into(),
+            cache: None,
+            permission: crate::permissions::cache_admin_mask(),
+            managed: true,
+        }
+    }
+
     #[test]
-    fn cache_owned_unmanaged_passes() {
+    fn cache_manage_settings_passes_for_member() {
         run(async {
+            let user = user_fixture();
             let db = MockDatabase::new(DatabaseBackend::Postgres)
                 .append_query_results([vec![cache_fixture(false)]])
+                .append_query_results([vec![cache_member_fixture()]])
+                .append_query_results([vec![cache_role_fixture()]])
                 .into_connection();
             let state = make_state(db);
             let r = load_cache(
                 &state,
-                user_fixture().id,
+                Caller::User(&user),
+                None,
                 "test-cache".into(),
-                CacheAccess::Editable,
+                manage_settings_access(),
             )
             .await;
             assert!(r.is_ok(), "{:?}", r.err());
@@ -1089,56 +1130,68 @@ mod tests {
     }
 
     #[test]
-    fn cache_editable_rejects_managed() {
+    fn cache_manage_settings_rejects_managed() {
         run(async {
+            let user = user_fixture();
             let db = MockDatabase::new(DatabaseBackend::Postgres)
                 .append_query_results([vec![cache_fixture(true)]])
+                .append_query_results([vec![cache_member_fixture()]])
+                .append_query_results([vec![cache_role_fixture()]])
                 .into_connection();
             let state = make_state(db);
             let err = load_cache(
                 &state,
-                user_fixture().id,
+                Caller::User(&user),
+                None,
                 "test-cache".into(),
-                CacheAccess::Editable,
+                manage_settings_access(),
             )
             .await
-            .expect_err("Editable must reject managed cache");
+            .expect_err("ManageCacheSettings must reject managed cache");
             assert!(matches!(err, WebError::Forbidden(..)));
         });
     }
 
-    /// `Owned` is the access level NAR-content endpoints use: it must permit
-    /// the cache owner to mutate content even when the cache's *config* is
-    /// state-managed, because NAR storage is operational data, not config.
     #[test]
-    fn cache_owned_allows_managed() {
+    fn cache_write_store_allows_managed() {
         run(async {
+            let user = user_fixture();
             let db = MockDatabase::new(DatabaseBackend::Postgres)
                 .append_query_results([vec![cache_fixture(true)]])
+                .append_query_results([vec![cache_member_fixture()]])
+                .append_query_results([vec![cache_role_fixture()]])
                 .into_connection();
             let state = make_state(db);
             let r = load_cache(
                 &state,
-                user_fixture().id,
+                Caller::User(&user),
+                None,
                 "test-cache".into(),
-                CacheAccess::Owned,
+                write_store_access(),
             )
             .await;
-            assert!(r.is_ok(), "Owned must allow managed cache: {:?}", r.err());
+            assert!(r.is_ok(), "WriteStore must allow managed cache: {:?}", r.err());
         });
     }
 
     #[test]
-    fn cache_non_owner_returns_not_found() {
+    fn cache_non_member_returns_not_found() {
         run(async {
+            let user = user_fixture();
             let db = MockDatabase::new(DatabaseBackend::Postgres)
                 .append_query_results([vec![cache_fixture(false)]])
+                .append_query_results([Vec::<entity::cache_user::Model>::new()])
                 .into_connection();
             let state = make_state(db);
-            let other = UserId::new(uuid!("a0000000-0000-0000-0000-000000000099"));
-            let err = load_cache(&state, other, "test-cache".into(), CacheAccess::Owned)
-                .await
-                .expect_err("non-owner must be rejected");
+            let err = load_cache(
+                &state,
+                Caller::User(&user),
+                None,
+                "test-cache".into(),
+                write_store_access(),
+            )
+            .await
+            .expect_err("non-member must be rejected");
             assert!(matches!(err, WebError::NotFound(..)));
         });
     }
