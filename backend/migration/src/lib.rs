@@ -115,6 +115,7 @@ mod m20260524_000004_drop_table_project_integration;
 mod m20260525_000000_create_table_cache_role;
 mod m20260525_000001_create_table_cache_user;
 mod m20260525_000002_add_cache_to_api;
+mod m20260525_000003_create_admin_task;
 
 pub struct Migrator;
 
@@ -231,6 +232,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260525_000000_create_table_cache_role::Migration),
             Box::new(m20260525_000001_create_table_cache_user::Migration),
             Box::new(m20260525_000002_add_cache_to_api::Migration),
+            Box::new(m20260525_000003_create_admin_task::Migration),
         ]
     }
 }
