@@ -275,7 +275,7 @@ fn permissions_endpoint_returns_both_catalogues() {
             .iter()
             .map(|e| e["id"].as_str().unwrap())
             .collect();
-        assert!(ids.contains(&"view-cache"), "must include view-cache");
-        assert!(ids.contains(&"write-store"), "must include write-store");
+        assert!(ids.contains(&"viewCache"), "must include viewCache");
+        assert!(ids.contains(&"writeStore"), "must include writeStore");
     });
 }
