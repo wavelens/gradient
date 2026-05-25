@@ -13,6 +13,7 @@ use gradient_core::types::SessionId;
 use gradient_core::types::consts::{BASE_CACHE_ROLE_ADMIN_ID, BASE_CACHE_ROLE_VIEW_ID};
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 use serde_json::{Value, json};
+use std::collections::BTreeMap;
 use test_support::fixtures::{test_date, user, user_id};
 use test_support::web::{live_session, make_test_server, make_token};
 use uuid::Uuid;
@@ -43,6 +44,14 @@ fn cache_row(managed: bool) -> cache::Model {
         created_at: test_date(),
         managed,
     }
+}
+
+/// Build a one-row mock result that satisfies sea-orm's `count()` parser
+/// (`SELECT COUNT(*) AS num_items` → `try_get::<i64>("", "num_items")`).
+fn count_row(num: i64) -> BTreeMap<&'static str, sea_orm::Value> {
+    let mut row = BTreeMap::new();
+    row.insert("num_items", sea_orm::Value::BigInt(Some(num)));
+    row
 }
 
 fn admin_member() -> cache_user::Model {
@@ -303,8 +312,8 @@ fn remove_member_blocks_last_admin() {
             .append_query_results([vec![user()]])
             // find_cache_membership
             .append_query_results([vec![admin_member()]])
-            // COUNT admin members → 1
-            .append_query_results::<cache_user::Model, _, _>([vec![admin_member()]]);
+            // COUNT admin members → 1 (sea-orm count parses `num_items: i64`)
+            .append_query_results([vec![count_row(1)]]);
 
         let server = make_test_server(db.into_connection());
         let res = server
