@@ -58,9 +58,13 @@ fn make_connect_options(
 }
 
 pub async fn connect_db(cli: &Cli) -> Result<DatabaseConnection> {
-    let db = Database::connect(make_connect_options(cli, 100, 5)?)
-        .await
-        .context("Failed to connect to database")?;
+    let db = Database::connect(make_connect_options(
+        cli,
+        cli.database.database_max_connections,
+        cli.database.database_min_connections,
+    )?)
+    .await
+    .context("Failed to connect to database")?;
     Migrator::install(&db)
         .await
         .context("Failed to install seaql_migrations table")?;
@@ -113,9 +117,13 @@ async fn prune_removed_migrations(db: &DatabaseConnection) -> Result<()> {
 /// handlers do not contend with the busy proto/scheduler pool during heavy
 /// NarPush traffic.
 pub async fn connect_web_db(cli: &Cli) -> Result<DatabaseConnection> {
-    Database::connect(make_connect_options(cli, 32, 2)?)
-        .await
-        .context("Failed to connect web database pool")
+    Database::connect(make_connect_options(
+        cli,
+        cli.database.database_web_max_connections,
+        cli.database.database_web_min_connections,
+    )?)
+    .await
+    .context("Failed to connect web database pool")
 }
 
 async fn update_db(db: &DatabaseConnection) -> Result<(), DbErr> {

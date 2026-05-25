@@ -45,6 +45,10 @@ openssl rand -base64 48 > /run/secrets/gradient-crypt
 | `cryptSecretFile` | - | Path to encryption secret file (required) |
 | `metricsTokenFile` | `null` | When set, enables `GET /metrics` (Prometheus exposition). The file's contents must be presented as `Authorization: Bearer <token>` by scrapers. When `null`, the endpoint returns 404. |
 | `databaseUrlFile` | auto | Override the PostgreSQL connection string file |
+| `databaseMaxConnections` | `32` | Max connections in the scheduler / worker / cache pool (`GRADIENT_DATABASE_MAX_CONNECTIONS`). Total per process is `databaseMaxConnections + databaseWebMaxConnections`; raise only if Postgres `max_connections` has headroom. |
+| `databaseMinConnections` | `2` | Min connections kept warm in the scheduler / worker / cache pool (`GRADIENT_DATABASE_MIN_CONNECTIONS`). |
+| `databaseWebMaxConnections` | `16` | Max connections in the axum HTTP pool (`GRADIENT_DATABASE_WEB_MAX_CONNECTIONS`). |
+| `databaseWebMinConnections` | `1` | Min connections kept warm in the axum HTTP pool (`GRADIENT_DATABASE_WEB_MIN_CONNECTIONS`). |
 | `reportErrors` | `false` | Send errors to Sentry |
 | `settings.sentryDsn` | `null` | Override the Sentry DSN used when `reportErrors` is true. `null` ships reports to the upstream Wavelens instance at `reports.wavelens.io`; set your own DSN to keep reports in-house. (`GRADIENT_SENTRY_DSN`) |
 | `discoverable` | `true` | Accept incoming `/proto` WebSocket connections from workers |

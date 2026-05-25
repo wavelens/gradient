@@ -154,6 +154,35 @@ in {
         example = "/etc/gradient/database_url";
       };
 
+      databaseMaxConnections = lib.mkOption {
+        description = ''
+          Maximum connections the scheduler / worker / cache pool may open.
+          Total Postgres connections per gradient-server process is
+          `databaseMaxConnections + databaseWebMaxConnections`. Raise only
+          if Postgres' max_connections has headroom for it.
+        '';
+        type = lib.types.ints.positive;
+        default = 32;
+      };
+
+      databaseMinConnections = lib.mkOption {
+        description = "Minimum connections kept warm in the scheduler / worker / cache pool.";
+        type = lib.types.ints.unsigned;
+        default = 2;
+      };
+
+      databaseWebMaxConnections = lib.mkOption {
+        description = "Maximum connections the axum HTTP pool may open.";
+        type = lib.types.ints.positive;
+        default = 16;
+      };
+
+      databaseWebMinConnections = lib.mkOption {
+        description = "Minimum connections kept warm in the axum HTTP pool.";
+        type = lib.types.ints.unsigned;
+        default = 1;
+      };
+
       proto = {
         public = lib.mkEnableOption "publicly accessible proto endpoint for federated builds and remote workers";
         federate = lib.mkEnableOption "federate Gradient Proto";
@@ -528,6 +557,10 @@ in {
         GRADIENT_FRONTEND_URL = cfg.frontend.url;
         GRADIENT_BASE_PATH = cfg.baseDir;
         GRADIENT_DATABASE_URL_FILE = "%d/gradient_database_url";
+        GRADIENT_DATABASE_MAX_CONNECTIONS = toString cfg.databaseMaxConnections;
+        GRADIENT_DATABASE_MIN_CONNECTIONS = toString cfg.databaseMinConnections;
+        GRADIENT_DATABASE_WEB_MAX_CONNECTIONS = toString cfg.databaseWebMaxConnections;
+        GRADIENT_DATABASE_WEB_MIN_CONNECTIONS = toString cfg.databaseWebMinConnections;
         GRADIENT_OIDC_ENABLED = lib.boolToString cfg.oidc.enable;
         GRADIENT_ENABLE_REGISTRATION = lib.boolToString cfg.settings.enableRegistration;
         GRADIENT_CRYPT_SECRET_FILE = "%d/gradient_crypt_secret";
