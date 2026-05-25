@@ -213,6 +213,125 @@ pub fn is_builtin_role(role_id: RoleId) -> bool {
     role_id == BASE_ROLE_ADMIN_ID || role_id == BASE_ROLE_WRITE_ID || role_id == BASE_ROLE_VIEW_ID
 }
 
+// ── CachePermission ──────────────────────────────────────────────────────────
+
+use crate::types::consts::{
+    BASE_CACHE_ROLE_ADMIN_ID, BASE_CACHE_ROLE_VIEW_ID, BASE_CACHE_ROLE_WRITE_ID,
+};
+
+/// A capability granted by a cache-scoped role. Stored in `cache_role.permission`
+/// as a 64-bit bitmask, parallel to (but disjoint from) [`Permission`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+pub enum CachePermission {
+    ViewCache,
+    ReadStore,
+    WriteStore,
+    ManageCacheSettings,
+    ManageCacheKeys,
+    ManageCacheUpstreams,
+    ManageCacheMembers,
+    ManageCacheRoles,
+    ManageCacheSubscriptions,
+    DeleteCache,
+}
+
+impl CachePermission {
+    pub const ALL: &'static [CachePermission] = &[
+        CachePermission::ViewCache,
+        CachePermission::ReadStore,
+        CachePermission::WriteStore,
+        CachePermission::ManageCacheSettings,
+        CachePermission::ManageCacheKeys,
+        CachePermission::ManageCacheUpstreams,
+        CachePermission::ManageCacheMembers,
+        CachePermission::ManageCacheRoles,
+        CachePermission::ManageCacheSubscriptions,
+        CachePermission::DeleteCache,
+    ];
+
+    pub const fn bit(self) -> PermissionMask {
+        let pos: u32 = match self {
+            CachePermission::ViewCache => 0,
+            CachePermission::ReadStore => 1,
+            CachePermission::WriteStore => 2,
+            CachePermission::ManageCacheSettings => 3,
+            CachePermission::ManageCacheKeys => 4,
+            CachePermission::ManageCacheUpstreams => 5,
+            CachePermission::ManageCacheMembers => 6,
+            CachePermission::ManageCacheRoles => 7,
+            CachePermission::ManageCacheSubscriptions => 8,
+            CachePermission::DeleteCache => 9,
+        };
+        1_i64 << pos
+    }
+
+    pub const fn as_wire_name(self) -> &'static str {
+        match self {
+            CachePermission::ViewCache => "viewCache",
+            CachePermission::ReadStore => "readStore",
+            CachePermission::WriteStore => "writeStore",
+            CachePermission::ManageCacheSettings => "manageCacheSettings",
+            CachePermission::ManageCacheKeys => "manageCacheKeys",
+            CachePermission::ManageCacheUpstreams => "manageCacheUpstreams",
+            CachePermission::ManageCacheMembers => "manageCacheMembers",
+            CachePermission::ManageCacheRoles => "manageCacheRoles",
+            CachePermission::ManageCacheSubscriptions => "manageCacheSubscriptions",
+            CachePermission::DeleteCache => "deleteCache",
+        }
+    }
+
+    pub fn from_wire_name(s: &str) -> Option<Self> {
+        CachePermission::ALL
+            .iter()
+            .copied()
+            .find(|p| p.as_wire_name() == s)
+    }
+}
+
+#[inline]
+pub const fn cache_mask_grants(mask: PermissionMask, permission: CachePermission) -> bool {
+    mask & permission.bit() != 0
+}
+
+pub fn cache_mask_from(perms: &[CachePermission]) -> PermissionMask {
+    perms.iter().fold(0_i64, |acc, p| acc | p.bit())
+}
+
+pub fn cache_mask_to_vec(mask: PermissionMask) -> Vec<CachePermission> {
+    CachePermission::ALL
+        .iter()
+        .copied()
+        .filter(|p| cache_mask_grants(mask, *p))
+        .collect()
+}
+
+pub fn is_cache_mutating(permission: CachePermission) -> bool {
+    !matches!(
+        permission,
+        CachePermission::ViewCache | CachePermission::ReadStore
+    )
+}
+
+pub fn cache_admin_mask() -> PermissionMask {
+    cache_mask_from(CachePermission::ALL)
+}
+
+pub fn cache_write_mask() -> PermissionMask {
+    use CachePermission::*;
+    cache_mask_from(&[ViewCache, ReadStore, WriteStore])
+}
+
+pub fn cache_view_mask() -> PermissionMask {
+    use CachePermission::*;
+    cache_mask_from(&[ViewCache, ReadStore])
+}
+
+pub fn is_builtin_cache_role(role_id: RoleId) -> bool {
+    role_id == BASE_CACHE_ROLE_ADMIN_ID
+        || role_id == BASE_CACHE_ROLE_WRITE_ID
+        || role_id == BASE_CACHE_ROLE_VIEW_ID
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -292,5 +411,80 @@ mod tests {
         assert!(is_builtin_role(BASE_ROLE_VIEW_ID));
         let other = RoleId::new(uuid::uuid!("99999999-9999-9999-9999-999999999999"));
         assert!(!is_builtin_role(other));
+    }
+
+    // ── CachePermission tests ────────────────────────────────────────────────
+
+    #[test]
+    fn each_cache_permission_has_unique_bit() {
+        let mut seen = 0_i64;
+        for p in CachePermission::ALL.iter().copied() {
+            assert_eq!(p.bit() & seen, 0, "{:?} re-uses an earlier bit", p);
+            seen |= p.bit();
+        }
+    }
+
+    #[test]
+    fn cache_wire_names_round_trip() {
+        for p in CachePermission::ALL.iter().copied() {
+            assert_eq!(CachePermission::from_wire_name(p.as_wire_name()), Some(p));
+        }
+        assert_eq!(CachePermission::from_wire_name("nope"), None);
+    }
+
+    #[test]
+    fn cache_admin_mask_grants_everything() {
+        let mask = cache_admin_mask();
+        for p in CachePermission::ALL.iter().copied() {
+            assert!(cache_mask_grants(mask, p), "admin missing {:?}", p);
+        }
+    }
+
+    #[test]
+    fn cache_write_mask_excludes_admin_only() {
+        let mask = cache_write_mask();
+        assert!(!cache_mask_grants(mask, CachePermission::ManageCacheSettings));
+        assert!(!cache_mask_grants(mask, CachePermission::ManageCacheRoles));
+        assert!(!cache_mask_grants(mask, CachePermission::DeleteCache));
+        assert!(cache_mask_grants(mask, CachePermission::WriteStore));
+        assert!(cache_mask_grants(mask, CachePermission::ReadStore));
+        assert!(cache_mask_grants(mask, CachePermission::ViewCache));
+    }
+
+    #[test]
+    fn cache_view_mask_is_read_only() {
+        let mask = cache_view_mask();
+        assert!(cache_mask_grants(mask, CachePermission::ViewCache));
+        assert!(cache_mask_grants(mask, CachePermission::ReadStore));
+        assert!(!cache_mask_grants(mask, CachePermission::WriteStore));
+        assert!(!cache_mask_grants(mask, CachePermission::ManageCacheKeys));
+    }
+
+    #[test]
+    fn cache_view_is_not_mutating() {
+        assert!(!is_cache_mutating(CachePermission::ViewCache));
+        assert!(!is_cache_mutating(CachePermission::ReadStore));
+        assert!(is_cache_mutating(CachePermission::WriteStore));
+        assert!(is_cache_mutating(CachePermission::ManageCacheKeys));
+        assert!(is_cache_mutating(CachePermission::DeleteCache));
+    }
+
+    #[test]
+    fn cache_mask_round_trips_through_vec() {
+        let mask = cache_write_mask();
+        let perms = cache_mask_to_vec(mask);
+        assert_eq!(cache_mask_from(&perms), mask);
+    }
+
+    #[test]
+    fn is_builtin_cache_role_recognises_seed_uuids() {
+        use crate::types::consts::{
+            BASE_CACHE_ROLE_ADMIN_ID, BASE_CACHE_ROLE_VIEW_ID, BASE_CACHE_ROLE_WRITE_ID,
+        };
+        assert!(is_builtin_cache_role(BASE_CACHE_ROLE_ADMIN_ID));
+        assert!(is_builtin_cache_role(BASE_CACHE_ROLE_WRITE_ID));
+        assert!(is_builtin_cache_role(BASE_CACHE_ROLE_VIEW_ID));
+        let other = RoleId::new(uuid::uuid!("99999999-9999-9999-9999-999999999999"));
+        assert!(!is_builtin_cache_role(other));
     }
 }
