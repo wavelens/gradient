@@ -487,8 +487,13 @@ async fn build_ci_report_from_payload(
         .context("loading commit")?
         .ok_or_else(|| anyhow!("commit {} not found", evaluation.commit))?;
 
-    let (owner, repo) = parse_owner_repo(&evaluation.repository)
-        .ok_or_else(|| anyhow!("could not parse owner/repo from {}", evaluation.repository))?;
+    // Always post check runs / status updates against the project's base
+    // repository, not `evaluation.repository`. For fork PRs the evaluation
+    // URL points at the fork (so the worker can fetch the commit), but the
+    // GitHub App installation lives on the base repo - calling the fork's
+    // /check-runs endpoint returns 403.
+    let (owner, repo) = parse_owner_repo(&project.repository)
+        .ok_or_else(|| anyhow!("could not parse owner/repo from {}", project.repository))?;
 
     let entry_points = match &build {
         Some(b) => EEntryPoint::find()
