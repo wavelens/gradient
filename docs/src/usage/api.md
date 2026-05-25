@@ -99,6 +99,15 @@ API-key-authenticated requests **cannot** create, edit, revoke, or delete API
 keys - only session-authenticated calls can. This prevents a leaked key from
 minting more powerful siblings.
 
+### Cache pinning
+
+A key may be pinned to a single cache as an alternative to organization
+pinning (the two are mutually exclusive). Cache-pinned keys carry a
+`CachePermission` bitmask and can be used only on routes targeting the pinned
+cache. Creating a cache-pinned key requires the `manageCacheMembers` permission
+on the target cache. Use the `availableCache` field on
+`GET /user/keys/permissions` to enumerate valid capability names.
+
 ### Organizations
 
 | Method | Path | Description |
