@@ -60,9 +60,11 @@ pub fn check_context_kind_for_event(event: &str) -> Option<CheckContextKind> {
         | "evaluation.completed"
         | "evaluation.failed"
         | "evaluation.aborted" => Some(CheckContextKind::Evaluation),
-        "build.started" | "build.completed" | "build.failed" | "build.substituted" => {
-            Some(CheckContextKind::Build)
-        }
+        "build.queued"
+        | "build.started"
+        | "build.completed"
+        | "build.failed"
+        | "build.substituted" => Some(CheckContextKind::Build),
         _ => None,
     }
 }

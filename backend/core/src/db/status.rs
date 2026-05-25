@@ -583,7 +583,7 @@ pub async fn find_active_leaders<C: ConnectionTrait>(
     Ok(out)
 }
 
-async fn dispatch_build_event_for_status(
+pub async fn dispatch_build_event_for_status(
     state: &Arc<ServerState>,
     build: MBuild,
     status: BuildStatus,

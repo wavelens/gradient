@@ -315,6 +315,31 @@ impl<'a> EvalResultProcessor<'a> {
             });
         }
 
+        // Substituted builds are inserted directly in their terminal state and
+        // never transition through `update_build_status`, so the regular
+        // status-change dispatch path never fires for them. Emit
+        // `build.substituted` here so the forge sees a Build check per
+        // already-cached output (Success).
+        if let Err(e) = self.dispatch_substituted_events().await {
+            tracing::warn!(error = %e, "failed to dispatch build.substituted events");
+        }
+
+        Ok(())
+    }
+
+    async fn dispatch_substituted_events(&self) -> Result<(), sea_orm::DbErr> {
+        use gradient_core::db::status::dispatch_build_event_for_status;
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+
+        let substituted = entity::build::Entity::find()
+            .filter(entity::build::Column::Evaluation.eq(self.evaluation_id))
+            .filter(entity::build::Column::Status.eq(BuildStatus::Substituted))
+            .all(&self.state.worker_db)
+            .await?;
+
+        for build in substituted {
+            dispatch_build_event_for_status(self.state, build, BuildStatus::Substituted).await;
+        }
         Ok(())
     }
 

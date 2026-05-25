@@ -54,6 +54,7 @@ pub fn decrypt_secret_with_file(
 }
 
 pub const FORGE_STATUS_EVENTS: &[&str] = &[
+    "build.queued",
     "build.started",
     "build.completed",
     "build.failed",
@@ -80,6 +81,7 @@ pub fn matches_event(action: &MProjectAction, event: &str) -> bool {
 
 pub fn forge_status_for_event(event: &str) -> Option<CiStatus> {
     match event {
+        "build.queued" => Some(CiStatus::Pending),
         "build.started" => Some(CiStatus::Running),
         "build.completed" => Some(CiStatus::Success),
         "build.failed" => Some(CiStatus::Failure),
