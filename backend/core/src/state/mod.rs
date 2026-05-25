@@ -180,6 +180,22 @@ pub struct StateCache {
     pub upstreams: Vec<StateUpstream>,
     pub public: bool,
     pub created_by: String,
+    #[serde(default)]
+    pub roles: Vec<StateCacheRoleEntry>,
+    #[serde(default)]
+    pub members: Vec<StateCacheMemberEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StateCacheRoleEntry {
+    pub name: String,
+    pub permissions: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StateCacheMemberEntry {
+    pub user: String,
+    pub role: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -439,6 +455,67 @@ impl StateConfiguration {
                     errors.push(ValidationError {
                         field: format!("caches.{}.organizations", cache.name),
                         message: format!("Organization '{}' does not exist", org_name),
+                    });
+                }
+            }
+
+            let mut role_names_seen: std::collections::HashSet<&str> =
+                std::collections::HashSet::new();
+            for role in &cache.roles {
+                if matches!(role.name.as_str(), "Admin" | "Write" | "View") {
+                    errors.push(ValidationError {
+                        field: format!("caches.{}.roles.{}.name", cache.name, role.name),
+                        message: format!(
+                            "Role name '{}' collides with a built-in cache role; pick a different name.",
+                            role.name
+                        ),
+                    });
+                }
+                if role.permissions.is_empty() {
+                    errors.push(ValidationError {
+                        field: format!("caches.{}.roles.{}.permissions", cache.name, role.name),
+                        message: "At least one permission must be declared.".into(),
+                    });
+                }
+                for wire in &role.permissions {
+                    if crate::permissions::CachePermission::from_wire_name(wire).is_none() {
+                        errors.push(ValidationError {
+                            field: format!(
+                                "caches.{}.roles.{}.permissions",
+                                cache.name, role.name
+                            ),
+                            message: format!("Unknown cache permission '{}'", wire),
+                        });
+                    }
+                }
+                if !role_names_seen.insert(role.name.as_str()) {
+                    errors.push(ValidationError {
+                        field: format!("caches.{}.roles.{}.name", cache.name, role.name),
+                        message: format!(
+                            "Duplicate role name '{}' in cache '{}'",
+                            role.name, cache.name
+                        ),
+                    });
+                }
+            }
+
+            let declared_role_names: std::collections::HashSet<&str> =
+                cache.roles.iter().map(|r| r.name.as_str()).collect();
+            for member in &cache.members {
+                if !self.users.contains_key(&member.user) {
+                    errors.push(ValidationError {
+                        field: format!("caches.{}.members.{}.user", cache.name, member.user),
+                        message: format!("User '{}' does not exist", member.user),
+                    });
+                }
+                let builtin = matches!(member.role.as_str(), "Admin" | "Write" | "View");
+                if !builtin && !declared_role_names.contains(member.role.as_str()) {
+                    errors.push(ValidationError {
+                        field: format!("caches.{}.members.{}.role", cache.name, member.user),
+                        message: format!(
+                            "Role '{}' not found in cache '{}'",
+                            member.role, cache.name
+                        ),
                     });
                 }
             }
