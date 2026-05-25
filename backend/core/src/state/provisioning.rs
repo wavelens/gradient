@@ -5,13 +5,15 @@
  */
 
 use super::{
-    StateAction, StateApiKey, StateCache, StateConfiguration, StateFlakeInputOverride,
-    StateIntegration, StateOrganization, StateProject, StateRole, StateTrigger, StateUpstream,
-    StateUser, StateWorker,
+    StateAction, StateApiKey, StateCache, StateCacheMemberEntry, StateCacheRoleEntry,
+    StateConfiguration, StateFlakeInputOverride, StateIntegration, StateOrganization, StateProject,
+    StateRole, StateTrigger, StateUpstream, StateUser, StateWorker,
 };
 use crate::ci::actions::encrypt_secret_with_file;
 use crate::ci::{ForgeType, GITHUB_APP_INTEGRATION_NAME, IntegrationKind};
-use crate::types::consts::BASE_ROLE_ADMIN_ID;
+use crate::types::consts::{
+    BASE_CACHE_ROLE_ADMIN_ID, BASE_CACHE_ROLE_VIEW_ID, BASE_CACHE_ROLE_WRITE_ID, BASE_ROLE_ADMIN_ID,
+};
 use crate::types::input::load_secret_bytes;
 use crate::types::triggers::TriggerConfig;
 use crate::types::*;
@@ -781,6 +783,20 @@ impl<'a> StateApplicator<'a> {
                     );
                 }
             }
+
+            self.apply_cache_roles_and_members(
+                cache_id,
+                &state_cache.name,
+                &state_cache.roles,
+                &state_cache.members,
+            )
+            .await
+            .map_err(|e| {
+                format!(
+                    "Failed to apply roles/members for cache '{}': {}",
+                    state_cache.name, e
+                )
+            })?;
         }
 
         Ok(())
@@ -856,6 +872,168 @@ impl<'a> StateApplicator<'a> {
             cache = %cache_name,
             "Applied upstreams to cache"
         );
+        Ok(())
+    }
+
+    // ── apply_cache_roles_and_members ─────────────────────────────────────────
+
+    async fn apply_cache_roles_and_members(
+        &self,
+        cache_id: CacheId,
+        cache_name: &str,
+        roles: &[StateCacheRoleEntry],
+        members: &[StateCacheMemberEntry],
+    ) -> Result<(), DynError> {
+        // (a) Custom cache roles
+        let mut declared_role_names: HashSet<String> = HashSet::new();
+        for entry in roles {
+            if matches!(entry.name.as_str(), "Admin" | "Write" | "View") {
+                return Err(format!(
+                    "Cache '{}' role '{}' collides with a built-in cache role",
+                    cache_name, entry.name
+                )
+                .into());
+            }
+
+            let mut perms = Vec::with_capacity(entry.permissions.len());
+            for wire in &entry.permissions {
+                let p =
+                    crate::permissions::CachePermission::from_wire_name(wire).ok_or_else(|| {
+                        format!(
+                            "Cache '{}' role '{}' references unknown permission '{}'",
+                            cache_name, entry.name, wire
+                        )
+                    })?;
+                perms.push(p);
+            }
+            let mask = crate::permissions::cache_mask_from(&perms);
+
+            let existing = ECacheRole::find()
+                .filter(CCacheRole::Cache.eq(cache_id))
+                .filter(CCacheRole::Name.eq(&entry.name))
+                .one(self.db)
+                .await?;
+
+            if let Some(row) = existing {
+                let mut active: ACacheRole = row.into();
+                active.permission = Set(mask);
+                active.managed = Set(true);
+                active.update(self.db).await?;
+                tracing::info!(cache = %cache_name, role = %entry.name, "Updated managed cache role");
+            } else {
+                let active = ACacheRole {
+                    id: Set(RoleId::now_v7()),
+                    name: Set(entry.name.clone()),
+                    cache: Set(Some(cache_id)),
+                    permission: Set(mask),
+                    managed: Set(true),
+                };
+                active.insert(self.db).await?;
+                tracing::info!(cache = %cache_name, role = %entry.name, "Created managed cache role");
+            }
+
+            declared_role_names.insert(entry.name.clone());
+        }
+
+        // (b) Members
+        let user_map = self.user_lookup().await?;
+        let mut declared_members: HashSet<UserId> = HashSet::new();
+        for entry in members {
+            let user_id = user_map.get(&entry.user).copied().ok_or_else(|| {
+                format!(
+                    "Cache '{}' member '{}' not found",
+                    cache_name, entry.user
+                )
+            })?;
+
+            let role_id = match entry.role.as_str() {
+                "Admin" => BASE_CACHE_ROLE_ADMIN_ID,
+                "Write" => BASE_CACHE_ROLE_WRITE_ID,
+                "View" => BASE_CACHE_ROLE_VIEW_ID,
+                name => ECacheRole::find()
+                    .filter(CCacheRole::Cache.eq(cache_id))
+                    .filter(CCacheRole::Name.eq(name))
+                    .one(self.db)
+                    .await?
+                    .ok_or_else(|| {
+                        format!(
+                            "Cache '{}' member '{}' references unknown role '{}'",
+                            cache_name, entry.user, name
+                        )
+                    })?
+                    .id,
+            };
+
+            let existing = ECacheUser::find()
+                .filter(CCacheUser::Cache.eq(cache_id))
+                .filter(CCacheUser::User.eq(user_id))
+                .one(self.db)
+                .await?;
+
+            if let Some(row) = existing {
+                if row.role != role_id {
+                    let mut active: ACacheUser = row.into();
+                    active.role = Set(role_id);
+                    active.update(self.db).await?;
+                    tracing::info!(cache = %cache_name, user = %entry.user, "Updated cache member role");
+                }
+            } else {
+                let active = ACacheUser {
+                    id: Set(CacheUserId::now_v7()),
+                    cache: Set(cache_id),
+                    user: Set(user_id),
+                    role: Set(role_id),
+                };
+                active.insert(self.db).await?;
+                tracing::info!(cache = %cache_name, user = %entry.user, "Added cache member");
+            }
+
+            declared_members.insert(user_id);
+        }
+
+        // (c) Drift reconciliation — remove managed roles not in declared set
+        let managed_roles = ECacheRole::find()
+            .filter(CCacheRole::Cache.eq(cache_id))
+            .filter(CCacheRole::Managed.eq(true))
+            .all(self.db)
+            .await?;
+
+        let mut roles_to_delete: Vec<RoleId> = Vec::new();
+        for row in &managed_roles {
+            if !declared_role_names.contains(&row.name) {
+                roles_to_delete.push(row.id);
+            }
+        }
+
+        if !roles_to_delete.is_empty() {
+            // Delete cache_user rows referencing these roles first (FK Restrict)
+            for &role_id in &roles_to_delete {
+                ECacheUser::delete_many()
+                    .filter(CCacheUser::Cache.eq(cache_id))
+                    .filter(CCacheUser::Role.eq(role_id))
+                    .exec(self.db)
+                    .await?;
+                ECacheRole::delete_by_id(role_id).exec(self.db).await?;
+                tracing::info!(cache = %cache_name, %role_id, "Deleted managed cache role no longer in state");
+            }
+        }
+
+        // Remove cache_user rows for declared members no longer in config
+        let existing_members = ECacheUser::find()
+            .filter(CCacheUser::Cache.eq(cache_id))
+            .all(self.db)
+            .await?;
+
+        for row in existing_members {
+            if !declared_members.contains(&row.user) {
+                // Only remove members that were on state-managed roles (custom or builtin used by state).
+                // Since we don't track per-row "managed" on cache_user, we conservatively
+                // remove all members not in the declared list when the cache is managed.
+                ECacheUser::delete_by_id(row.id).exec(self.db).await?;
+                tracing::info!(cache = %cache_name, user = %row.user, "Removed cache member no longer in state");
+            }
+        }
+
         Ok(())
     }
 
