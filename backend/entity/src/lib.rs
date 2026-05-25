@@ -16,6 +16,7 @@ pub mod cache_derivation;
 pub mod cache_metric;
 pub mod cache_role;
 pub mod cache_upstream;
+pub mod cache_user;
 pub mod cached_path;
 pub mod cached_path_signature;
 pub mod commit;
