@@ -804,6 +804,12 @@ async fn dispatch_approval_granted(state: &Arc<ServerState>, eval: &MEvaluation)
         payload,
     )
     .await;
+
+    // Make the Evaluation check appear immediately as Pending so the PR shows
+    // the gradient pipeline is now in flight. Without this the user only sees
+    // the Approval check turn green and nothing else until the eval worker
+    // actually picks the row up - looks like the click did nothing.
+    gradient_core::ci::actions::dispatch_evaluation_created(state, eval).await;
 }
 
 async fn find_eval_by_check_id(state: &Arc<ServerState>, check_id: i64) -> Option<MEvaluation> {

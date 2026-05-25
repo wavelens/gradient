@@ -22,9 +22,9 @@ pub fn format_check_scope(org_name: Option<&str>, project_name: &str) -> String 
     }
 }
 
-/// CI check name for the maintainer-approval gate (Awaiting Approval).
+/// CI check name for the maintainer-approval gate.
 pub fn approval_check_context(project_name: &str) -> String {
-    format!("gradient/{}: Awaiting Approval", project_name)
+    format!("gradient/{}: Approval", project_name)
 }
 
 /// CI check name for the per-evaluation roll-up status.
@@ -121,7 +121,7 @@ mod tests {
     fn approval_context_format() {
         assert_eq!(
             approval_check_context("my-project"),
-            "gradient/my-project: Awaiting Approval"
+            "gradient/my-project: Approval"
         );
     }
 

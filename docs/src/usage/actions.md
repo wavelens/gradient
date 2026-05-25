@@ -21,7 +21,7 @@ Actions are per-project. Three types ship in v1:
 | `evaluation.failed` | Evaluation failed |
 | `evaluation.aborted` | Evaluation was aborted |
 | `evaluation.action_required` | Evaluation parked waiting for maintainer approval on a fork PR |
-| `evaluation.approval_granted` | Maintainer cleared the approval gate (clears the `Awaiting Approval` check) |
+| `evaluation.approval_granted` | Maintainer cleared the approval gate (flips the `Approval` check to success) |
 | `build.queued` | Build enters the queue |
 | `build.started` | Build starts executing on a worker |
 | `build.completed` | Build completed successfully |
@@ -82,7 +82,7 @@ Token management: the plaintext token is revealed exactly once — on create or 
 
 ## Forge Status Report
 
-Posts commit status (pending / success / failure / action-required) back to the forge as three separate check runs per PR — `gradient/{project}: Awaiting Approval` (fork-PR gate), `gradient/{project}: Evaluation` (eval phase), and `gradient/{project}: Build {entry_point}` (per-entry-point). Each check is updated in place as the phase progresses; the Awaiting Approval check flips to Success when a maintainer clears the gate.
+Posts commit status (pending / success / failure / action-required) back to the forge as three separate check runs per PR — `gradient/{project}: Approval` (fork-PR gate), `gradient/{project}: Evaluation` (eval phase), and `gradient/{project}: Build {label}` (one per build, labelled by entry-point name or by `{drv-name}.{architecture}` when no entry-point matched). Each check is updated in place as the phase progresses; the Approval check flips to Success when a maintainer clears the gate, and the Evaluation check is posted as Pending at the same instant so the PR immediately reflects that the pipeline is in flight.
 
 **Config fields:**
 

@@ -15,8 +15,9 @@ use crate::ci::{parse_owner_repo, reporting};
 use crate::types::input::{load_secret_bytes, vec_to_hex};
 use crate::types::{
     AProjectActionDelivery, ActionConfig, ActionType, BuildId, CEntryPoint, CIntegration,
-    CProjectAction, EBuild, ECommit, EEntryPoint, EEvaluation, EIntegration, EOrganization,
-    EProject, EProjectAction, EvaluationId, IntegrationId, MProjectAction, ProjectActionDeliveryId,
+    CProjectAction, EBuild, ECommit, EDerivation, EEntryPoint, EEvaluation, EIntegration,
+    EOrganization, EProject, EProjectAction, EvaluationId, IntegrationId, MProjectAction,
+    ProjectActionDeliveryId,
     ProjectId, ServerState,
 };
 use anyhow::{Context, Result, anyhow};
@@ -536,6 +537,25 @@ async fn build_ci_report_from_payload(
         None => Vec::new(),
     };
 
+    // Fallback discriminator for builds that have no entry-point row (no
+    // `gradient.entry_points` config, or a derivation not matched by the
+    // wildcard). Without this every build event would collapse onto the
+    // Evaluation context and the per-build check would never appear.
+    let build_label = match &build {
+        Some(b) => {
+            if let Some(ep) = entry_points.first() {
+                Some(ep.eval.clone())
+            } else {
+                let drv = EDerivation::find_by_id(b.derivation)
+                    .one(&state.worker_db)
+                    .await
+                    .context("loading derivation for build label")?;
+                drv.map(|d| format!("{}.{}", d.name, d.architecture))
+            }
+        }
+        None => None,
+    };
+
     let org_name = EOrganization::find_by_id(project.organization)
         .one(&state.worker_db)
         .await
@@ -544,16 +564,16 @@ async fn build_ci_report_from_payload(
         .map(|o| o.name);
 
     // Pick the check-run name based on which phase fired the event so the
-    // Awaiting-Approval, Evaluation, and Build checks each show as their own
-    // line on the PR. Falls back to a generic project-scoped name for events
+    // Approval, Evaluation, and per-Build checks each show as their own line
+    // on the PR. Falls back to a generic project-scoped name for events
     // outside the three known families.
     let context = match reporting::check_context_kind_for_event(event) {
         Some(reporting::CheckContextKind::Approval) => {
             reporting::approval_check_context(&project.name)
         }
-        Some(reporting::CheckContextKind::Build) => entry_points
-            .first()
-            .map(|ep| reporting::build_check_context(&project.name, &ep.eval))
+        Some(reporting::CheckContextKind::Build) => build_label
+            .as_deref()
+            .map(|label| reporting::build_check_context(&project.name, label))
             .unwrap_or_else(|| reporting::evaluation_check_context(&project.name)),
         Some(reporting::CheckContextKind::Evaluation) | None => {
             reporting::evaluation_check_context(&project.name)
