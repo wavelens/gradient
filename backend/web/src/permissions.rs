@@ -56,3 +56,38 @@ pub fn parse_permission_list(
     }
     Ok(mask_from(&perms))
 }
+
+pub fn available_cache_permissions() -> Vec<PermissionEntry> {
+    CachePermission::ALL
+        .iter()
+        .copied()
+        .map(|p| PermissionEntry {
+            id: p.as_wire_name(),
+            mutating: is_cache_mutating(p),
+        })
+        .collect()
+}
+
+pub fn parse_cache_permission_list(
+    wire: &[String],
+    catalogue_hint: &str,
+) -> WebResult<PermissionMask> {
+    let mut perms = Vec::with_capacity(wire.len());
+    for w in wire {
+        let parsed = CachePermission::from_wire_name(w).ok_or_else(|| {
+            WebError::bad_request(format!(
+                "Unknown cache permission '{}'. See {} for the catalogue.",
+                w, catalogue_hint
+            ))
+        })?;
+        perms.push(parsed);
+    }
+    Ok(cache_mask_from(&perms))
+}
+
+pub fn cache_mask_to_wire(mask: PermissionMask) -> Vec<&'static str> {
+    cache_mask_to_vec(mask)
+        .into_iter()
+        .map(|p| p.as_wire_name())
+        .collect()
+}
