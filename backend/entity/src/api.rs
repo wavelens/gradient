@@ -8,7 +8,7 @@ use chrono::NaiveDateTime;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{ApiId, OrganizationId, UserId};
+use crate::ids::{ApiId, CacheId, OrganizationId, UserId};
 
 #[derive(Clone, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "api")]
@@ -30,6 +30,7 @@ pub struct Model {
     /// member of (legacy behavior). `Some(id)` = key is rejected for any
     /// other org.
     pub organization: Option<OrganizationId>,
+    pub cache: Option<CacheId>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -48,6 +49,14 @@ pub enum Relation {
         on_update = "Cascade"
     )]
     Organization,
+    #[sea_orm(
+        belongs_to = "super::cache::Entity",
+        from = "Column::Cache",
+        to = "super::cache::Column::Id",
+        on_delete = "Cascade",
+        on_update = "Cascade"
+    )]
+    Cache,
 }
 
 impl std::fmt::Debug for Model {
@@ -64,6 +73,7 @@ impl std::fmt::Debug for Model {
             .field("revoked_at", &self.revoked_at)
             .field("permission", &self.permission)
             .field("organization", &self.organization)
+            .field("cache", &self.cache)
             .finish()
     }
 }

@@ -998,6 +998,7 @@ impl<'a> StateApplicator<'a> {
                     revoked_at: Set(None),
                     permission: Set(mask),
                     organization: Set(pinned_org),
+                    cache: Set(None),
                 };
                 api_key_model.insert(self.db).await?;
                 tracing::info!(name = %state_api_key.name, "Created managed API key");
