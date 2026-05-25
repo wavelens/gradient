@@ -12,6 +12,7 @@ mod nar;
 mod narinfo;
 mod narlist;
 mod nars;
+pub mod roles;
 mod serve;
 mod upstreams;
 
