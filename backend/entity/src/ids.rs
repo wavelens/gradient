@@ -20,6 +20,7 @@ macro_rules! id_newtype {
         #[derive(
             Copy,
             Clone,
+            Default,
             Eq,
             PartialEq,
             Hash,
@@ -173,6 +174,12 @@ mod tests {
     fn try_from_u64_returns_error_for_uuid_pk() {
         assert!(<UserId as TryFromU64>::try_from_u64(0).is_err());
         assert!(<OrganizationId as TryFromU64>::try_from_u64(42).is_err());
+    }
+
+    #[test]
+    fn default_id_is_nil() {
+        assert_eq!(UserId::default(), UserId::nil());
+        assert_eq!(OrganizationId::default().into_inner(), Uuid::nil());
     }
 
     #[test]

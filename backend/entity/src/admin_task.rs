@@ -16,6 +16,7 @@ use crate::ids::{AdminTaskId, UserId};
     Debug,
     Clone,
     Copy,
+    Default,
     PartialEq,
     Eq,
     DeriveActiveEnum,
@@ -27,6 +28,7 @@ use crate::ids::{AdminTaskId, UserId};
 )]
 #[sea_orm(rs_type = "i32", db_type = "Integer")]
 pub enum AdminTaskKind {
+    #[default]
     #[sea_orm(num_value = 0)]
     DeepGc = 0,
 }
@@ -44,6 +46,7 @@ impl AdminTaskKind {
     Debug,
     Clone,
     Copy,
+    Default,
     PartialEq,
     Eq,
     DeriveActiveEnum,
@@ -55,6 +58,7 @@ impl AdminTaskKind {
 )]
 #[sea_orm(rs_type = "i32", db_type = "Integer")]
 pub enum AdminTaskStatus {
+    #[default]
     #[sea_orm(num_value = 0)]
     Pending = 0,
     #[sea_orm(num_value = 1)]
