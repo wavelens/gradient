@@ -47,6 +47,20 @@ pub struct StateOrganization {
     #[serde(default)]
     pub github_installation_id: Option<i64>,
     pub created_by: String,
+    /// Declarative org membership. Empty preserves the legacy behavior of
+    /// auto-adding `created_by` as Admin. Non-empty makes the list
+    /// authoritative: unmatched memberships are revoked, the implicit
+    /// creator-Admin assignment is skipped, and members referencing users
+    /// that do not yet exist are recorded as pending and applied at
+    /// registration / OIDC first-login.
+    #[serde(default)]
+    pub members: Vec<StateOrgMemberEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StateOrgMemberEntry {
+    pub user: String,
+    pub role: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -341,6 +355,37 @@ impl StateConfiguration {
                     field: format!("organizations.{}.created_by", org.name),
                     message: format!("User '{}' does not exist", org.created_by),
                 });
+            }
+
+            let declared_org_role_names: std::collections::HashSet<&str> = self
+                .roles
+                .values()
+                .filter(|r| r.organization == org.name)
+                .map(|r| r.name.as_str())
+                .collect();
+            let mut member_users_seen: std::collections::HashSet<&str> =
+                std::collections::HashSet::new();
+            for member in &org.members {
+                let builtin = matches!(member.role.as_str(), "Admin" | "Write" | "View");
+                if !builtin && !declared_org_role_names.contains(member.role.as_str()) {
+                    errors.push(ValidationError {
+                        field: format!("organizations.{}.members.{}.role", org.name, member.user),
+                        message: format!(
+                            "Role '{}' not found for organization '{}' (must be Admin/Write/View or a state-managed org role)",
+                            member.role, org.name
+                        ),
+                    });
+                }
+                if !member_users_seen.insert(member.user.as_str()) {
+                    errors.push(ValidationError {
+                        field: format!("organizations.{}.members.{}.user", org.name, member.user),
+                        message: format!(
+                            "Duplicate member entry for user '{}' in organization '{}'",
+                            member.user, org.name
+                        ),
+                    });
+                }
+                // Note: missing user is intentionally not an error (issue #94).
             }
         }
 
@@ -1138,6 +1183,169 @@ mod tests {
                 == "workers.550e8400-e29b-41d4-a716-446655440001.organizations"
                 && e.message.contains("at least one")),
             "expected at-least-one-org error, got: {:?}",
+            v.errors
+        );
+    }
+
+    #[test]
+    fn state_org_members_serde_round_trip() {
+        let json = r#"{
+            "organizations": {
+                "acme": {
+                    "name": "acme",
+                    "display_name": "ACME",
+                    "private_key_file": "/dev/null",
+                    "public": false,
+                    "created_by": "alice",
+                    "members": [
+                        { "user": "bob", "role": "Write" },
+                        { "user": "carol", "role": "releaser" }
+                    ]
+                }
+            }
+        }"#;
+        let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
+        let members = &cfg.organizations["acme"].members;
+        assert_eq!(members.len(), 2);
+        assert_eq!(members[0].user, "bob");
+        assert_eq!(members[0].role, "Write");
+        assert_eq!(members[1].user, "carol");
+        assert_eq!(members[1].role, "releaser");
+    }
+
+    #[test]
+    fn state_org_members_default_empty() {
+        let json = r#"{
+            "organizations": {
+                "acme": {
+                    "name": "acme",
+                    "display_name": "ACME",
+                    "private_key_file": "/dev/null",
+                    "public": false,
+                    "created_by": "alice"
+                }
+            }
+        }"#;
+        let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
+        assert!(cfg.organizations["acme"].members.is_empty());
+    }
+
+    #[test]
+    fn state_org_members_validator_accepts_builtin_role() {
+        let json = r#"{
+            "users": {
+                "alice": { "username": "alice", "name": "Alice", "email": "a@x.io", "password_file": "/dev/null" },
+                "bob":   { "username": "bob",   "name": "Bob",   "email": "b@x.io", "password_file": "/dev/null" }
+            },
+            "organizations": {
+                "acme": {
+                    "name": "acme", "display_name": "ACME",
+                    "private_key_file": "/dev/null", "public": false, "created_by": "alice",
+                    "members": [{ "user": "bob", "role": "Write" }]
+                }
+            }
+        }"#;
+        let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
+        let v = cfg.validate();
+        assert!(v.is_valid, "errors: {:?}", v.errors);
+    }
+
+    #[test]
+    fn state_org_members_validator_accepts_custom_org_role() {
+        let json = r#"{
+            "users": {
+                "alice": { "username": "alice", "name": "Alice", "email": "a@x.io", "password_file": "/dev/null" }
+            },
+            "organizations": {
+                "acme": {
+                    "name": "acme", "display_name": "ACME",
+                    "private_key_file": "/dev/null", "public": false, "created_by": "alice",
+                    "members": [{ "user": "alice", "role": "releaser" }]
+                }
+            },
+            "roles": {
+                "releaser": { "name": "releaser", "organization": "acme", "permissions": ["viewOrg"] }
+            }
+        }"#;
+        let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
+        let v = cfg.validate();
+        assert!(v.is_valid, "errors: {:?}", v.errors);
+    }
+
+    #[test]
+    fn state_org_members_validator_rejects_unknown_role() {
+        let json = r#"{
+            "users": {
+                "alice": { "username": "alice", "name": "Alice", "email": "a@x.io", "password_file": "/dev/null" }
+            },
+            "organizations": {
+                "acme": {
+                    "name": "acme", "display_name": "ACME",
+                    "private_key_file": "/dev/null", "public": false, "created_by": "alice",
+                    "members": [{ "user": "alice", "role": "Ghost" }]
+                }
+            }
+        }"#;
+        let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
+        let v = cfg.validate();
+        assert!(!v.is_valid);
+        assert!(
+            v.errors
+                .iter()
+                .any(|e| e.field == "organizations.acme.members.alice.role"),
+            "expected unknown-role error, got: {:?}",
+            v.errors
+        );
+    }
+
+    #[test]
+    fn state_org_members_validator_ignores_unknown_user() {
+        let json = r#"{
+            "users": {
+                "alice": { "username": "alice", "name": "Alice", "email": "a@x.io", "password_file": "/dev/null" }
+            },
+            "organizations": {
+                "acme": {
+                    "name": "acme", "display_name": "ACME",
+                    "private_key_file": "/dev/null", "public": false, "created_by": "alice",
+                    "members": [{ "user": "ghost", "role": "Write" }]
+                }
+            }
+        }"#;
+        let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
+        let v = cfg.validate();
+        assert!(
+            v.is_valid,
+            "missing user must not fail validation (issue #94): {:?}",
+            v.errors
+        );
+    }
+
+    #[test]
+    fn state_org_members_validator_rejects_duplicate_user() {
+        let json = r#"{
+            "users": {
+                "alice": { "username": "alice", "name": "Alice", "email": "a@x.io", "password_file": "/dev/null" }
+            },
+            "organizations": {
+                "acme": {
+                    "name": "acme", "display_name": "ACME",
+                    "private_key_file": "/dev/null", "public": false, "created_by": "alice",
+                    "members": [
+                        { "user": "alice", "role": "Write" },
+                        { "user": "alice", "role": "View" }
+                    ]
+                }
+            }
+        }"#;
+        let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
+        let v = cfg.validate();
+        assert!(!v.is_valid);
+        assert!(
+            v.errors
+                .iter()
+                .any(|e| e.message.contains("Duplicate member")),
+            "expected duplicate-member error, got: {:?}",
             v.errors
         );
     }
