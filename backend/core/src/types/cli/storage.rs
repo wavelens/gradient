@@ -16,12 +16,12 @@ pub struct StorageArgs {
     pub state_file: Option<String>,
     #[arg(long, env = "GRADIENT_DELETE_STATE", default_value = "true")]
     pub delete_state: bool,
-    #[arg(long, env = "GRADIENT_KEEP_EVALUATIONS", default_value = "0")]
+    #[arg(long, env = "GRADIENT_KEEP_EVALUATIONS", default_value = "30")]
     pub keep_evaluations: usize,
     /// TTL in hours for cached NAR files that have not been fetched recently.
     /// When expired the NAR is removed from storage and its GC root is deleted.
-    /// Set to 0 to disable (default).
-    #[arg(long, env = "GRADIENT_NAR_TTL_HOURS", default_value_t = 0)]
+    /// Defaults to 336 (2 weeks). Set to 0 to disable.
+    #[arg(long, env = "GRADIENT_NAR_TTL_HOURS", default_value_t = 336)]
     pub nar_ttl_hours: u64,
     /// Grace period in hours before the GC pass deletes a `derivation` row
     /// that no longer has any referencing `build` rows. The grace lets rapid
@@ -42,8 +42,8 @@ impl Default for StorageArgs {
             base_path: ".".into(),
             state_file: None,
             delete_state: true,
-            keep_evaluations: 0,
-            nar_ttl_hours: 0,
+            keep_evaluations: 30,
+            nar_ttl_hours: 336,
             keep_orphan_derivations_hours: 24,
         }
     }
