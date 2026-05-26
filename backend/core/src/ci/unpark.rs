@@ -220,6 +220,48 @@ mod tests {
         assert!(unpark_approval(&db, parked.id).await.unwrap().is_none());
     }
 
+    #[tokio::test]
+    async fn unpark_approval_with_wildcard_overrides_wildcard_and_requeues() {
+        let mut parked = waiting_eval(WaitingReason::approval(7, "octocat"));
+        parked.wildcard = "*".into();
+
+        let mut requeued = parked.clone();
+        requeued.status = EvaluationStatus::Queued;
+        requeued.waiting_reason = None;
+        requeued.wildcard = "packages.x86_64-linux.foo".into();
+
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![parked.clone()]])
+            .append_query_results([vec![requeued.clone()]])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            .into_connection();
+
+        let out = unpark_approval_with_wildcard(&db, parked.id, "packages.x86_64-linux.foo")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(out.status, EvaluationStatus::Queued);
+        assert!(out.waiting_reason.is_none());
+        assert_eq!(out.wildcard, "packages.x86_64-linux.foo");
+    }
+
+    #[tokio::test]
+    async fn unpark_approval_with_wildcard_no_op_for_non_approval_reason() {
+        let parked = waiting_eval(WaitingReason::NoCache);
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![parked.clone()]])
+            .into_connection();
+        assert!(
+            unpark_approval_with_wildcard(&db, parked.id, "packages.*.*")
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
     fn make_project(org: OrganizationId) -> entity::project::Model {
         entity::project::Model {
             id: ProjectId::now_v7(),
