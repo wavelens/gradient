@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Exactly one of `upstream_cache` (internal) or `url`+`public_key` (external)
 /// must be populated - enforced at the application level.
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "cache_upstream")]
 pub struct Model {
     #[sea_orm(primary_key)]

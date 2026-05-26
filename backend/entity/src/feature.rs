@@ -25,7 +25,7 @@ pub enum FeatureKind {
     Architecture,
 }
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "system_requirement")]
 pub struct Model {
     #[sea_orm(primary_key)]

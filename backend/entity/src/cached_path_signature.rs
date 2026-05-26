@@ -20,7 +20,7 @@ use crate::ids::{CacheId, CachedPathId, CachedPathSignatureId};
 /// `signature` stores the raw 64-byte Ed25519 signature. The narinfo wire
 /// form (`<key-name>:<base64>`) is reconstructed at read time from
 /// `cache.name` + the deployment's `serve_url`.
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "cached_path_signature")]
 pub struct Model {
     #[sea_orm(primary_key)]

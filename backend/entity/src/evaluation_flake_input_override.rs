@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::{EvaluationFlakeInputOverrideId, EvaluationId};
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "evaluation_flake_input_override")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]

@@ -16,7 +16,7 @@ use crate::ids::{CacheDerivationId, CacheId, DerivationId};
 /// the derivation is `is_cached = true` AND every transitive dependency also
 /// has a `cache_derivation` row for the same cache. One row therefore answers
 /// "is the full closure of this derivation available in this cache".
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "cache_derivation")]
 pub struct Model {
     #[sea_orm(primary_key)]

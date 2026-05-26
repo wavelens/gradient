@@ -16,7 +16,7 @@ use crate::ids::CachedPathId;
 /// build outputs, or anything else. The NAR data is stored once (keyed by
 /// `hash`). Association with specific caches and their signatures is via
 /// `cached_path_signature`.
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "cached_path")]
 pub struct Model {
     #[sea_orm(primary_key)]
