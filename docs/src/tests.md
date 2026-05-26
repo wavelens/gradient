@@ -2529,11 +2529,16 @@ immediately. Coverage:
 - `web/src/endpoints/forge_hooks/events.rs` - extraction of
   `pr_number`, `pr_author`, `is_fork`, `base_owner`, `base_repo` from
   GitHub / Gitea / GitLab payloads.
-- `web/src/endpoints/forge_hooks/trigger.rs::parse_ci_run_command_*` -
-  recogniser for the `/ci run [wildcard]` comment unpark command
-  (case insensitive, allows leading quote-reply lines, rejects
-  multi-line prose, captures an optional trailing wildcard string
-  for one-shot overrides; issue #274).
+- `web/src/endpoints/forge_hooks/trigger.rs::parse_gradient_*` -
+  recogniser for the `/gradient run [wildcard]` and `/gradient approve`
+  PR comments (case insensitive, allows leading quote-reply lines, rejects
+  multi-line prose and unknown subcommands, captures an optional trailing
+  wildcard string for one-shot overrides; legacy `/ci` prefix is rejected
+  by `parse_gradient_legacy_ci_prefix_rejected`). Both commands are
+  maintainer-only via `sender_is_trusted`; `/gradient run` falls through
+  to `trigger_pr_for_integration` with `manual=true` and the snapshot
+  fetched via `CiReporter::get_pull_request` when no parked approval gate
+  exists.
 - `core/src/ci/unpark.rs::unpark_approval_with_wildcard_*`
   (issue #274) - the new helper writes the maintainer-supplied
   wildcard into the same row update that flips `Waiting -> Queued`,

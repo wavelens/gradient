@@ -249,6 +249,8 @@ async fn dispatch_github_app_pr(
             None,
             approval_ctx.clone(),
             head_clone.clone(),
+            false,
+            None,
         )
         .await;
         combined.projects_scanned += outcome.projects_scanned;
@@ -431,6 +433,8 @@ pub async fn forge_webhook(
                 None,
                 approval_ctx,
                 head_clone,
+                false,
+                None,
             )
             .await;
             WebhookResponse {

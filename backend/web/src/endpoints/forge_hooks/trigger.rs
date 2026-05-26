@@ -23,7 +23,7 @@ use sea_orm::{
 };
 use serde::Deserialize;
 use std::sync::Arc;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 /// PR metadata extracted from the forge webhook payload, used by the approval
 /// gate to decide whether to park the evaluation pending maintainer approval.
@@ -275,6 +275,8 @@ pub(super) async fn trigger_push_for_integration(
         },
         None,
         None,
+        false,
+        None,
     )
     .await
 }
@@ -291,6 +293,8 @@ pub(super) async fn trigger_pr_for_integration(
     author_name: Option<String>,
     approval_ctx: PullRequestApprovalContext,
     head_repo_clone_url: Option<String>,
+    manual: bool,
+    wildcard_override: Option<String>,
 ) -> WebhookTriggerOutcome {
     let action_owned = action.to_string();
     let branch_owned = branch.map(str::to_string);
@@ -327,6 +331,8 @@ pub(super) async fn trigger_pr_for_integration(
         },
         Some(approval_ctx),
         head_repo_clone_url,
+        manual,
+        wildcard_override,
     )
     .await
 }
@@ -371,6 +377,8 @@ pub(super) async fn trigger_release_for_integration(
         },
         None,
         None,
+        false,
+        None,
     )
     .await
 }
@@ -401,6 +409,8 @@ async fn fan_out_triggers<F>(
     filter: F,
     approval_ctx: Option<PullRequestApprovalContext>,
     repository_override: Option<String>,
+    manual: bool,
+    wildcard_override: Option<String>,
 ) -> WebhookTriggerOutcome
 where
     F: Fn(&TriggerConfig) -> FilterResult,
@@ -472,9 +482,10 @@ where
                 commit_hash: commit_hash.clone(),
                 commit_message: commit_message.clone(),
                 author_name: author_name.clone(),
-                manual: false,
+                manual,
                 gate_approval,
                 repository_override: repository_override.clone(),
+                wildcard_override: wildcard_override.clone(),
             },
         )
         .await;
@@ -876,7 +887,7 @@ async fn sender_is_trusted(
     }
 }
 
-// ── Approval unpark: `/ci run` comment on Gitea/Forgejo/GitLab + GitHub ────
+// ── /gradient commands: PR-comment dispatch (Gitea/Forgejo/GitLab + GitHub) ─
 
 #[derive(Deserialize)]
 struct CommentPayload {
@@ -947,15 +958,17 @@ struct GitlabNoteMr {
     iid: Option<u64>,
 }
 
-/// Handle a `/ci run` comment on a PR. Re-queues the approval-gated
-/// evaluation when the commenter passes the writer-trust probe.
+/// Handle a `/gradient run [wildcard]` or `/gradient approve` comment on a PR.
+/// Both commands are maintainer-only. `run` unparks an existing approval gate
+/// if one exists for the PR, and otherwise creates a fresh evaluation; `approve`
+/// only unparks.
 ///
 /// `integration_id` is `Some` for per-integration webhook routes (Gitea /
 /// Forgejo / GitLab) and `None` for the shared GitHub App route - for the
 /// latter we resolve the integration from `installation.id` in the body.
 pub(super) async fn handle_issue_comment(
     state: &Arc<ServerState>,
-    _scheduler: &Arc<Scheduler>,
+    scheduler: &Arc<Scheduler>,
     forge: ForgeType,
     integration_id: Option<IntegrationId>,
     body: &[u8],
@@ -983,8 +996,7 @@ pub(super) async fn handle_issue_comment(
             (comment_body, pr_number, sender, owner_repo)
         }
         _ => {
-            // GitHub uses `action == "created"`; Gitea uses
-            // `action == "created"` too.
+            // GitHub and Gitea both use `action == "created"`.
             if payload.action.as_deref() != Some("created") {
                 return;
             }
@@ -999,20 +1011,20 @@ pub(super) async fn handle_issue_comment(
         }
     };
 
-    let cmd = match parse_ci_run_command(&comment_body) {
+    let cmd = match parse_gradient_command(&comment_body) {
         Some(cmd) => cmd,
         None => return,
     };
     let Some(pr_number) = pr_number else {
-        warn!("comment webhook: /ci run but no PR number");
+        warn!("comment webhook: /gradient command but no PR number");
         return;
     };
     let Some(sender) = sender_login else {
-        warn!("comment webhook: /ci run but no sender");
+        warn!("comment webhook: /gradient command but no sender");
         return;
     };
     let Some(owner_repo) = owner_repo else {
-        warn!("comment webhook: /ci run but no repo path");
+        warn!("comment webhook: /gradient command but no repo path");
         return;
     };
     let Some((owner, repo)) = owner_repo.rsplit_once('/') else {
@@ -1045,11 +1057,14 @@ pub(super) async fn handle_issue_comment(
     };
 
     let wildcard_override: Option<String> = match &cmd {
-        CiRunCommand::Plain => None,
-        CiRunCommand::WithWildcard(raw) => match raw.parse::<Wildcard>() {
+        GradientCommand::Approve => None,
+        GradientCommand::Run { wildcard: None } => None,
+        GradientCommand::Run {
+            wildcard: Some(raw),
+        } => match raw.parse::<Wildcard>() {
             Ok(_) => Some(raw.clone()),
             Err(e) => {
-                warn!(wildcard = %raw, error = %e, "/ci run wildcard rejected");
+                warn!(wildcard = %raw, error = %e, "/gradient run wildcard rejected");
                 post_wildcard_error_comment(
                     state,
                     &integration_ids,
@@ -1065,7 +1080,7 @@ pub(super) async fn handle_issue_comment(
         },
     };
 
-    let mut unparked_any = false;
+    let mut action_taken = false;
     for integration_id in &integration_ids {
         let project_ids = match active_project_ids_for_integration(state, *integration_id).await {
             Ok(rows) => rows,
@@ -1074,21 +1089,24 @@ pub(super) async fn handle_issue_comment(
                 continue;
             }
         };
-        for project_id in project_ids {
+        let mut parked_unparked_in_integration = false;
+        let mut maintainer_verified = false;
+        for project_id in &project_ids {
             let Ok(Some(eval)) =
-                find_approval_gated_eval(&state.web_db, project_id, pr_number).await
+                find_approval_gated_eval(&state.web_db, *project_id, pr_number).await
             else {
                 continue;
             };
-            if !sender_is_trusted(state, project_id, owner, repo, &sender).await {
+            if !sender_is_trusted(state, *project_id, owner, repo, &sender).await {
                 warn!(
                     project_id = %project_id,
                     pr_number,
                     %sender,
-                    "Rejecting /ci run - sender is not a repo writer"
+                    "Rejecting /gradient command - sender is not a repo writer"
                 );
                 continue;
             }
+            maintainer_verified = true;
             let unpark_result = match &wildcard_override {
                 None => unpark_approval(&state.web_db, eval.id).await,
                 Some(w) => unpark_approval_with_wildcard(&state.web_db, eval.id, w).await,
@@ -1100,10 +1118,11 @@ pub(super) async fn handle_issue_comment(
                         pr_number,
                         %sender,
                         wildcard_override = wildcard_override.as_deref(),
-                        "PR approval gate cleared via /ci run comment"
+                        "PR approval gate cleared via /gradient comment"
                     );
                     dispatch_approval_granted(state, &unparked).await;
-                    unparked_any = true;
+                    parked_unparked_in_integration = true;
+                    action_taken = true;
                 }
                 Ok(None) => {}
                 Err(e) => {
@@ -1111,13 +1130,140 @@ pub(super) async fn handle_issue_comment(
                 }
             }
         }
+
+        if parked_unparked_in_integration {
+            continue;
+        }
+        if !matches!(cmd, GradientCommand::Run { .. }) {
+            continue;
+        }
+
+        // No parked eval to unpark — create a fresh evaluation for the PR.
+        // Maintainer check: if no project unparked above, run the trust probe
+        // explicitly against the first project that has a usable reporter.
+        if !maintainer_verified {
+            let Some(probe_project) = first_project_with_reporter(state, &project_ids).await
+            else {
+                continue;
+            };
+            if !sender_is_trusted(state, probe_project, owner, repo, &sender).await {
+                warn!(
+                    %integration_id,
+                    pr_number,
+                    %sender,
+                    "Rejecting /gradient run - sender is not a repo writer"
+                );
+                continue;
+            }
+        }
+
+        let Some(snapshot) = fetch_pr_snapshot(state, &project_ids, owner, repo, pr_number).await
+        else {
+            warn!(
+                %integration_id,
+                pr_number,
+                "/gradient run: could not fetch PR head via any project reporter"
+            );
+            continue;
+        };
+        let commit_hash = match hex::decode(&snapshot.head_sha) {
+            Ok(b) => b,
+            Err(e) => {
+                warn!(error = %e, sha = %snapshot.head_sha, "/gradient run: invalid head SHA");
+                continue;
+            }
+        };
+        let approval_ctx = PullRequestApprovalContext {
+            pr_number: Some(pr_number),
+            pr_author: None,
+            is_fork: Some(snapshot.is_fork),
+        };
+        let outcome = trigger_pr_for_integration(
+            state,
+            scheduler,
+            *integration_id,
+            Some(snapshot.head_branch.as_str()),
+            "synchronize",
+            commit_hash,
+            None,
+            Some(sender.clone()),
+            approval_ctx,
+            snapshot.head_clone_url.clone(),
+            true,
+            wildcard_override.clone(),
+        )
+        .await;
+        if !outcome.queued.is_empty() {
+            info!(
+                %integration_id,
+                pr_number,
+                %sender,
+                wildcard_override = wildcard_override.as_deref(),
+                queued = outcome.queued.len(),
+                "/gradient run created fresh evaluation"
+            );
+            action_taken = true;
+        } else {
+            debug!(
+                %integration_id,
+                pr_number,
+                "/gradient run: trigger fan-out queued nothing"
+            );
+        }
     }
-    if !unparked_any {
-        debug_no_match(pr_number);
+    if !action_taken {
+        debug!(
+            pr_number,
+            "/gradient comment had no parked evaluation and produced no fresh fire"
+        );
     }
 }
 
-/// Posts a reply comment to the PR explaining a `/ci run <wildcard>`
+/// Walk `project_ids` and return the first project that resolves to a usable
+/// `CiReporter`. Used by the `/gradient run` fresh-eval path to obtain a
+/// reporter for both the maintainer trust check and the PR-snapshot fetch.
+async fn first_project_with_reporter(
+    state: &Arc<ServerState>,
+    project_ids: &[ProjectId],
+) -> Option<ProjectId> {
+    for project_id in project_ids {
+        if let Ok(Some(_)) =
+            gradient_core::ci::actions::reporter_for_project(state, *project_id).await
+        {
+            return Some(*project_id);
+        }
+    }
+    None
+}
+
+/// Fetch a [`PullRequestSnapshot`] using the first project's reporter.
+/// Returns `None` if no project has a reporter, the reporter call errors, or
+/// the PR is missing (closed/404).
+async fn fetch_pr_snapshot(
+    state: &Arc<ServerState>,
+    project_ids: &[ProjectId],
+    owner: &str,
+    repo: &str,
+    pr_number: u64,
+) -> Option<gradient_core::ci::PullRequestSnapshot> {
+    for project_id in project_ids {
+        let reporter =
+            match gradient_core::ci::actions::reporter_for_project(state, *project_id).await {
+                Ok(Some(r)) => r,
+                _ => continue,
+            };
+        match reporter.get_pull_request(owner, repo, pr_number).await {
+            Ok(Some(snap)) => return Some(snap),
+            Ok(None) => return None,
+            Err(e) => {
+                warn!(error = %e, %project_id, "/gradient run: PR fetch failed, trying next project");
+            }
+        }
+    }
+    None
+}
+
+/// Posts a reply comment to the PR explaining a `/gradient run <wildcard>`
 /// parse failure. Walks every project owned by the matching
 /// integrations and uses the first project with a usable
 /// `ForgeStatusReport` action's reporter. Failures are logged and
@@ -1141,7 +1287,7 @@ async fn post_wildcard_error_comment(
         let project_ids = match active_project_ids_for_integration(state, *integration_id).await {
             Ok(rows) => rows,
             Err(e) => {
-                warn!(error = %e, %integration_id, "/ci run wildcard: failed to load projects for reply comment");
+                warn!(error = %e, %integration_id, "/gradient run wildcard: failed to load projects for reply comment");
                 continue;
             }
         };
@@ -1151,48 +1297,45 @@ async fn post_wildcard_error_comment(
                     Ok(Some(r)) => r,
                     Ok(None) => continue,
                     Err(e) => {
-                        warn!(error = %e, %project_id, "/ci run wildcard: resolving reporter for reply comment");
+                        warn!(error = %e, %project_id, "/gradient run wildcard: resolving reporter for reply comment");
                         continue;
                     }
                 };
             match reporter.post_pr_comment(owner, repo, pr_number, &body).await {
                 Ok(()) => return,
                 Err(e) => {
-                    warn!(error = %e, %project_id, "/ci run wildcard: reply comment post failed, trying next project");
+                    warn!(error = %e, %project_id, "/gradient run wildcard: reply comment post failed, trying next project");
                 }
             }
         }
     }
 }
 
-fn debug_no_match(pr_number: u64) {
-    tracing::debug!(
-        pr_number,
-        "/ci run comment had no matching parked evaluation"
-    );
-}
-
-/// Outcome of parsing a `/ci run [wildcard]` comment.
+/// Outcome of parsing a `/gradient …` PR comment.
 #[derive(Debug, PartialEq, Eq)]
-pub(super) enum CiRunCommand {
-    /// Bare `/ci run` — unpark with the wildcard already on the eval row.
-    Plain,
-    /// `/ci run <wildcard>` — unpark and override the eval row's wildcard
-    /// with this raw string. Not yet validated; the caller must pass it
-    /// through `Wildcard::from_str` and reject (with a reply comment) on
-    /// parse failure.
-    WithWildcard(String),
+pub(super) enum GradientCommand {
+    /// `/gradient run [wildcard]` — re-run CI for this PR. Unparks an
+    /// existing approval-gated eval if one exists, otherwise creates a fresh
+    /// evaluation. The optional `wildcard` overrides the project's default
+    /// attribute path for this run; it is not yet validated, the caller must
+    /// pass it through `Wildcard::from_str` and reply on parse failure.
+    Run { wildcard: Option<String> },
+    /// `/gradient approve` — explicitly clear the approval gate for this PR.
+    /// No-op if there is no parked eval.
+    Approve,
 }
 
-/// Lifts `/ci run` (with or without a wildcard argument) from a comment
-/// body. The command must appear on its own line (after trimming
-/// whitespace). Blank lines and forge quote-reply lines (`> …`) are
-/// skipped so a maintainer can quote the PR context above the command;
-/// any other prose before or after the command disqualifies the comment.
-pub(super) fn parse_ci_run_command(body: &str) -> Option<CiRunCommand> {
-    const PREFIX: &str = "/ci run";
+/// Lifts a `/gradient <subcommand>` instruction from a PR comment. The
+/// command must appear on its own line (after trimming whitespace). Blank
+/// lines and forge quote-reply lines (`> …`) are skipped so a maintainer
+/// can quote PR context above the command; any other prose before or after
+/// disqualifies the comment.
+///
+/// Recognised subcommands: `run [wildcard]` and `approve`.
+pub(super) fn parse_gradient_command(body: &str) -> Option<GradientCommand> {
+    const PREFIX: &str = "/gradient";
 
-    let mut found: Option<CiRunCommand> = None;
+    let mut found: Option<GradientCommand> = None;
     for line in body.lines() {
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('>') {
@@ -1208,19 +1351,28 @@ pub(super) fn parse_ci_run_command(body: &str) -> Option<CiRunCommand> {
         if !prefix.eq_ignore_ascii_case(PREFIX) {
             return None;
         }
-        if rest.is_empty() {
-            found = Some(CiRunCommand::Plain);
-            continue;
-        }
         if !rest.starts_with(|c: char| c.is_ascii_whitespace()) {
             return None;
         }
-        let arg = rest.trim();
-        if arg.is_empty() {
-            found = Some(CiRunCommand::Plain);
+        let rest = rest.trim();
+        let (verb, arg) = match rest.split_once(|c: char| c.is_ascii_whitespace()) {
+            Some((v, a)) => (v, a.trim()),
+            None => (rest, ""),
+        };
+        if verb.eq_ignore_ascii_case("run") {
+            found = Some(GradientCommand::Run {
+                wildcard: (!arg.is_empty()).then(|| arg.to_string()),
+            });
             continue;
         }
-        found = Some(CiRunCommand::WithWildcard(arg.to_string()));
+        if verb.eq_ignore_ascii_case("approve") {
+            if !arg.is_empty() {
+                return None;
+            }
+            found = Some(GradientCommand::Approve);
+            continue;
+        }
+        return None;
     }
     found
 }
@@ -1271,7 +1423,8 @@ async fn active_project_ids_for_integration(
 mod tests {
     use super::super::WebhookTriggerOutcome;
     use super::{
-        CiRunCommand, glob_match_pattern, glob_matches, normalize_repo_url, parse_ci_run_command,
+        GradientCommand, glob_match_pattern, glob_matches, normalize_repo_url,
+        parse_gradient_command,
     };
 
     #[test]
@@ -1320,78 +1473,111 @@ mod tests {
     }
 
     #[test]
-    fn parse_ci_run_command_plain_returns_plain() {
-        assert!(matches!(
-            parse_ci_run_command("/ci run"),
-            Some(CiRunCommand::Plain)
-        ));
-        assert!(matches!(
-            parse_ci_run_command("   /ci run   "),
-            Some(CiRunCommand::Plain)
-        ));
-        assert!(matches!(
-            parse_ci_run_command("\n/ci run\n"),
-            Some(CiRunCommand::Plain)
-        ));
+    fn parse_gradient_run_bare_returns_run_without_wildcard() {
+        assert_eq!(
+            parse_gradient_command("/gradient run"),
+            Some(GradientCommand::Run { wildcard: None })
+        );
+        assert_eq!(
+            parse_gradient_command("   /gradient run   "),
+            Some(GradientCommand::Run { wildcard: None })
+        );
+        assert_eq!(
+            parse_gradient_command("\n/gradient run\n"),
+            Some(GradientCommand::Run { wildcard: None })
+        );
     }
 
     #[test]
-    fn parse_ci_run_command_case_insensitive_prefix() {
-        assert!(matches!(
-            parse_ci_run_command("/CI Run"),
-            Some(CiRunCommand::Plain)
-        ));
-        assert!(matches!(
-            parse_ci_run_command("/Ci RUN packages.*.*"),
-            Some(CiRunCommand::WithWildcard(ref w)) if w == "packages.*.*"
-        ));
+    fn parse_gradient_run_is_case_insensitive() {
+        assert_eq!(
+            parse_gradient_command("/GRADIENT Run"),
+            Some(GradientCommand::Run { wildcard: None })
+        );
+        assert_eq!(
+            parse_gradient_command("/Gradient RUN packages.*.*"),
+            Some(GradientCommand::Run {
+                wildcard: Some("packages.*.*".to_string())
+            })
+        );
     }
 
     #[test]
-    fn parse_ci_run_command_with_wildcard() {
-        assert!(matches!(
-            parse_ci_run_command("/ci run packages.*.*"),
-            Some(CiRunCommand::WithWildcard(ref w)) if w == "packages.*.*"
-        ));
+    fn parse_gradient_run_with_wildcard() {
+        assert_eq!(
+            parse_gradient_command("/gradient run packages.*.*"),
+            Some(GradientCommand::Run {
+                wildcard: Some("packages.*.*".to_string())
+            })
+        );
     }
 
     #[test]
-    fn parse_ci_run_command_with_complex_wildcard() {
-        let body = "/ci run packages.*.foo,!packages.x86_64-linux.broken";
-        let Some(CiRunCommand::WithWildcard(w)) = parse_ci_run_command(body) else {
-            panic!("expected WithWildcard");
+    fn parse_gradient_run_with_complex_wildcard_preserves_raw() {
+        let body = "/gradient run packages.*.foo,!packages.x86_64-linux.broken";
+        let Some(GradientCommand::Run { wildcard: Some(w) }) = parse_gradient_command(body) else {
+            panic!("expected Run with wildcard");
         };
         assert_eq!(w, "packages.*.foo,!packages.x86_64-linux.broken");
     }
 
     #[test]
-    fn parse_ci_run_command_trims_trailing_whitespace_around_wildcard() {
-        let body = "   /ci run   packages.*.*   ";
-        let Some(CiRunCommand::WithWildcard(w)) = parse_ci_run_command(body) else {
-            panic!("expected WithWildcard");
+    fn parse_gradient_run_trims_whitespace_around_wildcard() {
+        let body = "   /gradient run   packages.*.*   ";
+        let Some(GradientCommand::Run { wildcard: Some(w) }) = parse_gradient_command(body) else {
+            panic!("expected Run with wildcard");
         };
         assert_eq!(w, "packages.*.*");
     }
 
     #[test]
-    fn parse_ci_run_command_after_quote_reply() {
-        let body =
-            "> @maintainer asked us to retrigger\n> after rebasing main\n\n/ci run packages.*.*";
-        let Some(CiRunCommand::WithWildcard(w)) = parse_ci_run_command(body) else {
-            panic!("expected WithWildcard");
+    fn parse_gradient_run_after_quote_reply() {
+        let body = "> @maintainer asked us to retrigger\n> after rebasing main\n\n/gradient run packages.*.*";
+        let Some(GradientCommand::Run { wildcard: Some(w) }) = parse_gradient_command(body) else {
+            panic!("expected Run with wildcard");
         };
         assert_eq!(w, "packages.*.*");
     }
 
     #[test]
-    fn parse_ci_run_command_rejects_unrelated() {
-        assert!(parse_ci_run_command("looks good").is_none());
-        assert!(parse_ci_run_command("/ci runfoo").is_none());
-        assert!(parse_ci_run_command("foo\n/ci run\nbar").is_none());
-        assert!(
-            parse_ci_run_command("quote-reply context\n\n/ci run").is_none(),
-            "non-quote prose before /ci run must reject"
+    fn parse_gradient_approve() {
+        assert_eq!(
+            parse_gradient_command("/gradient approve"),
+            Some(GradientCommand::Approve)
         );
+        assert_eq!(
+            parse_gradient_command("   /GRADIENT Approve   "),
+            Some(GradientCommand::Approve)
+        );
+    }
+
+    #[test]
+    fn parse_gradient_approve_rejects_trailing_args() {
+        assert!(parse_gradient_command("/gradient approve packages.*").is_none());
+    }
+
+    #[test]
+    fn parse_gradient_rejects_unknown_subcommand() {
+        assert!(parse_gradient_command("/gradient yolo").is_none());
+        assert!(parse_gradient_command("/gradient").is_none());
+    }
+
+    #[test]
+    fn parse_gradient_rejects_unrelated() {
+        assert!(parse_gradient_command("looks good").is_none());
+        assert!(parse_gradient_command("/gradientrun").is_none());
+        assert!(parse_gradient_command("foo\n/gradient run\nbar").is_none());
+        assert!(
+            parse_gradient_command("quote-reply context\n\n/gradient run").is_none(),
+            "non-quote prose before /gradient must reject"
+        );
+    }
+
+    #[test]
+    fn parse_gradient_legacy_ci_prefix_rejected() {
+        // Hard rename: old /ci prefix no longer recognised.
+        assert!(parse_gradient_command("/ci run").is_none());
+        assert!(parse_gradient_command("/ci approve").is_none());
     }
 
     #[test]
