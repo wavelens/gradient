@@ -477,6 +477,23 @@ Backend (`cargo test -p core --lib state::tests`):
   configuration validator rejects `keep_evaluations < 1`, matching the
   `types.ints.positive` constraint in `nix/modules/gradient-state.nix`
   and the API-level `apply_keep_evaluations` check.
+- `default_keep_evaluations_is_thirty`
+  (`backend/core/src/types/cli/storage.rs`) - `StorageArgs::default()`
+  yields `keep_evaluations = 30` so a default `gradient-server` install
+  bounds per-project evaluation retention instead of allowing unbounded
+  growth (issue #92).
+- `default_nar_ttl_hours_is_two_weeks`
+  (`backend/core/src/types/cli/storage.rs`) - `StorageArgs::default()`
+  yields `nar_ttl_hours = 336` (2 weeks) so cached NARs eventually
+  expire on a default deploy (issue #92).
+- `clap_default_keep_evaluations_is_thirty`
+  (`backend/core/src/types/cli/storage.rs`) - parsing an empty argv
+  through clap yields `keep_evaluations = 30`, guarding against drift
+  between the `#[arg(default_value …)]` attribute and the `Default`
+  impl.
+- `clap_default_nar_ttl_hours_is_two_weeks`
+  (`backend/core/src/types/cli/storage.rs`) - parsing an empty argv
+  through clap yields `nar_ttl_hours = 336`, same drift guard.
 - `state_project_silently_ignores_legacy_force_evaluation_field` -
   state files written before the rename may still carry
   `force_evaluation`; serde's default unknown-field handling drops it

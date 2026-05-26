@@ -53,7 +53,7 @@ openssl rand -base64 48 > /run/secrets/gradient-crypt
 | `settings.sentryDsn` | `null` | Override the Sentry DSN used when `reportErrors` is true. `null` ships reports to the upstream Wavelens instance at `reports.wavelens.io`; set your own DSN to keep reports in-house. (`GRADIENT_SENTRY_DSN`) |
 | `discoverable` | `true` | Accept incoming `/proto` WebSocket connections from workers |
 | `settings.maxProtoConnections` | `256` | Max simultaneous worker WebSocket connections; further upgrades return `503 Service Unavailable` with `Retry-After: 10` until a slot frees |
-| `settings.keepEvaluations` | `5` | Number of evaluations kept per project |
+| `settings.keepEvaluations` | `30` | Global maximum of evaluations kept per project (caps the per-project setting) |
 | `settings.maxRequestSize` | `2097152` (2 MiB) | Max HTTP request body in bytes for most endpoints (caps webhook/JSON payloads to prevent OOM). The build-request blob endpoint uses a fixed 20 MiB cap. |
 | `settings.logLevel.default` | `info` | Log level: `trace` `debug` `info` `warn` `error` |
 | `settings.logLevel.cache` | null | Cache log level override (null inherits default) |
