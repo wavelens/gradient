@@ -998,9 +998,10 @@ pub(super) async fn handle_issue_comment(
         }
     };
 
-    if !is_ci_run_command(&comment_body) {
-        return;
-    }
+    let _cmd = match parse_ci_run_command(&comment_body) {
+        Some(cmd) => cmd,
+        None => return,
+    };
     let Some(pr_number) = pr_number else {
         warn!("comment webhook: /ci run but no PR number");
         return;
@@ -1096,28 +1097,57 @@ fn debug_no_match(pr_number: u64) {
     );
 }
 
-/// Lifts `/ci run` from a comment body. The command must appear on its own
-/// line (after trimming whitespace). Blank lines and forge quote-reply lines
-/// (`> …`) are skipped so a maintainer can quote the PR context above the
-/// command, but any other prose before or after the command disqualifies
-/// the comment - that protects against accidental unparks when a contributor
-/// quotes an earlier `/ci run` in a reply.
-fn is_ci_run_command(body: &str) -> bool {
-    let mut saw_command = false;
+/// Outcome of parsing a `/ci run [wildcard]` comment.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum CiRunCommand {
+    /// Bare `/ci run` — unpark with the wildcard already on the eval row.
+    Plain,
+    /// `/ci run <wildcard>` — unpark and override the eval row's wildcard
+    /// with this raw string. Not yet validated; the caller must pass it
+    /// through `Wildcard::from_str` and reject (with a reply comment) on
+    /// parse failure.
+    WithWildcard(String),
+}
+
+/// Lifts `/ci run` (with or without a wildcard argument) from a comment
+/// body. The command must appear on its own line (after trimming
+/// whitespace). Blank lines and forge quote-reply lines (`> …`) are
+/// skipped so a maintainer can quote the PR context above the command;
+/// any other prose before or after the command disqualifies the comment.
+pub(super) fn parse_ci_run_command(body: &str) -> Option<CiRunCommand> {
+    const PREFIX: &str = "/ci run";
+
+    let mut found: Option<CiRunCommand> = None;
     for line in body.lines() {
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('>') {
             continue;
         }
-        if saw_command {
-            return false;
+        if found.is_some() {
+            return None;
         }
-        if !trimmed.eq_ignore_ascii_case("/ci run") {
-            return false;
+        if trimmed.len() < PREFIX.len() {
+            return None;
         }
-        saw_command = true;
+        let (prefix, rest) = trimmed.split_at(PREFIX.len());
+        if !prefix.eq_ignore_ascii_case(PREFIX) {
+            return None;
+        }
+        if rest.is_empty() {
+            found = Some(CiRunCommand::Plain);
+            continue;
+        }
+        if !rest.starts_with(|c: char| c.is_ascii_whitespace()) {
+            return None;
+        }
+        let arg = rest.trim();
+        if arg.is_empty() {
+            found = Some(CiRunCommand::Plain);
+            continue;
+        }
+        found = Some(CiRunCommand::WithWildcard(arg.to_string()));
     }
-    saw_command
+    found
 }
 
 fn github_installation_id_from_comment_body(body: &[u8]) -> Option<i64> {
