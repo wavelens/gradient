@@ -55,6 +55,7 @@ pub fn build_manifest(serve_url: &str) -> Value {
             "statuses": "write",
             "checks": "write",
             "pull_requests": "write",
+            "issues": "write",
         },
         "default_events": [
             "push",
@@ -170,6 +171,7 @@ mod tests {
         assert_eq!(m["default_permissions"]["statuses"], "write");
         assert_eq!(m["default_permissions"]["checks"], "write");
         assert_eq!(m["default_permissions"]["pull_requests"], "write");
+        assert_eq!(m["default_permissions"]["issues"], "write");
         assert_eq!(
             m["default_events"],
             json!([
