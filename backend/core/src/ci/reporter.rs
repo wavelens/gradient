@@ -410,6 +410,14 @@ fn gitlab_project_id(owner: &str, repo: &str) -> String {
     format!("{}/{}", owner, repo).replace('/', "%2F")
 }
 
+fn gitlab_comment_url(base_url: &str, owner: &str, repo: &str, pr_number: u64) -> String {
+    let project_id = gitlab_project_id(owner, repo);
+    format!(
+        "{}/api/v4/projects/{}/merge_requests/{}/notes",
+        base_url, project_id, pr_number
+    )
+}
+
 #[async_trait]
 impl CiReporter for GitlabReporter {
     async fn report(&self, report: &CiReport) -> Result<Option<i64>> {
@@ -483,6 +491,40 @@ impl CiReporter for GitlabReporter {
         Ok(members
             .iter()
             .any(|m| m.username.eq_ignore_ascii_case(username) && m.access_level >= 30))
+    }
+
+    async fn post_pr_comment(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+        body: &str,
+    ) -> Result<()> {
+        let url = gitlab_comment_url(&self.base_url, owner, repo, pr_number);
+        let payload = ForgeCommentPayload { body };
+
+        let resp = self
+            .client
+            .post(&url)
+            .header("PRIVATE-TOKEN", &self.token)
+            .header("Content-Type", "application/json")
+            .json(&payload)
+            .send()
+            .await
+            .context("Failed to send GitLab comment request")?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let resp_body = resp.text().await.unwrap_or_default();
+            warn!(
+                gitlab_url = %url,
+                http_status = %status,
+                body = %resp_body,
+                "GitLab MR comment post failed"
+            );
+            anyhow::bail!("GitLab returned {}: {}", status, resp_body);
+        }
+        Ok(())
     }
 }
 
@@ -1455,6 +1497,20 @@ mod tests {
         // With deeper path, splitn(2) keeps everything after owner/ as the repo name.
         let got = parse_owner_repo("git@gitea.example.com:group/sub/repo.git");
         assert_eq!(got, Some(("group".into(), "sub/repo".into())));
+    }
+
+    #[test]
+    fn gitlab_comment_url_url_encodes_owner_repo() {
+        let url = gitlab_comment_url(
+            "https://gitlab.example.com",
+            "group/subgroup",
+            "demo",
+            7,
+        );
+        assert_eq!(
+            url,
+            "https://gitlab.example.com/api/v4/projects/group%2Fsubgroup%2Fdemo/merge_requests/7/notes"
+        );
     }
 
     #[test]
