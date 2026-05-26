@@ -416,34 +416,40 @@ async fn execute_forge_status_report(
     })
 }
 
-/// Upsert `check_run_id` into `evaluation.check_run_ids` under the given
-/// context name. Keeps every (Awaiting Approval / Evaluation / Build {ep})
-/// check id distinct so subsequent PATCHes don't stomp the wrong check run.
+/// Atomically upsert `check_run_id` into `evaluation.check_run_ids` under
+/// `context`. Uses Postgres `jsonb_set` so concurrent persists for
+/// different context keys (e.g. Approval + Evaluation + per-Build) cannot
+/// race each other into wiping previously-stored ids - a load-modify-write
+/// over a JSON column would let the slower writer's snapshot clobber the
+/// faster writer's entry.
 async fn persist_evaluation_check_id(
     state: &Arc<ServerState>,
     evaluation_id: EvaluationId,
     context: &str,
     check_run_id: i64,
 ) {
-    use sea_orm::IntoActiveModel;
-    let Ok(Some(eval)) = EEvaluation::find_by_id(evaluation_id)
-        .one(&state.worker_db)
-        .await
-    else {
-        return;
-    };
-    let mut map = eval
-        .check_run_ids
-        .as_ref()
-        .and_then(|v| v.as_object().cloned())
-        .unwrap_or_default();
-    if map.get(context).and_then(|v| v.as_i64()) == Some(check_run_id) {
-        return;
-    }
-    map.insert(context.to_string(), JsonValue::from(check_run_id));
-    let mut active = eval.into_active_model();
-    active.check_run_ids = Set(Some(JsonValue::Object(map)));
-    if let Err(e) = active.update(&state.worker_db).await {
+    use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
+
+    let result = state
+        .worker_db
+        .execute(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            r#"UPDATE evaluation
+               SET check_run_ids = jsonb_set(
+                   COALESCE(check_run_ids, '{}'::jsonb),
+                   ARRAY[$2::text],
+                   to_jsonb($3::bigint),
+                   true
+               )
+               WHERE id = $1"#,
+            [
+                sea_orm::Value::Uuid(Some(Box::new(evaluation_id.into_inner()))),
+                sea_orm::Value::String(Some(Box::new(context.to_string()))),
+                sea_orm::Value::BigInt(Some(check_run_id)),
+            ],
+        ))
+        .await;
+    if let Err(e) = result {
         warn!(error = %e, %evaluation_id, "persisting evaluation check_run_ids");
     }
 }
