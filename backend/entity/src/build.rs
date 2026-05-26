@@ -16,6 +16,7 @@ use crate::ids::{BuildId, DerivationId, EvaluationId};
     Debug,
     Clone,
     Copy,
+    Default,
     PartialEq,
     Eq,
     DeriveActiveEnum,
@@ -27,6 +28,7 @@ use crate::ids::{BuildId, DerivationId, EvaluationId};
 )]
 #[sea_orm(rs_type = "i32", db_type = "Integer")]
 pub enum BuildStatus {
+    #[default]
     #[sea_orm(num_value = 0)]
     Created = 0,
     #[sea_orm(num_value = 1)]
