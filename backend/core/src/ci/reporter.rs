@@ -505,6 +505,13 @@ pub struct GithubReporter {
     client: reqwest::Client,
 }
 
+fn github_comment_url(base_url: &str, owner: &str, repo: &str, pr_number: u64) -> String {
+    format!(
+        "{}/repos/{}/{}/issues/{}/comments",
+        base_url, owner, repo, pr_number
+    )
+}
+
 impl GithubReporter {
     const DEFAULT_API_URL: &'static str = "https://api.github.com";
 
@@ -631,6 +638,41 @@ impl CiReporter for GithubReporter {
             .await
             .context("Failed to parse GitHub permission response")?;
         Ok(matches!(parsed.permission.as_str(), "admin" | "write"))
+    }
+
+    async fn post_pr_comment(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+        body: &str,
+    ) -> Result<()> {
+        let url = github_comment_url(&self.base_url, owner, repo, pr_number);
+        let payload = ForgeCommentPayload { body };
+
+        let resp = self
+            .client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", self.token))
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .json(&payload)
+            .send()
+            .await
+            .context("Failed to send GitHub comment request")?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let resp_body = resp.text().await.unwrap_or_default();
+            warn!(
+                github_url = %url,
+                http_status = %status,
+                body = %resp_body,
+                "GitHub PR comment post failed"
+            );
+            anyhow::bail!("GitHub returned {}: {}", status, resp_body);
+        }
+        Ok(())
     }
 }
 
@@ -903,6 +945,51 @@ impl CiReporter for GithubAppReporter {
             .await
             .context("Failed to parse GitHub permission response")?;
         Ok(matches!(parsed.permission.as_str(), "admin" | "write"))
+    }
+
+    async fn post_pr_comment(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+        body: &str,
+    ) -> Result<()> {
+        let token = crate::ci::github_app::get_installation_token(
+            &self.client,
+            self.app_id,
+            &self.private_key_pem,
+            self.installation_id,
+        )
+        .await
+        .context("Failed to mint GitHub App installation token")?;
+
+        let url = github_comment_url(&self.api_base_url, owner, repo, pr_number);
+        let payload = ForgeCommentPayload { body };
+
+        let resp = self
+            .client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", token))
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .json(&payload)
+            .send()
+            .await
+            .context("Failed to send GitHub App comment request")?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let resp_body = resp.text().await.unwrap_or_default();
+            warn!(
+                github_url = %url,
+                http_status = %status,
+                body = %resp_body,
+                installation_id = self.installation_id,
+                "GitHub App PR comment post failed"
+            );
+            anyhow::bail!("GitHub App returned {}: {}", status, resp_body);
+        }
+        Ok(())
     }
 }
 
@@ -1368,6 +1455,15 @@ mod tests {
         // With deeper path, splitn(2) keeps everything after owner/ as the repo name.
         let got = parse_owner_repo("git@gitea.example.com:group/sub/repo.git");
         assert_eq!(got, Some(("group".into(), "sub/repo".into())));
+    }
+
+    #[test]
+    fn github_comment_url_targets_issues_endpoint() {
+        let url = github_comment_url("https://api.github.com", "octo", "demo", 42);
+        assert_eq!(
+            url,
+            "https://api.github.com/repos/octo/demo/issues/42/comments"
+        );
     }
 
     #[test]
