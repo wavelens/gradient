@@ -2482,10 +2482,23 @@ immediately. Coverage:
 - `web/src/endpoints/forge_hooks/events.rs` - extraction of
   `pr_number`, `pr_author`, `is_fork`, `base_owner`, `base_repo` from
   GitHub / Gitea / GitLab payloads.
-- `web/src/endpoints/forge_hooks/trigger.rs::is_ci_run_command_*` -
-  recogniser for the `/ci run` comment unpark command (case
-  insensitive, allows leading quote-reply lines, rejects trailing
-  noise).
+- `web/src/endpoints/forge_hooks/trigger.rs::parse_ci_run_command_*` -
+  recogniser for the `/ci run [wildcard]` comment unpark command
+  (case insensitive, allows leading quote-reply lines, rejects
+  multi-line prose, captures an optional trailing wildcard string
+  for one-shot overrides; issue #274).
+- `core/src/ci/unpark.rs::unpark_approval_with_wildcard_*`
+  (issue #274) - the new helper writes the maintainer-supplied
+  wildcard into the same row update that flips `Waiting -> Queued`,
+  so the dispatcher reads a consistent row; same guards as
+  `unpark_approval`.
+- `core/src/ci/reporter.rs::{gitea,github,gitlab}_comment_url_*`
+  (issue #274) - per-forge URL builders for the `post_pr_comment`
+  trait method that surfaces wildcard parse errors back to the
+  commenter.
+- `core/src/ci/reporter.rs::forge_comment_payload_serializes_with_body_field`
+  (issue #274) - the shared `{"body": "..."}` JSON payload sent to
+  all three forges.
 - `core/src/ci/unpark.rs::unpark_approval_*` - transitions
   `Waiting + Approval` back to `Queued` once a maintainer authorises
   the PR; no-ops when the row's reason is something else (NoCache /
