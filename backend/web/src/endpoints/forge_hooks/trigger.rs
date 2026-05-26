@@ -10,9 +10,10 @@ use super::response::{QueuedEvaluation, SkippedProject, WebhookTriggerOutcome};
 use entity::project_trigger as ept;
 use gradient_core::ci::{
     APPROVAL_ACTION_ID, ApplyInput, ApplyOutcome, ApprovalInfo, ForgeType, apply_trigger,
-    find_approval_gated_eval, unpark_approval,
+    find_approval_gated_eval, unpark_approval, unpark_approval_with_wildcard,
 };
 use gradient_core::types::triggers::{TriggerConfig, TriggerType};
+use gradient_core::types::wildcard::Wildcard;
 use gradient_core::types::*;
 use scheduler::Scheduler;
 use sea_orm::ActiveValue::Set;
@@ -998,7 +999,7 @@ pub(super) async fn handle_issue_comment(
         }
     };
 
-    let _cmd = match parse_ci_run_command(&comment_body) {
+    let cmd = match parse_ci_run_command(&comment_body) {
         Some(cmd) => cmd,
         None => return,
     };
@@ -1043,9 +1044,30 @@ pub(super) async fn handle_issue_comment(
         }
     };
 
+    let wildcard_override: Option<String> = match &cmd {
+        CiRunCommand::Plain => None,
+        CiRunCommand::WithWildcard(raw) => match raw.parse::<Wildcard>() {
+            Ok(_) => Some(raw.clone()),
+            Err(e) => {
+                warn!(wildcard = %raw, error = %e, "/ci run wildcard rejected");
+                post_wildcard_error_comment(
+                    state,
+                    &integration_ids,
+                    owner,
+                    repo,
+                    pr_number,
+                    raw,
+                    &e,
+                )
+                .await;
+                return;
+            }
+        },
+    };
+
     let mut unparked_any = false;
-    for integration_id in integration_ids {
-        let project_ids = match active_project_ids_for_integration(state, integration_id).await {
+    for integration_id in &integration_ids {
+        let project_ids = match active_project_ids_for_integration(state, *integration_id).await {
             Ok(rows) => rows,
             Err(e) => {
                 warn!(error = %e, "comment webhook: failed to load project list");
@@ -1067,12 +1089,17 @@ pub(super) async fn handle_issue_comment(
                 );
                 continue;
             }
-            match unpark_approval(&state.web_db, eval.id).await {
+            let unpark_result = match &wildcard_override {
+                None => unpark_approval(&state.web_db, eval.id).await,
+                Some(w) => unpark_approval_with_wildcard(&state.web_db, eval.id, w).await,
+            };
+            match unpark_result {
                 Ok(Some(unparked)) => {
                     info!(
                         evaluation_id = %eval.id,
                         pr_number,
                         %sender,
+                        wildcard_override = wildcard_override.as_deref(),
                         "PR approval gate cleared via /ci run comment"
                     );
                     dispatch_approval_granted(state, &unparked).await;
@@ -1087,6 +1114,54 @@ pub(super) async fn handle_issue_comment(
     }
     if !unparked_any {
         debug_no_match(pr_number);
+    }
+}
+
+/// Posts a reply comment to the PR explaining a `/ci run <wildcard>`
+/// parse failure. Walks every project owned by the matching
+/// integrations and uses the first project with a usable
+/// `ForgeStatusReport` action's reporter. Failures are logged and
+/// swallowed - a comment-post failure must not crash the webhook
+/// handler.
+async fn post_wildcard_error_comment(
+    state: &Arc<ServerState>,
+    integration_ids: &[IntegrationId],
+    owner: &str,
+    repo: &str,
+    pr_number: u64,
+    raw_wildcard: &str,
+    parse_error: &gradient_core::types::input::InputError,
+) {
+    let body = format!(
+        "Could not parse wildcard `{}`: {}",
+        raw_wildcard, parse_error
+    );
+
+    for integration_id in integration_ids {
+        let project_ids = match active_project_ids_for_integration(state, *integration_id).await {
+            Ok(rows) => rows,
+            Err(e) => {
+                warn!(error = %e, %integration_id, "/ci run wildcard: failed to load projects for reply comment");
+                continue;
+            }
+        };
+        for project_id in project_ids {
+            let reporter =
+                match gradient_core::ci::actions::reporter_for_project(state, project_id).await {
+                    Ok(Some(r)) => r,
+                    Ok(None) => continue,
+                    Err(e) => {
+                        warn!(error = %e, %project_id, "/ci run wildcard: resolving reporter for reply comment");
+                        continue;
+                    }
+                };
+            match reporter.post_pr_comment(owner, repo, pr_number, &body).await {
+                Ok(()) => return,
+                Err(e) => {
+                    warn!(error = %e, %project_id, "/ci run wildcard: reply comment post failed, trying next project");
+                }
+            }
+        }
     }
 }
 
