@@ -162,6 +162,18 @@ pub struct GiteaReporter {
     client: reqwest::Client,
 }
 
+fn gitea_comment_url(base_url: &str, owner: &str, repo: &str, pr_number: u64) -> String {
+    format!(
+        "{}/api/v1/repos/{}/{}/issues/{}/comments",
+        base_url, owner, repo, pr_number
+    )
+}
+
+#[derive(Debug, Serialize)]
+struct ForgeCommentPayload<'a> {
+    body: &'a str,
+}
+
 impl GiteaReporter {
     pub fn new(
         client: reqwest::Client,
@@ -284,6 +296,40 @@ impl CiReporter for GiteaReporter {
             parsed.permission.as_str(),
             "admin" | "owner" | "write"
         ))
+    }
+
+    async fn post_pr_comment(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+        body: &str,
+    ) -> Result<()> {
+        let url = gitea_comment_url(&self.base_url, owner, repo, pr_number);
+        let payload = ForgeCommentPayload { body };
+
+        let resp = self
+            .client
+            .post(&url)
+            .header("Authorization", format!("token {}", self.token))
+            .header("Content-Type", "application/json")
+            .json(&payload)
+            .send()
+            .await
+            .context("Failed to send Gitea comment request")?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let resp_body = resp.text().await.unwrap_or_default();
+            warn!(
+                gitea_url = %url,
+                http_status = %status,
+                body = %resp_body,
+                "Gitea PR comment post failed"
+            );
+            anyhow::bail!("Gitea returned {}: {}", status, resp_body);
+        }
+        Ok(())
     }
 }
 
@@ -1322,5 +1368,26 @@ mod tests {
         // With deeper path, splitn(2) keeps everything after owner/ as the repo name.
         let got = parse_owner_repo("git@gitea.example.com:group/sub/repo.git");
         assert_eq!(got, Some(("group".into(), "sub/repo".into())));
+    }
+
+    #[test]
+    fn gitea_comment_url_targets_issues_endpoint() {
+        let url = gitea_comment_url("https://gitea.example.com", "octo", "demo", 42);
+        assert_eq!(
+            url,
+            "https://gitea.example.com/api/v1/repos/octo/demo/issues/42/comments"
+        );
+    }
+
+    #[test]
+    fn forge_comment_payload_serializes_with_body_field() {
+        let payload = ForgeCommentPayload {
+            body: "Could not parse wildcard `bad`: error",
+        };
+        let json = serde_json::to_value(&payload).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({"body": "Could not parse wildcard `bad`: error"})
+        );
     }
 }
