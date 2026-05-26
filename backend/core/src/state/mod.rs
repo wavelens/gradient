@@ -6,6 +6,10 @@
 
 mod provisioning;
 
+pub use provisioning::{
+    PendingOrgMembership, PendingOrgMemberships, apply_pending_org_memberships,
+};
+
 use crate::types::triggers::{ConcurrencyPolicy, TriggerType};
 use entity::organization_cache::CacheSubscriptionMode;
 use sea_orm::DatabaseConnection;
@@ -674,10 +678,10 @@ pub async fn load_and_apply_state(
     crypt_secret_file: &str,
     delete_state: bool,
     email_enabled: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<PendingOrgMemberships, Box<dyn std::error::Error>> {
     let Some(path) = state_file_path else {
         tracing::info!("No state file configured, skipping state management");
-        return Ok(());
+        return Ok(PendingOrgMemberships::new());
     };
 
     tracing::info!(path, "Loading state configuration");
@@ -701,7 +705,7 @@ pub async fn load_and_apply_state(
 
     tracing::info!("State configuration validated successfully");
 
-    provisioning::apply_state_to_database(
+    let pending = provisioning::apply_state_to_database(
         db,
         &config,
         crypt_secret_file,
@@ -710,7 +714,7 @@ pub async fn load_and_apply_state(
     )
     .await?;
 
-    Ok(())
+    Ok(pending)
 }
 
 #[cfg(test)]

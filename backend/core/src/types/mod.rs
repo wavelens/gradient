@@ -133,6 +133,11 @@ pub struct ServerState {
     /// Wall-clock time the process bootstrapped. Used to derive
     /// `gradient_uptime_seconds` for the metrics endpoint.
     pub started_at: chrono::DateTime<chrono::Utc>,
+    /// Org memberships declared in state for users who did not exist at
+    /// apply time. Drained per-username when a user later registers or
+    /// signs in via OIDC for the first time. Empty when no state file is
+    /// configured or when every declared member already existed.
+    pub pending_org_memberships: Arc<crate::state::PendingOrgMemberships>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

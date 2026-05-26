@@ -126,6 +126,21 @@ pub async fn post_basic_register(
         .await
         .map_err(|e| WebError::from_db_err(e, "User"))?;
 
+    if let Err(e) = gradient_core::state::apply_pending_org_memberships(
+        &state.web_db,
+        &state.pending_org_memberships,
+        &user.username,
+        user.id,
+    )
+    .await
+    {
+        tracing::warn!(
+            error = %e,
+            username = %user.username,
+            "Failed to apply pending state-managed org memberships for new user"
+        );
+    }
+
     audit_record(
         &state.web_db,
         Some(user.id),

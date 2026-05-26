@@ -36,6 +36,7 @@ pub fn test_state(db: DatabaseConnection) -> Arc<ServerState> {
         shutdown: gradient_core::shutdown::Shutdown::new(),
         jwt_secret: SecretString::new("test-jwt-secret".to_string()),
         started_at: chrono::Utc::now(),
+        pending_org_memberships: Arc::new(std::collections::HashMap::new()),
     })
 }
 
@@ -60,5 +61,6 @@ pub fn test_state_with_log_storage(
         shutdown: gradient_core::shutdown::Shutdown::new(),
         jwt_secret: SecretString::new("test-jwt-secret".to_string()),
         started_at: chrono::Utc::now(),
+        pending_org_memberships: Arc::new(std::collections::HashMap::new()),
     })
 }

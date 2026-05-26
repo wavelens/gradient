@@ -116,6 +116,7 @@ pub fn make_test_server_with(
         shutdown: gradient_core::shutdown::Shutdown::new(),
         jwt_secret: SecretString::new(TEST_JWT_SECRET.to_string()),
         started_at: chrono::Utc::now(),
+        pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
     });
     TestServer::new(web::create_router(state))
 }

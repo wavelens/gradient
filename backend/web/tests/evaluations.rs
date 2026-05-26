@@ -175,6 +175,7 @@ fn make_server(db: sea_orm::DatabaseConnection) -> TestServer {
         shutdown: gradient_core::shutdown::Shutdown::new(),
         jwt_secret: SecretString::new(JWT_SECRET.to_string()),
         started_at: chrono::Utc::now(),
+        pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
     });
     TestServer::new(create_router(state))
 }

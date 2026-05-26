@@ -163,6 +163,7 @@ pub async fn public_cache_with_narinfo() -> Arc<ServerState> {
         shutdown: gradient_core::shutdown::Shutdown::new(),
         jwt_secret: SecretString::new("test-jwt-secret".to_string()),
         started_at: chrono::Utc::now(),
+        pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
     })
 }
 
@@ -207,6 +208,7 @@ pub async fn public_cache_state() -> Arc<ServerState> {
         shutdown: gradient_core::shutdown::Shutdown::new(),
         jwt_secret: SecretString::new("test-jwt-secret".to_string()),
         started_at: chrono::Utc::now(),
+        pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
     })
 }
 
@@ -256,6 +258,7 @@ pub async fn public_cache_with_nar() -> Arc<ServerState> {
         shutdown: gradient_core::shutdown::Shutdown::new(),
         jwt_secret: SecretString::new("test-jwt-secret".to_string()),
         started_at: chrono::Utc::now(),
+        pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
     });
 
     let compressed = synthetic_nar_zst().await;
@@ -359,6 +362,7 @@ fn make_state(
         shutdown: gradient_core::shutdown::Shutdown::new(),
         jwt_secret: SecretString::new("test-jwt-secret".to_string()),
         started_at: chrono::Utc::now(),
+        pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
     })
 }
 
@@ -429,6 +433,7 @@ pub async fn private_cache_state() -> Arc<ServerState> {
         shutdown: gradient_core::shutdown::Shutdown::new(),
         jwt_secret: SecretString::new("test-jwt-secret".to_string()),
         started_at: chrono::Utc::now(),
+        pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
     })
 }
 
@@ -484,6 +489,7 @@ pub async fn private_cache_with_nar() -> Arc<ServerState> {
         shutdown: gradient_core::shutdown::Shutdown::new(),
         jwt_secret: SecretString::new("test-jwt-secret".to_string()),
         started_at: chrono::Utc::now(),
+        pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
     });
 
     let compressed = synthetic_nar_zst().await;

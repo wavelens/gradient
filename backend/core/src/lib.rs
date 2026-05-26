@@ -63,7 +63,7 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
         }
     };
 
-    if let Err(e) = load_and_apply_state(
+    let pending_org_memberships = match load_and_apply_state(
         &db,
         cli.storage.state_file.as_deref(),
         &cli.secrets.crypt_secret_file,
@@ -72,9 +72,12 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
     )
     .await
     {
-        tracing::error!(error = %e, "Failed to load state configuration");
-        std::process::exit(1);
-    }
+        Ok(p) => Arc::new(p),
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to load state configuration");
+            std::process::exit(1);
+        }
+    };
 
     if cli.storage.keep_evaluations > 0 {
         let max = cli.storage.keep_evaluations as i32;
@@ -219,5 +222,6 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
         shutdown: Shutdown::new(),
         jwt_secret,
         started_at: chrono::Utc::now(),
+        pending_org_memberships,
     })
 }

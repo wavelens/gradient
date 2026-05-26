@@ -62,6 +62,7 @@ fn state_with_metrics(enabled: bool, db: DatabaseConnection) -> Arc<ServerState>
         shutdown: gradient_core::shutdown::Shutdown::new(),
         jwt_secret: SecretString::new("test-jwt-secret".into()),
         started_at: chrono::Utc::now(),
+        pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
     })
 }
 
