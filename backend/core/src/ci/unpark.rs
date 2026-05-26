@@ -141,6 +141,38 @@ pub async fn unpark_approval(
     Ok(Some(ae.update(db).await?))
 }
 
+/// Transition a single evaluation parked in `Waiting + Approval` back to
+/// `Queued` while overriding its `wildcard` column. Same guards as
+/// [`unpark_approval`]; on success, the same row update writes both the
+/// status flip and the new wildcard so the dispatcher reads a consistent
+/// row when it next polls.
+pub async fn unpark_approval_with_wildcard(
+    db: &impl ConnectionTrait,
+    evaluation_id: EvaluationId,
+    wildcard: &str,
+) -> Result<Option<MEvaluation>, sea_orm::DbErr> {
+    let Some(eval) = EEvaluation::find_by_id(evaluation_id).one(db).await? else {
+        return Ok(None);
+    };
+    if eval.status != EvaluationStatus::Waiting {
+        return Ok(None);
+    }
+    let is_approval = eval
+        .waiting_reason
+        .as_ref()
+        .and_then(WaitingReason::from_json)
+        .is_some_and(|r| matches!(r, WaitingReason::Approval { .. }));
+    if !is_approval {
+        return Ok(None);
+    }
+    let mut ae: AEvaluation = eval.into();
+    ae.status = Set(EvaluationStatus::Queued);
+    ae.waiting_reason = Set(None);
+    ae.wildcard = Set(wildcard.to_string());
+    ae.updated_at = Set(crate::types::now());
+    Ok(Some(ae.update(db).await?))
+}
+
 /// Find the evaluation that is parked in `Waiting + Approval` for the given
 /// project + PR number combination. Used by the comment-based unpark path
 /// where the webhook only carries the PR number, not the eval id.
