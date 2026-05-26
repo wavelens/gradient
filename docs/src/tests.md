@@ -2658,3 +2658,33 @@ Run with: `pnpm --dir frontend exec ng test --watch=false`
 
 - `backend/core/src/db/admin_tasks.rs` — DB helper unit tests: insert/find/mark transitions, unique-violation detection, startup recovery `mark_all_active_failed`.
 - `backend/cache/src/cacher/deep_gc.rs` — sweep unit tests: blob pass removes orphan blob, blob pass purges zombie row, log pass removes orphan log, `DeepGcReport` serialises with snake_case keys.
+
+## Evaluation start - surface repository errors (issue #280)
+
+`POST /projects/{org}/{p}/evaluate` and `POST /projects/{org}/{p}/check-repository`
+used to swallow git fetch failures (DNS, connection refused, auth) inside
+`core::sources::git::check_for_updates` and bubble up a generic 500 with no
+actionable detail. The fix propagates the `SourceError` to the web layer, which
+maps it to `400 Bad Request` with `code: "repository_unreachable"` and the
+underlying git error message. The frontend surfaces that message in an inline
+banner under the project header instead of failing silently.
+
+### Backend
+
+Run with: `cargo test -p core --test git_remote`
+
+- `check_project_updates_propagates_unreachable_remote_error` — `git://127.0.0.1:1/…`
+  triggers an immediate connection-refused; the helper now returns `Err(SourceError)`
+  instead of `Ok((false, vec![]))`. Locks in the propagation guarantee that the
+  endpoint relies on for its 4xx mapping.
+
+### Frontend
+
+Run with: `pnpm --dir frontend exec ng test --watch=false`
+
+- `project-detail.component.spec.ts → 'shows an inline error banner when
+  startEvaluation fails'` — mocks `ProjectsService.startEvaluation` to throw;
+  asserts the `.evaluation-error` banner renders the underlying message.
+- `project-detail.component.spec.ts → 'clears the error banner when the user
+  retries'` — calling `dismissError()` resets `errorMessage()` to `null` and the
+  banner disappears.

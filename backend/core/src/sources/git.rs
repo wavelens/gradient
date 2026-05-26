@@ -12,7 +12,7 @@ use async_trait::async_trait;
 use git2::{Direction, RemoteCallbacks};
 use sea_orm::EntityTrait;
 use std::sync::Arc;
-use tracing::{debug, info, instrument, warn};
+use tracing::{debug, info, instrument};
 
 // ── ProjectGitContext ─────────────────────────────────────────────────────────
 
@@ -79,7 +79,7 @@ impl<'a> ProjectGitContext<'a> {
         let ssh_creds = self.ssh_creds.clone();
         let branch_owned = branch.map(|b| b.to_owned());
 
-        let remote_hash = match tokio::task::spawn_blocking(move || {
+        let remote_hash = tokio::task::spawn_blocking(move || {
             let branch_ref = branch_owned.as_deref();
             if let Some((private_key, public_key)) = ssh_creds {
                 ls_remote_head(&url, Some(&private_key), Some(&public_key), branch_ref)
@@ -90,13 +90,7 @@ impl<'a> ProjectGitContext<'a> {
         .await
         .map_err(|e| SourceError::GitExecution {
             error: e.to_string(),
-        })? {
-            Ok(hash) => hash,
-            Err(e) => {
-                warn!(error = %e, "Failed to get remote HEAD ref, will retry next cycle");
-                return Ok((false, vec![]));
-            }
-        };
+        })??;
 
         let remote_hash_str = vec_to_hex(&remote_hash);
         debug!(remote_hash = %remote_hash_str, "Retrieved remote hash");

@@ -10,7 +10,7 @@ use super::{
 use crate::access::{Caller, ProjectAccess, has_permission, is_org_member, load_project};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::endpoints::content_type_for_filename;
-use crate::error::{WebError, WebResult};
+use crate::error::{ErrorCode, WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::Permission;
 use axum::extract::{Path, Query, State};
@@ -213,13 +213,12 @@ pub async fn post_project_evaluate(
     let (_has_updates, commit_hash) =
         check_project_updates(Arc::clone(&state), &project_for_check, None)
             .await
-            .map_err(|e| anyhow::anyhow!(e))?;
-
-    if commit_hash.is_empty() {
-        return Err(WebError::internal(
-            "Failed to fetch repository state".to_string(),
-        ));
-    }
+            .map_err(|e| {
+                WebError::bad_request_with(
+                    ErrorCode::REPOSITORY_UNREACHABLE,
+                    format!("Failed to fetch repository state: {}", e),
+                )
+            })?;
 
     let eval = gradient_core::ci::trigger_evaluation(
         &state.web_db,

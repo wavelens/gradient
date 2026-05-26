@@ -8,7 +8,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 import { ProjectDetailComponent } from './project-detail.component';
 import { ProjectsService } from '@core/services/projects.service';
 import { OrganizationsService } from '@core/services/organizations.service';
@@ -120,5 +120,59 @@ describe('ProjectDetailComponent - access gating', () => {
     expect(startBtn!.disabled).toBe(false);
     expect(restartBtn).not.toBeNull();
     expect(restartBtn!.disabled).toBe(false);
+  });
+});
+
+// ── Issue #280: surface evaluation start failures to the user ────────────────
+
+function setupWithStartError(message: string): ComponentFixture<ProjectDetailComponent> {
+  const access: AccessState = { managed: false, canEdit: true, canTrigger: true };
+  TestBed.configureTestingModule({
+    imports: [ProjectDetailComponent],
+    providers: [
+      provideRouter([]),
+      provideHttpClient(),
+      provideHttpClientTesting(),
+      { provide: ActivatedRoute, useValue: activatedRouteStub(access) },
+      {
+        provide: ProjectsService,
+        useValue: {
+          getProject: () => of(projectFor(access)),
+          getEntryPoints: () => of([]),
+          startEvaluation: () => throwError(() => new Error(message)),
+          restartFailedBuilds: () => throwError(() => new Error(message)),
+        },
+      },
+      { provide: OrganizationsService, useValue: { getOrganization: () => of({ display_name: 'Acme' }) } },
+      { provide: AuthService, useValue: { isAuthenticated: () => true } },
+    ],
+  });
+  const fixture = TestBed.createComponent(ProjectDetailComponent);
+  fixture.detectChanges();
+  return fixture;
+}
+
+describe('ProjectDetailComponent - error surfacing (issue #280)', () => {
+  it('shows an inline error banner when startEvaluation fails', () => {
+    const fixture = setupWithStartError('Failed to fetch repository state: connection refused');
+    fixture.componentInstance.startEvaluation();
+    fixture.detectChanges();
+
+    const banner = fixture.nativeElement.querySelector('.evaluation-error') as HTMLElement | null;
+    expect(banner).not.toBeNull();
+    expect(banner!.textContent).toContain('Failed to fetch repository state');
+  });
+
+  it('clears the error banner when the user retries', () => {
+    const fixture = setupWithStartError('Failed to fetch repository state: connection refused');
+    const component = fixture.componentInstance;
+    component.startEvaluation();
+    fixture.detectChanges();
+    expect(component.errorMessage()).not.toBeNull();
+
+    component.dismissError();
+    fixture.detectChanges();
+    expect(component.errorMessage()).toBeNull();
+    expect(fixture.nativeElement.querySelector('.evaluation-error')).toBeNull();
   });
 });

@@ -92,6 +92,43 @@
   }
 }
 
+.evaluation-error {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  padding: $spacing-sm $spacing-md;
+  background-color: rgba($color-danger, 0.1);
+  border: 1px solid $color-danger;
+  border-radius: $border-radius-sm;
+  color: $color-danger;
+  font-size: $font-size-sm;
+
+  .material-symbols-outlined {
+    font-size: 18px;
+    flex-shrink: 0;
+  }
+
+  .evaluation-error__text {
+    flex: 1 1 auto;
+    word-break: break-word;
+  }
+
+  .evaluation-error__dismiss {
+    background: none;
+    border: 0;
+    color: inherit;
+    cursor: pointer;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+
+    .material-symbols-outlined {
+      font-size: 18px;
+    }
+  }
+}
+
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));

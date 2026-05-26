@@ -57,6 +57,20 @@
           [routerLink]="['/organization', orgName, 'project', projectName, 'metrics']"
         ></button>
       </div>
+      @if (errorMessage(); as msg) {
+        <div class="evaluation-error" role="alert">
+          <span class="material-symbols-outlined">error</span>
+          <span class="evaluation-error__text">{{ msg }}</span>
+          <button
+            type="button"
+            class="evaluation-error__dismiss"
+            aria-label="Dismiss error"
+            (click)="dismissError()"
+          >
+            <span class="material-symbols-outlined">close</span>
+          </button>
+        </div>
+      }
       <div class="project-meta">
         <span class="meta-item">
           <span class="material-symbols-outlined">link</span>

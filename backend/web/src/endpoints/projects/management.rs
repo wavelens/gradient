@@ -8,7 +8,7 @@ use super::ProjectResponse;
 use crate::access::{Caller, OrgAccess, ProjectAccess, has_permission, load_org, load_project};
 use crate::audit::{RequestInfo, events, record as audit_record};
 use crate::authorization::{MaybeApiKey, MaybeUser};
-use crate::error::{WebError, WebResult};
+use crate::error::{ErrorCode, WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::Permission;
 use axum::extract::{Path, Query, State};
@@ -629,18 +629,19 @@ pub async fn post_project_check_repository(
 
     let (_has_updates, remote_hash) = check_project_updates(Arc::clone(&state), &project, None)
         .await
-        .map_err(|e| anyhow::anyhow!(e))?;
+        .map_err(|e| {
+            WebError::bad_request_with(
+                ErrorCode::REPOSITORY_UNREACHABLE,
+                format!("Failed to check repository: {}", e),
+            )
+        })?;
 
-    if !remote_hash.is_empty() {
-        let res = BaseResponse {
-            error: false,
-            message: vec_to_hex(&remote_hash),
-        };
+    let res = BaseResponse {
+        error: false,
+        message: vec_to_hex(&remote_hash),
+    };
 
-        Ok(Json(res))
-    } else {
-        Err(WebError::internal("Failed to check repository".to_string()))
-    }
+    Ok(Json(res))
 }
 
 pub async fn post_project_transfer(

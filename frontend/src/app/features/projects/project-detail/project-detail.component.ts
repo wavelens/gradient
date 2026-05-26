@@ -49,6 +49,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   project = signal<ProjectDetail | null>(null);
   entryPoints = signal<EntryPointSummary[]>([]);
   starting = signal(false);
+  errorMessage = signal<string | null>(null);
   tick = signal(Date.now());
 
   orgName = '';
@@ -120,6 +121,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
 
   startEvaluation(): void {
     this.starting.set(true);
+    this.errorMessage.set(null);
     this.projectsService.startEvaluation(this.orgName, this.projectName).subscribe({
       next: () => {
         // Keep starting=true; polling will clear it once the evaluation appears
@@ -127,6 +129,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
       },
       error: (error) => {
         console.error('Failed to start evaluation:', error);
+        this.errorMessage.set(error?.message || 'Failed to start evaluation.');
         this.starting.set(false);
       },
     });
@@ -134,15 +137,21 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
 
   restartFailedBuilds(): void {
     this.starting.set(true);
+    this.errorMessage.set(null);
     this.projectsService.restartFailedBuilds(this.orgName, this.projectName).subscribe({
       next: () => {
         this.loadProjectData(false);
       },
       error: (error) => {
         console.error('Failed to restart failed builds:', error);
+        this.errorMessage.set(error?.message || 'Failed to restart failed builds.');
         this.starting.set(false);
       },
     });
+  }
+
+  dismissError(): void {
+    this.errorMessage.set(null);
   }
 
   abortEvaluation(evaluationId: string): void {
