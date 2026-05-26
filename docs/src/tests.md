@@ -1315,6 +1315,26 @@ swaps. Unit tests (`cargo test -p entity --tests`) cover:
 - `serde` transparency (wire format identical to bare `Uuid`).
 - `FromStr` parsing (lets axum `Path<UserId>` extract from URL segments).
 - `TryFromU64` returns `DbErr` (UUID PKs are never `u64`-derivable).
+- `Default` resolves to `Uuid::nil()` so `Id::default() == Id::nil()` —
+  enables `Model { id, ..Default::default() }` ergonomics.
+
+## Model defaults (`entity::model_default_tests`)
+
+Every `DeriveEntityModel` struct derives `Default`, and every
+`DeriveActiveEnum` column type has a `#[default]` variant (initial-state /
+fail-noisy where applicable). Smoke tests in `backend/entity/src/lib.rs`
+confirm the derive resolves for representative models:
+
+- `user::Model::default()` — strings empty, `id` is nil, no password.
+- `build::Model::default()` — `status == BuildStatus::Created`.
+- `evaluation::Model::default()` — `status == EvaluationStatus::Queued`.
+- `audit_log::Model::default()` — JSON metadata is `None`, timestamp is
+  the 1970 epoch from `NaiveDateTime::default()`.
+- `organization_cache::Model::default()` — `mode == ReadWrite`.
+
+A nil ID is a placeholder, not a persistable value: callers override `id`
+(typically with `Id::now_v7()`) and use `..Default::default()` for the
+remaining fields.
 
 A `trybuild` compile-fail test
 (`cargo test -p entity --test compile_fail`) locks the swap-prevention

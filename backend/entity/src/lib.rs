@@ -46,3 +46,46 @@ pub mod session;
 pub mod upload_session;
 pub mod user;
 pub mod worker_registration;
+
+#[cfg(test)]
+mod model_default_tests {
+    use super::*;
+    use chrono::NaiveDateTime;
+    use uuid::Uuid;
+
+    #[test]
+    fn user_default_has_nil_id_and_blank_strings() {
+        let m = user::Model::default();
+        assert_eq!(Uuid::from(m.id), Uuid::nil());
+        assert_eq!(m.username, "");
+        assert!(!m.email_verified);
+        assert!(m.password.is_none());
+    }
+
+    #[test]
+    fn build_default_has_initial_status() {
+        let m = build::Model::default();
+        assert_eq!(m.status, build::BuildStatus::Created);
+        assert!(!m.external_cached);
+    }
+
+    #[test]
+    fn evaluation_default_has_initial_status() {
+        let m = evaluation::Model::default();
+        assert_eq!(m.status, evaluation::EvaluationStatus::Queued);
+        assert!(m.check_run_ids.is_none());
+    }
+
+    #[test]
+    fn audit_log_default_has_null_json() {
+        let m = audit_log::Model::default();
+        assert!(m.metadata.is_none());
+        assert_eq!(m.created_at, NaiveDateTime::default());
+    }
+
+    #[test]
+    fn organization_cache_default_uses_read_write_mode() {
+        let m = organization_cache::Model::default();
+        assert_eq!(m.mode, organization_cache::CacheSubscriptionMode::ReadWrite);
+    }
+}
