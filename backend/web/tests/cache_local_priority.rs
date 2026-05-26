@@ -76,6 +76,7 @@ fn build_server(cache: entity::cache::Model, peer: &str) -> TestServer {
         shutdown: gradient_core::shutdown::Shutdown::new(),
         jwt_secret: gradient_core::types::SecretString::new("test-jwt-secret".to_string()),
         started_at: chrono::Utc::now(),
+        pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
     });
 
     let peer_addr: SocketAddr = format!("{peer}:0").parse().expect("valid peer addr");

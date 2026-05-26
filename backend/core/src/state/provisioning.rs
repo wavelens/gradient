@@ -6,13 +6,15 @@
 
 use super::{
     StateAction, StateApiKey, StateCache, StateCacheMemberEntry, StateCacheRoleEntry,
-    StateConfiguration, StateFlakeInputOverride, StateIntegration, StateOrganization, StateProject,
-    StateRole, StateTrigger, StateUpstream, StateUser, StateWorker,
+    StateConfiguration, StateFlakeInputOverride, StateIntegration, StateOrganization,
+    StateOrgMemberEntry, StateProject, StateRole, StateTrigger, StateUpstream, StateUser,
+    StateWorker,
 };
 use crate::ci::actions::encrypt_secret_with_file;
 use crate::ci::{ForgeType, GITHUB_APP_INTEGRATION_NAME, IntegrationKind};
 use crate::types::consts::{
     BASE_CACHE_ROLE_ADMIN_ID, BASE_CACHE_ROLE_VIEW_ID, BASE_CACHE_ROLE_WRITE_ID, BASE_ROLE_ADMIN_ID,
+    BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID,
 };
 use crate::types::input::load_secret_bytes;
 use crate::types::triggers::TriggerConfig;
@@ -31,6 +33,17 @@ use std::fs;
 
 type DynError = Box<dyn std::error::Error>;
 
+/// Org membership declared in state for a user who did not exist at apply
+/// time. Drained per-username when the user is later registered or signs
+/// in via OIDC for the first time.
+#[derive(Debug, Clone)]
+pub struct PendingOrgMembership {
+    pub organization: OrganizationId,
+    pub role: RoleId,
+}
+
+pub type PendingOrgMemberships = HashMap<String, Vec<PendingOrgMembership>>;
+
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 pub(super) async fn apply_state_to_database(
@@ -39,7 +52,7 @@ pub(super) async fn apply_state_to_database(
     crypt_secret_file: &str,
     delete_state: bool,
     email_enabled: bool,
-) -> Result<(), DynError> {
+) -> Result<PendingOrgMemberships, DynError> {
     tracing::info!("Applying state to database");
 
     let app = StateApplicator {
@@ -48,9 +61,14 @@ pub(super) async fn apply_state_to_database(
         email_enabled,
     };
 
+    let mut pending: PendingOrgMemberships = HashMap::new();
+
     app.apply_users(&config.users).await?;
-    app.apply_organizations(&config.organizations).await?;
+    app.apply_organizations_without_members(&config.organizations)
+        .await?;
     app.apply_roles(&config.roles).await?;
+    app.apply_organization_members(&config.organizations, &mut pending)
+        .await?;
     app.apply_projects(&config.projects).await?;
     app.apply_integrations(&config.integrations).await?;
     app.apply_caches(&config.caches).await?;
@@ -59,7 +77,7 @@ pub(super) async fn apply_state_to_database(
     app.unmark_removed_entities(config, delete_state).await?;
 
     tracing::info!("State applied successfully");
-    Ok(())
+    Ok(pending)
 }
 
 // ── Credential / lookup helpers ───────────────────────────────────────────────
@@ -283,9 +301,14 @@ impl<'a> StateApplicator<'a> {
         Ok(())
     }
 
-    // ── apply_organizations ───────────────────────────────────────────────────
+    // ── apply_organizations_without_members ───────────────────────────────────
 
-    async fn apply_organizations(
+    /// Create/update the `organization` row (and seed the GitHub App
+    /// integration if needed). Membership reconciliation happens later in
+    /// `apply_organization_members`, after `apply_roles` so custom org roles
+    /// referenced by `members` can be resolved against rows inserted in the
+    /// same apply pass.
+    async fn apply_organizations_without_members(
         &self,
         state_orgs: &HashMap<String, StateOrganization>,
     ) -> Result<(), DynError> {
@@ -362,24 +385,178 @@ impl<'a> StateApplicator<'a> {
                 crate::ci::ensure_github_app_integrations(self.db, org_id, created_by_id).await?;
             }
 
-            let existing_membership = organization_user::Entity::find()
-                .filter(organization_user::Column::Organization.eq(org_id))
-                .filter(organization_user::Column::User.eq(created_by_id))
-                .one(self.db)
-                .await?;
+        }
 
-            if existing_membership.is_none() {
-                let membership = organization_user::ActiveModel {
-                    id: Set(OrganizationUserId::now_v7()),
-                    organization: Set(org_id),
-                    user: Set(created_by_id),
-                    role: Set(BASE_ROLE_ADMIN_ID),
-                };
-                membership.insert(self.db).await?;
+        Ok(())
+    }
+
+    // ── apply_organization_members ────────────────────────────────────────────
+
+    /// Reconcile `organization_user` rows for every state-managed org.
+    ///
+    /// When `state_org.members` is empty, the legacy behavior applies:
+    /// `created_by` is added as Admin if no row exists. When `members` is
+    /// non-empty, the declared list is authoritative — see
+    /// [`StateApplicator::apply_org_members`] for the per-org logic.
+    async fn apply_organization_members(
+        &self,
+        state_orgs: &HashMap<String, StateOrganization>,
+        pending: &mut PendingOrgMemberships,
+    ) -> Result<(), DynError> {
+        let user_map = self.user_lookup().await?;
+        let org_map = self.org_lookup().await?;
+
+        for state_org in state_orgs.values() {
+            let org_id = lookup_id(&org_map, &state_org.name, "Organization")?;
+            let created_by_id = lookup_id(&user_map, &state_org.created_by, "User")?;
+
+            if state_org.members.is_empty() {
+                let existing = organization_user::Entity::find()
+                    .filter(organization_user::Column::Organization.eq(org_id))
+                    .filter(organization_user::Column::User.eq(created_by_id))
+                    .one(self.db)
+                    .await?;
+
+                if existing.is_none() {
+                    organization_user::ActiveModel {
+                        id: Set(OrganizationUserId::now_v7()),
+                        organization: Set(org_id),
+                        user: Set(created_by_id),
+                        role: Set(BASE_ROLE_ADMIN_ID),
+                    }
+                    .insert(self.db)
+                    .await?;
+                    tracing::info!(
+                        username = %state_org.created_by,
+                        organization = %state_org.name,
+                        "Added admin member to organization"
+                    );
+                }
+            } else {
+                self.apply_org_members(org_id, &state_org.name, &state_org.members, pending)
+                    .await
+                    .map_err(|e| {
+                        format!(
+                            "Failed to apply members for organization '{}': {}",
+                            state_org.name, e
+                        )
+                    })?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Reconcile membership for a single state-managed organization whose
+    /// `members` list is non-empty.
+    ///
+    /// - Missing users are recorded into `pending` and skipped (issue #94);
+    ///   they'll be applied when the user later registers or signs in via
+    ///   OIDC.
+    /// - Built-in roles (`Admin`/`Write`/`View`) map to constant role IDs;
+    ///   custom org roles resolve against `role` rows scoped to this org.
+    /// - Drift: existing memberships not in the declared user set are
+    ///   deleted. State owns the membership list when explicitly declared.
+    async fn apply_org_members(
+        &self,
+        org_id: OrganizationId,
+        org_name: &str,
+        members: &[StateOrgMemberEntry],
+        pending: &mut PendingOrgMemberships,
+    ) -> Result<(), DynError> {
+        let user_map = self.user_lookup().await?;
+
+        let custom_roles: HashMap<String, RoleId> = role::Entity::find()
+            .filter(role::Column::Organization.eq(org_id))
+            .filter(role::Column::Managed.eq(true))
+            .all(self.db)
+            .await?
+            .into_iter()
+            .map(|r| (r.name, r.id))
+            .collect();
+
+        let mut declared_user_ids: HashSet<UserId> = HashSet::new();
+
+        for member in members {
+            let role_id = match member.role.as_str() {
+                "Admin" => BASE_ROLE_ADMIN_ID,
+                "Write" => BASE_ROLE_WRITE_ID,
+                "View" => BASE_ROLE_VIEW_ID,
+                name => *custom_roles.get(name).ok_or_else(|| -> DynError {
+                    format!(
+                        "Organization '{}' member '{}' references unknown role '{}'",
+                        org_name, member.user, name
+                    )
+                    .into()
+                })?,
+            };
+
+            match user_map.get(&member.user).copied() {
+                Some(user_id) => {
+                    declared_user_ids.insert(user_id);
+                    let existing = organization_user::Entity::find()
+                        .filter(organization_user::Column::Organization.eq(org_id))
+                        .filter(organization_user::Column::User.eq(user_id))
+                        .one(self.db)
+                        .await?;
+                    if let Some(row) = existing {
+                        if row.role != role_id {
+                            let mut active: organization_user::ActiveModel = row.into();
+                            active.role = Set(role_id);
+                            active.update(self.db).await?;
+                            tracing::info!(
+                                organization = %org_name,
+                                user = %member.user,
+                                "Updated organization membership role"
+                            );
+                        }
+                    } else {
+                        organization_user::ActiveModel {
+                            id: Set(OrganizationUserId::now_v7()),
+                            organization: Set(org_id),
+                            user: Set(user_id),
+                            role: Set(role_id),
+                        }
+                        .insert(self.db)
+                        .await?;
+                        tracing::info!(
+                            organization = %org_name,
+                            user = %member.user,
+                            "Added organization member"
+                        );
+                    }
+                }
+                None => {
+                    tracing::info!(
+                        organization = %org_name,
+                        user = %member.user,
+                        "Declared member not yet registered; deferring until user creation"
+                    );
+                    pending
+                        .entry(member.user.clone())
+                        .or_default()
+                        .push(PendingOrgMembership {
+                            organization: org_id,
+                            role: role_id,
+                        });
+                }
+            }
+        }
+
+        let existing = organization_user::Entity::find()
+            .filter(organization_user::Column::Organization.eq(org_id))
+            .all(self.db)
+            .await?;
+        for row in existing {
+            if !declared_user_ids.contains(&row.user) {
+                let user_id = row.user;
+                organization_user::Entity::delete_by_id(row.id)
+                    .exec(self.db)
+                    .await?;
                 tracing::info!(
-                    username = %state_org.created_by,
-                    organization = %state_org.name,
-                    "Added admin member to organization"
+                    organization = %org_name,
+                    %user_id,
+                    "Removed organization member no longer in state"
                 );
             }
         }
@@ -1562,6 +1739,63 @@ impl<'a> StateApplicator<'a> {
 
         Ok(())
     }
+}
+
+// ── Pending-membership backfill ──────────────────────────────────────────────
+
+/// Apply any pending state-managed org memberships for `username` against
+/// `user_id`. Idempotent: existing rows are updated to the declared role,
+/// missing rows are inserted. Returns the number of memberships applied
+/// (`Ok(0)` when the username has no pending entries).
+///
+/// Called from the user-creation paths (`POST /user` and OIDC first-login)
+/// so a member declared in state for a not-yet-registered user becomes
+/// effective the instant that user joins.
+pub async fn apply_pending_org_memberships<C: ConnectionTrait>(
+    db: &C,
+    pending: &PendingOrgMemberships,
+    username: &str,
+    user_id: UserId,
+) -> Result<usize, sea_orm::DbErr> {
+    let Some(entries) = pending.get(username) else {
+        return Ok(0);
+    };
+    let mut applied = 0usize;
+    for entry in entries {
+        let existing = organization_user::Entity::find()
+            .filter(organization_user::Column::Organization.eq(entry.organization))
+            .filter(organization_user::Column::User.eq(user_id))
+            .one(db)
+            .await?;
+        match existing {
+            Some(row) if row.role == entry.role => {}
+            Some(row) => {
+                let mut active: organization_user::ActiveModel = row.into();
+                active.role = Set(entry.role);
+                active.update(db).await?;
+                applied += 1;
+            }
+            None => {
+                organization_user::ActiveModel {
+                    id: Set(OrganizationUserId::now_v7()),
+                    organization: Set(entry.organization),
+                    user: Set(user_id),
+                    role: Set(entry.role),
+                }
+                .insert(db)
+                .await?;
+                applied += 1;
+            }
+        }
+    }
+    if applied > 0 {
+        tracing::info!(
+            username,
+            count = applied,
+            "Applied pending state-managed org memberships for newly-registered user"
+        );
+    }
+    Ok(applied)
 }
 
 // ── Trigger sync ─────────────────────────────────────────────────────────────

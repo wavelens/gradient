@@ -826,6 +826,7 @@ mod reelect_leader_tests {
             shutdown: crate::shutdown::Shutdown::new(),
             jwt_secret: SecretString::new("test-jwt-secret".to_string()),
             started_at: chrono::Utc::now(),
+            pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
         })
     }
 

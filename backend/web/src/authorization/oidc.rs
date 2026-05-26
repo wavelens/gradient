@@ -364,6 +364,21 @@ async fn create_or_update_user(
     .await
     .context("Failed to create user")?;
 
+    if let Err(e) = gradient_core::state::apply_pending_org_memberships(
+        &tx,
+        &state.pending_org_memberships,
+        &user.username,
+        user.id,
+    )
+    .await
+    {
+        tracing::warn!(
+            error = %e,
+            username = %user.username,
+            "Failed to apply pending state-managed org memberships for new OIDC user"
+        );
+    }
+
     tx.commit()
         .await
         .context("Failed to commit OIDC user transaction")?;
