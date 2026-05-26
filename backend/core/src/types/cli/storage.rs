@@ -48,3 +48,37 @@ impl Default for StorageArgs {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn default_keep_evaluations_is_thirty() {
+        assert_eq!(StorageArgs::default().keep_evaluations, 30);
+    }
+
+    #[test]
+    fn default_nar_ttl_hours_is_two_weeks() {
+        assert_eq!(StorageArgs::default().nar_ttl_hours, 336);
+    }
+
+    #[derive(Parser, Debug)]
+    struct StorageOnlyCli {
+        #[command(flatten)]
+        storage: StorageArgs,
+    }
+
+    #[test]
+    fn clap_default_keep_evaluations_is_thirty() {
+        let parsed = StorageOnlyCli::try_parse_from(["test"]).unwrap();
+        assert_eq!(parsed.storage.keep_evaluations, 30);
+    }
+
+    #[test]
+    fn clap_default_nar_ttl_hours_is_two_weeks() {
+        let parsed = StorageOnlyCli::try_parse_from(["test"]).unwrap();
+        assert_eq!(parsed.storage.nar_ttl_hours, 336);
+    }
+}
