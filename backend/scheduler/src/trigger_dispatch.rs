@@ -219,6 +219,7 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
                 manual: false,
                 gate_approval: None,
                 repository_override: None,
+                wildcard_override: None,
             },
         )
         .await

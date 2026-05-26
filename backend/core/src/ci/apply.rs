@@ -63,6 +63,11 @@ pub struct ApplyInput {
     /// `project.repository` (which only has the base repo's history). `None`
     /// falls back to `project.repository`.
     pub repository_override: Option<String>,
+    /// Override the evaluation's `wildcard` attribute pattern. Used by
+    /// `/gradient run <wildcard>` so a maintainer can re-target a single
+    /// run without editing project config. `None` falls back to
+    /// `project.wildcard`.
+    pub wildcard_override: Option<String>,
 }
 
 /// Identification of the pull request a maintainer must approve before the
@@ -149,6 +154,7 @@ pub async fn apply_trigger<C: ConnectionTrait>(
         Some(input.trigger_id),
         concurrent_flag,
         input.repository_override,
+        input.wildcard_override,
     )
     .await
     {
@@ -337,6 +343,7 @@ mod tests {
             manual,
             gate_approval: None,
             repository_override: None,
+            wildcard_override: None,
         }
     }
 
@@ -868,6 +875,7 @@ mod tests {
                 pr_author: "external-contrib".into(),
             }),
             repository_override: None,
+            wildcard_override: None,
         };
         let res = apply_trigger(&db, &project, applied).await.unwrap();
 
