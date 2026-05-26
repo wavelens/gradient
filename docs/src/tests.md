@@ -499,6 +499,33 @@ Backend (`cargo test -p core --lib state::tests`):
   `force_evaluation`; serde's default unknown-field handling drops it
   silently so existing deployments parse cleanly after the field's
   removal from the schema.
+- `state_org_members_serde_round_trip` - `StateOrganization.members`
+  round-trips through JSON as `[{ user, role }]` entries, covering both
+  built-in (`Write`) and custom (`releaser`) role names.
+- `state_org_members_default_empty` - omitting `members` deserialises
+  to an empty `Vec`, preserving the legacy creator-as-Admin behavior on
+  state files that predate the field (issue #94).
+- `state_org_members_validator_accepts_builtin_role` - a member with
+  `role = "Write"` validates when the referenced user exists.
+- `state_org_members_validator_accepts_custom_org_role` - a member can
+  reference a state-managed custom org role declared under
+  `state.roles` scoped to the same organization.
+- `state_org_members_validator_rejects_unknown_role` - a role name
+  that is neither a built-in nor a declared org role yields a
+  validation error pinpointing
+  `organizations.<org>.members.<user>.role`.
+- `state_org_members_validator_ignores_unknown_user` - a member
+  referencing a user that does not exist passes validation; the
+  membership is deferred and applied on registration / OIDC first-login
+  (issue #94 contract).
+- `state_org_members_validator_rejects_duplicate_user` - two
+  member entries with the same `user` in one org's `members` is an
+  error.
+- `pending_membership_tests::apply_pending_returns_zero_for_unknown_user`
+  (`backend/core/src/state/provisioning.rs`) -
+  `apply_pending_org_memberships` is a no-op when the username has no
+  pending entries; callable from any user-creation path without a
+  matching state declaration.
 - `keep_set_tests::keep_sets_track_inner_name_not_attrset_key`
   (`backend/core/src/state/provisioning.rs`) - `gradient-state.nix`
   exposes `name = mkOption { default = <attrset key>; }` on users,

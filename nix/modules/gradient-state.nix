@@ -156,6 +156,33 @@
         type = types.str;
         description = "Username of the user who created this organization";
       };
+
+      members = mkOption {
+        type = types.listOf orgMemberType;
+        default = [];
+        description = ''
+          Users with role assignments on this organization. When empty
+          (the default), legacy behavior applies: `created_by` is added
+          as Admin and no other membership reconciliation happens.
+
+          When non-empty, this list is the source of truth - existing
+          memberships not in the list are revoked on next state apply,
+          and the implicit `created_by`-as-Admin assignment is skipped
+          (list yourself explicitly if you want that role).
+
+          Members referencing users that do not yet exist are skipped
+          silently at provision time and applied automatically when the
+          user later registers (`POST /user`) or signs in via OIDC for
+          the first time.
+        '';
+        example = literalExpression ''
+          [
+            { user = "alice"; role = "Admin"; }
+            { user = "bob";   role = "Write"; }
+            { user = "carol"; role = "releaser"; }
+          ]
+        '';
+      };
     };
   });
 
@@ -558,6 +585,28 @@
       role = mkOption {
         type = types.str;
         description = "Role name (built-in `Admin`/`Write`/`View` or a custom role declared on this cache).";
+      };
+    };
+  };
+
+  orgMemberType = types.submodule {
+    options = {
+      user = mkOption {
+        type = types.str;
+        description = ''
+          Username to grant membership to. Resolved at provision time;
+          if the user does not yet exist, the membership is recorded as
+          pending and applied automatically when the user later registers
+          (`POST /user`) or signs in via OIDC for the first time.
+        '';
+      };
+      role = mkOption {
+        type = types.str;
+        description = ''
+          Role name. Either a built-in (`Admin`/`Write`/`View`) or a
+          custom org role declared under
+          `services.gradient.state.roles` for the same organization.
+        '';
       };
     };
   };

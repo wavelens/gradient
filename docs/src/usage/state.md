@@ -121,6 +121,38 @@ ssh-keygen -t ed25519 -N "" -f /run/secrets/acme-ssh-key
 | `public` | `false` | Visible to all users |
 | `github_installation_id` | `null` | GitHub App installation id to bind to this org (look it up on the App's "Install App" page on GitHub). Setting this enables outbound CI status reporting and webhook routing. When `null`, the field is left untouched on update so a webhook-recorded id survives reconciliation |
 | `created_by` | - | Username of creator (required) |
+| `members` | `[]` | Per-org membership list. When non-empty, the list is authoritative (drift removes unlisted memberships, the implicit creator-Admin step is skipped). Empty preserves the legacy behavior. Members referencing not-yet-registered users are skipped silently and backfilled on registration / OIDC first-login |
+
+### Organization members
+
+Declare per-org membership inline:
+
+```nix
+services.gradient.state.organizations.acme = {
+  display_name     = "ACME Corp";
+  private_key_file = "/run/secrets/acme-ssh-key";
+  created_by       = "alice";
+  members = [
+    { user = "alice"; role = "Admin"; }
+    { user = "bob";   role = "Write"; }
+    { user = "carol"; role = "releaser"; }   # custom org role from state.roles
+  ];
+};
+```
+
+When `members` is **empty** (the default), the `created_by` user is added as Admin and no other membership reconciliation happens — this is the legacy behavior.
+
+When `members` is **non-empty**, the list is the source of truth:
+
+- Built-in roles (`Admin`, `Write`, `View`) and state-managed custom org roles are both accepted.
+- Members referencing **unknown users are skipped silently** at provision time. The membership is applied automatically the instant that user registers (`POST /user`) or first-logs-in via OIDC.
+- Memberships no longer in the list are removed on next state apply (drift reconciliation, mirroring cache members).
+- The implicit "creator becomes Admin" rule does **not** fire — list yourself explicitly if you want it.
+
+| Option | Default | Description |
+|---|---|---|
+| `members.*.user` | - | Username (required) |
+| `members.*.role` | - | `Admin`/`Write`/`View` or a custom org role declared in `state.roles` for the same organization (required) |
 
 ## Projects
 
