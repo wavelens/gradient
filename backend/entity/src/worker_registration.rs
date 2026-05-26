@@ -12,7 +12,7 @@ use crate::ids::{OrganizationId, UserId, WorkerRegistrationId};
 
 /// Tracks which peers (orgs, caches, proxies) have registered a given worker ID
 /// and holds the SHA-256 hash of the peer-issued token for challenge-response auth.
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "worker_registration")]
 pub struct Model {
     #[sea_orm(primary_key)]

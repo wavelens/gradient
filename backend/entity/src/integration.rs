@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::{IntegrationId, OrganizationId, UserId};
 
-#[derive(Clone, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
+#[derive(Clone, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "integration")]
 pub struct Model {
     #[sea_orm(primary_key)]

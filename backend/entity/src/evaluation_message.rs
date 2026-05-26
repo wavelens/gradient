@@ -35,7 +35,7 @@ pub enum MessageLevel {
 /// - `"nix-eval:<attr>"` - resolution of a specific attribute path
 /// - `"dep-graph"` - dependency graph walk error
 /// - `"db-insert"` - internal: batch insert failure
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "evaluation_message")]
 pub struct Model {
     #[sea_orm(primary_key)]

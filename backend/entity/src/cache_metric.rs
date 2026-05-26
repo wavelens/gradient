@@ -9,7 +9,7 @@ use sea_orm::entity::prelude::*;
 
 use crate::ids::{CacheId, CacheMetricId};
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
+#[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel)]
 #[sea_orm(table_name = "cache_metric")]
 pub struct Model {
     #[sea_orm(primary_key)]

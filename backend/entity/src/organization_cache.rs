@@ -24,7 +24,7 @@ pub enum CacheSubscriptionMode {
     WriteOnly,
 }
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "organization_cache")]
 pub struct Model {
     #[sea_orm(primary_key)]

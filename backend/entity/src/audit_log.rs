@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::{AuditLogId, UserId};
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "audit_log")]
 pub struct Model {
     #[sea_orm(primary_key)]
