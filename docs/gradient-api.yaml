@@ -1744,6 +1744,9 @@ paths:
         Tests whether Gradient can clone the project's repository using the
         organization's SSH key. Requires Admin or Write role; rejects
         state-managed projects.
+
+        Returns `400` with `code: "repository_unreachable"` and the underlying
+        git error when the repository cannot be fetched.
       operationId: checkProjectRepository
       responses:
         '200':
@@ -1753,7 +1756,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/StringResponse'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: >-
+            Bad request - invalid input or repository unreachable
+            (`code: "repository_unreachable"`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -1768,7 +1777,12 @@ paths:
     post:
       tags: [projects]
       summary: Trigger evaluation
-      description: Queues a new evaluation for the project. Returns the new evaluation UUID.
+      description: >-
+        Queues a new evaluation for the project. Returns the new evaluation UUID.
+
+        Returns `400` with `code: "repository_unreachable"` when the repository
+        cannot be fetched (DNS failure, authentication failure, unreachable host,
+        bad URL, …) - the message includes the underlying git error.
       operationId: triggerEvaluation
       responses:
         '200':
@@ -1781,7 +1795,17 @@ paths:
                 error: false
                 message: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: >-
+            Bad request - invalid input, evaluation already in progress, or
+            repository unreachable (`code: "repository_unreachable"`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+              example:
+                error: true
+                code: repository_unreachable
+                message: 'Failed to fetch repository state: Git command failed: failed to resolve address for github: Name or service not known'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':

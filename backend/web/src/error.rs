@@ -46,6 +46,7 @@ impl ErrorCode {
     pub const INVALID_OAUTH_CODE: Self = Self("invalid_oauth_code");
     pub const OAUTH_DISABLED: Self = Self("oauth_disabled");
     pub const REGISTRATION_DISABLED: Self = Self("registration_disabled");
+    pub const REPOSITORY_UNREACHABLE: Self = Self("repository_unreachable");
 
     // 401 Unauthorized
     pub const UNAUTHORIZED: Self = Self("unauthorized");
