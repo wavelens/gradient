@@ -1165,7 +1165,9 @@ async fn active_project_ids_for_integration(
 #[cfg(test)]
 mod tests {
     use super::super::WebhookTriggerOutcome;
-    use super::{glob_match_pattern, glob_matches, is_ci_run_command, normalize_repo_url};
+    use super::{
+        CiRunCommand, glob_match_pattern, glob_matches, normalize_repo_url, parse_ci_run_command,
+    };
 
     #[test]
     fn normalize_strips_dot_git_suffix() {
@@ -1213,36 +1215,76 @@ mod tests {
     }
 
     #[test]
-    fn ci_run_command_matches_canonical_form() {
-        assert!(is_ci_run_command("/ci run"));
-    }
-
-    #[test]
-    fn ci_run_command_matches_with_surrounding_whitespace() {
-        assert!(is_ci_run_command("   /ci run   "));
-        assert!(is_ci_run_command("\n/ci run\n"));
-    }
-
-    #[test]
-    fn ci_run_command_matches_after_quote_reply() {
-        assert!(is_ci_run_command(
-            "> @maintainer asked us to retrigger\n> after rebasing main\n\n/ci run"
+    fn parse_ci_run_command_plain_returns_plain() {
+        assert!(matches!(
+            parse_ci_run_command("/ci run"),
+            Some(CiRunCommand::Plain)
+        ));
+        assert!(matches!(
+            parse_ci_run_command("   /ci run   "),
+            Some(CiRunCommand::Plain)
+        ));
+        assert!(matches!(
+            parse_ci_run_command("\n/ci run\n"),
+            Some(CiRunCommand::Plain)
         ));
     }
 
     #[test]
-    fn ci_run_command_case_insensitive() {
-        assert!(is_ci_run_command("/CI Run"));
-        assert!(is_ci_run_command("/Ci RUN"));
+    fn parse_ci_run_command_case_insensitive_prefix() {
+        assert!(matches!(
+            parse_ci_run_command("/CI Run"),
+            Some(CiRunCommand::Plain)
+        ));
+        assert!(matches!(
+            parse_ci_run_command("/Ci RUN packages.*.*"),
+            Some(CiRunCommand::WithWildcard(ref w)) if w == "packages.*.*"
+        ));
     }
 
     #[test]
-    fn ci_run_command_rejects_unrelated_text() {
-        assert!(!is_ci_run_command("looks good"));
-        assert!(!is_ci_run_command("/ci run please"));
-        assert!(!is_ci_run_command("foo\n/ci run\nbar"));
+    fn parse_ci_run_command_with_wildcard() {
+        assert!(matches!(
+            parse_ci_run_command("/ci run packages.*.*"),
+            Some(CiRunCommand::WithWildcard(ref w)) if w == "packages.*.*"
+        ));
+    }
+
+    #[test]
+    fn parse_ci_run_command_with_complex_wildcard() {
+        let body = "/ci run packages.*.foo,!packages.x86_64-linux.broken";
+        let Some(CiRunCommand::WithWildcard(w)) = parse_ci_run_command(body) else {
+            panic!("expected WithWildcard");
+        };
+        assert_eq!(w, "packages.*.foo,!packages.x86_64-linux.broken");
+    }
+
+    #[test]
+    fn parse_ci_run_command_trims_trailing_whitespace_around_wildcard() {
+        let body = "   /ci run   packages.*.*   ";
+        let Some(CiRunCommand::WithWildcard(w)) = parse_ci_run_command(body) else {
+            panic!("expected WithWildcard");
+        };
+        assert_eq!(w, "packages.*.*");
+    }
+
+    #[test]
+    fn parse_ci_run_command_after_quote_reply() {
+        let body =
+            "> @maintainer asked us to retrigger\n> after rebasing main\n\n/ci run packages.*.*";
+        let Some(CiRunCommand::WithWildcard(w)) = parse_ci_run_command(body) else {
+            panic!("expected WithWildcard");
+        };
+        assert_eq!(w, "packages.*.*");
+    }
+
+    #[test]
+    fn parse_ci_run_command_rejects_unrelated() {
+        assert!(parse_ci_run_command("looks good").is_none());
+        assert!(parse_ci_run_command("/ci runfoo").is_none());
+        assert!(parse_ci_run_command("foo\n/ci run\nbar").is_none());
         assert!(
-            !is_ci_run_command("quote-reply context\n\n/ci run"),
+            parse_ci_run_command("quote-reply context\n\n/ci run").is_none(),
             "non-quote prose before /ci run must reject"
         );
     }
