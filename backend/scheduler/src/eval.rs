@@ -315,19 +315,18 @@ impl<'a> EvalResultProcessor<'a> {
             });
         }
 
-        // Substituted builds are inserted directly in their terminal state and
-        // never transition through `update_build_status`, so the regular
-        // status-change dispatch path never fires for them. Emit
-        // `build.substituted` here so the forge sees a Build check per
-        // already-cached output (Success).
-        if let Err(e) = self.dispatch_substituted_events().await {
-            tracing::warn!(error = %e, "failed to dispatch build.substituted events");
-        }
-
         Ok(())
     }
 
-    async fn dispatch_substituted_events(&self) -> Result<(), sea_orm::DbErr> {
+    /// Dispatch `build.substituted` for every just-inserted Substituted build
+    /// that has an `entry_point` row. Substituted builds are inserted in
+    /// their terminal state and never go through `update_build_status`, so
+    /// the regular status-change dispatch path never fires for them.
+    ///
+    /// Must be called AFTER `process_entry_points` — the reporter skips
+    /// build events without an `entry_point`, so dispatching before
+    /// `entry_point` rows exist would silently drop every check.
+    pub(crate) async fn dispatch_substituted_events(&self) -> Result<(), sea_orm::DbErr> {
         use gradient_core::db::status::dispatch_build_event_for_status;
         use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
@@ -779,6 +778,13 @@ pub async fn handle_eval_result(
     if let Some(project_id) = job.project_id {
         proc.process_entry_points(project_id, &derivations, &drv_path_to_id)
             .await;
+    }
+
+    // Must run after `process_entry_points`: the forge reporter skips build
+    // events without a matching `entry_point` row, so emitting
+    // `build.substituted` earlier would drop every check.
+    if let Err(e) = proc.dispatch_substituted_events().await {
+        tracing::warn!(error = %e, "failed to dispatch build.substituted events");
     }
 
     debug!(
