@@ -57,6 +57,27 @@ pub struct RequestedAction {
 /// on when the forge echoes it back via `check_run.requested_action`.
 pub const APPROVAL_ACTION_ID: &str = "approve-and-run";
 
+/// Snapshot of a pull/merge request returned by [`CiReporter::get_pull_request`].
+///
+/// Used by the `/gradient run` comment handler to learn the PR's current head
+/// SHA + ref so it can lay down a fresh evaluation when no parked approval
+/// gate exists. `issue_comment` webhooks do not carry head metadata, hence
+/// the round-trip via the forge API.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PullRequestSnapshot {
+    /// Full 40-character commit SHA of the PR head.
+    pub head_sha: String,
+    /// PR head branch name (without `refs/heads/` prefix).
+    pub head_branch: String,
+    /// Clone URL of the PR head repo when the PR is from a fork; `None` for
+    /// same-repo PRs. Mirrors the `head_repo_clone_url` extracted from
+    /// `pull_request` webhook payloads so the existing PR-trigger fanout can
+    /// route fetches to the fork.
+    pub head_clone_url: Option<String>,
+    /// `true` when the PR head repo differs from the base repo.
+    pub is_fork: bool,
+}
+
 /// All parameters needed to report a CI status to an external provider.
 #[derive(Debug, Clone)]
 pub struct CiReport {
@@ -120,7 +141,7 @@ pub trait CiReporter: Send + Sync + std::fmt::Debug + 'static {
         Ok(false)
     }
 
-    /// Post a reply comment to a PR/MR. Used by `/ci run <wildcard>` to
+    /// Post a reply comment to a PR/MR. Used by `/gradient run <wildcard>` to
     /// surface wildcard parse errors back to the commenter.
     ///
     /// Default impl is a no-op so reporters that do not implement
@@ -133,6 +154,22 @@ pub trait CiReporter: Send + Sync + std::fmt::Debug + 'static {
         _body: &str,
     ) -> Result<()> {
         Ok(())
+    }
+
+    /// Fetch the current head metadata of an open pull/merge request.
+    /// Used by the `/gradient run` comment handler so it can create a fresh
+    /// evaluation when no parked approval gate exists for the PR.
+    ///
+    /// Default impl returns `Ok(None)`. Implementations that cannot probe
+    /// the forge should fall through; the comment handler then logs and
+    /// declines to create a fresh evaluation.
+    async fn get_pull_request(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _pr_number: u64,
+    ) -> Result<Option<PullRequestSnapshot>> {
+        Ok(None)
     }
 }
 
@@ -331,6 +368,77 @@ impl CiReporter for GiteaReporter {
         }
         Ok(())
     }
+
+    async fn get_pull_request(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+    ) -> Result<Option<PullRequestSnapshot>> {
+        let url = format!(
+            "{}/api/v1/repos/{}/{}/pulls/{}",
+            self.base_url, owner, repo, pr_number
+        );
+        let resp = self
+            .client
+            .get(&url)
+            .header("Authorization", format!("token {}", self.token))
+            .send()
+            .await
+            .context("Failed to query Gitea pull request")?;
+        if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("Gitea pull request query returned {}: {}", status, body);
+        }
+        #[derive(Deserialize)]
+        struct PrResponse {
+            head: GiteaPrRef,
+            #[serde(default)]
+            base: Option<GiteaPrRef>,
+        }
+        #[derive(Deserialize)]
+        struct GiteaPrRef {
+            sha: String,
+            #[serde(rename = "ref")]
+            ref_: Option<String>,
+            #[serde(default)]
+            repo: Option<GiteaPrRepo>,
+        }
+        #[derive(Deserialize)]
+        struct GiteaPrRepo {
+            #[serde(default)]
+            full_name: Option<String>,
+            #[serde(default)]
+            clone_url: Option<String>,
+        }
+        let pr: PrResponse = resp
+            .json()
+            .await
+            .context("Failed to parse Gitea pull request response")?;
+        let head_branch = pr.head.ref_.clone().unwrap_or_default();
+        let head_full = pr.head.repo.as_ref().and_then(|r| r.full_name.clone());
+        let base_full = pr
+            .base
+            .as_ref()
+            .and_then(|b| b.repo.as_ref())
+            .and_then(|r| r.full_name.clone());
+        let is_fork = matches!((head_full.as_deref(), base_full.as_deref()), (Some(h), Some(b)) if h != b);
+        let head_clone_url = if is_fork {
+            pr.head.repo.as_ref().and_then(|r| r.clone_url.clone())
+        } else {
+            None
+        };
+        Ok(Some(PullRequestSnapshot {
+            head_sha: pr.head.sha,
+            head_branch,
+            head_clone_url,
+            is_fork,
+        }))
+    }
 }
 
 // ── GitlabReporter ────────────────────────────────────────────────────────────
@@ -526,6 +634,63 @@ impl CiReporter for GitlabReporter {
         }
         Ok(())
     }
+
+    async fn get_pull_request(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+    ) -> Result<Option<PullRequestSnapshot>> {
+        let project_id = gitlab_project_id(owner, repo);
+        let url = format!(
+            "{}/api/v4/projects/{}/merge_requests/{}",
+            self.base_url, project_id, pr_number
+        );
+        let resp = self
+            .client
+            .get(&url)
+            .header("PRIVATE-TOKEN", &self.token)
+            .send()
+            .await
+            .context("Failed to query GitLab merge request")?;
+        if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("GitLab MR query returned {}: {}", status, body);
+        }
+        #[derive(Deserialize)]
+        struct MrResponse {
+            sha: String,
+            source_branch: String,
+            #[serde(default)]
+            source_project_id: Option<u64>,
+            #[serde(default)]
+            target_project_id: Option<u64>,
+        }
+        let mr: MrResponse = resp
+            .json()
+            .await
+            .context("Failed to parse GitLab merge request response")?;
+        let is_fork = matches!(
+            (mr.source_project_id, mr.target_project_id),
+            (Some(s), Some(t)) if s != t
+        );
+        // GitLab's MR JSON does not surface the fork's clone URL directly; the
+        // `synchronize`-style PR webhook does (via `object_attributes.source`),
+        // but the GET endpoint omits it. For the comment-driven path we leave
+        // `head_clone_url` unset for forks — the existing fan-out keeps using
+        // `project.repository` for the worker fetch. Same-project MRs (the
+        // common case) are unaffected.
+        Ok(Some(PullRequestSnapshot {
+            head_sha: mr.sha,
+            head_branch: mr.source_branch,
+            head_clone_url: None,
+            is_fork,
+        }))
+    }
 }
 
 // ── GithubReporter ────────────────────────────────────────────────────────────
@@ -716,11 +881,90 @@ impl CiReporter for GithubReporter {
         }
         Ok(())
     }
+
+    async fn get_pull_request(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+    ) -> Result<Option<PullRequestSnapshot>> {
+        let url = format!(
+            "{}/repos/{}/{}/pulls/{}",
+            self.base_url, owner, repo, pr_number
+        );
+        let resp = self
+            .client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.token))
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .send()
+            .await
+            .context("Failed to query GitHub pull request")?;
+        if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("GitHub pull request query returned {}: {}", status, body);
+        }
+        let pr: GithubPrResponse = resp
+            .json()
+            .await
+            .context("Failed to parse GitHub pull request response")?;
+        Ok(Some(github_pr_response_to_snapshot(pr)))
+    }
 }
 
 #[derive(Debug, Deserialize)]
 struct GithubPermissionResponse {
     permission: String,
+}
+
+#[derive(Deserialize)]
+struct GithubPrResponse {
+    head: GithubPrRef,
+    #[serde(default)]
+    base: Option<GithubPrRef>,
+}
+
+#[derive(Deserialize)]
+struct GithubPrRef {
+    sha: String,
+    #[serde(rename = "ref")]
+    ref_: String,
+    #[serde(default)]
+    repo: Option<GithubPrRepo>,
+}
+
+#[derive(Deserialize)]
+struct GithubPrRepo {
+    #[serde(default)]
+    full_name: Option<String>,
+    #[serde(default)]
+    clone_url: Option<String>,
+}
+
+fn github_pr_response_to_snapshot(pr: GithubPrResponse) -> PullRequestSnapshot {
+    let head_full = pr.head.repo.as_ref().and_then(|r| r.full_name.clone());
+    let base_full = pr
+        .base
+        .as_ref()
+        .and_then(|b| b.repo.as_ref())
+        .and_then(|r| r.full_name.clone());
+    let is_fork = matches!((head_full.as_deref(), base_full.as_deref()), (Some(h), Some(b)) if h != b);
+    let head_clone_url = if is_fork {
+        pr.head.repo.as_ref().and_then(|r| r.clone_url.clone())
+    } else {
+        None
+    };
+    PullRequestSnapshot {
+        head_sha: pr.head.sha,
+        head_branch: pr.head.ref_,
+        head_clone_url,
+        is_fork,
+    }
 }
 
 // ── GithubAppReporter ────────────────────────────────────────────────────────
@@ -1032,6 +1276,49 @@ impl CiReporter for GithubAppReporter {
             anyhow::bail!("GitHub App returned {}: {}", status, resp_body);
         }
         Ok(())
+    }
+
+    async fn get_pull_request(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+    ) -> Result<Option<PullRequestSnapshot>> {
+        let token = crate::ci::github_app::get_installation_token(
+            &self.client,
+            self.app_id,
+            &self.private_key_pem,
+            self.installation_id,
+        )
+        .await
+        .context("Failed to mint GitHub App installation token")?;
+
+        let url = format!(
+            "{}/repos/{}/{}/pulls/{}",
+            self.api_base_url, owner, repo, pr_number
+        );
+        let resp = self
+            .client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", token))
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .send()
+            .await
+            .context("Failed to query GitHub pull request")?;
+        if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("GitHub App PR query returned {}: {}", status, body);
+        }
+        let pr: GithubPrResponse = resp
+            .json()
+            .await
+            .context("Failed to parse GitHub pull request response")?;
+        Ok(Some(github_pr_response_to_snapshot(pr)))
     }
 }
 

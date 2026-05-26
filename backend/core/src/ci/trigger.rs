@@ -49,6 +49,7 @@ pub async fn trigger_evaluation<C: ConnectionTrait>(
     trigger: Option<crate::types::ids::ProjectTriggerId>,
     concurrent: bool,
     repository_override: Option<String>,
+    wildcard_override: Option<String>,
 ) -> Result<MEvaluation, TriggerError> {
     if !concurrent {
         let in_progress = EEvaluation::find()
@@ -97,7 +98,7 @@ pub async fn trigger_evaluation<C: ConnectionTrait>(
         project: Set(Some(project.id)),
         repository: Set(repository_override.unwrap_or_else(|| project.repository.clone())),
         commit: Set(commit.id),
-        wildcard: Set(project.wildcard.clone()),
+        wildcard: Set(wildcard_override.unwrap_or_else(|| project.wildcard.clone())),
         status: Set(EvaluationStatus::Queued),
         previous: Set(previous),
         next: Set(None),
@@ -405,7 +406,7 @@ mod tests {
             .into_connection();
 
         let result =
-            trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None, false, None).await;
+            trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None, false, None, None).await;
         assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
         assert_eq!(result.unwrap().status, EvaluationStatus::Queued);
     }
@@ -446,7 +447,7 @@ mod tests {
             .into_connection();
 
         let result =
-            trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None, false, None).await;
+            trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None, false, None, None).await;
         assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
     }
 
@@ -461,7 +462,7 @@ mod tests {
             .into_connection();
 
         let result =
-            trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None, false, None).await;
+            trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None, false, None, None).await;
         assert!(matches!(result, Err(TriggerError::AlreadyInProgress)));
     }
 
@@ -481,7 +482,7 @@ mod tests {
                 .append_query_results([vec![make_eval(EvaluationId::now_v7(), status)]])
                 .into_connection();
             let result =
-                trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None, false, None)
+                trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None, false, None, None)
                     .await;
             assert!(
                 matches!(result, Err(TriggerError::AlreadyInProgress)),
@@ -549,7 +550,7 @@ mod tests {
             .into_connection();
 
         let result =
-            trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None, false, None).await;
+            trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None, false, None, None).await;
         assert!(result.is_ok(), "terminal eval should not block new trigger");
     }
 
@@ -590,6 +591,7 @@ mod tests {
             None,
             Some(trig),
             false,
+            None,
             None,
         )
         .await;

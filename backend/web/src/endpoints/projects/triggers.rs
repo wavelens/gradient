@@ -399,6 +399,7 @@ pub async fn fire_now(
         manual: true,
         gate_approval: None,
         repository_override: None,
+        wildcard_override: None,
     };
 
     let outcome = apply_trigger(&state.web_db, &proj, input)
