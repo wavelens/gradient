@@ -41,7 +41,7 @@ export interface ReporterPullRequestTriggerConfig {
   actions?: string[];
   /** When true (default), PRs from non-writer contributors are parked until
    *  a maintainer approves them via the forge's check-run action (GitHub)
-   *  or a `/ci run` comment (Gitea/Forgejo/GitLab). */
+   *  or a `/gradient approve` (or `/gradient run`) comment. */
   require_approval?: boolean;
 }
 

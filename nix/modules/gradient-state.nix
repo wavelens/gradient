@@ -508,8 +508,8 @@
           `require_approval` (PR triggers only, default `true`) parks evaluations
           for PRs from contributors who are not repo writers on the forge until
           a maintainer clicks "Approve and run" on the GitHub check or comments
-          `/ci run` on Gitea/Forgejo/GitLab. Set to `false` to disable the gate
-          and run every PR build automatically.
+          `/gradient approve` (or `/gradient run`) on the PR. Set to `false` to
+          disable the gate and run every PR build automatically.
         '';
         example = literalExpression ''
           { interval_secs = 60; }

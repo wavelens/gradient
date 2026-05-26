@@ -47,8 +47,9 @@ Match the values Gradient expects:
 
 The `issues: write` permission is what gates `issue_comment` delivery — GitHub
 routes every comment on a PR's main conversation tab through that event, so
-without the permission Gradient never sees `/ci run` triggers posted there.
-`write` is required because the `post_pr_comment` reporter uses the same
+without the permission Gradient never sees `/gradient run` or
+`/gradient approve` triggers posted there. `write` is required because the
+`post_pr_comment` reporter uses the same
 `/repos/{owner}/{repo}/issues/{n}/comments` endpoint to reply with build
 status.
 
