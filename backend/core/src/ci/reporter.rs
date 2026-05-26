@@ -119,6 +119,21 @@ pub trait CiReporter: Send + Sync + std::fmt::Debug + 'static {
     async fn is_repo_writer(&self, _owner: &str, _repo: &str, _username: &str) -> Result<bool> {
         Ok(false)
     }
+
+    /// Post a reply comment to a PR/MR. Used by `/ci run <wildcard>` to
+    /// surface wildcard parse errors back to the commenter.
+    ///
+    /// Default impl is a no-op so reporters that do not implement
+    /// outbound comments simply swallow the request.
+    async fn post_pr_comment(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _pr_number: u64,
+        _body: &str,
+    ) -> Result<()> {
+        Ok(())
+    }
 }
 
 // ── NoopCiReporter ────────────────────────────────────────────────────────────
