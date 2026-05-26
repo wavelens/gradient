@@ -700,12 +700,14 @@ mod tests {
     async fn build_request_blob_sweep_disabled_when_ttl_zero() {
         let tmp = tempfile::tempdir().unwrap();
         let nar_storage = NarStore::local(tmp.path().to_str().unwrap()).unwrap();
+        let mut cli = test_cli();
+        cli.storage.nar_ttl_hours = 0;
         let state = Arc::new(ServerState {
             web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
             worker_db: WorkerDb::new(
                 MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
             ),
-            config: Arc::new(RuntimeConfig::from_cli(&test_cli()).expect("valid test config")),
+            config: Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config")),
             log_storage: Arc::new(NoopLogStorage),
             email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
             nar_storage,
