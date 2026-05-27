@@ -52,6 +52,7 @@ fn gitea_inbound_row() -> integration::Model {
         secret: Some("encrypted-blob".into()),
         endpoint_url: None,
         access_token: None,
+        allowed_ips: None,
         created_by: user_id(),
         created_at: test_date(),
     }
@@ -68,6 +69,7 @@ fn github_inbound_row() -> integration::Model {
         secret: None,
         endpoint_url: None,
         access_token: None,
+        allowed_ips: None,
         created_by: user_id(),
         created_at: test_date(),
     }
@@ -84,6 +86,7 @@ fn gitea_outbound_row() -> integration::Model {
         secret: None,
         endpoint_url: Some("https://gitea.example.com".into()),
         access_token: Some("encrypted-token".into()),
+        allowed_ips: None,
         created_by: user_id(),
         created_at: test_date(),
     }

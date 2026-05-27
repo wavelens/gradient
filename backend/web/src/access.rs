@@ -960,6 +960,7 @@ mod tests {
             organization: org,
             cache_pin: None,
             cache_permission_mask: None,
+            allowed_ips: Vec::new(),
         }
     }
 
@@ -1251,6 +1252,7 @@ mod tests {
             organization: None,
             cache_pin: None,
             cache_permission_mask: Some(crate::permissions::cache_view_mask()),
+            allowed_ips: Vec::new(),
         }
     }
 

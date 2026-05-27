@@ -180,6 +180,7 @@ fn integration_row(secret_ciphertext: &str) -> entity::integration::Model {
         secret: Some(secret_ciphertext.to_string()),
         endpoint_url: None,
         access_token: None,
+        allowed_ips: None,
         created_by: user_id(),
         created_at: fixture_date(),
     }
@@ -196,6 +197,7 @@ fn github_integration_row() -> entity::integration::Model {
         secret: None,
         endpoint_url: None,
         access_token: None,
+        allowed_ips: None,
         created_by: user_id(),
         created_at: fixture_date(),
     }

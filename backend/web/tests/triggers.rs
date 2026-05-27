@@ -105,6 +105,7 @@ fn github_inbound_integration_row() -> integration::Model {
         secret: None,
         endpoint_url: None,
         access_token: None,
+        allowed_ips: None,
         created_by: user_id(),
         created_at: test_date(),
     }
