@@ -57,6 +57,53 @@ pub struct RequestedAction {
 /// on when the forge echoes it back via `check_run.requested_action`.
 pub const APPROVAL_ACTION_ID: &str = "approve-and-run";
 
+/// The reaction Gradient leaves on a `/gradient` PR comment.
+///
+/// `Eyes` fires on receipt (maintainer gate passed); `ThumbsUp` / `ThumbsDown`
+/// fire when the triggered evaluation reaches a terminal status; `Confused`
+/// fires when a non-maintainer issues a command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReactionKind {
+    Eyes,
+    ThumbsUp,
+    ThumbsDown,
+    Confused,
+}
+
+impl ReactionKind {
+    /// String accepted by GitHub / Gitea / Forgejo reactions API (`content`).
+    pub const fn github_content(self) -> &'static str {
+        match self {
+            ReactionKind::Eyes => "eyes",
+            ReactionKind::ThumbsUp => "+1",
+            ReactionKind::ThumbsDown => "-1",
+            ReactionKind::Confused => "confused",
+        }
+    }
+
+    /// Emoji name accepted by GitLab award-emoji API (`name`).
+    pub const fn gitlab_name(self) -> &'static str {
+        match self {
+            ReactionKind::Eyes => "eyes",
+            ReactionKind::ThumbsUp => "thumbsup",
+            ReactionKind::ThumbsDown => "thumbsdown",
+            ReactionKind::Confused => "confused",
+        }
+    }
+}
+
+/// Identifies the comment the reaction should be attached to. GitHub and
+/// Gitea / Forgejo address PR-conversation comments by `(owner, repo,
+/// comment_id)`; GitLab requires the MR number too because notes are nested
+/// under `/projects/:id/merge_requests/:iid/notes/:note_id`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReactionTarget {
+    pub owner: String,
+    pub repo: String,
+    pub pr_number: u64,
+    pub comment_id: i64,
+}
+
 /// Snapshot of a pull/merge request returned by [`CiReporter::get_pull_request`].
 ///
 /// Used by the `/gradient run` comment handler to learn the PR's current head
@@ -170,6 +217,17 @@ pub trait CiReporter: Send + Sync + std::fmt::Debug + 'static {
         _pr_number: u64,
     ) -> Result<Option<PullRequestSnapshot>> {
         Ok(None)
+    }
+
+    /// Attach a reaction to a PR/MR comment so the commenter gets visual
+    /// feedback on the lifecycle of their `/gradient` command (eyes on
+    /// receipt, thumbs-up/down on terminal eval status, confused on
+    /// non-maintainer rejection).
+    ///
+    /// Default impl is a no-op so reporters that cannot publish reactions
+    /// just swallow the call.
+    async fn add_reaction(&self, _target: &ReactionTarget, _kind: ReactionKind) -> Result<()> {
+        Ok(())
     }
 }
 
@@ -365,6 +423,40 @@ impl CiReporter for GiteaReporter {
                 "Gitea PR comment post failed"
             );
             anyhow::bail!("Gitea returned {}: {}", status, resp_body);
+        }
+        Ok(())
+    }
+
+    async fn add_reaction(&self, target: &ReactionTarget, kind: ReactionKind) -> Result<()> {
+        let url = format!(
+            "{}/api/v1/repos/{}/{}/issues/comments/{}/reactions",
+            self.base_url, target.owner, target.repo, target.comment_id
+        );
+        #[derive(Serialize)]
+        struct Body<'a> {
+            content: &'a str,
+        }
+        let resp = self
+            .client
+            .post(&url)
+            .header("Authorization", format!("token {}", self.token))
+            .header("Content-Type", "application/json")
+            .json(&Body {
+                content: kind.github_content(),
+            })
+            .send()
+            .await
+            .context("Failed to send Gitea comment reaction")?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            warn!(
+                gitea_url = %url,
+                http_status = %status,
+                body = %body,
+                "Gitea comment reaction failed"
+            );
+            anyhow::bail!("Gitea returned {}: {}", status, body);
         }
         Ok(())
     }
@@ -631,6 +723,46 @@ impl CiReporter for GitlabReporter {
                 "GitLab MR comment post failed"
             );
             anyhow::bail!("GitLab returned {}: {}", status, resp_body);
+        }
+        Ok(())
+    }
+
+    async fn add_reaction(&self, target: &ReactionTarget, kind: ReactionKind) -> Result<()> {
+        let project_id = gitlab_project_id(&target.owner, &target.repo);
+        let url = format!(
+            "{}/api/v4/projects/{}/merge_requests/{}/notes/{}/award_emoji",
+            self.base_url, project_id, target.pr_number, target.comment_id
+        );
+        #[derive(Serialize)]
+        struct Body<'a> {
+            name: &'a str,
+        }
+        let resp = self
+            .client
+            .post(&url)
+            .header("PRIVATE-TOKEN", &self.token)
+            .header("Content-Type", "application/json")
+            .json(&Body {
+                name: kind.gitlab_name(),
+            })
+            .send()
+            .await
+            .context("Failed to send GitLab note award_emoji")?;
+        let status = resp.status();
+        // GitLab returns 409 when the emoji already exists on the note; treat
+        // that as success so repeat eval finishes don't trip alarms.
+        if status == reqwest::StatusCode::CONFLICT {
+            return Ok(());
+        }
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            warn!(
+                gitlab_url = %url,
+                http_status = %status,
+                body = %body,
+                "GitLab MR note reaction failed"
+            );
+            anyhow::bail!("GitLab returned {}: {}", status, body);
         }
         Ok(())
     }
@@ -915,6 +1047,53 @@ impl CiReporter for GithubReporter {
             .context("Failed to parse GitHub pull request response")?;
         Ok(Some(github_pr_response_to_snapshot(pr)))
     }
+
+    async fn add_reaction(&self, target: &ReactionTarget, kind: ReactionKind) -> Result<()> {
+        let url = github_reaction_url(&self.base_url, &target.owner, &target.repo, target.comment_id);
+        post_github_reaction(&self.client, &url, &self.token, kind).await
+    }
+}
+
+fn github_reaction_url(base_url: &str, owner: &str, repo: &str, comment_id: i64) -> String {
+    format!(
+        "{}/repos/{}/{}/issues/comments/{}/reactions",
+        base_url, owner, repo, comment_id
+    )
+}
+
+async fn post_github_reaction(
+    client: &reqwest::Client,
+    url: &str,
+    token: &str,
+    kind: ReactionKind,
+) -> Result<()> {
+    #[derive(Serialize)]
+    struct Body<'a> {
+        content: &'a str,
+    }
+    let resp = client
+        .post(url)
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Accept", "application/vnd.github+json")
+        .header("X-GitHub-Api-Version", "2022-11-28")
+        .json(&Body {
+            content: kind.github_content(),
+        })
+        .send()
+        .await
+        .context("Failed to send GitHub comment reaction")?;
+    let status = resp.status();
+    if !status.is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        warn!(
+            github_url = %url,
+            http_status = %status,
+            body = %body,
+            "GitHub comment reaction failed"
+        );
+        anyhow::bail!("GitHub returned {}: {}", status, body);
+    }
+    Ok(())
 }
 
 #[derive(Debug, Deserialize)]
@@ -1319,6 +1498,24 @@ impl CiReporter for GithubAppReporter {
             .await
             .context("Failed to parse GitHub pull request response")?;
         Ok(Some(github_pr_response_to_snapshot(pr)))
+    }
+
+    async fn add_reaction(&self, target: &ReactionTarget, kind: ReactionKind) -> Result<()> {
+        let token = crate::ci::github_app::get_installation_token(
+            &self.client,
+            self.app_id,
+            &self.private_key_pem,
+            self.installation_id,
+        )
+        .await
+        .context("Failed to mint GitHub App installation token")?;
+        let url = github_reaction_url(
+            &self.api_base_url,
+            &target.owner,
+            &target.repo,
+            target.comment_id,
+        );
+        post_github_reaction(&self.client, &url, &token, kind).await
     }
 }
 
