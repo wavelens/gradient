@@ -5,42 +5,16 @@
  */
 
 use super::helpers::{CacheContext, JsonFlag, cache_client_ip, get_nar_by_hash};
+use crate::client_ip::OptionalPeer;
 use crate::error::{WebError, WebResult};
-use axum::extract::connect_info::MockConnectInfo;
-use axum::extract::{ConnectInfo, FromRequestParts, Path, Query, State};
-use axum::http::request::Parts;
+use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::{IntoResponse, Response};
 use gradient_core::sources::{get_hash_from_url, verify_narinfo_signature};
 use gradient_core::types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-use std::convert::Infallible;
-use std::net::SocketAddr;
 use std::sync::Arc;
 use tracing::warn;
-
-/// Optional peer address - mirrors `ConnectInfo`'s real / `MockConnectInfo`
-/// fallback, but yields `None` instead of 500 when the runtime wired neither
-/// (`axum_test::TestServer` without `MockConnectInfo`, ad-hoc tower stacks).
-pub struct OptionalPeer(pub Option<SocketAddr>);
-
-impl<S: Send + Sync> FromRequestParts<S> for OptionalPeer {
-    type Rejection = Infallible;
-
-    async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Self::Rejection> {
-        let addr = parts
-            .extensions
-            .get::<ConnectInfo<SocketAddr>>()
-            .map(|c| c.0)
-            .or_else(|| {
-                parts
-                    .extensions
-                    .get::<MockConnectInfo<SocketAddr>>()
-                    .map(|m| m.0)
-            });
-        Ok(OptionalPeer(addr))
-    }
-}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

@@ -29,15 +29,18 @@ use gradient_core::ci::actions::decrypt_secret_with_file;
 use gradient_core::ci::{
     ForgeType, IntegrationKind, verify_gitea_signature, verify_github_signature,
 };
+use gradient_core::ip_allowlist::is_allowed as ip_allowed;
 use gradient_core::types::input::load_secret;
 use gradient_core::types::*;
 use scheduler::Scheduler;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 use subtle::ConstantTimeEq;
 use tracing::{debug, warn};
 
-use crate::error::{WebError, WebResult};
+use crate::client_ip::{OptionalPeer, resolve_client_ip};
+use crate::error::{ErrorCode, WebError, WebResult};
 use crate::helpers::ok_json;
 
 use events::{ParsedPullRequestEvent, ParsedPushEvent, ParsedReleaseEvent};
@@ -52,6 +55,7 @@ use trigger::{
 pub async fn github_app_webhook(
     State(state): State<Arc<ServerState>>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
+    OptionalPeer(peer): OptionalPeer,
     headers: HeaderMap,
     body: Bytes,
 ) -> WebResult<Json<BaseResponse<WebhookResponse>>> {
@@ -83,6 +87,11 @@ pub async fn github_app_webhook(
         return Err(WebError::unauthorized("invalid webhook signature"));
     }
 
+    let peer_ip = peer
+        .map(|p| p.ip())
+        .unwrap_or_else(|| IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+    let client_ip = resolve_client_ip(&headers, peer_ip, &state.config.network.trusted_proxies);
+
     let event = headers
         .get("X-GitHub-Event")
         .and_then(|v| v.to_str().ok())
@@ -97,7 +106,8 @@ pub async fn github_app_webhook(
                 return Err(WebError::bad_request("malformed webhook payload"));
             };
             let urls = parsed.repository_urls.clone();
-            let outcome = dispatch_github_app_push(&state, &scheduler, parsed, &body).await;
+            let outcome =
+                dispatch_github_app_push(&state, &scheduler, parsed, &body, client_ip).await;
             WebhookResponse {
                 event: "push".to_string(),
                 repository_urls: urls,
@@ -111,7 +121,8 @@ pub async fn github_app_webhook(
                 return Err(WebError::bad_request("malformed webhook payload"));
             };
             let urls = parsed.repository_urls.clone();
-            let outcome = dispatch_github_app_pr(&state, &scheduler, parsed, &body).await;
+            let outcome =
+                dispatch_github_app_pr(&state, &scheduler, parsed, &body, client_ip).await;
             WebhookResponse {
                 event: "pull_request".to_string(),
                 repository_urls: urls,
@@ -125,7 +136,8 @@ pub async fn github_app_webhook(
                 return Err(WebError::bad_request("malformed webhook payload"));
             };
             let urls = parsed.repository_urls.clone();
-            let outcome = dispatch_github_app_release(&state, &scheduler, parsed, &body).await;
+            let outcome =
+                dispatch_github_app_release(&state, &scheduler, parsed, &body, client_ip).await;
             WebhookResponse {
                 event: "release".to_string(),
                 repository_urls: urls,
@@ -143,7 +155,15 @@ pub async fn github_app_webhook(
             WebhookResponse::empty(&event)
         }
         "issue_comment" => {
-            trigger::handle_issue_comment(&state, &scheduler, ForgeType::GitHub, None, &body).await;
+            trigger::handle_issue_comment(
+                &state,
+                &scheduler,
+                ForgeType::GitHub,
+                None,
+                &body,
+                client_ip,
+            )
+            .await;
             WebhookResponse::empty(&event)
         }
         other => WebhookResponse::empty(other),
@@ -175,12 +195,15 @@ async fn dispatch_github_app_push(
     scheduler: &Arc<Scheduler>,
     parsed: ParsedPushEvent,
     body: &[u8],
+    client_ip: IpAddr,
 ) -> WebhookTriggerOutcome {
     let Some(installation_id) = github_installation_id_from_body(body) else {
         warn!("GitHub App push: missing installation_id");
         return WebhookTriggerOutcome::default();
     };
-    let targets = resolve_github_app_targets(state, installation_id, &parsed.repository_urls).await;
+    let targets =
+        resolve_github_app_targets(state, installation_id, &parsed.repository_urls, client_ip)
+            .await;
     if targets.is_empty() {
         warn!(
             installation_id,
@@ -220,12 +243,15 @@ async fn dispatch_github_app_pr(
     scheduler: &Arc<Scheduler>,
     parsed: ParsedPullRequestEvent,
     body: &[u8],
+    client_ip: IpAddr,
 ) -> WebhookTriggerOutcome {
     let Some(installation_id) = github_installation_id_from_body(body) else {
         warn!("GitHub App pull_request: missing installation_id");
         return WebhookTriggerOutcome::default();
     };
-    let targets = resolve_github_app_targets(state, installation_id, &parsed.repository_urls).await;
+    let targets =
+        resolve_github_app_targets(state, installation_id, &parsed.repository_urls, client_ip)
+            .await;
     if targets.is_empty() {
         warn!(
             installation_id,
@@ -274,12 +300,15 @@ async fn dispatch_github_app_release(
     scheduler: &Arc<Scheduler>,
     parsed: ParsedReleaseEvent,
     body: &[u8],
+    client_ip: IpAddr,
 ) -> WebhookTriggerOutcome {
     let Some(installation_id) = github_installation_id_from_body(body) else {
         warn!("GitHub App release: missing installation_id");
         return WebhookTriggerOutcome::default();
     };
-    let targets = resolve_github_app_targets(state, installation_id, &parsed.repository_urls).await;
+    let targets =
+        resolve_github_app_targets(state, installation_id, &parsed.repository_urls, client_ip)
+            .await;
     if targets.is_empty() {
         warn!(
             installation_id,
@@ -316,6 +345,7 @@ async fn dispatch_github_app_release(
 pub async fn forge_webhook(
     State(state): State<Arc<ServerState>>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
+    OptionalPeer(peer): OptionalPeer,
     Path((forge, org_name, integration_name)): Path<(String, String, String)>,
     headers: HeaderMap,
     body: Bytes,
@@ -370,6 +400,28 @@ pub async fn forge_webhook(
     if !verify_forge_signature(forge_type, plaintext_secret.expose(), &headers, &body) {
         warn!(org = %org_name, forge = %forge, integration = %integration_name, "Forge webhook: invalid signature");
         return Err(WebError::unauthorized("invalid webhook signature"));
+    }
+
+    let allowlist = integration.allowed_ips.clone().unwrap_or_default();
+    if !allowlist.is_empty() {
+        let peer_ip = peer
+            .map(|p| p.ip())
+            .unwrap_or_else(|| IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+        let client_ip =
+            resolve_client_ip(&headers, peer_ip, &state.config.network.trusted_proxies);
+        if !ip_allowed(client_ip, &allowlist) {
+            warn!(
+                org = %org_name,
+                forge = %forge,
+                integration = %integration_name,
+                %client_ip,
+                "Forge webhook: source IP not allowed",
+            );
+            return Err(WebError::forbidden_with(
+                ErrorCode::FORBIDDEN_SOURCE_IP,
+                "Webhook source IP not allowed",
+            ));
+        }
     }
 
     let integration_id = integration.id;
@@ -476,12 +528,18 @@ pub async fn forge_webhook(
             }
         }
         ForgeEvent::Comment => {
+            let peer_ip = peer
+                .map(|p| p.ip())
+                .unwrap_or_else(|| IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+            let client_ip =
+                resolve_client_ip(&headers, peer_ip, &state.config.network.trusted_proxies);
             trigger::handle_issue_comment(
                 &state,
                 &scheduler,
                 forge_type,
                 Some(integration_id),
                 &body,
+                client_ip,
             )
             .await;
             WebhookResponse::empty("comment")
