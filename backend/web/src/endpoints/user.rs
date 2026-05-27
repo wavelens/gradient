@@ -432,6 +432,7 @@ pub async fn post_keys(
         permission: Set(mask),
         organization: Set(org_pin),
         cache: Set(cache_pin),
+        allowed_ips: Set(None),
     };
     let inserted = api_key.insert(&state.web_db).await?;
 

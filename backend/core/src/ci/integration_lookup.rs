@@ -96,6 +96,7 @@ pub async fn ensure_github_app_integrations<C: ConnectionTrait>(
             secret: Set(None),
             endpoint_url: Set(None),
             access_token: Set(None),
+            allowed_ips: Set(None),
             created_by: Set(creator),
             created_at: Set(chrono::Utc::now().naive_utc()),
         }
