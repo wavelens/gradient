@@ -317,6 +317,7 @@ pub async fn put_integration(
         secret: Set(encrypted_secret),
         endpoint_url: Set(endpoint_url),
         access_token: Set(encrypted_token),
+        allowed_ips: Set(None),
         created_by: Set(user.id),
         created_at: Set(gradient_core::types::now()),
     };

@@ -31,6 +31,9 @@ pub struct Model {
     /// other org.
     pub organization: Option<OrganizationId>,
     pub cache: Option<CacheId>,
+    /// Source CIDRs allowed to present this key. `None`/empty = any source.
+    #[sea_orm(column_type = "Array(std::sync::Arc::new(ColumnType::Text))", nullable)]
+    pub allowed_ips: Option<Vec<String>>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -74,6 +77,7 @@ impl std::fmt::Debug for Model {
             .field("permission", &self.permission)
             .field("organization", &self.organization)
             .field("cache", &self.cache)
+            .field("allowed_ips", &self.allowed_ips)
             .finish()
     }
 }

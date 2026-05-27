@@ -29,6 +29,9 @@ pub struct Model {
     pub endpoint_url: Option<String>,
     #[sea_orm(column_type = "Text", nullable)]
     pub access_token: Option<String>,
+    /// Source CIDRs allowed for inbound webhooks. `None`/empty = any source.
+    #[sea_orm(column_type = "Array(std::sync::Arc::new(ColumnType::Text))", nullable)]
+    pub allowed_ips: Option<Vec<String>>,
     pub created_by: UserId,
     pub created_at: NaiveDateTime,
 }
@@ -64,6 +67,7 @@ impl std::fmt::Debug for Model {
                 "access_token",
                 &self.access_token.as_ref().map(|_| "[redacted]"),
             )
+            .field("allowed_ips", &self.allowed_ips)
             .field("created_by", &self.created_by)
             .field("created_at", &self.created_at)
             .finish()

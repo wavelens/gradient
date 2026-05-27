@@ -1398,6 +1398,7 @@ impl<'a> StateApplicator<'a> {
                     permission: Set(mask),
                     organization: Set(pinned_org),
                     cache: Set(None),
+                    allowed_ips: Set(None),
                 };
                 api_key_model.insert(self.db).await?;
                 tracing::info!(name = %state_api_key.name, "Created managed API key");
@@ -1598,6 +1599,7 @@ impl<'a> StateApplicator<'a> {
                     secret: Set(encrypted_secret),
                     endpoint_url: Set(endpoint),
                     access_token: Set(encrypted_token),
+                    allowed_ips: Set(None),
                     created_by: Set(created_by_id),
                     created_at: Set(now()),
                 };
