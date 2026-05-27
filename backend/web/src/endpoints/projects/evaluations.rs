@@ -662,6 +662,7 @@ pub async fn get_entry_point_download(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Extension(api_key): Extension<MaybeApiKey>,
+    Extension(crate::client_ip::ClientIp(client_ip)): Extension<crate::client_ip::ClientIp>,
     Path((organization, project)): Path<(String, String)>,
     Query(params): Query<EntryPointDownloadQuery>,
 ) -> Result<Response, WebError> {
@@ -683,12 +684,20 @@ pub async fn get_entry_point_download(
         let decoded = crate::authorization::decode_jwt(State(Arc::clone(&state)), token_str)
             .await
             .map_err(|_| WebError::unauthorized("Invalid token"))?;
+        if let Some(ctx) = decoded.api_key_context()
+            && !gradient_core::ip_allowlist::is_allowed(client_ip, &ctx.allowed_ips)
+        {
+            return Err(WebError::forbidden_with(
+                crate::error::ErrorCode::FORBIDDEN_SOURCE_IP,
+                "API key not allowed from this source IP",
+            ));
+        }
         let user = EUser::find_by_id(decoded.user_id())
             .one(&state.web_db)
             .await?;
-        (user, decoded.api_key_context().copied())
+        (user, decoded.api_key_context().cloned())
     } else {
-        (maybe_user, api_key.as_ref().copied())
+        (maybe_user, api_key.as_ref().cloned())
     };
 
     if !organization.public {

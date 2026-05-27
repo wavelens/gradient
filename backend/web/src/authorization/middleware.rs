@@ -18,7 +18,9 @@ use std::sync::Arc;
 use super::api_key::MaybeApiKey;
 use super::jwt::{decode_jwt, extract_bearer_or_cookie, token_from_cookie};
 use crate::audit::{RequestInfo, events, record as audit_record};
-use crate::error::{WebError, WebResult};
+use crate::client_ip::{ClientIp, resolve_client_ip};
+use crate::error::{ErrorCode, WebError, WebResult};
+use gradient_core::ip_allowlist::is_allowed as ip_allowed;
 
 /// Extension type for optional authentication.
 /// Inserted by `authorize_optional` into every request regardless of whether
@@ -123,8 +125,26 @@ pub async fn authorize(
     };
 
     let user_id = decoded.user_id();
+    let client_ip = resolve_client_ip(req.headers(), peer, &state.config.network.trusted_proxies);
     let api_key_extension = match decoded.api_key_context() {
-        Some(ctx) => MaybeApiKey::from_key(*ctx),
+        Some(ctx) => {
+            if !ip_allowed(client_ip, &ctx.allowed_ips) {
+                audit_deny(
+                    &state,
+                    Some(user_id),
+                    info,
+                    method,
+                    path,
+                    "API key source IP not allowed",
+                )
+                .await;
+                return Err(WebError::forbidden_with(
+                    ErrorCode::FORBIDDEN_SOURCE_IP,
+                    "API key not allowed from this source IP",
+                ));
+            }
+            MaybeApiKey::from_key(ctx.clone())
+        }
         None => MaybeApiKey::none(),
     };
 
@@ -138,6 +158,7 @@ pub async fn authorize(
 
     req.extensions_mut().insert(current_user);
     req.extensions_mut().insert(api_key_extension);
+    req.extensions_mut().insert(ClientIp(client_ip));
     Ok(next.run(req).await)
 }
 
@@ -153,21 +174,36 @@ pub async fn authorize_optional(
     let mut maybe_user: Option<MUser> = None;
     let mut maybe_api_key = MaybeApiKey::none();
 
+    let peer = req
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|c| c.0.ip())
+        .unwrap_or_else(|| IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+    let client_ip =
+        resolve_client_ip(req.headers(), peer, &state.config.network.trusted_proxies);
+
     if let Some(token_str) = extract_bearer_or_cookie(req.headers())
         && let Ok(decoded) = decode_jwt(State(Arc::clone(&state)), token_str).await
     {
-        if let Some(ctx) = decoded.api_key_context() {
-            maybe_api_key = MaybeApiKey::from_key(*ctx);
+        let ip_ok = match decoded.api_key_context() {
+            Some(ctx) => ip_allowed(client_ip, &ctx.allowed_ips),
+            None => true,
+        };
+        if ip_ok {
+            if let Some(ctx) = decoded.api_key_context() {
+                maybe_api_key = MaybeApiKey::from_key(ctx.clone());
+            }
+            maybe_user = EUser::find_by_id(decoded.user_id())
+                .one(&state.web_db)
+                .await
+                .ok()
+                .flatten();
         }
-        maybe_user = EUser::find_by_id(decoded.user_id())
-            .one(&state.web_db)
-            .await
-            .ok()
-            .flatten();
     }
 
     req.extensions_mut().insert(MaybeUser(maybe_user));
     req.extensions_mut().insert(maybe_api_key);
+    req.extensions_mut().insert(ClientIp(client_ip));
     next.run(req).await
 }
 

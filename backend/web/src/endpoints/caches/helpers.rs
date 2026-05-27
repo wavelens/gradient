@@ -5,14 +5,17 @@
  */
 
 use crate::authorization::decode_jwt;
-use crate::error::{WebError, WebResult};
+use crate::client_ip::resolve_client_ip;
+use crate::error::{ErrorCode, WebError, WebResult};
 use crate::helpers::OptionExt;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use base64::Engine;
+use gradient_core::ip_allowlist::is_allowed as ip_allowed;
 use gradient_core::nix_hash::{normalize_nar_hash, strip_hash_algo};
 use gradient_core::sources::get_path_from_derivation_output;
 use gradient_core::types::*;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, PaginatorTrait,
@@ -23,21 +26,44 @@ use tracing::error;
 
 /// Extracts HTTP Basic Auth credentials and resolves them to a user.
 /// The password field is treated as a JWT or API key (the username is ignored).
-async fn try_authenticate_basic(state: &Arc<ServerState>, headers: &HeaderMap) -> Option<MUser> {
-    let auth = headers.get(axum::http::header::AUTHORIZATION)?;
-    let val = auth.to_str().ok()?;
-    let encoded = val.strip_prefix("Basic ")?;
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(encoded)
-        .ok()?;
-    let creds = String::from_utf8(bytes).ok()?;
-    let password = creds.split_once(':').map(|(_, p)| p)?.to_string();
-    let decoded = decode_jwt(State(Arc::clone(state)), password).await.ok()?;
-    EUser::find_by_id(decoded.user_id())
+/// Returns `Err(forbidden)` when an API-key allowlist rejects `client_ip`.
+async fn try_authenticate_basic(
+    state: &Arc<ServerState>,
+    headers: &HeaderMap,
+    client_ip: IpAddr,
+) -> WebResult<Option<MUser>> {
+    let Some(auth) = headers.get(axum::http::header::AUTHORIZATION) else {
+        return Ok(None);
+    };
+    let Ok(val) = auth.to_str() else { return Ok(None) };
+    let Some(encoded) = val.strip_prefix("Basic ") else {
+        return Ok(None);
+    };
+    let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(encoded) else {
+        return Ok(None);
+    };
+    let Ok(creds) = String::from_utf8(bytes) else {
+        return Ok(None);
+    };
+    let Some(password) = creds.split_once(':').map(|(_, p)| p.to_string()) else {
+        return Ok(None);
+    };
+    let Ok(decoded) = decode_jwt(State(Arc::clone(state)), password).await else {
+        return Ok(None);
+    };
+    if let Some(ctx) = decoded.api_key_context()
+        && !ip_allowed(client_ip, &ctx.allowed_ips)
+    {
+        return Err(WebError::forbidden_with(
+            ErrorCode::FORBIDDEN_SOURCE_IP,
+            "API key not allowed from this source IP",
+        ));
+    }
+    Ok(EUser::find_by_id(decoded.user_id())
         .one(&state.web_db)
         .await
         .ok()
-        .flatten()
+        .flatten())
 }
 
 /// Returns true if `user` is allowed to read `cache`.
@@ -86,13 +112,14 @@ async fn user_can_access_cache(state: &Arc<ServerState>, cache: &MCache, user: &
 async fn require_cache_auth(
     state: &Arc<ServerState>,
     headers: &HeaderMap,
+    client_ip: IpAddr,
     cache: &MCache,
 ) -> WebResult<()> {
     if cache.public {
         return Ok(());
     }
 
-    let maybe_user = try_authenticate_basic(state, headers).await;
+    let maybe_user = try_authenticate_basic(state, headers, client_ip).await?;
     match maybe_user {
         Some(user) if user_can_access_cache(state, cache, &user).await => Ok(()),
         _ => Err(WebError::unauthorized(
@@ -385,6 +412,7 @@ impl CacheContext {
     pub(super) async fn load(
         state: &Arc<ServerState>,
         headers: &HeaderMap,
+        client_ip: IpAddr,
         cache_name: String,
     ) -> WebResult<Self> {
         let cache = ECache::find()
@@ -397,10 +425,21 @@ impl CacheContext {
             return Err(WebError::bad_request("Cache is disabled"));
         }
 
-        require_cache_auth(state, headers, &cache).await?;
+        require_cache_auth(state, headers, client_ip, &cache).await?;
 
         Ok(Self { cache })
     }
+}
+
+pub(super) fn cache_client_ip(
+    state: &Arc<ServerState>,
+    headers: &HeaderMap,
+    peer: Option<SocketAddr>,
+) -> IpAddr {
+    let peer_ip = peer
+        .map(|p| p.ip())
+        .unwrap_or_else(|| IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+    resolve_client_ip(headers, peer_ip, &state.config.network.trusted_proxies)
 }
 
 /// Query extractor for the `?json` flag used by text-format cache endpoints

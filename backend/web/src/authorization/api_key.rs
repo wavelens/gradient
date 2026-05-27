@@ -16,7 +16,7 @@ use crate::permissions::PermissionMask;
 use gradient_core::types::ids::CacheId;
 use gradient_core::types::{ApiId, OrganizationId, UserId};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApiKeyContext {
     pub api_id: ApiId,
     pub mask: PermissionMask,
@@ -26,6 +26,8 @@ pub struct ApiKeyContext {
     pub cache_pin: Option<CacheId>,
     /// Cache-permission mask. `None` means unrestricted (i64::MAX).
     pub cache_permission_mask: Option<i64>,
+    /// Source-IP allowlist (CIDR strings). Empty = any source allowed.
+    pub allowed_ips: Vec<String>,
 }
 
 /// Extension type inserted on every authenticated request.
@@ -89,8 +91,9 @@ mod tests {
             ))),
             cache_pin: None,
             cache_permission_mask: None,
+            allowed_ips: Vec::new(),
         };
-        let wrapped = MaybeApiKey::from_key(ctx);
+        let wrapped = MaybeApiKey::from_key(ctx.clone());
         assert_eq!(wrapped.as_ref(), Some(&ctx));
     }
 
@@ -123,6 +126,7 @@ mod tests {
                 organization: None,
                 cache_pin: None,
                 cache_permission_mask: None,
+                allowed_ips: Vec::new(),
             },
         };
         let ctx = outcome.api_key_context().expect("present");

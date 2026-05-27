@@ -57,6 +57,10 @@ impl ErrorCode {
     // 403 Forbidden
     pub const FORBIDDEN: Self = Self("forbidden");
     pub const SUPERUSER_REQUIRED: Self = Self("superuser_required");
+    pub const FORBIDDEN_SOURCE_IP: Self = Self("forbidden_source_ip");
+
+    // Validation-specific bad-request codes
+    pub const INVALID_ALLOWED_IP: Self = Self("invalid_allowed_ip");
 
     // 404 Not Found
     pub const NOT_FOUND: Self = Self("not_found");

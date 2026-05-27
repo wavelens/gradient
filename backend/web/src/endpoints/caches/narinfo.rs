@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::helpers::{CacheContext, JsonFlag, get_nar_by_hash};
+use super::helpers::{CacheContext, JsonFlag, cache_client_ip, get_nar_by_hash};
 use crate::error::{WebError, WebResult};
 use axum::extract::connect_info::MockConnectInfo;
 use axum::extract::{ConnectInfo, FromRequestParts, Path, Query, State};
@@ -60,7 +60,8 @@ pub async fn nix_cache_info(
     Path(cache): Path<String>,
     Query(flag): Query<JsonFlag>,
 ) -> WebResult<Response> {
-    let ctx = CacheContext::load(&state, &headers, cache).await?;
+    let client_ip = cache_client_ip(&state, &headers, peer);
+    let ctx = CacheContext::load(&state, &headers, client_ip, cache).await?;
 
     let priority = match (ctx.cache.local_priority, peer) {
         (Some(p), Some(addr)) if p != 0 => {
@@ -93,11 +94,13 @@ pub async fn nix_cache_info(
 
 pub async fn gradient_cache_info(
     state: State<Arc<ServerState>>,
+    OptionalPeer(peer): OptionalPeer,
     headers: HeaderMap,
     Path(cache): Path<String>,
     Query(flag): Query<JsonFlag>,
 ) -> WebResult<Response> {
-    CacheContext::load(&state, &headers, cache).await?;
+    let client_ip = cache_client_ip(&state, &headers, peer);
+    CacheContext::load(&state, &headers, client_ip, cache).await?;
 
     let info = GradientCacheInfo {
         gradient_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -113,6 +116,7 @@ pub async fn gradient_cache_info(
 
 pub async fn path(
     state: State<Arc<ServerState>>,
+    OptionalPeer(peer): OptionalPeer,
     headers: HeaderMap,
     Path((cache, path)): Path<(String, String)>,
     Query(flag): Query<JsonFlag>,
@@ -124,7 +128,8 @@ pub async fn path(
         return Err(WebError::not_found("Path"));
     }
 
-    let ctx = CacheContext::load(&state, &headers, cache).await?;
+    let client_ip = cache_client_ip(&state, &headers, peer);
+    let ctx = CacheContext::load(&state, &headers, client_ip, cache).await?;
 
     if let Ok(path_info) =
         get_nar_by_hash(Arc::clone(&state), ctx.cache.clone(), path_hash.clone()).await

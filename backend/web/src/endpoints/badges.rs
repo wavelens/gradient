@@ -237,18 +237,27 @@ async fn resolve_badge_user(
     maybe_user: Option<MUser>,
     api_key: MaybeApiKey,
     token: Option<String>,
+    client_ip: std::net::IpAddr,
 ) -> Result<(Option<MUser>, Option<ApiKeyContext>), WebError> {
     match token {
         Some(tok) => {
             let decoded = crate::authorization::decode_jwt(State(Arc::clone(state)), tok)
                 .await
                 .map_err(|_| WebError::unauthorized("Invalid token"))?;
+            if let Some(ctx) = decoded.api_key_context()
+                && !gradient_core::ip_allowlist::is_allowed(client_ip, &ctx.allowed_ips)
+            {
+                return Err(WebError::forbidden_with(
+                    crate::error::ErrorCode::FORBIDDEN_SOURCE_IP,
+                    "API key not allowed from this source IP",
+                ));
+            }
             let user = EUser::find_by_id(decoded.user_id())
                 .one(&state.web_db)
                 .await?;
-            Ok((user, decoded.api_key_context().copied()))
+            Ok((user, decoded.api_key_context().cloned()))
         }
-        None => Ok((maybe_user, api_key.as_ref().copied())),
+        None => Ok((maybe_user, api_key.as_ref().cloned())),
     }
 }
 
@@ -368,6 +377,9 @@ pub async fn get_project_badge(
     state: State<Arc<ServerState>>,
     axum::Extension(MaybeUser(maybe_user)): axum::Extension<MaybeUser>,
     axum::Extension(api_key): axum::Extension<MaybeApiKey>,
+    axum::Extension(crate::client_ip::ClientIp(client_ip)): axum::Extension<
+        crate::client_ip::ClientIp,
+    >,
     Path((organization, project)): Path<(String, String)>,
     Query(params): Query<BadgeParams>,
 ) -> Result<Response, WebError> {
@@ -376,7 +388,7 @@ pub async fn get_project_badge(
         .or_not_found("Organization")?;
 
     let (resolved_user, resolved_key) =
-        resolve_badge_user(&state, maybe_user, api_key, params.token).await?;
+        resolve_badge_user(&state, maybe_user, api_key, params.token, client_ip).await?;
     check_badge_org_access(&state, &organization, &resolved_user, resolved_key.as_ref()).await?;
 
     let project = EProject::find()

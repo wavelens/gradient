@@ -187,6 +187,7 @@ async fn decode_api_key(
         } else {
             None
         },
+        allowed_ips: api_key.allowed_ips.clone().unwrap_or_default(),
     };
     let user_id = api_key.owned_by;
 

@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::helpers::CacheContext;
+use super::helpers::{CacheContext, cache_client_ip};
+use super::narinfo::OptionalPeer;
 use crate::error::{WebError, WebResult};
 use crate::helpers::OptionExt;
 use axum::body::Body;
@@ -19,6 +20,7 @@ use uuid::Uuid;
 
 pub async fn nar(
     state: State<Arc<ServerState>>,
+    OptionalPeer(peer): OptionalPeer,
     headers: HeaderMap,
     Path((cache, path)): Path<(String, String)>,
 ) -> WebResult<Response> {
@@ -29,7 +31,8 @@ pub async fn nar(
         return Err(WebError::not_found("Path"));
     }
 
-    let ctx = CacheContext::load(&state, &headers, cache).await?;
+    let client_ip = cache_client_ip(&state, &headers, peer);
+    let ctx = CacheContext::load(&state, &headers, client_ip, cache).await?;
 
     let compressed = super::helpers::fetch_nar_bytes(&state, &path_hash).await?;
     let effective_hash = resolve_effective_hash_db(&state.web_db, &path_hash).await?;
@@ -48,10 +51,12 @@ pub async fn nar(
 
 pub async fn upstream_nar(
     state: State<Arc<ServerState>>,
+    OptionalPeer(peer): OptionalPeer,
     headers: HeaderMap,
     Path((cache_name, upstream_id, path)): Path<(String, Uuid, String)>,
 ) -> WebResult<Response> {
-    let ctx = CacheContext::load(&state, &headers, cache_name).await?;
+    let client_ip = cache_client_ip(&state, &headers, peer);
+    let ctx = CacheContext::load(&state, &headers, client_ip, cache_name).await?;
 
     let upstream = ECacheUpstream::find_by_id(upstream_id)
         .filter(CCacheUpstream::Cache.eq(ctx.cache.id))
