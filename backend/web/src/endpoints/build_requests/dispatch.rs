@@ -162,6 +162,7 @@ pub async fn post_dispatch(
         waiting_reason: Set(None),
         trigger: Set(None),
         concurrent: Set(false),
+        source_comment: Set(None),
     }
     .insert(&tx)
     .await?;

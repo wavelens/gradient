@@ -93,6 +93,7 @@ mod tests {
             waiting_reason: None,
             trigger: None,
             concurrent: false,
+            source_comment: None,
         }
     }
 

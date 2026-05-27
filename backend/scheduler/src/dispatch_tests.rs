@@ -59,6 +59,7 @@ fn make_eval_queued(
         waiting_reason: None,
         trigger: None,
         concurrent: false,
+        source_comment: None,
     }
 }
 

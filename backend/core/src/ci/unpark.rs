@@ -173,6 +173,26 @@ pub async fn unpark_approval_with_wildcard(
     Ok(Some(ae.update(db).await?))
 }
 
+/// Stamp `evaluation.source_comment` with the JSON payload describing the
+/// PR comment that prompted this run. Used by the `/gradient run` /
+/// `/gradient approve` unpark path so the terminal-status reaction lands on
+/// the maintainer's comment, not on whatever original webhook (if any) the
+/// row was created from.
+pub async fn set_evaluation_source_comment(
+    db: &impl ConnectionTrait,
+    evaluation_id: EvaluationId,
+    source_comment: serde_json::Value,
+) -> Result<(), sea_orm::DbErr> {
+    let Some(eval) = EEvaluation::find_by_id(evaluation_id).one(db).await? else {
+        return Ok(());
+    };
+    let mut ae: AEvaluation = eval.into();
+    ae.source_comment = Set(Some(source_comment));
+    ae.updated_at = Set(crate::types::now());
+    ae.update(db).await?;
+    Ok(())
+}
+
 /// Find the evaluation that is parked in `Waiting + Approval` for the given
 /// project + PR number combination. Used by the comment-based unpark path
 /// where the webhook only carries the PR number, not the eval id.
@@ -219,6 +239,7 @@ mod tests {
             waiting_reason: Some(reason.to_json()),
             trigger: None,
             concurrent: false,
+            source_comment: None,
         }
     }
 

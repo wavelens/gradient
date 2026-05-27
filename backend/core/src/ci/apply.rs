@@ -68,6 +68,10 @@ pub struct ApplyInput {
     /// run without editing project config. `None` falls back to
     /// `project.wildcard`.
     pub wildcard_override: Option<String>,
+    /// Records the PR comment that triggered this evaluation. Persisted
+    /// in `evaluation.source_comment` so the terminal-status reporter can
+    /// react with thumbs-up / thumbs-down once the build resolves.
+    pub source_comment: Option<serde_json::Value>,
 }
 
 /// Identification of the pull request a maintainer must approve before the
@@ -155,6 +159,7 @@ pub async fn apply_trigger<C: ConnectionTrait>(
         concurrent_flag,
         input.repository_override,
         input.wildcard_override,
+        input.source_comment,
     )
     .await
     {
@@ -315,6 +320,7 @@ mod tests {
             waiting_reason: None,
             trigger: None,
             concurrent: false,
+            source_comment: None,
         }
     }
 
@@ -344,6 +350,7 @@ mod tests {
             gate_approval: None,
             repository_override: None,
             wildcard_override: None,
+            source_comment: None,
         }
     }
 
@@ -876,6 +883,7 @@ mod tests {
             }),
             repository_override: None,
             wildcard_override: None,
+            source_comment: None,
         };
         let res = apply_trigger(&db, &project, applied).await.unwrap();
 

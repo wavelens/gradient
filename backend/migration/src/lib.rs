@@ -117,6 +117,7 @@ mod m20260525_000001_create_table_cache_user;
 mod m20260525_000002_add_cache_to_api;
 mod m20260525_000003_create_admin_task;
 mod m20260525_000004_evaluation_check_run_ids;
+mod m20260527_000000_evaluation_source_comment;
 
 pub struct Migrator;
 
@@ -235,6 +236,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260525_000002_add_cache_to_api::Migration),
             Box::new(m20260525_000003_create_admin_task::Migration),
             Box::new(m20260525_000004_evaluation_check_run_ids::Migration),
+            Box::new(m20260527_000000_evaluation_source_comment::Migration),
         ]
     }
 }

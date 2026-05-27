@@ -141,6 +141,7 @@ fn eval_row(project: ProjectId, commit: CommitId) -> entity::evaluation::Model {
         waiting_reason: None,
         trigger: None,
         concurrent: false,
+        source_comment: None,
     }
 }
 

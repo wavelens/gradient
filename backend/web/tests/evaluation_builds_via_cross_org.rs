@@ -133,6 +133,7 @@ fn evaluation_row(id: EvaluationId, project: ProjectId) -> entity::evaluation::M
         waiting_reason: None,
         trigger: None,
         concurrent: false,
+        source_comment: None,
     }
 }
 

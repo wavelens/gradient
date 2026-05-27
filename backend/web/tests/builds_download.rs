@@ -162,6 +162,7 @@ fn evaluation_row() -> entity::evaluation::Model {
         waiting_reason: None,
         trigger: None,
         concurrent: false,
+        source_comment: None,
     }
 }
 

@@ -174,6 +174,7 @@ pub fn eval_at(id: EvaluationId, offset_secs: i64) -> evaluation::Model {
         waiting_reason: None,
         trigger: None,
         concurrent: false,
+        source_comment: None,
     }
 }
 

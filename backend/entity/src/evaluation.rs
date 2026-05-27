@@ -91,6 +91,7 @@ pub struct Model {
     pub waiting_reason: Option<serde_json::Value>,
     pub trigger: Option<ProjectTriggerId>,
     pub concurrent: bool,
+    pub source_comment: Option<serde_json::Value>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
