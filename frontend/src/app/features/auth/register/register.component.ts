@@ -18,8 +18,8 @@ import { Router, RouterModule } from '@angular/router';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
 import { environment } from '@environments/environment';
-import { debounceTime, switchMap, map } from 'rxjs/operators';
-import { of } from 'rxjs';
+import { switchMap, map } from 'rxjs/operators';
+import { of, timer } from 'rxjs';
 
 @Component({
   selector: 'app-register',
@@ -109,10 +109,9 @@ export class RegisterComponent {
       return of(null);
     }
 
-    return of(control.value).pipe(
-      debounceTime(500),
-      switchMap((username) =>
-        this.authService.checkUsername(username).pipe(
+    return timer(500).pipe(
+      switchMap(() =>
+        this.authService.checkUsername(control.value).pipe(
           map((available) => (available ? null : { usernameTaken: true }))
         )
       )
