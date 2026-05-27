@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::helpers::{CacheContext, fetch_nar_bytes};
+use super::helpers::{CacheContext, cache_client_ip, fetch_nar_bytes};
+use super::narinfo::OptionalPeer;
 use crate::error::{WebError, WebResult};
 use axum::body::Body;
 use axum::extract::{Path, State};
@@ -15,10 +16,12 @@ use std::sync::Arc;
 
 pub async fn serve(
     state: State<Arc<ServerState>>,
+    OptionalPeer(peer): OptionalPeer,
     headers: HeaderMap,
     Path((cache, hash, rel_path)): Path<(String, String, String)>,
 ) -> WebResult<Response> {
-    let _ctx = CacheContext::load(&state, &headers, cache).await?;
+    let client_ip = cache_client_ip(&state, &headers, peer);
+    let _ctx = CacheContext::load(&state, &headers, client_ip, cache).await?;
     let compressed = fetch_nar_bytes(&state, &hash).await?;
 
     match extract_path_from_nar_bytes(compressed, &rel_path).await {

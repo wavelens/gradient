@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::helpers::CacheContext;
+use super::helpers::{CacheContext, cache_client_ip};
+use super::narinfo::OptionalPeer;
 use crate::error::{WebError, WebResult};
 use axum::body::Body;
 use axum::extract::{Path, State};
@@ -17,10 +18,12 @@ use std::sync::Arc;
 
 pub async fn log(
     state: State<Arc<ServerState>>,
+    OptionalPeer(peer): OptionalPeer,
     headers: HeaderMap,
     Path((cache, drv)): Path<(String, String)>,
 ) -> WebResult<Response> {
-    let ctx = CacheContext::load(&state, &headers, cache).await?;
+    let client_ip = cache_client_ip(&state, &headers, peer);
+    let ctx = CacheContext::load(&state, &headers, client_ip, cache).await?;
 
     let Ok((drv_hash, drv_name)) = parse_drv_hash_name(&drv) else {
         return Err(WebError::not_found("Log"));

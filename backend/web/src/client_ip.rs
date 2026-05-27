@@ -15,6 +15,13 @@ use axum::http::HeaderMap;
 use ipnet::IpNet;
 use std::net::IpAddr;
 
+/// Request extension carrying the resolved client IP. Inserted by the
+/// `authorize` and `authorize_optional` middleware so downstream handlers
+/// (cache Basic-auth, badge token URL, evaluation token URL) can re-check
+/// `allowed_ips` without re-deriving from peer + XFF.
+#[derive(Debug, Clone, Copy)]
+pub struct ClientIp(pub IpAddr);
+
 pub fn resolve_client_ip(headers: &HeaderMap, peer: IpAddr, trusted_proxies: &[IpNet]) -> IpAddr {
     let peer = normalize(peer);
     if !in_any(peer, trusted_proxies) {
