@@ -88,6 +88,7 @@ export class ApiKeysComponent implements OnInit {
   formScope: ScopeType = 'none';
   formOrganization: string | null = null;
   formCache: string | null = null;
+  formAllowedIps = '';
 
   ngOnInit(): void {
     this.loadKeys();
@@ -136,6 +137,7 @@ export class ApiKeysComponent implements OnInit {
     this.formCache = null;
     this.formPermissions = this.permissionTemplate(false);
     this.formPermissions['viewOrg'] = true;
+    this.formAllowedIps = '';
     this.errorMessage.set(null);
     this.showDialog.set(true);
   }
@@ -159,8 +161,16 @@ export class ApiKeysComponent implements OnInit {
       this.formOrganization = null;
       this.formCache = null;
     }
+    this.formAllowedIps = (key.allowed_ips ?? []).join('\n');
     this.errorMessage.set(null);
     this.showDialog.set(true);
+  }
+
+  private parseAllowedIps(): string[] {
+    return this.formAllowedIps
+      .split('\n')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
   }
 
   onScopeChange(): void {
@@ -203,11 +213,18 @@ export class ApiKeysComponent implements OnInit {
     }
     const organization = this.formScope === 'organization' ? this.formOrganization : null;
     const cache = this.formScope === 'cache' ? this.formCache : null;
+    const allowedIps = this.parseAllowedIps();
     const editing = this.editingKey();
     if (editing) {
       this.saving.set(true);
       this.userService
-        .updateApiKey(editing.id, { name, permissions: perms, organization, cache })
+        .updateApiKey(editing.id, {
+          name,
+          permissions: perms,
+          organization,
+          cache,
+          allowed_ips: allowedIps,
+        })
         .subscribe({
           next: () => {
             this.saving.set(false);
@@ -222,7 +239,7 @@ export class ApiKeysComponent implements OnInit {
     } else {
       this.creating.set(true);
       this.userService
-        .createApiKey(name, this.formExpiresInDays, perms, organization, cache)
+        .createApiKey(name, this.formExpiresInDays, perms, organization, cache, allowedIps)
         .subscribe({
           next: (keyValue) => {
             this.creating.set(false);

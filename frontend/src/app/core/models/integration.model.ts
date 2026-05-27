@@ -18,6 +18,7 @@ export interface Integration {
   endpoint_url: string | null;
   has_secret: boolean;
   has_access_token: boolean;
+  allowed_ips: string[];
   created_by: string;
   created_at: string;
 }
@@ -40,6 +41,7 @@ export interface CreateIntegrationRequest {
   secret?: string;
   endpoint_url?: string;
   access_token?: string;
+  allowed_ips?: string[];
 }
 
 export interface PatchIntegrationRequest {
@@ -49,4 +51,5 @@ export interface PatchIntegrationRequest {
   secret?: string;
   endpoint_url?: string;
   access_token?: string;
+  allowed_ips?: string[];
 }

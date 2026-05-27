@@ -42,6 +42,7 @@ export class UserService {
     permissions: string[] = ['viewOrg'],
     organization: string | null = null,
     cache: string | null = null,
+    allowedIps: string[] = [],
   ): Observable<string> {
     const body: {
       name: string;
@@ -49,7 +50,8 @@ export class UserService {
       permissions: string[];
       organization: string | null;
       cache: string | null;
-    } = { name, permissions, organization, cache };
+      allowed_ips: string[];
+    } = { name, permissions, organization, cache, allowed_ips: allowedIps };
     if (expiresInDays !== null && expiresInDays !== undefined) {
       body.expires_in_days = expiresInDays;
     }
@@ -63,6 +65,7 @@ export class UserService {
       permissions?: string[];
       organization?: string | null;
       cache?: string | null;
+      allowed_ips?: string[];
     },
   ): Observable<ApiKey> {
     return this.api.patch<ApiKey>(`user/keys/${apiId}`, body);
