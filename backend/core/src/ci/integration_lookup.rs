@@ -131,6 +131,7 @@ mod ensure_tests {
             secret: None,
             endpoint_url: None,
             access_token: None,
+            allowed_ips: None,
             created_by: user(),
             created_at: NaiveDateTime::default(),
         }
