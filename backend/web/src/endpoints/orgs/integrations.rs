@@ -45,6 +45,7 @@ pub struct IntegrationResponse {
     pub endpoint_url: Option<String>,
     pub has_secret: bool,
     pub has_access_token: bool,
+    pub allowed_ips: Vec<String>,
     pub created_by: UserId,
     pub created_at: chrono::NaiveDateTime,
 }
@@ -61,10 +62,29 @@ impl From<MIntegration> for IntegrationResponse {
             endpoint_url: m.endpoint_url,
             has_secret: m.secret.is_some(),
             has_access_token: m.access_token.is_some(),
+            allowed_ips: m.allowed_ips.unwrap_or_default(),
             created_by: m.created_by,
             created_at: m.created_at,
         }
     }
+}
+
+fn normalize_allowed_ips(raw: Option<Vec<String>>) -> Result<Option<Vec<String>>, WebError> {
+    let Some(entries) = raw else { return Ok(None) };
+    if entries.is_empty() {
+        return Ok(Some(Vec::new()));
+    }
+    let mut out = Vec::with_capacity(entries.len());
+    for e in entries {
+        let canon = gradient_core::ip_allowlist::normalize_entry(&e).map_err(|err| {
+            WebError::bad_request_with(
+                crate::error::ErrorCode::INVALID_ALLOWED_IP,
+                format!("invalid allowed_ips entry '{e}': {err}"),
+            )
+        })?;
+        out.push(canon);
+    }
+    Ok(Some(out))
 }
 
 #[derive(Deserialize, Debug)]
@@ -83,6 +103,9 @@ pub struct CreateIntegrationRequest {
     pub endpoint_url: Option<String>,
     /// Plaintext API token for outbound integrations.
     pub access_token: Option<String>,
+    /// CIDR strings; only inbound webhooks from these sources are accepted.
+    #[serde(default)]
+    pub allowed_ips: Option<Vec<String>>,
 }
 
 /// Credential-free integration handle. Returned by the summaries endpoint
@@ -120,6 +143,8 @@ pub struct PatchIntegrationRequest {
     pub secret: Option<String>,
     /// When present, replaces the stored access token. Empty string clears it.
     pub access_token: Option<String>,
+    /// Wholesale replacement; `[]` clears the allowlist.
+    pub allowed_ips: Option<Vec<String>>,
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -307,6 +332,8 @@ pub async fn put_integration(
         .map(|s| s.to_string())
         .unwrap_or_else(|| body.name.clone());
 
+    let allowed_ips = normalize_allowed_ips(body.allowed_ips.clone())?
+        .and_then(|v| if v.is_empty() { None } else { Some(v) });
     let integration = AIntegration {
         id: Set(IntegrationId::now_v7()),
         organization: Set(org.id),
@@ -317,7 +344,7 @@ pub async fn put_integration(
         secret: Set(encrypted_secret),
         endpoint_url: Set(endpoint_url),
         access_token: Set(encrypted_token),
-        allowed_ips: Set(None),
+        allowed_ips: Set(allowed_ips),
         created_by: Set(user.id),
         created_at: Set(gradient_core::types::now()),
     };
@@ -451,6 +478,10 @@ pub async fn patch_integration(
                     .map_err(|e| WebError::internal(format!("Failed to encrypt token: {}", e)))?,
             )
         });
+    }
+
+    if let Some(canon) = normalize_allowed_ips(body.allowed_ips)? {
+        active.allowed_ips = Set(if canon.is_empty() { None } else { Some(canon) });
     }
 
     let updated = active.update(&state.web_db).await?;

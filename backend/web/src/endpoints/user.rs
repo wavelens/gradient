@@ -57,6 +57,9 @@ pub struct CreateApiKeyRequest {
     /// Optional cache name to pin the key to. Mutually exclusive with `organization`.
     #[serde(default)]
     pub cache: Option<String>,
+    /// CIDR strings the key may be used from. Empty or omitted = any source.
+    #[serde(default)]
+    pub allowed_ips: Option<Vec<String>>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -69,6 +72,9 @@ pub struct PatchApiKeyRequest {
     /// pin, `Some(null)` (i.e. JSON null) to unpin.
     #[serde(default, deserialize_with = "deserialize_optional_field")]
     pub organization: Option<Option<String>>,
+    /// Wholesale replacement; `[]` clears the allowlist.
+    #[serde(default)]
+    pub allowed_ips: Option<Vec<String>>,
 }
 
 fn deserialize_optional_field<'de, T, D>(de: D) -> Result<Option<Option<T>>, D::Error>
@@ -91,6 +97,8 @@ pub struct ApiKeyInfo {
     pub last_used_at: Option<String>,
     pub expires_at: Option<String>,
     pub revoked_at: Option<String>,
+    /// CIDR allowlist (canonicalized). Empty list = any source.
+    pub allowed_ips: Vec<String>,
 }
 
 #[derive(Serialize, Debug)]
@@ -326,7 +334,26 @@ fn api_key_info(
         last_used_at: last_used_or_none(key.last_used_at),
         expires_at: fmt_opt_dt(key.expires_at),
         revoked_at: fmt_opt_dt(key.revoked_at),
+        allowed_ips: key.allowed_ips.unwrap_or_default(),
     }
+}
+
+fn normalize_allowed_ips(raw: Option<Vec<String>>) -> Result<Option<Vec<String>>, WebError> {
+    let Some(entries) = raw else { return Ok(None) };
+    if entries.is_empty() {
+        return Ok(Some(Vec::new()));
+    }
+    let mut out = Vec::with_capacity(entries.len());
+    for e in entries {
+        let canon = gradient_core::ip_allowlist::normalize_entry(&e).map_err(|err| {
+            WebError::bad_request_with(
+                crate::error::ErrorCode::INVALID_ALLOWED_IP,
+                format!("invalid allowed_ips entry '{e}': {err}"),
+            )
+        })?;
+        out.push(canon);
+    }
+    Ok(Some(out))
 }
 
 pub async fn get_key_permissions() -> WebResult<Json<BaseResponse<ApiKeyPermissionsResponse>>> {
@@ -418,6 +445,7 @@ pub async fn post_keys(
         (m, org, None)
     };
 
+    let allowed_ips = normalize_allowed_ips(body.allowed_ips.clone())?;
     let raw_key = generate_api_key();
     let api_key = AApi {
         id: Set(ApiId::now_v7()),
@@ -432,7 +460,7 @@ pub async fn post_keys(
         permission: Set(mask),
         organization: Set(org_pin),
         cache: Set(cache_pin),
-        allowed_ips: Set(None),
+        allowed_ips: Set(allowed_ips),
     };
     let inserted = api_key.insert(&state.web_db).await?;
 
@@ -517,6 +545,9 @@ pub async fn patch_key(
     if let Some(maybe_name) = body.organization {
         new_org = resolve_org_pin(&state, user.id, maybe_name).await?;
         active.organization = Set(new_org);
+    }
+    if let Some(canon) = normalize_allowed_ips(body.allowed_ips)? {
+        active.allowed_ips = Set(if canon.is_empty() { None } else { Some(canon) });
     }
 
     let updated = active.update(&state.web_db).await?;
