@@ -168,8 +168,10 @@ pub(super) async fn resolve_github_app_targets(
     state: &Arc<ServerState>,
     installation_id: i64,
     repository_urls: &[String],
+    client_ip: std::net::IpAddr,
 ) -> Vec<IntegrationId> {
     use gradient_core::ci::IntegrationKind;
+    use gradient_core::ip_allowlist::is_allowed as ip_allowed;
     use std::collections::HashSet;
 
     let candidate_orgs = EOrganization::find()
@@ -215,7 +217,19 @@ pub(super) async fn resolve_github_app_targets(
             .ok()
             .flatten();
         match integration {
-            Some(i) => integrations.push(i.id),
+            Some(i) => {
+                let allowlist = i.allowed_ips.clone().unwrap_or_default();
+                if !ip_allowed(client_ip, &allowlist) {
+                    warn!(
+                        org_id = %org.id,
+                        integration_id = %i.id,
+                        %client_ip,
+                        "resolve_github_app_targets: source IP not allowed, skipping integration"
+                    );
+                    continue;
+                }
+                integrations.push(i.id);
+            }
             None => warn!(
                 org_id = %org.id,
                 "resolve_github_app_targets: org has matching project but no inbound github integration row"
@@ -983,6 +997,7 @@ pub(super) async fn handle_issue_comment(
     forge: ForgeType,
     integration_id: Option<IntegrationId>,
     body: &[u8],
+    client_ip: std::net::IpAddr,
 ) {
     let payload: CommentPayload = match serde_json::from_slice(body) {
         Ok(p) => p,
@@ -1061,7 +1076,8 @@ pub(super) async fn handle_issue_comment(
                 format!("https://github.com/{owner_repo}.git"),
                 format!("git@github.com:{owner_repo}.git"),
             ];
-            let targets = resolve_github_app_targets(state, installation_id, &repo_urls).await;
+            let targets =
+                resolve_github_app_targets(state, installation_id, &repo_urls, client_ip).await;
             if targets.is_empty() {
                 warn!(installation_id, %owner_repo, "comment webhook (github): no integration matched");
                 return;

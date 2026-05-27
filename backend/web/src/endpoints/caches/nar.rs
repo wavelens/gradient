@@ -5,7 +5,7 @@
  */
 
 use super::helpers::{CacheContext, cache_client_ip};
-use super::narinfo::OptionalPeer;
+use crate::client_ip::OptionalPeer;
 use crate::error::{WebError, WebResult};
 use crate::helpers::OptionExt;
 use axum::body::Body;

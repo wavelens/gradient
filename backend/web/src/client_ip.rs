@@ -11,9 +11,36 @@
 //! otherwise the peer IP is returned verbatim so an internet client can't
 //! spoof its own apparent origin by sending the header.
 
+use axum::extract::connect_info::MockConnectInfo;
+use axum::extract::{ConnectInfo, FromRequestParts};
 use axum::http::HeaderMap;
+use axum::http::request::Parts;
 use ipnet::IpNet;
-use std::net::IpAddr;
+use std::convert::Infallible;
+use std::net::{IpAddr, SocketAddr};
+
+/// Optional peer-address extractor that yields `None` instead of 500 when
+/// neither real nor mock `ConnectInfo` is wired (e.g., `axum_test` without
+/// `MockConnectInfo`, ad-hoc tower stacks).
+pub struct OptionalPeer(pub Option<SocketAddr>);
+
+impl<S: Send + Sync> FromRequestParts<S> for OptionalPeer {
+    type Rejection = Infallible;
+
+    async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Self::Rejection> {
+        let addr = parts
+            .extensions
+            .get::<ConnectInfo<SocketAddr>>()
+            .map(|c| c.0)
+            .or_else(|| {
+                parts
+                    .extensions
+                    .get::<MockConnectInfo<SocketAddr>>()
+                    .map(|m| m.0)
+            });
+        Ok(OptionalPeer(addr))
+    }
+}
 
 /// Request extension carrying the resolved client IP. Inserted by the
 /// `authorize` and `authorize_optional` middleware so downstream handlers

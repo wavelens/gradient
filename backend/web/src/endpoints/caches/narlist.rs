@@ -4,7 +4,7 @@
  */
 
 use super::helpers::{CacheContext, cache_client_ip, fetch_nar_bytes};
-use super::narinfo::OptionalPeer;
+use crate::client_ip::OptionalPeer;
 use crate::error::{WebError, WebResult};
 use axum::Json;
 use axum::extract::{Path, State};
