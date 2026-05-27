@@ -99,6 +99,29 @@ API-key-authenticated requests **cannot** create, edit, revoke, or delete API
 keys - only session-authenticated calls can. This prevents a leaked key from
 minting more powerful siblings.
 
+### Source IP restrictions
+
+Each API key can carry a CIDR allowlist. Requests from outside the list are
+rejected with `403 forbidden_source_ip`; an empty / omitted list allows any
+source. Bare IPs are auto-normalized to `/32` (v4) or `/128` (v6).
+
+```bash
+curl -X POST $API/user/keys \
+  -H "Authorization: Bearer $SESSION" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "name": "office-ci",
+        "permissions": ["triggerEvaluation"],
+        "allowed_ips": ["10.0.0.0/8", "203.0.113.5"]
+      }'
+```
+
+To tighten or clear the allowlist on an existing key, `PATCH` with
+`"allowed_ips": [...]` (use `[]` to wipe).
+
+The source IP is resolved from the connection peer with `X-Forwarded-For`
+honored only when the peer is in `GRADIENT_NETWORK_TRUSTED_PROXIES`.
+
 ### Cache pinning
 
 A key may be pinned to a single cache as an alternative to organization

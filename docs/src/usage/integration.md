@@ -153,11 +153,34 @@ The `reason` field for skipped projects is one of:
 Non-push GitHub App events (`ping`, `installation`, `installation_repositories`, unknown)
 return the same envelope with `event` set accordingly and empty `queued` / `skipped` arrays.
 
+## Source IP restrictions
+
+Each inbound integration can carry a CIDR allowlist (`allowed_ips`). When set,
+deliveries whose source IP does not match are rejected with
+`403 forbidden_source_ip` after signature verification succeeds. An empty or
+omitted list allows any source.
+
+For the per-forge route (`POST /hooks/{forge}/{org}/{integration_name}`) the
+check applies to the resolved client IP. For the GitHub App route
+(`POST /hooks/github`), the check is applied per-installation: integrations
+whose allowlist rejects the source IP are simply skipped, while integrations
+whose list matches (or is empty) are dispatched as usual.
+
+Forge IP ranges to allowlist:
+
+- **GitHub**: published at `https://api.github.com/meta` (the `hooks` array).
+- **GitLab.com**: published at <https://docs.gitlab.com/ee/user/gitlab_com/#ip-range>.
+- **Gitea / Forgejo**: typically self-hosted; allowlist your own forge's egress IPs.
+
+The source IP is resolved from the connection peer with `X-Forwarded-For`
+honored only when the peer is in `GRADIENT_NETWORK_TRUSTED_PROXIES`.
+
 ## Troubleshooting
 
 | Symptom                           | Likely cause                                                                                    |
 |-----------------------------------|-------------------------------------------------------------------------------------------------|
 | `401 Unauthorized` in delivery log | Secret mismatch - re-copy the secret from Gradient or rotate and reconfigure the forge.         |
+| `403 forbidden_source_ip`          | The forge's egress IP isn't in the integration's `allowed_ips` list. Add it or clear the list.   |
 | `404 Not Found`                   | Wrong organization or integration name in the URL, or `{forge}=github` (use the App webhook).   |
 | `200 OK` but no evaluation runs   | No project links to this inbound integration, or the repository URL doesn't match any project.  |
 | `503 Service Unavailable`         | The integration row has no secret set yet - paste or generate one on the Integrations page.     |

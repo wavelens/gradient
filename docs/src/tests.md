@@ -2697,3 +2697,20 @@ Run with: `pnpm --dir frontend exec ng test --watch=false`
 - `project-detail.component.spec.ts → 'clears the error banner when the user
   retries'` — calling `dismissError()` resets `errorMessage()` to `null` and the
   banner disappears.
+
+## Source-IP allowlist (#282)
+
+### Backend
+
+Run with: `cargo test -p core --test ip_allowlist`
+
+- `empty_list_allows_everything` — empty allowlist is a permissive default so
+  existing rows keep working after migration.
+- `slash_32_exact_match`, `slash_24_contains_address` — exact-host and net-mask
+  containment.
+- `ipv4_mapped_ipv6_matches_ipv4_cidr` — dual-stack sockets compare correctly.
+- `malformed_entry_is_skipped_but_others_still_count` — validation happens at
+  the API edge; the runtime check tolerates noise.
+- `normalize_bare_ipv4_to_slash_32` / `normalize_bare_ipv6_to_slash_128` /
+  `normalize_keeps_cidr_unchanged` / `normalize_trims_whitespace` /
+  `normalize_rejects_garbage` / `normalize_rejects_empty` — write-time canonicalization.
