@@ -5691,6 +5691,16 @@ components:
             Optional cache name to pin the key to. When set, the key carries
             cache-scoped permissions and is rejected for any other cache.
             Mutually exclusive with `organization`.
+        allowed_ips:
+          type: array
+          items: { type: string }
+          nullable: true
+          description: |-
+            CIDR strings (or bare IPs, auto-promoted to `/32` / `/128`) the key
+            may be used from. Empty array or `null` means "any source".
+            Requests whose resolved client IP does not fall in any listed CIDR
+            are rejected with `403 forbidden_source_ip`.
+          example: ["10.0.0.0/8", "203.0.113.5"]
 
     ApiKeyInfo:
       type: object
@@ -5723,6 +5733,12 @@ components:
           type: string
           format: date-time
           nullable: true
+        allowed_ips:
+          type: array
+          items: { type: string }
+          description: |-
+            Canonical CIDR strings the key may be used from. Empty list means
+            any source is allowed.
 
     PatchApiKeyRequest:
       type: object
@@ -5740,6 +5756,13 @@ components:
           description: |-
             Tri-state: omit to leave the pin unchanged; `null` to unpin;
             string to pin to a specific organization.
+        allowed_ips:
+          type: array
+          items: { type: string }
+          description: |-
+            Wholesale replacement of the source-IP allowlist. Omit to leave
+            unchanged; `[]` to clear; otherwise CIDR strings the key may be
+            used from.
 
     SessionInfo:
       type: object
@@ -7326,6 +7349,14 @@ components:
         has_access_token:
           type: boolean
           description: Whether an API token is stored (outbound integrations).
+        allowed_ips:
+          type: array
+          items: { type: string }
+          description: |-
+            Source CIDRs allowed for inbound webhooks. Empty list means any
+            source is allowed. Inbound deliveries from outside the allowlist
+            are rejected with `403 forbidden_source_ip` (after signature
+            verification succeeds).
         created_by:
           type: string
           format: uuid
@@ -7390,6 +7421,14 @@ components:
           description: >-
             Plaintext API token for outbound integrations. Stored encrypted.
             Omit for inbound integrations.
+        allowed_ips:
+          type: array
+          items: { type: string }
+          nullable: true
+          description: |-
+            CIDR strings the inbound webhook accepts deliveries from. Empty
+            array or `null` means "any source". Bare IPs are auto-promoted to
+            `/32` (v4) or `/128` (v6). Ignored for outbound integrations.
 
     PatchIntegrationRequest:
       type: object
@@ -7417,6 +7456,12 @@ components:
           type: string
         access_token:
           type: string
+        allowed_ips:
+          type: array
+          items: { type: string }
+          description: |-
+            Wholesale replacement of the inbound source-IP allowlist. Omit to
+            leave unchanged; `[]` to clear; otherwise CIDR strings.
 
     TriggerType:
       type: string
