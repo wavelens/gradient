@@ -97,7 +97,7 @@
   }
 
   <!-- Public Caches -->
-  @if (publicLoading()) {
+  @if (publicLoading() && !loading()) {
     <app-loading-spinner message="Loading public caches..." />
   } @else if (filteredPublicCaches.length > 0) {
     <div class="discover-header">

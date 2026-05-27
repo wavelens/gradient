@@ -62,7 +62,7 @@
     }
   }
 
-  @if (publicLoading()) {
+  @if (publicLoading() && !loading()) {
     <app-loading-spinner message="Loading public organizations..." />
   } @else if (filteredPublicOrgs.length > 0) {
     <div class="section-header discover-header">
