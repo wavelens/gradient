@@ -2539,6 +2539,15 @@ immediately. Coverage:
   to `trigger_pr_for_integration` with `manual=true` and the snapshot
   fetched via `CiReporter::get_pull_request` when no parked approval gate
   exists.
+- Comment reactions: `CiReporter::add_reaction` (default no-op, implemented
+  for Gitea/Forgejo, GitLab, GitHub, GitHub App). The handler fires `eyes`
+  immediately after the maintainer trust check passes and `confused` when
+  the sender is rejected; the JSON `evaluation.source_comment` column (added
+  by migration `m20260527_000000_evaluation_source_comment`) is consumed by
+  `core/src/db/status.rs::react_to_source_comment_on_terminal` to post
+  `+1` / `-1` once the evaluation hits `Completed` / `Failed` / `Aborted`.
+  GitLab's `409 Conflict` (already-reacted) is treated as success so
+  repeated terminal transitions don't trip alarms.
 - `core/src/ci/unpark.rs::unpark_approval_with_wildcard_*`
   (issue #274) - the new helper writes the maintainer-supplied
   wildcard into the same row update that flips `Waiting -> Queued`,

@@ -51,7 +51,9 @@ without the permission Gradient never sees `/gradient run` or
 `/gradient approve` triggers posted there. `write` is required because the
 `post_pr_comment` reporter uses the same
 `/repos/{owner}/{repo}/issues/{n}/comments` endpoint to reply with build
-status.
+status, and it is also what allows Gradient to leave reactions on the
+originating comment (`👀` on receipt, `👍` / `👎` on terminal eval status,
+`😕` when a non-maintainer issues a command).
 
 Then download the private key, generate a webhook secret, and configure the
 env vars as below.

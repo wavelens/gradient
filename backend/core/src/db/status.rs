@@ -664,6 +664,61 @@ async fn dispatch_evaluation_event_for_status(
     });
 
     dispatch_evaluation_event(state, project_id, event, payload).await;
+
+    react_to_source_comment_on_terminal(state, project_id, &evaluation, status).await;
+}
+
+/// If the evaluation has a `source_comment` (set by the `/gradient run` or
+/// `/gradient approve` PR-comment pipeline) and the status is terminal, post a
+/// thumbs-up / thumbs-down reaction on that comment via the project's
+/// configured reporter. Best-effort: failures are logged and swallowed.
+async fn react_to_source_comment_on_terminal(
+    state: &Arc<ServerState>,
+    project_id: ProjectId,
+    evaluation: &MEvaluation,
+    status: EvaluationStatus,
+) {
+    use crate::ci::{ReactionKind, actions::reporter_for_project};
+
+    let kind = match status {
+        EvaluationStatus::Completed => ReactionKind::ThumbsUp,
+        EvaluationStatus::Failed | EvaluationStatus::Aborted => ReactionKind::ThumbsDown,
+        _ => return,
+    };
+    let Some(raw) = evaluation.source_comment.as_ref() else {
+        return;
+    };
+    let Some(target) = parse_source_comment(raw) else {
+        warn!(
+            evaluation_id = %evaluation.id,
+            "evaluation.source_comment present but malformed; skipping reaction"
+        );
+        return;
+    };
+    let reporter = match reporter_for_project(state, project_id).await {
+        Ok(Some(r)) => r,
+        Ok(None) => return,
+        Err(e) => {
+            warn!(error = %e, %project_id, "resolving reporter for terminal-status reaction");
+            return;
+        }
+    };
+    if let Err(e) = reporter.add_reaction(&target, kind).await {
+        warn!(error = %e, %project_id, ?kind, "/gradient terminal reaction post failed");
+    }
+}
+
+fn parse_source_comment(value: &serde_json::Value) -> Option<crate::ci::ReactionTarget> {
+    let owner = value.get("owner")?.as_str()?.to_string();
+    let repo = value.get("repo")?.as_str()?.to_string();
+    let pr_number = value.get("pr_number")?.as_u64()?;
+    let comment_id = value.get("comment_id")?.as_i64()?;
+    Some(crate::ci::ReactionTarget {
+        owner,
+        repo,
+        pr_number,
+        comment_id,
+    })
 }
 
 #[cfg(test)]

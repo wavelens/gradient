@@ -10,7 +10,8 @@ use super::response::{QueuedEvaluation, SkippedProject, WebhookTriggerOutcome};
 use entity::project_trigger as ept;
 use gradient_core::ci::{
     APPROVAL_ACTION_ID, ApplyInput, ApplyOutcome, ApprovalInfo, ForgeType, apply_trigger,
-    find_approval_gated_eval, unpark_approval, unpark_approval_with_wildcard,
+    find_approval_gated_eval, set_evaluation_source_comment, unpark_approval,
+    unpark_approval_with_wildcard,
 };
 use gradient_core::types::triggers::{TriggerConfig, TriggerType};
 use gradient_core::types::wildcard::Wildcard;
@@ -277,6 +278,7 @@ pub(super) async fn trigger_push_for_integration(
         None,
         false,
         None,
+        None,
     )
     .await
 }
@@ -295,6 +297,7 @@ pub(super) async fn trigger_pr_for_integration(
     head_repo_clone_url: Option<String>,
     manual: bool,
     wildcard_override: Option<String>,
+    source_comment: Option<serde_json::Value>,
 ) -> WebhookTriggerOutcome {
     let action_owned = action.to_string();
     let branch_owned = branch.map(str::to_string);
@@ -333,6 +336,7 @@ pub(super) async fn trigger_pr_for_integration(
         head_repo_clone_url,
         manual,
         wildcard_override,
+        source_comment,
     )
     .await
 }
@@ -379,6 +383,7 @@ pub(super) async fn trigger_release_for_integration(
         None,
         false,
         None,
+        None,
     )
     .await
 }
@@ -411,6 +416,7 @@ async fn fan_out_triggers<F>(
     repository_override: Option<String>,
     manual: bool,
     wildcard_override: Option<String>,
+    source_comment: Option<serde_json::Value>,
 ) -> WebhookTriggerOutcome
 where
     F: Fn(&TriggerConfig) -> FilterResult,
@@ -486,6 +492,7 @@ where
                 gate_approval,
                 repository_override: repository_override.clone(),
                 wildcard_override: wildcard_override.clone(),
+                source_comment: source_comment.clone(),
             },
         )
         .await;
@@ -917,6 +924,8 @@ struct CommentPayload {
 #[derive(Deserialize, Default)]
 struct CommentBody {
     body: Option<String>,
+    #[serde(default)]
+    id: Option<i64>,
 }
 
 #[derive(Deserialize, Default)]
@@ -940,6 +949,8 @@ struct CommentRepo {
 
 #[derive(Deserialize, Default)]
 struct GitlabNoteAttrs {
+    #[serde(default)]
+    id: Option<i64>,
     #[serde(default)]
     note: Option<String>,
     #[serde(default)]
@@ -981,7 +992,7 @@ pub(super) async fn handle_issue_comment(
         }
     };
 
-    let (comment_body, pr_number, sender_login, owner_repo) = match forge {
+    let (comment_body, pr_number, sender_login, owner_repo, comment_id) = match forge {
         ForgeType::GitLab => {
             let Some(attrs) = payload.object_attributes else {
                 return;
@@ -989,25 +1000,28 @@ pub(super) async fn handle_issue_comment(
             if attrs.noteable_type.as_deref() != Some("MergeRequest") {
                 return;
             }
+            let comment_id = attrs.id;
             let comment_body = attrs.note.unwrap_or_default();
             let pr_number = payload.merge_request.and_then(|m| m.iid);
             let sender = payload.user.and_then(|u| u.username.or(u.login));
             let owner_repo = payload.project.and_then(|p| p.path_with_namespace);
-            (comment_body, pr_number, sender, owner_repo)
+            (comment_body, pr_number, sender, owner_repo, comment_id)
         }
         _ => {
             // GitHub and Gitea both use `action == "created"`.
             if payload.action.as_deref() != Some("created") {
                 return;
             }
-            let comment_body = payload.comment.and_then(|c| c.body).unwrap_or_default();
+            let comment = payload.comment.unwrap_or_default();
+            let comment_id = comment.id;
+            let comment_body = comment.body.unwrap_or_default();
             let pr_number = payload
                 .pull_request
                 .or(payload.issue)
                 .and_then(|i| i.number);
             let sender = payload.sender.and_then(|s| s.login.or(s.username));
             let owner_repo = payload.repository.and_then(|r| r.full_name);
-            (comment_body, pr_number, sender, owner_repo)
+            (comment_body, pr_number, sender, owner_repo, comment_id)
         }
     };
 
@@ -1080,6 +1094,13 @@ pub(super) async fn handle_issue_comment(
         },
     };
 
+    let reaction_target = comment_id.map(|id| gradient_core::ci::ReactionTarget {
+        owner: owner.to_string(),
+        repo: repo.to_string(),
+        pr_number,
+        comment_id: id,
+    });
+
     let mut action_taken = false;
     for integration_id in &integration_ids {
         let project_ids = match active_project_ids_for_integration(state, *integration_id).await {
@@ -1089,24 +1110,39 @@ pub(super) async fn handle_issue_comment(
                 continue;
             }
         };
+        // Lift the maintainer trust probe out of the per-project loop: all
+        // projects in this integration share the same forge auth, so the
+        // answer is the same. This also lets us fire the eyes/confused
+        // reaction exactly once per integration.
+        let Some(probe_project) = first_project_with_reporter(state, &project_ids).await else {
+            continue;
+        };
+        let is_maintainer = sender_is_trusted(state, probe_project, owner, repo, &sender).await;
+        if let Some(target) = &reaction_target {
+            let kind = if is_maintainer {
+                gradient_core::ci::ReactionKind::Eyes
+            } else {
+                gradient_core::ci::ReactionKind::Confused
+            };
+            fire_reaction_via_project(state, probe_project, target, kind).await;
+        }
+        if !is_maintainer {
+            warn!(
+                %integration_id,
+                pr_number,
+                %sender,
+                "Rejecting /gradient command - sender is not a repo writer"
+            );
+            continue;
+        }
+
         let mut parked_unparked_in_integration = false;
-        let mut maintainer_verified = false;
         for project_id in &project_ids {
             let Ok(Some(eval)) =
                 find_approval_gated_eval(&state.web_db, *project_id, pr_number).await
             else {
                 continue;
             };
-            if !sender_is_trusted(state, *project_id, owner, repo, &sender).await {
-                warn!(
-                    project_id = %project_id,
-                    pr_number,
-                    %sender,
-                    "Rejecting /gradient command - sender is not a repo writer"
-                );
-                continue;
-            }
-            maintainer_verified = true;
             let unpark_result = match &wildcard_override {
                 None => unpark_approval(&state.web_db, eval.id).await,
                 Some(w) => unpark_approval_with_wildcard(&state.web_db, eval.id, w).await,
@@ -1120,6 +1156,19 @@ pub(super) async fn handle_issue_comment(
                         wildcard_override = wildcard_override.as_deref(),
                         "PR approval gate cleared via /gradient comment"
                     );
+                    if let Some(target) = &reaction_target {
+                        let json = serde_json::json!({
+                            "owner": target.owner,
+                            "repo": target.repo,
+                            "pr_number": target.pr_number,
+                            "comment_id": target.comment_id,
+                        });
+                        if let Err(e) =
+                            set_evaluation_source_comment(&state.web_db, unparked.id, json).await
+                        {
+                            warn!(error = %e, evaluation_id = %unparked.id, "stamp source_comment on unparked eval failed");
+                        }
+                    }
                     dispatch_approval_granted(state, &unparked).await;
                     parked_unparked_in_integration = true;
                     action_taken = true;
@@ -1136,25 +1185,6 @@ pub(super) async fn handle_issue_comment(
         }
         if !matches!(cmd, GradientCommand::Run { .. }) {
             continue;
-        }
-
-        // No parked eval to unpark — create a fresh evaluation for the PR.
-        // Maintainer check: if no project unparked above, run the trust probe
-        // explicitly against the first project that has a usable reporter.
-        if !maintainer_verified {
-            let Some(probe_project) = first_project_with_reporter(state, &project_ids).await
-            else {
-                continue;
-            };
-            if !sender_is_trusted(state, probe_project, owner, repo, &sender).await {
-                warn!(
-                    %integration_id,
-                    pr_number,
-                    %sender,
-                    "Rejecting /gradient run - sender is not a repo writer"
-                );
-                continue;
-            }
         }
 
         let Some(snapshot) = fetch_pr_snapshot(state, &project_ids, owner, repo, pr_number).await
@@ -1178,6 +1208,14 @@ pub(super) async fn handle_issue_comment(
             pr_author: None,
             is_fork: Some(snapshot.is_fork),
         };
+        let source_comment_json = reaction_target.as_ref().map(|t| {
+            serde_json::json!({
+                "owner": t.owner,
+                "repo": t.repo,
+                "pr_number": t.pr_number,
+                "comment_id": t.comment_id,
+            })
+        });
         let outcome = trigger_pr_for_integration(
             state,
             scheduler,
@@ -1191,6 +1229,7 @@ pub(super) async fn handle_issue_comment(
             snapshot.head_clone_url.clone(),
             true,
             wildcard_override.clone(),
+            source_comment_json,
         )
         .await;
         if !outcome.queued.is_empty() {
@@ -1216,6 +1255,28 @@ pub(super) async fn handle_issue_comment(
             pr_number,
             "/gradient comment had no parked evaluation and produced no fresh fire"
         );
+    }
+}
+
+/// Post a reaction on a PR/MR comment via the given project's reporter.
+/// Best-effort: failures are logged and swallowed so the rest of the
+/// command pipeline keeps running.
+async fn fire_reaction_via_project(
+    state: &Arc<ServerState>,
+    project_id: ProjectId,
+    target: &gradient_core::ci::ReactionTarget,
+    kind: gradient_core::ci::ReactionKind,
+) {
+    let reporter = match gradient_core::ci::actions::reporter_for_project(state, project_id).await {
+        Ok(Some(r)) => r,
+        Ok(None) => return,
+        Err(e) => {
+            warn!(error = %e, %project_id, "/gradient reaction: resolving reporter");
+            return;
+        }
+    };
+    if let Err(e) = reporter.add_reaction(target, kind).await {
+        warn!(error = %e, %project_id, ?kind, "/gradient reaction: post failed");
     }
 }
 
