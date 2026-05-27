@@ -190,6 +190,21 @@
     </div>
   }
 
+  <div class="form-group">
+    <label for="key-allowed-ips">
+      Allowed source IPs / CIDRs
+      <span class="hint">(one per line; leave blank to allow any source)</span>
+    </label>
+    <textarea
+      id="key-allowed-ips"
+      pInputText
+      rows="3"
+      class="w-full"
+      [(ngModel)]="formAllowedIps"
+      placeholder="10.0.0.0/8&#10;203.0.113.5"
+    ></textarea>
+  </div>
+
   <p-divider />
 
   <div class="form-group">

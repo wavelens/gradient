@@ -93,6 +93,7 @@ export class IntegrationsComponent implements OnInit {
     endpoint_url: string;
     secret: string;
     access_token: string;
+    allowed_ips: string;
   } = {
     name: '',
     display_name: '',
@@ -101,6 +102,7 @@ export class IntegrationsComponent implements OnInit {
     endpoint_url: '',
     secret: '',
     access_token: '',
+    allowed_ips: '',
   };
 
   githubAppAvailable = computed(() => this.organization()?.github_app_available === true);
@@ -172,9 +174,17 @@ export class IntegrationsComponent implements OnInit {
       endpoint_url: '',
       secret: '',
       access_token: '',
+      allowed_ips: '',
     };
     this.errorMessage.set(null);
     this.showCreateDialog.set(true);
+  }
+
+  private parseAllowedIps(): string[] {
+    return this.formData.allowed_ips
+      .split('\n')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
   }
 
   generateSecret(): void {
@@ -199,6 +209,7 @@ export class IntegrationsComponent implements OnInit {
     }
     if (this.formData.kind === 'inbound') {
       if (this.formData.secret.trim()) body.secret = this.formData.secret.trim();
+      body.allowed_ips = this.parseAllowedIps();
     } else {
       if (this.formData.endpoint_url.trim()) body.endpoint_url = this.formData.endpoint_url.trim();
       if (this.formData.access_token.trim()) body.access_token = this.formData.access_token.trim();
@@ -226,6 +237,7 @@ export class IntegrationsComponent implements OnInit {
       endpoint_url: integration.endpoint_url ?? '',
       secret: '',
       access_token: '',
+      allowed_ips: (integration.allowed_ips ?? []).join('\n'),
     };
     this.errorMessage.set(null);
     this.showEditDialog.set(true);
@@ -256,6 +268,11 @@ export class IntegrationsComponent implements OnInit {
     } else {
       if (this.formData.secret.trim()) {
         body.secret = this.formData.secret.trim();
+      }
+      const allowed = this.parseAllowedIps();
+      const current = (target.allowed_ips ?? []).join('\n');
+      if (this.formData.allowed_ips !== current) {
+        body.allowed_ips = allowed;
       }
     }
     this.integrationsService.patchOrgIntegration(this.orgName, target.id, body).subscribe({

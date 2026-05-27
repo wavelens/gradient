@@ -255,6 +255,11 @@
       </div>
       <small class="text-secondary">Copy this into your forge's webhook secret field. Store it now - it will not be shown again.</small>
     </div>
+    <div class="form-group">
+      <label for="int-allowed-ips">Allowed source IPs / CIDRs</label>
+      <textarea id="int-allowed-ips" pInputText rows="3" class="w-full" [(ngModel)]="formData.allowed_ips" placeholder="10.0.0.0/8&#10;203.0.113.5"></textarea>
+      <small class="text-secondary">One CIDR per line. Leave blank to accept webhooks from any source.</small>
+    </div>
   } @else {
     <div class="form-group">
       <label for="int-endpoint">Endpoint URL</label>
@@ -321,6 +326,11 @@
         @if (target.has_secret) {
           <button pButton type="button" label="Clear Secret" icon="pi pi-trash" severity="danger" size="small" class="mt-sm" (click)="clearSecret()" [disabled]="saving()"></button>
         }
+      </div>
+      <div class="form-group">
+        <label for="edit-allowed-ips">Allowed source IPs / CIDRs</label>
+        <textarea id="edit-allowed-ips" pInputText rows="3" class="w-full" [(ngModel)]="formData.allowed_ips" placeholder="10.0.0.0/8&#10;203.0.113.5"></textarea>
+        <small class="text-secondary">One CIDR per line. Leave blank to accept webhooks from any source.</small>
       </div>
     } @else {
       <div class="form-group">

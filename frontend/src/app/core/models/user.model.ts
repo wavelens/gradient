@@ -34,6 +34,7 @@ export interface ApiKey {
   last_used_at: string | null;
   expires_at: string | null;
   revoked_at: string | null;
+  allowed_ips: string[];
 }
 
 export interface Session {
