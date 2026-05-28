@@ -121,6 +121,7 @@ id_newtype!(SessionId);
 id_newtype!(UploadSessionId);
 id_newtype!(AuditLogId);
 id_newtype!(WorkerRegistrationId);
+id_newtype!(CliDeviceAuthorizationId);
 
 #[cfg(test)]
 mod tests {
