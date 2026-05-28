@@ -168,6 +168,26 @@ Run with: `cargo test -p web --test auth_middleware`
 | `malformed_bearer_returns_403_envelope` | `Authorization` header present but not `Bearer <token>` | 403, `message="Invalid Authorization header"` |
 | `undecodable_token_returns_401_envelope` | `Bearer` token that JWT can't decode | 401, `message="Unable to decode token"` |
 
+## CLI device authorization (`gradient login` web flow)
+
+Integration tests in `backend/web/tests/cli_device_authorization.rs` pin the
+state machine that backs `gradient login` (issue #251): a CLI calls
+`POST /auth/cli/start`, polls `POST /auth/cli/poll`, and the browser-side user
+hits `POST /auth/cli/authorize` or `/auth/cli/deny`.
+
+Run with: `cargo test -p web --test cli_device_authorization`
+
+| Test | Scenario | Expected |
+|------|----------|----------|
+| `start_returns_user_code_and_verification_uri` | `POST /auth/cli/start` | 200, response carries a `device_code`, dashed `user_code`, `verification_uri_complete` ending in `/account/cli-authorize?code=...`, and a positive `interval`/`expires_in` |
+| `poll_pending_returns_cli_auth_pending` | poll on a row with no token/denial | 400, `code="cli_auth_pending"` |
+| `poll_denied_returns_cli_auth_denied` | poll on a row with `denied_at` set | 400, `code="cli_auth_denied"` |
+| `poll_expired_returns_cli_auth_expired` | poll on a row past `expires_at` | 400, `code="cli_auth_expired"` |
+| `poll_authorized_returns_token_once` | poll on a row that has a token | 200, returns the session token |
+| `poll_unknown_device_code_returns_404` | unknown `device_code` | 404 |
+| `authorize_requires_auth` | `POST /auth/cli/authorize` without bearer | 403 |
+| `deny_marks_row_denied` | authenticated `POST /auth/cli/deny` for a pending row | 200 |
+
 ## Inbound forge webhook response-body (BaseResponse envelope)
 
 Integration tests in `backend/web/tests/forge_hooks.rs` verify that both
