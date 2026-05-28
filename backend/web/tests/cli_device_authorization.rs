@@ -140,13 +140,10 @@ fn pending_row(device_code: &str, user_code: &str) -> cli_device_authorization::
 fn start_returns_user_code_and_verification_uri() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
+        let inserted = pending_row("dev-code", "ABCD-EFGH");
         let s = server_with(|db| {
             db.append_query_results([Vec::<cli_device_authorization::Model>::new()])
-                .append_exec_results([MockExecResult {
-                    last_insert_id: 0,
-                    rows_affected: 1,
-                }])
-                .append_query_results([Vec::<entity::audit_log::Model>::new()])
+                .append_query_results([vec![inserted]])
                 .append_exec_results([MockExecResult {
                     last_insert_id: 0,
                     rows_affected: 1,
