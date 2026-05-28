@@ -152,13 +152,38 @@ fn init_crypto_provider() {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 }
 
+fn rustls_root_store() -> rustls::RootCertStore {
+    let mut roots = rustls::RootCertStore::empty();
+    let native = rustls_native_certs::load_native_certs();
+    for cert in native.certs {
+        let _ = roots.add(cert);
+    }
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    roots
+}
+
 fn rustls_config() -> rustls::ClientConfig {
     init_crypto_provider();
-    let mut roots = rustls::RootCertStore::empty();
-    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
     rustls::ClientConfig::builder()
-        .with_root_certificates(roots)
+        .with_root_certificates(rustls_root_store())
         .with_no_client_auth()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Regression for #287: native certs must be merged into the root store
+    // (alongside webpki-roots) so self-signed CAs installed in the OS trust
+    // store are honoured.
+    #[test]
+    fn root_store_contains_webpki_baseline() {
+        let roots = rustls_root_store();
+        assert!(
+            roots.len() >= webpki_roots::TLS_SERVER_ROOTS.len(),
+            "root store missing webpki baseline",
+        );
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

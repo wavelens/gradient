@@ -35,12 +35,20 @@ pub fn init_crypto_provider() {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 }
 
+fn rustls_root_store() -> rustls::RootCertStore {
+    let mut roots = rustls::RootCertStore::empty();
+    let native = rustls_native_certs::load_native_certs();
+    for cert in native.certs {
+        let _ = roots.add(cert);
+    }
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    roots
+}
+
 fn rustls_config() -> rustls::ClientConfig {
     init_crypto_provider();
-    let mut roots = rustls::RootCertStore::empty();
-    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
     rustls::ClientConfig::builder()
-        .with_root_certificates(roots)
+        .with_root_certificates(rustls_root_store())
         .with_no_client_auth()
 }
 
@@ -76,6 +84,19 @@ mod tests {
         let _ = rustls::ClientConfig::builder()
             .with_root_certificates(roots)
             .with_no_client_auth();
+    }
+
+    /// Regression for #287: outbound HTTPS must honour OS-installed CAs so
+    /// self-hosted Gradient instances with a self-signed CA work the same way
+    /// `curl` does. `rustls_root_store` merges native certs with the bundled
+    /// Mozilla baseline and degrades silently when the system store is absent.
+    #[test]
+    fn root_store_contains_webpki_baseline() {
+        let roots = rustls_root_store();
+        assert!(
+            roots.len() >= webpki_roots::TLS_SERVER_ROOTS.len(),
+            "root store missing webpki baseline",
+        );
     }
 
     #[test]

@@ -2498,10 +2498,13 @@ Each file covers: happy path, server `{error: true}` envelope (→ `ConnectorErr
 401 (→ `Unauthorized`), and transport failure.
 
 `cli/connector/tests/client.rs::builder_succeeds_without_system_certs`
-guards the rustls + `webpki-roots` setup: `Client::builder().build()` must
-succeed in sandboxed environments without `/etc/ssl/certs` (Nix sandbox,
-minimal containers) by serving the Mozilla CA bundle from the binary
-instead of `rustls-platform-verifier`'s system trust-store load.
+guards the rustls trust setup: `Client::builder().build()` must succeed
+regardless of whether the platform CA store is reachable. The CLI loads
+system certs via `rustls-native-certs` (so self-hosted instances with a
+self-signed CA installed in the OS trust store work — fix for #287) and
+falls back to the bundled Mozilla CA bundle via `webpki-roots` when no
+system store is present (Nix sandbox, minimal containers). Native cert
+loading degrades silently when `/etc/ssl/certs` is missing.
 
 CLI integration tests in `cli/tests/`:
 

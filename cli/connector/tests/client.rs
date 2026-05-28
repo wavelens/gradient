@@ -8,9 +8,11 @@ async fn builder_requires_base_url() {
     assert!(res.is_err());
 }
 
-// Regression: `Client::builder().build()` must succeed without reading
-// platform CA certs. Mozilla roots are baked in via `webpki-roots`, so the
-// CLI works in Nix sandboxes and minimal containers that have no
+// Regression for #287: `Client::builder().build()` must succeed regardless of
+// whether the platform CA store is reachable. Native certs are loaded on top
+// of bundled Mozilla roots so self-hosted instances with self-signed CAs
+// installed in the system trust store work; `webpki-roots` remains a fallback
+// so the CLI still builds in Nix sandboxes and minimal containers without
 // `/etc/ssl/certs`.
 #[tokio::test]
 async fn builder_succeeds_without_system_certs() {
