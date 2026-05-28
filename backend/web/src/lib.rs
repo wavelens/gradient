@@ -382,6 +382,9 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             "/user/settings",
             get(user::get_settings).patch(user::patch_settings),
         )
+        .route("/auth/cli/info", get(auth::get_cli_device_info))
+        .route("/auth/cli/authorize", post(auth::post_cli_device_authorize))
+        .route("/auth/cli/deny", post(auth::post_cli_device_deny))
         .nest("/admin", admin::admin_router())
         .route_layer(middleware::from_fn_with_state(
             Arc::clone(&state),
@@ -490,6 +493,8 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         )
         .route("/auth/oidc/login", get(auth::get_oidc_login))
         .route("/auth/oidc/callback", get(auth::get_oidc_callback))
+        .route("/auth/cli/start", post(auth::post_cli_device_start))
+        .route("/auth/cli/poll", post(auth::post_cli_device_poll))
         .route_layer(GovernorLayer::new(rl_per_second(6, 5)));
 
     // ── Incoming forge webhooks (unauthenticated, HMAC-verified) ─────────

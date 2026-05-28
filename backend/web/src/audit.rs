@@ -35,6 +35,9 @@ pub mod events {
     pub const API_KEY_DELETE: &str = "api_key.delete";
     pub const SESSION_REVOKE: &str = "session.revoke";
     pub const AUTH_DENY: &str = "auth.deny";
+    pub const CLI_DEVICE_START: &str = "cli.device.start";
+    pub const CLI_DEVICE_AUTHORIZE: &str = "cli.device.authorize";
+    pub const CLI_DEVICE_DENY: &str = "cli.device.deny";
     pub const ORG_DELETE: &str = "organization.delete";
     pub const ORG_MEMBER_ADD: &str = "organization.member.add";
     pub const ORG_MEMBER_REMOVE: &str = "organization.member.remove";

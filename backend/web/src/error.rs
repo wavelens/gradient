@@ -53,6 +53,9 @@ impl ErrorCode {
     pub const AUTHENTICATION: Self = Self("authentication");
     pub const INVALID_CREDENTIALS: Self = Self("invalid_credentials");
     pub const OAUTH_REQUIRED: Self = Self("oauth_required");
+    pub const CLI_AUTH_PENDING: Self = Self("cli_auth_pending");
+    pub const CLI_AUTH_EXPIRED: Self = Self("cli_auth_expired");
+    pub const CLI_AUTH_DENIED: Self = Self("cli_auth_denied");
 
     // 403 Forbidden
     pub const FORBIDDEN: Self = Self("forbidden");
