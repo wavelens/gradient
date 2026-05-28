@@ -1,0 +1,83 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<div class="auth-container">
+  <div class="auth-card">
+    <div class="auth-header">
+      <img src="/images/logo.svg" alt="Gradient" class="auth-logo" />
+      <h1>Authorize CLI</h1>
+      <p class="text-secondary">Grant the Gradient CLI access to your account</p>
+    </div>
+
+    @if (errorMessage()) {
+      <div class="error-message">
+        <span class="material-symbols-outlined">error</span>
+        {{ errorMessage() }}
+      </div>
+    }
+
+    @if (loading()) {
+      <p>Loading…</p>
+    } @else if (status() === 'authorized') {
+      <div class="status-message success">
+        <span class="material-symbols-outlined">check_circle</span>
+        <div>
+          <h2>Authorized</h2>
+          <p>Return to your terminal. You may close this window.</p>
+        </div>
+      </div>
+    } @else if (status() === 'denied') {
+      <div class="status-message warning">
+        <span class="material-symbols-outlined">cancel</span>
+        <div>
+          <h2>Denied</h2>
+          <p>The CLI was not granted access.</p>
+        </div>
+      </div>
+    } @else if (info()) {
+      <div class="device-info">
+        <p>A Gradient CLI session is requesting to sign in as you.</p>
+        <dl>
+          <dt>Confirmation code</dt>
+          <dd class="code">{{ info()!.user_code }}</dd>
+          <dt>Origin IP</dt>
+          <dd>{{ info()!.ip || 'unknown' }}</dd>
+          <dt>User agent</dt>
+          <dd>{{ info()!.user_agent || 'unknown' }}</dd>
+        </dl>
+        <p class="text-secondary">
+          Only authorize if you started this <code>gradient login</code> yourself
+          and the confirmation code matches what your terminal displays.
+        </p>
+        <div class="actions">
+          <button type="button" class="btn-primary" [disabled]="submitting()" (click)="authorize()">
+            Authorize
+          </button>
+          <button type="button" class="btn-secondary" [disabled]="submitting()" (click)="deny()">
+            Deny
+          </button>
+        </div>
+      </div>
+    } @else {
+      <form [formGroup]="form" (ngSubmit)="onLookup()" class="auth-form">
+        <div class="form-group">
+          <label for="userCode">Confirmation code</label>
+          <input
+            type="text"
+            id="userCode"
+            formControlName="userCode"
+            class="form-input"
+            placeholder="XXXX-XXXX"
+            autocomplete="off"
+          />
+        </div>
+        <button type="submit" class="btn-primary" [disabled]="!form.valid">
+          Continue
+        </button>
+      </form>
+    }
+  </div>
+</div>

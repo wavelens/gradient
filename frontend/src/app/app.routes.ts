@@ -35,6 +35,14 @@ export const routes: Routes = [
             (m) => m.OidcCallbackComponent
           ),
       },
+      {
+        path: 'cli-authorize',
+        title: 'Authorize CLI',
+        loadComponent: () =>
+          import('./features/auth/cli-authorize/cli-authorize.component').then(
+            (m) => m.CliAuthorizeComponent
+          ),
+      },
     ],
   },
 
