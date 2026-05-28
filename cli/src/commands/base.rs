@@ -10,8 +10,12 @@ use crate::input::*;
 use crate::output::{ExitKind, Output, to_exit_kind};
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{Shell, generate};
-use connector::auth::{MakeLoginRequest, MakeUserRequest};
+use connector::auth::{
+    CliDevicePollRequest, CliPollOutcome, MakeLoginRequest, MakeUserRequest,
+};
 use std::io;
+use std::process::Command;
+use std::time::Duration;
 
 #[derive(Parser, Debug)]
 #[command(name = "Gradient", display_name = "Gradient", bin_name = "gradient", author = "Wavelens", version, about, long_about = None)]
@@ -49,10 +53,14 @@ enum MainCommands {
     },
     /// Login to the server
     Login {
+        /// Use basic username/password instead of the default web flow
         #[arg(short, long)]
         username: Option<String>,
         #[arg(short, long)]
         password: Option<String>,
+        /// Skip opening the browser; print the URL instead
+        #[arg(long)]
+        no_browser: bool,
     },
     /// Logout from the server
     Logout,
@@ -194,34 +202,40 @@ pub async fn run_cli() -> std::io::Result<()> {
             }
         }
 
-        MainCommands::Login { username, password } => {
-            if out.is_json() && password.is_none() {
-                out.err(ExitKind::Usage, "missing argument: --password");
-            }
-
+        MainCommands::Login {
+            username,
+            password,
+            no_browser,
+        } => {
             let server_url = set_get_value(ConfigKey::Server, None, true);
             if server_url.is_none() {
                 set_get_value(ConfigKey::Server, Some(ask_for_input("Server URL")), true).unwrap();
             }
 
-            let username = username.unwrap_or_else(|| ask_for_input("Username"));
-            let pw = password.unwrap_or_else(ask_for_password);
-
-            let client = client_from_config(out);
-            match client
-                .auth()
-                .basic_login(MakeLoginRequest {
-                    loginname: username,
-                    password: pw,
-                })
-                .await
-            {
-                Ok(token) => {
-                    set_get_value(ConfigKey::AuthToken, Some(token), true).unwrap();
-                    out.ok(&serde_json::json!({"logged_in": true}));
-                    out.human("Logged in.");
+            if username.is_some() || password.is_some() {
+                if out.is_json() && password.is_none() {
+                    out.err(ExitKind::Usage, "missing argument: --password");
                 }
-                Err(e) => out.err(to_exit_kind(&e), e),
+                let username = username.unwrap_or_else(|| ask_for_input("Username"));
+                let pw = password.unwrap_or_else(ask_for_password);
+                let client = client_from_config(out);
+                match client
+                    .auth()
+                    .basic_login(MakeLoginRequest {
+                        loginname: username,
+                        password: pw,
+                    })
+                    .await
+                {
+                    Ok(token) => {
+                        set_get_value(ConfigKey::AuthToken, Some(token), true).unwrap();
+                        out.ok(&serde_json::json!({"logged_in": true}));
+                        out.human("Logged in.");
+                    }
+                    Err(e) => out.err(to_exit_kind(&e), e),
+                }
+            } else {
+                run_web_login(out, no_browser).await;
             }
         }
 
@@ -277,4 +291,72 @@ pub async fn run_cli() -> std::io::Result<()> {
     }
 
     std::process::exit(0);
+}
+
+async fn run_web_login(out: Output, no_browser: bool) {
+    let client = client_from_config(out);
+    let start = match client.auth().cli_device_start().await {
+        Ok(s) => s,
+        Err(e) => out.err(to_exit_kind(&e), e),
+    };
+
+    out.human(format!(
+        "Open this URL in your browser:\n  {}\n\nConfirmation code: {}",
+        start.verification_uri_complete, start.user_code
+    ));
+
+    if !no_browser && !out.is_json() {
+        let _ = open_url(&start.verification_uri_complete);
+    }
+
+    let interval = Duration::from_secs(start.interval.max(1));
+    let deadline = std::time::Instant::now()
+        + Duration::from_secs(start.expires_in.max(0) as u64);
+
+    loop {
+        if std::time::Instant::now() >= deadline {
+            out.err(ExitKind::Api, "Authorization expired before approval.");
+        }
+        tokio::time::sleep(interval).await;
+        match client
+            .auth()
+            .cli_device_poll(CliDevicePollRequest {
+                device_code: start.device_code.clone(),
+            })
+            .await
+        {
+            Ok(CliPollOutcome::Pending) => continue,
+            Ok(CliPollOutcome::Expired) => {
+                out.err(ExitKind::Api, "Authorization expired before approval.");
+            }
+            Ok(CliPollOutcome::Denied) => {
+                out.err(ExitKind::Unauthorized, "Authorization was denied.");
+            }
+            Ok(CliPollOutcome::Token(token)) => {
+                set_get_value(ConfigKey::AuthToken, Some(token), true).unwrap();
+                out.ok(&serde_json::json!({"logged_in": true}));
+                out.human("Logged in.");
+                return;
+            }
+            Err(e) => out.err(to_exit_kind(&e), e),
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn open_url(url: &str) -> std::io::Result<()> {
+    Command::new("open").arg(url).status().map(|_| ())
+}
+
+#[cfg(target_os = "windows")]
+fn open_url(url: &str) -> std::io::Result<()> {
+    Command::new("cmd")
+        .args(["/C", "start", "", url])
+        .status()
+        .map(|_| ())
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn open_url(url: &str) -> std::io::Result<()> {
+    Command::new("xdg-open").arg(url).status().map(|_| ())
 }

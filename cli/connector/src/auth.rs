@@ -2,6 +2,17 @@ use crate::{Client, ConnectorError, http};
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
 
+/// Outcome of `/auth/cli/poll`. Pending/Expired/Denied are normal states of the
+/// device flow, not transport errors, so the CLI matches on them instead of
+/// reading prose out of `ConnectorError::Api`.
+#[derive(Debug, Clone)]
+pub enum CliPollOutcome {
+    Pending,
+    Expired,
+    Denied,
+    Token(String),
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct MakeUserRequest {
     pub username: String,
@@ -34,6 +45,21 @@ pub struct OidcLoginRequest {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct OidcRedirect {
     pub url: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct CliDeviceStartResponse {
+    pub device_code: String,
+    pub user_code: String,
+    pub verification_uri: String,
+    pub verification_uri_complete: String,
+    pub expires_in: i64,
+    pub interval: u64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct CliDevicePollRequest {
+    pub device_code: String,
 }
 
 pub struct AuthApi<'a>(pub(crate) &'a Client);
@@ -114,6 +140,34 @@ impl AuthApi<'_> {
         )?
         .json(&body);
         http::decode(req.send().await?).await
+    }
+
+    pub async fn cli_device_start(&self) -> Result<CliDeviceStartResponse, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::POST,
+            "auth/cli/start",
+            false,
+        )?;
+        http::decode(req.send().await?).await
+    }
+
+    pub async fn cli_device_poll(
+        &self,
+        body: CliDevicePollRequest,
+    ) -> Result<CliPollOutcome, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::POST,
+            "auth/cli/poll",
+            false,
+        )?
+        .json(&body);
+        http::decode_cli_poll(req.send().await?).await
     }
 
     pub async fn logout(&self) -> Result<String, ConnectorError> {
