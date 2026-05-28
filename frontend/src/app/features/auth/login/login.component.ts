@@ -7,7 +7,7 @@
 import { Component, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
-import { Router, RouterModule } from '@angular/router';
+import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
 import { take } from 'rxjs';
@@ -24,6 +24,7 @@ export class LoginComponent {
   private fb = inject(FormBuilder);
   private authService = inject(AuthService);
   private router = inject(Router);
+  private route = inject(ActivatedRoute);
   private config = inject(ConfigService);
 
   loginForm: FormGroup;
@@ -43,9 +44,18 @@ export class LoginComponent {
 
     this.authService.initialized$.pipe(take(1)).subscribe(() => {
       if (this.authService.isAuthenticated()) {
-        this.router.navigate(['/']);
+        this.navigateAfterLogin();
       }
     });
+  }
+
+  private navigateAfterLogin(): void {
+    const next = this.route.snapshot.queryParamMap.get('next');
+    if (next && next.startsWith('/')) {
+      this.router.navigateByUrl(next);
+    } else {
+      this.router.navigate(['/']);
+    }
   }
 
   onSubmit(): void {
@@ -58,7 +68,7 @@ export class LoginComponent {
       this.authService.login(username, password, rememberMe).subscribe({
         next: () => {
           this.loading.set(false);
-          this.router.navigate(['/']);
+          this.navigateAfterLogin();
         },
         error: (error) => {
           this.loading.set(false);

@@ -1,0 +1,119 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '../../../styles/variables' as *;
+
+.auth-container {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: $spacing-lg;
+}
+
+.auth-card {
+  background-color: $color-tertiary;
+  border: 1px solid $color-border;
+  border-radius: $border-radius-lg;
+  padding: $spacing-xxl;
+  max-width: 520px;
+  width: 100%;
+}
+
+.auth-header {
+  text-align: center;
+  margin-bottom: $spacing-xl;
+
+  .auth-logo {
+    height: 48px;
+    margin-bottom: $spacing-lg;
+  }
+
+  h1 {
+    font-size: $font-size-xxl;
+    color: $text-primary;
+    margin: 0 0 $spacing-sm 0;
+  }
+
+  p {
+    margin: 0;
+    font-size: $font-size-md;
+  }
+}
+
+.device-info {
+  dl {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    column-gap: $spacing-md;
+    row-gap: $spacing-xs;
+    margin: $spacing-lg 0;
+  }
+
+  dt {
+    font-weight: 600;
+    color: $text-secondary;
+  }
+
+  dd {
+    margin: 0;
+    word-break: break-all;
+  }
+
+  .code {
+    font-family: monospace;
+    font-size: $font-size-lg;
+    letter-spacing: 0.1em;
+  }
+
+  .actions {
+    display: flex;
+    gap: $spacing-md;
+    margin-top: $spacing-lg;
+
+    button {
+      flex: 1;
+    }
+  }
+}
+
+.status-message {
+  display: flex;
+  gap: $spacing-md;
+  align-items: flex-start;
+  padding: $spacing-lg;
+  border-radius: $border-radius-sm;
+
+  h2 {
+    margin: 0 0 $spacing-xs 0;
+    font-size: $font-size-lg;
+  }
+
+  p {
+    margin: 0;
+  }
+
+  &.success {
+    background-color: rgba($color-success, 0.1);
+    border: 1px solid $color-success;
+  }
+
+  &.warning {
+    background-color: rgba($color-warning, 0.1);
+    border: 1px solid $color-warning;
+  }
+}
+
+.error-message {
+  background-color: rgba($color-danger, 0.1);
+  border: 1px solid $color-danger;
+  border-radius: $border-radius-sm;
+  padding: $spacing-md;
+  margin-bottom: $spacing-lg;
+  display: flex;
+  gap: $spacing-sm;
+  align-items: center;
+}
