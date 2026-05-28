@@ -20,6 +20,7 @@ pub mod cache_upstream;
 pub mod cache_user;
 pub mod cached_path;
 pub mod cached_path_signature;
+pub mod cli_device_authorization;
 pub mod commit;
 pub mod derivation;
 pub mod derivation_dependency;
