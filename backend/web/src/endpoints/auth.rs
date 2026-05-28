@@ -8,25 +8,30 @@ use crate::audit::{RequestInfo, events, record as audit_record};
 use crate::authorization::{
     create_session_and_token, oidc_login_create, oidc_login_verify, update_last_login,
 };
-use crate::error::{WebError, WebResult};
+use crate::error::{ErrorCode, WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use axum::Json;
 use axum::body::Body;
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
+use axum::Extension;
 
+use chrono::Duration;
 use email_address::EmailAddress;
 use gradient_core::storage::generate_verification_token;
 use gradient_core::types::consts::*;
 use gradient_core::types::input::{validate_display_name, validate_password, validate_username};
 use gradient_core::types::*;
 use password_auth::{generate_hash, verify_password};
+use rand::distr::{Alphanumeric, SampleString};
+use rand::seq::IndexedRandom;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter,
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -691,6 +696,284 @@ pub async fn post_resend_verification(
     tx.commit().await?;
 
     Ok(ok_json("Verification email sent successfully".to_string()))
+}
+
+// ── CLI device authorization (RFC 8628 style) ────────────────────────────
+
+/// Lifetime of a pending device authorization. Long enough for the user to
+/// log in via the browser if they aren't already, short enough that an
+/// abandoned CLI invocation can't be claimed days later.
+const CLI_DEVICE_LIFETIME_MINUTES: i64 = 10;
+const CLI_DEVICE_POLL_INTERVAL_SECONDS: u64 = 3;
+
+/// Alphabet for the human-typed `user_code` shown on both screens. Omits
+/// visually ambiguous characters (0/O, 1/I/L) so a phone-screen → terminal
+/// transcription doesn't mis-type.
+const CLI_USER_CODE_ALPHABET: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+
+fn generate_device_code() -> String {
+    Alphanumeric.sample_string(&mut rand::rng(), 64)
+}
+
+fn generate_user_code() -> String {
+    let mut rng = rand::rng();
+    let mut s = String::with_capacity(9);
+    for i in 0..8 {
+        if i == 4 {
+            s.push('-');
+        }
+        let c = *CLI_USER_CODE_ALPHABET
+            .choose(&mut rng)
+            .expect("alphabet non-empty");
+        s.push(c as char);
+    }
+    s
+}
+
+fn hash_device_code(raw: &str) -> String {
+    let mut h = Sha256::new();
+    h.update(raw.as_bytes());
+    let bytes = h.finalize();
+    let mut out = String::with_capacity(64);
+    for b in bytes {
+        use std::fmt::Write as _;
+        write!(&mut out, "{:02x}", b).unwrap();
+    }
+    out
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CliDeviceStartResponse {
+    pub device_code: String,
+    pub user_code: String,
+    pub verification_uri: String,
+    pub verification_uri_complete: String,
+    pub expires_in: i64,
+    pub interval: u64,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CliDevicePollRequest {
+    pub device_code: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CliDeviceAuthorizeRequest {
+    pub user_code: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CliDeviceUserCodeQuery {
+    pub user_code: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CliDeviceInfoResponse {
+    pub user_code: String,
+    pub expires_at: chrono::NaiveDateTime,
+    pub user_agent: Option<String>,
+    pub ip: Option<String>,
+}
+
+pub async fn post_cli_device_start(
+    state: State<Arc<ServerState>>,
+    info: RequestInfo,
+) -> WebResult<Json<BaseResponse<CliDeviceStartResponse>>> {
+    let device_code = generate_device_code();
+    let user_code = loop {
+        let candidate = generate_user_code();
+        let exists = ECliDeviceAuthorization::find()
+            .filter(CCliDeviceAuthorization::UserCode.eq(candidate.clone()))
+            .filter(CCliDeviceAuthorization::ExpiresAt.gt(gradient_core::types::now()))
+            .one(&state.web_db)
+            .await?;
+        if exists.is_none() {
+            break candidate;
+        }
+    };
+
+    let now = gradient_core::types::now();
+    let expires_at = now + Duration::minutes(CLI_DEVICE_LIFETIME_MINUTES);
+
+    let row = ACliDeviceAuthorization {
+        id: Set(CliDeviceAuthorizationId::now_v7()),
+        device_code_hash: Set(hash_device_code(&device_code)),
+        user_code: Set(user_code.clone()),
+        user_id: Set(None),
+        token: Set(None),
+        denied_at: Set(None),
+        authorized_at: Set(None),
+        created_at: Set(now),
+        expires_at: Set(expires_at),
+        user_agent: Set(info.user_agent.clone()),
+        ip: Set(info.ip.clone()),
+    };
+    row.insert(&state.web_db).await?;
+
+    audit_record(
+        &state.web_db,
+        None,
+        events::CLI_DEVICE_START,
+        &info,
+        Some(serde_json::json!({ "user_code": user_code })),
+    )
+    .await;
+
+    let base = state.config.server.serve_url.trim_end_matches('/');
+    let verification_uri = format!("{}/account/cli-authorize", base);
+    let verification_uri_complete = format!("{}?code={}", verification_uri, user_code);
+
+    Ok(ok_json(CliDeviceStartResponse {
+        device_code,
+        user_code,
+        verification_uri,
+        verification_uri_complete,
+        expires_in: CLI_DEVICE_LIFETIME_MINUTES * 60,
+        interval: CLI_DEVICE_POLL_INTERVAL_SECONDS,
+    }))
+}
+
+pub async fn post_cli_device_poll(
+    state: State<Arc<ServerState>>,
+    Json(body): Json<CliDevicePollRequest>,
+) -> WebResult<Json<BaseResponse<String>>> {
+    let hash = hash_device_code(&body.device_code);
+    let row = ECliDeviceAuthorization::find()
+        .filter(CCliDeviceAuthorization::DeviceCodeHash.eq(hash))
+        .one(&state.web_db)
+        .await?
+        .ok_or_else(|| WebError::not_found("Device authorization"))?;
+
+    let now = gradient_core::types::now();
+    if row.denied_at.is_some() {
+        return Err(WebError::bad_request_with(
+            ErrorCode::CLI_AUTH_DENIED,
+            "Authorization denied",
+        ));
+    }
+    if let Some(token) = row.token.clone() {
+        let mut active: ACliDeviceAuthorization = row.into();
+        active.token = Set(None);
+        active.update(&state.web_db).await?;
+        return Ok(ok_json(token));
+    }
+    if row.authorized_at.is_some() || row.expires_at < now {
+        return Err(WebError::bad_request_with(
+            ErrorCode::CLI_AUTH_EXPIRED,
+            "Authorization expired",
+        ));
+    }
+    Err(WebError::bad_request_with(
+        ErrorCode::CLI_AUTH_PENDING,
+        "Authorization pending",
+    ))
+}
+
+async fn find_active_user_code(
+    state: &Arc<ServerState>,
+    user_code: &str,
+) -> WebResult<MCliDeviceAuthorization> {
+    let row = ECliDeviceAuthorization::find()
+        .filter(CCliDeviceAuthorization::UserCode.eq(user_code.to_string()))
+        .one(&state.web_db)
+        .await?
+        .ok_or_else(|| WebError::not_found("Device authorization"))?;
+
+    let now = gradient_core::types::now();
+    if row.denied_at.is_some() {
+        return Err(WebError::bad_request_with(
+            ErrorCode::CLI_AUTH_DENIED,
+            "Authorization already denied",
+        ));
+    }
+    if row.authorized_at.is_some() {
+        return Err(WebError::bad_request_with(
+            ErrorCode::CLI_AUTH_DENIED,
+            "Authorization already completed",
+        ));
+    }
+    if row.expires_at < now {
+        return Err(WebError::bad_request_with(
+            ErrorCode::CLI_AUTH_EXPIRED,
+            "Authorization expired",
+        ));
+    }
+    Ok(row)
+}
+
+pub async fn get_cli_device_info(
+    state: State<Arc<ServerState>>,
+    Query(query): Query<CliDeviceUserCodeQuery>,
+) -> WebResult<Json<BaseResponse<CliDeviceInfoResponse>>> {
+    let row = find_active_user_code(&state, &query.user_code).await?;
+    Ok(ok_json(CliDeviceInfoResponse {
+        user_code: row.user_code,
+        expires_at: row.expires_at,
+        user_agent: row.user_agent,
+        ip: row.ip,
+    }))
+}
+
+pub async fn post_cli_device_authorize(
+    state: State<Arc<ServerState>>,
+    info: RequestInfo,
+    Extension(user): Extension<MUser>,
+    Json(body): Json<CliDeviceAuthorizeRequest>,
+) -> WebResult<Json<BaseResponse<String>>> {
+    let row = find_active_user_code(&state, &body.user_code).await?;
+
+    let (_session_id, token) = create_session_and_token(
+        state.clone(),
+        user.id,
+        true,
+        row.user_agent.clone(),
+        row.ip.clone(),
+    )
+    .await
+    .map_err(|_| WebError::failed_to_generate_token())?;
+
+    let now = gradient_core::types::now();
+    let mut active: ACliDeviceAuthorization = row.into();
+    active.user_id = Set(Some(user.id));
+    active.token = Set(Some(token));
+    active.authorized_at = Set(Some(now));
+    active.update(&state.web_db).await?;
+
+    audit_record(
+        &state.web_db,
+        Some(user.id),
+        events::CLI_DEVICE_AUTHORIZE,
+        &info,
+        Some(serde_json::json!({ "user_code": body.user_code })),
+    )
+    .await;
+
+    Ok(ok_json("Device authorized".to_string()))
+}
+
+pub async fn post_cli_device_deny(
+    state: State<Arc<ServerState>>,
+    info: RequestInfo,
+    Extension(user): Extension<MUser>,
+    Json(body): Json<CliDeviceAuthorizeRequest>,
+) -> WebResult<Json<BaseResponse<String>>> {
+    let row = find_active_user_code(&state, &body.user_code).await?;
+
+    let now = gradient_core::types::now();
+    let mut active: ACliDeviceAuthorization = row.into();
+    active.denied_at = Set(Some(now));
+    active.update(&state.web_db).await?;
+
+    audit_record(
+        &state.web_db,
+        Some(user.id),
+        events::CLI_DEVICE_DENY,
+        &info,
+        Some(serde_json::json!({ "user_code": body.user_code })),
+    )
+    .await;
+
+    Ok(ok_json("Device denied".to_string()))
 }
 
 #[cfg(test)]
