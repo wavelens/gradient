@@ -125,6 +125,12 @@ in {
                   organization = "org";
                   repository = "git://server/test";
                   created_by = "admin";
+                  triggers = [
+                    {
+                      type = "polling";
+                      config = { interval_secs = 10; };
+                    }
+                  ];
                 };
               };
 
@@ -347,15 +353,16 @@ in {
       print(output)
 
       # ── Phase 4: wait for the server to notice the new commit ─────────────
-      # Project poll cycle is 30 s; we poll in 15 s slices so a panic shows
-      # up instantly instead of after the full timeout.
+      # Project poll cycle is configured to 10 s in the state above; we poll
+      # in 15 s slices so a panic shows up instantly instead of after the
+      # full timeout.
       banner("Phase 4: wait for repository detection")
       detected = False
       for attempt in range(1, 7):
           server.sleep(15)
           j = assert_no_server_panic(since_seconds=attempt * 15 + 15)
           if any(needle in j for needle in (
-              "update needed", "Force evaluation", "triggered evaluation", "Queued"
+              "update needed", "Force evaluation", "trigger created evaluation", "Queued"
           )):
               detected = True
               banner(f"Repository update detected on attempt {attempt}")
