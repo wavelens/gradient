@@ -525,6 +525,128 @@ paths:
                 error: false
                 message: "Logout Successfully"
 
+  /auth/cli/start:
+    post:
+      tags: [auth]
+      summary: Start a CLI device-authorization flow
+      description: |-
+        Mints a `device_code` (returned once, opaque to the server thereafter) and a short,
+        human-friendly `user_code` that the CLI shows in the terminal and the user confirms
+        in the browser at `verification_uri_complete`. The CLI polls `/auth/cli/poll` until
+        the browser-side flow completes.
+      security: []
+      operationId: cliDeviceStart
+      responses:
+        '200':
+          description: Device flow started
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseEnvelope'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/CliDeviceStartResponse'
+
+  /auth/cli/poll:
+    post:
+      tags: [auth]
+      summary: Poll a pending CLI device authorization
+      description: |-
+        Exchanges a `device_code` for a session token once the browser-side flow has been
+        approved. Returns `cli_auth_pending` while the user hasn't yet clicked Authorize,
+        `cli_auth_denied` if they explicitly denied, and `cli_auth_expired` once the device
+        code lifetime elapses.
+      security: []
+      operationId: cliDevicePoll
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CliDevicePollRequest'
+      responses:
+        '200':
+          description: Authorized - session token returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '400':
+          description: Pending, denied, or expired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/cli/info:
+    get:
+      tags: [auth]
+      summary: Look up a pending CLI device authorization
+      description: Returns metadata about a pending `user_code` so the browser-side UI can confirm what is being authorized.
+      operationId: cliDeviceInfo
+      parameters:
+        - name: user_code
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Device info
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseEnvelope'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/CliDeviceInfoResponse'
+
+  /auth/cli/authorize:
+    post:
+      tags: [auth]
+      summary: Authorize a pending CLI device session
+      description: |-
+        Marks the device authorization identified by `user_code` as approved, minting a JWT
+        session token (remember_me=true, 30-day lifetime) bound to the calling user. The
+        token is returned to the CLI on its next `/auth/cli/poll` request.
+      operationId: cliDeviceAuthorize
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CliDeviceAuthorizeRequest'
+      responses:
+        '200':
+          description: Authorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+
+  /auth/cli/deny:
+    post:
+      tags: [auth]
+      summary: Deny a pending CLI device session
+      operationId: cliDeviceDeny
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CliDeviceAuthorizeRequest'
+      responses:
+        '200':
+          description: Denied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+
   # ── User ─────────────────────────────────────────────────────────────────────
 
   /user:
@@ -5347,6 +5469,10 @@ components:
         - authentication
         - invalid_credentials
         - oauth_required
+        # CLI device authorization (RFC 8628 style)
+        - cli_auth_pending
+        - cli_auth_expired
+        - cli_auth_denied
         # 403 Forbidden
         - forbidden
         - superuser_required
@@ -5367,6 +5493,15 @@ components:
         # 503 Service Unavailable
         - service_unavailable
 
+    BaseEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: boolean
+          enum: [false]
+        message: {}
+
     StringResponse:
       allOf:
         - $ref: '#/components/schemas/BaseResponse'
@@ -5374,6 +5509,60 @@ components:
           properties:
             message:
               type: string
+
+    CliDeviceStartResponse:
+      type: object
+      required: [device_code, user_code, verification_uri, verification_uri_complete, expires_in, interval]
+      properties:
+        device_code:
+          type: string
+          description: Opaque token the CLI uses to poll. Returned once; not stored on the server in plaintext.
+        user_code:
+          type: string
+          description: Human-readable code shown to the user (8 chars in `XXXX-XXXX` form, ambiguity-free alphabet).
+        verification_uri:
+          type: string
+          format: uri
+        verification_uri_complete:
+          type: string
+          format: uri
+          description: "`verification_uri` with `?code=<user_code>` appended; safe to display or open directly."
+        expires_in:
+          type: integer
+          description: Seconds until the authorization expires.
+        interval:
+          type: integer
+          description: Minimum poll interval the CLI should respect, in seconds.
+
+    CliDevicePollRequest:
+      type: object
+      required: [device_code]
+      properties:
+        device_code:
+          type: string
+
+    CliDeviceAuthorizeRequest:
+      type: object
+      required: [user_code]
+      properties:
+        user_code:
+          type: string
+
+    CliDeviceInfoResponse:
+      type: object
+      required: [user_code, expires_at]
+      properties:
+        user_code:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+        user_agent:
+          type: string
+          nullable: true
+        ip:
+          type: string
+          nullable: true
 
     BoolResponse:
       allOf:
