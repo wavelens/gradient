@@ -1061,6 +1061,7 @@ dependencies = [
  "ring",
  "rkyv",
  "rustls",
+ "rustls-native-certs",
  "sea-orm",
  "sea-orm-migration",
  "serde",

@@ -58,6 +58,17 @@ gradient login --username alice --password "$PASSWORD"
 
 Either way, the resulting token is stored in the local configuration file (`~/.config/gradient/config`).
 
+### Self-signed certificates
+
+The CLI trusts the OS certificate store in addition to the bundled Mozilla
+CA roots, so self-hosted instances served behind a private CA work the same
+way `curl` does — install the CA in your system trust store (for example
+`update-ca-certificates` on Debian/Ubuntu, `trust anchor` on Fedora, or by
+adding it to `/etc/ssl/certs` on NixOS via `security.pki.certificateFiles`)
+and `gradient login` will pick it up. A `transport error` from `gradient
+login` against a self-hosted server typically means the CA has not been
+installed system-wide yet.
+
 ## Commands
 
 ### Authentication
