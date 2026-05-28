@@ -1,3 +1,4 @@
+use crate::auth::CliPollOutcome;
 use crate::ConnectorError;
 use reqwest::{Method, RequestBuilder, Response};
 use serde::de::DeserializeOwned;
@@ -6,6 +7,13 @@ use serde::de::DeserializeOwned;
 struct Envelope<T> {
     error: bool,
     message: T,
+}
+
+#[derive(serde::Deserialize)]
+struct ErrorEnvelope {
+    #[serde(default)]
+    code: Option<String>,
+    message: String,
 }
 
 pub(crate) async fn decode<T: DeserializeOwned>(res: Response) -> Result<T, ConnectorError> {
@@ -41,6 +49,34 @@ pub(crate) fn build_url(base: &str, path: &str) -> String {
         base.trim_end_matches('/'),
         path.trim_start_matches('/')
     )
+}
+
+pub(crate) async fn decode_cli_poll(res: Response) -> Result<CliPollOutcome, ConnectorError> {
+    let status = res.status();
+    let bytes = res.bytes().await?;
+
+    if let Ok(env) = serde_json::from_slice::<Envelope<String>>(&bytes)
+        && !env.error
+    {
+        return Ok(CliPollOutcome::Token(env.message));
+    }
+
+    if let Ok(env) = serde_json::from_slice::<ErrorEnvelope>(&bytes) {
+        return match env.code.as_deref() {
+            Some("cli_auth_pending") => Ok(CliPollOutcome::Pending),
+            Some("cli_auth_expired") => Ok(CliPollOutcome::Expired),
+            Some("cli_auth_denied") => Ok(CliPollOutcome::Denied),
+            _ => Err(ConnectorError::Api {
+                status,
+                message: env.message,
+            }),
+        };
+    }
+
+    Err(ConnectorError::Api {
+        status,
+        message: String::from_utf8_lossy(&bytes).into_owned(),
+    })
 }
 
 pub(crate) async fn decode_raw_string(res: Response) -> Result<String, ConnectorError> {
