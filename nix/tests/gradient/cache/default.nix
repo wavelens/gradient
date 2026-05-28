@@ -259,10 +259,7 @@ in {
 
     testScript = { nodes, ... }:
       ''
-      import re
-
       # ── Helpers ───────────────────────────────────────────────────────────
-      ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
       GIT     = "${lib.getExe pkgs.git}"
       CURL    = "${lib.getExe pkgs.curl}"
       JQ      = "${lib.getExe pkgs.jq}"
@@ -421,28 +418,21 @@ in {
           j = server.succeed("journalctl -u gradient-server --no-pager --since='-900s' -n 200")
           raise Exception(f"Evaluation did not complete after 900 s:\n{j[-2000:]}")
 
-      # ── Phase 6: extract hello's `.drv` from the CLI output ───────────────
-      # The CLI's last step (log fetch) exits 1, so use `execute`. The
-      # Project / Evaluation / Building sections we need are already printed
-      # by then, and `colored` wraps build names in ANSI escapes which we
-      # have to strip before pattern-matching.
-      banner("Phase 6: extract hello's derivation path from `gradient project show`")
-      _, output = server.execute(f"{CLI} project show")
-      print(output)
-
-      store_path_drv = ""
-      in_building = False
-      for line in output.split("\n"):
-          clean = ANSI_RE.sub("", line).strip()
-          if clean == "===== Building =====":
-              in_building = True
-              continue
-          if clean == "===== Log =====":
-              break
-          if in_building and "hello" in clean and clean.endswith(".drv"):
-              store_path_drv = clean if clean.startswith("/nix/store/") else f"/nix/store/{clean}"
-              break
-      assert store_path_drv, "could not find hello's .drv path in `gradient project show` output"
+      # ── Phase 6: extract hello's `.drv` from the eval's build list ────────
+      # We hit `/evals/{id}/builds` directly with the eval_id already pinned
+      # by Phase 5; screen-scraping `gradient project show` is too brittle
+      # (polling can rotate `last_evaluations[0]` to a fresh Queued eval
+      # between phases, and the CLI then errors on the eval-detail fetch
+      # before reaching the Building section).
+      banner("Phase 6: extract hello's derivation path from /evals/{id}/builds")
+      store_path_drv = server.succeed(
+          f'{CURL} -sf -H "Authorization: Bearer {token}" '
+          f'{API}/evals/{eval_id}/builds | '
+          f'{JQ} -r \'.message.builds[] | select(.name | test("hello[^/]*\\\\.drv$")) | .name\' | head -n1'
+      ).strip()
+      assert store_path_drv, f"could not find hello's .drv in eval {eval_id}'s builds"
+      if not store_path_drv.startswith("/nix/store/"):
+          store_path_drv = f"/nix/store/{store_path_drv}"
 
       # The `.drv` file is on the builder VM (its full closure was preseeded
       # via `additionalPaths`), not on the server, so resolve the output
