@@ -45,3 +45,22 @@ fn completion_zsh_registers_lowercase_binary() {
     assert!(!script.contains("Gradient"), "zsh script: {script}");
     assert!(script.contains("gradient"), "zsh script: {script}");
 }
+
+// clap's dynamic zsh script is built to be sourced; the Nix package installs it as an
+// fpath autoload `_gradient` file, where the completer is otherwise registered only on
+// the first TAB (producing nothing). The appended bridge must run it on first invocation.
+#[test]
+fn completion_zsh_bridges_autoload_first_tab() {
+    let output = Command::cargo_bin("gradient")
+        .unwrap()
+        .args(["completion", "zsh"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let script = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        script.contains(r#"[[ ${funcstack[1]} = _gradient ]] && _clap_dynamic_completer_gradient "$@""#),
+        "zsh script must bridge the autoload first-TAB case:\n{script}"
+    );
+}

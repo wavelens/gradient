@@ -148,7 +148,18 @@ pub async fn run_cli() -> std::io::Result<()> {
                 .unwrap_or_else(|e| {
                     out.err(ExitKind::Api, format!("failed to generate completions: {e}"))
                 });
-            io::stdout().write_all(&output.stdout).ok();
+            let mut stdout = io::stdout();
+            stdout.write_all(&output.stdout).ok();
+            // clap's dynamic zsh script registers the completer only when sourced; installed
+            // as an fpath autoload file it yields nothing on the first TAB. Bridge the autoload
+            // case so the function completes on its first invocation too.
+            if shell == Shell::Zsh {
+                stdout
+                    .write_all(
+                        b"\n[[ ${funcstack[1]} = _gradient ]] && _clap_dynamic_completer_gradient \"$@\"\n",
+                    )
+                    .ok();
+            }
         }
         MainCommands::Config { key, value } => {
             set_get_value_from_string(key, value, false)
