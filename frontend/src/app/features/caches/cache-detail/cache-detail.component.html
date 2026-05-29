@@ -187,8 +187,22 @@ trusted-public-keys = &lt;unavailable&gt;</pre>
                 <span class="material-symbols-outlined">{{ copied() === 'netrc' ? 'check' : 'content_copy' }}</span>
               </button>
             </div>
+            <p class="text-secondary usage-hint">Replace <code>&lt;YOUR_TOKEN&gt;</code> with your API key or login token. The command writes the credentials to <code>/etc/nix/netrc</code> so the Nix daemon can authenticate against this cache.</p>
           </div>
-          <p class="text-secondary usage-hint">Replace <code>&lt;YOUR_TOKEN&gt;</code> with your API key or login token. The command writes the credentials to <code>/etc/nix/netrc</code> so the Nix daemon can authenticate against this cache.</p>
+          <div class="usage-row">
+            <span class="usage-label">Or install <code>/etc/nix/netrc</code> decleratively</span>
+            <div class="code-block multiline">
+              <pre>
+                {{ declerativeNetrcCode }}
+              </pre>
+              <button class="copy-btn" (click)="copy(declerativeNetrcCode, 'netrc-code')" [title]="copied() === 'netrc-code' ? 'Copied!' : 'Copy'">
+                <span class="material-symbols-outlined">{{ copied() === 'netrc-code' ? 'check' : 'content_copy' }}</span>
+              </button>
+            </div>
+            <p class="text-secondary usage-hint">
+              This example uses <a href="https://github.com/Mic92/sops-nix">sops-nix</a>.
+              Replace <code>&lt;YOUR_USERNAME&gt;</code> with the user who should be able to use this cache. </p>
+          </div>
         }
       </div>
     </div>

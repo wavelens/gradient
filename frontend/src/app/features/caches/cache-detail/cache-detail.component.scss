@@ -358,7 +358,19 @@
   }
 
   .usage-hint {
+    align-items: center;
     margin-top: $spacing-sm;
     font-size: $font-size-xs;
+
+    a {
+      padding: 0;
+      text-decoration: underline;
+      color: inherit;
+
+      &:hover {
+        background: none;
+        color: $text-primary;
+      }
+    }
   }
 }

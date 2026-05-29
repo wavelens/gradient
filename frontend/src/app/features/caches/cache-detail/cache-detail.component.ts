@@ -83,6 +83,24 @@ export class CacheDetailComponent implements OnInit {
     return `nix run wavelens/gradient#gradient-cli -- cache install-netrc --server ${this.serverUrl} --token <YOUR_TOKEN> --cache ${this.cacheName}`;
   }
 
+  get declerativeNetrcCode(): string {
+    return `
+{ config, ... }: {
+  sops.secrets."gradient-api-token" = { };
+  sops.templates."nix-netrc" = {
+    content = ''
+      maschine ${window.location.hostname}
+      login gradient
+      password \${config.sops.placeholder."gradient-api-token"}
+    '';
+    owner = "YOUR_USERNAME";
+  };
+  systemd.tmpfiles.rules = [
+    "L+ /etc/nix/netrc - - - - \${config.sops.templates."nix-netrc".path}"
+  ];
+}`;
+  }
+
   readonly windows: { key: Window; label: string }[] = [
     { key: 'minutes', label: 'Minutes' },
     { key: 'hours', label: 'Hours' },
