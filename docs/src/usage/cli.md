@@ -184,6 +184,13 @@ gradient completion fish   >> ~/.config/fish/completions/gradient.fish
 gradient generate <type>
 ```
 
+Completions are dynamic: besides subcommands and flags, TAB also completes
+existing resource names (organizations, projects, workers, and caches) by
+querying the server. The resource lookups require a configured server and a
+valid login; when offline or logged out they yield nothing instead of erroring.
+Project and worker name completion uses the currently selected organization
+(`gradient organization select <name>`).
+
 ## Global Options
 
 ```

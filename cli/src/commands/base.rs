@@ -9,16 +9,16 @@ use crate::config::*;
 use crate::input::*;
 use crate::output::{ExitKind, Output, to_exit_kind};
 use clap::{CommandFactory, Parser, Subcommand};
-use clap_complete::{Shell, generate};
+use clap_complete::{CompleteEnv, Shell};
 use connector::auth::{
     CliDevicePollRequest, CliPollOutcome, MakeLoginRequest, MakeUserRequest,
 };
-use std::io;
+use std::io::{self, Write};
 use std::process::Command;
 use std::time::Duration;
 
 #[derive(Parser, Debug)]
-#[command(name = "Gradient", display_name = "Gradient", bin_name = "gradient", author = "Wavelens", version, about, long_about = None)]
+#[command(name = "gradient", display_name = "Gradient", bin_name = "gradient", author = "Wavelens", version, about, long_about = None)]
 #[command(arg_required_else_help = true, subcommand_required = true)]
 struct Cli {
     /// Emit machine-readable JSON envelopes; disables interactive prompts.
@@ -128,15 +128,27 @@ enum MainCommands {
     Hash,
 }
 
+/// Intercept dynamic completion requests (`COMPLETE=<shell> gradient …`) and exit.
+/// Must run before the tokio runtime starts: completers build their own runtime.
+pub fn complete_env() {
+    CompleteEnv::with_factory(Cli::command).complete();
+}
+
 pub async fn run_cli() -> std::io::Result<()> {
     let cli = Cli::parse();
     let out = Output::new(cli.json);
 
     match cli.cmd {
         MainCommands::Completion { shell } => {
-            let mut app = Cli::command();
-            let bin_name = app.get_name().to_string();
-            generate(shell, &mut app, bin_name, &mut io::stdout());
+            let exe = std::env::current_exe()
+                .unwrap_or_else(|e| out.err(ExitKind::Api, format!("cannot locate binary: {e}")));
+            let output = Command::new(&exe)
+                .env("COMPLETE", shell.to_string())
+                .output()
+                .unwrap_or_else(|e| {
+                    out.err(ExitKind::Api, format!("failed to generate completions: {e}"))
+                });
+            io::stdout().write_all(&output.stdout).ok();
         }
         MainCommands::Config { key, value } => {
             set_get_value_from_string(key, value, false)

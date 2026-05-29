@@ -4,10 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::commands::completion;
 use crate::config::*;
 use crate::input::{client_from_config, handle_input};
 use crate::output::{ExitKind, Output, to_exit_kind};
 use clap::Subcommand;
+use clap_complete::engine::ArgValueCompleter;
 use connector::orgs::{
     AddUserRequest, MakeOrganizationRequest, PatchOrganizationRequest, RemoveUserRequest,
 };
@@ -15,6 +17,7 @@ use connector::orgs::{
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     Select {
+        #[arg(add = ArgValueCompleter::new(completion::complete_orgs))]
         organization: String,
     },
     Create {
@@ -54,7 +57,10 @@ pub enum Commands {
 pub enum UserCommands {
     List,
     Add { user: String, role: Option<String> },
-    Remove { user: String },
+    Remove {
+        #[arg(add = ArgValueCompleter::new(completion::complete_org_users))]
+        user: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -66,8 +72,14 @@ pub enum SshCommands {
 #[derive(Subcommand, Debug)]
 pub enum CacheCommands {
     List,
-    Add { cache: String },
-    Remove { cache: String },
+    Add {
+        #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
+        cache: String,
+    },
+    Remove {
+        #[arg(add = ArgValueCompleter::new(completion::complete_subscribed_caches))]
+        cache: String,
+    },
 }
 
 pub async fn handle(cmd: Commands, out: Output) {

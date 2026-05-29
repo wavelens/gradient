@@ -5,9 +5,11 @@
  */
 
 use crate::commands::cache_nar;
+use crate::commands::completion;
 use crate::input::{client_from_config, handle_input};
 use crate::output::{ExitKind, Output, to_exit_kind};
 use clap::Subcommand;
+use clap_complete::engine::ArgValueCompleter;
 use connector::caches::MakeCacheRequest;
 use std::fs;
 
@@ -25,6 +27,7 @@ pub enum Commands {
     },
     List,
     Edit {
+        #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
         name: String,
         #[arg(short, long)]
         display_name: Option<String>,
@@ -34,9 +37,11 @@ pub enum Commands {
         priority: Option<i32>,
     },
     Delete {
+        #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
         name: String,
     },
     Show {
+        #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
         name: String,
     },
     /// Build a netrc entry locally for a cache and install it into a netrc file.

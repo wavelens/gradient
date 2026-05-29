@@ -11,7 +11,10 @@ pub mod output;
 
 use commands::base;
 
-#[tokio::main]
-pub async fn main() -> std::io::Result<()> {
-    base::run_cli().await
+fn main() -> std::io::Result<()> {
+    base::complete_env();
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(base::run_cli())
 }
