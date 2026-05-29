@@ -2516,6 +2516,14 @@ loading degrades silently when `/etc/ssl/certs` is missing.
 CLI integration tests in `cli/tests/`:
 
 - `download_attr.rs` - `gradient download '#attr' --json` writes the right files; `--json` without args returns a structured missing-argument envelope and exits 2.
+- `completion.rs` - regression for the broken completion bin name: `gradient completion {bash,zsh}` must emit a script that registers against the real `gradient` binary (`-F _clap_complete_gradient gradient`) and never the capitalised `Gradient` app name, which silently disabled `gradient <TAB>`.
+
+Dynamic completer unit tests live in `cli/src/commands/completion.rs` (`#[cfg(test)]`,
+wiremock-backed). They drive each completer core against a mock server and assert it
+returns the resource names and honours the partial prefix
+(`cache_names`, `org_names` reading paginated `items`, `project_names`/`worker_ids`
+scoped to the selected org), and that a non-2xx response yields no candidates so the
+shell never errors.
 
 Run a single connector test file with `cargo test -p connector --test <name>`; CI runs the full suite.
 

@@ -4,10 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::commands::completion;
 use crate::config::*;
 use crate::input::client_from_config;
 use crate::output::{ExitKind, Output, to_exit_kind};
 use clap::Subcommand;
+use clap_complete::engine::ArgValueCompleter;
 use connector::workers::MakeWorkerRequest;
 
 #[derive(Subcommand, Debug)]
@@ -32,6 +34,7 @@ pub enum Commands {
     /// Unregister a worker from the selected organization
     Delete {
         /// Worker ID to unregister
+        #[arg(add = ArgValueCompleter::new(completion::complete_workers))]
         worker_id: String,
     },
 }

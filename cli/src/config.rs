@@ -60,6 +60,14 @@ pub fn load_config() -> HashMap<ConfigKey, Option<String>> {
     }
 }
 
+pub fn load_config_quiet() -> HashMap<ConfigKey, Option<String>> {
+    let config_file = get_config_file();
+    fs::read_to_string(&config_file)
+        .ok()
+        .and_then(|contents| toml::from_str(&contents).ok())
+        .unwrap_or_else(|| ConfigKey::iter().map(|key| (key, None)).collect())
+}
+
 pub fn save_config(config: &HashMap<ConfigKey, Option<String>>) {
     let config_file = get_config_file();
     let config_dir = config_file

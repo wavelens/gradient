@@ -4,10 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::commands::completion;
 use crate::config::*;
 use crate::input::{client_from_config, handle_input};
 use crate::output::{ExitKind, Output, to_exit_kind};
 use clap::Subcommand;
+use clap_complete::engine::ArgValueCompleter;
 use colored::*;
 use connector::projects::{MakeProjectRequest, PatchProjectRequest};
 use futures::StreamExt;
@@ -16,6 +18,7 @@ use futures::pin_mut;
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     Select {
+        #[arg(add = ArgValueCompleter::new(completion::complete_projects))]
         project: String,
     },
     Show,
