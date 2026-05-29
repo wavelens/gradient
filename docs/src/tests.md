@@ -2497,6 +2497,13 @@ The `cli/connector` crate has wiremock-backed unit tests covering each sub-API
 Each file covers: happy path, server `{error: true}` envelope (→ `ConnectorError::Api`),
 401 (→ `Unauthorized`), and transport failure.
 
+`caches_api.rs::list_caches_decodes_bare_array` is a regression for #290: the
+`GET /caches` endpoint returns `message` as a bare array (not the paginated
+`{items,total,page,per_page}` envelope used by orgs/projects), so
+`caches().list()` returns `ListResponse` (`Vec<ListItem>`). The test replays the
+exact response from the bug report to prevent the connector from drifting back to
+the paginated type, which made the CLI mis-report a 200 as `api error (200)`.
+
 `cli/connector/tests/client.rs::builder_succeeds_without_system_certs`
 guards the rustls trust setup: `Client::builder().build()` must succeed
 regardless of whether the platform CA store is reachable. The CLI loads
