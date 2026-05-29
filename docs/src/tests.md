@@ -2516,7 +2516,7 @@ loading degrades silently when `/etc/ssl/certs` is missing.
 CLI integration tests in `cli/tests/`:
 
 - `download_attr.rs` - `gradient download '#attr' --json` writes the right files; `--json` without args returns a structured missing-argument envelope and exits 2.
-- `completion.rs` - regression for the broken completion bin name: `gradient completion {bash,zsh}` must emit a script that registers against the real `gradient` binary (`-F _clap_complete_gradient gradient`) and never the capitalised `Gradient` app name, which silently disabled `gradient <TAB>`.
+- `completion.rs` - regression for the broken completion bin name: `gradient completion {bash,zsh}` must emit a script that registers against the real `gradient` binary (`-F _clap_complete_gradient gradient`) and never the capitalised `Gradient` app name, which silently disabled `gradient <TAB>`. Also asserts the zsh script appends the autoload bridge (`[[ ${funcstack[1]} = _gradient ]] && _clap_dynamic_completer_gradient "$@"`) so the fpath autoload file the Nix package installs completes on the first TAB instead of only after a second.
 
 Dynamic completer unit tests live in `cli/src/commands/completion.rs` (`#[cfg(test)]`,
 wiremock-backed). They drive each completer core against a mock server and assert it
