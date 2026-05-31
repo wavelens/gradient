@@ -7460,7 +7460,7 @@ components:
               example: https://gradient.example.com
             remote_cache:
               type: string
-              description: Cache name (slug) on the remote server
+              description: Cache name on the remote server. May contain only letters, digits, '-', '_', and '.'.
               example: my-cache
             mode:
               type: string
@@ -7471,7 +7471,7 @@ components:
               type: string
               writeOnly: true
               nullable: true
-              description: API key for authenticating to the remote cache (`Authorization: GRAD<key>`). Stored encrypted at rest and never returned by the API.
+              description: API key for authenticating to a private remote cache. Requires an `https://` url so the key is not transmitted in cleartext. Stored encrypted at rest and never returned by the API.
         - title: HTTP upstream
           type: object
           required: [type, display_name, url, public_key]

@@ -85,11 +85,32 @@ fn validate_http(url: &str, public_key: &str) -> Result<(), WebError> {
     Ok(())
 }
 
-fn validate_gradient_proto(url: &str, remote_cache: &str) -> Result<(), WebError> {
+fn validate_gradient_proto(
+    url: &str,
+    remote_cache: &str,
+    api_key: Option<&str>,
+) -> Result<(), WebError> {
     validate_url(url)?;
-    if remote_cache.trim().is_empty() {
+    if api_key.is_some_and(|k| !k.trim().is_empty()) && !url.trim().starts_with("https://") {
+        return Err(WebError::bad_request(
+            "An API key requires an https:// upstream URL so the key is not transmitted in cleartext.",
+        ));
+    }
+    let name = remote_cache.trim();
+    if name.is_empty() {
         return Err(WebError::bad_request(
             "Remote cache name is required for a Gradient Proto upstream.",
+        ));
+    }
+    if name == "." || name == ".." {
+        return Err(WebError::bad_request("Remote cache name is invalid."));
+    }
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+    {
+        return Err(WebError::bad_request(
+            "Remote cache name may only contain letters, digits, '-', '_', and '.'.",
         ));
     }
     Ok(())
@@ -223,7 +244,7 @@ pub async fn put_cache_upstream(
             mode,
             api_key: key,
         } => {
-            validate_gradient_proto(&url, &remote_cache)?;
+            validate_gradient_proto(&url, &remote_cache, key.as_deref())?;
             let api_key_enc = match key {
                 Some(k) if !k.trim().is_empty() => Some(
                     gradient_core::sources::encrypt_secret(
@@ -335,9 +356,28 @@ mod tests {
 
     #[test]
     fn validate_gradient_proto_requires_url_and_remote_cache() {
-        assert!(validate_gradient_proto("", "prod").is_err());
-        assert!(validate_gradient_proto("https://x", "").is_err());
-        assert!(validate_gradient_proto("ftp://x", "prod").is_err());
-        assert!(validate_gradient_proto("https://remote.example", "prod").is_ok());
+        assert!(validate_gradient_proto("", "prod", None).is_err());
+        assert!(validate_gradient_proto("https://x", "", None).is_err());
+        assert!(validate_gradient_proto("ftp://x", "prod", None).is_err());
+        assert!(validate_gradient_proto("https://remote.example", "prod", None).is_ok());
+    }
+
+    #[test]
+    fn validate_gradient_proto_requires_https_when_api_key_present() {
+        assert!(validate_gradient_proto("http://remote.example", "prod", Some("secret")).is_err());
+        assert!(validate_gradient_proto("https://remote.example", "prod", Some("secret")).is_ok());
+        // http is fine when no key is transmitted.
+        assert!(validate_gradient_proto("http://remote.example", "prod", None).is_ok());
+        // A blank key is treated as no key.
+        assert!(validate_gradient_proto("http://remote.example", "prod", Some("   ")).is_ok());
+    }
+
+    #[test]
+    fn validate_gradient_proto_rejects_unsafe_remote_cache() {
+        assert!(validate_gradient_proto("https://x", "a/b", None).is_err());
+        assert!(validate_gradient_proto("https://x", "..", None).is_err());
+        assert!(validate_gradient_proto("https://x", "x?y=1", None).is_err());
+        assert!(validate_gradient_proto("https://x", "has space", None).is_err());
+        assert!(validate_gradient_proto("https://x", "prod-1.cache_2", None).is_ok());
     }
 }

@@ -2758,7 +2758,7 @@ Run with: `cargo test -p core --test ip_allowlist`
 - `cargo test -p entity --lib cache_upstream` — `as_source` for internal/gradient_proto/http + inconsistent rows.
 - `cargo test -p core --lib db::cache_upstream` — http vs gradient_proto upstream resolution.
 - `cargo test -p core --lib sources::secret` — encrypt/decrypt roundtrip for stored credentials.
-- `cargo test -p web --lib endpoints::caches::upstreams` — per-type validation error messages.
+- `cargo test -p web --lib endpoints::caches::upstreams` — per-type validation error messages, plus `validate_gradient_proto_requires_https_when_api_key_present` (an API key forces an `https://` upstream) and `validate_gradient_proto_rejects_unsafe_remote_cache` (remote cache name restricted to a safe charset).
 - `cargo test -p proto --lib handler::cache` — cache-scoped query + Push rejection.
 - `cargo test -p proto --lib handler::cache_session` — read-only message allow-list.
 - `cargo test -p proto --lib handler::limiter` — per-IP connection cap.
