@@ -12,6 +12,7 @@ use crate::permissions::CachePermission;
 use axum::Extension;
 use axum::Json;
 use axum::extract::{Path, State};
+use entity::cache_upstream::{CacheUpstreamKind, CacheUpstreamSource};
 use entity::organization_cache::CacheSubscriptionMode;
 use gradient_core::types::*;
 use sea_orm::ActiveValue::Set;
@@ -29,7 +30,7 @@ pub enum AddUpstreamRequest {
         mode: Option<CacheSubscriptionMode>,
     },
     /// An upstream that is an external Nix binary cache. Always ReadOnly.
-    External {
+    Http {
         display_name: String,
         url: String,
         public_key: String,
@@ -148,12 +149,15 @@ pub async fn put_cache_upstream(
                 cache: Set(cache.id),
                 display_name: Set(name),
                 mode: Set(mode.unwrap_or(CacheSubscriptionMode::ReadWrite)),
+                kind: Set(CacheUpstreamKind::Internal),
                 upstream_cache: Set(Some(upstream.id)),
                 url: Set(None),
                 public_key: Set(None),
+                remote_cache_name: Set(None),
+                api_key: Set(None),
             }
         }
-        AddUpstreamRequest::External {
+        AddUpstreamRequest::Http {
             display_name,
             url,
             public_key,
@@ -162,9 +166,12 @@ pub async fn put_cache_upstream(
             cache: Set(cache.id),
             display_name: Set(display_name),
             mode: Set(CacheSubscriptionMode::ReadOnly),
+            kind: Set(CacheUpstreamKind::Http),
             upstream_cache: Set(None),
             url: Set(Some(url)),
             public_key: Set(Some(public_key)),
+            remote_cache_name: Set(None),
+            api_key: Set(None),
         },
     };
 
@@ -192,10 +199,7 @@ pub async fn patch_cache_upstream(
     .await?;
     let record = load_upstream(&state, cache.id, upstream_id).await?;
 
-    let is_external = matches!(
-        record.as_source(),
-        Some(entity::cache_upstream::CacheUpstreamSource::External { .. })
-    );
+    let is_external = matches!(record.as_source(), Some(CacheUpstreamSource::Http { .. }));
     let mut active = record.into_active_model();
 
     if let Some(name) = body.display_name {

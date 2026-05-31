@@ -15,6 +15,7 @@ use axum::Extension;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use chrono::NaiveDateTime;
+use entity::cache_upstream::CacheUpstreamKind;
 use entity::organization_cache::CacheSubscriptionMode;
 use gradient_core::sources::{format_cache_public_key, generate_signing_key};
 use gradient_core::types::input::{check_index_name, validate_display_name};
@@ -180,11 +181,14 @@ pub async fn put(
         cache: Set(cache.id),
         display_name: Set("cache.nixos.org".to_string()),
         mode: Set(CacheSubscriptionMode::ReadOnly),
+        kind: Set(CacheUpstreamKind::Http),
         upstream_cache: Set(None),
         url: Set(Some("https://cache.nixos.org".to_string())),
         public_key: Set(Some(
             "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=".to_string(),
         )),
+        remote_cache_name: Set(None),
+        api_key: Set(None),
     }
     .insert(&tx)
     .await?;

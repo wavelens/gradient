@@ -1070,9 +1070,12 @@ impl<'a> StateApplicator<'a> {
                         cache: Set(cache_id),
                         display_name: Set(name),
                         mode: Set(mode.clone()),
+                        kind: Set(cache_upstream::CacheUpstreamKind::Internal),
                         upstream_cache: Set(Some(upstream_id)),
                         url: Set(None),
                         public_key: Set(None),
+                        remote_cache_name: Set(None),
+                        api_key: Set(None),
                     }
                 }
                 StateUpstream::External {
@@ -1084,9 +1087,12 @@ impl<'a> StateApplicator<'a> {
                     cache: Set(cache_id),
                     display_name: Set(display_name.clone()),
                     mode: Set(CacheSubscriptionMode::ReadOnly),
+                    kind: Set(cache_upstream::CacheUpstreamKind::Http),
                     upstream_cache: Set(None),
                     url: Set(Some(url.clone())),
                     public_key: Set(Some(public_key.clone())),
+                    remote_cache_name: Set(None),
+                    api_key: Set(None),
                 },
             };
             record.insert(self.db).await?;
