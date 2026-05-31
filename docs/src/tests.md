@@ -2752,3 +2752,14 @@ Run with: `cargo test -p core --test ip_allowlist`
 - `normalize_bare_ipv4_to_slash_32` / `normalize_bare_ipv6_to_slash_128` /
   `normalize_keeps_cidr_unchanged` / `normalize_trims_whitespace` /
   `normalize_rejects_garbage` / `normalize_rejects_empty` — write-time canonicalization.
+
+## Upstream cache types + Gradient Proto (#118)
+
+- `cargo test -p entity --lib cache_upstream` — `as_source` for internal/gradient_proto/http + inconsistent rows.
+- `cargo test -p core --lib db::cache_upstream` — http vs gradient_proto upstream resolution.
+- `cargo test -p core --lib sources::secret` — encrypt/decrypt roundtrip for stored credentials.
+- `cargo test -p web --lib endpoints::caches::upstreams` — per-type validation error messages.
+- `cargo test -p proto --lib handler::cache` — cache-scoped query + Push rejection.
+- `cargo test -p proto --lib handler::cache_session` — read-only message allow-list.
+- `cargo test -p proto --lib handler::limiter` — per-IP connection cap.
+- `cargo test -p proto --lib handler::cache_consumer` — ws URL building.

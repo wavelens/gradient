@@ -4489,10 +4489,11 @@ paths:
       tags: [caches]
       summary: Add upstream cache
       description: |-
-        Adds an upstream cache. Two types are supported:
+        Adds an upstream cache. Three types are supported, selected by the `type` discriminator:
 
         - **internal** - another Gradient-managed cache (referenced by name). Supports ReadOnly / ReadWrite / WriteOnly modes.
-        - **external** - an arbitrary Nix binary cache URL. Always ReadOnly.
+        - **gradient_proto** - a remote Gradient cache accessed via the binary WebSocket protocol (`/cache/{cache}/proto`). Supports optional `api_key` (stored encrypted at rest; write-only - never returned by the API) and pull mode.
+        - **http** - an arbitrary Nix binary cache URL. Always ReadOnly.
 
         Requires `manageCacheUpstreams`.
       operationId: addCacheUpstream
@@ -5234,9 +5235,15 @@ x-nix-cache-paths:
     | Endpoint | Description |
     |---|---|
     | `GET /cache/{cache}/nix-cache-info` | Cache metadata for Nix. Add `?json` for JSON response (`NixCacheInfo`). |
-    | `GET /cache/{cache}/gradient-cache-info` | Gradient-specific cache metadata. Add `?json` for JSON response (`GradientCacheInfo`). |
+    | `GET /cache/{cache}/gradient-cache-info` | Gradient-specific cache metadata. Add `?json` for JSON response (`GradientCacheInfo`). Responds with `Access-Control-Allow-Origin: *` for browser probes. |
     | `GET /cache/{cache}/{hash}.narinfo` | Path info for a store path. Add `?json` for JSON response (`NixPathInfo`). |
     | `GET /cache/{cache}/nar/{hash}.nar.zst` | Compressed NAR archive |
+
+    ### Gradient Proto surface
+
+    | Endpoint | Description |
+    |---|---|
+    | `GET /cache/{cache}/proto` | WebSocket upgrade carrying rkyv-encoded binary frames (same wire format as `/proto`). Read-only, cache-scoped. PUBLIC caches allow anonymous connections (governed by `GRADIENT_PROTO_ALLOW_ANONYMOUS_CACHE`, default `true`); PRIVATE caches require `Authorization: GRAD<key>`. Anonymous sessions are subject to per-IP connection and rate caps (`GRADIENT_PROTO_ANON_MAX_CONNECTIONS_PER_IP`, `GRADIENT_PROTO_ANON_RATE_PER_SECOND`, `GRADIENT_PROTO_ANON_RATE_BURST`). Only `CacheQuery` (Normal/Pull modes) and `NarRequest` messages are accepted; Push, job RPCs, and worker registration are rejected. |
 
     ### Inspection surface
 
@@ -7383,13 +7390,17 @@ components:
 
     CacheUpstream:
       type: object
-      required: [id, display_name, mode]
+      required: [id, display_name, mode, kind]
       properties:
         id:
           type: string
           format: uuid
         display_name:
           type: string
+        kind:
+          type: string
+          enum: [internal, gradient_proto, http]
+          description: Upstream type
         mode:
           type: string
           enum: [read_only, read_write, write_only]
@@ -7398,16 +7409,20 @@ components:
           type: string
           format: uuid
           nullable: true
-          description: Set for internal (Gradient-managed) upstreams
+          description: Set for internal upstreams - UUID of the referenced Gradient-managed cache
         url:
           type: string
           format: uri
           nullable: true
-          description: Set for external upstream binary caches
+          description: Set for gradient_proto and http upstreams
+        remote_cache:
+          type: string
+          nullable: true
+          description: Set for gradient_proto upstreams - cache name on the remote server
         public_key:
           type: string
           nullable: true
-          description: Nix-format public key used to verify signatures from the external upstream
+          description: Set for http upstreams - Nix-format public key used to verify signatures
 
     AddUpstreamRequest:
       oneOf:
@@ -7429,13 +7444,41 @@ components:
               enum: [read_only, read_write, write_only]
               nullable: true
               description: Defaults to read_write
-        - title: External upstream
+        - title: Gradient Proto upstream
+          type: object
+          required: [type, display_name, url, remote_cache]
+          properties:
+            type:
+              type: string
+              enum: [gradient_proto]
+            display_name:
+              type: string
+            url:
+              type: string
+              format: uri
+              description: Base URL of the remote Gradient server
+              example: https://gradient.example.com
+            remote_cache:
+              type: string
+              description: Cache name (slug) on the remote server
+              example: my-cache
+            mode:
+              type: string
+              enum: [read_only, read_write, write_only]
+              nullable: true
+              description: Defaults to read_only
+            api_key:
+              type: string
+              writeOnly: true
+              nullable: true
+              description: API key for authenticating to the remote cache (`Authorization: GRAD<key>`). Stored encrypted at rest and never returned by the API.
+        - title: HTTP upstream
           type: object
           required: [type, display_name, url, public_key]
           properties:
             type:
               type: string
-              enum: [external]
+              enum: [http]
             display_name:
               type: string
             url:
