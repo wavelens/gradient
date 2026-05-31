@@ -21,9 +21,10 @@ pub async fn dial(url: &str) -> Result<ProtoSocket> {
     Ok(ProtoSocket::Tungstenite(Box::new(ws)))
 }
 
-/// Like [`dial`] but attaches an `Authorization: GRAD<key>` header when an
-/// `api_key` is supplied, used to authenticate against a remote cache's
-/// read-only `/cache/{cache}/proto` endpoint.
+/// Like [`dial`] but attaches an `Authorization: Bearer GRAD<key>` header when
+/// an `api_key` is supplied, used to authenticate against a remote cache's
+/// read-only `/cache/{cache}/proto` endpoint. The server only accepts API keys
+/// via the `Bearer` scheme, so the `GRAD` token must be wrapped in it.
 pub async fn dial_with_auth(url: &str, api_key: Option<&str>) -> Result<ProtoSocket> {
     let Some(key) = api_key else {
         return dial(url).await;
@@ -34,7 +35,7 @@ pub async fn dial_with_auth(url: &str, api_key: Option<&str>) -> Result<ProtoSoc
         .with_context(|| format!("build WebSocket request {url}"))?;
     request.headers_mut().insert(
         http::header::AUTHORIZATION,
-        format!("GRAD{key}")
+        format!("Bearer GRAD{key}")
             .parse()
             .context("encode Authorization header")?,
     );
