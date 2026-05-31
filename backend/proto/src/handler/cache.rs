@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use gradient_core::types::ids::{CacheId, CachedPathId, CachedPathSignatureId, OrganizationId};
@@ -497,6 +497,141 @@ fn build_uncached_pull_entry(path: &str) -> gradient_core::types::proto::CachedP
     }
 }
 
+/// Return the subset of `hashes` that have a `cached_path_signature` row for
+/// `cache_id`. Fails closed: any DB error yields an empty set so a public
+/// cache never leaks paths it cannot prove belong to it.
+async fn hashes_in_cache(
+    state: &ServerState,
+    cache_id: CacheId,
+    hashes: &[&str],
+) -> HashSet<String> {
+    if hashes.is_empty() {
+        return HashSet::new();
+    }
+
+    let cached_paths = match ECachedPath::find()
+        .filter(CCachedPath::Hash.is_in(hashes.to_vec()))
+        .all(&state.worker_db)
+        .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            warn!(error = %e, "cache-scoped query cached_path lookup failed");
+            return HashSet::new();
+        }
+    };
+
+    let id_to_hash: HashMap<CachedPathId, String> =
+        cached_paths.into_iter().map(|cp| (cp.id, cp.hash)).collect();
+    if id_to_hash.is_empty() {
+        return HashSet::new();
+    }
+
+    let ids: Vec<CachedPathId> = id_to_hash.keys().copied().collect();
+    let signatures = match ECachedPathSignature::find()
+        .filter(
+            sea_orm::Condition::all()
+                .add(CCachedPathSignature::Cache.eq(cache_id))
+                .add(CCachedPathSignature::CachedPath.is_in(ids)),
+        )
+        .all(&state.worker_db)
+        .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            warn!(error = %e, "cache-scoped query signature lookup failed");
+            return HashSet::new();
+        }
+    };
+
+    signatures
+        .into_iter()
+        .filter_map(|s| id_to_hash.get(&s.cached_path).cloned())
+        .collect()
+}
+
+/// Read-only query scoped to a single cache. Only paths with a
+/// `cached_path_signature` row for `cache_id` are returned. `Push` is never
+/// honored - it would mint upload URLs and is meaningless for a public cache.
+pub(super) async fn query_for_cache(
+    state: &ServerState,
+    cache_id: CacheId,
+    paths: &[String],
+    mode: gradient_core::types::proto::QueryMode,
+) -> Vec<gradient_core::types::proto::CachedPath> {
+    use gradient_core::types::proto::QueryMode;
+
+    if matches!(mode, QueryMode::Push) {
+        return vec![];
+    }
+
+    let hash_path_pairs: Vec<(&str, &str)> = paths
+        .iter()
+        .filter_map(|p| {
+            let base = p.strip_prefix("/nix/store/").unwrap_or(p);
+            let hash = base.split('-').next()?;
+            if hash.len() == 32 {
+                Some((hash, p.as_str()))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if hash_path_pairs.is_empty() {
+        return vec![];
+    }
+
+    let hashes: Vec<&str> = hash_path_pairs.iter().map(|(h, _)| *h).collect();
+
+    let in_cache = hashes_in_cache(state, cache_id, &hashes).await;
+    let cached_map = build_local_cache_map(state, &hashes).await;
+
+    let expire = std::time::Duration::from_secs(3600);
+    let mut result: Vec<gradient_core::types::proto::CachedPath> = Vec::new();
+
+    for (hash, path) in &hash_path_pairs {
+        if !in_cache.contains(*hash) {
+            continue;
+        }
+        if let Some((file_size, nar_size)) = cached_map.get(*hash) {
+            result.push(
+                build_cached_entry(state, hash, path, file_size, nar_size, mode.clone(), expire)
+                    .await,
+            );
+        }
+    }
+
+    if matches!(mode, QueryMode::Pull) {
+        let returned: HashSet<String> = result.iter().map(|cp| cp.path.clone()).collect();
+        let missing: Vec<gradient_core::types::proto::CachedPath> = hash_path_pairs
+            .iter()
+            .filter(|(_, p)| !returned.contains(*p))
+            .map(|(_, p)| build_uncached_pull_entry(p))
+            .collect();
+        result.extend(missing);
+    }
+
+    result
+}
+
+/// Authorize a single store path against `cache_id`: true only when the path
+/// has a `cached_path_signature` row for this cache.
+pub(super) async fn path_in_cache(
+    state: &ServerState,
+    cache_id: CacheId,
+    store_path: &str,
+) -> bool {
+    let base = store_path.strip_prefix("/nix/store/").unwrap_or(store_path);
+    let Some(hash) = base.split('-').next() else {
+        return false;
+    };
+    if hash.len() != 32 {
+        return false;
+    }
+    !hashes_in_cache(state, cache_id, &[hash]).await.is_empty()
+}
+
 pub(super) async fn handle_cache_query(
     state: &ServerState,
     org_id: Option<OrganizationId>,
@@ -850,6 +985,29 @@ mod tests {
         for cp in &result {
             assert!(!cp.cached);
         }
+    }
+
+    #[tokio::test]
+    async fn cache_scoped_query_rejects_push() {
+        let state = make_state();
+        let cache = CacheId::new(uuid::Uuid::now_v7());
+        let paths = vec!["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string()];
+        assert!(
+            query_for_cache(&state, cache, &paths, QueryMode::Push)
+                .await
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn cache_scoped_query_empty_returns_empty() {
+        let state = make_state();
+        let cache = CacheId::new(uuid::Uuid::now_v7());
+        assert!(
+            query_for_cache(&state, cache, &[], QueryMode::Normal)
+                .await
+                .is_empty()
+        );
     }
 
     // ── expand_references ────────────────────────────────────────────────────
