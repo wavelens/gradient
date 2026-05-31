@@ -133,9 +133,12 @@ pub fn internal_upstream(
         cache,
         display_name: "internal".into(),
         mode: CacheSubscriptionMode::ReadOnly,
+        kind: cache_upstream::CacheUpstreamKind::Internal,
         upstream_cache: Some(upstream),
         url: None,
         public_key: None,
+        remote_cache_name: None,
+        api_key: None,
     }
 }
 
@@ -150,9 +153,12 @@ pub fn external_upstream(
         cache,
         display_name: "external".into(),
         mode: CacheSubscriptionMode::ReadOnly,
+        kind: cache_upstream::CacheUpstreamKind::Http,
         upstream_cache: None,
         url: Some(url.into()),
         public_key: Some(public_key.into()),
+        remote_cache_name: None,
+        api_key: None,
     }
 }
 
