@@ -155,9 +155,9 @@
     <div class="form-group">
       <label>Type</label>
       <div class="type-toggle">
-        <button class="type-btn" [class.active]="upstreamType === 'internal'" (click)="upstreamType = 'internal'">Internal</button>
-        <button class="type-btn" [class.active]="upstreamType === 'gradient_proto'" (click)="upstreamType = 'gradient_proto'">Gradient Proto</button>
-        <button class="type-btn" [class.active]="upstreamType === 'http'" (click)="upstreamType = 'http'">Http</button>
+        <button type="button" class="type-btn" [class.active]="upstreamType === 'internal'" (click)="upstreamType = 'internal'; probeSuggestsProto.set(false)">Internal</button>
+        <button type="button" class="type-btn" [class.active]="upstreamType === 'gradient_proto'" (click)="upstreamType = 'gradient_proto'; probeSuggestsProto.set(false)">Gradient Proto</button>
+        <button type="button" class="type-btn" [class.active]="upstreamType === 'http'" (click)="upstreamType = 'http'; probeSuggestsProto.set(false)">HTTP</button>
       </div>
     </div>
 
@@ -213,7 +213,15 @@
       </div>
       <div class="form-group">
         <label for="up-url">Substituter URL</label>
-        <input pInputText id="up-url" [(ngModel)]="upstreamForm.url" placeholder="https://cache.nixos.org" class="w-full" />
+        <input pInputText id="up-url" [(ngModel)]="upstreamForm.url" placeholder="https://cache.nixos.org" class="w-full" (blur)="probeHttpUrl()" />
+        @if (probeSuggestsProto()) {
+          <div class="dialog-hint">
+            <span class="material-symbols-outlined">lightbulb</span>
+            This looks like a Gradient cache.
+            <button type="button" class="hint-link-btn" (click)="switchToGradientProto()">Switch to Gradient Proto</button>
+            for native protocol pulling.
+          </div>
+        }
       </div>
       <div class="form-group">
         <label for="up-pubkey">Public Key</label>

@@ -201,3 +201,30 @@
   font-size: $font-size-sm;
   margin-bottom: $spacing-md;
 }
+
+.dialog-hint {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  background: rgba($color-info, 0.1);
+  border: 1px solid rgba($color-info, 0.4);
+  border-radius: $border-radius-sm;
+  padding: $spacing-sm $spacing-md;
+  color: $text-secondary;
+  font-size: $font-size-xs;
+  margin-top: $spacing-xs;
+
+  .material-symbols-outlined { font-size: 16px; color: $color-info; flex-shrink: 0; }
+}
+
+.hint-link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  color: $color-info;
+  font-size: $font-size-xs;
+  cursor: pointer;
+  text-decoration: underline;
+
+  &:hover { opacity: 0.8; }
+}
