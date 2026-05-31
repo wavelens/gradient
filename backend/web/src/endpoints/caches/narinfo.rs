@@ -81,11 +81,16 @@ pub async fn gradient_cache_info(
         gradient_url: state.config.server.serve_url.clone(),
     };
 
-    if flag.is_set() {
-        Ok(axum::Json(info).into_response())
+    let mut response = if flag.is_set() {
+        axum::Json(info).into_response()
     } else {
-        Ok(text_response("text/x-gradient-cache-info", info.to_nix_string())?.into_response())
-    }
+        text_response("text/x-gradient-cache-info", info.to_nix_string())?.into_response()
+    };
+    response.headers_mut().insert(
+        header::ACCESS_CONTROL_ALLOW_ORIGIN,
+        HeaderValue::from_static("*"),
+    );
+    Ok(response)
 }
 
 pub async fn path(
