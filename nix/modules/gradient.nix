@@ -492,6 +492,34 @@ in {
           type = lib.types.ints.positive;
           default = 10 * 1024 * 1024 * 1024;
         };
+
+        allowAnonymousCache = lib.mkOption {
+          description = ''
+            Allow unauthenticated clients to access `GET /cache/{cache}/proto`
+            for public caches. When false, anonymous handshakes are rejected
+            with 403. Private caches always require an API key regardless.
+          '';
+          type = lib.types.bool;
+          default = true;
+        };
+
+        anonMaxConnectionsPerIp = lib.mkOption {
+          description = "Maximum simultaneous anonymous /cache/proto connections per client IP";
+          type = lib.types.ints.positive;
+          default = 32;
+        };
+
+        anonRatePerSecond = lib.mkOption {
+          description = "Sustained request rate (per second) allowed for an anonymous proto session";
+          type = lib.types.ints.positive;
+          default = 20;
+        };
+
+        anonRateBurst = lib.mkOption {
+          description = "Burst capacity for the anonymous proto session token bucket";
+          type = lib.types.ints.positive;
+          default = 200;
+        };
       };
     };
   };
@@ -595,6 +623,10 @@ in {
         GRADIENT_NAR_SEND_CHUNK_TIMEOUT_SECS = toString cfg.settings.narSendChunkTimeoutSecs;
         GRADIENT_MAX_CONCURRENT_NAR_SERVES = toString cfg.settings.maxConcurrentNarServes;
         GRADIENT_MAX_NAR_BUFFER_BYTES = toString cfg.settings.maxNarBufferBytes;
+        GRADIENT_PROTO_ALLOW_ANONYMOUS_CACHE = lib.boolToString cfg.settings.allowAnonymousCache;
+        GRADIENT_PROTO_ANON_MAX_CONNECTIONS_PER_IP = toString cfg.settings.anonMaxConnectionsPerIp;
+        GRADIENT_PROTO_ANON_RATE_PER_SECOND = toString cfg.settings.anonRatePerSecond;
+        GRADIENT_PROTO_ANON_RATE_BURST = toString cfg.settings.anonRateBurst;
         GRADIENT_LOCAL_IPS = builtins.concatStringsSep "," cfg.settings.localIps;
         GRADIENT_TRUSTED_PROXIES = builtins.concatStringsSep "," cfg.settings.trustedProxies;
         GRADIENT_STATE_FILE = "%d/gradient_state";
