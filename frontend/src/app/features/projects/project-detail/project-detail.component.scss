@@ -156,16 +156,26 @@
   background-color: $color-tertiary;
   border: 1px solid $color-border;
   border-radius: $border-radius-md;
-  padding: $spacing-lg;
   display: flex;
-  align-items: flex-start;
-  gap: $spacing-md;
   transition: $transition-base;
 
   &:hover {
     border-color: $text-secondary;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
   }
+}
+
+.evaluation-info-container {
+  padding: $spacing-lg;
+  display: flex;
+  flex-grow: 1;
+  align-items: flex-start;
+  border-radius: $border-radius-md 0 0 $border-radius-md;
+  gap: $spacing-md;
+
+  &:hover {
+    background-color: transparent;
+  };
 }
 
 .evaluation-status {
@@ -220,32 +230,14 @@
     gap: $spacing-md;
     margin-bottom: $spacing-xs;
 
-    .graph-icon-link {
-      display: inline-flex;
-      align-items: center;
-      color: $text-light;
-      text-decoration: none;
-      padding: 2px 4px;
-      border-radius: $border-radius-sm;
-      transition: color $transition-fast, background $transition-fast;
-      .material-symbols-outlined { font-size: 1rem; }
-      &:not(.disabled):hover { color: $text-primary; background: $color-hover; }
-      &.disabled { opacity: 0.3; cursor: default; pointer-events: none; }
+    .evaluation-date {
+      font-size: $font-size-xs;
     }
 
     h3 {
       font-size: $font-size-lg;
       color: $text-primary;
       margin: 0;
-
-      a {
-        color: inherit;
-        text-decoration: none;
-
-        &:hover {
-          color: $text-secondary;
-        }
-      }
     }
 
     .trigger-badge {
@@ -386,10 +378,28 @@
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
   gap: $spacing-sm;
+  padding: $spacing-lg;
 
-  .evaluation-date {
-    font-size: $font-size-xs;
+  &.align-start {
+    align-items: flex-start;
   }
+  &.align-end {
+    align-items: flex-end;
+  }
+
+  .graph-icon-link {
+    display: inline-flex;
+    gap: $spacing-sm;
+    align-items: center;
+    color: $text-light;
+    text-decoration: none;
+    padding: 2px 4px;
+    border-radius: $border-radius-sm;
+    transition: color $transition-fast, background $transition-fast;
+    .material-symbols-outlined { font-size: 1rem; }
+    &:not(.disabled):hover { color: $text-primary; background: transparent; }
+    &.disabled { opacity: 0.3; cursor: default; pointer-events: none; }
+  }
+
 }
