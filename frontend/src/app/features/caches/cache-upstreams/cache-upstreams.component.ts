@@ -61,12 +61,14 @@ export class CacheUpstreamsComponent implements OnInit {
   cacheName = '';
   cacheDisplayName = '';
 
-  upstreamType: 'internal' | 'external' = 'internal';
+  upstreamType: 'internal' | 'gradient_proto' | 'http' = 'internal';
   upstreamForm = {
     cache_name: '',
     display_name: '',
     url: '',
     public_key: '',
+    remote_cache: '',
+    api_key: '',
     mode: 'ReadWrite' as CacheSubscriptionMode,
   };
 
@@ -111,6 +113,13 @@ export class CacheUpstreamsComponent implements OnInit {
     if (this.upstreamType === 'internal') {
       return this.upstreamForm.cache_name.trim().length > 0;
     }
+    if (this.upstreamType === 'gradient_proto') {
+      return (
+        this.upstreamForm.url.trim().length > 0 &&
+        this.upstreamForm.remote_cache.trim().length > 0 &&
+        this.upstreamForm.display_name.trim().length > 0
+      );
+    }
     return (
       this.upstreamForm.display_name.trim().length > 0 &&
       this.upstreamForm.url.trim().length > 0 &&
@@ -132,7 +141,7 @@ export class CacheUpstreamsComponent implements OnInit {
 
   openAddDialog(): void {
     this.upstreamType = 'internal';
-    this.upstreamForm = { cache_name: '', display_name: '', url: '', public_key: '', mode: 'ReadWrite' };
+    this.upstreamForm = { cache_name: '', display_name: '', url: '', public_key: '', remote_cache: '', api_key: '', mode: 'ReadWrite' };
     this.addError.set(null);
     this.showAddDialog.set(true);
   }
@@ -180,27 +189,36 @@ export class CacheUpstreamsComponent implements OnInit {
 
   addUpstream(): void {
     if (!this.isAddFormValid()) {
-      this.addError.set(
-        this.upstreamType === 'internal'
-          ? 'Cache name is required.'
-          : 'Display name, substituter URL and public key are required.'
-      );
+      this.addError.set('Please fill in all required fields.');
       return;
     }
     this.addError.set(null);
     this.addingUpstream.set(true);
-    const obs = this.upstreamType === 'internal'
-      ? this.cachesService.addInternalUpstream(this.cacheName, {
+    let obs;
+    switch (this.upstreamType) {
+      case 'internal':
+        obs = this.cachesService.addInternalUpstream(this.cacheName, {
           cache_name: this.upstreamForm.cache_name,
           display_name: this.upstreamForm.display_name || undefined,
           mode: this.upstreamForm.mode,
-        })
-      : this.cachesService.addExternalUpstream(this.cacheName, {
+        });
+        break;
+      case 'gradient_proto':
+        obs = this.cachesService.addGradientProtoUpstream(this.cacheName, {
+          url: this.upstreamForm.url,
+          remote_cache: this.upstreamForm.remote_cache,
+          display_name: this.upstreamForm.display_name,
+          mode: this.upstreamForm.mode,
+          api_key: this.upstreamForm.api_key || undefined,
+        });
+        break;
+      default:
+        obs = this.cachesService.addHttpUpstream(this.cacheName, {
           display_name: this.upstreamForm.display_name,
           url: this.upstreamForm.url,
           public_key: this.upstreamForm.public_key,
         });
-
+    }
     obs.subscribe({
       next: () => {
         this.addingUpstream.set(false);
@@ -208,7 +226,7 @@ export class CacheUpstreamsComponent implements OnInit {
         this.loadUpstreams();
       },
       error: (err) => {
-        this.addError.set(err?.error?.message || 'Failed to add upstream.');
+        this.addError.set(err?.error?.message || err?.message || 'Failed to add upstream.');
         this.addingUpstream.set(false);
       },
     });
