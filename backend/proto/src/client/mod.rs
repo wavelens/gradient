@@ -13,4 +13,4 @@
 
 pub mod dial;
 
-pub use dial::dial;
+pub use dial::{dial, dial_with_auth};
