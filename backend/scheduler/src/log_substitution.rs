@@ -362,9 +362,12 @@ mod tests {
                 cache: cache_id,
                 display_name: "test-upstream".into(),
                 mode: entity::organization_cache::CacheSubscriptionMode::ReadOnly,
+                kind: entity::cache_upstream::CacheUpstreamKind::Http,
                 upstream_cache: None,
                 url: Some((*u).to_string()),
                 public_key: None,
+                remote_cache_name: None,
+                api_key: None,
             })
             .collect();
         builder
