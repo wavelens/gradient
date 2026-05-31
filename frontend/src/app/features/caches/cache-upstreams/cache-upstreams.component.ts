@@ -50,6 +50,7 @@ export class CacheUpstreamsComponent implements OnInit {
   addingUpstream = signal(false);
   savingUpstream = signal(false);
   removingUpstreamId = signal<string | null>(null);
+  probeSuggestsProto = signal(false);
 
   upstreams = signal<UpstreamCache[]>([]);
   showAddDialog = signal(false);
@@ -143,6 +144,7 @@ export class CacheUpstreamsComponent implements OnInit {
     this.upstreamType = 'internal';
     this.upstreamForm = { cache_name: '', display_name: '', url: '', public_key: '', remote_cache: '', api_key: '', mode: 'ReadWrite' };
     this.addError.set(null);
+    this.probeSuggestsProto.set(false);
     this.showAddDialog.set(true);
   }
 
@@ -230,6 +232,20 @@ export class CacheUpstreamsComponent implements OnInit {
         this.addingUpstream.set(false);
       },
     });
+  }
+
+  probeHttpUrl(): void {
+    this.probeSuggestsProto.set(false);
+    const url = this.upstreamForm.url.trim().replace(/\/$/, '');
+    if (!url) return;
+    fetch(`${url}/gradient-cache-info`, { method: 'GET', mode: 'cors' })
+      .then((r) => { if (r.ok) this.probeSuggestsProto.set(true); })
+      .catch(() => {});
+  }
+
+  switchToGradientProto(): void {
+    this.upstreamType = 'gradient_proto';
+    this.probeSuggestsProto.set(false);
   }
 
   removeUpstream(id: string): void {
