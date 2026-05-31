@@ -6,6 +6,7 @@
 
 mod auth;
 mod cache;
+mod cache_session;
 mod dispatch;
 mod limiter;
 mod nar;
@@ -24,6 +25,8 @@ use gradient_core::types::*;
 use scheduler::Scheduler;
 
 pub use limiter::ProtoLimiter;
+#[allow(unused_imports)]
+pub(crate) use cache_session::handle_cache_socket;
 pub(crate) use session::handle_socket;
 pub(crate) use socket::{MAX_PROTO_MESSAGE_SIZE, ProtoSocket};
 
