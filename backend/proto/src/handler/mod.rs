@@ -26,7 +26,7 @@ use scheduler::Scheduler;
 
 pub use cache_session::handle_cache_socket;
 pub use crate::session::frame::MAX_PROTO_MESSAGE_SIZE;
-pub use limiter::ProtoLimiter;
+pub use limiter::{PerIpLimiter, ProtoLimiter};
 pub(crate) use session::handle_socket;
 pub(crate) use socket::ProtoSocket;
 

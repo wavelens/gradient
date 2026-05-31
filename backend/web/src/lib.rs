@@ -41,6 +41,7 @@ use uuid::Uuid;
 
 use endpoints::{admin, *};
 use gradient_core::types::ServerState;
+use proto::handler::PerIpLimiter;
 use proto::{ProtoLimiter, proto_router};
 use scheduler::Scheduler;
 use std::sync::Arc;
@@ -583,16 +584,22 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         .route_layer(GovernorLayer::new(rl_per_second(1, 300)));
 
     // Cache-scoped read-only proto WebSocket. `authorize_optional` populates
-    // MaybeUser/MaybeApiKey so the handler can authorize anon→public and
-    // key→private (respecting cache_pin). Same rate-limit tier as the worker
-    // proto route; Task 14 will add per-IP caps.
+    // MaybeUser/MaybeApiKey/ClientIp so the handler can authorize anon→public
+    // and key→private (respecting cache_pin) and cap anonymous fan-out per IP.
+    let cache_per_ip = Arc::new(PerIpLimiter::new(
+        state.config.proto.anon_max_connections_per_ip,
+    ));
     let cache_proto_route = Router::new()
         .route("/cache/{cache}/proto", get(caches::cache_proto))
         .route_layer(middleware::from_fn_with_state(
             Arc::clone(&state),
             authorization::authorize_optional,
         ))
-        .route_layer(GovernorLayer::new(rl_per_ms(200, 150)));
+        .route_layer(GovernorLayer::new(rl_per_second(
+            state.config.proto.anon_rate_per_second as u64,
+            state.config.proto.anon_rate_burst,
+        )))
+        .layer(axum::Extension(cache_per_ip));
 
     app = app
         .merge(cache_routes)
