@@ -35,6 +35,16 @@ pub struct ProtoArgs {
     #[arg(long, env = "GRADIENT_GLOBAL_STATS_PUBLIC", default_value = "false")]
     pub global_stats_public: bool,
 
+    /// Allow anonymous (unauthenticated) clients on `GET /cache/{cache}/proto`
+    /// for public caches. When `false`, anonymous handshakes are rejected with
+    /// 403; private caches always require an API key regardless of this flag.
+    #[arg(
+        long,
+        env = "GRADIENT_PROTO_ALLOW_ANONYMOUS_CACHE",
+        default_value = "true"
+    )]
+    pub allow_anonymous_cache: bool,
+
     /// Maximum time the server will wait to open a NAR object stream
     /// (e.g. S3 GET) before giving up and emitting `NarUnavailable`. A stalled
     /// backend used to silently block the dispatch loop until the worker's
@@ -83,6 +93,7 @@ impl Default for ProtoArgs {
             discoverable: true,
             federate_proto: false,
             global_stats_public: false,
+            allow_anonymous_cache: true,
             nar_storage_open_timeout_secs: 60,
             nar_send_chunk_timeout_secs: 30,
             max_concurrent_nar_serves: 8,

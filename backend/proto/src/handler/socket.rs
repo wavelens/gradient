@@ -25,8 +25,8 @@ use crate::messages::ServerMessage;
 use scheduler::Scheduler;
 
 pub use crate::session::frame::{
-    HANDSHAKE_TIMEOUT, JOB_OFFER_CHUNK_SIZE, MAX_PROTO_MESSAGE_SIZE, NAR_PUSH_CHUNK_SIZE,
-    ProtoSocket, ProtoWriter, recv_client_msg, send_error, send_server_msg,
+    HANDSHAKE_TIMEOUT, JOB_OFFER_CHUNK_SIZE, NAR_PUSH_CHUNK_SIZE, ProtoSocket, ProtoWriter,
+    recv_client_msg, send_error, send_server_msg,
 };
 
 /// Push any pending job candidates to the worker (delta).

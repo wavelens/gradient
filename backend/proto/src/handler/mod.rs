@@ -24,11 +24,11 @@ use axum::routing::get;
 use gradient_core::types::*;
 use scheduler::Scheduler;
 
+pub use cache_session::handle_cache_socket;
+pub use crate::session::frame::MAX_PROTO_MESSAGE_SIZE;
 pub use limiter::ProtoLimiter;
-#[allow(unused_imports)]
-pub(crate) use cache_session::handle_cache_socket;
 pub(crate) use session::handle_socket;
-pub(crate) use socket::{MAX_PROTO_MESSAGE_SIZE, ProtoSocket};
+pub(crate) use socket::ProtoSocket;
 
 #[cfg(test)]
 pub(crate) use socket::{HANDSHAKE_TIMEOUT, NAR_PUSH_CHUNK_SIZE};
