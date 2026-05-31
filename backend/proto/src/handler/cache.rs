@@ -468,7 +468,7 @@ async fn query(
             result.iter().map(|cp| cp.path.clone()).collect();
         let missing: Vec<gradient_core::types::proto::CachedPath> = hash_path_pairs
             .iter()
-            .filter(|(_, p)| !returned.contains(*p))
+            .filter(|(hash, p)| cached_map.contains_key(*hash) && !returned.contains(*p))
             .map(|(_, p)| build_uncached_pull_entry(p))
             .collect();
         result.extend(missing);
