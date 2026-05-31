@@ -86,7 +86,7 @@ pub async fn writer_orgs_reachable_from<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use entity::cache_upstream::Model as MCacheUpstream;
+    use entity::cache_upstream::{CacheUpstreamKind, Model as MCacheUpstream};
     use entity::ids::{CacheId, CacheUpstreamId, OrganizationCacheId, OrganizationId};
     use entity::organization_cache::Model as MOrganizationCache;
     use sea_orm::{DatabaseBackend, MockDatabase};
@@ -167,18 +167,24 @@ mod tests {
                     cache: a,
                     display_name: "ab".into(),
                     mode: CacheSubscriptionMode::ReadOnly,
+                    kind: CacheUpstreamKind::Internal,
                     upstream_cache: Some(b),
                     url: None,
                     public_key: None,
+                    remote_cache_name: None,
+                    api_key: None,
                 },
                 MCacheUpstream {
                     id: CacheUpstreamId::now_v7(),
                     cache: b,
                     display_name: "bc".into(),
                     mode: CacheSubscriptionMode::ReadOnly,
+                    kind: CacheUpstreamKind::Internal,
                     upstream_cache: Some(c),
                     url: None,
                     public_key: None,
+                    remote_cache_name: None,
+                    api_key: None,
                 },
             ];
             let writer_rows = vec![org_cache(org(1), c, CacheSubscriptionMode::ReadWrite)];
@@ -265,18 +271,24 @@ mod tests {
                     cache: a,
                     display_name: "ab".into(),
                     mode: CacheSubscriptionMode::ReadOnly,
+                    kind: CacheUpstreamKind::Internal,
                     upstream_cache: Some(b),
                     url: None,
                     public_key: None,
+                    remote_cache_name: None,
+                    api_key: None,
                 },
                 MCacheUpstream {
                     id: CacheUpstreamId::now_v7(),
                     cache: b,
                     display_name: "ba".into(),
                     mode: CacheSubscriptionMode::ReadOnly,
+                    kind: CacheUpstreamKind::Internal,
                     upstream_cache: Some(a),
                     url: None,
                     public_key: None,
+                    remote_cache_name: None,
+                    api_key: None,
                 },
             ];
             let writer_rows = vec![
