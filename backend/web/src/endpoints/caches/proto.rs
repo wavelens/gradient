@@ -11,8 +11,10 @@ use std::sync::Arc;
 
 use crate::access::{Caller, CacheAccess, load_cache};
 use crate::authorization::{MaybeApiKey, MaybeUser};
+use crate::client_ip::ClientIp;
 use crate::error::{WebError, WebResult};
 use gradient_core::types::ServerState;
+use proto::handler::PerIpLimiter;
 
 /// `GET /cache/{cache}/proto` - cache-scoped read-only proto WebSocket.
 ///
@@ -24,13 +26,13 @@ pub async fn cache_proto(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Extension(api_key): Extension<MaybeApiKey>,
+    Extension(per_ip): Extension<Arc<PerIpLimiter>>,
+    Extension(ClientIp(client_ip)): Extension<ClientIp>,
     Path(cache): Path<String>,
     ws: WebSocketUpgrade,
 ) -> WebResult<Response> {
-    if maybe_user.is_none()
-        && api_key.as_ref().is_none()
-        && !state.config.proto.allow_anonymous_cache
-    {
+    let anonymous = maybe_user.is_none() && api_key.as_ref().is_none();
+    if anonymous && !state.config.proto.allow_anonymous_cache {
         return Err(WebError::forbidden("Anonymous cache access is disabled."));
     }
 
@@ -45,15 +47,23 @@ pub async fn cache_proto(
     .await?;
     let cache_id = cache.id;
 
-    Ok(ws
+    let upgrade = ws
         .max_message_size(proto::handler::MAX_PROTO_MESSAGE_SIZE)
-        .max_frame_size(proto::handler::MAX_PROTO_MESSAGE_SIZE)
-        .on_upgrade(move |sock| async move {
-            proto::handler::handle_cache_socket(
-                proto::server::accept_axum(sock),
-                state,
-                cache_id,
-            )
-            .await;
+        .max_frame_size(proto::handler::MAX_PROTO_MESSAGE_SIZE);
+
+    if anonymous {
+        let permit = per_ip.try_acquire(client_ip).ok_or_else(|| {
+            WebError::service_unavailable("Too many connections from your IP; retry later.")
+        })?;
+        Ok(upgrade.on_upgrade(move |sock| async move {
+            let _permit = permit;
+            proto::handler::handle_cache_socket(proto::server::accept_axum(sock), state, cache_id)
+                .await;
         }))
+    } else {
+        Ok(upgrade.on_upgrade(move |sock| async move {
+            proto::handler::handle_cache_socket(proto::server::accept_axum(sock), state, cache_id)
+                .await;
+        }))
+    }
 }
