@@ -1385,3 +1385,63 @@ On receiving `ServerMessage::Draining`, workers:
  - `PROTO_VERSION` (currently `1`) is incremented on breaking wire changes.
  - Server accepts any `client_version == PROTO_VERSION`.
  - New capabilities are gated by `GradientCapabilities` flags, not version numbers.
+
+---
+
+## Anonymous / cache-scoped sessions
+
+In addition to the worker-facing `/proto` endpoint, Gradient exposes a **cache-scoped read-only WebSocket** at `/cache/{cache}/proto`. It uses the same rkyv-encoded binary frame format as `/proto` but runs a reduced session that never grants write or job-dispatch capabilities.
+
+### Authentication
+
+Access is gated by the cache's visibility setting:
+
+| Cache visibility | Auth required | How to authenticate |
+|---|---|---|
+| PUBLIC | No (`GRADIENT_PROTO_ALLOW_ANONYMOUS_CACHE=true`, default) | Connect without credentials |
+| PRIVATE | Yes | `Authorization: GRAD<key>` HTTP header on the upgrade request |
+
+`GRADIENT_PROTO_ALLOW_ANONYMOUS_CACHE` (default `true`) controls whether anonymous access to public caches is permitted server-wide. Set it to `false` to require a key for every cache-proto connection.
+
+### Minimal handshake
+
+The cache-scoped session skips the worker peer-challenge flow:
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+
+    C->>S: HTTP GET /cache/{cache}/proto (WebSocket upgrade)
+    Note right of S: validates auth / visibility
+    C->>S: ClientMessage::InitConnection { version, capabilities, id }
+    S->>C: ServerMessage::InitAck { version, capabilities, authorized_peers: [] }
+    Note over C,S: read-only session open
+```
+
+There is no `AuthChallenge` / `AuthResponse` exchange and no peer identity registered - `authorized_peers` in `InitAck` is always empty. The client must still send `InitConnection` with a matching `PROTO_VERSION`; a version mismatch produces `Reject { code: 400 }`.
+
+### Read-only allow-list
+
+Only the following client messages are accepted. All others are rejected with `Reject { code: 499 }` (capability not negotiated):
+
+| Message | Modes permitted |
+|---|---|
+| `CacheQuery` | `Normal` and `Pull` only |
+| `NarRequest` | Unrestricted (path read) |
+
+`CacheQuery { mode: Push }`, `NarPush` / `NarUploaded`, and all job-related RPCs (`RequestJob`, `JobUpdate`, `JobCompleted`, `JobFailed`, `WorkerCapabilities`, …) are rejected. Cache results are scoped to the specific cache identified in the URL - a client cannot query across caches on a single session.
+
+### Per-IP limits (anonymous sessions)
+
+To prevent abuse from unauthenticated callers, anonymous sessions on public caches are subject to per-IP resource caps:
+
+| Env var | Default | Description |
+|---|---|---|
+| `GRADIENT_PROTO_ANON_MAX_CONNECTIONS_PER_IP` | `32` | Maximum simultaneous open WebSocket connections per source IP |
+| `GRADIENT_PROTO_ANON_RATE_PER_SECOND` | `20` | Token-bucket refill rate (messages per second) |
+| `GRADIENT_PROTO_ANON_RATE_BURST` | `200` | Token-bucket burst capacity |
+
+Connections that exceed `GRADIENT_PROTO_ANON_MAX_CONNECTIONS_PER_IP` receive `503 Service Unavailable` on the HTTP upgrade. Messages that exceed the rate limit are dropped and the connection is closed.
+
+Authenticated sessions (PRIVATE caches with a valid API key) are not subject to these anonymous caps and share the global `/proto` semaphore (`GRADIENT_MAX_PROTO_CONNECTIONS`).
