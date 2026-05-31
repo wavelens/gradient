@@ -13,6 +13,7 @@ mod nar;
 mod narinfo;
 mod narlist;
 mod nars;
+mod proto;
 pub mod roles;
 mod serve;
 mod upstreams;
@@ -27,6 +28,7 @@ pub use self::management::{
 pub use self::nar::{nar, upstream_nar};
 pub use self::narinfo::{gradient_cache_info, nix_cache_info, path};
 pub use self::narlist::ls;
+pub use self::proto::cache_proto;
 pub use self::nars::{
     available as nars_available, delete as nars_delete, list as nars_list, show as nars_show,
     stats as nars_stats,

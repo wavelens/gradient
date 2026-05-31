@@ -582,10 +582,23 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         .route("/cache/{cache}/log/{drv}", get(caches::log))
         .route_layer(GovernorLayer::new(rl_per_second(1, 300)));
 
+    // Cache-scoped read-only proto WebSocket. `authorize_optional` populates
+    // MaybeUser/MaybeApiKey so the handler can authorize anon→public and
+    // key→private (respecting cache_pin). Same rate-limit tier as the worker
+    // proto route; Task 14 will add per-IP caps.
+    let cache_proto_route = Router::new()
+        .route("/cache/{cache}/proto", get(caches::cache_proto))
+        .route_layer(middleware::from_fn_with_state(
+            Arc::clone(&state),
+            authorization::authorize_optional,
+        ))
+        .route_layer(GovernorLayer::new(rl_per_ms(200, 150)));
+
     app = app
         .merge(cache_routes)
         .merge(cache_inspect)
-        .merge(cache_log);
+        .merge(cache_log)
+        .merge(cache_proto_route);
 
     // Layer order (outer → inner, i.e. last `.layer()` is outermost):
     //   SetRequestIdLayer    - assigns x-request-id on inbound requests

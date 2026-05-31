@@ -51,8 +51,7 @@ fn readonly_capabilities() -> GradientCapabilities {
     }
 }
 
-#[allow(dead_code)]
-pub(crate) async fn handle_cache_socket(
+pub async fn handle_cache_socket(
     mut socket: ProtoSocket,
     state: Arc<ServerState>,
     cache_id: CacheId,
