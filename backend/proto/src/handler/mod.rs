@@ -26,8 +26,6 @@ use gradient_core::types::*;
 use scheduler::Scheduler;
 
 pub use cache_session::handle_cache_socket;
-#[allow(unused_imports)]
-pub(crate) use cache_consumer::pull_paths;
 pub use crate::session::frame::MAX_PROTO_MESSAGE_SIZE;
 pub use limiter::{PerIpLimiter, ProtoLimiter};
 pub(crate) use session::handle_socket;
