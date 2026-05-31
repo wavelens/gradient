@@ -378,6 +378,51 @@ async fn extend_with_upstream_results(
     }
 }
 
+/// Pull availability for any still-uncached paths from the org's configured
+/// gradient_proto upstreams, extending `result` with hits.
+async fn extend_with_gradient_proto_results(
+    state: &ServerState,
+    org_id: OrganizationId,
+    uncached_pairs: &[(String, String)],
+    result: &mut Vec<gradient_core::types::proto::CachedPath>,
+) {
+    let upstreams =
+        match gradient_core::db::gradient_proto_upstreams_for_org(&state.worker_db, org_id).await {
+            Ok(u) => u,
+            Err(e) => {
+                warn!(%org_id, error = %e, "gradient_proto upstream lookup failed");
+                return;
+            }
+        };
+    if upstreams.is_empty() {
+        return;
+    }
+
+    let already: HashSet<String> = result.iter().map(|c| c.path.clone()).collect();
+    let want: Vec<String> = uncached_pairs
+        .iter()
+        .map(|(_, p)| p.clone())
+        .filter(|p| !already.contains(p))
+        .collect();
+    if want.is_empty() {
+        return;
+    }
+
+    for up in upstreams {
+        let api_key = up.api_key_enc.as_deref().and_then(|enc| {
+            gradient_core::sources::decrypt_secret(&state.config.secrets.crypt_secret_file, enc).ok()
+        });
+        let found =
+            super::cache_consumer::pull_paths(&up.url, &up.remote_cache, api_key.as_deref(), &want)
+                .await;
+        for cp in found {
+            if !result.iter().any(|r| r.path == cp.path) {
+                result.push(cp);
+            }
+        }
+    }
+}
+
 /// Check which store paths are available - in the local Gradient cache or upstream.
 ///
 /// Behaviour depends on `mode`:
@@ -460,7 +505,8 @@ async fn query(
     if !uncached_pairs.is_empty()
         && let Some(oid) = org_id
     {
-        extend_with_upstream_results(state, oid, uncached_pairs, &mut result).await;
+        extend_with_upstream_results(state, oid, uncached_pairs.clone(), &mut result).await;
+        extend_with_gradient_proto_results(state, oid, &uncached_pairs, &mut result).await;
     }
 
     if matches!(mode, QueryMode::Pull) {
