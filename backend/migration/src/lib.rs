@@ -121,6 +121,7 @@ mod m20260527_000000_evaluation_source_comment;
 mod m20260527_000001_add_allowed_ips_to_api;
 mod m20260527_000002_add_allowed_ips_to_integration;
 mod m20260528_000000_create_table_cli_device_authorization;
+mod m20260529_000000_add_cache_upstream_kind;
 
 pub struct Migrator;
 
@@ -243,6 +244,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260527_000001_add_allowed_ips_to_api::Migration),
             Box::new(m20260527_000002_add_allowed_ips_to_integration::Migration),
             Box::new(m20260528_000000_create_table_cli_device_authorization::Migration),
+            Box::new(m20260529_000000_add_cache_upstream_kind::Migration),
         ]
     }
 }
