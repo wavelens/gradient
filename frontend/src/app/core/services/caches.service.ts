@@ -162,12 +162,22 @@ export class CachesService {
     return this.api.put<string>(`caches/${cache}/upstreams`, { type: 'internal', ...data });
   }
 
-  addExternalUpstream(cache: string, data: {
+  addGradientProtoUpstream(cache: string, data: {
+    url: string;
+    remote_cache: string;
+    display_name: string;
+    mode?: CacheSubscriptionMode;
+    api_key?: string;
+  }): Observable<string> {
+    return this.api.put<string>(`caches/${cache}/upstreams`, { type: 'gradient_proto', ...data });
+  }
+
+  addHttpUpstream(cache: string, data: {
     display_name: string;
     url: string;
     public_key: string;
   }): Observable<string> {
-    return this.api.put<string>(`caches/${cache}/upstreams`, { type: 'external', ...data });
+    return this.api.put<string>(`caches/${cache}/upstreams`, { type: 'http', ...data });
   }
 
   updateUpstream(cache: string, upstreamId: string, data: {

@@ -156,7 +156,8 @@
       <label>Type</label>
       <div class="type-toggle">
         <button class="type-btn" [class.active]="upstreamType === 'internal'" (click)="upstreamType = 'internal'">Internal</button>
-        <button class="type-btn" [class.active]="upstreamType === 'external'" (click)="upstreamType = 'external'">External</button>
+        <button class="type-btn" [class.active]="upstreamType === 'gradient_proto'" (click)="upstreamType = 'gradient_proto'">Gradient Proto</button>
+        <button class="type-btn" [class.active]="upstreamType === 'http'" (click)="upstreamType = 'http'">Http</button>
       </div>
     </div>
 
@@ -168,6 +169,42 @@
       <div class="form-group">
         <label for="up-display-name-int">Display Name <span class="text-secondary">(optional)</span></label>
         <input pInputText id="up-display-name-int" [(ngModel)]="upstreamForm.display_name" placeholder="Defaults to the cache's display name" class="w-full" />
+      </div>
+      <div class="form-group">
+        <label for="up-mode">Mode</label>
+        <select id="up-mode" [(ngModel)]="upstreamForm.mode" class="role-select w-full">
+          @for (m of modes; track m.value) {
+            <option [value]="m.value">{{ m.label }}</option>
+          }
+        </select>
+        <small class="text-secondary">
+          Read &amp; Write: pull through and push results upstream. Read Only: pull through only. Write Only: push only.
+        </small>
+      </div>
+    } @else if (upstreamType === 'gradient_proto') {
+      <div class="form-group">
+        <label for="up-gp-display-name">Display Name</label>
+        <input pInputText id="up-gp-display-name" [(ngModel)]="upstreamForm.display_name" placeholder="My Gradient Cache" class="w-full" />
+      </div>
+      <div class="form-group">
+        <label for="up-gp-url">Server URL</label>
+        <input pInputText id="up-gp-url" [(ngModel)]="upstreamForm.url" placeholder="https://gradient.example.com" class="w-full" />
+      </div>
+      <div class="form-group">
+        <label for="up-gp-remote-cache">Remote Cache Name</label>
+        <input pInputText id="up-gp-remote-cache" [(ngModel)]="upstreamForm.remote_cache" placeholder="my-cache" class="w-full" />
+      </div>
+      <div class="form-group">
+        <label for="up-gp-api-key">API Key <span class="text-secondary">(optional)</span></label>
+        <input pInputText type="password" id="up-gp-api-key" [(ngModel)]="upstreamForm.api_key" class="w-full" />
+      </div>
+      <div class="form-group">
+        <label for="up-gp-mode">Mode</label>
+        <select id="up-gp-mode" [(ngModel)]="upstreamForm.mode" class="role-select w-full">
+          @for (m of modes; track m.value) {
+            <option [value]="m.value">{{ m.label }}</option>
+          }
+        </select>
       </div>
     } @else {
       <div class="form-group">
@@ -182,22 +219,7 @@
         <label for="up-pubkey">Public Key</label>
         <input pInputText id="up-pubkey" [(ngModel)]="upstreamForm.public_key" placeholder="cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=" class="w-full" />
       </div>
-    }
-
-    @if (upstreamType === 'internal') {
-      <div class="form-group">
-        <label for="up-mode">Mode</label>
-        <select id="up-mode" [(ngModel)]="upstreamForm.mode" class="role-select w-full">
-          @for (m of modes; track m.value) {
-            <option [value]="m.value">{{ m.label }}</option>
-          }
-        </select>
-        <small class="text-secondary">
-          Read &amp; Write: pull through and push results upstream. Read Only: pull through only. Write Only: push only.
-        </small>
-      </div>
-    } @else {
-      <small class="text-secondary">External caches are always Read Only.</small>
+      <small class="text-secondary">Http caches are always Read Only.</small>
     }
   </div>
   <ng-template pTemplate="footer">
