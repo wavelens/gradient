@@ -208,7 +208,7 @@ export class CacheUpstreamsComponent implements OnInit {
         this.loadUpstreams();
       },
       error: (err) => {
-        console.error('Failed to add upstream:', err);
+        this.addError.set(err?.error?.message || 'Failed to add upstream.');
         this.addingUpstream.set(false);
       },
     });
