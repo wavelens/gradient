@@ -24,6 +24,11 @@ use crate::messages::{ClientMessage, GradientCapabilities, PROTO_VERSION, Server
 
 use super::socket::{HANDSHAKE_TIMEOUT, ProtoSocket, recv_client_msg, send_server_msg};
 
+/// Idle cutoff for a read-only cache session: when no NAR transfer is in
+/// flight and no message arrives within this window, the connection is closed
+/// so a silent peer cannot pin a connection slot indefinitely.
+const CACHE_SESSION_IDLE_TIMEOUT_SECS: u64 = 120;
+
 /// Allow-list classifier: `Some(reason)` means the message is rejected on a
 /// read-only cache session, `None` means it is served. Pure so the policy is
 /// unit-testable without a socket or DB.
@@ -93,10 +98,30 @@ pub async fn handle_cache_socket(
 
     let send_chunk_timeout = Duration::from_secs(state.config.proto.nar_send_chunk_timeout_secs);
     let (mut reader, writer) = socket.split(send_chunk_timeout);
-    let nar_serve_semaphore =
-        Arc::new(Semaphore::new(state.config.proto.max_concurrent_nar_serves));
+    let max_serves = state.config.proto.max_concurrent_nar_serves;
+    let nar_serve_semaphore = Arc::new(Semaphore::new(max_serves));
+    let idle = Duration::from_secs(CACHE_SESSION_IDLE_TIMEOUT_SECS);
 
-    while let Some(msg) = recv_client_msg(&mut reader).await {
+    loop {
+        // Only enforce the idle timeout while no NAR transfer is in flight, so
+        // a client that batches its NarRequests and then quietly receives a
+        // large download is not disconnected mid-transfer.
+        let msg = if nar_serve_semaphore.available_permits() == max_serves {
+            match tokio::time::timeout(idle, recv_client_msg(&mut reader)).await {
+                Ok(Some(m)) => m,
+                Ok(None) => break,
+                Err(_) => {
+                    debug!(%cache_id, "cache websocket idle timeout; closing");
+                    break;
+                }
+            }
+        } else {
+            match recv_client_msg(&mut reader).await {
+                Some(m) => m,
+                None => break,
+            }
+        };
+
         if let Some(reason) = reject_reason(&msg) {
             warn!(%cache_id, variant = msg.variant_name(), "rejecting message on cache session");
             if send_server_msg(

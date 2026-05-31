@@ -541,7 +541,7 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         .nest("/api/v1", api)
         .merge(proto_router().route_layer(GovernorLayer::new(rl_per_ms(200, 150))))
         .layer(axum::Extension(Arc::clone(&scheduler)))
-        .layer(axum::Extension(proto_limiter));
+        .layer(axum::Extension(Arc::clone(&proto_limiter)));
 
     // Metrics endpoint - root-mounted, only when an operator-configured
     // bearer token is present. Uses the same rate-limit tier as
@@ -599,7 +599,8 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             state.config.proto.anon_rate_per_second as u64,
             state.config.proto.anon_rate_burst,
         )))
-        .layer(axum::Extension(cache_per_ip));
+        .layer(axum::Extension(cache_per_ip))
+        .layer(axum::Extension(Arc::clone(&proto_limiter)));
 
     app = app
         .merge(cache_routes)

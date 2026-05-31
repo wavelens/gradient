@@ -14,7 +14,7 @@ use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::client_ip::ClientIp;
 use crate::error::{WebError, WebResult};
 use gradient_core::types::ServerState;
-use proto::handler::PerIpLimiter;
+use proto::handler::{PerIpLimiter, ProtoLimiter};
 
 /// `GET /cache/{cache}/proto` - cache-scoped read-only proto WebSocket.
 ///
@@ -22,11 +22,13 @@ use proto::handler::PerIpLimiter;
 /// anonymous callers reach public caches only; an API key reaches the private
 /// caches it can read (respecting `cache_pin`). Anonymous access additionally
 /// requires `allow_anonymous_cache`; private caches always require a key.
+#[allow(clippy::too_many_arguments)]
 pub async fn cache_proto(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Extension(api_key): Extension<MaybeApiKey>,
     Extension(per_ip): Extension<Arc<PerIpLimiter>>,
+    Extension(global): Extension<Arc<ProtoLimiter>>,
     Extension(ClientIp(client_ip)): Extension<ClientIp>,
     Path(cache): Path<String>,
     ws: WebSocketUpgrade,
@@ -47,23 +49,27 @@ pub async fn cache_proto(
     .await?;
     let cache_id = cache.id;
 
+    // Every session counts against the global connection cap that protects the
+    // server from fd/memory exhaustion; anonymous sessions are additionally
+    // capped per source IP.
+    let global_permit = global.try_acquire().ok_or_else(|| {
+        WebError::service_unavailable("Server is at connection capacity; retry later.")
+    })?;
+    let ip_permit = if anonymous {
+        Some(per_ip.try_acquire(client_ip).ok_or_else(|| {
+            WebError::service_unavailable("Too many connections from your IP; retry later.")
+        })?)
+    } else {
+        None
+    };
+
     let upgrade = ws
         .max_message_size(proto::handler::MAX_PROTO_MESSAGE_SIZE)
         .max_frame_size(proto::handler::MAX_PROTO_MESSAGE_SIZE);
 
-    if anonymous {
-        let permit = per_ip.try_acquire(client_ip).ok_or_else(|| {
-            WebError::service_unavailable("Too many connections from your IP; retry later.")
-        })?;
-        Ok(upgrade.on_upgrade(move |sock| async move {
-            let _permit = permit;
-            proto::handler::handle_cache_socket(proto::server::accept_axum(sock), state, cache_id)
-                .await;
-        }))
-    } else {
-        Ok(upgrade.on_upgrade(move |sock| async move {
-            proto::handler::handle_cache_socket(proto::server::accept_axum(sock), state, cache_id)
-                .await;
-        }))
-    }
+    Ok(upgrade.on_upgrade(move |sock| async move {
+        let _global_permit = global_permit;
+        let _ip_permit = ip_permit;
+        proto::handler::handle_cache_socket(proto::server::accept_axum(sock), state, cache_id).await;
+    }))
 }
