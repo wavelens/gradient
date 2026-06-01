@@ -110,12 +110,19 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
                 .collect::<Vec<_>>()
         };
 
-        let flake_job = FlakeJob {
-            tasks: vec![
+        let split_fetch = scheduler.worker_pool.read().await.has_idle_eval_only_worker();
+        let tasks = if split_fetch {
+            vec![FlakeTask::FetchFlake]
+        } else {
+            vec![
                 FlakeTask::FetchFlake,
                 FlakeTask::EvaluateFlake,
                 FlakeTask::EvaluateDerivations,
-            ],
+            ]
+        };
+
+        let flake_job = FlakeJob {
+            tasks,
             source: gradient_core::types::proto::FlakeSource::Repository {
                 url: eval.repository.clone(),
                 commit: commit_sha,
@@ -150,7 +157,7 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
         };
 
         scheduler.enqueue_eval_job(job_id.clone(), pending).await;
-        debug!(evaluation_id = %eval.id, %job_id, "eval job enqueued");
+        debug!(evaluation_id = %eval.id, %job_id, split_fetch, "eval job enqueued");
     }
 
     Ok(())
