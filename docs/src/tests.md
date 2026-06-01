@@ -2802,3 +2802,35 @@ Run with: `cargo test -p scheduler --lib` and `cargo test -p worker --lib`
   fetch workers are penalised for cached-eval jobs, eval-only workers are not.
 - `executor::eval::tests::cached_source_requires_store_path_present` — the
   worker substitutes the cached source before eval.
+
+## Forge integration - maintainer approval bypass & wildcard check name (#298)
+
+A fork-PR approval gate must not re-park runs initiated by a maintainer, and a
+command-driven run with a custom wildcard must report under its own check line.
+
+The gate decision is split from its forge probe: `decide_pr_gate` resolves
+whether the event's actor is a trusted repo writer (via `sender_is_trusted`),
+then delegates the branching to the pure `gate_decision`. A `/gradient run`
+that creates a fresh evaluation, and a maintainer force-push onto a
+contributor's branch (`synchronize`), both thread the event `sender` so the
+gate is bypassed once the actor is verified.
+
+The Evaluation check name gains a wildcard suffix
+(`gradient/{project}: Evaluation: {wildcard}`) whenever the evaluation's
+wildcard differs from the project default.
+
+Run with: `cargo test -p web --lib forge_hooks` and
+`cargo test -p core --tests ci::reporting`.
+
+- `trigger::tests::gate_same_repo_pr_bypasses` — same-repo PR runs without a gate.
+- `trigger::tests::gate_fork_untrusted_sender_parks` — fork PR with an
+  untrusted sender parks for approval (carrying PR number/author).
+- `trigger::tests::gate_fork_trusted_sender_bypasses` — a trusted maintainer
+  (force-push / command) bypasses the gate.
+- `trigger::tests::gate_unknown_fork_status_fails_closed` — uncertain fork
+  status with an untrusted sender parks (fail-closed).
+- `events::tests::github_pr_sender_distinct_from_author_on_force_push` /
+  `gitea_pr_parses_sender_login` / `gitlab_mr_sender_falls_back_to_event_user`
+  — the event actor is parsed independently of the PR author.
+- `reporting::tests::evaluation_context_format_with_custom_wildcard` — custom
+  wildcard produces `gradient/{project}: Evaluation: {wildcard}`.
