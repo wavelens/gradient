@@ -30,9 +30,34 @@ serde_json = "1.0"
 connector = { path = "connector" }
 rand = { version = "0.10", features = ["std_rng"] }
 colored = "3.1"
+anyhow = "1"
 futures = "0.3"
 git2 = "0.21"
 reqwest = { version = "0.13", features = ["multipart"] }
+
+[features]
+default = []
+nix = ["dep:harmonia-file-nar", "dep:harmonia-store-path", "dep:harmonia-store-remote", "dep:harmonia-utils-hash"]
+
+[dependencies.harmonia-file-nar]
+git = "https://github.com/nix-community/harmonia.git"
+default-features = false
+optional = true
+
+[dependencies.harmonia-store-path]
+git = "https://github.com/nix-community/harmonia.git"
+default-features = false
+optional = true
+
+[dependencies.harmonia-store-remote]
+git = "https://github.com/nix-community/harmonia.git"
+default-features = false
+optional = true
+
+[dependencies.harmonia-utils-hash]
+git = "https://github.com/nix-community/harmonia.git"
+default-features = false
+optional = true
 
 [dev-dependencies]
 assert_cmd = "2"

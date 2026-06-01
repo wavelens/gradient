@@ -45,10 +45,14 @@ pub async fn handle(args: UploadArgs, out: Output) {
         out.err(ExitKind::Usage, "provide store path(s) or --nar-file/--narinfo");
     }
 
+    #[cfg(not(feature = "nix"))]
     out.err(
         ExitKind::Usage,
         "store-path upload requires a CLI built with the `nix` feature; use --nar-file/--narinfo instead",
     );
+
+    #[cfg(feature = "nix")]
+    crate::commands::cache_upload_nix::upload_paths(&args, out).await;
 }
 
 pub(crate) async fn upload_one_owned(cache: &str, ni: Narinfo, bytes: Vec<u8>, out: Output) {
