@@ -266,12 +266,14 @@ impl JobTracker {
         let worker_ctx = caps.map(|c| WorkerContext {
             architectures: &c.architectures,
             system_features: &c.system_features,
+            fetch: c.fetch,
         });
         let empty_archs: Vec<String> = vec![];
         let empty_feats: Vec<String> = vec![];
         let fallback_ctx = WorkerContext {
             architectures: &empty_archs,
             system_features: &empty_feats,
+            fetch: false,
         };
         let worker_ctx = worker_ctx.as_ref().unwrap_or(&fallback_ctx);
 
