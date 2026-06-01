@@ -4336,6 +4336,58 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+    post:
+      tags: [caches]
+      summary: Upload a NAR to a cache
+      description: |-
+        Uploads a single NAR (its bytes plus narinfo metadata) to this cache.
+        Requires `writeStore`. The server validates the byte length against the
+        declared `file_size`, stores the blob, records the cached path, and
+        enqueues a signature for this cache. Re-uploading an existing store path
+        reuses the cached path and only adds this cache's signature.
+
+        The route's body limit is `GRADIENT_MAX_NAR_UPLOAD_SIZE` (default 512 MiB).
+      operationId: uploadCacheNar
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [narinfo, nar]
+              properties:
+                narinfo:
+                  type: string
+                  description: |-
+                    JSON object: `store_path`, `file_hash`, `file_size`,
+                    `nar_size`, `nar_hash`, `references` (array), optional `deriver`.
+                nar:
+                  type: string
+                  format: binary
+                  description: Raw NAR bytes.
+      responses:
+        '201':
+          description: NAR stored
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: object
+                        properties:
+                          store_path:
+                            type: string
+                          created:
+                            type: boolean
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /caches/{cache}/nars/stats:
     parameters:
