@@ -232,6 +232,35 @@ impl Rule for WaitTimeRule {
     }
 }
 
+/// Reserve scarce fetch workers for fetch work: penalize a fetch-capable worker
+/// scoring a cached eval job (no `FetchFlake` task) so idle eval-only workers
+/// win it. A penalty, not a ban — a fetch worker with nothing else to do still
+/// takes the job rather than idle.
+#[derive(Debug)]
+pub struct ReserveFetchWorkersRule {
+    pub penalty: f64,
+}
+
+impl Default for ReserveFetchWorkersRule {
+    fn default() -> Self {
+        Self { penalty: 300.0 }
+    }
+}
+
+impl Rule for ReserveFetchWorkersRule {
+    fn score(&self, job: &JobContext<'_>, worker: &WorkerContext<'_>) -> f64 {
+        use gradient_core::types::proto::FlakeTask;
+        match job.job {
+            PendingJob::Eval(j)
+                if worker.fetch && !j.job.tasks.contains(&FlakeTask::FetchFlake) =>
+            {
+                -self.penalty
+            }
+            _ => 0.0,
+        }
+    }
+}
+
 // ── Policy ────────────────────────────────────────────────────────────────────
 
 /// Ordered collection of [`Rule`]s.
@@ -267,6 +296,7 @@ impl Policy {
     /// 3. [`DependencyCountRule`] - prefer builds that unblock more downstream work
     /// 4. [`WaitTimeRule`] - prevent starvation by boosting long-waiting builds
     /// 5. [`BuiltinDeprioritizeRule`] - keep real builds ahead of synthetic helpers
+    /// 6. [`ReserveFetchWorkersRule`] - keep scarce fetch workers free for fetch work
     pub fn default_build_policy() -> Self {
         let mut p = Self::new();
         p.add_rule(MissingPathsRule::default());
@@ -274,6 +304,7 @@ impl Policy {
         p.add_rule(DependencyCountRule::default());
         p.add_rule(WaitTimeRule::default());
         p.add_rule(BuiltinDeprioritizeRule::default());
+        p.add_rule(ReserveFetchWorkersRule::default());
         p
     }
 }
@@ -599,6 +630,82 @@ mod tests {
             "1-hour-old build must beat fresh fully-cached candidate \
              (anti-starvation): old={s_old} fresh={s_fresh}"
         );
+    }
+
+    #[test]
+    fn reserve_rule_penalizes_fetch_worker_for_cached_eval_only() {
+        use crate::jobs::{PendingEvalJob, PendingJob};
+        use gradient_core::types::ids::*;
+        use gradient_core::types::proto::{FlakeJob, FlakeSource, FlakeTask};
+
+        let cached_eval = PendingJob::Eval(PendingEvalJob {
+            evaluation_id: EvaluationId::now_v7(),
+            project_id: None,
+            peer_id: OrganizationId::now_v7(),
+            commit_id: CommitId::now_v7(),
+            repository: "r".into(),
+            job: FlakeJob {
+                tasks: vec![FlakeTask::EvaluateFlake, FlakeTask::EvaluateDerivations],
+                source: FlakeSource::Cached { store_path: "/nix/store/x".into() },
+                wildcards: vec!["*".into()],
+                timeout_secs: None,
+                input_overrides: vec![],
+            },
+            required_paths: vec![],
+            queued_at: gradient_core::types::now(),
+        });
+        let ctx = JobContext {
+            job: &cached_eval,
+            missing_count: None,
+            missing_nar_size: None,
+            dependency_count: 0,
+            queued_at: gradient_core::types::now(),
+        };
+        let rule = ReserveFetchWorkersRule::default();
+        let archs: Vec<String> = vec![];
+        let feats: Vec<String> = vec![];
+        let fetch_worker = WorkerContext { architectures: &archs, system_features: &feats, fetch: true };
+        let eval_worker = WorkerContext { architectures: &archs, system_features: &feats, fetch: false };
+
+        assert!(rule.score(&ctx, &fetch_worker) < 0.0, "fetch worker penalized");
+        assert_eq!(rule.score(&ctx, &eval_worker), 0.0, "eval-only worker not penalized");
+
+        // A fetch-only eval job (carries FetchFlake) is the fetch worker's own work - no penalty.
+        let fetch_only = PendingJob::Eval(PendingEvalJob {
+            evaluation_id: EvaluationId::now_v7(),
+            project_id: None,
+            peer_id: OrganizationId::now_v7(),
+            commit_id: CommitId::now_v7(),
+            repository: "r".into(),
+            job: FlakeJob {
+                tasks: vec![FlakeTask::FetchFlake],
+                source: FlakeSource::Repository { url: "u".into(), commit: "c".into() },
+                wildcards: vec!["*".into()],
+                timeout_secs: None,
+                input_overrides: vec![],
+            },
+            required_paths: vec![],
+            queued_at: gradient_core::types::now(),
+        });
+        let fetch_only_ctx = JobContext {
+            job: &fetch_only,
+            missing_count: None,
+            missing_nar_size: None,
+            dependency_count: 0,
+            queued_at: gradient_core::types::now(),
+        };
+        assert_eq!(rule.score(&fetch_only_ctx, &fetch_worker), 0.0, "fetch-only eval not penalized");
+
+        // Build jobs are irrelevant to the fetch-reservation rule — no penalty.
+        let (build_job, ..) = build_job_ctx("x86_64-linux", None, None);
+        let build_ctx = JobContext {
+            job: &build_job,
+            missing_count: None,
+            missing_nar_size: None,
+            dependency_count: 0,
+            queued_at: gradient_core::types::now(),
+        };
+        assert_eq!(rule.score(&build_ctx, &fetch_worker), 0.0, "build job not penalized for fetch worker");
     }
 
     #[test]
