@@ -7,6 +7,7 @@
 mod commands;
 mod config;
 mod input;
+pub mod narinfo;
 pub mod output;
 
 use commands::base;
