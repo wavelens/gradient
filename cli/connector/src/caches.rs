@@ -94,6 +94,17 @@ pub struct NarStats {
     pub oldest_fetched_at: Option<String>,
 }
 
+#[derive(Serialize, Debug, Clone)]
+pub struct NarinfoUpload {
+    pub store_path: String,
+    pub file_hash: String,
+    pub file_size: i64,
+    pub nar_size: i64,
+    pub nar_hash: String,
+    pub references: Vec<String>,
+    pub deriver: Option<String>,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct NarListQuery {
     pub hash: Option<String>,
@@ -400,6 +411,45 @@ impl CachesApi<'_> {
             true,
         )?;
         http::decode(req.send().await?).await
+    }
+
+    pub async fn nar_upload(
+        &self,
+        cache: &str,
+        narinfo: NarinfoUpload,
+        nar_bytes: Vec<u8>,
+    ) -> Result<(), ConnectorError> {
+        let narinfo_json = serde_json::to_string(&narinfo).map_err(ConnectorError::Decode)?;
+        let form = reqwest::multipart::Form::new()
+            .text("narinfo", narinfo_json)
+            .part("nar", reqwest::multipart::Part::bytes(nar_bytes).file_name("nar"));
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::POST,
+            &format!("caches/{cache}/nars"),
+            true,
+        )?
+        .multipart(form);
+        let resp = req.send().await?;
+        let status = resp.status();
+        if status == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(ConnectorError::Unauthorized);
+        }
+        if !status.is_success() {
+            let bytes = resp.bytes().await?;
+            let message = if let Ok(env) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+                env.get("message")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| String::from_utf8_lossy(&bytes).into_owned())
+            } else {
+                String::from_utf8_lossy(&bytes).into_owned()
+            };
+            return Err(ConnectorError::Api { status, message });
+        }
+        Ok(())
     }
 
     pub async fn nar_delete(&self, cache: &str, hash: &str) -> Result<(), ConnectorError> {
