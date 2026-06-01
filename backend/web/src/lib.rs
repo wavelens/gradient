@@ -325,6 +325,11 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             patch(caches::patch_cache).delete(caches::delete_cache),
         )
         .route(
+            "/caches/{cache}/nars",
+            post(caches::nars_upload)
+                .layer(DefaultBodyLimit::max(state.config.limits.max_nar_upload_size)),
+        )
+        .route(
             "/caches/{cache}/nars/{hash}",
             axum::routing::delete(caches::nars_delete),
         )
