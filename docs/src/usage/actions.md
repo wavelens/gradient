@@ -84,6 +84,10 @@ Token management: the plaintext token is revealed exactly once — on create or 
 
 Posts commit status (pending / success / failure / action-required) back to the forge as three separate check runs per PR — `gradient/{project}: Approval` (fork-PR gate), `gradient/{project}: Evaluation` (eval phase), and `gradient/{project}: Build {label}` (one per build, labelled by entry-point name or by `{drv-name}.{architecture}` when no entry-point matched). Each check is updated in place as the phase progresses; the Approval check flips to Success when a maintainer clears the gate, and the Evaluation check is posted as Pending at the same instant so the PR immediately reflects that the pipeline is in flight.
 
+A run that targets a wildcard other than the project default — e.g. `/gradient run packages.x86_64-linux.foo` — reports under `gradient/{project}: Evaluation: {wildcard}` so the custom run shows as its own check line instead of overwriting the default evaluation check.
+
+**Maintainer-initiated runs skip the fork-PR approval gate.** The gate only exists to hold untrusted external contributions; when the action comes from a repo writer it is not needed. The Evaluation runs immediately (no `Approval` check) when either: a maintainer issues `/gradient run` / `/gradient approve` on the PR, or a maintainer force-pushes onto the contributor's branch (the `synchronize` event's actor is verified as a repo writer via the forge API before bypassing).
+
 **Config fields:**
 
 | Field | Required | Description |
