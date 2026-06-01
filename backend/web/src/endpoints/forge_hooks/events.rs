@@ -68,6 +68,8 @@ pub(super) struct GitHubPullRequestPayload {
     pub action: String,
     pub pull_request: GitHubPullRequest,
     pub repository: GitHubRepository,
+    #[serde(default)]
+    pub sender: Option<GitHubUser>,
 }
 
 #[derive(Deserialize)]
@@ -127,6 +129,8 @@ pub(super) struct GiteaPullRequestPayload {
     pub action: String,
     pub pull_request: GiteaPullRequest,
     pub repository: GiteaRepository,
+    #[serde(default)]
+    pub sender: Option<GiteaUser>,
 }
 
 #[derive(Deserialize)]
@@ -266,6 +270,11 @@ pub(super) struct ParsedPullRequestEvent {
     pub pr_number: Option<u64>,
     /// Login/username of the PR author.
     pub pr_author: Option<String>,
+    /// Login/username of the actor who triggered this event (the pusher on a
+    /// `synchronize`, the opener on `opened`). Distinct from `pr_author` when a
+    /// maintainer force-pushes onto a contributor's branch. Used to bypass the
+    /// approval gate when the actor is a trusted repo writer.
+    pub sender: Option<String>,
     /// `true` when the head repo is not the base repo (i.e. the PR comes
     /// from a fork). `false` when same-repo. `None` when the payload lacks
     /// enough information to decide - callers should treat as untrusted.
@@ -468,6 +477,7 @@ impl ParsedPullRequestEvent {
             .user
             .as_ref()
             .and_then(|u| u.login.clone());
+        let sender = payload.sender.as_ref().and_then(|s| s.login.clone());
         let mut repository_urls = Vec::with_capacity(4);
         let mut head_repo_clone_url: Option<String> = None;
         if let (Some(true), Some(repo)) = (is_fork, head_repo) {
@@ -488,6 +498,7 @@ impl ParsedPullRequestEvent {
             branch: Some(payload.pull_request.head.branch),
             pr_number: payload.pull_request.number,
             pr_author,
+            sender,
             is_fork,
             head_repo_clone_url,
         })
@@ -529,6 +540,10 @@ impl ParsedPullRequestEvent {
             .user
             .as_ref()
             .and_then(|u| u.username.clone().or_else(|| u.login.clone()));
+        let sender = payload
+            .sender
+            .as_ref()
+            .and_then(|s| s.username.clone().or_else(|| s.login.clone()));
         let mut repository_urls = Vec::with_capacity(4);
         let mut head_repo_clone_url: Option<String> = None;
         if let (Some(true), Some(repo)) = (is_fork, head_repo) {
@@ -548,6 +563,7 @@ impl ParsedPullRequestEvent {
             branch,
             pr_number: payload.pull_request.number,
             pr_author,
+            sender,
             is_fork,
             head_repo_clone_url,
         })
@@ -575,6 +591,7 @@ impl ParsedPullRequestEvent {
             _ => None,
         };
         let pr_author = payload.user.as_ref().and_then(|u| u.username.clone());
+        let sender = pr_author.clone();
         let mut repository_urls = Vec::with_capacity(4);
         let mut head_repo_clone_url: Option<String> = None;
         if let (Some(true), Some(src)) = (is_fork, payload.object_attributes.source.as_ref()) {
@@ -594,6 +611,7 @@ impl ParsedPullRequestEvent {
             branch: Some(payload.object_attributes.source_branch),
             pr_number: payload.object_attributes.iid,
             pr_author,
+            sender,
             is_fork,
             head_repo_clone_url,
         })
@@ -766,6 +784,75 @@ mod tests {
         assert_eq!(ev.pr_number, Some(42));
         assert_eq!(ev.pr_author.as_deref(), Some("external-contrib"));
         assert_eq!(ev.is_fork, Some(true));
+    }
+
+    #[test]
+    fn github_pr_sender_distinct_from_author_on_force_push() {
+        let body = format!(
+            r#"{{
+                "action": "synchronize",
+                "sender": {{ "login": "maintainer" }},
+                "pull_request": {{
+                    "number": 42,
+                    "user": {{ "login": "external-contrib" }},
+                    "head": {{
+                        "sha": "{VALID_SHA}",
+                        "ref": "patch-1",
+                        "repo": {{ "full_name": "external-contrib/repo" }}
+                    }},
+                    "base": {{
+                        "sha": "0000000000000000000000000000000000000000",
+                        "ref": "main",
+                        "repo": {{ "full_name": "org/repo" }}
+                    }}
+                }},
+                "repository": {{
+                    "clone_url": "https://github.com/org/repo.git",
+                    "ssh_url": "git@github.com:org/repo.git",
+                    "full_name": "org/repo"
+                }}
+            }}"#
+        );
+        let ev = ParsedPullRequestEvent::from_github(body.as_bytes()).unwrap();
+        assert_eq!(ev.is_fork, Some(true));
+        assert_eq!(ev.pr_author.as_deref(), Some("external-contrib"));
+        assert_eq!(ev.sender.as_deref(), Some("maintainer"));
+    }
+
+    #[test]
+    fn gitea_pr_parses_sender_login() {
+        let body = format!(
+            r#"{{
+                "action": "synchronize",
+                "sender": {{ "username": "maintainer" }},
+                "pull_request": {{
+                    "user": {{ "username": "external-contrib" }},
+                    "head": {{ "sha": "{VALID_SHA}", "ref": "feat" }}
+                }},
+                "repository": {{ "clone_url": "https://gitea.example.com/org/repo.git" }}
+            }}"#
+        );
+        let ev = ParsedPullRequestEvent::from_gitea(body.as_bytes()).unwrap();
+        assert_eq!(ev.pr_author.as_deref(), Some("external-contrib"));
+        assert_eq!(ev.sender.as_deref(), Some("maintainer"));
+    }
+
+    #[test]
+    fn gitlab_mr_sender_falls_back_to_event_user() {
+        let body = format!(
+            r#"{{
+                "object_attributes": {{
+                    "action": "update",
+                    "iid": 11,
+                    "source_branch": "feat",
+                    "last_commit": {{ "id": "{VALID_SHA}" }}
+                }},
+                "project": {{ "http_url": "https://gitlab.example.com/group/repo.git" }},
+                "user": {{ "username": "maintainer" }}
+            }}"#
+        );
+        let ev = ParsedPullRequestEvent::from_gitlab(body.as_bytes()).unwrap();
+        assert_eq!(ev.sender.as_deref(), Some("maintainer"));
     }
 
     #[test]
