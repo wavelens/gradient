@@ -62,7 +62,7 @@ impl BuildsApi<'_> {
     pub async fn log_stream(
         &self,
         id: &str,
-    ) -> Result<impl Stream<Item = Result<String, ConnectorError>>, ConnectorError> {
+    ) -> Result<impl Stream<Item = Result<String, ConnectorError>> + use<>, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),

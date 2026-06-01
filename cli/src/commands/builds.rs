@@ -15,6 +15,12 @@ pub enum Commands {
         #[arg(short = 'i', long)]
         interactive: bool,
     },
+    /// View a build's log
+    Log {
+        id: String,
+        #[arg(short = 'i', long)]
+        interactive: bool,
+    },
 }
 
 pub async fn handle(cmd: Commands, out: Output) {
@@ -33,6 +39,9 @@ pub async fn handle(cmd: Commands, out: Output) {
                 }
                 Err(e) => out.err(to_exit_kind(&e), e),
             }
+        }
+        Commands::Log { id, interactive } => {
+            crate::commands::builds_log::handle_log(&id, interactive, out).await
         }
     }
 }

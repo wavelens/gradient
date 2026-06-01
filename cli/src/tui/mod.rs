@@ -4,6 +4,7 @@
  */
 
 pub mod graph;
+pub mod log_view;
 pub mod nar_browser;
 
 use ratatui::Terminal;
