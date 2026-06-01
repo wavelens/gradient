@@ -28,6 +28,8 @@ pub struct IngestInput<'a> {
 pub enum SignTargets {
     OrgCaches(OrganizationId),
     Cache(CacheId),
+    /// Record the path but enqueue no signatures (no resolvable org).
+    None,
 }
 
 /// Outcome of an ingest.
@@ -137,6 +139,7 @@ async fn upsert_and_sign<C: ConnectionTrait>(
     };
 
     let cache_ids: Vec<CacheId> = match targets {
+        SignTargets::None => vec![],
         SignTargets::Cache(id) => vec![id],
         SignTargets::OrgCaches(org) => EOrganizationCache::find()
             .filter(COrganizationCache::Organization.eq(org))
