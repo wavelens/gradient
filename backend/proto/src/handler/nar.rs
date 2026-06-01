@@ -5,15 +5,13 @@
  */
 
 use chrono::Timelike;
-use gradient_core::nix_hash::normalize_nar_hash;
-use gradient_core::types::ids::{CacheId, CacheMetricId, CachedPathId, CachedPathSignatureId};
+use gradient_core::cache::ingest::{IngestInput, SignTargets, ingest_metadata_only};
+use gradient_core::types::ids::{CacheId, CacheMetricId};
 use gradient_core::types::*;
 use scheduler::Scheduler;
-use sea_orm::sea_query::OnConflict;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
 use tracing::{info, warn};
 
-/// Metadata produced by a worker after compressing and uploading a NAR.
 pub(super) struct NarUploadRecord<'a> {
     pub file_hash: &'a str,
     pub file_size: i64,
@@ -25,8 +23,6 @@ pub(super) struct NarUploadRecord<'a> {
     pub deriver: Option<&'a str>,
 }
 
-/// Record a cache metric entry for a NAR push (direct or presigned).
-///
 /// Resolves `job_id → org → cache` and increments the traffic counter.
 pub(super) async fn record_nar_push_metric(
     state: &ServerState,
@@ -88,10 +84,6 @@ async fn upsert_cache_metric(
     Ok(())
 }
 
-/// Update the `derivation_output` and `cached_path` records for `store_path`
-/// after a NAR push.  Creates `cached_path` and `cached_path_signature` rows
-/// when the worker supplies path metadata (build-output uploads from remote
-/// workers).
 pub(super) async fn mark_nar_stored(
     state: &ServerState,
     scheduler: &Scheduler,
@@ -101,82 +93,31 @@ pub(super) async fn mark_nar_stored(
 ) -> anyhow::Result<()> {
     let hash_name = store_path.strip_prefix("/nix/store/").unwrap_or(store_path);
     let hash = hash_name.split('-').next().unwrap_or("");
-    let package = hash_name
-        .find('-')
-        .map(|i| &hash_name[i + 1..])
-        .unwrap_or("");
 
     if hash.is_empty() {
         return Ok(());
     }
 
-    let now = gradient_core::types::now();
-
-    // Find or create the cached_path row.
-    let references_str = if record.references.is_empty() {
-        None
-    } else {
-        Some(record.references.join(" "))
+    let Some(org_id) = scheduler.peer_id_for_job(job_id).await else {
+        warn!(%job_id, "no org for job; skipping NAR ingest");
+        return Ok(());
     };
 
-    let cached_path_row = match ECachedPath::find()
-        .filter(CCachedPath::Hash.eq(hash))
-        .one(&state.worker_db)
-        .await?
-    {
-        Some(row) => {
-            let mut active = row.into_active_model();
-            active.file_size = Set(Some(record.file_size));
-            active.file_hash = Set(Some(normalize_nar_hash(record.file_hash)));
-            active.nar_size = Set(Some(record.nar_size));
-            active.nar_hash = Set(Some(normalize_nar_hash(record.nar_hash)));
-            if references_str.is_some() {
-                active.references = Set(references_str);
-            }
-            if record.deriver.is_some() {
-                active.deriver = Set(record.deriver.map(str::to_owned));
-            }
-            active.update(&state.worker_db).await?
-        }
-        None => {
-            let am = ACachedPath {
-                id: Set(CachedPathId::now_v7()),
-                store_path: Set(store_path.to_owned()),
-                hash: Set(hash.to_owned()),
-                package: Set(package.to_owned()),
-                file_hash: Set(Some(normalize_nar_hash(record.file_hash))),
-                file_size: Set(Some(record.file_size)),
-                nar_size: Set(Some(record.nar_size)),
-                nar_hash: Set(Some(normalize_nar_hash(record.nar_hash))),
-                references: Set(references_str),
-                ca: Set(None),
-                deriver: Set(record.deriver.map(str::to_owned)),
-                created_at: Set(now),
-            };
-            match am.insert(&state.worker_db).await {
-                Ok(row) => row,
-                Err(e) => {
-                    warn!(store_path, error = %e, "failed to insert cached_path (may be a race)");
-                    // Try to find the row that was inserted concurrently.
-                    match ECachedPath::find()
-                        .filter(CCachedPath::Hash.eq(hash))
-                        .one(&state.worker_db)
-                        .await?
-                    {
-                        Some(row) => row,
-                        None => return Err(e.into()),
-                    }
-                }
-            }
-        }
+    let input = IngestInput {
+        store_path,
+        file_hash: record.file_hash,
+        file_size: record.file_size,
+        nar_size: record.nar_size,
+        nar_hash: record.nar_hash,
+        references: record.references,
+        deriver: record.deriver,
     };
 
-    // Mark every derivation_output that produces this store path as cached
-    // and link it to the cached_path row. Filtering by `hash` is more robust
-    // than filtering by the full `output` string: it avoids prefix-shape
-    // mismatches and survives "known/pruned" eval results that never wrote
-    // an `output` value. The narinfo read path filters on (is_cached, hash),
-    // so this is the field that has to match.
+    let outcome =
+        ingest_metadata_only(&state.worker_db, input, SignTargets::OrgCaches(org_id)).await?;
+
+    let cached_path_id = outcome.cached_path;
+
     let outputs = EDerivationOutput::find()
         .filter(CDerivationOutput::Hash.eq(hash))
         .all(&state.worker_db)
@@ -185,7 +126,7 @@ pub(super) async fn mark_nar_stored(
     for row in outputs {
         let mut active = row.into_active_model();
         active.is_cached = Set(true);
-        active.cached_path = Set(Some(cached_path_row.id));
+        active.cached_path = Set(Some(cached_path_id));
         if let Err(e) = active.update(&state.worker_db).await {
             warn!(store_path, error = %e, "failed to mark derivation_output cached");
         } else {
@@ -201,79 +142,6 @@ pub(super) async fn mark_nar_stored(
         );
     }
 
-    // Enqueue signing: insert a placeholder `cached_path_signature` row
-    // (signature = NULL) for every cache owned by the job's org. The
-    // periodic sign sweep (see `cache::cacher::sign_sweep`) will fill in
-    // the signatures in the background.
-    ensure_signature_placeholders(state, scheduler, job_id, &cached_path_row, now).await;
-
-    info!(
-        store_path,
-        "cached_path metadata recorded after NarUploaded"
-    );
+    info!(store_path, "cached_path metadata recorded after NarUploaded");
     Ok(())
-}
-
-/// Insert `cached_path_signature` placeholders (signature = NULL) for every
-/// cache the job's organization is subscribed to. The periodic sweep will
-/// sign them later. Existing rows are left untouched.
-async fn ensure_signature_placeholders(
-    state: &ServerState,
-    scheduler: &Scheduler,
-    job_id: &str,
-    cached_path_row: &MCachedPath,
-    now: chrono::NaiveDateTime,
-) {
-    let Some(org_id) = scheduler.peer_id_for_job(job_id).await else {
-        return;
-    };
-
-    let org_caches = match EOrganizationCache::find()
-        .filter(COrganizationCache::Organization.eq(org_id))
-        .all(&state.worker_db)
-        .await
-    {
-        Ok(v) => v,
-        Err(e) => {
-            warn!(%org_id, error = %e, "failed to fetch org caches for signature placeholders");
-            return;
-        }
-    };
-
-    if org_caches.is_empty() {
-        return;
-    }
-
-    let rows: Vec<ACachedPathSignature> = org_caches
-        .into_iter()
-        .map(|oc| ACachedPathSignature {
-            id: Set(CachedPathSignatureId::now_v7()),
-            cached_path: Set(cached_path_row.id),
-            cache: Set(oc.cache),
-            signature: Set(None),
-            created_at: Set(now),
-            last_fetched_at: Set(None),
-            fetch_count: Set(0),
-        })
-        .collect();
-
-    let result = ECachedPathSignature::insert_many(rows)
-        .on_conflict(
-            OnConflict::columns([
-                CCachedPathSignature::CachedPath,
-                CCachedPathSignature::Cache,
-            ])
-            .do_nothing()
-            .to_owned(),
-        )
-        .do_nothing()
-        .exec(&state.worker_db)
-        .await;
-    if let Err(e) = result {
-        warn!(
-            store_path = %cached_path_row.store_path,
-            error = %e,
-            "failed to insert cached_path_signature placeholders"
-        );
-    }
 }
