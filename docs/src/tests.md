@@ -2834,3 +2834,64 @@ Run with: `cargo test -p web --lib forge_hooks` and
   — the event actor is parsed independently of the PR author.
 - `reporting::tests::evaluation_context_format_with_custom_wildcard` — custom
   wildcard produces `gradient/{project}: Evaluation: {wildcard}`.
+
+## Cache upload - NAR ingest, endpoint, connector, and CLI (issue #261)
+
+### Shared NAR ingest (`core::cache::ingest`)
+
+Run with: `cargo test -p core cache::ingest`
+
+- `malformed_store_path_bails_before_any_io` — a syntactically invalid store
+  path is rejected before any blob write is attempted.
+- `create_path_writes_blob_and_reports_created` — a valid NAR + narinfo pair
+  writes the blob to storage and returns `IngestResult::Created`.
+
+### Upload endpoint (`web` crate)
+
+Run with: `cargo test -p web --test caches_upload`
+
+- `upload_unauthenticated_returns_403` — `POST /api/v1/caches/{cache}/nars`
+  without a bearer token returns `403`.
+- Real-DB integration stubs are present but marked `#[ignore]`; they run in
+  CI against a live Postgres instance.
+
+### Connector multipart upload (`connector` crate)
+
+Run with: `cargo test -p connector nar_upload`
+
+- `nar_upload_posts_multipart` — the connector assembles the correct multipart
+  form (a `narinfo` JSON part and a `nar` binary part) and maps a 200 response
+  to success.
+
+### CLI narinfo parser
+
+Run with: `cargo test -p gradient-cli`
+
+- `parses_full_narinfo` — a complete `.narinfo` file round-trips through the
+  parser with all fields populated.
+- `missing_required_field_errors` — a narinfo missing a required field (e.g.
+  `StorePath`) returns a parse error naming the field.
+- `empty_references_ok` — a `References:` line with no paths is accepted and
+  produces an empty references list.
+
+### CLI `cache_upload` integration
+
+Run with: `cargo test -p gradient-cli`
+
+- `upload_nar_file_with_narinfo_succeeds` — providing both `--nar-file` and
+  `--narinfo` against a mock server returns success.
+- `upload_nar_file_without_narinfo_errors` — omitting `--narinfo` in no-nix
+  mode exits with a usage error (exit code 2).
+
+### CLI TUI view-model tests
+
+Run with: `cargo test -p gradient-cli`
+
+- `tui::nar_browser` — filter input narrows the displayed list; scroll position
+  resets to 0 when the filter changes; clearing the filter restores the full
+  list.
+- `tui::graph` — expanding a collapsed node adds its children to the visible
+  set; collapsing removes them; nested expand/collapse is consistent; `Esc`
+  triggers quit.
+- `tui::log_view` — `↑`/`↓` scroll adjusts the offset; enabling follow-tail
+  pins the view to the last line; `/` search highlights matching lines.
