@@ -9,6 +9,7 @@ mod config;
 mod input;
 pub mod narinfo;
 pub mod output;
+mod tui;
 
 use commands::base;
 
