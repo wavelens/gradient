@@ -46,6 +46,8 @@ pub struct JobContext<'a> {
 pub struct WorkerContext<'a> {
     pub architectures: &'a [String],
     pub system_features: &'a [String],
+    /// Whether the worker can fetch. Used to reserve fetch workers for fetch.
+    pub fetch: bool,
 }
 
 // ── Rule trait ────────────────────────────────────────────────────────────────
@@ -289,6 +291,7 @@ mod tests {
         WorkerContext {
             architectures: archs,
             system_features: features,
+            fetch: false,
         }
     }
 
