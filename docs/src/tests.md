@@ -2779,3 +2779,26 @@ Run with: `cargo test -p scheduler --lib jobs`
   assigned to a worker lacking `fetch`, but is assigned to a fetch-capable one.
 - `cached_eval_job_runs_without_fetch_capability` — an eval-only follow-up job
   (cached source, no `FetchFlake`) still runs on a worker without `fetch`.
+
+## Adaptive fetch/eval split
+
+When an idle dedicated eval worker is connected, the scheduler dispatches a
+fetch-only flake job to a fetch worker and hands evaluation to the eval pool via
+a cached-source follow-up; a scoring penalty keeps fetch workers free. The eval
+worker substitutes the cached source from the binary cache before evaluating.
+
+Run with: `cargo test -p scheduler --lib` and `cargo test -p worker --lib`
+
+- `worker_pool::tests::idle_eval_only_worker_detected` /
+  `draining_eval_only_worker_does_not_count` — the split heuristic (an idle,
+  non-draining eval-only worker triggers the split).
+- `jobs::tests::is_fetch_only_true_only_for_fetch_task_alone` — recognises a
+  fetch-only job by its task list.
+- `jobs::tests::cached_followup_rewrites_source_and_tasks` — builds the cached
+  eval follow-up (Cached source, eval tasks, source as a required path).
+- `scheduler_tests::fetch_only_completion_enqueues_cached_eval_followup` — a
+  completed fetch-only job enqueues the cached eval follow-up reusing its id.
+- `policy::tests::reserve_rule_penalizes_fetch_worker_for_cached_eval_only` —
+  fetch workers are penalised for cached-eval jobs, eval-only workers are not.
+- `executor::eval::tests::cached_source_requires_store_path_present` — the
+  worker substitutes the cached source before eval.

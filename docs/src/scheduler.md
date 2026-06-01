@@ -57,3 +57,25 @@ from that upstream's `/log/{drv}` endpoint (the same one the Gradient cache
 exposes). If the upstream serves the log, it is stored under the same build
 record so the build's log tab shows it just like a locally-built one. If no
 upstream serves the log, the build is recorded without one.
+
+## Adaptive fetch/eval split
+
+When the scheduler detects an idle dedicated eval-only worker — determined by
+checking whether any connected worker is eval-only (fetch capability absent)
+and has no currently assigned job — it splits a flake evaluation into two
+sequential jobs instead of dispatching the usual bundled fetch+eval job. The
+split is a heuristic: if no idle eval-only worker exists at dispatch time, the
+original bundled job is issued unchanged.
+
+The first job (`FetchFlake` task only, `FlakeSource::Repository`) is routed
+exclusively to a fetch-capable worker; once it completes, the scheduler reads
+`evaluation.flake_source` from the finished job and immediately enqueues a
+cached-eval follow-up (`EvaluateFlake` + `EvaluateDerivations` tasks,
+`FlakeSource::Cached`) that any eval worker can run. The eval worker
+substitutes the cached source NAR from the gradient binary cache into its
+local store before evaluating, since a `path:` flakeref must point to a
+locally-present path. The `ReserveFetchWorkersRule` scoring policy applies a
+penalty when a fetch-capable worker is offered a cached-eval job, steering
+those workers toward fetch work; it is a soft steer rather than a ban, so a
+fetch worker still accepts cached-eval jobs when no other candidate is
+available.
