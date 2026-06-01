@@ -665,8 +665,6 @@ impl<'a> DispatchContext<'a> {
             return;
         }
 
-        // Local-mode commit: if we buffered NarPush chunks for this path,
-        // validate + write them to nar_storage atomically with the metadata.
         if let Some(buf) = nar_buffers.take(&store_path) {
             if buf.len() as u64 != file_size {
                 let reason = format!(
@@ -678,22 +676,22 @@ impl<'a> DispatchContext<'a> {
                 self.abort_job(&job_id, reason).await;
                 return;
             }
-            let Some(hash) = store_path
+            let hash = store_path
                 .strip_prefix("/nix/store/")
                 .unwrap_or(&store_path)
                 .split('-')
                 .next()
-                .filter(|h| h.len() == 32 && h.bytes().all(|b| b.is_ascii_alphanumeric()))
-                .map(str::to_owned)
-            else {
+                .unwrap_or("");
+            let valid = hash.len() == 32 && hash.bytes().all(|b| b.is_ascii_alphanumeric());
+            if !valid {
                 let reason = format!("NarUploaded for malformed store path {store_path}");
                 error!(peer_id = %self.peer_id, %job_id, %store_path, %reason, "NarUploaded for malformed store path");
                 self.abort_job(&job_id, reason).await;
                 return;
-            };
-            if let Err(e) = self.state.nar_storage.put(&hash, buf).await {
-                let reason = format!("nar_storage write failed: {e}");
-                error!(peer_id = %self.peer_id, %job_id, %store_path, error = %e, "NAR storage commit failed");
+            }
+            if let Err(e) = self.state.nar_storage.put(hash, buf).await {
+                let reason = format!("failed to write NAR to storage: {e}");
+                error!(peer_id = %self.peer_id, %job_id, %store_path, error = %e, "nar_storage.put failed");
                 self.abort_job(&job_id, reason).await;
                 return;
             }
@@ -709,14 +707,8 @@ impl<'a> DispatchContext<'a> {
             references: &references,
             deriver: deriver.as_deref(),
         };
-        if let Err(e) = mark_nar_stored(
-            self.state,
-            self.scheduler,
-            &job_id,
-            &store_path,
-            &nar_record,
-        )
-        .await
+        if let Err(e) =
+            mark_nar_stored(self.state, self.scheduler, &job_id, &store_path, &nar_record).await
         {
             warn!(%store_path, error = %e, "failed to mark NAR as stored");
         }
