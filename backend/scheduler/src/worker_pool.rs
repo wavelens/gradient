@@ -227,6 +227,15 @@ impl WorkerPool {
         }
     }
 
+    pub fn has_idle_eval_only_worker(&self) -> bool {
+        self.workers.values().any(|slot| match slot {
+            WorkerSlot::Active(w) => {
+                w.capabilities.eval && !w.capabilities.fetch && w.assigned_jobs.is_empty()
+            }
+            WorkerSlot::Draining(_) => false,
+        })
+    }
+
     pub fn assign_job(&mut self, worker_id: &str, job_id: &str) {
         if let Some(slot) = self.workers.get_mut(worker_id) {
             slot.shared_mut().assigned_jobs.insert(job_id.to_owned());
@@ -291,6 +300,31 @@ mod tests {
 
     fn caps() -> GradientCapabilities {
         GradientCapabilities::default()
+    }
+
+    fn caps_ef(eval: bool, fetch: bool) -> GradientCapabilities {
+        GradientCapabilities { eval, fetch, ..GradientCapabilities::default() }
+    }
+
+    #[test]
+    fn idle_eval_only_worker_detected() {
+        let mut pool = WorkerPool::new();
+        pool.register("f1".into(), caps_ef(true, true), HashSet::new());
+        assert!(!pool.has_idle_eval_only_worker(), "only a fetch worker present");
+
+        pool.register("e1".into(), caps_ef(true, false), HashSet::new());
+        assert!(pool.has_idle_eval_only_worker(), "idle eval-only worker present");
+
+        pool.assign_job("e1", "j1");
+        assert!(!pool.has_idle_eval_only_worker(), "eval-only worker is busy");
+    }
+
+    #[test]
+    fn draining_eval_only_worker_does_not_count() {
+        let mut pool = WorkerPool::new();
+        pool.register("e1".into(), caps_ef(true, false), HashSet::new());
+        pool.mark_draining("e1");
+        assert!(!pool.has_idle_eval_only_worker(), "draining worker excluded");
     }
 
     #[test]
