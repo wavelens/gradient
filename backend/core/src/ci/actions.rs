@@ -587,7 +587,9 @@ async fn build_ci_report_from_payload(
             None => return Ok(None),
         },
         Some(reporting::CheckContextKind::Evaluation) | None => {
-            reporting::evaluation_check_context(&project.name)
+            let wildcard_suffix =
+                (evaluation.wildcard != project.wildcard).then_some(evaluation.wildcard.as_str());
+            reporting::evaluation_check_context(&project.name, wildcard_suffix)
         }
     };
 
