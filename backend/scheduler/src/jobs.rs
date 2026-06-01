@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 
 use gradient_core::types::ids::{BuildId, CommitId, EvaluationId, OrganizationId, ProjectId};
 use gradient_core::types::proto::{
-    BuildJob, CandidateScore, FlakeJob, Job, JobCandidate, JobKind, RequiredPath,
+    BuildJob, CandidateScore, FlakeJob, FlakeTask, Job, JobCandidate, JobKind, RequiredPath,
 };
 
 use crate::policy::{JobContext, Policy, WorkerContext};
@@ -52,15 +52,20 @@ pub struct PendingBuildJob {
     pub queued_at: chrono::NaiveDateTime,
 }
 
-/// A connected worker's build-relevant capabilities, used to gate which
-/// build jobs are eligible for assignment.
+/// A connected worker's capabilities, used to gate which jobs are eligible
+/// for assignment: the `fetch` gradient capability plus the Nix architectures
+/// and system features it can build for.
 #[derive(Debug, Clone, Default)]
-pub struct WorkerBuildCaps {
+pub struct WorkerCaps {
+    /// Worker can fetch flake sources from a repository. Required for any
+    /// FlakeJob carrying a `FetchFlake` task, since the server only sends SSH
+    /// credentials to fetch-capable workers.
+    pub fetch: bool,
     pub architectures: Vec<String>,
     pub system_features: Vec<String>,
 }
 
-impl WorkerBuildCaps {
+impl WorkerCaps {
     /// Returns true when this worker can execute a build with the given
     /// `architecture` and `required_features`. `"builtin"` derivations
     /// (`builtin:fetchurl` etc.) run on any architecture.
@@ -143,16 +148,18 @@ pub struct Assignment {
     pub peer_id: OrganizationId,
 }
 
-/// Returns true when `job` is either an eval job (no arch constraint) or a
-/// build job whose architecture/features the worker can satisfy. If `caps` is
-/// `None`, capability checks are skipped (used for tests / open mode).
-fn job_eligible_for_caps(job: &PendingJob, caps: Option<&WorkerBuildCaps>) -> bool {
+/// Returns true when the worker can execute `job`: a flake job that fetches
+/// from a repository (carries `FetchFlake`) needs the `fetch` capability; a
+/// build job needs matching architecture/features. If `caps` is `None`,
+/// capability checks are skipped (used for tests / open mode).
+fn job_eligible_for_caps(job: &PendingJob, caps: Option<&WorkerCaps>) -> bool {
     match (job, caps) {
         // No capability info known → don't block (legacy behaviour for callers
         // that don't supply caps, e.g. unit tests for unrelated logic).
         (_, None) => true,
-        // Eval jobs aren't gated by build caps.
-        (PendingJob::Eval(_), Some(_)) => true,
+        // A repository-source flake job clones over the network and so requires
+        // `fetch`; eval-only follow-up jobs (cached source) run on any worker.
+        (PendingJob::Eval(j), Some(c)) => c.fetch || !j.job.tasks.contains(&FlakeTask::FetchFlake),
         (PendingJob::Build(j), Some(c)) => c.can_build(&j.architecture, &j.required_features),
     }
 }
@@ -187,13 +194,13 @@ impl JobTracker {
 
     /// Returns all pending job candidates that the worker is authorized to receive
     /// AND can execute. `caps` filters build jobs to those matching the worker's
-    /// architectures and system features; eval jobs are always eligible.
-    /// Pass `None` for `authorized` to disable peer filtering (open mode).
-    /// Pass `None` for `caps` to disable capability filtering (e.g. eval-only worker).
+    /// architectures and system features, and fetch flake jobs to fetch-capable
+    /// workers. Pass `None` for `authorized` to disable peer filtering (open mode).
+    /// Pass `None` for `caps` to disable capability filtering.
     pub fn candidates_for_worker(
         &self,
         authorized: Option<&HashSet<OrganizationId>>,
-        caps: Option<&WorkerBuildCaps>,
+        caps: Option<&WorkerCaps>,
     ) -> Vec<JobCandidate> {
         self.pending
             .iter()
@@ -233,7 +240,7 @@ impl JobTracker {
         &mut self,
         peer_id: &str,
         authorized: Option<&HashSet<OrganizationId>>,
-        caps: Option<&WorkerBuildCaps>,
+        caps: Option<&WorkerCaps>,
         kind: &JobKind,
         policy: &Policy,
     ) -> Option<Assignment> {
@@ -422,6 +429,32 @@ mod tests {
         })
     }
 
+    fn fetch_eval_job(peer: OrganizationId) -> PendingJob {
+        PendingJob::Eval(PendingEvalJob {
+            evaluation_id: EvaluationId::now_v7(),
+            project_id: None,
+            peer_id: peer,
+            commit_id: CommitId::now_v7(),
+            repository: "git+ssh://git@example.com/repo".into(),
+            job: FlakeJob {
+                tasks: vec![
+                    FlakeTask::FetchFlake,
+                    FlakeTask::EvaluateFlake,
+                    FlakeTask::EvaluateDerivations,
+                ],
+                source: FlakeSource::Repository {
+                    url: "git+ssh://git@example.com/repo".into(),
+                    commit: "abc123".into(),
+                },
+                wildcards: vec!["*".into()],
+                timeout_secs: None,
+                input_overrides: vec![],
+            },
+            required_paths: vec![],
+            queued_at: gradient_core::types::now(),
+        })
+    }
+
     fn build_job(peer: OrganizationId, required: Vec<RequiredPath>) -> PendingJob {
         build_job_arch(peer, required, "x86_64-linux", vec![])
     }
@@ -456,7 +489,8 @@ mod tests {
         // Worker with multiple architectures must accept a build whose target
         // matches ANY (not ALL) of its listed architectures. Guards against
         // `.any()` → `.all()` in the capability check.
-        let caps = WorkerBuildCaps {
+        let caps = WorkerCaps {
+            fetch: false,
             architectures: vec!["x86_64-linux".into(), "aarch64-linux".into()],
             system_features: vec![],
         };
@@ -469,7 +503,8 @@ mod tests {
     fn can_build_requires_all_features() {
         // Worker must provide EVERY required feature (not just one). Guards
         // against `.all()` → `.any()` in the feature check.
-        let caps = WorkerBuildCaps {
+        let caps = WorkerCaps {
+            fetch: false,
             architectures: vec!["x86_64-linux".into()],
             system_features: vec!["kvm".into()],
         };
@@ -527,7 +562,8 @@ mod tests {
             build_job_arch(peer, vec![], "builtin", vec![]),
         );
 
-        let x86_caps = WorkerBuildCaps {
+        let x86_caps = WorkerCaps {
+            fetch: false,
             architectures: vec!["x86_64-linux".into()],
             system_features: vec![],
         };
@@ -538,6 +574,66 @@ mod tests {
     }
 
     #[test]
+    fn fetch_flake_job_requires_fetch_capability() {
+        // Regression guard for #252: a FlakeJob carrying FetchFlake clones a
+        // repository (over SSH) and so must only be offered to fetch-capable
+        // workers - the server only sends SSH credentials to those. A worker
+        // without `fetch` (e.g. eval+build only) previously received the job
+        // and failed with "authentication required but no callback set".
+        let mut tracker = JobTracker::new();
+        let peer = OrganizationId::now_v7();
+        tracker.add_pending("j1".into(), fetch_eval_job(peer));
+
+        let no_fetch = WorkerCaps {
+            fetch: false,
+            architectures: vec!["x86_64-linux".into()],
+            system_features: vec![],
+        };
+        let p = Policy::default_build_policy();
+        assert!(
+            tracker
+                .take_best_of_kind("w1", None, Some(&no_fetch), &JobKind::Flake, &p)
+                .is_none(),
+            "worker without fetch must not receive a fetch flake job"
+        );
+        assert_eq!(tracker.pending_count(), 1);
+
+        let with_fetch = WorkerCaps {
+            fetch: true,
+            architectures: vec!["x86_64-linux".into()],
+            system_features: vec![],
+        };
+        assert!(
+            tracker
+                .take_best_of_kind("w2", None, Some(&with_fetch), &JobKind::Flake, &p)
+                .is_some(),
+            "fetch-capable worker must receive the fetch flake job"
+        );
+    }
+
+    #[test]
+    fn cached_eval_job_runs_without_fetch_capability() {
+        // Eval-only follow-up jobs (no FetchFlake task) read an already-cached
+        // source and must remain servable by workers that lack `fetch`.
+        let mut tracker = JobTracker::new();
+        let peer = OrganizationId::now_v7();
+        tracker.add_pending("j1".into(), eval_job(peer));
+
+        let no_fetch = WorkerCaps {
+            fetch: false,
+            architectures: vec![],
+            system_features: vec![],
+        };
+        let p = Policy::default_build_policy();
+        assert!(
+            tracker
+                .take_best_of_kind("w1", None, Some(&no_fetch), &JobKind::Flake, &p)
+                .is_some(),
+            "cached eval job must run on a worker without fetch"
+        );
+    }
+
+    #[test]
     fn test_take_best_of_kind_skips_wrong_arch() {
         let mut tracker = JobTracker::new();
         let peer = OrganizationId::now_v7();
@@ -545,7 +641,8 @@ mod tests {
             "arm".into(),
             build_job_arch(peer, vec![], "aarch64-linux", vec![]),
         );
-        let x86_caps = WorkerBuildCaps {
+        let x86_caps = WorkerCaps {
+            fetch: false,
             architectures: vec!["x86_64-linux".into()],
             system_features: vec![],
         };
@@ -565,11 +662,13 @@ mod tests {
             "kvm".into(),
             build_job_arch(peer, vec![], "x86_64-linux", vec!["kvm".into()]),
         );
-        let no_kvm = WorkerBuildCaps {
+        let no_kvm = WorkerCaps {
+            fetch: false,
             architectures: vec!["x86_64-linux".into()],
             system_features: vec![],
         };
-        let with_kvm = WorkerBuildCaps {
+        let with_kvm = WorkerCaps {
+            fetch: false,
             architectures: vec!["x86_64-linux".into()],
             system_features: vec!["kvm".into()],
         };

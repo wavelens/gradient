@@ -2763,3 +2763,19 @@ Run with: `cargo test -p core --test ip_allowlist`
 - `cargo test -p proto --lib handler::cache_session` — read-only message allow-list.
 - `cargo test -p proto --lib handler::limiter` — per-IP connection cap.
 - `cargo test -p proto --lib handler::cache_consumer` — ws URL building.
+
+## Fetch-capability gating for flake jobs (#252)
+
+A `FlakeJob` carrying a `FetchFlake` task clones its source repository (over
+SSH for private repos), and the server only sends SSH credentials to
+fetch-capable workers. Assigning such a job to a worker without the `fetch`
+capability left it cloning with no credentials callback, failing with
+`authentication required but no callback set`. The scheduler now gates these
+jobs on the worker's `fetch` capability.
+
+Run with: `cargo test -p scheduler --lib jobs`
+
+- `fetch_flake_job_requires_fetch_capability` — a `FetchFlake` flake job is not
+  assigned to a worker lacking `fetch`, but is assigned to a fetch-capable one.
+- `cached_eval_job_runs_without_fetch_capability` — an eval-only follow-up job
+  (cached source, no `FetchFlake`) still runs on a worker without `fetch`.
