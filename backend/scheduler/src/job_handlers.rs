@@ -24,7 +24,7 @@ use gradient_core::types::proto::{
 use gradient_core::types::*;
 
 use crate::Scheduler;
-use crate::jobs::{Assignment, PendingBuildJob, PendingEvalJob, PendingJob, WorkerBuildCaps};
+use crate::jobs::{Assignment, PendingBuildJob, PendingEvalJob, PendingJob, WorkerCaps};
 use crate::worker_pool::WorkerInfo;
 use crate::{build, dispatch, eval};
 
@@ -579,22 +579,27 @@ impl Scheduler {
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
-    /// Fetch the peer auth filter and build capabilities for a worker from the pool.
+    /// Fetch the peer auth filter and capabilities for a worker from the pool.
     async fn worker_auth_and_caps(
         &self,
         worker_id: &str,
-    ) -> (Option<HashSet<OrganizationId>>, Option<WorkerBuildCaps>) {
+    ) -> (Option<HashSet<OrganizationId>>, Option<WorkerCaps>) {
         let pool = self.worker_pool.read().await;
         let authorized = pool
             .peer_auth_for(worker_id)
             .and_then(|a| a.as_filter())
             .cloned();
-        let caps = pool
-            .build_caps_for(worker_id)
-            .map(|(a, f)| WorkerBuildCaps {
-                architectures: a,
-                system_features: f,
-            });
+        let caps = match (
+            pool.gradient_caps_for(worker_id),
+            pool.build_caps_for(worker_id),
+        ) {
+            (Some(g), Some((architectures, system_features))) => Some(WorkerCaps {
+                fetch: g.fetch,
+                architectures,
+                system_features,
+            }),
+            _ => None,
+        };
         (authorized, caps)
     }
 
@@ -604,7 +609,7 @@ impl Scheduler {
         &self,
         peer_id: &str,
         authorized: Option<&HashSet<OrganizationId>>,
-        caps: Option<&WorkerBuildCaps>,
+        caps: Option<&WorkerCaps>,
         kind: &JobKind,
     ) -> Option<Assignment> {
         let policy = Arc::clone(&self.policy);
