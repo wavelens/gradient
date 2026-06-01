@@ -379,6 +379,12 @@ in {
           default = 2 * 1024 * 1024;
         };
 
+        maxNarUploadSize = lib.mkOption {
+          description = "Maximum size in bytes of a NAR upload to the cache upload endpoint.";
+          type = lib.types.ints.positive;
+          default = 512 * 1024 * 1024;
+        };
+
         trustedProxies = lib.mkOption {
           description = ''
             CIDR allowlist of peers permitted to set `X-Forwarded-For`.
@@ -611,6 +617,7 @@ in {
         GRADIENT_REPORT_ERRORS = lib.boolToString cfg.reportErrors;
         GRADIENT_KEEP_EVALUATIONS = toString cfg.settings.keepEvaluations;
         GRADIENT_MAX_REQUEST_SIZE = toString cfg.settings.maxRequestSize;
+        GRADIENT_MAX_NAR_UPLOAD_SIZE = toString cfg.settings.maxNarUploadSize;
         GRADIENT_MAX_PROTO_CONNECTIONS = toString cfg.settings.maxProtoConnections;
         GRADIENT_LOG_LEVEL = cfg.settings.logLevel.default;
         GRADIENT_USE_TLS = lib.boolToString cfg.useTls;

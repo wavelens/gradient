@@ -48,6 +48,7 @@ pub mod events {
     pub const PROJECT_DELETE: &str = "project.delete";
     pub const CACHE_DELETE: &str = "cache.delete";
     pub const CACHE_NAR_DELETE: &str = "cache.nar.delete";
+    pub const CACHE_NAR_UPLOAD: &str = "cache.nar.upload";
     pub const CACHE_ROLE_CREATE: &str = "cache.role.create";
     pub const CACHE_ROLE_UPDATE: &str = "cache.role.update";
     pub const CACHE_ROLE_DELETE: &str = "cache.role.delete";
