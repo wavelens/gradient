@@ -1,7 +1,7 @@
 <h1 align="center">Gradient - Modern Nix-CI System</h1>
 
 <p align="center">
-  <a href="https://gradient.wavelens.io">🚀 Demo Instance</a>
+  <a href="https://public.gradient.ci">🚀 Public Instance</a>
   •
   <a href="https://wavelens.github.io/gradient">📖 Documentation</a>
   •
@@ -9,8 +9,8 @@
   •
   <a href="https://petstore.swagger.io/?url=https://raw.githubusercontent.com/wavelens/gradient/master/docs/gradient-api.yaml">🛠️ API Docs</a>
   •
-  <sup><a href="https://gradient.wavelens.io/organization/gradient/project/main">
-    <img src="https://gradient.wavelens.io/api/v1/projects/gradient/main/badge" alt="Gradient Badge" align="middle">
+  <sup><a href="https://public.gradient.ci/organization/gradient/project/main">
+    <img src="https://public.gradient.ci/api/v1/projects/gradient/main/badge" alt="Gradient Badge" align="middle">
   </a></sup>
 </p>
 
@@ -39,8 +39,8 @@
 Please refer to the [Quick Start Guide](https://wavelens.github.io/gradient/quick-start/) for a step-by-step installation guide.
 Add Cache for prebuilt Gradient packages (optional):
 ```
-URL: https://gradient.wavelens.io/cache/main
-Public Key: gradient.wavelens.io-main:qmxRE+saUvhNa3jqaCMWje+feVU77TjABchZrPGf7A8=
+URL: https://public.gradient.ci/cache/main
+Public Key: public.gradient.ci-main:qmxRE+saUvhNa3jqaCMWje+feVU77TjABchZrPGf7A8=
 ```
 
 Extend your `flake.nix` with Gradient module:

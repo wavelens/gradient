@@ -69,9 +69,9 @@ Add the public cache to avoid rebuilding Gradient from source:
 ```nix
 {
   nix.settings = {
-    substituters     = [ "https://gradient.wavelens.io/cache/main" ];
+    substituters     = [ "https://public.gradient.ci/cache/main" ];
     trusted-public-keys = [
-      "gradient.wavelens.io-main:qmxRE+saUvhNa3jqaCMWje+feVU77TjABchZrPGf7A8="
+      "public.gradient.ci-main:qmxRE+saUvhNa3jqaCMWje+feVU77TjABchZrPGf7A8="
     ];
   };
 }

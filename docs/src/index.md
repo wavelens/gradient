@@ -24,7 +24,7 @@
 | Resource | Link |
 |---|---|
 | Source code | <https://github.com/wavelens/gradient> |
-| Demo | <https://gradient.wavelens.io/api/v1/health> |
+| Demo | <https://public.gradient.ci> |
 | API Reference (Swagger) | [View on Swagger UI](https://petstore.swagger.io/?url=https://raw.githubusercontent.com/wavelens/gradient/master/docs/gradient-api.yaml) |
 | NixOS Options Search | <https://wavelens.github.io/gradient-search> |
 
@@ -33,8 +33,8 @@
 A public binary cache with pre-built Gradient packages is available:
 
 ```
-URL:        https://gradient.wavelens.io/cache/main
-Public Key: gradient.wavelens.io-main:qmxRE+saUvhNa3jqaCMWje+feVU77TjABchZrPGf7A8=
+URL:        https://public.gradient.ci/cache/main
+Public Key: public.gradient.ci-main:qmxRE+saUvhNa3jqaCMWje+feVU77TjABchZrPGf7A8=
 ```
 
 ## License
