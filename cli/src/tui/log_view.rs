@@ -32,14 +32,16 @@ impl Default for LogView {
 }
 
 impl LogView {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     pub fn streaming(rx: UnboundedReceiver<String>) -> Self {
         Self { rx: Some(rx), ..Self::default() }
     }
 
+    #[cfg(test)]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[cfg(test)]
     pub fn set_viewport(&mut self, n: usize) {
         self.viewport = n.max(1);
         self.clamp();
@@ -63,7 +65,9 @@ impl LogView {
         }
     }
 
+    #[cfg(test)]
     pub fn offset(&self) -> usize { self.offset }
+    #[cfg(test)]
     pub fn follow(&self) -> bool { self.follow }
 
     pub fn scroll_down(&mut self) {
