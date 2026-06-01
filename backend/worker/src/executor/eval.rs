@@ -92,6 +92,16 @@ pub async fn evaluate_flake(_job: &FlakeJob, updater: &mut JobUpdater) -> Result
     updater.report_evaluating_flake()
 }
 
+/// For a `Cached` source, the store path that must be present locally before
+/// evaluation (substituted from the gradient cache if absent). A `Repository`
+/// source is fetched/cloned by the worker itself, so nothing to ensure.
+pub fn required_local_source(source: &FlakeSource) -> Option<&str> {
+    match source {
+        FlakeSource::Cached { store_path } => Some(store_path.as_str()),
+        FlakeSource::Repository { .. } => None,
+    }
+}
+
 /// Number of derivations to accumulate before flushing a mid-walk `EvalResult`.
 const EVAL_BATCH_SIZE: usize = 50;
 
@@ -600,6 +610,19 @@ mod tests {
         let drv_reader = FakeDrvReader::from_raw_drvs(fixture.raw_drvs.clone());
 
         (resolver, drv_reader)
+    }
+
+    #[test]
+    fn cached_source_requires_store_path_present() {
+        let cached = FlakeSource::Cached {
+            store_path: "/nix/store/abc-source".into(),
+        };
+        assert_eq!(required_local_source(&cached), Some("/nix/store/abc-source"));
+        let repo = FlakeSource::Repository {
+            url: "u".into(),
+            commit: "c".into(),
+        };
+        assert_eq!(required_local_source(&repo), None);
     }
 
     #[tokio::test]

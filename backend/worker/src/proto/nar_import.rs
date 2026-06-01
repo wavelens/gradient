@@ -82,9 +82,9 @@ enum ClosureMode {
 struct InputPrefetcher<'a> {
     store: &'a LocalNixStore,
     /// Derivation path of the build task (used for logging and cache queries).
-    drv_path: &'a str,
+    drv_path: String,
     /// Build ID (used for logging only).
-    build_id: &'a str,
+    build_id: String,
     /// Live WS connection back to the server (used for `CacheQuery` /
     /// `NarRequest`). Requires `&mut` because sending advances the framing state.
     updater: &'a mut JobUpdater,
@@ -94,8 +94,20 @@ impl<'a> InputPrefetcher<'a> {
     fn new(store: &'a LocalNixStore, task: &'a BuildTask, updater: &'a mut JobUpdater) -> Self {
         Self {
             store,
-            drv_path: &task.drv_path,
-            build_id: &task.build_id,
+            drv_path: task.drv_path.clone(),
+            build_id: task.build_id.clone(),
+            updater,
+        }
+    }
+
+    /// Construct a prefetcher not tied to a `BuildTask` - used by
+    /// [`ensure_path`] to substitute a single store path (and its closure)
+    /// without a build context. `label` only feeds logging.
+    fn for_path(store: &'a LocalNixStore, label: String, updater: &'a mut JobUpdater) -> Self {
+        Self {
+            store,
+            drv_path: label.clone(),
+            build_id: label,
             updater,
         }
     }
@@ -117,7 +129,7 @@ impl<'a> InputPrefetcher<'a> {
     /// outputs are by construction not cached (we're about to produce them),
     /// and the daemon doesn't need them present to accept the `.drv` import.
     async fn ensure_self_drv_present(&mut self) -> Result<()> {
-        let full_drv_path = nix_store_path(self.drv_path);
+        let full_drv_path = nix_store_path(&self.drv_path);
         if tokio::fs::try_exists(&full_drv_path).await.unwrap_or(false) {
             return Ok(());
         }
@@ -146,7 +158,7 @@ impl<'a> InputPrefetcher<'a> {
     /// Reads `input_sources` (plain paths) and the output paths of each
     /// `input_derivation` by parsing their `.drv` files.
     async fn enumerate_inputs(&self) -> Result<HashSet<String>> {
-        let full_drv_path = nix_store_path(self.drv_path);
+        let full_drv_path = nix_store_path(&self.drv_path);
         let drv_bytes = tokio::fs::read(&full_drv_path)
             .await
             .with_context(|| format!("read .drv {} for prefetch", full_drv_path))?;
@@ -633,6 +645,28 @@ pub async fn prefetch_inputs(
         }
     }
     result
+}
+
+/// Ensure a single store path (plus its transitive runtime closure) is present
+/// in the local nix store, substituting it from the gradient cache when absent.
+///
+/// Used before evaluating a `FlakeSource::Cached` flake: the fetch ran on a
+/// different worker, so the archived source store path is only in the binary
+/// cache, not this worker's local store. `nix` won't substitute a `path:` flake
+/// ref from a cache, so we pull it in ourselves first. Reuses the same
+/// closure-expanding `CacheQuery Pull → download → import` pipeline as
+/// [`prefetch_inputs`].
+pub async fn ensure_path(
+    store: &LocalNixStore,
+    path: &str,
+    updater: &mut JobUpdater,
+) -> Result<()> {
+    if store.has_path(path).await? {
+        return Ok(());
+    }
+    InputPrefetcher::for_path(store, path.to_owned(), updater)
+        .fetch_closure(vec![path.to_owned()], ClosureMode::FollowOutputs)
+        .await
 }
 
 /// Worker side of an `external_cached` build: the build's outputs are
