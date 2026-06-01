@@ -5,6 +5,7 @@
  */
 
 use crate::commands::cache_nar;
+use crate::commands::cache_upload;
 use crate::commands::completion;
 use crate::input::{client_from_config, handle_input};
 use crate::output::{ExitKind, Output, to_exit_kind};
@@ -67,6 +68,8 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: cache_nar::Commands,
     },
+    /// Upload NAR(s) to a cache
+    Upload(crate::commands::cache_upload::UploadArgs),
 }
 
 pub async fn handle(cmd: Commands, out: Output) {
@@ -264,6 +267,7 @@ pub async fn handle(cmd: Commands, out: Output) {
         }
 
         Commands::Nar { cmd } => cache_nar::handle(cmd, out).await,
+        Commands::Upload(args) => cache_upload::handle(args, out).await,
     }
 }
 

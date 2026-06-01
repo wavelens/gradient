@@ -9,6 +9,7 @@ pub mod base;
 pub mod build;
 pub mod cache;
 pub mod cache_nar;
+pub mod cache_upload;
 pub mod completion;
 pub mod download;
 pub mod generate;
