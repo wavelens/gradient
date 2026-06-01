@@ -361,6 +361,34 @@ impl Scheduler {
         let job = self.job_tracker.write().await.remove_active(job_id);
         match job {
             Some(PendingJob::Eval(j)) => {
+                // Split mode: a fetch-only job just archived the source. Enqueue
+                // the cached eval follow-up instead of finalizing - eval has not run.
+                if crate::jobs::is_fetch_only(&j.job) {
+                    // Reusing the `eval:{id}` job id is safe: remove_active above
+                    // already evicted it from the active map.
+                    let store_path = EEvaluation::find_by_id(j.evaluation_id)
+                        .one(&self.state.worker_db)
+                        .await?
+                        .and_then(|e| e.flake_source);
+                    return match store_path {
+                        Some(path) => {
+                            let follow_id = format!("eval:{}", j.evaluation_id);
+                            self.enqueue_eval_job(follow_id, j.cached_followup(path)).await;
+                            info!(evaluation_id = %j.evaluation_id, "fetch complete; enqueued cached eval follow-up");
+                            Ok(())
+                        }
+                        None => {
+                            warn!(evaluation_id = %j.evaluation_id, "fetch-only job reported no flake_source; failing eval");
+                            eval::handle_eval_job_failed(
+                                &self.state,
+                                j.evaluation_id,
+                                "fetch completed but no flake source was archived",
+                            )
+                            .await
+                        }
+                    };
+                }
+
                 // Flush deferred dependency edges BEFORE promoting builds,
                 // so the dispatch SQL's dep-gating sees the full graph.
                 let deferred = self
