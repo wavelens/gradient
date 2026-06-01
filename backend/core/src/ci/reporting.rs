@@ -27,9 +27,15 @@ pub fn approval_check_context(project_name: &str) -> String {
     format!("gradient/{}: Approval", project_name)
 }
 
-/// CI check name for the per-evaluation roll-up status.
-pub fn evaluation_check_context(project_name: &str) -> String {
-    format!("gradient/{}: Evaluation", project_name)
+/// CI check name for the per-evaluation roll-up status. `wildcard_suffix` is
+/// `Some` only when a run targets a wildcard other than the project default
+/// (e.g. `/gradient run <wildcard>`), so that custom-wildcard runs report as
+/// their own check line instead of overwriting the default evaluation check.
+pub fn evaluation_check_context(project_name: &str, wildcard_suffix: Option<&str>) -> String {
+    match wildcard_suffix {
+        Some(w) => format!("gradient/{}: Evaluation: {}", project_name, w),
+        None => format!("gradient/{}: Evaluation", project_name),
+    }
 }
 
 /// CI check name for a single entry-point build under an evaluation.
@@ -130,8 +136,16 @@ mod tests {
     #[test]
     fn evaluation_context_format() {
         assert_eq!(
-            evaluation_check_context("my-project"),
+            evaluation_check_context("my-project", None),
             "gradient/my-project: Evaluation"
+        );
+    }
+
+    #[test]
+    fn evaluation_context_format_with_custom_wildcard() {
+        assert_eq!(
+            evaluation_check_context("my-project", Some("packages.x86_64-linux.foo")),
+            "gradient/my-project: Evaluation: packages.x86_64-linux.foo"
         );
     }
 
