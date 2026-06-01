@@ -6,6 +6,7 @@
 
 pub mod attr_spec;
 pub mod builds;
+pub mod builds_log;
 #[cfg(feature = "nix")]
 pub mod cache_upload_nix;
 pub mod base;
