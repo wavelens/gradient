@@ -164,6 +164,12 @@ fn job_eligible_for_caps(job: &PendingJob, caps: Option<&WorkerCaps>) -> bool {
     }
 }
 
+/// True when a flake job's only task is `FetchFlake` — a split-mode fetch-only
+/// job whose completion enqueues a cached eval follow-up rather than finalizing.
+pub fn is_fetch_only(job: &FlakeJob) -> bool {
+    job.tasks.as_slice() == [FlakeTask::FetchFlake]
+}
+
 /// Per-job score submitted by a worker after checking its local store.
 #[derive(Debug, Clone, Default)]
 pub struct WorkerJobScore {
@@ -932,5 +938,29 @@ mod tests {
     fn remove_job_unknown_id_is_noop() {
         let mut tracker = JobTracker::new();
         tracker.remove_job("does-not-exist");
+    }
+
+    #[test]
+    fn is_fetch_only_true_only_for_fetch_task_alone() {
+        let fetch_only = FlakeJob {
+            tasks: vec![FlakeTask::FetchFlake],
+            source: FlakeSource::Repository { url: "u".into(), commit: "c".into() },
+            wildcards: vec!["*".into()],
+            timeout_secs: None,
+            input_overrides: vec![],
+        };
+        assert!(is_fetch_only(&fetch_only));
+
+        let bundled = FlakeJob {
+            tasks: vec![FlakeTask::FetchFlake, FlakeTask::EvaluateFlake, FlakeTask::EvaluateDerivations],
+            ..fetch_only.clone()
+        };
+        assert!(!is_fetch_only(&bundled));
+
+        let cached = FlakeJob {
+            tasks: vec![FlakeTask::EvaluateFlake, FlakeTask::EvaluateDerivations],
+            ..fetch_only.clone()
+        };
+        assert!(!is_fetch_only(&cached));
     }
 }
