@@ -341,6 +341,79 @@ async fn record_eval_message_inserts_for_active_build_job() {
 }
 
 #[tokio::test]
+async fn fetch_only_completion_enqueues_cached_eval_followup() {
+    use entity::evaluation::EvaluationStatus;
+    use sea_orm::{DatabaseBackend, MockDatabase};
+    use test_support::prelude::*;
+
+    let eval_id = EvaluationId::now_v7();
+    let peer = OrganizationId::now_v7();
+    let source_path = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-source";
+
+    let archived_eval = entity::evaluation::Model {
+        id: eval_id,
+        project: None,
+        repository: "https://example.com/repo".into(),
+        commit: CommitId::nil(),
+        wildcard: "*".into(),
+        status: EvaluationStatus::Building,
+        previous: None,
+        next: None,
+        created_at: gradient_core::types::now(),
+        updated_at: gradient_core::types::now(),
+        flake_source: Some(source_path.into()),
+        check_run_ids: None,
+        waiting_reason: None,
+        trigger: None,
+        concurrent: false,
+        source_comment: None,
+    };
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![archived_eval]])
+        .into_connection();
+    let scheduler = Arc::new(Scheduler::new(test_state(db)));
+
+    let mut fetch_job = eval_job(peer);
+    fetch_job.evaluation_id = eval_id;
+    fetch_job.job.tasks = vec![FlakeTask::FetchFlake];
+    let job_id = format!("eval:{eval_id}");
+
+    scheduler.enqueue_eval_job(job_id.clone(), fetch_job).await;
+    scheduler
+        .register_worker(
+            "w1",
+            GradientCapabilities { eval: true, fetch: true, ..GradientCapabilities::default() },
+            HashSet::new(),
+        )
+        .await;
+    scheduler.request_job("w1", JobKind::Flake).await;
+
+    scheduler
+        .handle_job_completed("w1", &job_id)
+        .await
+        .expect("fetch-only completion should succeed");
+
+    assert_eq!(scheduler.pending_job_count().await, 1);
+
+    // The follow-up reuses the `eval:{id}` id and carries a cached source.
+    let assignment = scheduler
+        .request_job("w1", JobKind::Flake)
+        .await
+        .expect("cached eval follow-up should be assignable");
+    assert_eq!(assignment.job_id, job_id);
+    match assignment.job {
+        gradient_core::types::proto::Job::Flake(j) => match j.source {
+            gradient_core::types::proto::FlakeSource::Cached { store_path } => {
+                assert_eq!(store_path, source_path)
+            }
+            other => panic!("expected Cached source, got {other:?}"),
+        },
+        other => panic!("expected a Flake job, got {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn cancel_evaluation_jobs_drops_eval_and_build_jobs() {
     use gradient_core::types::proto::{BuildJob, BuildTask};
 
