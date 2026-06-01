@@ -27,6 +27,8 @@ pub enum Commands {
         page: Option<u32>,
         #[arg(long = "per-page")]
         per_page: Option<u32>,
+        #[arg(short = 'i', long)]
+        interactive: bool,
     },
     /// Show a NAR's full metadata
     Show { cache: String, hash: String },
@@ -51,6 +53,7 @@ pub async fn handle(cmd: Commands, out: Output) {
             order,
             page,
             per_page,
+            interactive,
         } => {
             let client = client_from_config(out);
             let q = NarListQuery {
@@ -63,6 +66,11 @@ pub async fn handle(cmd: Commands, out: Output) {
             };
             match client.caches().nars_list(&cache, q).await {
                 Ok(res) => {
+                    if interactive && !out.is_json() {
+                        crate::tui::run(crate::tui::nar_browser::NarBrowser::new(res.items))
+                            .unwrap_or_else(|e| out.err(ExitKind::Api, format!("tui error: {e}")));
+                        return;
+                    }
                     out.ok(&res);
                     if res.items.is_empty() {
                         out.human("No NARs match.");
