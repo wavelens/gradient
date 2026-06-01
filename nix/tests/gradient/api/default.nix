@@ -8,10 +8,20 @@
 {
   value = pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     name = "gradient-api";
-    globalTimeout = 120;
+    globalTimeout = 600;
+
     nodes = {
       machine = { config, pkgs, lib, ... }: {
         imports = [ ../../../modules/gradient.nix ];
+
+        networking.hosts."127.0.0.1" = [ "gradient.local" ];
+
+        environment.systemPackages = with pkgs; [
+          curl
+          jq
+          gradient-cli
+        ];
+
         services = {
           gradient = {
             enable = true;
