@@ -10,7 +10,7 @@ use super::response::{QueuedEvaluation, SkippedProject, WebhookTriggerOutcome};
 use entity::project_trigger as ept;
 use gradient_core::ci::{
     APPROVAL_ACTION_ID, ApplyInput, ApplyOutcome, ApprovalInfo, ForgeType, apply_trigger,
-    find_approval_gated_eval, set_evaluation_source_comment, unpark_approval,
+    find_approval_gated_eval, parse_owner_repo, set_evaluation_source_comment, unpark_approval,
     unpark_approval_with_wildcard,
 };
 use gradient_core::types::triggers::{TriggerConfig, TriggerType};
@@ -33,6 +33,10 @@ pub(super) struct PullRequestApprovalContext {
     pub pr_number: Option<u64>,
     pub pr_author: Option<String>,
     pub is_fork: Option<bool>,
+    /// Login of the actor who triggered this PR event. When this actor is a
+    /// trusted repo writer the approval gate is bypassed, so a maintainer
+    /// force-pushing onto a contributor's branch does not re-park the run.
+    pub sender: Option<String>,
 }
 
 // ── GitHub installation payload ────────────────────────────────────────────
@@ -488,7 +492,7 @@ where
             .unwrap_or_default();
 
         let gate_approval = if pr_require_approval {
-            decide_pr_gate(approval_ctx.as_ref()).await
+            decide_pr_gate(state, &project, approval_ctx.as_ref()).await
         } else {
             None
         };
@@ -572,11 +576,40 @@ where
 /// Resolves whether a PR webhook fire should be gated on maintainer approval.
 ///
 /// Fail-closed: returns `Some(ApprovalInfo)` whenever the PR is (or might be) a
-/// fork, deferring the trust decision to maintainers via the forge UI / `/ci
-/// run` comment. Same-repo PRs (`is_fork == Some(false)`) bypass the gate.
-async fn decide_pr_gate(ctx: Option<&PullRequestApprovalContext>) -> Option<ApprovalInfo> {
+/// fork, deferring the trust decision to maintainers via the forge UI /
+/// `/gradient run` comment. The gate is bypassed when:
+/// - the PR is same-repo (`is_fork == Some(false)`), or
+/// - the actor who triggered the event (`sender`) is a trusted repo writer,
+///   so a maintainer force-pushing onto a contributor's branch runs without
+///   re-parking.
+async fn decide_pr_gate(
+    state: &Arc<ServerState>,
+    project: &MProject,
+    ctx: Option<&PullRequestApprovalContext>,
+) -> Option<ApprovalInfo> {
     let ctx = ctx?;
-    if matches!(ctx.is_fork, Some(false)) {
+    let sender_trusted = match ctx.sender.as_deref() {
+        Some(sender) if !matches!(ctx.is_fork, Some(false)) => {
+            match parse_owner_repo(&project.repository) {
+                Some((owner, repo)) => {
+                    sender_is_trusted(state, project.id, &owner, &repo, sender).await
+                }
+                None => false,
+            }
+        }
+        _ => false,
+    };
+    gate_decision(ctx, sender_trusted)
+}
+
+/// Pure approval-gate decision given whether the event's actor is a trusted
+/// repo writer. Returns `None` (run immediately) when the PR is same-repo or
+/// the actor is trusted; otherwise `Some(ApprovalInfo)` to park for approval.
+fn gate_decision(
+    ctx: &PullRequestApprovalContext,
+    sender_trusted: bool,
+) -> Option<ApprovalInfo> {
+    if matches!(ctx.is_fork, Some(false)) || sender_trusted {
         return None;
     }
     Some(ApprovalInfo {
@@ -1219,10 +1252,14 @@ pub(super) async fn handle_issue_comment(
                 continue;
             }
         };
+        // The maintainer running `/gradient run` was already trust-verified
+        // above, so `sender` lets `decide_pr_gate` bypass the approval gate -
+        // the command itself is the approval, even on a fork PR.
         let approval_ctx = PullRequestApprovalContext {
             pr_number: Some(pr_number),
             pr_author: None,
             is_fork: Some(snapshot.is_fork),
+            sender: Some(sender.clone()),
         };
         let source_comment_json = reaction_target.as_ref().map(|t| {
             serde_json::json!({
@@ -1500,9 +1537,55 @@ async fn active_project_ids_for_integration(
 mod tests {
     use super::super::WebhookTriggerOutcome;
     use super::{
-        GradientCommand, glob_match_pattern, glob_matches, normalize_repo_url,
-        parse_gradient_command,
+        GradientCommand, PullRequestApprovalContext, gate_decision, glob_match_pattern,
+        glob_matches, normalize_repo_url, parse_gradient_command,
     };
+
+    fn fork_ctx() -> PullRequestApprovalContext {
+        PullRequestApprovalContext {
+            pr_number: Some(7),
+            pr_author: Some("external".into()),
+            is_fork: Some(true),
+            sender: Some("maintainer".into()),
+        }
+    }
+
+    #[test]
+    fn gate_same_repo_pr_bypasses() {
+        let ctx = PullRequestApprovalContext {
+            is_fork: Some(false),
+            ..fork_ctx()
+        };
+        assert!(gate_decision(&ctx, false).is_none());
+    }
+
+    #[test]
+    fn gate_fork_untrusted_sender_parks() {
+        let gate = gate_decision(&fork_ctx(), false).expect("fork PR must park");
+        assert_eq!(gate.pr_number, 7);
+        assert_eq!(gate.pr_author, "external");
+    }
+
+    #[test]
+    fn gate_fork_trusted_sender_bypasses() {
+        assert!(
+            gate_decision(&fork_ctx(), true).is_none(),
+            "a trusted maintainer (force-push / command) must bypass the gate"
+        );
+    }
+
+    #[test]
+    fn gate_unknown_fork_status_fails_closed() {
+        let ctx = PullRequestApprovalContext {
+            is_fork: None,
+            sender: None,
+            ..fork_ctx()
+        };
+        assert!(
+            gate_decision(&ctx, false).is_some(),
+            "uncertain fork status with untrusted sender must park"
+        );
+    }
 
     #[test]
     fn normalize_strips_dot_git_suffix() {
