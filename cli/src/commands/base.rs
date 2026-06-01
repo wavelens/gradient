@@ -118,6 +118,11 @@ enum MainCommands {
         #[arg(long)]
         out: Option<String>,
     },
+    /// Inspect builds (dependency graph)
+    Builds {
+        #[command(subcommand)]
+        cmd: builds::Commands,
+    },
     /// Generate project files
     Generate {
         #[command(subcommand)]
@@ -302,6 +307,7 @@ pub async fn run_cli() -> std::io::Result<()> {
         MainCommands::Project { cmd } => project::handle(cmd, out).await,
         MainCommands::Worker { cmd } => worker::handle(cmd, out).await,
         MainCommands::Cache { cmd } => cache::handle(cmd, out).await,
+        MainCommands::Builds { cmd } => builds::handle(cmd, out).await,
         MainCommands::Generate { cmd } => generate::handle(cmd, out).await,
         MainCommands::Hash => {
             let password = ask_for_password();
