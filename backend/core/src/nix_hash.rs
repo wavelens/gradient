@@ -16,6 +16,11 @@
 
 use base64::Engine as _;
 
+pub fn is_nix32_hash(s: &str) -> bool {
+    const CHARS: &[u8] = b"0123456789abcdfghijklmnpqrsvwxyz";
+    s.len() == 32 && s.bytes().all(|b| CHARS.contains(&b))
+}
+
 /// Encode bytes using the Nix base32 alphabet (omits `e`, `o`, `t`, `u`).
 pub fn nix32_encode(bytes: &[u8]) -> String {
     const CHARS: &[u8] = b"0123456789abcdfghijklmnpqrsvwxyz";
