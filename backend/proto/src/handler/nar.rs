@@ -98,9 +98,9 @@ pub(super) async fn mark_nar_stored(
         return Ok(());
     }
 
-    let Some(org_id) = scheduler.peer_id_for_job(job_id).await else {
-        warn!(%job_id, "no org for job; skipping NAR ingest");
-        return Ok(());
+    let targets = match scheduler.peer_id_for_job(job_id).await {
+        Some(org_id) => SignTargets::OrgCaches(org_id),
+        None => SignTargets::None,
     };
 
     let input = IngestInput {
@@ -113,10 +113,9 @@ pub(super) async fn mark_nar_stored(
         deriver: record.deriver,
     };
 
-    let outcome =
-        ingest_metadata_only(&state.worker_db, input, SignTargets::OrgCaches(org_id)).await?;
-
-    let cached_path_id = outcome.cached_path;
+    let cached_path_id = ingest_metadata_only(&state.worker_db, input, targets)
+        .await?
+        .cached_path;
 
     let outputs = EDerivationOutput::find()
         .filter(CDerivationOutput::Hash.eq(hash))

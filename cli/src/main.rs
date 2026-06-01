@@ -7,7 +7,7 @@
 mod commands;
 mod config;
 mod input;
-pub mod narinfo;
+mod narinfo;
 pub mod output;
 mod tui;
 

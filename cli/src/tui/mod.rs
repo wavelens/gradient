@@ -31,15 +31,13 @@ pub fn run<V: View>(mut view: V) -> io::Result<()> {
 
 fn run_loop<V: View>(terminal: &mut Terminal<CrosstermBackend<Stdout>>, view: &mut V) -> io::Result<()> {
     loop {
+        view.on_tick();
         terminal.draw(|f| view.render(f))?;
-        if event::poll(Duration::from_millis(200))? {
-            if let Event::Key(key) = event::read()?
-                && view.on_key(key)
-            {
-                return Ok(());
-            }
-        } else {
-            view.on_tick();
+        if event::poll(Duration::from_millis(200))?
+            && let Event::Key(key) = event::read()?
+            && view.on_key(key)
+        {
+            return Ok(());
         }
     }
 }

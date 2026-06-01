@@ -23,8 +23,8 @@ pub struct GraphTree {
     selected: usize,
 }
 
-#[allow(dead_code)]
 impl GraphTree {
+    #[cfg(test)]
     pub fn from_edges(nodes: &[(&str, &str)], edges: &[(&str, &str)], roots: Vec<NodeId>) -> Self {
         let mut map: HashMap<NodeId, Node> = HashMap::new();
         for (id, label) in nodes {
@@ -110,10 +110,11 @@ impl GraphTree {
         }
     }
 
+    #[cfg(test)]
     pub fn flat_len(&self) -> usize { self.flat.len() }
-    pub fn selected(&self) -> usize { self.selected }
     pub fn move_down(&mut self) { if self.selected + 1 < self.flat.len() { self.selected += 1; } }
     pub fn move_up(&mut self) { self.selected = self.selected.saturating_sub(1); }
+    #[cfg(test)]
     pub fn contains(&self, id: &str) -> bool { self.flat.iter().any(|(i, _)| i == id) }
 
     pub fn toggle_expand(&mut self) {
