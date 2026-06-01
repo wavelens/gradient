@@ -5,6 +5,8 @@
  */
 
 pub mod attr_spec;
+#[cfg(feature = "nix")]
+pub mod cache_upload_nix;
 pub mod base;
 pub mod build;
 pub mod cache;
