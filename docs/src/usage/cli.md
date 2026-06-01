@@ -108,7 +108,8 @@ gradient cache add
 gradient cache remove <name>
 ```
 
-NAR management (list, inspect, delete cached store paths inside a cache):
+NAR management (list, inspect, delete, and upload cached store paths inside a
+cache):
 
 ```sh
 gradient cache nar list <cache> [--hash <prefix>] [--package <substring>] \
@@ -117,14 +118,24 @@ gradient cache nar list <cache> [--hash <prefix>] [--package <substring>] \
 gradient cache nar show <cache> <hash>
 gradient cache nar delete <cache> <hash> [-y]
 gradient cache nar stats <cache>
+
+# Upload a pre-dumped NAR (no Nix required)
+gradient cache upload --nar-file <file.nar> --narinfo <file.narinfo> <cache>
+
+# Upload from the local Nix store (nix feature only)
+gradient cache upload [--full-closure] <store-path>... <cache>
 ```
 
 Deleting a NAR is ref-counted: if the NAR is signed by more than one cache,
 the delete only drops the current cache's signature; the underlying NAR blob
 stays. When the last cache holding a NAR drops it, the blob is GC'd
 asynchronously and any `derivation_output.is_cached` rows for it flip to
-`false`. NAR upload from local store is tracked separately under
-[issue #261](https://github.com/wavelens/gradient/issues/261).
+`false`.
+
+Uploading requires the `writeStore` cache permission. The server enforces a
+maximum NAR upload size (default 512 MiB, configurable via
+`GRADIENT_MAX_NAR_UPLOAD_SIZE`). See [Managing cached NARs](cache-nars.md)
+for full upload documentation.
 
 ### Build Requests
 
@@ -150,6 +161,34 @@ Requirements and limits:
 - Combined upload size must not exceed **20 MiB** (`MAX_BUILD_REQUEST_SIZE`).
 - The default flow streams logs from all queued builds until they complete;
   pass `--no-stream` to return immediately after dispatch.
+
+### Builds
+
+`gradient builds` is a top-level command group for inspecting build metadata
+after dispatch.
+
+```sh
+# Collapsible dependency-graph browser for a specific build
+gradient builds graph <build-id> [-i]
+
+# Build log viewer / streamer for a specific build
+gradient builds log <build-id> [-i]
+```
+
+Without `-i`, `builds graph` prints the node and edge counts to stdout.
+Without `-i`, `builds log` streams the log to stdout.
+
+### Interactive mode (`-i` / `--interactive`)
+
+Several commands accept `-i` / `--interactive` to open a full-screen
+[ratatui](https://github.com/ratatui/ratatui) TUI instead of plain text
+output. The flag is silently ignored in `--json` mode.
+
+| Command | TUI description | Key bindings |
+|---|---|---|
+| `gradient cache nar list -i` | Scrollable, type-to-filter NAR browser | Type to filter by package or hash; `↑`/`↓` navigate; `Esc` quit |
+| `gradient builds graph <id> -i` | Collapsible dependency-graph browser (nix-tree style) | `↑`/`↓` navigate; `Enter`/`Space` expand or collapse a node; `Esc` quit |
+| `gradient builds log <id> -i` | Less-style log pager with follow-tail | `↑`/`↓` scroll; `f` toggle follow-tail; `/` search; `Esc` quit |
 
 ### Downloading artefacts
 
