@@ -10,7 +10,8 @@ use std::collections::{HashMap, HashSet};
 
 use gradient_core::types::ids::{BuildId, CommitId, EvaluationId, OrganizationId, ProjectId};
 use gradient_core::types::proto::{
-    BuildJob, CandidateScore, FlakeJob, FlakeTask, Job, JobCandidate, JobKind, RequiredPath,
+    BuildJob, CandidateScore, FlakeJob, FlakeSource, FlakeTask, Job, JobCandidate, JobKind,
+    RequiredPath,
 };
 
 use crate::policy::{JobContext, Policy, WorkerContext};
@@ -29,6 +30,16 @@ pub struct PendingEvalJob {
     /// `evaluation.updated_at` at the time this job was dispatched.
     /// Used by the scoring policy to prefer evaluations that have waited longer.
     pub queued_at: chrono::NaiveDateTime,
+}
+
+impl PendingEvalJob {
+    pub fn cached_followup(&self, store_path: String) -> PendingEvalJob {
+        let mut follow = self.clone();
+        follow.job.tasks = vec![FlakeTask::EvaluateFlake, FlakeTask::EvaluateDerivations];
+        follow.job.source = FlakeSource::Cached { store_path: store_path.clone() };
+        follow.required_paths = vec![RequiredPath { path: store_path, cache_info: None }];
+        follow
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -938,6 +949,28 @@ mod tests {
     fn remove_job_unknown_id_is_noop() {
         let mut tracker = JobTracker::new();
         tracker.remove_job("does-not-exist");
+    }
+
+    #[test]
+    fn cached_followup_rewrites_source_and_tasks() {
+        let peer = OrganizationId::now_v7();
+        let PendingJob::Eval(original) = fetch_eval_job(peer) else { unreachable!() };
+
+        let follow = original.cached_followup("/nix/store/abc-source".into());
+
+        assert_eq!(
+            follow.job.tasks,
+            vec![FlakeTask::EvaluateFlake, FlakeTask::EvaluateDerivations]
+        );
+        match &follow.job.source {
+            FlakeSource::Cached { store_path } => assert_eq!(store_path, "/nix/store/abc-source"),
+            other => panic!("expected Cached, got {other:?}"),
+        }
+        assert_eq!(follow.evaluation_id, original.evaluation_id);
+        assert_eq!(follow.peer_id, original.peer_id);
+        assert_eq!(follow.repository, original.repository);
+        assert_eq!(follow.required_paths.len(), 1);
+        assert!(follow.required_paths.iter().any(|p| p.path == "/nix/store/abc-source"));
     }
 
     #[test]
