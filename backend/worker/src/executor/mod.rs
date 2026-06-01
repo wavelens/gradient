@@ -227,6 +227,16 @@ impl JobExecutor {
                 }
                 FlakeTask::EvaluateFlake => eval::evaluate_flake(&job, updater).await?,
                 FlakeTask::EvaluateDerivations => {
+                    // A `Cached` source was archived to a *different* worker's
+                    // store and pushed to the cache; substitute it locally
+                    // before eval, since nix won't pull a `path:` flake ref
+                    // from a binary cache.
+                    if local_flake_path.is_none()
+                        && let Some(src) = eval::required_local_source(&job.source)
+                    {
+                        crate::proto::nar_import::ensure_path(&self.store, src, updater).await?;
+                    }
+
                     let produced_drvs = eval::evaluate_derivations(
                         &self.evaluator,
                         &job,
