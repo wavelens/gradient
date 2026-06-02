@@ -125,7 +125,7 @@ api("GET", "orgs/myorg/users", token=token)
 api("GET", "orgs/myorg/subscribe", token=token)
 
 role_id = api("POST", "orgs/myorg/roles", token=token, body=json.dumps({
-    "name": "viewers", "permissions": ["viewOrg"]}))
+    "name": "viewers", "permissions": ["viewOrg"]}))["id"]
 api("GET", "orgs/myorg/roles", token=token)
 api("GET", f"orgs/myorg/roles/{role_id}", token=token)
 api("PATCH", f"orgs/myorg/roles/{role_id}", token=token, body=json.dumps({"name": "viewers2"}))
