@@ -102,9 +102,8 @@ keys = api("GET", "user/keys", token=token)
 key_id = next(k["id"] for k in keys if k["name"] == "ci-key")
 # The created key authorizes API calls just like a session token.
 api("GET", "orgs", token=key_token)
-api("GET", f"user/keys/{key_id}", token=token)
 api("POST", f"user/keys/{key_id}/revoke", token=token)
-api("DELETE", f"user/keys/{key_id}", token=token)
+api("DELETE", "user/keys", token=token, body=json.dumps({"name": "ci-key"}))
 
 # ── Phase 3: organizations (direct + CLI) ─────────────────────────────────────
 banner("Phase 3: organizations")
