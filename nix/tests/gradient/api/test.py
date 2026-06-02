@@ -96,7 +96,7 @@ api("GET", "user/audit-log", token=token)
 api("GET", "user/search?q=operator", token=token)
 
 created = api("POST", "user/keys", token=token, body=json.dumps({
-    "name": "ci-key", "permissions": []}))
+    "name": "ci-key", "permissions": ["viewOrg"]}))
 key_id, key_token = created["id"], created["token"]
 api("GET", "user/keys", token=token)
 # The created key authorizes API calls just like a session token.
