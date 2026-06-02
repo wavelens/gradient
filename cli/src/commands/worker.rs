@@ -67,9 +67,6 @@ pub async fn handle(cmd: Commands, out: Output) {
                         display_name,
                         url,
                         token,
-                        enable_fetch: None,
-                        enable_eval: None,
-                        enable_build: None,
                     },
                 )
                 .await
