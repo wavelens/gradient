@@ -11,6 +11,7 @@
 # build-request dispatch) have dedicated tests and are out of scope here.
 
 import json
+import time
 
 API = "http://gradient.local/api/v1"
 CLI = "gradient"
@@ -87,7 +88,10 @@ assert token, "login returned empty token"
 api("GET", "orgs", token=token)  # token authorizes
 
 # A second user, used later for org/cache membership flows. Lookup is by username.
+# The auth surface is rate-limited (burst 5, one token refilled every 6s); the
+# calls above exhaust the burst, so wait for a token before this 6th request.
 member = "teammate"
+time.sleep(8)
 api("POST", "auth/basic/register", body=json.dumps({
     "username": member, "name": "Team Mate",
     "email": "teammate@gradient.local", "password": "SecureTest123!",
