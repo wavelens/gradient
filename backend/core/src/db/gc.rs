@@ -6,6 +6,7 @@
 
 use anyhow::{Context, Result};
 use chrono::Duration as ChronoDuration;
+use entity::evaluation::EvaluationStatus;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, IntoActiveModel,
@@ -17,10 +18,11 @@ use uuid::Uuid;
 
 use crate::types::*;
 
-/// Deletes evaluations for `project_id` beyond the most recent `keep` entries.
+/// Deletes evaluations for `project_id`, retaining the most recent `keep`
+/// terminal evaluations (see [`evaluations_to_gc`]).
 ///
 /// Handles DB deletion, build log removal, NAR cache files, and GC root symlinks.
-/// Never deletes evaluations that are still Queued/Evaluating/Building.
+/// Active evaluations are never deleted and never count toward `keep`.
 pub async fn gc_project_evaluations(
     state: Arc<ServerState>,
     project_id: ProjectId,
@@ -30,7 +32,7 @@ pub async fn gc_project_evaluations(
         return Ok(());
     }
 
-    // Newest first so [..keep] are the ones to retain.
+    // Newest first; deletion selection counts only terminal evaluations.
     let all_evals = EEvaluation::find()
         .filter(CEvaluation::Project.eq(project_id))
         .order_by_desc(CEvaluation::CreatedAt)
@@ -38,20 +40,15 @@ pub async fn gc_project_evaluations(
         .await
         .context("GC: failed to query evaluations")?;
 
-    if all_evals.len() <= keep {
+    let statuses: Vec<EvaluationStatus> = all_evals.iter().map(|e| e.status).collect();
+    let delete_indices = evaluations_to_gc(&statuses, keep);
+    if delete_indices.is_empty() {
         return Ok(());
     }
 
-    // Never GC evaluations that are still running.
-    let to_delete: Vec<MEvaluation> = all_evals[keep..]
-        .iter()
-        .filter(|e| !e.status.is_active())
-        .cloned()
-        .collect();
-
-    if to_delete.is_empty() {
-        return Ok(());
-    }
+    let to_delete: Vec<MEvaluation> = delete_indices.iter().map(|&i| all_evals[i].clone()).collect();
+    let deleted_ids: std::collections::HashSet<EvaluationId> =
+        to_delete.iter().map(|e| e.id).collect();
 
     info!(
         project_id = %project_id,
@@ -59,24 +56,22 @@ pub async fn gc_project_evaluations(
         "Running per-project evaluation GC"
     );
 
-    // Break the linked list: NULL out `previous` on the oldest surviving evaluation so that
-    // deleting the old evaluations does not cascade into the surviving chain.
-    if let Some(oldest_surviving) = all_evals[..keep].last()
-        && oldest_surviving.previous.is_some()
-    {
-        let mut a: AEvaluation = oldest_surviving.clone().into_active_model();
-        a.previous = Set(None);
-        a.update(&state.worker_db)
-            .await
-            .context("GC: failed to unlink oldest surviving evaluation")?;
-    }
+    // Break the linked list so deletions never violate previous/next FKs:
+    // NULL the deleted rows' own pointers and any surviving pointer into them.
+    for eval in &all_evals {
+        let drop_prev = eval.previous.is_some_and(|p| deleted_ids.contains(&p));
+        let drop_next = eval.next.is_some_and(|n| deleted_ids.contains(&n));
+        if !deleted_ids.contains(&eval.id) && !drop_prev && !drop_next {
+            continue;
+        }
 
-    // NULL out previous/next on every evaluation being deleted so cascade between
-    // deleted rows does not interfere with the deletion order.
-    for eval in &to_delete {
         let mut a: AEvaluation = eval.clone().into_active_model();
-        a.previous = Set(None);
-        a.next = Set(None);
+        if deleted_ids.contains(&eval.id) || drop_prev {
+            a.previous = Set(None);
+        }
+        if deleted_ids.contains(&eval.id) || drop_next {
+            a.next = Set(None);
+        }
         a.update(&state.worker_db)
             .await
             .context("GC: failed to NULL evaluation linked-list pointers")?;
@@ -129,6 +124,33 @@ pub async fn gc_project_evaluations(
 
     info!(project_id = %project_id, deleted = to_delete.len(), "Per-project evaluation GC done");
     Ok(())
+}
+
+/// Selects, by index into a newest-first evaluation list, which evaluations the
+/// per-project GC should delete for a given `keep` count.
+///
+/// Active evaluations (Queued/Fetching/Evaluating*/Building/Waiting) are never
+/// deleted and never consume a `keep` slot. Among terminal evaluations the
+/// `keep` most recent `Completed`/`Failed` ("done") ones are retained; `Aborted`
+/// evaluations are retained only to fill remaining slots when too few done
+/// evaluations exist, and are deleted otherwise.
+fn evaluations_to_gc(statuses: &[EvaluationStatus], keep: usize) -> Vec<usize> {
+    if keep == 0 {
+        return Vec::new();
+    }
+
+    let terminal: Vec<usize> = (0..statuses.len())
+        .filter(|&i| !statuses[i].is_active())
+        .collect();
+
+    let mut retained = terminal.clone();
+    retained.sort_by_key(|&i| matches!(statuses[i], EvaluationStatus::Aborted));
+    let keep_set: std::collections::HashSet<usize> = retained.into_iter().take(keep).collect();
+
+    terminal
+        .into_iter()
+        .filter(|i| !keep_set.contains(i))
+        .collect()
 }
 
 /// Derivation GC pass: deletes `derivation` rows that have no remaining `build`
@@ -232,4 +254,53 @@ pub async fn gc_orphan_derivations(state: Arc<ServerState>, grace_hours: i64) ->
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use EvaluationStatus::*;
+
+    #[test]
+    fn keeps_last_done_when_newer_evaluation_is_active() {
+        assert!(evaluations_to_gc(&[Building, Completed], 1).is_empty());
+    }
+
+    #[test]
+    fn never_deletes_active_evaluations() {
+        assert!(evaluations_to_gc(&[Queued, Building, Waiting, Fetching], 1).is_empty());
+    }
+
+    #[test]
+    fn gcs_aborted_when_a_done_evaluation_exists() {
+        assert_eq!(evaluations_to_gc(&[Aborted, Completed], 1), vec![0]);
+    }
+
+    #[test]
+    fn keeps_aborted_when_no_done_evaluation_exists() {
+        assert!(evaluations_to_gc(&[Aborted], 1).is_empty());
+    }
+
+    #[test]
+    fn done_evaluations_take_priority_over_aborted() {
+        assert_eq!(evaluations_to_gc(&[Completed, Aborted, Failed], 2), vec![1]);
+    }
+
+    #[test]
+    fn deletes_done_evaluations_beyond_keep() {
+        assert_eq!(evaluations_to_gc(&[Completed, Failed, Completed], 1), vec![1, 2]);
+    }
+
+    #[test]
+    fn active_evaluations_do_not_consume_keep_slots() {
+        assert_eq!(
+            evaluations_to_gc(&[Building, Completed, Aborted, Completed], 1),
+            vec![2, 3]
+        );
+    }
+
+    #[test]
+    fn keep_zero_deletes_nothing() {
+        assert!(evaluations_to_gc(&[Completed, Aborted], 0).is_empty());
+    }
 }
