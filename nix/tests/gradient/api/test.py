@@ -50,6 +50,14 @@ def cli(args):
     return machine.succeed(f"{CLI} --json {args}")
 
 
+def status(method, path, token=None, code=200):
+    cmd = f"curl -sS -o /dev/null -w '%{{http_code}}' -X {method} {API}/{path}"
+    if token:
+        cmd += f" -H 'Authorization: Bearer {token}'"
+    out = machine.succeed(cmd).strip()
+    assert out == str(code), f"{method} {path}: expected {code}, got {out}"
+
+
 # ── Phase 0: health ───────────────────────────────────────────────────────────
 banner("Phase 0: health")
 print(machine.succeed(f"curl -sS --fail {API}/health -i"))
@@ -284,7 +292,7 @@ assert any(n["hash"] == direct_hash for n in nars), f"direct-uploaded NAR missin
 
 # Delete one via CLI, one via direct API.
 cli(f"cache nar delete maincache {cli_hash} -y")
-api("DELETE", f"caches/maincache/nars/{direct_hash}", token=token)
+status("DELETE", f"caches/maincache/nars/{direct_hash}", token=token, code=204)
 remaining = api("GET", "caches/maincache/nars", token=token)["items"]
 assert not any(n["hash"] in (cli_hash, direct_hash) for n in remaining), remaining
 
