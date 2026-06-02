@@ -272,8 +272,8 @@ pub async fn stats(
     let row = Row::find_by_statement(Statement::from_sql_and_values(
         DatabaseBackend::Postgres,
         "SELECT COUNT(*) AS total_nars, \
-                COALESCE(SUM(cp.nar_size),0) AS total_nar_size, \
-                COALESCE(SUM(cp.file_size),0) AS total_file_size, \
+                COALESCE(SUM(cp.nar_size),0)::bigint AS total_nar_size, \
+                COALESCE(SUM(cp.file_size),0)::bigint AS total_file_size, \
                 MAX(cp.created_at) AS last_uploaded_at, \
                 MIN(cps.last_fetched_at) AS oldest_fetched_at \
          FROM cached_path_signature cps \
