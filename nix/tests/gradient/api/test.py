@@ -95,10 +95,11 @@ api("GET", "user/sessions", token=token)
 api("GET", "user/audit-log", token=token)
 api("GET", "user/search?q=operator", token=token)
 
-created = api("POST", "user/keys", token=token, body=json.dumps({
+key_token = api("POST", "user/keys", token=token, body=json.dumps({
     "name": "ci-key", "permissions": ["viewOrg"]}))
-key_id, key_token = created["id"], created["token"]
-api("GET", "user/keys", token=token)
+assert key_token.startswith("GRAD"), key_token
+keys = api("GET", "user/keys", token=token)
+key_id = next(k["id"] for k in keys if k["name"] == "ci-key")
 # The created key authorizes API calls just like a session token.
 api("GET", "orgs", token=key_token)
 api("GET", f"user/keys/{key_id}", token=token)
