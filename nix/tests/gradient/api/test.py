@@ -57,23 +57,23 @@ api("GET", "health")
 
 # ── Phase 1: auth + registration ──────────────────────────────────────────────
 banner("Phase 1: auth")
-api("POST", "auth/check-username", body=json.dumps({"username": "admin"}))  # available
+api("POST", "auth/check-username", body=json.dumps({"username": "operator"}))  # available
 
 api("POST", "auth/basic/register", body=json.dumps({
-    "username": "admin", "name": "Admin User",
-    "email": "admin@gradient.local", "password": "SecureTest123!",
+    "username": "operator", "name": "Operator User",
+    "email": "operator@gradient.local", "password": "SecureTest123!",
 }))
 api("POST", "auth/basic/register", expect_error=True, body=json.dumps({
-    "username": "admin", "name": "Admin User",
-    "email": "admin@gradient.local", "password": "SecureTest123!",
+    "username": "operator", "name": "Operator User",
+    "email": "operator@gradient.local", "password": "SecureTest123!",
 }))
 api("POST", "auth/check-username", expect_error=True,
-    body=json.dumps({"username": "admin"}))  # now taken
+    body=json.dumps({"username": "operator"}))  # now taken
 
 api("GET", "orgs", expect_error=True)  # no token -> rejected
 
 token = api("POST", "auth/basic/login", body=json.dumps({
-    "loginname": "admin", "password": "SecureTest123!",
+    "loginname": "operator", "password": "SecureTest123!",
 }))
 assert token, "login returned empty token"
 api("GET", "orgs", token=token)  # token authorizes
@@ -85,7 +85,7 @@ machine.execute(f"curl -sS {API}/metrics -o /dev/null -w '%{{http_code}}'")
 # ── Phase 2: user + api keys ──────────────────────────────────────────────────
 banner("Phase 2: user + api keys")
 me = api("GET", "user", token=token)
-assert me.get("username") == "admin", me
+assert me.get("username") == "operator", me
 
 api("PATCH", "user/settings", token=token, body=json.dumps({"name": "Admin Renamed"}))
 assert api("GET", "user", token=token).get("name") == "Admin Renamed"
@@ -93,7 +93,7 @@ assert api("GET", "user", token=token).get("name") == "Admin Renamed"
 api("GET", "user/keys/permissions", token=token)
 api("GET", "user/sessions", token=token)
 api("GET", "user/audit-log", token=token)
-api("GET", "user/search?q=admin", token=token)
+api("GET", "user/search?q=operator", token=token)
 
 created = api("POST", "user/keys", token=token, body=json.dumps({
     "name": "ci-key", "permissions": []}))
