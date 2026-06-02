@@ -259,7 +259,7 @@ assert any(n["hash"] == cli_hash for n in nars), f"uploaded NAR missing: {nars}"
 api("GET", f"caches/maincache/nars/{cli_hash}", token=token)
 api("GET", "caches/maincache/nars/stats", token=token)
 api("GET", f"caches/maincache/nars/available?hash={cli_hash}", token=token)
-cli(f"cache nar list maincache")
+cli("cache nar list maincache")
 cli(f"cache nar show maincache {cli_hash}")
 cli("cache nar stats maincache")
 
@@ -276,8 +276,8 @@ machine.succeed(f"cat > /tmp/direct.narinfo.json <<'EOF'\n{narinfo_json}\nEOF")
 machine.succeed(
     f"curl -sS --fail -X POST {API}/caches/maincache/nars "
     f"-H 'Authorization: Bearer {token}' "
-    f"-F 'narinfo=</tmp/direct.narinfo.json;type=application/json' "
-    f"-F 'nar=@/tmp/direct.nar'"
+    "-F 'narinfo=</tmp/direct.narinfo.json;type=application/json' "
+    "-F 'nar=@/tmp/direct.nar'"
 )
 nars = api("GET", "caches/maincache/nars", token=token)["items"]
 assert any(n["hash"] == direct_hash for n in nars), f"direct-uploaded NAR missing: {nars}"
