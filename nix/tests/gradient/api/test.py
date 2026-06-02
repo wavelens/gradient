@@ -158,8 +158,8 @@ api("GET", "projects/myorg/myproject/metrics", token=token)
 assert api("GET", "projects/myorg/myproject/evaluations", token=token) == [], \
     "fresh project should have no evaluations"
 
-trig = api("POST", "projects/myorg/myproject/triggers", token=token, body=json.dumps({
-    "type": "polling", "config": {"interval_secs": 3600}}))
+api("POST", "projects/myorg/myproject/triggers", token=token, body=json.dumps({
+    "config": {"type": "polling", "interval_secs": 3600}}))
 api("GET", "projects/myorg/myproject/triggers", token=token)
 
 api("GET", "projects/myorg/myproject/actions", token=token)
