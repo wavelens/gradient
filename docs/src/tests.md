@@ -2895,3 +2895,32 @@ Run with: `cargo test -p gradient-cli`
   triggers quit.
 - `tui::log_view` — `↑`/`↓` scroll adjusts the offset; enabling follow-tail
   pins the view to the last line; `/` search highlights matching lines.
+
+## REST API endpoint surface (NixOS integration)
+
+`nix/tests/gradient/api` boots a single node (gradient + nginx + postgres, no
+worker or nix store) and drives `nix/tests/gradient/api/test.py`. Every
+management endpoint is hit directly (`curl`) and, where the CLI exposes it, also
+through `gradient`. Resources are created at runtime so the creation endpoints
+are covered too. Phases:
+
+- **Auth / user / keys** — check-username, register, login, logout; profile,
+  settings, sessions, audit-log, search; API-key create/list/revoke/delete.
+- **Organizations** — CRUD, available/public, ssh rotation, roles CRUD, and
+  membership (a second user is added via `POST /orgs/{org}/users`, re-roled with
+  `PATCH`, and removed with `DELETE`, asserting the member list each time).
+- **Projects** — CRUD, details, triggers, active toggle, plus a transfer flow
+  that moves a throwaway project to a second org and verifies it disappears from
+  the source and appears under the destination.
+- **Workers** — register/list/patch/delete (direct + CLI), with v4 worker UUIDs.
+- **Caches** — CRUD, key/stats, active/public toggles, plus sub-resources:
+  member add/re-role/remove, custom-role create/get/patch/delete, an HTTP
+  upstream create/patch/delete, and org subscription remove/restore.
+- **Cache NARs** — synthetic upload (CLI + direct multipart), list/show/stats/
+  available, and delete (CLI plus a direct `DELETE` asserting `204`).
+- **Build-dependent endpoints** — exercised on empty state for correct
+  not-found behaviour, since no builds are present.
+
+Out of scope (covered by dedicated tests or requiring external services):
+OIDC, SMTP e-mail verification, forge webhooks, the worker proto protocol,
+the Nix binary-cache serving family, and build-request dispatch.
