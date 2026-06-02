@@ -117,6 +117,10 @@ api("GET", "user/search?q=operator", token=token)
 key_token = api("POST", "user/keys", token=token, body=json.dumps({
     "name": "ci-key", "permissions": ["viewOrg"]}))
 assert key_token.startswith("GRAD"), key_token
+api("POST", "user/keys", token=token, expect_error=True,
+    body=json.dumps({"name": "ci-key", "permissions": ["viewOrg"]}))  # duplicate name
+api("POST", "user/keys", token=token, expect_error=True,
+    body=json.dumps({"name": "no-perms", "permissions": []}))  # empty permission mask
 keys = api("GET", "user/keys", token=token)
 key_id = next(k["id"] for k in keys if k["name"] == "ci-key")
 # The created key authorizes API calls just like a session token.
@@ -128,6 +132,8 @@ api("DELETE", "user/keys", token=token, body=json.dumps({"name": "ci-key"}))
 banner("Phase 3: organizations")
 org_id = api("PUT", "orgs", token=token, body=json.dumps({
     "name": "myorg", "display_name": "My Org", "description": "desc"}))
+api("PUT", "orgs", token=token, expect_error=True, body=json.dumps({
+    "name": "myorg", "display_name": "Dup", "description": "d"}))  # duplicate name
 assert api("GET", "orgs/myorg", token=token)["id"] == org_id
 orgs = api("GET", "orgs", token=token)["items"]
 assert any(o["id"] == org_id for o in orgs)
@@ -145,6 +151,8 @@ api("GET", "orgs/myorg/subscribe", token=token)
 
 role_id = api("POST", "orgs/myorg/roles", token=token, body=json.dumps({
     "name": "viewers", "permissions": ["viewOrg"]}))["id"]
+api("POST", "orgs/myorg/roles", token=token, expect_error=True,
+    body=json.dumps({"name": "viewers", "permissions": ["viewOrg"]}))  # duplicate name
 api("GET", "orgs/myorg/roles", token=token)
 api("GET", f"orgs/myorg/roles/{role_id}", token=token)
 api("PATCH", f"orgs/myorg/roles/{role_id}", token=token, body=json.dumps({"name": "viewers2"}))
@@ -154,6 +162,8 @@ api("DELETE", f"orgs/myorg/roles/{role_id}", token=token)
 # Members are referenced by username; "View"/"Write" are built-in roles.
 api("POST", "orgs/myorg/users", token=token,
     body=json.dumps({"user": member, "role": "View"}))
+api("POST", "orgs/myorg/users", token=token, expect_error=True,
+    body=json.dumps({"user": member, "role": "View"}))  # already a member
 assert any(m["id"] == member for m in api("GET", "orgs/myorg/users", token=token)), "member not added"
 api("PATCH", "orgs/myorg/users", token=token,
     body=json.dumps({"user": member, "role": "Write"}))
@@ -177,6 +187,12 @@ banner("Phase 4: projects")
 proj_id = api("PUT", "projects/myorg", token=token, body=json.dumps({
     "name": "myproject", "display_name": "My Project", "description": "d",
     "repository": "git@github.com:Wavelens/Gradient.git", "wildcard": "packages.*"}))
+api("PUT", "projects/myorg", token=token, expect_error=True, body=json.dumps({
+    "name": "myproject", "display_name": "Dup", "description": "d",
+    "repository": "git@github.com:Wavelens/Gradient.git", "wildcard": "packages.*"}))  # duplicate name
+api("PUT", "projects/myorg", token=token, expect_error=True, body=json.dumps({
+    "name": "build-request", "display_name": "Reserved", "description": "d",
+    "repository": "git@github.com:Wavelens/Gradient.git", "wildcard": "packages.*"}))  # reserved name
 assert api("GET", "projects/myorg/myproject", token=token)["id"] == proj_id
 assert any(p["id"] == proj_id for p in api("GET", "projects/myorg", token=token)["items"])
 api("GET", "projects/myorg/available", token=token)
@@ -248,6 +264,8 @@ assert not any(w["worker_id"] == cli_worker
 banner("Phase 6: caches")
 api("PUT", "caches", token=token, body=json.dumps({
     "name": "maincache", "display_name": "Main", "description": "d", "priority": 10}))
+api("PUT", "caches", token=token, expect_error=True, body=json.dumps({
+    "name": "maincache", "display_name": "Dup", "description": "d", "priority": 10}))  # duplicate name
 api("GET", "caches/maincache", token=token)
 assert any(c["name"] == "maincache" for c in api("GET", "caches", token=token))
 api("GET", "caches/available", token=token)
@@ -261,6 +279,7 @@ api("GET", "caches/maincache/upstreams", token=token)
 api("PATCH", "caches/maincache", token=token, body=json.dumps({"priority": 20}))
 # Subscribe the org so the cache is usable in org context.
 api("POST", "orgs/myorg/subscribe/maincache", token=token)
+api("POST", "orgs/myorg/subscribe/maincache", token=token, expect_error=True)  # already subscribed
 
 cli("cache create --name clicache --display-name 'CLI Cache' --description d --priority 5")
 api("GET", "caches/clicache", token=token)
@@ -274,6 +293,8 @@ banner("Phase 6b: cache members / roles / upstreams")
 # Members (second user, by username; "View"/"Write" are built-in cache roles).
 api("POST", "caches/maincache/members", token=token,
     body=json.dumps({"user": member, "role": "View"}))
+api("POST", "caches/maincache/members", token=token, expect_error=True,
+    body=json.dumps({"user": member, "role": "View"}))  # already a member
 assert any(m["id"] == member for m in api("GET", "caches/maincache/members", token=token)), \
     "cache member not added"
 api("PATCH", "caches/maincache/members", token=token,
@@ -285,6 +306,8 @@ assert not any(m["id"] == member for m in api("GET", "caches/maincache/members",
 # Custom cache role lifecycle.
 crole_id = api("POST", "caches/maincache/roles", token=token, body=json.dumps({
     "name": "cacheviewers", "permissions": ["viewCache"]}))["id"]
+api("POST", "caches/maincache/roles", token=token, expect_error=True,
+    body=json.dumps({"name": "cacheviewers", "permissions": ["viewCache"]}))  # duplicate name
 api("GET", f"caches/maincache/roles/{crole_id}", token=token)
 api("PATCH", f"caches/maincache/roles/{crole_id}", token=token,
     body=json.dumps({"name": "cacheviewers2"}))
@@ -380,6 +403,38 @@ api("GET", f"evals/{missing}/builds", token=token, expect_error=True)
 api("GET", f"builds/{missing}", token=token, expect_error=True)
 api("GET", f"builds/{missing}/graph", token=token, expect_error=True)
 api("GET", f"commits/{missing}", token=token, expect_error=True)
+
+# ── Phase 8b: permissions (multi-actor) ───────────────────────────────────────
+# The second user logs in and acts with their own token. The built-in "View"
+# role grants read access but none of the org-management permissions, so those
+# mutations must be rejected; promotion to "Admin" then unlocks them.
+banner("Phase 8b: permissions (multi-actor)")
+team_token = api("POST", "auth/basic/login", body=json.dumps({
+    "loginname": member, "password": "SecureTest123!"}))
+assert team_token, "second-user login returned empty token"
+
+# Non-member cannot read a private org.
+api("GET", "orgs/myorg", token=team_token, expect_error=True)
+
+# Operator grants "View"; the member can read but cannot manage.
+api("POST", "orgs/myorg/users", token=token, body=json.dumps({"user": member, "role": "View"}))
+api("GET", "orgs/myorg", token=team_token)                                    # ViewOrg granted
+api("PATCH", "orgs/myorg", token=team_token, expect_error=True,
+    body=json.dumps({"display_name": "hijack"}))                              # no ManageOrgSettings
+api("PUT", "projects/myorg", token=team_token, expect_error=True, body=json.dumps({
+    "name": "sneak", "display_name": "x", "description": "d",
+    "repository": "git@github.com:Wavelens/Gradient.git", "wildcard": "packages.*"}))  # no CreateProject
+api("POST", "orgs/myorg/users", token=team_token, expect_error=True,
+    body=json.dumps({"user": "operator", "role": "View"}))                    # no ManageMembers
+api("DELETE", "orgs/myorg", token=team_token, expect_error=True)              # no DeleteOrg
+
+# Promote to "Admin": the same mutation now succeeds.
+api("PATCH", "orgs/myorg/users", token=token, body=json.dumps({"user": member, "role": "Admin"}))
+api("PATCH", "orgs/myorg", token=team_token, body=json.dumps({"display_name": "Admin Edit OK"}))
+
+# Remove the member; read access is revoked again.
+api("DELETE", "orgs/myorg/users", token=token, body=json.dumps({"user": member}))
+api("GET", "orgs/myorg", token=team_token, expect_error=True)
 
 # ── Phase 9: logout ───────────────────────────────────────────────────────────
 banner("Phase 9: logout")

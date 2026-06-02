@@ -2920,6 +2920,17 @@ are covered too. Phases:
   available, and delete (CLI plus a direct `DELETE` asserting `204`).
 - **Build-dependent endpoints** — exercised on empty state for correct
   not-found behaviour, since no builds are present.
+- **Edge cases** — duplicate creates (org, project, cache, org/cache role, API
+  key, org/cache member, subscription) return an enveloped `409`; a reserved
+  project name (`build-request`) and an empty API-key permission mask return
+  enveloped `400`s.
+- **Permissions (multi-actor)** — the second user acts with their own token: a
+  non-member cannot read the private org; the built-in `View` role grants read
+  but is rejected (enveloped `403`) on settings edit, project create, member
+  add, and org delete; promotion to `Admin` unlocks the settings edit.
+
+The auth surface is rate-limited (burst 5, one token per 6s), so the script
+spaces its registration/login calls to stay within the bucket.
 
 Out of scope (covered by dedicated tests or requiring external services):
 OIDC, SMTP e-mail verification, forge webhooks, the worker proto protocol,
