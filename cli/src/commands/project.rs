@@ -199,7 +199,6 @@ pub async fn handle(cmd: Commands, out: Output) {
                 .projects()
                 .create(
                     &organization,
-                    &name,
                     MakeProjectRequest {
                         name: name.clone(),
                         display_name: input.get("Display Name").unwrap().clone(),
