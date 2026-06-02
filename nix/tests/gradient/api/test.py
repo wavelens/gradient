@@ -86,6 +86,13 @@ token = api("POST", "auth/basic/login", body=json.dumps({
 assert token, "login returned empty token"
 api("GET", "orgs", token=token)  # token authorizes
 
+# A second user, used later for org/cache membership flows. Lookup is by username.
+member = "teammate"
+api("POST", "auth/basic/register", body=json.dumps({
+    "username": member, "name": "Team Mate",
+    "email": "teammate@gradient.local", "password": "SecureTest123!",
+}))
+
 # Public/unauthenticated-ish reads.
 print(machine.succeed(f"curl -sS {API}/config -i"))
 machine.execute(f"curl -sS {API}/metrics -o /dev/null -w '%{{http_code}}'")
@@ -139,6 +146,16 @@ api("GET", f"orgs/myorg/roles/{role_id}", token=token)
 api("PATCH", f"orgs/myorg/roles/{role_id}", token=token, body=json.dumps({"name": "viewers2"}))
 api("DELETE", f"orgs/myorg/roles/{role_id}", token=token)
 
+# Org membership: add the second user, change their role, then remove them.
+# Members are referenced by username; "View"/"Write" are built-in roles.
+api("POST", "orgs/myorg/users", token=token,
+    body=json.dumps({"user": member, "role": "View"}))
+assert any(m["id"] == member for m in api("GET", "orgs/myorg/users", token=token)), "member not added"
+api("PATCH", "orgs/myorg/users", token=token,
+    body=json.dumps({"user": member, "role": "Write"}))
+api("DELETE", "orgs/myorg/users", token=token, body=json.dumps({"user": member}))
+assert not any(m["id"] == member for m in api("GET", "orgs/myorg/users", token=token)), "member not removed"
+
 # CLI: configure, then create/list/show/delete a second org.
 machine.succeed(f"{CLI} config Server http://gradient.local")
 machine.succeed(f"{CLI} config AuthToken {token}")
@@ -191,6 +208,17 @@ cli("project delete")
 api("GET", "projects/myorg/cliproject", token=token, expect_error=True)
 machine.succeed(f"{CLI} project select myproject")
 
+# Project transfer: move a throwaway project to a second org owned by the caller.
+api("PUT", "orgs", token=token, body=json.dumps({
+    "name": "destorg", "display_name": "Dest", "description": "d"}))
+api("PUT", "projects/myorg", token=token, body=json.dumps({
+    "name": "transferme", "display_name": "Transfer", "description": "d",
+    "repository": "git@github.com:Wavelens/Gradient.git", "wildcard": "packages.*"}))
+api("POST", "projects/myorg/transferme/transfer", token=token,
+    body=json.dumps({"organization": "destorg"}))
+api("GET", "projects/destorg/transferme", token=token)               # now under destorg
+api("GET", "projects/myorg/transferme", token=token, expect_error=True)  # gone from myorg
+
 # ── Phase 5: workers (direct + CLI) ───────────────────────────────────────────
 banner("Phase 5: workers")
 api_worker = "b0000000-0000-4000-8000-000000000001"
@@ -236,6 +264,43 @@ cli("cache list")
 cli("cache show clicache")
 cli("cache delete clicache")
 api("GET", "caches/clicache", token=token, expect_error=True)
+
+# ── Phase 6b: cache sub-resources (members, roles, upstreams, subscription) ───
+banner("Phase 6b: cache members / roles / upstreams")
+# Members (second user, by username; "View"/"Write" are built-in cache roles).
+api("POST", "caches/maincache/members", token=token,
+    body=json.dumps({"user": member, "role": "View"}))
+assert any(m["id"] == member for m in api("GET", "caches/maincache/members", token=token)), \
+    "cache member not added"
+api("PATCH", "caches/maincache/members", token=token,
+    body=json.dumps({"user": member, "role": "Write"}))
+api("DELETE", "caches/maincache/members", token=token, body=json.dumps({"user": member}))
+assert not any(m["id"] == member for m in api("GET", "caches/maincache/members", token=token)), \
+    "cache member not removed"
+
+# Custom cache role lifecycle.
+crole_id = api("POST", "caches/maincache/roles", token=token, body=json.dumps({
+    "name": "cacheviewers", "permissions": ["viewCache"]}))["id"]
+api("GET", f"caches/maincache/roles/{crole_id}", token=token)
+api("PATCH", f"caches/maincache/roles/{crole_id}", token=token,
+    body=json.dumps({"name": "cacheviewers2"}))
+api("DELETE", f"caches/maincache/roles/{crole_id}", token=token)
+
+# HTTP upstream lifecycle (self-contained: no second cache needed).
+up_id = api("PUT", "caches/maincache/upstreams", token=token, body=json.dumps({
+    "type": "http", "display_name": "mirror",
+    "url": "https://cache.example.com",
+    "public_key": "cache.example.com-1:" + "A" * 44}))
+assert any(u["id"] == up_id for u in api("GET", "caches/maincache/upstreams", token=token)), \
+    "upstream not created"
+api("PATCH", f"caches/maincache/upstreams/{up_id}", token=token, body=json.dumps({
+    "url": "https://mirror.example.com",
+    "public_key": "mirror.example.com-1:" + "B" * 44}))
+api("DELETE", f"caches/maincache/upstreams/{up_id}", token=token)
+
+# Org subscription removal then restore.
+api("DELETE", "orgs/myorg/subscribe/maincache", token=token)
+api("POST", "orgs/myorg/subscribe/maincache", token=token)
 
 # ── Phase 7: cache NAR upload surface (direct + CLI) ──────────────────────────
 # No nix store is needed: the endpoint validates byte length + store-path shape,
