@@ -185,23 +185,23 @@ machine.succeed(f"{CLI} project select myproject")
 
 # ── Phase 5: workers (direct + CLI) ───────────────────────────────────────────
 banner("Phase 5: workers")
+api_worker = "b0000000-0000-4000-8000-000000000001"
 reg = api("POST", "orgs/myorg/workers", token=token, body=json.dumps({
-    "worker_id": "b0000000-0000-0000-0000-000000000001",
-    "display_name": "api-worker"}))
+    "worker_id": api_worker, "display_name": "api-worker"}))
 assert reg.get("token") and len(reg["token"]) == 64, reg
-assert any(w["worker_id"] == "b0000000-0000-0000-0000-000000000001"
+assert any(w["worker_id"] == api_worker
            for w in api("GET", "orgs/myorg/workers", token=token))
-api("GET", "orgs/myorg/workers/b0000000-0000-0000-0000-000000000001", token=token)
-api("PATCH", "orgs/myorg/workers/b0000000-0000-0000-0000-000000000001", token=token,
+api("PATCH", f"orgs/myorg/workers/{api_worker}", token=token,
     body=json.dumps({"display_name": "api-worker-2"}))
-api("DELETE", "orgs/myorg/workers/b0000000-0000-0000-0000-000000000001", token=token)
+api("DELETE", f"orgs/myorg/workers/{api_worker}", token=token)
 
-cli("worker register c0000000-0000-0000-0000-000000000002 --display-name cli-worker")
-assert any(w["worker_id"] == "c0000000-0000-0000-0000-000000000002"
+cli_worker = "c0000000-0000-4000-8000-000000000002"
+cli(f"worker register {cli_worker} --display-name cli-worker")
+assert any(w["worker_id"] == cli_worker
            for w in api("GET", "orgs/myorg/workers", token=token))
 cli("worker list")
-cli("worker delete c0000000-0000-0000-0000-000000000002")
-assert not any(w["worker_id"] == "c0000000-0000-0000-0000-000000000002"
+cli(f"worker delete {cli_worker}")
+assert not any(w["worker_id"] == cli_worker
                for w in api("GET", "orgs/myorg/workers", token=token))
 
 # ── Phase 6: caches (direct + CLI) ────────────────────────────────────────────
