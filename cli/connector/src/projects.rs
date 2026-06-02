@@ -160,7 +160,6 @@ impl ProjectsApi<'_> {
     pub async fn create(
         &self,
         org: &str,
-        proj: &str,
         body: MakeProjectRequest,
     ) -> Result<String, ConnectorError> {
         let req = http::request(
@@ -168,7 +167,7 @@ impl ProjectsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::PUT,
-            &format!("projects/{org}/{proj}"),
+            &format!("projects/{org}"),
             true,
         )?
         .json(&body);
