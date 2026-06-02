@@ -720,6 +720,35 @@ and zero remaining build references.
   regression for #107: the TTL SELECT must keep its `derivation_output.ca
   IS NOT NULL` guard so FOD NARs are never evicted by the TTL pass.
 
+## Per-project evaluation GC retention policy (#305)
+
+`evaluations_to_gc` (`backend/core/src/db/gc.rs`) decides, by index into a
+newest-first evaluation list, which evaluations `gc_project_evaluations`
+deletes for a project's `keep_evaluations` count. Active evaluations
+(Queued/Fetching/Evaluating*/Building/Waiting) are never deleted and never
+consume a `keep` slot; among terminal evaluations the `keep` most recent
+`Completed`/`Failed` ("done") are retained, and `Aborted` evaluations are
+retained only to fill remaining slots when too few done evaluations exist.
+This fixes #305 where a building/queued evaluation consumed the single keep
+slot and the last successful evaluation was deleted.
+
+- `core::db::gc::tests::keeps_last_done_when_newer_evaluation_is_active` -
+  `keep = 1` with a newer active evaluation deletes nothing.
+- `core::db::gc::tests::never_deletes_active_evaluations` - an all-active
+  list is never touched regardless of `keep`.
+- `core::db::gc::tests::gcs_aborted_when_a_done_evaluation_exists` - a newer
+  `Aborted` is deleted in favour of an older `Completed`.
+- `core::db::gc::tests::keeps_aborted_when_no_done_evaluation_exists` - a
+  lone `Aborted` is retained when no done evaluation exists.
+- `core::db::gc::tests::done_evaluations_take_priority_over_aborted` - done
+  evaluations fill `keep` slots ahead of `Aborted` ones.
+- `core::db::gc::tests::deletes_done_evaluations_beyond_keep` - done
+  evaluations past `keep` are deleted.
+- `core::db::gc::tests::active_evaluations_do_not_consume_keep_slots` - an
+  active evaluation does not occupy a slot, so the newest done evaluation
+  is retained.
+- `core::db::gc::tests::keep_zero_deletes_nothing` - `keep = 0` is a no-op.
+
 ## Frontend - form primitives & style guide
 
 Reusable form primitives live under
