@@ -155,7 +155,7 @@ api("GET", "projects/myorg/myproject/details", token=token)
 api("PATCH", "projects/myorg/myproject", token=token, body=json.dumps({"display_name": "MP2"}))
 api("GET", "projects/myorg/myproject/entry-points", token=token)
 api("GET", "projects/myorg/myproject/metrics", token=token)
-assert api("GET", "projects/myorg/myproject/evaluations", token=token)["items"] == [], \
+assert api("GET", "projects/myorg/myproject/evaluations", token=token) == [], \
     "fresh project should have no evaluations"
 
 trig = api("POST", "projects/myorg/myproject/triggers", token=token, body=json.dumps({
