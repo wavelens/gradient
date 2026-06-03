@@ -66,7 +66,8 @@ pub async fn update_build_status(
         && matches!(
             status,
             BuildStatus::Completed
-                | BuildStatus::Failed
+                | BuildStatus::FailedPermanent
+                | BuildStatus::FailedTimeout
                 | BuildStatus::Aborted
                 | BuildStatus::DependencyFailed
         )
@@ -91,7 +92,8 @@ pub async fn update_build_status(
             if matches!(
                 updated_build.status,
                 BuildStatus::Completed
-                    | BuildStatus::Failed
+                    | BuildStatus::FailedPermanent
+                    | BuildStatus::FailedTimeout
                     | BuildStatus::Aborted
                     | BuildStatus::DependencyFailed
             ) {
@@ -592,7 +594,9 @@ pub async fn dispatch_build_event_for_status(
         BuildStatus::Queued => "build.queued",
         BuildStatus::Building => "build.started",
         BuildStatus::Completed => "build.completed",
-        BuildStatus::Failed => "build.failed",
+        BuildStatus::FailedPermanent => "build.failed",
+        BuildStatus::FailedTimeout => "build.failed",
+        BuildStatus::FailedTransient => "build.failed_transient",
         BuildStatus::Substituted => "build.substituted",
         BuildStatus::Created | BuildStatus::Aborted | BuildStatus::DependencyFailed => return,
     };
