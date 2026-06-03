@@ -167,7 +167,7 @@ export class EntryPointMetricsComponent implements OnInit {
   });
 
   completedCount = computed(() => this.points().filter((p) => p.build_status === 'Completed').length);
-  failedCount = computed(() => this.points().filter((p) => p.build_status === 'FailedPermanent' || p.build_status === 'FailedTransient' || p.build_status === 'FailedTimeout').length);
+  failedCount = computed(() => this.points().filter((p) => p.build_status === 'FailedPermanent' || p.build_status === 'FailedTimeout').length);
   substitutedCount = computed(() => this.points().filter((p) => p.build_status === 'Substituted').length);
 
   formatBytes(bytes: number): string {
