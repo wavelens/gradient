@@ -313,6 +313,8 @@ async fn record_eval_message_inserts_for_active_build_job() {
                         build_id: build_id.to_string(),
                         drv_path: "aaaa-hello.drv".into(),
                         external_cached: false,
+                        timeout_secs: None,
+                        max_silent_secs: None,
                     }],
                 },
                 required_paths: vec![],
