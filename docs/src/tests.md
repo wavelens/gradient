@@ -1675,6 +1675,34 @@ Tests (`cargo test -p worker executor::build::tests`):
 - `next_log_event_errors_on_silent_timeout` - with `maxSilent` set and no log
   output, the drain errors once the budget elapses (paused-time test).
 
+## Startup recovery preserves queued/waiting work
+
+`core/src/db/connection.rs::update_db` runs once on boot to reconcile work
+left behind by the previous process. It used to abort **everything** active -
+every `Created`/`Queued`/`Building` build and every `ACTIVE` evaluation - which
+needlessly threw away queued evaluations and builds that were only waiting for
+a free worker.
+
+The policy is now two pure predicates the recovery loop applies per row:
+
+- `eval_survives_restart` - `Queued` and `Waiting` evaluations survive (the
+  eval dispatcher re-offers `Queued`; build reconcile re-drives `Waiting`).
+  `Fetching` / `EvaluatingFlake` / `EvaluatingDerivation` / `Building` were
+  running on a now-disconnected worker, so they are aborted (and their project
+  is flagged `force_evaluation`).
+- `build_survives_restart` - a build survives only if it is `Created`/`Queued`
+  **and** its evaluation survives. A `Building` build was mid-compile on a lost
+  worker; a queued build under an aborted evaluation goes with it.
+
+Tests (`cargo test -p core startup_recovery_tests`):
+
+- `queued_and_waiting_evaluations_survive_restart`
+- `actively_running_evaluations_are_aborted_on_restart`
+- `queued_builds_of_a_surviving_evaluation_survive_restart` - the "eval waiting
+  case" from the bug report: builds queued for a free worker are kept.
+- `running_builds_are_aborted_even_under_a_surviving_evaluation`
+- `builds_of_an_aborted_evaluation_are_aborted`
+
 ## Cache GC - guard shared-hash NARs and purge zombie cached_path rows
 
 Two bugs together inflated cache stats and over-deleted shared NARs:

@@ -131,18 +131,50 @@ pub async fn connect_web_db(cli: &Cli) -> Result<DatabaseConnection> {
     .context("Failed to connect web database pool")
 }
 
+/// Evaluations the scheduler re-dispatches on its own after a restart, so
+/// startup recovery must leave them alone: `Queued` is re-offered by the eval
+/// dispatcher, `Waiting` (evaluated, builds queued for a free worker) is
+/// re-driven by build reconcile. Every other active status was running on a
+/// now-disconnected worker and is genuinely lost.
+fn eval_survives_restart(status: EvaluationStatus) -> bool {
+    matches!(status, EvaluationStatus::Queued | EvaluationStatus::Waiting)
+}
+
+/// A build survives a restart only if it had not started running
+/// (`Created`/`Queued`) *and* its evaluation survives too. A `Building` build
+/// was on a lost worker; a queued build under an aborted evaluation goes with
+/// it.
+fn build_survives_restart(status: BuildStatus, eval_survives: bool) -> bool {
+    eval_survives && matches!(status, BuildStatus::Created | BuildStatus::Queued)
+}
+
 async fn update_db(db: &DatabaseConnection) -> Result<(), DbErr> {
+    // Recover work interrupted by the restart. Only abort what was genuinely
+    // lost (mid-fetch/eval/build evaluations, mid-compile builds); leave
+    // queued/waiting evaluations and their not-yet-dispatched builds so the
+    // scheduler re-offers them on its next tick.
+    let surviving_eval_ids: Vec<EvaluationId> = EEvaluation::find()
+        .filter(CEvaluation::Status.is_in(EvaluationStatus::ACTIVE))
+        .all(db)
+        .await?
+        .into_iter()
+        .filter(|e| eval_survives_restart(e.status))
+        .map(|e| e.id)
+        .collect();
+
     let builds = EBuild::find()
-        .filter(
-            Condition::any()
-                .add(CBuild::Status.eq(BuildStatus::Created))
-                .add(CBuild::Status.eq(BuildStatus::Queued))
-                .add(CBuild::Status.eq(BuildStatus::Building)),
-        )
+        .filter(CBuild::Status.is_in([
+            BuildStatus::Created,
+            BuildStatus::Queued,
+            BuildStatus::Building,
+        ]))
         .all(db)
         .await?;
 
     for build in builds {
+        if build_survives_restart(build.status, surviving_eval_ids.contains(&build.evaluation)) {
+            continue;
+        }
         let mut abuild: ABuild = build.into();
         abuild.status = Set(BuildStatus::Aborted);
         abuild.via = Set(None);
@@ -155,6 +187,10 @@ async fn update_db(db: &DatabaseConnection) -> Result<(), DbErr> {
         .await?;
 
     for evaluation in evaluations {
+        if eval_survives_restart(evaluation.status) {
+            continue;
+        }
+
         // Direct-build evaluations have no project; skip force_evaluation for those.
         if let Some(project_id) = evaluation.project
             && let Some(project) = EProject::find_by_id(project_id).one(db).await?
@@ -398,4 +434,49 @@ pub async fn get_any_cache_by_name(
         .one(&state.web_db)
         .await
         .context("Failed to query cache")
+}
+
+#[cfg(test)]
+mod startup_recovery_tests {
+    use super::{build_survives_restart, eval_survives_restart};
+    use entity::build::BuildStatus;
+    use entity::evaluation::EvaluationStatus;
+
+    #[test]
+    fn queued_and_waiting_evaluations_survive_restart() {
+        assert!(eval_survives_restart(EvaluationStatus::Queued));
+        assert!(eval_survives_restart(EvaluationStatus::Waiting));
+    }
+
+    #[test]
+    fn actively_running_evaluations_are_aborted_on_restart() {
+        for status in [
+            EvaluationStatus::Fetching,
+            EvaluationStatus::EvaluatingFlake,
+            EvaluationStatus::EvaluatingDerivation,
+            EvaluationStatus::Building,
+        ] {
+            assert!(!eval_survives_restart(status), "{status:?} must not survive");
+        }
+    }
+
+    #[test]
+    fn queued_builds_of_a_surviving_evaluation_survive_restart() {
+        // The "eval waiting case": builds queued for a free worker must not be
+        // aborted just because the server restarted.
+        assert!(build_survives_restart(BuildStatus::Queued, true));
+        assert!(build_survives_restart(BuildStatus::Created, true));
+    }
+
+    #[test]
+    fn running_builds_are_aborted_even_under_a_surviving_evaluation() {
+        // A `Building` build was on a now-disconnected worker - genuinely lost.
+        assert!(!build_survives_restart(BuildStatus::Building, true));
+    }
+
+    #[test]
+    fn builds_of_an_aborted_evaluation_are_aborted() {
+        assert!(!build_survives_restart(BuildStatus::Queued, false));
+        assert!(!build_survives_restart(BuildStatus::Created, false));
+    }
 }
