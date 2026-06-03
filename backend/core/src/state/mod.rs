@@ -4,8 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+pub mod export;
 mod provisioning;
 
+pub use export::export_state;
 pub use provisioning::{
     PendingOrgMembership, PendingOrgMemberships, apply_pending_org_memberships,
 };
