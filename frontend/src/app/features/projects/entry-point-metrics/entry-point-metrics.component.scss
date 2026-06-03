@@ -19,12 +19,6 @@
   align-items: flex-start;
   gap: $spacing-lg;
 
-  .closure-link {
-    gap: $spacing-xs;
-    white-space: nowrap;
-    text-decoration: none;
-  }
-
   .breadcrumb {
     display: flex;
     align-items: center;
