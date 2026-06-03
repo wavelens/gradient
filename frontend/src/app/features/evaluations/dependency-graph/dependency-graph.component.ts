@@ -83,17 +83,18 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
   hoveredNode = signal<LayoutNode | null>(null);
   tooltipX = signal(0);
   tooltipY = signal(0);
+  private hoveredId: string | null = null;
 
   private layoutNodes: LayoutNode[] = [];
   private layoutEdges: LayoutEdge[] = [];
   private nodeMap = new Map<string, LayoutNode>();
-  private nodeDepths = new Map<string, number>();
-  private graphBounds = { minX: 0, maxX: 0 };
 
   // DOM refs (imperative)
   private nodeEls = new Map<string, SVGGElement>();
-  private edgeEls: { el: SVGPathElement; source: string; target: string; idx: number }[] = [];
+  private edgeEls: { el: SVGPathElement; source: string; target: string }[] = [];
   private durationEls = new Map<string, SVGTextElement>();
+  private incident = new Map<string, Set<number>>(); // nodeId -> indices into edgeEls
+  private neighbours = new Map<string, Set<string>>();
 
   // Interaction
   private isPanning = false;
@@ -188,8 +189,6 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
       }
     }
 
-    this.nodeDepths = depth;
-
     // Group nodes by level
     const byLevel = new Map<number, LayoutNode[]>();
     for (const n of nodes) {
@@ -221,13 +220,6 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
         posX.set(n.id, n.x + CARD_W / 2);
       });
     }
-
-    // Overall graph bounds (used for side-lane routing of multi-level edges)
-    this.graphBounds = { minX: Infinity, maxX: -Infinity };
-    for (const n of nodes) {
-      if (n.x < this.graphBounds.minX) this.graphBounds.minX = n.x;
-      if (n.x + CARD_W > this.graphBounds.maxX) this.graphBounds.maxX = n.x + CARD_W;
-    }
   }
 
   private avgX(nodeId: string, dependents: Map<string, string[]>, posX: Map<string, number>): number {
@@ -249,13 +241,13 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
     this.edgeEls = [];
 
     // Edges first (rendered under cards)
-    this.layoutEdges.forEach((edge, idx) => {
+    this.layoutEdges.forEach((edge) => {
       const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
       path.setAttribute('fill', 'none');
       path.setAttribute('stroke-width', '1.5');
       path.setAttribute('marker-end', 'url(#arrowhead)');
       g.appendChild(path);
-      this.edgeEls.push({ el: path, source: edge.source, target: edge.target, idx });
+      this.edgeEls.push({ el: path, source: edge.source, target: edge.target });
     });
 
     // Cards
@@ -264,6 +256,19 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
       g.appendChild(cardG);
       this.nodeEls.set(node.id, cardG);
     }
+
+    // Incidence index: which edges + neighbours touch each node, for hover highlight.
+    this.incident.clear();
+    this.neighbours.clear();
+    this.edgeEls.forEach((e, i) => {
+      for (const id of [e.source, e.target]) {
+        if (!this.incident.has(id)) this.incident.set(id, new Set());
+        this.incident.get(id)!.add(i);
+        if (!this.neighbours.has(id)) this.neighbours.set(id, new Set());
+      }
+      this.neighbours.get(e.source)!.add(e.target);
+      this.neighbours.get(e.target)!.add(e.source);
+    });
 
     this.updateSvgPositions();
   }
@@ -347,6 +352,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
 
     // Hover events for tooltip
     g.addEventListener('mouseenter', (e: MouseEvent) => {
+      this.highlightNode(node.id);
       this.zone.run(() => {
         this.hoveredNode.set(node);
         this.tooltipX.set(e.clientX + 14);
@@ -354,6 +360,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
       });
     });
     g.addEventListener('mouseleave', () => {
+      this.resetHighlight();
       this.zone.run(() => this.hoveredNode.set(null));
     });
     // Click navigates to build log
@@ -372,8 +379,6 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
   }
 
   private updateSvgPositions(): void {
-    const LANE_MARGIN = 50;
-
     // Update card transforms and live status visuals
     for (const node of this.layoutNodes) {
       const el = this.nodeEls.get(node.id);
@@ -393,51 +398,46 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
       }
     }
 
-    // Update edge paths
+    // Update edge paths — every edge uses a smooth bottom→top bezier; hovering a
+    // node (highlightNode) makes its incident edges legible on demand.
     for (const edge of this.edgeEls) {
-      const child  = this.nodeMap.get(edge.source); // dependency  (lower level)
-      const parent = this.nodeMap.get(edge.target); // dependent   (higher level)
+      const child = this.nodeMap.get(edge.source);
+      const parent = this.nodeMap.get(edge.target);
       if (!child || !parent) continue;
-
-      const pd = this.nodeDepths.get(edge.target) ?? 0;
-      const cd = this.nodeDepths.get(edge.source) ?? 0;
-      const dd = cd - pd;
-
-      const pCX = parent.x + CARD_W / 2;
-      const cCX = child.x + CARD_W / 2;
-
-      if (dd <= 1) {
-        // Single-level: smooth bezier bottom-center → top-center
-        const px = pCX, py = parent.y + CARD_H;
-        const cx = cCX, cy = child.y;
-        const midY = (py + cy) / 2;
-        edge.el.setAttribute('d', `M ${px} ${py} C ${px} ${midY} ${cx} ${midY} ${cx} ${cy}`);
-        edge.el.setAttribute('stroke', '#374151');
-      } else {
-        // Multi-level: route through a side-lane to avoid crossing intermediate cards.
-        // Determine which side based on horizontal direction; use edge index as tiebreaker.
-        const dx = cCX - pCX;
-        const useRight = dx > 5 ? true : dx < -5 ? false : edge.idx % 2 === 0;
-        const laneX = useRight
-          ? this.graphBounds.maxX + LANE_MARGIN + (dd - 2) * 15
-          : this.graphBounds.minX - LANE_MARGIN - (dd - 2) * 15;
-
-        // Exit from the card's left/right side mid-height, re-enter child top-center vertically.
-        const exitX = useRight ? parent.x + CARD_W : parent.x;
-        const exitY = parent.y + CARD_H / 2;
-        const TURN = 22;
-
-        // Compound path: curve to lane → straight down → curve back to child top-center
-        const d = [
-          `M ${exitX} ${exitY}`,
-          `C ${laneX} ${exitY} ${laneX} ${exitY + TURN} ${laneX} ${exitY + TURN}`,
-          `L ${laneX} ${child.y - TURN}`,
-          `C ${laneX} ${child.y} ${cCX} ${child.y - TURN} ${cCX} ${child.y}`,
-        ].join(' ');
-        edge.el.setAttribute('d', d);
-        edge.el.setAttribute('stroke', '#2d3748');
-      }
+      const px = parent.x + CARD_W / 2, py = parent.y + CARD_H;
+      const cx = child.x + CARD_W / 2, cy = child.y;
+      const midY = (py + cy) / 2;
+      edge.el.setAttribute('d', `M ${px} ${py} C ${px} ${midY} ${cx} ${midY} ${cx} ${cy}`);
+      edge.el.setAttribute('stroke', '#374151');
     }
+
+    // Re-apply hover highlight if a node is still hovered after a live update.
+    if (this.hoveredId) this.highlightNode(this.hoveredId);
+  }
+
+  private highlightNode(nodeId: string): void {
+    this.hoveredId = nodeId;
+    const inc = this.incident.get(nodeId) ?? new Set<number>();
+    const near = this.neighbours.get(nodeId) ?? new Set<string>();
+    this.edgeEls.forEach((e, i) => {
+      const on = inc.has(i);
+      e.el.setAttribute('stroke', on ? '#9ca3af' : '#1f2733');
+      e.el.setAttribute('stroke-width', on ? '2.5' : '1');
+      e.el.setAttribute('opacity', on ? '1' : '0.25');
+    });
+    for (const [id, el] of this.nodeEls) {
+      el.setAttribute('opacity', id === nodeId || near.has(id) ? '1' : '0.35');
+    }
+  }
+
+  private resetHighlight(): void {
+    this.hoveredId = null;
+    for (const e of this.edgeEls) {
+      e.el.setAttribute('stroke', '#374151');
+      e.el.setAttribute('stroke-width', '1.5');
+      e.el.setAttribute('opacity', '1');
+    }
+    for (const [, el] of this.nodeEls) el.setAttribute('opacity', '1');
   }
 
   private centerViewport(): void {
@@ -464,16 +464,17 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
 
   onWheel(event: WheelEvent): void {
     event.preventDefault();
-    const factor = event.deltaY > 0 ? 0.9 : 1.1;
-    const newScale = Math.max(0.08, Math.min(4, this.scale() * factor));
     const rect = this.svgRef.nativeElement.getBoundingClientRect();
     const mx = event.clientX - rect.left;
     const my = event.clientY - rect.top;
-    const dx = (mx - this.tx()) * (1 - factor);
-    const dy = (my - this.ty()) * (1 - factor);
+    const oldScale = this.scale();
+    const target = oldScale * (event.deltaY > 0 ? 0.9 : 1.1);
+    const newScale = Math.max(0.08, Math.min(4, target));
+    const effFactor = newScale / oldScale;
+    if (effFactor === 1) return;
     this.scale.set(newScale);
-    this.tx.update((v) => v + dx);
-    this.ty.update((v) => v + dy);
+    this.tx.update((v) => mx - effFactor * (mx - v));
+    this.ty.update((v) => my - effFactor * (my - v));
   }
 
   onSvgMousedown(event: MouseEvent): void {
@@ -503,25 +504,21 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
     this.isPanning = false;
   }
 
-  zoomIn(): void {
+  private zoomBy(factor: number): void {
     const rect = this.svgRef?.nativeElement.getBoundingClientRect();
     if (!rect) return;
-    const factor = 1.3;
     const cx = rect.width / 2, cy = rect.height / 2;
-    this.scale.update((s) => Math.min(s * factor, 4));
-    this.tx.update((v) => v + (cx - v) * (1 - 1 / factor));
-    this.ty.update((v) => v + (cy - v) * (1 - 1 / factor));
+    const oldScale = this.scale();
+    const newScale = Math.max(0.08, Math.min(4, oldScale * factor));
+    const eff = newScale / oldScale;
+    if (eff === 1) return;
+    this.scale.set(newScale);
+    this.tx.update((v) => cx - eff * (cx - v));
+    this.ty.update((v) => cy - eff * (cy - v));
   }
 
-  zoomOut(): void {
-    const rect = this.svgRef?.nativeElement.getBoundingClientRect();
-    if (!rect) return;
-    const factor = 1 / 1.3;
-    const cx = rect.width / 2, cy = rect.height / 2;
-    this.scale.update((s) => Math.max(s * factor, 0.08));
-    this.tx.update((v) => v + (cx - v) * (1 - 1 / factor));
-    this.ty.update((v) => v + (cy - v) * (1 - 1 / factor));
-  }
+  zoomIn(): void { this.zoomBy(1.3); }
+  zoomOut(): void { this.zoomBy(1 / 1.3); }
 
   fitToScreen(): void {
     this.centerViewport();
