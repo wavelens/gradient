@@ -362,7 +362,8 @@ impl JobExecutor {
                     crate::executor::build::BuildError::transient(e)
                 })?;
             let outputs =
-                build::build_derivation(&self.store, build_task, index as u32, updater).await?;
+                build::build_derivation(&self.store, build_task, index as u32, updater, &mut abort)
+                    .await?;
             for o in &outputs {
                 gc_handles.push(self.gcroots.add(&o.store_path).await);
             }

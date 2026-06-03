@@ -38,6 +38,7 @@ use harmonia_utils_hash::{Algorithm, Hash};
 use proto::messages::{BuildFailureKind, BuildOutput, BuildProduct, BuildTask};
 use std::collections::BTreeMap;
 use std::pin::{Pin, pin};
+use tokio::sync::watch;
 use tracing::{debug, info, warn};
 
 use crate::nix::store::{LocalNixStore, strip_store_prefix};
@@ -77,6 +78,14 @@ impl BuildError {
         Self {
             kind: BuildFailureKind::Timeout,
             source: e.into(),
+        }
+    }
+    /// The server sent `AbortJob` while the daemon was building. Terminal: the
+    /// build is already in a terminal state server-side, so retrying is wrong.
+    pub(crate) fn aborted(drv_path: &str) -> Self {
+        Self {
+            kind: BuildFailureKind::Permanent,
+            source: anyhow::anyhow!("build aborted by server: {}", drv_path),
         }
     }
 }
@@ -152,6 +161,7 @@ impl ParsedDerivation {
         updater: &mut JobUpdater,
         drv_path: &str,
         max_silent_secs: Option<u64>,
+        abort: &mut watch::Receiver<bool>,
     ) -> Result<Vec<BuildOutput>, BuildError> {
         let mut guard = store.scoped().await.map_err(BuildError::transient)?;
 
@@ -183,6 +193,11 @@ impl ParsedDerivation {
 
         // `build_derivation` returns `impl ResultLog = Stream<Item=LogMessage> + Future`.
         // Drain the stream first, then await the future for the BuildResult.
+        //
+        // On abort we return early *without* `mark_ok`: dropping `logs` and
+        // then `guard` discards the daemon connection (see `ScopedGuard`),
+        // which closes the socket and makes the nix-daemon kill the in-flight
+        // build instead of leaving it compiling after the server cancelled.
         let silent = max_silent_secs.map(std::time::Duration::from_secs);
         let outcome = {
             let logs = guard.client().build_derivation(
@@ -191,8 +206,11 @@ impl ParsedDerivation {
                 BuildMode::Normal,
             );
             let mut logs = pin!(logs);
-            match drain_build_logs_with_timeout(logs.as_mut(), updater, task_index, silent).await {
-                Ok(stats) => log_stream_summary(&stats, drv_path),
+            match drain_build_logs_with_timeout(logs.as_mut(), updater, task_index, silent, abort)
+                .await
+            {
+                Ok(DrainOutcome::Completed(stats)) => log_stream_summary(&stats, drv_path),
+                Ok(DrainOutcome::Aborted) => return Err(BuildError::aborted(drv_path)),
                 Err(e) => return Err(BuildError::timeout(e)),
             }
             logs.await
@@ -343,6 +361,7 @@ pub async fn build_derivation(
     task: &BuildTask,
     task_index: u32,
     updater: &mut JobUpdater,
+    abort: &mut watch::Receiver<bool>,
 ) -> Result<Vec<BuildOutput>, BuildError> {
     // `report_building` is sent by the caller (`execute_build_job`) before the
     // prefetch step, so a `JobFailed` after a prefetch error finds the build
@@ -358,6 +377,7 @@ pub async fn build_derivation(
         updater,
         &task.drv_path,
         task.max_silent_secs,
+        abort,
     );
 
     let outputs = match task.timeout_secs.map(std::time::Duration::from_secs) {
@@ -389,36 +409,84 @@ struct LogStreamStats {
     send_failures: u64,
 }
 
-/// Drain every [`LogMessage`] from `logs`, forwarding text lines to `updater`,
-/// aborting with an error if no log line arrives within `silent` (the build's
-/// `maxSilent` budget). `None` disables the silent timeout.
+/// Why the build log drain stopped.
+enum DrainOutcome {
+    /// The daemon finished the build and closed the log stream normally.
+    Completed(LogStreamStats),
+    /// The server signalled `AbortJob` mid-build; the caller must drop the
+    /// daemon connection so the build is killed.
+    Aborted,
+}
+
+/// One step of the build log stream: the next message, end-of-stream, or a
+/// server abort.
+enum NextLog {
+    Message(LogMessage),
+    StreamEnd,
+    Aborted,
+}
+
+/// Resolve the next event on the build log stream, racing it against the
+/// server abort signal and the `maxSilent` budget.
 ///
-/// Returns aggregate counters; callers should pass them to
-/// [`log_stream_summary`] for tracing.
+/// Returns [`NextLog::Aborted`] the instant `abort` is set so the caller can
+/// tear down the daemon connection and let the daemon kill the running build.
+/// Returns `Err` only when `silent` elapses with no new log line.
+async fn next_log_event<S>(
+    mut logs: Pin<&mut S>,
+    silent: Option<std::time::Duration>,
+    abort: &mut watch::Receiver<bool>,
+) -> Result<NextLog>
+where
+    S: futures::Stream<Item = LogMessage>,
+{
+    if *abort.borrow() {
+        return Ok(NextLog::Aborted);
+    }
+    tokio::select! {
+        biased;
+        _ = abort.changed() => Ok(NextLog::Aborted),
+        item = logs.next() => Ok(match item {
+            Some(msg) => NextLog::Message(msg),
+            None => NextLog::StreamEnd,
+        }),
+        _ = maybe_silent_timeout(silent) => Err(anyhow::anyhow!(
+            "build produced no output for {}s (maxSilent exceeded)",
+            silent.map(|d| d.as_secs()).unwrap_or_default()
+        )),
+    }
+}
+
+/// Sleep for the `maxSilent` budget, or never resolve when no budget is set.
+async fn maybe_silent_timeout(silent: Option<std::time::Duration>) {
+    match silent {
+        Some(d) => tokio::time::sleep(d).await,
+        None => std::future::pending().await,
+    }
+}
+
+/// Drain every [`LogMessage`] from `logs`, forwarding text lines to `updater`.
+///
+/// Stops early with [`DrainOutcome::Aborted`] when the server cancels the job,
+/// or with `Err` when no log line arrives within `silent` (the build's
+/// `maxSilent` budget; `None` disables it).
 async fn drain_build_logs_with_timeout<S>(
     mut logs: Pin<&mut S>,
     updater: &mut JobUpdater,
     task_index: u32,
     silent: Option<std::time::Duration>,
-) -> Result<LogStreamStats>
+    abort: &mut watch::Receiver<bool>,
+) -> Result<DrainOutcome>
 where
     S: futures::Stream<Item = LogMessage>,
 {
     let mut stats = LogStreamStats::default();
     loop {
-        let next = match silent {
-            Some(d) => match tokio::time::timeout(d, logs.next()).await {
-                Ok(item) => item,
-                Err(_) => {
-                    return Err(anyhow::anyhow!(
-                        "build produced no output for {}s (maxSilent exceeded)",
-                        d.as_secs()
-                    ));
-                }
-            },
-            None => logs.next().await,
+        let msg = match next_log_event(logs.as_mut(), silent, abort).await? {
+            NextLog::Message(msg) => msg,
+            NextLog::StreamEnd => break,
+            NextLog::Aborted => return Ok(DrainOutcome::Aborted),
         };
-        let Some(msg) = next else { break };
         stats.total_msgs += 1;
         if let Some(line) = log_message_to_text(&msg) {
             let len = line.len();
@@ -437,7 +505,7 @@ where
             }
         }
     }
-    Ok(stats)
+    Ok(DrainOutcome::Completed(stats))
 }
 
 /// Emit a tracing summary after [`drain_build_logs_with_timeout`] completes.
@@ -878,6 +946,53 @@ mod tests {
 
         let pairs = output_pairs_from_built_or_drv(&built, &drv);
         assert!(pairs.is_empty());
+    }
+
+    use tokio::sync::watch;
+
+    #[tokio::test]
+    async fn next_log_event_returns_aborted_when_already_set() {
+        let (tx, mut rx) = watch::channel(false);
+        tx.send(true).unwrap();
+        let stream = futures::stream::pending::<LogMessage>();
+        let mut stream = std::pin::pin!(stream);
+        let out = next_log_event(stream.as_mut(), None, &mut rx).await;
+        assert!(matches!(out, Ok(NextLog::Aborted)));
+    }
+
+    #[tokio::test]
+    async fn next_log_event_aborts_while_waiting_on_stalled_stream() {
+        let (tx, mut rx) = watch::channel(false);
+        let stream = futures::stream::pending::<LogMessage>();
+        let mut stream = std::pin::pin!(stream);
+        let mut fut = std::pin::pin!(next_log_event(stream.as_mut(), None, &mut rx));
+        assert!(futures::poll!(fut.as_mut()).is_pending());
+        tx.send(true).unwrap();
+        assert!(matches!(fut.await, Ok(NextLog::Aborted)));
+    }
+
+    #[tokio::test]
+    async fn next_log_event_reports_stream_end() {
+        let (_tx, mut rx) = watch::channel(false);
+        let stream = futures::stream::empty::<LogMessage>();
+        let mut stream = std::pin::pin!(stream);
+        let out = next_log_event(stream.as_mut(), None, &mut rx).await;
+        assert!(matches!(out, Ok(NextLog::StreamEnd)));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn next_log_event_errors_on_silent_timeout() {
+        let (_tx, mut rx) = watch::channel(false);
+        let stream = futures::stream::pending::<LogMessage>();
+        let mut stream = std::pin::pin!(stream);
+        let mut fut = std::pin::pin!(next_log_event(
+            stream.as_mut(),
+            Some(std::time::Duration::from_secs(5)),
+            &mut rx,
+        ));
+        assert!(futures::poll!(fut.as_mut()).is_pending());
+        tokio::time::advance(std::time::Duration::from_secs(6)).await;
+        assert!(fut.await.is_err());
     }
 
     #[tokio::test]

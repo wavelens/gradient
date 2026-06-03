@@ -1645,6 +1645,36 @@ SET NULL`, so a delete would silently drop the link plus the
 `cached_path_signature` placeholders, while a demote keeps the row's
 identity and lets a subsequent successful upload re-fill the metadata.
 
+## Worker aborts the running build, not just the upload (#309)
+
+Abort propagation reached the `compress`/`push` loop (above), but **not the
+derivation build itself**. `execute_build_job` only checked `abort` at the top
+of each task iteration; the long-running `build_derivation` never observed it.
+So cancelling a build server-side left the worker's nix-daemon compiling the
+derivation to completion - high memory, build still running, `LogChunk`s still
+streaming - while the server already showed no running build.
+
+Fix in `worker/src/executor/build.rs`: the build log drain races the daemon's
+log stream against the `abort` watch (`next_log_event`). When the server
+signals `AbortJob`, `drain_build_logs_with_timeout` returns
+`DrainOutcome::Aborted` and `realize` returns early *without* `mark_ok`.
+Dropping the `ScopedGuard` discards the daemon connection (closes the socket),
+which makes the nix-daemon kill the in-flight build. Because the build errors
+out before the compress/push stage, no NAR is uploaded for a cancelled build.
+
+Tests (`cargo test -p worker executor::build::tests`):
+
+- `next_log_event_returns_aborted_when_already_set` - abort already signalled
+  before the first poll yields `NextLog::Aborted` immediately, even against a
+  stalled stream.
+- `next_log_event_aborts_while_waiting_on_stalled_stream` - a stream that never
+  yields stays `Pending` until `abort` fires, then resolves to
+  `NextLog::Aborted` (proves a running build is interruptible, not hung).
+- `next_log_event_reports_stream_end` - an exhausted log stream maps to
+  `NextLog::StreamEnd` so a normal build still completes.
+- `next_log_event_errors_on_silent_timeout` - with `maxSilent` set and no log
+  output, the drain errors once the budget elapses (paused-time test).
+
 ## Cache GC - guard shared-hash NARs and purge zombie cached_path rows
 
 Two bugs together inflated cache stats and over-deleted shared NARs:
