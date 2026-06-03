@@ -290,6 +290,10 @@ pub async fn trigger_restart_builds<C: ConnectionTrait>(
             worker: Set(None),
             via: Set(via),
             external_cached: Set(false),
+            attempt: Set(0),
+            timeout_secs: Set(None),
+            max_silent_secs: Set(None),
+            prefer_local_build: Set(false),
             created_at: Set(now),
             updated_at: Set(now),
         };
@@ -514,7 +518,9 @@ mod tests {
         for s in [
             BuildStatus::Queued,
             BuildStatus::Building,
-            BuildStatus::Failed,
+            BuildStatus::FailedPermanent,
+            BuildStatus::FailedTransient,
+            BuildStatus::FailedTimeout,
             BuildStatus::Aborted,
             BuildStatus::Created,
             BuildStatus::DependencyFailed,
@@ -626,6 +632,10 @@ mod tests {
             worker: None,
             via: None,
             external_cached: false,
+            attempt: 0,
+            timeout_secs: None,
+            max_silent_secs: None,
+            prefer_local_build: false,
             created_at: NaiveDateTime::default(),
             updated_at: NaiveDateTime::default(),
         }
@@ -715,7 +725,7 @@ mod tests {
 
         let prev_builds = vec![
             make_build(BuildId::now_v7(), prev_eval_id, BuildStatus::Completed),
-            make_build(BuildId::now_v7(), prev_eval_id, BuildStatus::Failed),
+            make_build(BuildId::now_v7(), prev_eval_id, BuildStatus::FailedPermanent),
         ];
 
         let inserted_eval = {
@@ -776,7 +786,7 @@ mod tests {
             BuildId::now_v7(),
             prev_eval_id,
             shared_drv,
-            BuildStatus::Failed,
+            BuildStatus::FailedPermanent,
         );
 
         // Leader currently Building under a different evaluation.
