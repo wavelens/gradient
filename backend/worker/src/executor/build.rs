@@ -35,13 +35,71 @@ use harmonia_store_derivation::derivation::{BasicDerivation, DerivationOutput, D
 use harmonia_store_path::StorePath;
 use harmonia_store_remote::DaemonStore as _;
 use harmonia_utils_hash::{Algorithm, Hash};
-use proto::messages::{BuildOutput, BuildProduct, BuildTask};
+use proto::messages::{BuildFailureKind, BuildOutput, BuildProduct, BuildTask};
 use std::collections::BTreeMap;
 use std::pin::{Pin, pin};
 use tracing::{debug, info, warn};
 
 use crate::nix::store::{LocalNixStore, strip_store_prefix};
 use crate::proto::job::JobUpdater;
+
+// ── Failure classification ────────────────────────────────────────────────────
+
+/// A build failure carrying its classification, so the dispatch layer can
+/// report the right `BuildFailureKind` to the server.
+#[derive(Debug)]
+pub struct BuildError {
+    pub kind: BuildFailureKind,
+    pub source: anyhow::Error,
+}
+
+impl std::fmt::Display for BuildError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:#}", self.source)
+    }
+}
+impl std::error::Error for BuildError {}
+
+impl BuildError {
+    fn transient(e: impl Into<anyhow::Error>) -> Self {
+        Self {
+            kind: BuildFailureKind::Transient,
+            source: e.into(),
+        }
+    }
+    fn permanent(e: impl Into<anyhow::Error>) -> Self {
+        Self {
+            kind: BuildFailureKind::Permanent,
+            source: e.into(),
+        }
+    }
+    fn timeout(e: impl Into<anyhow::Error>) -> Self {
+        Self {
+            kind: BuildFailureKind::Timeout,
+            source: e.into(),
+        }
+    }
+}
+
+/// Best-effort OOM signature scan. OOM presents as a generic build failure but
+/// is transient (retry on a less-loaded builder).
+pub(super) fn looks_like_oom(msg: &str) -> bool {
+    let l = msg.to_ascii_lowercase();
+    l.contains("out of memory")
+        || l.contains("cannot allocate memory")
+        || l.contains("oom-killer")
+        || l.contains("killed")
+}
+
+/// Classify a builder-reported failure message: OOM -> Transient, otherwise a
+/// real build error -> Permanent.
+pub(super) fn classify_build_error(msg: &str) -> BuildFailureKind {
+    if looks_like_oom(msg) {
+        BuildFailureKind::Transient
+    } else {
+        BuildFailureKind::Permanent
+    }
+}
 
 // ── Type-state pipeline ───────────────────────────────────────────────────────
 
@@ -93,8 +151,9 @@ impl ParsedDerivation {
         task_index: u32,
         updater: &mut JobUpdater,
         drv_path: &str,
-    ) -> Result<Vec<BuildOutput>> {
-        let mut guard = store.scoped().await?;
+        max_silent_secs: Option<u64>,
+    ) -> Result<Vec<BuildOutput>, BuildError> {
+        let mut guard = store.scoped().await.map_err(BuildError::transient)?;
 
         debug!(
             drv = %drv_path,
@@ -115,15 +174,16 @@ impl ParsedDerivation {
 
         if let Err(e) = guard.client().set_options(&opts).await {
             warn!(error = %e, "set_options failed; discarding daemon connection");
-            return Err(anyhow::anyhow!(
+            return Err(BuildError::transient(anyhow::anyhow!(
                 "set_options failed for {}: {}",
                 drv_path,
                 e
-            ));
+            )));
         }
 
         // `build_derivation` returns `impl ResultLog = Stream<Item=LogMessage> + Future`.
         // Drain the stream first, then await the future for the BuildResult.
+        let silent = max_silent_secs.map(std::time::Duration::from_secs);
         let outcome = {
             let logs = guard.client().build_derivation(
                 &self.harmonia_path,
@@ -131,8 +191,10 @@ impl ParsedDerivation {
                 BuildMode::Normal,
             );
             let mut logs = pin!(logs);
-            let stats = drain_build_logs(logs.as_mut(), updater, task_index).await;
-            log_stream_summary(&stats, drv_path);
+            match drain_build_logs_with_timeout(logs.as_mut(), updater, task_index, silent).await {
+                Ok(stats) => log_stream_summary(&stats, drv_path),
+                Err(e) => return Err(BuildError::timeout(e)),
+            }
             logs.await
         };
 
@@ -142,11 +204,11 @@ impl ParsedDerivation {
                 r
             }
             Err(e) => {
-                return Err(anyhow::anyhow!(
+                return Err(BuildError::transient(anyhow::anyhow!(
                     "build_derivation failed for {}: {}",
                     drv_path,
                     e
-                ));
+                )));
             }
         };
 
@@ -155,13 +217,13 @@ impl ParsedDerivation {
                 info!(drv = %drv_path, "build succeeded");
                 let pairs = output_pairs_from_built_or_drv(&s.built_outputs, &self.drv);
                 if pairs.is_empty() {
-                    return Err(anyhow::anyhow!(
+                    return Err(BuildError::permanent(anyhow::anyhow!(
                         "build of {} reported success but produced no recordable outputs - \
                          the daemon returned no built_outputs and the .drv carries no \
                          input-addressed paths to recover (likely a content-addressed or \
                          deferred-output derivation built against an old protocol)",
                         drv_path
-                    ));
+                    )));
                 }
                 if s.built_outputs.is_empty() {
                     debug!(
@@ -174,7 +236,8 @@ impl ParsedDerivation {
                 let mut outputs = Vec::with_capacity(pairs.len());
                 for (output_name, store_path_str) in pairs {
                     let (hash, _package) = get_hash_from_path(store_path_str.clone())
-                        .with_context(|| format!("parse output path: {}", store_path_str))?;
+                        .with_context(|| format!("parse output path: {}", store_path_str))
+                        .map_err(BuildError::permanent)?;
                     let products = load_products(&store_path_str).await;
                     outputs.push(BuildOutput {
                         name: output_name,
@@ -189,9 +252,13 @@ impl ParsedDerivation {
             }
 
             BuildResultInner::Failure(f) => {
-                let msg = String::from_utf8_lossy(&f.error_msg);
+                let msg = String::from_utf8_lossy(&f.error_msg).to_string();
                 warn!(drv = %drv_path, error = %msg, "build failed");
-                Err(anyhow::anyhow!("build failed: {}", msg))
+                let kind = classify_build_error(&msg);
+                Err(BuildError {
+                    kind,
+                    source: anyhow::anyhow!("build failed: {}", msg),
+                })
             }
         }
     }
@@ -276,18 +343,38 @@ pub async fn build_derivation(
     task: &BuildTask,
     task_index: u32,
     updater: &mut JobUpdater,
-) -> Result<Vec<BuildOutput>> {
-    // NOTE: `report_building` is sent by the caller (`execute_build_job`)
-    // *before* the prefetch step, so that a `JobFailed` arriving after a
-    // prefetch error finds the build already in `Building` state on the
-    // server.
+) -> Result<Vec<BuildOutput>, BuildError> {
+    // `report_building` is sent by the caller (`execute_build_job`) before the
+    // prefetch step, so a `JobFailed` after a prefetch error finds the build
+    // already in `Building` state on the server.
 
-    let outputs = ParsedDerivation::load(&task.drv_path)
-        .await?
-        .realize(store, task_index, updater, &task.drv_path)
-        .await?;
+    let parsed = ParsedDerivation::load(&task.drv_path)
+        .await
+        .map_err(BuildError::transient)?;
 
-    updater.report_build_output(task.build_id.clone(), outputs.clone())?;
+    let realize = parsed.realize(
+        store,
+        task_index,
+        updater,
+        &task.drv_path,
+        task.max_silent_secs,
+    );
+
+    let outputs = match task.timeout_secs.map(std::time::Duration::from_secs) {
+        Some(d) => tokio::time::timeout(d, realize)
+            .await
+            .map_err(|_| {
+                BuildError::timeout(anyhow::anyhow!(
+                    "build exceeded wall-clock timeout of {}s",
+                    d.as_secs()
+                ))
+            })??,
+        None => realize.await?,
+    };
+
+    updater
+        .report_build_output(task.build_id.clone(), outputs.clone())
+        .map_err(BuildError::transient)?;
     Ok(outputs)
 }
 
@@ -302,20 +389,36 @@ struct LogStreamStats {
     send_failures: u64,
 }
 
-/// Drain every [`LogMessage`] from `logs`, forwarding text lines to `updater`.
+/// Drain every [`LogMessage`] from `logs`, forwarding text lines to `updater`,
+/// aborting with an error if no log line arrives within `silent` (the build's
+/// `maxSilent` budget). `None` disables the silent timeout.
 ///
 /// Returns aggregate counters; callers should pass them to
 /// [`log_stream_summary`] for tracing.
-async fn drain_build_logs<S>(
+async fn drain_build_logs_with_timeout<S>(
     mut logs: Pin<&mut S>,
     updater: &mut JobUpdater,
     task_index: u32,
-) -> LogStreamStats
+    silent: Option<std::time::Duration>,
+) -> Result<LogStreamStats>
 where
     S: futures::Stream<Item = LogMessage>,
 {
     let mut stats = LogStreamStats::default();
-    while let Some(msg) = logs.next().await {
+    loop {
+        let next = match silent {
+            Some(d) => match tokio::time::timeout(d, logs.next()).await {
+                Ok(item) => item,
+                Err(_) => {
+                    return Err(anyhow::anyhow!(
+                        "build produced no output for {}s (maxSilent exceeded)",
+                        d.as_secs()
+                    ));
+                }
+            },
+            None => logs.next().await,
+        };
+        let Some(msg) = next else { break };
         stats.total_msgs += 1;
         if let Some(line) = log_message_to_text(&msg) {
             let len = line.len();
@@ -334,10 +437,10 @@ where
             }
         }
     }
-    stats
+    Ok(stats)
 }
 
-/// Emit a tracing summary after [`drain_build_logs`] completes.
+/// Emit a tracing summary after [`drain_build_logs_with_timeout`] completes.
 ///
 /// Warns if the daemon emitted no messages at all, or if it emitted messages
 /// but none were forwardable text (suggesting daemon verbosity is too low).
@@ -804,5 +907,31 @@ mod tests {
         assert_eq!(products[0].subtype, "html");
         assert_eq!(products[0].name, "index.html");
         assert_eq!(products[0].size, Some(13));
+    }
+}
+
+#[cfg(test)]
+mod classify_tests {
+    use super::{classify_build_error, looks_like_oom};
+    use proto::messages::BuildFailureKind;
+
+    #[test]
+    fn builder_nonzero_is_permanent() {
+        assert_eq!(
+            classify_build_error("build failed: builder for '/nix/store/x.drv' failed with exit code 1"),
+            BuildFailureKind::Permanent
+        );
+    }
+
+    #[test]
+    fn oom_signature_is_transient() {
+        assert_eq!(
+            classify_build_error("build failed: gcc: fatal error: Killed signal terminated; out of memory"),
+            BuildFailureKind::Transient
+        );
+        assert!(looks_like_oom("cc1plus: out of memory allocating 1048576 bytes"));
+        assert!(looks_like_oom("Killed"));
+        assert!(looks_like_oom("oom-killer: invoked"));
+        assert!(!looks_like_oom("error: undefined reference to `foo'"));
     }
 }
