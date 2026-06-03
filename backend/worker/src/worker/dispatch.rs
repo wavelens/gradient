@@ -162,10 +162,15 @@ fn on_job_done(
         }
         Err(e) => {
             let error_chain = format!("{e:#}");
-            error!(%job_id, error = %error_chain, "job failed");
+            let kind = e
+                .downcast_ref::<crate::executor::build::BuildError>()
+                .map(|be| be.kind)
+                .unwrap_or(proto::messages::BuildFailureKind::Permanent);
+            error!(%job_id, error = %error_chain, ?kind, "job failed");
             writer.send(ClientMessage::JobFailed {
                 job_id,
                 error: error_chain,
+                kind,
             })?;
         }
     }

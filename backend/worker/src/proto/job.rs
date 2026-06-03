@@ -523,7 +523,7 @@ mod tests {
     async fn updater_fail() {
         let (conn, server_task, job_id) = server_then_client!("job-fail", |sc| {
             let msg = sc.recv().await.unwrap();
-            if let ClientMessage::JobFailed { job_id, error } = msg {
+            if let ClientMessage::JobFailed { job_id, error, .. } = msg {
                 assert_eq!(job_id, "job-fail");
                 assert_eq!(error, "something went wrong");
             } else {
@@ -537,6 +537,7 @@ mod tests {
             .send(ClientMessage::JobFailed {
                 job_id: updater.job_id.clone(),
                 error: "something went wrong".to_owned(),
+                kind: proto::messages::BuildFailureKind::Permanent,
             })
             .unwrap();
         server_task.await.unwrap();
