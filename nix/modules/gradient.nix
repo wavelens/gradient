@@ -368,6 +368,30 @@ in {
           default = 30;
         };
 
+        buildMaxAttempts = lib.mkOption {
+          description = "Maximum number of build attempts before a transient failure becomes permanent (must be ≥ 1).";
+          type = lib.types.ints.positive;
+          default = 3;
+        };
+
+        buildRetryBackoffSecs = lib.mkOption {
+          description = "Base backoff in seconds before retrying a transient build failure; doubled per prior attempt.";
+          type = lib.types.ints.unsigned;
+          default = 30;
+        };
+
+        buildDefaultTimeoutSecs = lib.mkOption {
+          description = "Default wall-clock build timeout in seconds when the derivation sets no `timeout`. `0` disables.";
+          type = lib.types.ints.unsigned;
+          default = 3600;
+        };
+
+        buildDefaultMaxSilentSecs = lib.mkOption {
+          description = "Default silent (no-output) build timeout in seconds when the derivation sets no `maxSilent`. `0` disables.";
+          type = lib.types.ints.unsigned;
+          default = 1800;
+        };
+
         maxRequestSize = lib.mkOption {
           description = ''
             Maximum size in bytes of an HTTP request body for most endpoints.
@@ -616,6 +640,10 @@ in {
         GRADIENT_JWT_SECRET_FILE = "%d/gradient_jwt_secret";
         GRADIENT_REPORT_ERRORS = lib.boolToString cfg.reportErrors;
         GRADIENT_KEEP_EVALUATIONS = toString cfg.settings.keepEvaluations;
+        GRADIENT_BUILD_MAX_ATTEMPTS = toString cfg.settings.buildMaxAttempts;
+        GRADIENT_BUILD_RETRY_BACKOFF_SECS = toString cfg.settings.buildRetryBackoffSecs;
+        GRADIENT_BUILD_DEFAULT_TIMEOUT_SECS = toString cfg.settings.buildDefaultTimeoutSecs;
+        GRADIENT_BUILD_DEFAULT_MAX_SILENT_SECS = toString cfg.settings.buildDefaultMaxSilentSecs;
         GRADIENT_MAX_REQUEST_SIZE = toString cfg.settings.maxRequestSize;
         GRADIENT_MAX_NAR_UPLOAD_SIZE = toString cfg.settings.maxNarUploadSize;
         GRADIENT_MAX_PROTO_CONNECTIONS = toString cfg.settings.maxProtoConnections;
