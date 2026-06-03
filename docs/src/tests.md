@@ -2957,6 +2957,10 @@ are covered too. Phases:
   non-member cannot read the private org; the built-in `View` role grants read
   but is rejected (enveloped `403`) on settings edit, project create, member
   add, and org delete; promotion to `Admin` unlocks the settings edit.
+- **State export (`GET /admin/state`)** — rejected (`403`) for a non-superuser;
+  after elevating `operator` to superuser in the DB, the JSON format returns the
+  seeded org/project/cache with secret `*_file` fields redacted to `null`, and
+  the default Nix format renders the same resources as a pasteable expression.
 
 The auth surface is rate-limited (burst 5, one token per 6s), so the script
 spaces its registration/login calls to stay within the bucket.
@@ -2964,3 +2968,17 @@ spaces its registration/login calls to stay within the bucket.
 Out of scope (covered by dedicated tests or requiring external services):
 OIDC, SMTP e-mail verification, forge webhooks, the worker proto protocol,
 the Nix binary-cache serving family, and build-request dispatch.
+
+## State export endpoint (#188)
+
+`backend/core/src/state/export.rs` unit tests cover the secret-redaction pass
+(`redact` nulls every `*_file` key at any nesting depth) and the JSON→Nix
+renderer (string escaping for `"`, `\`, `${`, and newlines; identifier vs.
+quoted attribute keys; nested attrsets/lists; empty `{ }`/`[ ]`; and the header
+comment).
+
+`backend/web/tests/admin_state.rs` drives `GET /api/v1/admin/state` through the
+router: a non-superuser gets `403`, an unknown `format` gets `400`, and a
+superuser over an empty database gets the eight top-level state keys (JSON) and
+a `text/plain` Nix body (default). The full round-trip against real data lives
+in the NixOS API integration test above.
