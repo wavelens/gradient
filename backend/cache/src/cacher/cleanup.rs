@@ -137,7 +137,7 @@ const STALE_CACHED_NARS_SELECT: &str = r#"SELECT cd.id, cd.cache, cd.derivation
                  AND NOT EXISTS (
                      SELECT 1 FROM build b
                      WHERE b.derivation = cd.derivation
-                       AND b.status NOT IN ($2, $3, $4)
+                       AND b.status NOT IN ($2, $3, $4, $5)
                  )
                  AND NOT EXISTS (
                      SELECT 1 FROM derivation_output dout
@@ -161,6 +161,7 @@ pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
                 sea_orm::Value::Int(Some(BuildStatus::FailedPermanent as i32)),
                 sea_orm::Value::Int(Some(BuildStatus::Aborted as i32)),
                 sea_orm::Value::Int(Some(BuildStatus::DependencyFailed as i32)),
+                sea_orm::Value::Int(Some(BuildStatus::FailedTimeout as i32)),
             ],
         ))
         .await
@@ -358,7 +359,7 @@ async fn active_hashes(state: &Arc<ServerState>) -> Result<HashSet<String>> {
             SELECT DISTINCT dout.hash AS hash
             FROM derivation_output dout
             JOIN build b ON b.derivation = dout.derivation
-            WHERE b.status NOT IN ($1, $2, $3)
+            WHERE b.status NOT IN ($1, $2, $3, $4)
             UNION
             SELECT cp.hash AS hash
             FROM cached_path cp
@@ -368,6 +369,7 @@ async fn active_hashes(state: &Arc<ServerState>) -> Result<HashSet<String>> {
                 sea_orm::Value::Int(Some(BuildStatus::FailedPermanent as i32)),
                 sea_orm::Value::Int(Some(BuildStatus::Aborted as i32)),
                 sea_orm::Value::Int(Some(BuildStatus::DependencyFailed as i32)),
+                sea_orm::Value::Int(Some(BuildStatus::FailedTimeout as i32)),
             ],
         ))
         .await
