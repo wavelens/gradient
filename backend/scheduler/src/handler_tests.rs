@@ -37,7 +37,8 @@ use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 use crate::jobs::{PendingBuildJob, PendingEvalJob};
 use crate::{build as build_handler, eval as eval_handler};
 use gradient_core::types::proto::{
-    BuildOutput, BuildProduct, DerivationOutput, DiscoveredDerivation, FlakeJob, FlakeTask,
+    BuildFailureKind, BuildOutput, BuildProduct, DerivationOutput, DiscoveredDerivation, FlakeJob,
+    FlakeTask,
 };
 // ── Fixture helpers ──────────────────────────────────────────────────────────
 
@@ -237,6 +238,9 @@ fn make_discovered(
         dependencies: deps.iter().map(|s| s.to_string()).collect(),
         architecture: "x86_64-linux".into(),
         required_features: vec![],
+        timeout_secs: None,
+        max_silent_secs: None,
+        prefer_local_build: false,
         substituted: false,
     }
 }
@@ -808,7 +812,7 @@ async fn build_completed_with_failed_sibling() {
 
     let build = make_build(build_id, eval_id, drv_id, BuildStatus::Building);
     let build_completed = make_build(build_id, eval_id, drv_id, BuildStatus::Completed);
-    let failed_build = make_build(failed_build_id, eval_id, failed_drv_id, BuildStatus::Failed);
+    let failed_build = make_build(failed_build_id, eval_id, failed_drv_id, BuildStatus::FailedPermanent);
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // 1. find_by_id(build)
@@ -935,7 +939,7 @@ async fn build_failed_cascades_to_direct_dependent() {
 
     // Building → Failed is the valid terminal failure transition per the state machine.
     let build_a = make_build(build_a_id, eval_id, drv_a_id, BuildStatus::Building);
-    let build_a_failed = make_build(build_a_id, eval_id, drv_a_id, BuildStatus::Failed);
+    let build_a_failed = make_build(build_a_id, eval_id, drv_a_id, BuildStatus::FailedPermanent);
     let build_b = make_build(build_b_id, eval_id, drv_b_id, BuildStatus::Queued);
     let build_b_dep_failed =
         make_build(build_b_id, eval_id, drv_b_id, BuildStatus::DependencyFailed);
@@ -965,7 +969,7 @@ async fn build_failed_cascades_to_direct_dependent() {
         .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Building)]])
         // 9. find failed builds → [buildA{Failed}, buildB{DependencyFailed}]
         .append_query_results([vec![
-            make_build(build_a_id, eval_id, drv_a_id, BuildStatus::Failed),
+            make_build(build_a_id, eval_id, drv_a_id, BuildStatus::FailedPermanent),
             make_build(build_b_id, eval_id, drv_b_id, BuildStatus::DependencyFailed),
         ]])
         // 10. find eval error messages → empty
@@ -979,7 +983,7 @@ async fn build_failed_cascades_to_direct_dependent() {
         .into_connection();
 
     let state = make_state(db);
-    let result = build_handler::handle_build_job_failed(&state, build_a_id, "build error").await;
+    let result = build_handler::handle_build_job_failed(&state, build_a_id, "build error", BuildFailureKind::Permanent).await;
     assert!(result.is_ok());
 }
 
@@ -998,7 +1002,7 @@ async fn build_failed_appends_worker_error_to_log() {
     let build_id = BuildId::now_v7();
 
     let build = make_build(build_id, eval_id, drv_id, BuildStatus::Building);
-    let build_failed = make_build(build_id, eval_id, drv_id, BuildStatus::Failed);
+    let build_failed = make_build(build_id, eval_id, drv_id, BuildStatus::FailedPermanent);
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // 1. find_by_id(build)
@@ -1030,7 +1034,7 @@ async fn build_failed_appends_worker_error_to_log() {
 
     let worker_error = "input prefetch failed: acquire local store for import: timeout: \
                         acquiring connection from pool";
-    let result = build_handler::handle_build_job_failed(&state, build_id, worker_error).await;
+    let result = build_handler::handle_build_job_failed(&state, build_id, worker_error, BuildFailureKind::Permanent).await;
     assert!(result.is_ok(), "handler returned error: {result:?}");
 
     let entries = log.entries();
@@ -1055,7 +1059,7 @@ async fn build_failed_no_dependents() {
 
     // Building → Failed is the valid terminal failure transition per the state machine.
     let build = make_build(build_id, eval_id, drv_id, BuildStatus::Building);
-    let build_failed = make_build(build_id, eval_id, drv_id, BuildStatus::Failed);
+    let build_failed = make_build(build_id, eval_id, drv_id, BuildStatus::FailedPermanent);
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // 1. find_by_id(build)
@@ -1083,7 +1087,7 @@ async fn build_failed_no_dependents() {
         .into_connection();
 
     let state = make_state(db);
-    let result = build_handler::handle_build_job_failed(&state, build_id, "error").await;
+    let result = build_handler::handle_build_job_failed(&state, build_id, "error", BuildFailureKind::Permanent).await;
     assert!(result.is_ok());
 }
 
@@ -1101,7 +1105,7 @@ async fn build_failed_cascade_only_direct_dependents() {
 
     // Building → Failed is the valid terminal failure transition per the state machine.
     let build_a = make_build(build_a_id, eval_id, drv_a_id, BuildStatus::Building);
-    let build_a_failed = make_build(build_a_id, eval_id, drv_a_id, BuildStatus::Failed);
+    let build_a_failed = make_build(build_a_id, eval_id, drv_a_id, BuildStatus::FailedPermanent);
     let build_b = make_build(build_b_id, eval_id, drv_b_id, BuildStatus::Queued);
     let build_b_dep_failed =
         make_build(build_b_id, eval_id, drv_b_id, BuildStatus::DependencyFailed);
@@ -1134,7 +1138,7 @@ async fn build_failed_cascade_only_direct_dependents() {
         .into_connection();
 
     let state = make_state(db);
-    let result = build_handler::handle_build_job_failed(&state, build_a_id, "error").await;
+    let result = build_handler::handle_build_job_failed(&state, build_a_id, "error", BuildFailureKind::Permanent).await;
     assert!(result.is_ok());
 }
 
@@ -1148,7 +1152,7 @@ async fn build_failed_unknown_build_noop() {
         .into_connection();
 
     let state = make_state(db);
-    let result = build_handler::handle_build_job_failed(&state, build_id, "error").await;
+    let result = build_handler::handle_build_job_failed(&state, build_id, "error", BuildFailureKind::Permanent).await;
     assert!(result.is_ok());
 }
 
@@ -1164,7 +1168,7 @@ async fn build_failed_cascade_skips_building_status() {
 
     // Building → Failed is the valid terminal failure transition per the state machine.
     let build_a = make_build(build_a_id, eval_id, drv_a_id, BuildStatus::Building);
-    let build_a_failed = make_build(build_a_id, eval_id, drv_a_id, BuildStatus::Failed);
+    let build_a_failed = make_build(build_a_id, eval_id, drv_a_id, BuildStatus::FailedPermanent);
     // B is Building (not Created/Queued) - cascade filter excludes it
     let build_b_building = make_build(build_b_id, eval_id, drv_b_id, BuildStatus::Building);
 
@@ -1183,7 +1187,7 @@ async fn build_failed_cascade_skips_building_status() {
         .into_connection();
 
     let state = make_state(db);
-    let result = build_handler::handle_build_job_failed(&state, build_a_id, "err").await;
+    let result = build_handler::handle_build_job_failed(&state, build_a_id, "err", BuildFailureKind::Permanent).await;
     assert!(result.is_ok());
 }
 
@@ -1430,7 +1434,7 @@ async fn eval_job_completed_with_failed_build_marks_eval_failed() {
     let drv_id = DerivationId::now_v7();
     let build_id = BuildId::now_v7();
 
-    let failed_build = make_build(build_id, eval_id, drv_id, BuildStatus::Failed);
+    let failed_build = make_build(build_id, eval_id, drv_id, BuildStatus::FailedPermanent);
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // 1. find Created builds → empty
@@ -2013,7 +2017,7 @@ async fn action_not_dispatched_for_dep_failed() {
     let build_b_id = BuildId::now_v7();
 
     let build_a = make_build(build_a_id, eval_id, drv_a_id, BuildStatus::Building);
-    let build_a_failed = make_build(build_a_id, eval_id, drv_a_id, BuildStatus::Failed);
+    let build_a_failed = make_build(build_a_id, eval_id, drv_a_id, BuildStatus::FailedPermanent);
     let build_b = make_build(build_b_id, eval_id, drv_b_id, BuildStatus::Queued);
     let build_b_dep_failed =
         make_build(build_b_id, eval_id, drv_b_id, BuildStatus::DependencyFailed);
@@ -2066,7 +2070,7 @@ async fn action_not_dispatched_for_dep_failed() {
         .into_connection();
 
     let state = make_state(db);
-    let result = build_handler::handle_build_job_failed(&state, build_a_id, "build error").await;
+    let result = build_handler::handle_build_job_failed(&state, build_a_id, "build error", BuildFailureKind::Permanent).await;
     assert!(result.is_ok());
     tokio::task::yield_now().await;
 }
@@ -2098,6 +2102,9 @@ async fn eval_result_creates_entry_points_for_project() {
         dependencies: vec![],
         architecture: "x86_64-linux".into(),
         required_features: vec![],
+        timeout_secs: None,
+        max_silent_secs: None,
+        prefer_local_build: false,
         substituted: false,
     }];
 
@@ -2226,6 +2233,9 @@ async fn eval_result_no_entry_points_without_project() {
         dependencies: vec![],
         architecture: "x86_64-linux".into(),
         required_features: vec![],
+        timeout_secs: None,
+        max_silent_secs: None,
+        prefer_local_build: false,
         substituted: false,
     }];
 
@@ -2357,7 +2367,10 @@ async fn eval_result_all_substituted_with_project_completes() {
         dependencies: vec![],
         architecture: "x86_64-linux".into(),
         required_features: vec![],
-        substituted: true, // all outputs cached
+        timeout_secs: None,
+        max_silent_secs: None,
+        prefer_local_build: false,
+        substituted: true,
     }];
 
     let eval_job = PendingEvalJob {
@@ -2482,7 +2495,7 @@ async fn build_failed_cascades_transitively_through_graph() {
             build_c,
             eval_id,
             drv_c,
-            BuildStatus::Failed,
+            BuildStatus::FailedPermanent,
         )]])
         // 2a. propagate_to_followers: empty
         .append_query_results([Vec::<MBuild>::new()])
@@ -2542,7 +2555,7 @@ async fn build_failed_cascades_transitively_through_graph() {
         .into_connection();
 
     let state = test_support::prelude::test_state(db);
-    let result = build_handler::handle_build_job_failed(&state, build_c, "nix build failed").await;
+    let result = build_handler::handle_build_job_failed(&state, build_c, "nix build failed", BuildFailureKind::Permanent).await;
     assert!(
         result.is_ok(),
         "transitive cascade should succeed: {:?}",

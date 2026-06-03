@@ -158,7 +158,7 @@ pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
             STALE_CACHED_NARS_SELECT,
             [
                 sea_orm::Value::BigInt(Some(ttl_hours as i64)),
-                sea_orm::Value::Int(Some(BuildStatus::Failed as i32)),
+                sea_orm::Value::Int(Some(BuildStatus::FailedPermanent as i32)),
                 sea_orm::Value::Int(Some(BuildStatus::Aborted as i32)),
                 sea_orm::Value::Int(Some(BuildStatus::DependencyFailed as i32)),
             ],
@@ -365,7 +365,7 @@ async fn active_hashes(state: &Arc<ServerState>) -> Result<HashSet<String>> {
             WHERE cp.file_hash IS NOT NULL
             "#,
             [
-                sea_orm::Value::Int(Some(BuildStatus::Failed as i32)),
+                sea_orm::Value::Int(Some(BuildStatus::FailedPermanent as i32)),
                 sea_orm::Value::Int(Some(BuildStatus::Aborted as i32)),
                 sea_orm::Value::Int(Some(BuildStatus::DependencyFailed as i32)),
             ],

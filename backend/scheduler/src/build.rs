@@ -420,7 +420,11 @@ impl<'a> BuildStateHandler<'a> {
 
         let cascaded_builds = EBuild::find()
             .filter(CBuild::Evaluation.eq(evaluation_id))
-            .filter(CBuild::Status.is_in(vec![BuildStatus::Created, BuildStatus::Queued]))
+            .filter(CBuild::Status.is_in(vec![
+                BuildStatus::Created,
+                BuildStatus::Queued,
+                BuildStatus::FailedTransient,
+            ]))
             .filter(CBuild::Derivation.is_in(closure.into_iter().collect::<Vec<_>>()))
             .all(&self.state.worker_db)
             .await
@@ -444,6 +448,7 @@ impl<'a> BuildStateHandler<'a> {
                 BuildStatus::Created,
                 BuildStatus::Queued,
                 BuildStatus::Building,
+                BuildStatus::FailedTransient,
             ]))
             .all(&self.state.worker_db)
             .await
@@ -557,6 +562,7 @@ impl<'a> BuildStateHandler<'a> {
                     BuildStatus::Created,
                     BuildStatus::Queued,
                     BuildStatus::Building,
+                    BuildStatus::FailedTransient,
                 ]))
                 .all(&self.state.worker_db)
                 .await

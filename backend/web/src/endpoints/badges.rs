@@ -318,7 +318,7 @@ async fn badge_status_for_entry_point(
         Some(BuildStatus::Completed) | Some(BuildStatus::Substituted) => {
             (EvaluationStatus::Completed, false)
         }
-        Some(BuildStatus::Failed) => (EvaluationStatus::Failed, true),
+        Some(BuildStatus::FailedPermanent) => (EvaluationStatus::Failed, true),
         Some(BuildStatus::Aborted) | Some(BuildStatus::DependencyFailed) => {
             (EvaluationStatus::Aborted, false)
         }
@@ -354,7 +354,7 @@ async fn badge_status_for_latest_eval(
             !ep_build_ids.is_empty()
                 && EBuild::find()
                     .filter(CBuild::Id.is_in(ep_build_ids))
-                    .filter(CBuild::Status.eq(BuildStatus::Failed))
+                    .filter(CBuild::Status.eq(BuildStatus::FailedPermanent))
                     .one(&state.web_db)
                     .await?
                     .is_some()

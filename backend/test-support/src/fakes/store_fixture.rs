@@ -140,6 +140,9 @@ pub fn load_store(dir: &Path) -> StoreFixture {
             dependencies: dep_paths,
             architecture: drv.system.clone(),
             required_features: drv.required_system_features(),
+            timeout_secs: None,
+            max_silent_secs: None,
+            prefer_local_build: false,
             substituted: false,
         });
     }

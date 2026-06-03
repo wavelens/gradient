@@ -87,7 +87,7 @@ pub(super) async fn evaluations_to_summaries(
         .await?
     {
         *total_per_eval.entry(build.evaluation).or_insert(0) += 1;
-        if build.status == BuildStatus::Failed {
+        if build.status == BuildStatus::FailedPermanent {
             *failed_per_eval.entry(build.evaluation).or_insert(0) += 1;
         }
     }
@@ -136,7 +136,7 @@ pub(super) async fn evaluations_to_summaries(
                 Some(BuildStatus::Completed) | Some(BuildStatus::Substituted) => {
                     completed_entry_points += 1;
                 }
-                Some(BuildStatus::Failed) => failed_entry_points += 1,
+                Some(BuildStatus::FailedPermanent) => failed_entry_points += 1,
                 _ => {}
             }
         }
