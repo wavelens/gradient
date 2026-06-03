@@ -40,6 +40,19 @@ pub struct Derivation {
     pub environment: HashMap<String, String>,
 }
 
+/// Build-relevant attributes extracted from a derivation's environment.
+///
+/// Generalizes the old `required_system_features` accessor. `meta.*` Nix
+/// attributes do not survive into the `.drv`; these are read from top-level
+/// derivation attributes that *do* land in `drv.environment`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BuildMeta {
+    pub timeout_secs: Option<u64>,
+    pub max_silent_secs: Option<u64>,
+    pub prefer_local_build: bool,
+    pub required_features: Vec<String>,
+}
+
 impl Derivation {
     /// Returns the `requiredSystemFeatures` as a list. The env var is stored as a
     /// space-separated string inside the derivation.
@@ -53,6 +66,26 @@ impl Derivation {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    /// Extract all build-relevant attributes in one pass.
+    pub fn build_meta(&self) -> BuildMeta {
+        let secs = |key: &str| {
+            self.environment
+                .get(key)
+                .and_then(|v| v.trim().parse::<u64>().ok())
+        };
+        let prefer_local_build = self
+            .environment
+            .get("preferLocalBuild")
+            .map(|v| matches!(v.trim(), "1" | "true"))
+            .unwrap_or(false);
+        BuildMeta {
+            timeout_secs: secs("timeout"),
+            max_silent_secs: secs("maxSilent"),
+            prefer_local_build,
+            required_features: self.required_system_features(),
+        }
     }
 }
 
@@ -297,5 +330,39 @@ mod tests {
         let drv = parse_drv(drv).unwrap();
         assert_eq!(drv.system, "aarch64-linux");
         assert!(drv.required_system_features().is_empty());
+    }
+
+    const META_DRV: &[u8] = br#"Derive([("out","/nix/store/abc-hello","","")],[],["/nix/store/src"],"x86_64-linux","/nix/store/bash",[],[("name","hello"),("requiredSystemFeatures","kvm"),("timeout","3600"),("maxSilent","1800"),("preferLocalBuild","1")])"#;
+
+    #[test]
+    fn build_meta_reads_all_fields() {
+        let drv = parse_drv(META_DRV).unwrap();
+        let meta = drv.build_meta();
+        assert_eq!(meta.timeout_secs, Some(3600));
+        assert_eq!(meta.max_silent_secs, Some(1800));
+        assert!(meta.prefer_local_build);
+        assert_eq!(meta.required_features, vec!["kvm"]);
+    }
+
+    #[test]
+    fn build_meta_defaults_when_absent() {
+        let drv = parse_drv(EXAMPLE).unwrap();
+        let meta = drv.build_meta();
+        assert_eq!(meta.timeout_secs, None);
+        assert_eq!(meta.max_silent_secs, None);
+        assert!(!meta.prefer_local_build);
+        assert_eq!(meta.required_features, vec!["kvm", "big-parallel"]);
+    }
+
+    #[test]
+    fn build_meta_prefer_local_build_accepts_true_and_1() {
+        let true_drv = br#"Derive([("out","/nix/store/abc-hello","","")],[],[],"x86_64-linux","/nix/store/bash",[],[("name","x"),("preferLocalBuild","true")])"#;
+        assert!(parse_drv(true_drv).unwrap().build_meta().prefer_local_build);
+    }
+
+    #[test]
+    fn build_meta_ignores_unparseable_timeout() {
+        let bad = br#"Derive([("out","/nix/store/abc-hello","","")],[],[],"x86_64-linux","/nix/store/bash",[],[("name","x"),("timeout","forever")])"#;
+        assert_eq!(parse_drv(bad).unwrap().build_meta().timeout_secs, None);
     }
 }
