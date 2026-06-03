@@ -51,6 +51,7 @@ impl MigrationTrait for Migration {
 }
 
 #[derive(DeriveIden)]
+#[allow(clippy::enum_variant_names)]
 enum Build {
     Table,
     Attempt,
