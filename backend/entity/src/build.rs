@@ -37,28 +37,55 @@ pub enum BuildStatus {
     Building = 2,
     #[sea_orm(num_value = 3)]
     Completed = 3,
+    /// Terminal failure: the build will not be retried. Set when the builder
+    /// exits non-zero, or a transient failure exhausts the retry budget.
     #[sea_orm(num_value = 4)]
-    Failed = 4,
+    FailedPermanent = 4,
     #[sea_orm(num_value = 5)]
     Aborted = 5,
     #[sea_orm(num_value = 6)]
     DependencyFailed = 6,
     /// The derivation was already present in the Nix store at evaluation
-    /// time; no actual work was performed in this evaluation. Distinct from
-    /// `Completed` (which means "we ran the build and it succeeded").
+    /// time; no actual work was performed in this evaluation.
     #[sea_orm(num_value = 7)]
     Substituted = 7,
+    /// Non-terminal failure: an infrastructure error (OOM, disk full, network
+    /// timeout, builder crash) that the scheduler will retry until the attempt
+    /// budget is spent. Entry-point queries ignore builds in this state.
+    #[sea_orm(num_value = 8)]
+    FailedTransient = 8,
+    /// Terminal failure: the build exceeded its wall-clock or silent timeout.
+    #[sea_orm(num_value = 9)]
+    FailedTimeout = 9,
 }
 
 impl BuildStatus {
     /// Maps internal-only states onto their API-facing equivalents.
-    /// `Created` is a transient pre-queue state the scheduler flips to
-    /// `Queued` almost immediately, so it is collapsed to `Queued` for clients.
     pub const fn for_api(self) -> Self {
         match self {
             Self::Created => Self::Queued,
             other => other,
         }
+    }
+
+    /// Any failure state (terminal or pending-retry).
+    pub const fn is_failure(self) -> bool {
+        matches!(
+            self,
+            Self::FailedPermanent
+                | Self::FailedTransient
+                | Self::FailedTimeout
+                | Self::DependencyFailed
+        )
+    }
+
+    /// A failure that counts as a final, user-visible failure (excludes the
+    /// pending-retry `FailedTransient`).
+    pub const fn is_terminal_failure(self) -> bool {
+        matches!(
+            self,
+            Self::FailedPermanent | Self::FailedTimeout | Self::DependencyFailed
+        )
     }
 }
 
@@ -90,6 +117,19 @@ pub struct Model {
     /// running an actual `nix build`. Always `false` for `Substituted`
     /// rows (those are already in our cache) and for plain rebuild jobs.
     pub external_cached: bool,
+    /// Number of build attempts made so far. Incremented on each transient
+    /// failure; when it reaches the configured cap the build becomes
+    /// `FailedPermanent`.
+    pub attempt: i32,
+    /// Wall-clock build limit in seconds extracted from the derivation
+    /// (`timeout` attr). `None` means use the server default.
+    pub timeout_secs: Option<i64>,
+    /// No-output (silent) build limit in seconds (`maxSilent` attr).
+    /// `None` means use the server default.
+    pub max_silent_secs: Option<i64>,
+    /// `preferLocalBuild` derivation attribute. Plumbed for future scheduling
+    /// use; not consulted by placement yet.
+    pub prefer_local_build: bool,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
 }
@@ -127,12 +167,31 @@ mod tests {
             BuildStatus::Queued,
             BuildStatus::Building,
             BuildStatus::Completed,
-            BuildStatus::Failed,
+            BuildStatus::FailedPermanent,
+            BuildStatus::FailedTransient,
+            BuildStatus::FailedTimeout,
             BuildStatus::Aborted,
             BuildStatus::DependencyFailed,
             BuildStatus::Substituted,
         ] {
             assert_eq!(status.for_api(), status);
         }
+    }
+
+    #[test]
+    fn is_failure_covers_all_failure_states() {
+        assert!(BuildStatus::FailedPermanent.is_failure());
+        assert!(BuildStatus::FailedTransient.is_failure());
+        assert!(BuildStatus::FailedTimeout.is_failure());
+        assert!(BuildStatus::DependencyFailed.is_failure());
+        assert!(!BuildStatus::Completed.is_failure());
+        assert!(!BuildStatus::Building.is_failure());
+    }
+
+    #[test]
+    fn terminal_failure_excludes_transient() {
+        assert!(BuildStatus::FailedPermanent.is_terminal_failure());
+        assert!(BuildStatus::FailedTimeout.is_terminal_failure());
+        assert!(!BuildStatus::FailedTransient.is_terminal_failure());
     }
 }
