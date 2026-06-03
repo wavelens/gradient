@@ -18,11 +18,11 @@
       <p class="text-secondary">Build history over the last {{ keepEvaluations() }} completed evaluations.</p>
     </div>
     @if (latestBuildId()) {
-      <a class="closure-link"
+      <a pButton severity="secondary" class="closure-link"
          [routerLink]="['/organization', orgName, 'closure', 'build', latestBuildId()]"
          title="View closure size breakdown">
         <span class="material-symbols-outlined">account_tree</span>
-        View Closure
+        <span>View Closure</span>
       </a>
     }
   </div>

@@ -23,17 +23,17 @@
   "private": true,
   "packageManager": "pnpm@10.26.1",
   "dependencies": {
-    "@angular/animations": "^21.2.13",
-    "@angular/cdk": "^21.2.11",
-    "@angular/common": "^21.2.13",
-    "@angular/compiler": "^21.2.13",
-    "@angular/core": "^21.2.13",
-    "@angular/forms": "^21.2.13",
-    "@angular/platform-browser": "^21.2.13",
-    "@angular/router": "^21.2.13",
+    "@angular/animations": "^21.2.16",
+    "@angular/cdk": "^21.2.14",
+    "@angular/common": "^21.2.16",
+    "@angular/compiler": "^21.2.16",
+    "@angular/core": "^21.2.16",
+    "@angular/forms": "^21.2.16",
+    "@angular/platform-browser": "^21.2.16",
+    "@angular/router": "^21.2.16",
     "@primeuix/themes": "^2.0.3",
-    "apexcharts": "^5.12.0",
-    "apexsankey": "^1.7.1",
+    "apexcharts": "^5.13.0",
+    "d3-sankey": "^0.12.3",
     "ng-apexcharts": "^2.4.0",
     "primeicons": "^7.0.0",
     "primeng": "^21.1.8",
@@ -41,11 +41,12 @@
     "tslib": "^2.8.1"
   },
   "devDependencies": {
-    "@angular/build": "^21.2.11",
-    "@angular/cli": "^21.2.11",
-    "@angular/compiler-cli": "^21.2.13",
+    "@angular/build": "^21.2.14",
+    "@angular/cli": "^21.2.14",
+    "@angular/compiler-cli": "^21.2.16",
+    "@types/d3-sankey": "^0.12.5",
     "jsdom": "^29.1.1",
     "typescript": "~5.9.3",
-    "vitest": "^4.1.6"
+    "vitest": "^4.1.8"
   }
 }
