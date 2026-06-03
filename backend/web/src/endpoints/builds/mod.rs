@@ -4,11 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+pub mod closure;
 pub mod downloads;
 pub mod graph;
 pub mod log;
 pub mod query;
 
+pub use self::closure::{
+    ClosureEdge, ClosureGraph, ClosureNode, build_closure_graph, derivation_closure_reachable,
+    get_build_closure, get_eval_closure, sum_output_sizes,
+};
 pub use self::downloads::{
     BuildProduct, DownloadQuery, get_build_download, get_build_download_token, get_build_downloads,
 };

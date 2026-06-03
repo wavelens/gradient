@@ -6,6 +6,7 @@
 
 use crate::access::{Caller, OrgAccess, load_org};
 use crate::authorization::{MaybeApiKey, MaybeUser};
+use crate::endpoints::builds::closure::{derivation_closure_reachable, sum_output_sizes};
 use crate::error::WebResult;
 use crate::helpers::{OptionExt, ok_json};
 use axum::extract::{Path, Query, State};
@@ -13,7 +14,6 @@ use axum::{Extension, Json};
 use gradient_core::types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 use std::sync::Arc;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -31,84 +31,6 @@ pub struct ProjectMetricPoint {
 pub struct ProjectMetricsResponse {
     pub keep_evaluations: i32,
     pub points: Vec<ProjectMetricPoint>,
-}
-
-// ── Shared metric helpers ─────────────────────────────────────────────────────
-
-/// BFS over `derivation_dependency` starting from `seed_drv_ids`.
-///
-/// Returns all reachable derivation UUIDs (including the seeds themselves).
-async fn derivation_closure_reachable<C: sea_orm::ConnectionTrait>(
-    db: &C,
-    seed_drv_ids: Vec<DerivationId>,
-) -> WebResult<HashSet<DerivationId>> {
-    let mut visited: HashSet<DerivationId> = seed_drv_ids.iter().cloned().collect();
-    let mut frontier = seed_drv_ids;
-
-    while !frontier.is_empty() {
-        let edges = EDerivationDependency::find()
-            .filter(CDerivationDependency::Derivation.is_in(frontier.clone()))
-            .all(db)
-            .await?;
-        frontier.clear();
-        for edge in edges {
-            if visited.insert(edge.dependency) {
-                frontier.push(edge.dependency);
-            }
-        }
-    }
-
-    Ok(visited)
-}
-
-/// Sum uncompressed NAR size of derivation outputs for `drv_ids`.
-///
-/// `derivation_output.nar_size` is populated only when the worker actually
-/// built the output. For substituted builds it's `None`, but the size lives
-/// on the matching `cached_path` row (joined by hash). This helper coalesces
-/// the two so that completed and substituted outputs both contribute.
-///
-/// Returns `Some(total)` when the total is > 0, `None` otherwise.
-async fn sum_output_sizes<C: sea_orm::ConnectionTrait>(
-    db: &C,
-    drv_ids: Vec<DerivationId>,
-) -> WebResult<Option<i64>> {
-    if drv_ids.is_empty() {
-        return Ok(None);
-    }
-    let outputs = EDerivationOutput::find()
-        .filter(CDerivationOutput::Derivation.is_in(drv_ids))
-        .all(db)
-        .await?;
-
-    let missing_hashes: Vec<String> = outputs
-        .iter()
-        .filter(|o| o.nar_size.is_none())
-        .map(|o| o.hash.clone())
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .collect();
-
-    let cached_size_by_hash: std::collections::HashMap<String, i64> = if missing_hashes.is_empty() {
-        std::collections::HashMap::new()
-    } else {
-        ECachedPath::find()
-            .filter(CCachedPath::Hash.is_in(missing_hashes))
-            .all(db)
-            .await?
-            .into_iter()
-            .filter_map(|cp| cp.nar_size.map(|n| (cp.hash, n)))
-            .collect()
-    };
-
-    let total: i64 = outputs
-        .iter()
-        .filter_map(|o| {
-            o.nar_size
-                .or_else(|| cached_size_by_hash.get(&o.hash).copied())
-        })
-        .sum();
-    Ok(if total > 0 { Some(total) } else { None })
 }
 
 // ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -214,6 +136,7 @@ pub struct EntryPointMetricsQuery {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct EntryPointMetricPoint {
     pub evaluation_id: EvaluationId,
+    pub build_id: BuildId,
     pub created_at: chrono::NaiveDateTime,
     pub build_status: entity::build::BuildStatus,
     pub build_time_ms: Option<i64>,
@@ -289,6 +212,7 @@ pub async fn get_entry_point_metrics(
 
         points.push(EntryPointMetricPoint {
             evaluation_id: evaluation.id,
+            build_id: build.id,
             created_at: evaluation.created_at,
             build_status: build.status.for_api(),
             build_time_ms,
