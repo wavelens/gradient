@@ -28,16 +28,16 @@ impl std::error::Error for InvalidBuildTransition {}
 
 /// Validates and enforces [`BuildStatus`] state transitions.
 ///
-/// The valid transition graph is:
 /// ```text
 /// Created → Queued
 /// Queued  → Building
-/// Building → Completed | Failed
-/// * → Aborted          (except Completed, Substituted)
-/// * → DependencyFailed (except Completed, Substituted, Failed)
+/// Building → Completed | FailedPermanent | FailedTransient | FailedTimeout
+/// FailedTransient → Queued | FailedPermanent
+/// * → Aborted          (except terminal states)
+/// * → DependencyFailed (except terminal states)
 /// ```
-/// Terminal states (`Completed`, `Failed`, `Aborted`, `DependencyFailed`,
-/// `Substituted`) cannot be transitioned away from.
+/// Terminal states (`Completed`, `FailedPermanent`, `FailedTimeout`, `Aborted`,
+/// `DependencyFailed`, `Substituted`) cannot be transitioned away from.
 pub struct BuildStateMachine;
 
 impl BuildStateMachine {
@@ -50,12 +50,12 @@ impl BuildStateMachine {
             return Ok(to);
         }
 
-        // Terminal states - nothing can move away from these.
         let from_is_terminal = matches!(
             from,
             BuildStatus::Completed
                 | BuildStatus::Substituted
-                | BuildStatus::Failed
+                | BuildStatus::FailedPermanent
+                | BuildStatus::FailedTimeout
                 | BuildStatus::Aborted
                 | BuildStatus::DependencyFailed
         );
@@ -64,30 +64,18 @@ impl BuildStateMachine {
         }
 
         match (from, to) {
-            // Normal progression (still enforced for non-terminal states so
-            // we don't accidentally skip Queued / Building in the UI).
             (BuildStatus::Created, BuildStatus::Queued) => Ok(to),
             (BuildStatus::Queued, BuildStatus::Building) => Ok(to),
 
-            // Terminal transitions are allowed from ANY non-terminal source.
-            // The `from_is_terminal` guard above already prevents moves out
-            // of terminal states; here we deliberately accept shortcuts like
-            //   Queued → Completed   (worker built so fast the `Building`
-            //                          update was lost or never sent)
-            //   Queued → Failed      (worker errored before reporting
-            //                          `Building`)
-            //   Created → Failed     (eval-side rejection before queueing)
-            // Without these, a lost / out-of-order `Building` update would
-            // strand the build in `Queued`/`Building` forever - the same
-            // bug class as the silent Queued→Failed reject we hit earlier.
+            // FailedTransient can be retried (back to Queued) or promoted to permanent.
+            (BuildStatus::FailedTransient, BuildStatus::Queued) => Ok(to),
+            (_, BuildStatus::FailedPermanent) => Ok(to),
+            (_, BuildStatus::FailedTransient) => Ok(to),
+            (_, BuildStatus::FailedTimeout) => Ok(to),
             (_, BuildStatus::Completed) => Ok(to),
-            (_, BuildStatus::Failed) => Ok(to),
             (_, BuildStatus::Aborted) => Ok(to),
             (_, BuildStatus::DependencyFailed) => Ok(to),
 
-            // Substituted is set inline by the eval handler when discovery
-            // sees the output is already in the cache; no transition needed.
-            // Anything else is a real bug.
             _ => Err(InvalidBuildTransition { from, to }),
         }
     }
@@ -98,7 +86,8 @@ impl BuildStateMachine {
             status,
             BuildStatus::Completed
                 | BuildStatus::Substituted
-                | BuildStatus::Failed
+                | BuildStatus::FailedPermanent
+                | BuildStatus::FailedTimeout
                 | BuildStatus::Aborted
                 | BuildStatus::DependencyFailed
         )
@@ -126,7 +115,9 @@ mod tests {
 
     #[test]
     fn build_sm_building_to_failed() {
-        assert!(BuildStateMachine::validate(BuildStatus::Building, BuildStatus::Failed).is_ok());
+        assert!(
+            BuildStateMachine::validate(BuildStatus::Building, BuildStatus::FailedPermanent).is_ok()
+        );
     }
 
     #[test]
@@ -162,12 +153,11 @@ mod tests {
         let terminals = [
             BuildStatus::Completed,
             BuildStatus::Substituted,
-            BuildStatus::Failed,
+            BuildStatus::FailedPermanent,
             BuildStatus::Aborted,
             BuildStatus::DependencyFailed,
         ];
         for from in &terminals {
-            // Try transitioning to every non-same status
             for to in [
                 BuildStatus::Created,
                 BuildStatus::Queued,
@@ -198,12 +188,8 @@ mod tests {
         assert!(BuildStateMachine::validate(BuildStatus::Created, BuildStatus::Building).is_err());
     }
 
-    /// Terminal transitions (`Failed`, `Completed`, `Aborted`,
+    /// Terminal transitions (`FailedPermanent`, `Completed`, `Aborted`,
     /// `DependencyFailed`) are accepted from every non-terminal source.
-    /// This is the regression guard for "JobFailed / JobCompleted arriving
-    /// while the build is still `Queued` because the worker's `Building`
-    /// update was lost or never sent" - without this, the build would be
-    /// silently stranded in the wrong state.
     #[test]
     fn build_sm_any_nonterminal_to_any_terminal() {
         let from_states = [
@@ -213,7 +199,7 @@ mod tests {
         ];
         let terminal_states = [
             BuildStatus::Completed,
-            BuildStatus::Failed,
+            BuildStatus::FailedPermanent,
             BuildStatus::Aborted,
             BuildStatus::DependencyFailed,
         ];
@@ -232,7 +218,7 @@ mod tests {
         for s in [
             BuildStatus::Completed,
             BuildStatus::Substituted,
-            BuildStatus::Failed,
+            BuildStatus::FailedPermanent,
             BuildStatus::Aborted,
             BuildStatus::DependencyFailed,
         ] {
@@ -251,5 +237,48 @@ mod tests {
                 "{s:?} should not be terminal"
             );
         }
+    }
+
+    #[test]
+    fn build_sm_building_to_failed_transient() {
+        assert!(
+            BuildStateMachine::validate(BuildStatus::Building, BuildStatus::FailedTransient).is_ok()
+        );
+    }
+
+    #[test]
+    fn build_sm_failed_transient_to_queued_for_retry() {
+        assert!(
+            BuildStateMachine::validate(BuildStatus::FailedTransient, BuildStatus::Queued).is_ok()
+        );
+    }
+
+    #[test]
+    fn build_sm_failed_transient_to_permanent_when_exhausted() {
+        assert!(
+            BuildStateMachine::validate(BuildStatus::FailedTransient, BuildStatus::FailedPermanent)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn build_sm_failed_transient_is_not_terminal() {
+        assert!(!BuildStateMachine::is_terminal(&BuildStatus::FailedTransient));
+    }
+
+    #[test]
+    fn build_sm_failed_permanent_and_timeout_are_terminal() {
+        assert!(BuildStateMachine::is_terminal(&BuildStatus::FailedPermanent));
+        assert!(BuildStateMachine::is_terminal(&BuildStatus::FailedTimeout));
+    }
+
+    #[test]
+    fn build_sm_terminal_failure_rejects_requeue() {
+        assert!(
+            BuildStateMachine::validate(BuildStatus::FailedPermanent, BuildStatus::Queued).is_err()
+        );
+        assert!(
+            BuildStateMachine::validate(BuildStatus::FailedTimeout, BuildStatus::Queued).is_err()
+        );
     }
 }
