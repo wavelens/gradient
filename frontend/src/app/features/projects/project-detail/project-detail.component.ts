@@ -94,7 +94,9 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   private readonly buildStatusOrder: Record<string, number> = {
     Building: 0,
     Queued: 1,
-    Failed: 2,
+    FailedPermanent: 2,
+    FailedTimeout: 2,
+    FailedTransient: 2,
     Aborted: 3,
     Completed: 4,
     Substituted: 4,
@@ -199,13 +201,15 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   }
 
   formatBuildStatus(status: BuildStatus): string {
-    return status === 'DependencyFailed' ? 'Dependency Failed' : status;
+    if (status === 'DependencyFailed') return 'Dependency Failed';
+    if (status === 'FailedPermanent' || status === 'FailedTransient' || status === 'FailedTimeout') return 'Failed';
+    return status;
   }
 
   getBuildStatusClass(status: BuildStatus): string {
     switch (status) {
       case 'Completed': case 'Substituted': return 'status-success';
-      case 'Failed': return 'status-danger';
+      case 'FailedPermanent': case 'FailedTransient': case 'FailedTimeout': return 'status-danger';
       case 'Aborted': case 'DependencyFailed': return 'status-secondary';
       case 'Queued': case 'Building': return 'status-running';
       default: return '';
@@ -215,7 +219,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   getBuildStatusIcon(status: BuildStatus): string {
     switch (status) {
       case 'Completed': case 'Substituted': return 'check_circle';
-      case 'Failed': return 'error';
+      case 'FailedPermanent': case 'FailedTransient': case 'FailedTimeout': return 'error';
       case 'Aborted': case 'DependencyFailed': return 'cancel';
       case 'Queued': return 'schedule';
       case 'Building': return 'sync';
