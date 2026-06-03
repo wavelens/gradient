@@ -73,19 +73,15 @@
     margin-top: 2px;
 
     .sep { opacity: 0.4; }
-    .warn { color: $color-graph-warning; }
+    .warn { color: $text-secondary; }
   }
 
   .header-controls { display: flex; gap: $spacing-xs; flex-shrink: 0; }
 }
 
 .total-badge {
-  background: #fd7e14;
-  color: $color-primary;
-  font-weight: 700;
-  padding: 2px 10px;
-  border-radius: 12px;
-  font-size: $font-size-xs;
+  color: $text-secondary;
+  font-size: $font-size-sm;
 }
 
 .icon-btn {
