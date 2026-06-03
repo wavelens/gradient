@@ -3148,9 +3148,16 @@ The shared `derivation_closure_reachable` / `sum_output_sizes` helpers (lifted
 out of `projects/metrics.rs`) keep their existing coverage in
 `backend/web/src/endpoints/projects/metrics.rs` (`sum_output_sizes_*`).
 
-### Top-N aggregation - `frontend/.../closure-graph/closure-aggregate.spec.ts`
+### Closure Sankey model - `frontend/.../closure-graph/closure-aggregate.spec.ts`
 
-- keeps the largest `N` nodes and buckets the remainder into an exact-sized
-  `others` node.
-- reattaches edges from dropped nodes onto the `others` node.
-- returns the graph unchanged when the node count is within `N`.
+`buildClosureSankey` turns the closure DAG into a flow-conserving tree:
+
+- accumulates each node's subtree size so a node carries its full closure size.
+- values links by the dependency's subtree size, pointing dependency → consumer.
+- tree-ifies a shared dependency onto a single parent (first reached by the
+  breadth-first walk from the roots).
+- buckets nodes outside the top `N` into a per-parent `others` node attached to
+  their nearest kept ancestor.
+- adds no bucket nodes when the whole closure fits within `N`.
+- treats nodes unreachable from any root (their consumer was truncated
+  server-side) as their own top-level roots.

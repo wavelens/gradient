@@ -18,8 +18,9 @@
   } @else {
     <div class="closure-header">
       <div class="header-left">
-        <button class="icon-btn" (click)="goBack()" title="Back">
+        <button pButton type="button" severity="secondary" class="back-btn" (click)="goBack()">
           <span class="material-symbols-outlined">arrow_back</span>
+          <span>Back</span>
         </button>
         <div class="header-info">
           <div class="header-title">

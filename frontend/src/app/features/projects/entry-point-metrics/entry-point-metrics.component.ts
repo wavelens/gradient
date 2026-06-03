@@ -19,6 +19,7 @@ import {
   ApexDataLabels,
   ApexMarkers,
 } from 'ng-apexcharts';
+import { ButtonModule } from 'primeng/button';
 import { ProjectsService, EntryPointMetricPoint, EntryPointMetricsResponse } from '@core/services/projects.service';
 import { OrganizationsService } from '@core/services/organizations.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
@@ -52,7 +53,7 @@ type ChartOptions = {
 @Component({
   selector: 'app-entry-point-metrics',
   standalone: true,
-  imports: [CommonModule, RouterModule, NgApexchartsModule, LoadingSpinnerComponent],
+  imports: [CommonModule, RouterModule, ButtonModule, NgApexchartsModule, LoadingSpinnerComponent],
   templateUrl: './entry-point-metrics.component.html',
   styleUrl: './entry-point-metrics.component.scss',
 })

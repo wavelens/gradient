@@ -32,13 +32,10 @@
 
 .header-left { display: flex; align-items: center; gap: 12px; }
 
-.icon-btn {
-  background: none;
-  border: none;
-  color: #abb0b4;
-  cursor: pointer;
-  display: flex;
+.back-btn {
+  display: inline-flex;
   align-items: center;
+  gap: 6px;
 }
 
 .header-title { display: flex; align-items: center; gap: 10px; }
@@ -61,4 +58,14 @@
   flex: 1;
   overflow: auto;
   padding: 16px;
+
+  svg {
+    display: block;
+  }
+
+  text {
+    user-select: none;
+    pointer-events: none;
+    font-family: inherit;
+  }
 }
