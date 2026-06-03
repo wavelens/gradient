@@ -3006,96 +3006,73 @@ via the `.drv` attributes `timeout`, `maxSilent`, and `preferLocalBuild`.
 
 Run with: `cargo test -p core --lib db::derivation`
 
-- `build_meta_returns_defaults_when_attrs_absent` — a derivation with no
-  `timeout`, `maxSilent`, `preferLocalBuild`, or `requiredSystemFeatures`
+- `build_meta_reads_all_fields` — all four attributes (`timeout`,
+  `maxSilent`, `preferLocalBuild`, `requiredSystemFeatures`) are parsed
+  into a `BuildMeta` with the correct values.
+- `build_meta_defaults_when_absent` — a derivation with none of the
   attributes returns all-default `BuildMeta`.
-- `build_meta_parses_timeout_and_max_silent` — integer `timeout` and
-  `maxSilent` attributes are parsed correctly.
-- `build_meta_parses_prefer_local_build` — `"1"` is treated as true;
-  absent/other values as false.
-- `build_meta_parses_required_system_features` — space-separated feature
-  string is split into a `Vec<String>`.
+- `build_meta_prefer_local_build_accepts_true_and_1` — both `"true"` and
+  `"1"` are accepted as `prefer_local_build = true`.
+- `build_meta_ignores_unparseable_timeout` — a non-integer `timeout`
+  attribute falls back to `None` instead of erroring.
 
 ### Build state-machine transitions — `core/src/state_machine/build.rs`
 
-Run with: `cargo test -p core --tests state_machine::build`
+Run with: `cargo test -p core --lib state_machine::build`
 
-- `failed_transient_can_re_queue` — `FailedTransient → Queued` is valid
-  (auto-retry path).
-- `failed_permanent_is_terminal` — `FailedPermanent` cannot transition to
-  any other status; the state machine rejects all outgoing edges.
-- `failed_timeout_is_terminal` — same guard for `FailedTimeout`.
+- `build_sm_building_to_failed_transient` — `Building → FailedTransient`
+  is a valid transition (worker classified the failure as transient).
+- `build_sm_failed_transient_to_queued_for_retry` — `FailedTransient →
+  Queued` is valid (scheduler re-queues for the next attempt).
+- `build_sm_failed_transient_to_permanent_when_exhausted` — `FailedTransient
+  → FailedPermanent` is valid (attempt budget exhausted).
+- `build_sm_failed_transient_is_not_terminal` — `FailedTransient` is not
+  terminal; the state machine permits outgoing edges from it.
+- `build_sm_failed_permanent_and_timeout_are_terminal` — `FailedPermanent`
+  and `FailedTimeout` are terminal; no outgoing transitions are accepted.
+- `build_sm_terminal_failure_rejects_requeue` — attempting to transition
+  either terminal failure status back to `Queued` is rejected.
 
 ### Retry decision and backoff — `scheduler/src/build.rs`
 
-Run with: `cargo test -p scheduler --lib build`
+Run with: `cargo test -p scheduler --lib build::retry_tests`
 
-- `decide_failure_outcome_transient_below_cap_retries` — a transient error
-  below `max_attempts` produces `Outcome::Retry`.
-- `decide_failure_outcome_transient_at_cap_promotes` — hitting the cap
-  promotes to `FailedPermanent`.
-- `decide_failure_outcome_permanent_never_retries` — permanent errors skip
-  the retry path regardless of the attempt count.
-- `decide_failure_outcome_timeout_never_retries` — timeout errors are
-  always terminal.
-- `retry_backoff_elapsed_returns_false_before_deadline` — the build is not
-  re-queued until `now >= updated_at + backoff`.
-- `retry_backoff_elapsed_returns_true_after_deadline` — once the deadline
-  passes the build is eligible for re-queue.
-- `retry_backoff_doubles_per_attempt` — attempt 1 waits 30 s, attempt 2
-  waits 60 s, attempt 3 waits 120 s (base × 2^(attempt-1)).
+- `permanent_is_terminal_regardless_of_attempt` — `FailedPermanent` is
+  never retried regardless of the current attempt count.
+- `timeout_is_terminal` — `FailedTimeout` is never retried.
+- `transient_retries_until_budget_then_permanent` — `FailedTransient`
+  retries while attempts remain; once the budget is exhausted the outcome
+  is `FailedPermanent`.
+- `backoff_grows_per_attempt` — the retry delay doubles with each attempt
+  (exponential backoff).
 
-### Per-build timeout resolution — `scheduler/src/dispatch.rs`
+### Per-build limit resolution — `scheduler/src/dispatch.rs`
 
-Run with: `cargo test -p scheduler --lib dispatch`
+Run with: `cargo test -p scheduler --lib dispatch::limit_tests`
 
-- `resolve_limit_uses_drv_when_nonzero` — a non-zero `.drv` attribute
-  overrides the server default.
-- `resolve_limit_falls_back_to_default` — a zero or absent `.drv`
-  attribute falls back to the server default.
-- `resolve_limit_returns_none_when_both_zero` — when both are `0`, no
-  timeout is sent in `AssignJob`.
-- `nonzero_returns_some_for_positive` / `nonzero_returns_none_for_zero` —
-  the helper used by `resolve_limit` to convert `0 → None`.
+- `per_drv_overrides_default` — a non-zero per-derivation limit takes
+  precedence over the server default.
+- `zero_means_no_limit` — a stored value of `0` is treated as no limit
+  (`None`), not as `0`.
+- `falls_back_to_default_when_absent` — when no per-derivation value is
+  present, the server default is used.
 
 ### Worker failure classification — `worker/src/executor/build.rs`
 
-Run with: `cargo test -p worker --tests executor::build`
+Run with: `cargo test -p worker --lib executor::build::classify_tests`
 
-- `classify_build_error_oom` — an OOM log line (`"out of memory"`) maps to
-  `BuildFailureKind::Transient`.
-- `classify_build_error_disk_full` — `"No space left on device"` maps to
-  `BuildFailureKind::Transient`.
-- `classify_build_error_nonzero_exit` — a non-zero builder exit maps to
+- `builder_nonzero_is_permanent` — a non-zero builder exit code maps to
   `BuildFailureKind::Permanent`.
-- `classify_build_error_network` — network/substitution failure messages
-  map to `BuildFailureKind::Transient`.
-- `looks_like_oom_matches_known_messages` — spot-checks representative OOM
-  strings from the nix-daemon log.
-- `looks_like_oom_ignores_unrelated_lines` — unrelated log lines are not
-  mis-classified as OOM.
+- `oom_signature_is_transient` — a log line matching the OOM heuristic
+  maps to `BuildFailureKind::Transient`.
 
 ### Entity helpers — `entity/src/build.rs`
 
 Run with: `cargo test -p entity --lib build`
 
-- `is_failure_true_for_all_failed_variants` — `FailedPermanent`,
+- `is_failure_covers_all_failure_states` — `FailedPermanent`,
   `FailedTransient`, and `FailedTimeout` all return `true` from
   `is_failure()`.
-- `is_failure_false_for_other_statuses` — `Queued`, `Building`,
-  `Succeeded`, `DependencyFailed`, `Aborted` return `false`.
-- `is_terminal_failure_excludes_transient` — `FailedTransient` returns
-  `false` (it will be retried); `FailedPermanent` and `FailedTimeout`
-  return `true`.
-
-### Web entry-point and badge counting — `web/src/endpoints/projects/`
-
-Run with: `cargo test -p web --lib endpoints::projects`
-
-- `evaluations::tests::failed_transient_excluded_from_failed_count` —
-  `FailedTransient` builds do not increment `failed_entry_points`; only
-  `FailedPermanent` and `FailedTimeout` do (`evaluations.rs`).
-- `badges::tests::failed_transient_does_not_make_badge_red` — an
-  evaluation whose only failing entry point is `FailedTransient` does not
-  render the red `failing` badge; it falls back to the in-progress colour
-  (`badges.rs`).
+- `terminal_failure_excludes_transient` — `FailedTransient` returns
+  `false` from `is_terminal_failure()` (it will be retried); `FailedPermanent`
+  and `FailedTimeout` return `true`.
