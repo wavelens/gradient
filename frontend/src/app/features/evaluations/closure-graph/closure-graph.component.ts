@@ -109,24 +109,28 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
     this.zone.runOutsideAngular(() => {
       try {
         const probeWidth = svg.clientWidth || 1200;
-        const height = Math.max(420, model.nodes.length * 11);
 
-        const layout = (width: number) =>
+        const layout = (width: number, height: number) =>
           sankey<SankeyNode, SankeyLink>()
             .nodeId((d) => d.id)
             .nodeWidth(14)
-            .nodePadding(6)
+            .nodePadding(14)
             .nodeAlign(sankeyJustify)
             .extent([[1, 6], [width - 1, height - 6]])({
             nodes: model.nodes.map((n) => ({ ...n })),
             links: model.links.map((l) => ({ ...l, value: Math.max(1, l.value) })),
           });
 
-        // First pass derives the column count; widen so columns stay legible.
-        const probe = layout(probeWidth);
-        const columns = Math.max(...probe.nodes.map((n) => n.depth ?? 0)) + 1;
-        const width = Math.max(probeWidth, columns * 220);
-        const { nodes, links } = layout(width);
+        // Probe pass derives the column layout; size the canvas to the densest
+        // column so every band gets room, and widen columns to stay legible.
+        const probe = layout(probeWidth, 1000);
+        const perDepth = new Map<number, number>();
+        for (const n of probe.nodes) perDepth.set(n.depth ?? 0, (perDepth.get(n.depth ?? 0) ?? 0) + 1);
+        const columns = Math.max(...perDepth.keys()) + 1;
+        const densest = Math.max(...perDepth.values());
+        const width = Math.max(probeWidth, columns * 240);
+        const height = Math.max(480, densest * 28);
+        const { nodes, links } = layout(width, height);
 
         const linkPath = sankeyLinkHorizontal() as unknown as (l: unknown) => string;
         this.build(group, nodes as LaidNode[], links as unknown as LaidLink[], width, linkPath);
