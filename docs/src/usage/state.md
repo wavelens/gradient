@@ -509,3 +509,19 @@ Each project has a single concurrency policy that applies to all of its triggers
 - Concurrency defaults to `soft_abort` - a new trigger event marks the running evaluation Aborted while letting its in-flight builds finish; the new evaluation reuses any cached outputs they produce. Switch to `hard_abort` to also cancel the running builds, `skip` to drop the new event, or `all` to run multiple evaluations concurrently.
 
 The implicit fallback poll for projects with an inbound integration (the legacy `WEBHOOK_BACKUP_POLL_SECS` behavior) has been removed; webhook-driven projects must declare an explicit `reporter_push` trigger to receive evaluations from forge pushes.
+
+## Exporting current state
+
+When the live system has drifted from your Nix config - users registered through the UI, organizations or projects created via the API - `GET /admin/state` reconstructs the current users, organizations, projects, caches, custom roles, API keys, workers and integrations into the same shape as `services.gradient.state`, so you can codify the running system back into Nix.
+
+The endpoint requires `superuser` and supports two formats:
+
+```bash
+# Nix expression (default), ready to paste under services.gradient.state
+curl -H "Authorization: Bearer $TOKEN" https://gradient.example.com/api/v1/admin/state
+
+# JSON, mirroring the StateConfiguration object
+curl -H "Authorization: Bearer $TOKEN" "https://gradient.example.com/api/v1/admin/state?format=json"
+```
+
+Secrets are never recoverable from the database (passwords and worker tokens are hashed, signing keys and integration secrets are encrypted). Every credential-file field - `password_file`, `private_key_file`, `signing_key_file`, `token_file`, `key_file`, `secret_file`, `access_token_file` - is therefore exported as `null`; fill in the credential paths on your host before applying. The auto-managed `build-request` project, server-managed GitHub integration rows, and the built-in `Admin`/`Write`/`View` roles are omitted.
