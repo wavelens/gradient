@@ -173,6 +173,30 @@ in {
         default = 8;
       };
 
+      buildMaxAttempts = lib.mkOption {
+        description = "Maximum number of attempts per build job before it is marked as failed (must be ≥ 1)";
+        type = lib.types.ints.positive;
+        default = 3;
+      };
+
+      buildRetryBackoffSecs = lib.mkOption {
+        description = "Seconds to wait between build retry attempts";
+        type = lib.types.ints.unsigned;
+        default = 30;
+      };
+
+      buildDefaultTimeoutSecs = lib.mkOption {
+        description = "Default wall-clock timeout for a build in seconds (0 disables)";
+        type = lib.types.ints.unsigned;
+        default = 3600;
+      };
+
+      buildDefaultMaxSilentSecs = lib.mkOption {
+        description = "Default maximum silence timeout for a build in seconds (0 disables)";
+        type = lib.types.ints.unsigned;
+        default = 1800;
+      };
+
       maxNixdaemonConnections = lib.mkOption {
         description = ''
           Maximum number of simultaneous local Nix daemon connections in
@@ -336,6 +360,10 @@ in {
           GRADIENT_WORKER_PORT                        = toString cfg.port;
           GRADIENT_MAX_CONCURRENT_EVALUATIONS         = toString cfg.settings.maxConcurrentEvaluations;
           GRADIENT_MAX_CONCURRENT_BUILDS              = toString cfg.settings.maxConcurrentBuilds;
+          GRADIENT_BUILD_MAX_ATTEMPTS                 = toString cfg.settings.buildMaxAttempts;
+          GRADIENT_BUILD_RETRY_BACKOFF_SECS           = toString cfg.settings.buildRetryBackoffSecs;
+          GRADIENT_BUILD_DEFAULT_TIMEOUT_SECS         = toString cfg.settings.buildDefaultTimeoutSecs;
+          GRADIENT_BUILD_DEFAULT_MAX_SILENT_SECS      = toString cfg.settings.buildDefaultMaxSilentSecs;
           GRADIENT_MAX_NIXDAEMON_CONNECTIONS          = toString cfg.settings.maxNixdaemonConnections;
           GRADIENT_WORKER_EVAL_WORKERS                = toString cfg.settings.evalWorkers;
           GRADIENT_MAX_EVALUATIONS_PER_WORKER         = toString cfg.settings.maxEvaluationsPerWorker;
