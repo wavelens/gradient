@@ -3016,6 +3016,34 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /evals/{evaluation}/closure:
+    parameters:
+      - $ref: '#/components/parameters/EvaluationId'
+    get:
+      tags: [evals]
+      summary: Get closure size graph for an evaluation
+      description: |-
+        Returns the union dependency closure of all the evaluation's entry-point
+        builds with per-node uncompressed NAR sizes and an exact `total_size_bytes`.
+        Same shape as `/builds/{build}/closure`.
+      operationId: getEvalClosure
+      responses:
+        '200':
+          description: Closure size graph
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/ClosureGraph'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   # ── Build Requests ───────────────────────────────────────────────────────────
 
   /build-requests/manifest:
@@ -3265,6 +3293,38 @@ paths:
                     properties:
                       message:
                         $ref: '#/components/schemas/BuildGraph'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /builds/{build}/closure:
+    parameters:
+      - $ref: '#/components/parameters/BuildId'
+    get:
+      tags: [builds]
+      summary: Get closure size graph
+      description: |-
+        Returns the full dependency closure of the build's derivation with per-node
+        uncompressed NAR sizes and an exact `total_size_bytes` over the whole closure.
+        The `nodes`/`edges` lists are capped (largest nodes first) with `truncated`
+        set when the cap is hit; `total_size_bytes` stays exact regardless. Intended
+        for the closure Sankey view and size-trimming tooling.
+
+        **Access:** Same as the dependency graph endpoint.
+      operationId: getBuildClosure
+      responses:
+        '200':
+          description: Closure size graph
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/ClosureGraph'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -6694,11 +6754,15 @@ components:
 
     EntryPointMetricPoint:
       type: object
-      required: [evaluation_id, created_at, build_status, dependencies_count]
+      required: [evaluation_id, build_id, created_at, build_status, dependencies_count]
       properties:
         evaluation_id:
           type: string
           format: uuid
+        build_id:
+          type: string
+          format: uuid
+          description: Entry-point build for this evaluation (target of the closure view)
         created_at:
           type: string
           format: date-time
@@ -7276,6 +7340,71 @@ components:
           items:
             $ref: '#/components/schemas/DependencyEdge'
           description: Dependency edges (`source` → `target` means source must be built before target)
+
+    ClosureNode:
+      type: object
+      required: [id, name, path, nar_size]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Derivation UUID
+        name:
+          type: string
+          example: hello-2.12.1
+        path:
+          type: string
+          description: Full Nix store path of the `.drv`
+        nar_size:
+          type: integer
+          format: int64
+          nullable: true
+          description: Coalesced uncompressed NAR size of the derivation's outputs (null when unknown)
+
+    ClosureEdge:
+      type: object
+      required: [source, target]
+      properties:
+        source:
+          type: string
+          format: uuid
+          description: Dependency derivation
+        target:
+          type: string
+          format: uuid
+          description: Derivation that depends on `source`
+
+    ClosureGraph:
+      type: object
+      required: [roots, total_size_bytes, node_count, edge_count, truncated, nodes, edges]
+      properties:
+        roots:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Seed derivations (one for a build, all entry points for an evaluation)
+        total_size_bytes:
+          type: integer
+          format: int64
+          nullable: true
+          description: Exact sum of NAR sizes over the whole closure, independent of the node cap
+        node_count:
+          type: integer
+          description: Number of nodes returned (after the cap)
+        edge_count:
+          type: integer
+        truncated:
+          type: boolean
+          description: True when the closure exceeded the node cap and the node/edge lists were trimmed (largest nodes kept)
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/ClosureNode'
+        edges:
+          type: array
+          items:
+            $ref: '#/components/schemas/ClosureEdge'
 
     BuildProduct:
       type: object

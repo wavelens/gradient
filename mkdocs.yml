@@ -24,6 +24,7 @@ nav:
     - Forge Integration: usage/integration.md
     - Actions: usage/actions.md
     - Cache NARs: usage/cache-nars.md
+    - Closure View: usage/closure-view.md
   - Development:
     - Architecture: development/architecture.md
     - Internals: development/internals.md

@@ -3076,3 +3076,23 @@ Run with: `cargo test -p entity --lib build`
 - `terminal_failure_excludes_transient` — `FailedTransient` returns
   `false` from `is_terminal_failure()` (it will be retried); `FailedPermanent`
   and `FailedTimeout` return `true`.
+
+## Closure size graph - issue #242
+
+### Closure builder - `backend/web/src/endpoints/builds/closure.rs`
+
+- `build_closure_graph_sums_and_links` - the closure builder walks the
+  dependency closure, sums per-derivation NAR sizes into an exact
+  `total_size_bytes`, orders nodes largest-first, and emits one edge per
+  in-closure dependency (`source` = dependency, `target` = dependent).
+
+The shared `derivation_closure_reachable` / `sum_output_sizes` helpers (lifted
+out of `projects/metrics.rs`) keep their existing coverage in
+`backend/web/src/endpoints/projects/metrics.rs` (`sum_output_sizes_*`).
+
+### Top-N aggregation - `frontend/.../closure-graph/closure-aggregate.spec.ts`
+
+- keeps the largest `N` nodes and buckets the remainder into an exact-sized
+  `others` node.
+- reattaches edges from dropped nodes onto the `others` node.
+- returns the graph unchanged when the node count is within `N`.
