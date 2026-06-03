@@ -120,6 +120,10 @@ pub struct BuildTask {
     /// recompresses to zstd, and pushes via `NarUploaded`. No daemon
     /// build invocation, no input prefetch.
     pub external_cached: bool,
+    /// Wall-clock limit in seconds for this build; `None` = no limit.
+    pub timeout_secs: Option<u64>,
+    /// Silent (no-output) limit in seconds; `None` = no limit.
+    pub max_silent_secs: Option<u64>,
 }
 
 /// Severity of a worker-reported evaluation message. Mirrors
@@ -295,6 +299,9 @@ pub struct DiscoveredDerivation {
     pub dependencies: Vec<String>,
     pub architecture: String,
     pub required_features: Vec<String>,
+    pub timeout_secs: Option<u64>,
+    pub max_silent_secs: Option<u64>,
+    pub prefer_local_build: bool,
     pub substituted: bool,
 }
 
@@ -352,4 +359,21 @@ pub enum JobKind {
     Flake,
     /// Nix build job.
     Build,
+}
+
+/// Why a build failed, as classified by the worker. Drives the scheduler's
+/// retry decision.
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[rkyv(derive(Debug, PartialEq))]
+pub enum BuildFailureKind {
+    /// Infrastructure failure (OOM, disk full, network/substitution error,
+    /// builder crash) — eligible for retry.
+    Transient,
+    /// The builder exited non-zero, or the retry budget is exhausted —
+    /// terminal. Default so eval-job failures (which ignore the kind) decode
+    /// to a safe terminal value.
+    #[default]
+    Permanent,
+    /// Wall-clock or silent timeout exceeded — terminal.
+    Timeout,
 }

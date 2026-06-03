@@ -5,7 +5,8 @@
  */
 
 use gradient_core::types::proto::{
-    CandidateScore, EvalMessageLevel, GradientCapabilities, JobKind, JobUpdateKind, QueryMode,
+    BuildFailureKind, CandidateScore, EvalMessageLevel, GradientCapabilities, JobKind,
+    JobUpdateKind, QueryMode,
 };
 use rkyv::{Archive, Deserialize, Serialize};
 
@@ -82,7 +83,11 @@ pub enum ClientMessage {
     JobCompleted { job_id: String },
 
     /// A task in the job failed; remaining tasks are skipped.
-    JobFailed { job_id: String, error: String },
+    JobFailed {
+        job_id: String,
+        error: String,
+        kind: BuildFailureKind,
+    },
 
     /// Worker is draining - it will finish in-flight jobs then disconnect.
     /// Server stops assigning new jobs to this peer.
