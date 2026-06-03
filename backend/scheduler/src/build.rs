@@ -24,7 +24,49 @@ use tracing::{error, info, warn};
 
 use super::jobs::PendingBuildJob;
 use gradient_core::types::BuildOutputMetadata;
+use gradient_core::types::proto::BuildFailureKind;
 use gradient_core::types::proto::BuildOutput;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FailureOutcome {
+    Retry,
+    Permanent,
+    Timeout,
+}
+
+/// Decide what to do with a failed build given its classification and how many
+/// attempts it has already had (`attempt` is the count *before* this failure).
+pub(crate) fn decide_failure_outcome(
+    kind: BuildFailureKind,
+    attempt: i32,
+    max_attempts: u32,
+) -> FailureOutcome {
+    match kind {
+        BuildFailureKind::Timeout => FailureOutcome::Timeout,
+        BuildFailureKind::Permanent => FailureOutcome::Permanent,
+        BuildFailureKind::Transient => {
+            if (attempt + 1) < max_attempts as i32 {
+                FailureOutcome::Retry
+            } else {
+                FailureOutcome::Permanent
+            }
+        }
+    }
+}
+
+/// True when a `FailedTransient` build's exponential backoff window has elapsed
+/// and it is due for re-queue. `attempt` is `>= 1` (it failed at least once);
+/// window = `base_secs * 2^(attempt-1)`.
+pub(crate) fn retry_backoff_elapsed(
+    attempt: i32,
+    failed_at: chrono::NaiveDateTime,
+    now: chrono::NaiveDateTime,
+    base_secs: u64,
+) -> bool {
+    let shift = (attempt.max(1) - 1).min(16) as u32;
+    let window = base_secs.saturating_mul(1u64 << shift);
+    (now - failed_at).num_seconds() >= window as i64
+}
 
 /// Wraps `&ServerState` so build-lifecycle helpers don't repeat `state` as a parameter.
 pub(crate) struct BuildStateHandler<'a> {
@@ -160,7 +202,12 @@ impl<'a> BuildStateHandler<'a> {
         self.check_evaluation_done(evaluation_id).await
     }
 
-    pub async fn handle_build_job_failed(&self, build_id: BuildId, error: &str) -> Result<()> {
+    pub async fn handle_build_job_failed(
+        &self,
+        build_id: BuildId,
+        error: &str,
+        kind: BuildFailureKind,
+    ) -> Result<()> {
         let build = match EBuild::find_by_id(build_id)
             .one(&self.state.worker_db)
             .await?
@@ -190,8 +237,38 @@ impl<'a> BuildStateHandler<'a> {
 
         let evaluation_id = build.evaluation;
         let derivation_id = build.derivation;
-        let leader = update_build_status(Arc::clone(self.state), build, BuildStatus::Failed).await;
-        self.propagate_to_followers(&leader).await?;
+        let attempt = build.attempt;
+        let max_attempts = self.state.config.eval.build_max_attempts;
+
+        match decide_failure_outcome(kind, attempt, max_attempts) {
+            FailureOutcome::Retry => {
+                let mut active: ABuild = build.clone().into_active_model();
+                active.attempt = Set(attempt + 1);
+                if let Err(e) = active.update(&self.state.worker_db).await {
+                    error!(%build_id, error = %e, "failed to bump build attempt");
+                }
+                let reloaded = EBuild::find_by_id(build_id)
+                    .one(&self.state.worker_db)
+                    .await?
+                    .unwrap_or(build);
+                update_build_status(Arc::clone(self.state), reloaded, BuildStatus::FailedTransient)
+                    .await;
+                info!(%build_id, attempt = attempt + 1, "transient build failure; scheduled for retry");
+                return Ok(());
+            }
+            FailureOutcome::Permanent => {
+                let leader =
+                    update_build_status(Arc::clone(self.state), build, BuildStatus::FailedPermanent)
+                        .await;
+                self.propagate_to_followers(&leader).await?;
+            }
+            FailureOutcome::Timeout => {
+                let leader =
+                    update_build_status(Arc::clone(self.state), build, BuildStatus::FailedTimeout)
+                        .await;
+                self.propagate_to_followers(&leader).await?;
+            }
+        }
         self.cascade_dependency_failed(evaluation_id, derivation_id)
             .await?;
         self.check_evaluation_done(evaluation_id).await
@@ -216,7 +293,8 @@ impl<'a> BuildStateHandler<'a> {
             leader.status,
             BuildStatus::Completed
                 | BuildStatus::Substituted
-                | BuildStatus::Failed
+                | BuildStatus::FailedPermanent
+                | BuildStatus::FailedTimeout
                 | BuildStatus::DependencyFailed
         );
         if !propagate {
@@ -313,7 +391,9 @@ impl<'a> BuildStateHandler<'a> {
 
             if matches!(
                 leader.status,
-                BuildStatus::Failed | BuildStatus::DependencyFailed
+                BuildStatus::FailedPermanent
+                    | BuildStatus::FailedTimeout
+                    | BuildStatus::DependencyFailed
             ) {
                 self.cascade_dependency_failed(evaluation_id, derivation_id)
                     .await?;
@@ -386,7 +466,11 @@ impl<'a> BuildStateHandler<'a> {
 
         let failed_builds = EBuild::find()
             .filter(CBuild::Evaluation.eq(evaluation_id))
-            .filter(CBuild::Status.is_in(vec![BuildStatus::Failed, BuildStatus::DependencyFailed]))
+            .filter(CBuild::Status.is_in(vec![
+                BuildStatus::FailedPermanent,
+                BuildStatus::FailedTimeout,
+                BuildStatus::DependencyFailed,
+            ]))
             .all(&self.state.worker_db)
             .await
             .context("fetch failed builds")?;
@@ -646,9 +730,10 @@ pub async fn handle_build_job_failed(
     state: &Arc<ServerState>,
     build_id: BuildId,
     error: &str,
+    kind: BuildFailureKind,
 ) -> Result<()> {
     BuildStateHandler::new(state)
-        .handle_build_job_failed(build_id, error)
+        .handle_build_job_failed(build_id, error, kind)
         .await
 }
 
@@ -882,6 +967,50 @@ impl BuildabilityChecker {
             connected_workers: worker_caps.len() as u32,
             available_architectures,
         }
+    }
+}
+
+#[cfg(test)]
+mod retry_tests {
+    use super::{FailureOutcome, decide_failure_outcome, retry_backoff_elapsed};
+    use gradient_core::types::proto::BuildFailureKind;
+
+    #[test]
+    fn permanent_is_terminal_regardless_of_attempt() {
+        assert_eq!(
+            decide_failure_outcome(BuildFailureKind::Permanent, 0, 3),
+            FailureOutcome::Permanent
+        );
+    }
+    #[test]
+    fn timeout_is_terminal() {
+        assert_eq!(
+            decide_failure_outcome(BuildFailureKind::Timeout, 0, 3),
+            FailureOutcome::Timeout
+        );
+    }
+    #[test]
+    fn transient_retries_until_budget_then_permanent() {
+        assert_eq!(
+            decide_failure_outcome(BuildFailureKind::Transient, 0, 3),
+            FailureOutcome::Retry
+        );
+        assert_eq!(
+            decide_failure_outcome(BuildFailureKind::Transient, 1, 3),
+            FailureOutcome::Retry
+        );
+        assert_eq!(
+            decide_failure_outcome(BuildFailureKind::Transient, 2, 3),
+            FailureOutcome::Permanent
+        );
+    }
+    #[test]
+    fn backoff_grows_per_attempt() {
+        let t0 = chrono::NaiveDateTime::default();
+        assert!(!retry_backoff_elapsed(1, t0, t0 + chrono::Duration::seconds(29), 30));
+        assert!(retry_backoff_elapsed(1, t0, t0 + chrono::Duration::seconds(30), 30));
+        assert!(!retry_backoff_elapsed(2, t0, t0 + chrono::Duration::seconds(59), 30));
+        assert!(retry_backoff_elapsed(2, t0, t0 + chrono::Duration::seconds(60), 30));
     }
 }
 

@@ -177,6 +177,9 @@ async fn build_dispatch_loop(scheduler: Arc<Scheduler>) {
             }
             _ = interval.tick() => {}
         }
+        if let Err(e) = requeue_transient_failures(&scheduler).await {
+            error!(error = %e, "requeue_transient_failures error");
+        }
         if let Err(e) = dispatch_ready_builds(&scheduler).await {
             error!(error = %e, "build dispatch error");
         }
@@ -188,6 +191,27 @@ async fn build_dispatch_loop(scheduler: Arc<Scheduler>) {
             error!(error = %e, "reconcile_waiting_state in dispatch loop failed");
         }
     }
+}
+
+/// Move `FailedTransient` builds whose backoff window has elapsed back to
+/// `Queued` so the ready-builds pass can dispatch them again.
+pub(crate) async fn requeue_transient_failures(scheduler: &Scheduler) -> anyhow::Result<()> {
+    use crate::build::retry_backoff_elapsed;
+    let state = &scheduler.state;
+    let base = state.config.eval.build_retry_backoff_secs;
+    let now = gradient_core::types::now();
+
+    let transient = EBuild::find()
+        .filter(CBuild::Status.eq(BuildStatus::FailedTransient))
+        .all(&state.worker_db)
+        .await?;
+    for build in transient {
+        if retry_backoff_elapsed(build.attempt, build.updated_at, now, base) {
+            gradient_core::db::update_build_status(Arc::clone(state), build, BuildStatus::Queued)
+                .await;
+        }
+    }
+    Ok(())
 }
 
 /// All DB data needed to assemble [`PendingBuildJob`]s for a dispatch pass.
