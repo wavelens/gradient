@@ -277,6 +277,10 @@ impl<'a> EvalResultProcessor<'a> {
                 worker: Set(None),
                 via: Set(via),
                 external_cached: Set(external_cached),
+                attempt: Set(0),
+                timeout_secs: Set(d.timeout_secs.map(|v| v as i64)),
+                max_silent_secs: Set(d.max_silent_secs.map(|v| v as i64)),
+                prefer_local_build: Set(d.prefer_local_build),
                 created_at: Set(now),
                 updated_at: Set(now),
             });
@@ -651,6 +655,10 @@ async fn expand_substituted_closure(
             worker: Set(None),
             via: Set(None),
             external_cached: Set(external_cached),
+            attempt: Set(0),
+            timeout_secs: Set(None),
+            max_silent_secs: Set(None),
+            prefer_local_build: Set(false),
             created_at: Set(now),
             updated_at: Set(now),
         });
