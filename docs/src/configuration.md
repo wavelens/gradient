@@ -73,6 +73,24 @@ openssl rand -base64 48 > /run/secrets/gradient-crypt
 | `settings.anonRateBurst` | `200` | Burst capacity for the anonymous proto session token bucket. (`GRADIENT_PROTO_ANON_RATE_BURST`) |
 | `settings.trustedProxies` | `127.0.0.1/32,::1/128` | Comma-separated CIDR allowlist of peers permitted to set `X-Forwarded-For` (`GRADIENT_TRUSTED_PROXIES`). |
 | `settings.localIps` | `10.0.0.0/8` | Comma-separated CIDR allowlist whose resolved client IPs receive each cache's `local_priority` value (`GRADIENT_LOCAL_IPS`). |
+| `settings.buildMaxAttempts` | `3` | Maximum number of build attempts before a transient failure is promoted to `FailedPermanent`. (`GRADIENT_BUILD_MAX_ATTEMPTS`) |
+| `settings.buildRetryBackoffSecs` | `30` | Base back-off in seconds before retrying a transient build failure; doubled after each prior attempt (exponential). (`GRADIENT_BUILD_RETRY_BACKOFF_SECS`) |
+| `settings.buildDefaultTimeoutSecs` | `3600` | Default wall-clock timeout (seconds) for builds whose `.drv` does not set a `timeout` attribute. `0` disables. (`GRADIENT_BUILD_DEFAULT_TIMEOUT_SECS`) |
+| `settings.buildDefaultMaxSilentSecs` | `1800` | Default silent-output timeout (seconds) for builds whose `.drv` does not set a `maxSilent` attribute. `0` disables. (`GRADIENT_BUILD_DEFAULT_MAX_SILENT_SECS`) |
+
+### Build failure states and retries
+
+Builds can fail in three distinct ways:
+
+| Status | Terminal | Meaning |
+|---|---|---|
+| `FailedPermanent` | Yes | Builder exited non-zero; no retry will be attempted |
+| `FailedTransient` | No | Transient error (OOM, disk full, network/substitution failure, builder crash); scheduler will re-queue automatically |
+| `FailedTimeout` | Yes | Exceeded `buildDefaultTimeoutSecs` or `buildDefaultMaxSilentSecs` |
+
+`FailedTransient` is non-terminal: the build is re-queued automatically with an exponential back-off until `buildMaxAttempts` is exhausted, at which point the status is promoted to `FailedPermanent`. API entry-point queries treat `FailedTransient` as in-progress; the frontend renders all three variants as "Failed".
+
+Per-derivation `.drv` attributes `timeout`, `maxSilent`, and `preferLocalBuild` override the server defaults when present on a derivation. Note that Nix `meta.*` attributes do **not** propagate to the `.drv`; these must be set as top-level derivation attributes.
 
 ## Reverse Proxies
 
