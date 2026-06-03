@@ -156,6 +156,10 @@ fn leader_build_row() -> entity::build::Model {
         worker: None,
         via: None,
         external_cached: false,
+        attempt: 0,
+        timeout_secs: None,
+        max_silent_secs: None,
+        prefer_local_build: false,
         created_at: test_date(),
         updated_at: test_date(),
     }
@@ -172,6 +176,10 @@ fn follower_build_row() -> entity::build::Model {
         worker: None,
         via: Some(leader_build_id()),
         external_cached: false,
+        attempt: 0,
+        timeout_secs: None,
+        max_silent_secs: None,
+        prefer_local_build: false,
         created_at: test_date(),
         updated_at: test_date(),
     }
