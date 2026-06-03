@@ -591,7 +591,9 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
     switch (status) {
       case 'Completed':         return '#22c55e';
       case 'Substituted':       return '#22c55e';
-      case 'Failed':            return '#ef4444';
+      case 'FailedPermanent':
+      case 'FailedTransient':
+      case 'FailedTimeout':          return '#ef4444';
       case 'Building':          return '#3b82f6';
       case 'Queued':            return '#eab308';
       case 'Aborted':           return '#6b7280';
@@ -605,7 +607,9 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
     switch (status) {
       case 'Completed':
       case 'Substituted':       return 'status-success';
-      case 'Failed':            return 'status-danger';
+      case 'FailedPermanent':
+      case 'FailedTransient':
+      case 'FailedTimeout':     return 'status-danger';
       case 'Aborted':
       case 'DependencyFailed':  return 'status-neutral';
       case 'Building':

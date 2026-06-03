@@ -21,7 +21,9 @@ export type BuildStatus =
   | 'Building'
   | 'Completed'
   | 'Substituted'
-  | 'Failed'
+  | 'FailedPermanent'
+  | 'FailedTransient'
+  | 'FailedTimeout'
   | 'Aborted'
   | 'DependencyFailed';
 
