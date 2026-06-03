@@ -493,6 +493,8 @@ mod tests {
                     build_id: BuildId::now_v7().to_string(),
                     drv_path: "/nix/store/abc.drv".into(),
                     external_cached: false,
+                    timeout_secs: None,
+                    max_silent_secs: None,
                 }],
             },
             required_paths: required,

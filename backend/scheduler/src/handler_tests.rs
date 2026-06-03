@@ -207,6 +207,8 @@ fn make_build_job(
                 build_id: build_id.to_string(),
                 drv_path: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello.drv".into(),
                 external_cached: false,
+                timeout_secs: None,
+                max_silent_secs: None,
             }],
         },
         required_paths: vec![],

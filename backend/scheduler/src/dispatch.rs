@@ -210,11 +210,16 @@ struct BuildDispatchMaps {
     /// download to start this build. `inputSrcs` are not included - they
     /// live in the `.drv` file and are not stored in the scheduler DB.
     direct_inputs: HashMap<DerivationId, Vec<RequiredPath>>,
+    default_timeout_secs: Option<u64>,
+    default_max_silent_secs: Option<u64>,
 }
 
 impl BuildDispatchMaps {
     /// Issue one IN-list query per table and build all lookup maps.
     async fn load(state: &Arc<ServerState>, builds: &[MBuild]) -> anyhow::Result<Self> {
+        let default_timeout_secs = nonzero(state.config.eval.build_default_timeout_secs);
+        let default_max_silent_secs = nonzero(state.config.eval.build_default_max_silent_secs);
+
         let drv_ids: Vec<DerivationId> = builds.iter().map(|b| b.derivation).collect();
         let eval_ids: Vec<EvaluationId> = builds
             .iter()
@@ -388,6 +393,8 @@ impl BuildDispatchMaps {
             feature_names,
             dep_counts,
             direct_inputs,
+            default_timeout_secs,
+            default_max_silent_secs,
         })
     }
 
@@ -435,6 +442,8 @@ impl BuildDispatchMaps {
                 build_id: build.id.to_string(),
                 drv_path: derivation.store_path(),
                 external_cached: build.external_cached,
+                timeout_secs: resolve_limit(build.timeout_secs, self.default_timeout_secs),
+                max_silent_secs: resolve_limit(build.max_silent_secs, self.default_max_silent_secs),
             }],
         };
         let pending = PendingBuildJob {
@@ -541,6 +550,19 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+fn nonzero(v: u64) -> Option<u64> {
+    (v != 0).then_some(v)
+}
+
+/// Per-derivation limit takes precedence over the server default. A stored `0` means "no limit".
+fn resolve_limit(stored: Option<i64>, default: Option<u64>) -> Option<u64> {
+    match stored {
+        Some(0) => None,
+        Some(v) if v > 0 => Some(v as u64),
+        _ => default,
+    }
+}
+
 async fn organization_id_for_eval(
     state: &Arc<ServerState>,
     eval: &MEvaluation,
@@ -556,5 +578,27 @@ async fn organization_id_for_eval(
             error!(error = %e, %project_id, "failed to load project for eval");
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod limit_tests {
+    use super::{nonzero, resolve_limit};
+
+    #[test]
+    fn per_drv_overrides_default() {
+        assert_eq!(resolve_limit(Some(120), Some(3600)), Some(120));
+    }
+
+    #[test]
+    fn zero_means_no_limit() {
+        assert_eq!(resolve_limit(Some(0), Some(3600)), None);
+        assert_eq!(nonzero(0), None);
+    }
+
+    #[test]
+    fn falls_back_to_default_when_absent() {
+        assert_eq!(resolve_limit(None, Some(3600)), Some(3600));
+        assert_eq!(resolve_limit(None, None), None);
     }
 }
