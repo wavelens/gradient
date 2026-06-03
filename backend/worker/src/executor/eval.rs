@@ -266,13 +266,17 @@ fn build_discovered_derivation(
         .map(|(p, _)| p.clone())
         .collect();
 
+    let meta = drv.build_meta();
     DiscoveredDerivation {
         attr: attr.unwrap_or_default(),
         drv_path,
         outputs,
         dependencies,
         architecture: drv.system.clone(),
-        required_features: drv.required_system_features(),
+        required_features: meta.required_features,
+        timeout_secs: meta.timeout_secs,
+        max_silent_secs: meta.max_silent_secs,
+        prefer_local_build: meta.prefer_local_build,
         substituted: false,
     }
 }
@@ -406,6 +410,9 @@ impl<'a> ClosureWalker<'a> {
                     dependencies: vec![],
                     architecture: String::new(),
                     required_features: vec![],
+                    timeout_secs: None,
+                    max_silent_secs: None,
+                    prefer_local_build: false,
                     substituted: true, // already built - skip dispatch
                 });
             } else {
