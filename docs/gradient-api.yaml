@@ -2877,7 +2877,7 @@ paths:
       summary: List evaluation builds
       description: |-
         Returns `.drv` builds associated with the evaluation, sorted by status
-        (Building → Queued → Failed → Aborted/DependencyFailed → Completed/Substituted),
+        (Building → Queued → FailedTransient/FailedPermanent/FailedTimeout → Aborted/DependencyFailed → Completed/Substituted),
         then by display name. Supports optional `limit` and `offset` query parameters
         for pagination.
 
@@ -6572,7 +6572,7 @@ components:
           description: Number of entry points with Completed build status
         failed_entry_points:
           type: integer
-          description: Number of entry points with Failed build status
+          description: Number of entry points with FailedPermanent or FailedTimeout build status
         entry_point_diff:
           type: integer
           nullable: true
@@ -7138,8 +7138,24 @@ components:
 
     BuildStatus:
       type: string
-      enum: [Queued, Building, Succeeded, Failed, Cancelled]
-      description: Current state of a single build
+      enum: [Queued, Building, Succeeded, FailedPermanent, FailedTransient, FailedTimeout, Cancelled]
+      description: |-
+        Current state of a single build.
+
+        | Value | Terminal | Meaning |
+        |---|---|---|
+        | `Queued` | No | Waiting to be dispatched to a worker |
+        | `Building` | No | Actively executing on a worker |
+        | `Succeeded` | Yes | Build completed successfully |
+        | `FailedPermanent` | Yes | Builder exited non-zero; no retry will be attempted |
+        | `FailedTransient` | No | Transient failure (OOM, disk full, network error); an automatic retry is pending |
+        | `FailedTimeout` | Yes | Exceeded the wall-clock or silent-output timeout |
+        | `Cancelled` | Yes | Cancelled by user or dependency failure |
+
+        `FailedTransient` is non-terminal: the scheduler will re-queue the build
+        automatically. Treat it as in-progress when deciding whether an evaluation
+        has finished. The frontend renders `FailedPermanent`, `FailedTransient`, and
+        `FailedTimeout` all as "Failed".
 
     Architecture:
       type: string

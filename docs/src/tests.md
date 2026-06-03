@@ -2990,3 +2990,112 @@ router: a non-superuser gets `403`, an unknown `format` gets `400`, and a
 superuser over an empty database gets the eight top-level state keys (JSON) and
 a `text/plain` Nix body (default). The full round-trip against real data lives
 in the NixOS API integration test above.
+
+## Failure handling and retries (#244)
+
+Builds can fail in three distinct ways: `FailedPermanent` (builder exited
+non-zero, terminal), `FailedTransient` (OOM / disk full / network error /
+builder crash, retried automatically with exponential backoff), and
+`FailedTimeout` (wall-clock or silent-output timeout exceeded, terminal).
+Server-wide defaults (`GRADIENT_BUILD_MAX_ATTEMPTS`,
+`GRADIENT_BUILD_RETRY_BACKOFF_SECS`, `GRADIENT_BUILD_DEFAULT_TIMEOUT_SECS`,
+`GRADIENT_BUILD_DEFAULT_MAX_SILENT_SECS`) can be overridden per-derivation
+via the `.drv` attributes `timeout`, `maxSilent`, and `preferLocalBuild`.
+
+### `Derivation::build_meta()` parsing — `core/src/db/derivation.rs`
+
+Run with: `cargo test -p core --lib db::derivation`
+
+- `build_meta_returns_defaults_when_attrs_absent` — a derivation with no
+  `timeout`, `maxSilent`, `preferLocalBuild`, or `requiredSystemFeatures`
+  attributes returns all-default `BuildMeta`.
+- `build_meta_parses_timeout_and_max_silent` — integer `timeout` and
+  `maxSilent` attributes are parsed correctly.
+- `build_meta_parses_prefer_local_build` — `"1"` is treated as true;
+  absent/other values as false.
+- `build_meta_parses_required_system_features` — space-separated feature
+  string is split into a `Vec<String>`.
+
+### Build state-machine transitions — `core/src/state_machine/build.rs`
+
+Run with: `cargo test -p core --tests state_machine::build`
+
+- `failed_transient_can_re_queue` — `FailedTransient → Queued` is valid
+  (auto-retry path).
+- `failed_permanent_is_terminal` — `FailedPermanent` cannot transition to
+  any other status; the state machine rejects all outgoing edges.
+- `failed_timeout_is_terminal` — same guard for `FailedTimeout`.
+
+### Retry decision and backoff — `scheduler/src/build.rs`
+
+Run with: `cargo test -p scheduler --lib build`
+
+- `decide_failure_outcome_transient_below_cap_retries` — a transient error
+  below `max_attempts` produces `Outcome::Retry`.
+- `decide_failure_outcome_transient_at_cap_promotes` — hitting the cap
+  promotes to `FailedPermanent`.
+- `decide_failure_outcome_permanent_never_retries` — permanent errors skip
+  the retry path regardless of the attempt count.
+- `decide_failure_outcome_timeout_never_retries` — timeout errors are
+  always terminal.
+- `retry_backoff_elapsed_returns_false_before_deadline` — the build is not
+  re-queued until `now >= updated_at + backoff`.
+- `retry_backoff_elapsed_returns_true_after_deadline` — once the deadline
+  passes the build is eligible for re-queue.
+- `retry_backoff_doubles_per_attempt` — attempt 1 waits 30 s, attempt 2
+  waits 60 s, attempt 3 waits 120 s (base × 2^(attempt-1)).
+
+### Per-build timeout resolution — `scheduler/src/dispatch.rs`
+
+Run with: `cargo test -p scheduler --lib dispatch`
+
+- `resolve_limit_uses_drv_when_nonzero` — a non-zero `.drv` attribute
+  overrides the server default.
+- `resolve_limit_falls_back_to_default` — a zero or absent `.drv`
+  attribute falls back to the server default.
+- `resolve_limit_returns_none_when_both_zero` — when both are `0`, no
+  timeout is sent in `AssignJob`.
+- `nonzero_returns_some_for_positive` / `nonzero_returns_none_for_zero` —
+  the helper used by `resolve_limit` to convert `0 → None`.
+
+### Worker failure classification — `worker/src/executor/build.rs`
+
+Run with: `cargo test -p worker --tests executor::build`
+
+- `classify_build_error_oom` — an OOM log line (`"out of memory"`) maps to
+  `BuildFailureKind::Transient`.
+- `classify_build_error_disk_full` — `"No space left on device"` maps to
+  `BuildFailureKind::Transient`.
+- `classify_build_error_nonzero_exit` — a non-zero builder exit maps to
+  `BuildFailureKind::Permanent`.
+- `classify_build_error_network` — network/substitution failure messages
+  map to `BuildFailureKind::Transient`.
+- `looks_like_oom_matches_known_messages` — spot-checks representative OOM
+  strings from the nix-daemon log.
+- `looks_like_oom_ignores_unrelated_lines` — unrelated log lines are not
+  mis-classified as OOM.
+
+### Entity helpers — `entity/src/build.rs`
+
+Run with: `cargo test -p entity --lib build`
+
+- `is_failure_true_for_all_failed_variants` — `FailedPermanent`,
+  `FailedTransient`, and `FailedTimeout` all return `true` from
+  `is_failure()`.
+- `is_failure_false_for_other_statuses` — `Queued`, `Building`,
+  `Succeeded`, `DependencyFailed`, `Aborted` return `false`.
+- `is_terminal_failure_excludes_transient` — `FailedTransient` returns
+  `false` (it will be retried); `FailedPermanent` and `FailedTimeout`
+  return `true`.
+
+### Web entry-point and badge counting — `web/src/endpoints/projects/`
+
+Run with: `cargo test -p web --lib endpoints::projects`
+
+- `evaluations::tests::failed_transient_excluded_from_failed_count` —
+  `FailedTransient` builds do not increment `failed_entry_points`; only
+  `FailedPermanent` and `FailedTimeout` do (`evaluations.rs`).
+- `badges::tests::failed_transient_does_not_make_badge_red` — an
+  evaluation whose only failing entry point is `FailedTransient` does not
+  render the red `failing` badge; it falls back to the in-progress colour
+  (`badges.rs`).

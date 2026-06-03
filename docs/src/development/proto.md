@@ -1094,7 +1094,7 @@ When the timeout expires, the server sends `AbortJob { reason: "timeout" }`. The
 
 Default timeouts:
 - FlakeJob (evaluation): `GRADIENT_EVALUATION_TIMEOUT` (default: 600s)
-- BuildJob: no default timeout (builds can be long-running)
+- BuildJob: `GRADIENT_BUILD_DEFAULT_TIMEOUT_SECS` (default: 3600s wall-clock) and `GRADIENT_BUILD_DEFAULT_MAX_SILENT_SECS` (default: 1800s silent-output). Per-derivation `timeout` / `maxSilent` attributes override the server defaults. Either limit set to `0` disables that check. A timeout triggers `FailedTimeout` (terminal).
 
 ---
 
