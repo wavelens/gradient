@@ -150,6 +150,15 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'organization/:org/closure/:kind/:id',
+    title: 'Closure',
+    data: { hideFooter: true },
+    loadComponent: () =>
+      import('./features/evaluations/closure-graph/closure-graph.component').then(
+        (m) => m.ClosureGraphComponent
+      ),
+  },
+  {
     path: 'organization/:org/log/:evaluationId',
     title: 'Evaluation Log',
     data: { hideFooter: true },

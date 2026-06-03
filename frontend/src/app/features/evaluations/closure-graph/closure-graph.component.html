@@ -1,0 +1,42 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<div class="closure-page">
+  @if (loading()) {
+    <div class="full-loading">
+      <app-loading-spinner message="Loading closure…" />
+    </div>
+  } @else if (errorMsg()) {
+    <div class="error-state">
+      <span class="material-symbols-outlined">error</span>
+      <p>{{ errorMsg() }}</p>
+      <button pButton label="Go Back" severity="secondary" (click)="goBack()"></button>
+    </div>
+  } @else {
+    <div class="closure-header">
+      <div class="header-left">
+        <button class="icon-btn" (click)="goBack()" title="Back">
+          <span class="material-symbols-outlined">arrow_back</span>
+        </button>
+        <div class="header-info">
+          <div class="header-title">
+            <span class="header-name">{{ rootName() }}</span>
+            <span class="total-badge">{{ totalLabel() }}</span>
+          </div>
+          <div class="header-meta">
+            <span>{{ nodeCount() }} packages in closure</span>
+            @if (truncated()) {
+              <span class="sep">·</span>
+              <span class="warn">large closure — node list truncated</span>
+            }
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div #sankeyEl class="sankey-canvas"></div>
+  }
+</div>
