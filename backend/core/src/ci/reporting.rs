@@ -102,9 +102,11 @@ pub fn ci_status_for_build(status: &BuildStatus) -> Option<CiStatus> {
     match status {
         BuildStatus::Building => Some(CiStatus::Running),
         BuildStatus::Completed | BuildStatus::Substituted => Some(CiStatus::Success),
-        BuildStatus::Failed | BuildStatus::DependencyFailed => Some(CiStatus::Failure),
+        BuildStatus::FailedPermanent
+            | BuildStatus::FailedTimeout
+            | BuildStatus::DependencyFailed => Some(CiStatus::Failure),
         BuildStatus::Aborted => Some(CiStatus::Error),
-        BuildStatus::Created | BuildStatus::Queued => None,
+        BuildStatus::Created | BuildStatus::Queued | BuildStatus::FailedTransient => None,
     }
 }
 
@@ -184,7 +186,7 @@ mod tests {
             Some(CiStatus::Success)
         );
         assert_eq!(
-            ci_status_for_build(&BuildStatus::Failed),
+            ci_status_for_build(&BuildStatus::FailedPermanent),
             Some(CiStatus::Failure)
         );
         assert_eq!(
