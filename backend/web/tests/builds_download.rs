@@ -177,6 +177,10 @@ fn build_row() -> entity::build::Model {
         worker: None,
         via: None,
         external_cached: false,
+        attempt: 0,
+        timeout_secs: None,
+        max_silent_secs: None,
+        prefer_local_build: false,
         created_at: test_date(),
         updated_at: test_date(),
     }

@@ -760,6 +760,10 @@ mod reelect_leader_tests {
             worker: None,
             via,
             external_cached: false,
+            attempt: 0,
+            timeout_secs: None,
+            max_silent_secs: None,
+            prefer_local_build: false,
             created_at: chrono::NaiveDateTime::default(),
             updated_at: chrono::NaiveDateTime::default(),
         }
@@ -1030,6 +1034,10 @@ mod find_active_leaders_tests {
             worker: None,
             via: None,
             external_cached,
+            attempt: 0,
+            timeout_secs: None,
+            max_silent_secs: None,
+            prefer_local_build: false,
             created_at: t,
             updated_at: t,
         }

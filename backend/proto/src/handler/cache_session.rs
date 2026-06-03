@@ -228,6 +228,7 @@ mod tests {
             reject_reason(&ClientMessage::JobFailed {
                 job_id: "job".into(),
                 error: "x".into(),
+                kind: crate::messages::BuildFailureKind::Permanent,
             })
             .is_some()
         );
