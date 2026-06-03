@@ -199,8 +199,12 @@ impl<'a> DispatchContext<'a> {
                 self.on_job_completed(job_id).await;
                 true
             }
-            ClientMessage::JobFailed { job_id, error } => {
-                self.on_job_failed(job_id, error).await;
+            ClientMessage::JobFailed {
+                job_id,
+                error,
+                kind,
+            } => {
+                self.on_job_failed(job_id, error, kind).await;
                 true
             }
             ClientMessage::Draining => {
@@ -530,11 +534,16 @@ impl<'a> DispatchContext<'a> {
         push_pending_candidates(self.writer, self.scheduler, self.peer_id).await;
     }
 
-    async fn on_job_failed(&mut self, job_id: String, error: String) {
-        warn!(peer_id = %self.peer_id, %job_id, %error, "job failed");
+    async fn on_job_failed(
+        &mut self,
+        job_id: String,
+        error: String,
+        kind: gradient_core::types::proto::BuildFailureKind,
+    ) {
+        warn!(peer_id = %self.peer_id, %job_id, %error, ?kind, "job failed");
         if let Err(e) = self
             .scheduler
-            .handle_job_failed(self.peer_id, &job_id, &error)
+            .handle_job_failed(self.peer_id, &job_id, &error, kind)
             .await
         {
             error!(peer_id = %self.peer_id, %job_id, error = %e, "handle_job_failed failed");

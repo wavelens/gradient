@@ -18,7 +18,7 @@ use tracing::{debug, error, info, warn};
 
 use gradient_core::executer::strip_nix_store_prefix;
 use gradient_core::types::proto::{
-    BuildOutput, CandidateScore, DiscoveredDerivation, JobCandidate, JobKind,
+    BuildFailureKind, BuildOutput, CandidateScore, DiscoveredDerivation, JobCandidate, JobKind,
 };
 
 use gradient_core::types::*;
@@ -417,7 +417,13 @@ impl Scheduler {
         }
     }
 
-    pub async fn handle_job_failed(&self, peer_id: &str, job_id: &str, error: &str) -> Result<()> {
+    pub async fn handle_job_failed(
+        &self,
+        peer_id: &str,
+        job_id: &str,
+        error: &str,
+        kind: BuildFailureKind,
+    ) -> Result<()> {
         self.worker_pool.write().await.release_job(peer_id, job_id);
         let job = self.job_tracker.write().await.remove_active(job_id);
         match job {
@@ -425,7 +431,7 @@ impl Scheduler {
                 eval::handle_eval_job_failed(&self.state, j.evaluation_id, error).await
             }
             Some(PendingJob::Build(j)) => {
-                build::handle_build_job_failed(&self.state, j.build_id, error).await
+                build::handle_build_job_failed(&self.state, j.build_id, error, kind).await
             }
             None => {
                 warn!(%job_id, "job_failed for unknown job");
