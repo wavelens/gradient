@@ -113,6 +113,7 @@ export interface ProjectMetricsResponse {
 
 export interface EntryPointMetricPoint {
   evaluation_id: string;
+  build_id: string;
   created_at: string;
   build_status: string;
   build_time_ms: number | null;
