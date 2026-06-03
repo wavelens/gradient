@@ -134,16 +134,24 @@ Helper `filter_org_peers_without_cache` runs during the `/proto` handshake's
 `perform_auth` step. After token validation, each authorized peer that is an
 organization is checked against the `organization_cache` table. Organizations
 without a subscribed cache are moved into `failed_peers` with reason
-`"organization has no cache subscribed"`. If the authorized peer set ends up
-empty the connection is rejected with `401 no valid peer tokens provided`.
+`"organization has no cache subscribed"`. If the worker authenticated but the
+authorized peer set ends up empty solely because of missing caches, the
+connection is rejected with the dedicated `495 organization has no cache
+subscribed` instead of a misleading `401`; a `401 no valid peer tokens provided`
+is reserved for genuine token failures.
 
-Backend tests (in `backend/core/src/proto/handler/auth.rs`):
+Backend tests (in `backend/proto/src/handler/auth.rs`):
 
-- `proto::handler::auth::tests::filter_org_peers_passes_through_org_with_cache`
-- `proto::handler::auth::tests::filter_org_peers_demotes_org_without_cache`
-- `proto::handler::auth::tests::filter_org_peers_passes_through_non_org_uuids`
-- `proto::handler::auth::tests::filter_org_peers_mixed`
-- `proto::handler::auth::tests::validate_then_filter_demotes_org_without_cache`
+- `tests::filter_org_peers_passes_through_org_with_cache`
+- `tests::filter_org_peers_demotes_org_without_cache`
+- `tests::filter_org_peers_passes_through_non_org_uuids`
+- `tests::filter_org_peers_mixed`
+- `tests::validate_then_filter_demotes_org_without_cache`
+
+Auth-decision tests (in `backend/proto/src/handler/session.rs`):
+
+- `auth_decision_tests::registered_but_no_valid_token`
+- `auth_decision_tests::registered_emptied_by_missing_cache`
 
 ## Frontend - workers page no-cache banner
 

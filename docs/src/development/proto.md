@@ -131,7 +131,7 @@ AuthResponse {
 
 The server validates each token independently. The worker is authorized for every peer whose token is valid. If some tokens fail, the connection continues with the successful peers - only a total failure causes `Reject`.
 
-When validating peer tokens, the server additionally checks each authorized peer that is an organization against the `organization_cache` table. If the organization has no subscribed cache, that peer is moved into `failed_peers` with reason `"organization has no cache subscribed"`. If this leaves the authorized peer set empty, the connection is rejected with `401 no valid peer tokens provided`.
+When validating peer tokens, the server additionally checks each authorized peer that is an organization against the `organization_cache` table. If the organization has no subscribed cache, that peer is moved into `failed_peers` with reason `"organization has no cache subscribed"`. If this leaves the authorized peer set empty - i.e. the worker authenticated but every peer it presented a valid token for lacks a cache - the connection is rejected with the dedicated `495 organization has no cache subscribed` rather than a misleading `401`. A `401 no valid peer tokens provided` is only sent when no token validated at all.
 
 What authorization means depends on the peer type:
  - **Org** - worker receives jobs from that org's projects
@@ -1370,6 +1370,7 @@ On receiving `ServerMessage::Draining`, workers:
 |------|---------|
 | 400  | Malformed message or unsupported protocol version |
 | 401  | Unauthorized (missing or invalid token) |
+| 495  | Organization has no cache subscribed (incomplete server setup) |
 | 499  | Capability not negotiated for this session |
 | 498  | Job not found (e.g. AbortJob for unknown job_id) |
 | 497  | Job already assigned or completed |
