@@ -61,19 +61,19 @@ impl std::fmt::Display for BuildError {
 impl std::error::Error for BuildError {}
 
 impl BuildError {
-    fn transient(e: impl Into<anyhow::Error>) -> Self {
+    pub(crate) fn transient(e: impl Into<anyhow::Error>) -> Self {
         Self {
             kind: BuildFailureKind::Transient,
             source: e.into(),
         }
     }
-    fn permanent(e: impl Into<anyhow::Error>) -> Self {
+    pub(crate) fn permanent(e: impl Into<anyhow::Error>) -> Self {
         Self {
             kind: BuildFailureKind::Permanent,
             source: e.into(),
         }
     }
-    fn timeout(e: impl Into<anyhow::Error>) -> Self {
+    pub(crate) fn timeout(e: impl Into<anyhow::Error>) -> Self {
         Self {
             kind: BuildFailureKind::Timeout,
             source: e.into(),

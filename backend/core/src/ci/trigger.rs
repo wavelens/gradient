@@ -291,9 +291,9 @@ pub async fn trigger_restart_builds<C: ConnectionTrait>(
             via: Set(via),
             external_cached: Set(false),
             attempt: Set(0),
-            timeout_secs: Set(None),
-            max_silent_secs: Set(None),
-            prefer_local_build: Set(false),
+            timeout_secs: Set(prev_build.timeout_secs),
+            max_silent_secs: Set(prev_build.max_silent_secs),
+            prefer_local_build: Set(prev_build.prefer_local_build),
             created_at: Set(now),
             updated_at: Set(now),
         };

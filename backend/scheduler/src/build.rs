@@ -440,7 +440,8 @@ impl<'a> BuildStateHandler<'a> {
     ///
     /// Returns early if any build is still active (Created/Queued/Building) or if
     /// the evaluation is not in `Building` state. Otherwise sets `Failed` when at
-    /// least one build failed (Failed or DependencyFailed), else `Completed`.
+    /// least one build is a terminal failure (FailedPermanent, FailedTimeout, or
+    /// DependencyFailed), else `Completed`.
     pub(crate) async fn check_evaluation_done(&self, evaluation_id: EvaluationId) -> Result<()> {
         let active = EBuild::find()
             .filter(CBuild::Evaluation.eq(evaluation_id))

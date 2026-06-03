@@ -359,7 +359,7 @@ impl JobExecutor {
                         error = %e,
                         "input prefetch failed; aborting build"
                     );
-                    e
+                    crate::executor::build::BuildError::transient(e)
                 })?;
             let outputs =
                 build::build_derivation(&self.store, build_task, index as u32, updater).await?;
@@ -376,7 +376,8 @@ impl JobExecutor {
         // buffer exceeded) terminates the upload loop and surfaces as a
         // `JobFailed`.
         compress::compress_and_push_paths(&self.store, &all_output_paths, updater, &mut abort)
-            .await?;
+            .await
+            .map_err(crate::executor::build::BuildError::transient)?;
 
         // Release every indirect GC root for this job; symlinks are removed
         // and the daemon's next GC walk is free to delete unreachable paths.
