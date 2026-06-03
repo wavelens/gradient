@@ -25,6 +25,7 @@ const baseIntegration: Integration = {
   endpoint_url: null,
   has_secret: true,
   has_access_token: false,
+  allowed_ips: [],
   created_by: 'u',
   created_at: '2026-01-01T00:00:00Z',
 };
