@@ -151,7 +151,7 @@ fn status_rank(status: entity::build::BuildStatus) -> u32 {
     match status {
         Building => 0,
         Created | Queued => 1,
-        Failed => 2,
+        FailedPermanent | FailedTimeout | FailedTransient => 2,
         Aborted | DependencyFailed => 3,
         Completed | Substituted => 4,
     }

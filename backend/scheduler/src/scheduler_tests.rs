@@ -466,6 +466,8 @@ async fn cancel_evaluation_jobs_drops_eval_and_build_jobs() {
                             build_id: build_id.to_string(),
                             drv_path: "aaaa-hello.drv".into(),
                             external_cached: false,
+                            timeout_secs: None,
+                            max_silent_secs: None,
                         }],
                     },
                     required_paths: vec![],
