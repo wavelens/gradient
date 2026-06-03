@@ -29,6 +29,28 @@ export interface BuildGraph {
   edges: DependencyEdge[];
 }
 
+export interface ClosureNode {
+  id: string;
+  name: string;
+  path: string;
+  nar_size: number | null;
+}
+
+export interface ClosureEdge {
+  source: string;
+  target: string;
+}
+
+export interface ClosureGraph {
+  roots: string[];
+  total_size_bytes: number | null;
+  node_count: number;
+  edge_count: number;
+  truncated: boolean;
+  nodes: ClosureNode[];
+  edges: ClosureEdge[];
+}
+
 export interface BuildItem {
   id: string;
   name: string;          // derivation path
@@ -94,6 +116,14 @@ export class EvaluationsService {
 
   getBuildGraph(buildId: string): Observable<BuildGraph> {
     return this.api.get<BuildGraph>(`builds/${buildId}/graph`);
+  }
+
+  getBuildClosure(buildId: string): Observable<ClosureGraph> {
+    return this.api.get<ClosureGraph>(`builds/${buildId}/closure`);
+  }
+
+  getEvalClosure(evalId: string): Observable<ClosureGraph> {
+    return this.api.get<ClosureGraph>(`evals/${evalId}/closure`);
   }
 
   getBuildDownloads(buildId: string): Observable<BuildProduct[]> {

@@ -65,6 +65,9 @@ importers:
       apexcharts:
         specifier: ^5.12.0
         version: 5.12.0
+      apexsankey:
+        specifier: ^1.7.1
+        version: 1.7.1
       ng-apexcharts:
         specifier: ^2.4.0
         version: 2.4.0(@angular/common@21.2.13(@angular/core@21.2.13(@angular/compiler@21.2.13)(rxjs@7.8.2))(rxjs@7.8.2))(@angular/core@21.2.13(@angular/compiler@21.2.13)(rxjs@7.8.2))(apexcharts@5.12.0)(rxjs@7.8.2)
@@ -1471,6 +1474,9 @@ packages:
 
   apexcharts@5.12.0:
     resolution: {integrity: sha512-vNCw62M5rhVg09FHFCL/ztpH7VlTOF8/+lWLUVjBdQffIAgQaxtyDGfojCyYoZHM3Hh17srWwz6rrD/XzblRSw==}
+
+  apexsankey@1.7.1:
+    resolution: {integrity: sha512-K9G+HfQdLBMNGY0MnaT36WDBQzI5gN27paXkNMh/oB+9InAnGEymqQUSnCj3sF3eVIdolH4QzIqPspgnFTd9uQ==}
 
   assertion-error@2.0.1:
     resolution: {integrity: sha512-Izi8RQcffqCeNVgFigKli1ssklIbpHnCYc6AknXGYoB6grJqyeby7jv12JUQgmTAnIDnbck1uxksT4dzN3PWBA==}
@@ -4015,6 +4021,8 @@ snapshots:
   ansi-styles@6.2.3: {}
 
   apexcharts@5.12.0: {}
+
+  apexsankey@1.7.1: {}
 
   assertion-error@2.0.1: {}
 
