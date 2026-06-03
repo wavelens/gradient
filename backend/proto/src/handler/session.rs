@@ -150,9 +150,12 @@ impl ProtoSession<Opening> {
             None => return None,
         };
 
-        let (authorized_peers, mut failed_peers) = validate_tokens(&registered_peers, &tokens);
+        let (token_authorized, mut failed_peers) = validate_tokens(&registered_peers, &tokens);
+        let had_token_authorized = !token_authorized.is_empty();
         let (authorized_peers, demoted) =
-            filter_org_peers_without_cache(&self.state, authorized_peers).await;
+            filter_org_peers_without_cache(&self.state, token_authorized).await;
+        let emptied_by_missing_cache =
+            authorized_peers.is_empty() && had_token_authorized && !demoted.is_empty();
         failed_peers.extend(demoted);
 
         let has_any =
@@ -162,6 +165,7 @@ impl ProtoSession<Opening> {
             registered_peers.is_empty(),
             has_any,
             authorized_peers.is_empty(),
+            emptied_by_missing_cache,
         ) {
             AuthDecision::Accept => {
                 if registered_peers.is_empty() {
@@ -409,11 +413,15 @@ enum AuthDecision {
 ///   (i.e. it once existed but is now deactivated).
 /// - `authorized_peers_empty`: zero of the peers in the challenge produced a
 ///   valid token.
+/// - `emptied_by_missing_cache`: tokens validated for at least one peer, but
+///   every such peer was demoted because its organization has no subscribed
+///   cache. Distinguishes "incomplete server setup" from a real auth failure.
 fn decide_auth(
     server_initiated: bool,
     registered_peers_empty: bool,
     has_any_registrations: bool,
     authorized_peers_empty: bool,
+    emptied_by_missing_cache: bool,
 ) -> AuthDecision {
     if registered_peers_empty {
         if has_any_registrations {
@@ -430,9 +438,16 @@ fn decide_auth(
         }
         AuthDecision::Accept
     } else if authorized_peers_empty {
-        AuthDecision::Reject {
-            code: 401,
-            reason: "no valid peer tokens provided",
+        if emptied_by_missing_cache {
+            AuthDecision::Reject {
+                code: 495,
+                reason: "organization has no cache subscribed",
+            }
+        } else {
+            AuthDecision::Reject {
+                code: 401,
+                reason: "no valid peer tokens provided",
+            }
         }
     } else {
         AuthDecision::Accept
@@ -449,7 +464,7 @@ mod auth_decision_tests {
     /// `server_initiated` branch ran for everyone.
     #[test]
     fn inbound_unknown_worker_rejected() {
-        let d = decide_auth(false, true, false, true);
+        let d = decide_auth(false, true, false, true, false);
         assert_eq!(
             d,
             AuthDecision::Reject {
@@ -463,7 +478,10 @@ mod auth_decision_tests {
     /// the only legitimate "open mode" path.
     #[test]
     fn outbound_unknown_worker_accepted() {
-        assert_eq!(decide_auth(true, true, false, true), AuthDecision::Accept);
+        assert_eq!(
+            decide_auth(true, true, false, true, false),
+            AuthDecision::Accept
+        );
     }
 
     /// Worker had a registration once but it's been removed → reject as
@@ -471,7 +489,7 @@ mod auth_decision_tests {
     #[test]
     fn deactivated_worker_rejected_inbound() {
         assert_eq!(
-            decide_auth(false, true, true, true),
+            decide_auth(false, true, true, true, false),
             AuthDecision::Reject {
                 code: 403,
                 reason: "worker is deactivated",
@@ -482,7 +500,7 @@ mod auth_decision_tests {
     #[test]
     fn deactivated_worker_rejected_outbound() {
         assert_eq!(
-            decide_auth(true, true, true, true),
+            decide_auth(true, true, true, true, false),
             AuthDecision::Reject {
                 code: 403,
                 reason: "worker is deactivated",
@@ -494,10 +512,23 @@ mod auth_decision_tests {
     #[test]
     fn registered_but_no_valid_token() {
         assert_eq!(
-            decide_auth(false, false, false, true),
+            decide_auth(false, false, false, true, false),
             AuthDecision::Reject {
                 code: 401,
                 reason: "no valid peer tokens provided",
+            }
+        );
+    }
+
+    /// Tokens validated but every authorized peer was demoted because its
+    /// organization has no cache → distinct 495, not a misleading 401.
+    #[test]
+    fn registered_emptied_by_missing_cache() {
+        assert_eq!(
+            decide_auth(false, false, false, true, true),
+            AuthDecision::Reject {
+                code: 495,
+                reason: "organization has no cache subscribed",
             }
         );
     }
@@ -506,7 +537,7 @@ mod auth_decision_tests {
     #[test]
     fn registered_with_valid_token_accepted() {
         assert_eq!(
-            decide_auth(false, false, false, false),
+            decide_auth(false, false, false, false, false),
             AuthDecision::Accept
         );
     }
