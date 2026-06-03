@@ -166,6 +166,11 @@ export class EntryPointMetricsComponent implements OnInit {
     return opts;
   });
 
+  latestBuildId = computed(() => {
+    const pts = this.points();
+    return pts.length ? pts[pts.length - 1].build_id : '';
+  });
+
   completedCount = computed(() => this.points().filter((p) => p.build_status === 'Completed').length);
   failedCount = computed(() => this.points().filter((p) => p.build_status === 'FailedPermanent' || p.build_status === 'FailedTimeout').length);
   substitutedCount = computed(() => this.points().filter((p) => p.build_status === 'Substituted').length);

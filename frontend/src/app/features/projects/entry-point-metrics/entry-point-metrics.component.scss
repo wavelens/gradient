@@ -14,6 +14,28 @@
 
 .page-header {
   margin-bottom: $spacing-xl;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: $spacing-lg;
+
+  .closure-link {
+    display: inline-flex;
+    align-items: center;
+    gap: $spacing-xs;
+    padding: $spacing-sm $spacing-md;
+    border: 1px solid $color-border;
+    border-radius: $border-radius-md;
+    color: $text-secondary;
+    text-decoration: none;
+    font-size: $font-size-sm;
+    white-space: nowrap;
+
+    &:hover {
+      border-color: #fd7e14;
+      color: #fd7e14;
+    }
+  }
 
   .breadcrumb {
     display: flex;
