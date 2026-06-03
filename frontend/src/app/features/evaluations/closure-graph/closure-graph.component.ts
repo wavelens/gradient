@@ -5,7 +5,8 @@
  */
 
 import {
-  Component, OnInit, inject, signal, ViewChild, ElementRef, NgZone,
+  Component, OnInit, OnDestroy, inject, signal, computed,
+  ViewChild, ElementRef, NgZone, ChangeDetectorRef,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router } from '@angular/router';
@@ -18,8 +19,11 @@ const TOP_N = 500;
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const ACCENT = '#fd7e14';
 const OTHERS_FILL = '#4b5563';
+const MIN_SCALE = 0.02;
+const MAX_SCALE = 4;
 
 type LaidNode = SankeyNode & { x0: number; x1: number; y0: number; y1: number; depth: number };
+type LaidLink = { source: LaidNode; target: LaidNode; width?: number; value: number };
 
 @Component({
   selector: 'app-closure-graph',
@@ -28,13 +32,15 @@ type LaidNode = SankeyNode & { x0: number; x1: number; y0: number; y1: number; d
   templateUrl: './closure-graph.component.html',
   styleUrl: './closure-graph.component.scss',
 })
-export class ClosureGraphComponent implements OnInit {
+export class ClosureGraphComponent implements OnInit, OnDestroy {
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private evalService = inject(EvaluationsService);
   private zone = inject(NgZone);
+  private cdr = inject(ChangeDetectorRef);
 
-  @ViewChild('sankeyEl') sankeyRef!: ElementRef<HTMLDivElement>;
+  @ViewChild('svgEl') svgRef!: ElementRef<SVGSVGElement>;
+  @ViewChild('graphEl') graphRef!: ElementRef<SVGGElement>;
 
   loading = signal(true);
   errorMsg = signal<string | null>(null);
@@ -43,15 +49,31 @@ export class ClosureGraphComponent implements OnInit {
   totalLabel = signal('');
   nodeCount = signal(0);
 
+  scale = signal(1);
+  tx = signal(0);
+  ty = signal(0);
+  transform = computed(() => `translate(${this.tx()},${this.ty()}) scale(${this.scale()})`);
+
   orgName = '';
   kind = '';
   id = '';
 
+  private bounds = { minX: 0, minY: 0, maxX: 0, maxY: 0 };
+  private isPanning = false;
+  private panStart = { x: 0, y: 0, tx: 0, ty: 0 };
+
   ngOnInit(): void {
+    document.documentElement.style.overflow = 'hidden';
+    document.body.style.overflow = 'hidden';
     this.orgName = this.route.snapshot.paramMap.get('org') || '';
     this.kind = this.route.snapshot.paramMap.get('kind') || 'build';
     this.id = this.route.snapshot.paramMap.get('id') || '';
     this.load();
+  }
+
+  ngOnDestroy(): void {
+    document.documentElement.style.overflow = '';
+    document.body.style.overflow = '';
   }
 
   private load(): void {
@@ -66,6 +88,7 @@ export class ClosureGraphComponent implements OnInit {
         const rootNode = g.nodes.find((n) => g.roots.includes(n.id));
         this.rootName.set(rootNode?.name ?? '');
         this.loading.set(false);
+        this.cdr.detectChanges();
         setTimeout(() => this.render(g), 0);
       },
       error: () => {
@@ -76,15 +99,16 @@ export class ClosureGraphComponent implements OnInit {
   }
 
   private async render(graph: ClosureGraph): Promise<void> {
-    const el = this.sankeyRef?.nativeElement;
-    if (!el || !graph.nodes.length) return;
+    const group = this.graphRef?.nativeElement;
+    const svg = this.svgRef?.nativeElement;
+    if (!group || !svg || !graph.nodes.length) return;
     const model = buildClosureSankey(graph, TOP_N);
 
     const { sankey, sankeyLinkHorizontal, sankeyJustify } = await import('d3-sankey');
 
     this.zone.runOutsideAngular(() => {
       try {
-        const containerWidth = el.clientWidth || 1200;
+        const probeWidth = svg.clientWidth || 1200;
         const height = Math.max(420, model.nodes.length * 11);
 
         const layout = (width: number) =>
@@ -99,31 +123,30 @@ export class ClosureGraphComponent implements OnInit {
           });
 
         // First pass derives the column count; widen so columns stay legible.
-        const probe = layout(containerWidth);
-        const columns = Math.max(...probe.nodes.map((n) => (n.depth ?? 0))) + 1;
-        const width = Math.max(containerWidth, columns * 220);
+        const probe = layout(probeWidth);
+        const columns = Math.max(...probe.nodes.map((n) => n.depth ?? 0)) + 1;
+        const width = Math.max(probeWidth, columns * 220);
         const { nodes, links } = layout(width);
 
-        el.innerHTML = '';
         const linkPath = sankeyLinkHorizontal() as unknown as (l: unknown) => string;
-        el.appendChild(this.draw(nodes as LaidNode[], links as never, width, height, linkPath));
+        this.build(group, nodes as LaidNode[], links as unknown as LaidLink[], width, linkPath);
+        this.bounds = { minX: 0, minY: 0, maxX: width, maxY: height };
       } catch {
         this.zone.run(() => this.errorMsg.set('Unable to render closure diagram'));
+        return;
       }
     });
+    this.fitToScreen();
   }
 
-  private draw(
+  private build(
+    group: SVGGElement,
     nodes: LaidNode[],
-    links: { source: LaidNode; target: LaidNode; width?: number; value: number }[],
+    links: LaidLink[],
     width: number,
-    height: number,
     linkPath: (l: unknown) => string,
-  ): SVGSVGElement {
-    const svg = document.createElementNS(SVG_NS, 'svg');
-    svg.setAttribute('width', `${width}`);
-    svg.setAttribute('height', `${height}`);
-    svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+  ): void {
+    group.innerHTML = '';
 
     const linkLayer = document.createElementNS(SVG_NS, 'g');
     linkLayer.setAttribute('fill', 'none');
@@ -136,7 +159,7 @@ export class ClosureGraphComponent implements OnInit {
       path.appendChild(this.titleEl(`${l.source.name} → ${l.target.name}\n${this.formatBytes(l.value)}`));
       linkLayer.appendChild(path);
     }
-    svg.appendChild(linkLayer);
+    group.appendChild(linkLayer);
 
     const nodeLayer = document.createElementNS(SVG_NS, 'g');
     for (const n of nodes) {
@@ -150,7 +173,7 @@ export class ClosureGraphComponent implements OnInit {
       rect.appendChild(this.titleEl(this.nodeTooltip(n)));
       nodeLayer.appendChild(rect);
 
-      if (n.y1 - n.y0 < 9) continue; // skip labels on slivers to avoid overlap
+      if (n.y1 - n.y0 < 3) continue; // skip labels on slivers to cut clutter
       const text = document.createElementNS(SVG_NS, 'text');
       const leftHalf = n.x0 < width / 2;
       text.setAttribute('x', `${leftHalf ? n.x1 + 5 : n.x0 - 5}`);
@@ -162,8 +185,7 @@ export class ClosureGraphComponent implements OnInit {
       text.textContent = `${this.shortName(n.name)} · ${this.formatBytes(n.value)}`;
       nodeLayer.appendChild(text);
     }
-    svg.appendChild(nodeLayer);
-    return svg;
+    group.appendChild(nodeLayer);
   }
 
   private fill(n: SankeyNode): string {
@@ -179,6 +201,65 @@ export class ClosureGraphComponent implements OnInit {
     const title = document.createElementNS(SVG_NS, 'title');
     title.textContent = text;
     return title;
+  }
+
+  onWheel(event: WheelEvent): void {
+    event.preventDefault();
+    const rect = this.svgRef.nativeElement.getBoundingClientRect();
+    const mx = event.clientX - rect.left;
+    const my = event.clientY - rect.top;
+    this.zoomAt(mx, my, event.deltaY > 0 ? 0.9 : 1.1);
+  }
+
+  onSvgMousedown(event: MouseEvent): void {
+    if (event.button !== 0) return;
+    this.isPanning = true;
+    this.panStart = { x: event.clientX, y: event.clientY, tx: this.tx(), ty: this.ty() };
+  }
+
+  onMousemove(event: MouseEvent): void {
+    if (!this.isPanning) return;
+    this.tx.set(this.panStart.tx + event.clientX - this.panStart.x);
+    this.ty.set(this.panStart.ty + event.clientY - this.panStart.y);
+  }
+
+  onMouseup(): void {
+    this.isPanning = false;
+  }
+
+  private zoomAt(cx: number, cy: number, factor: number): void {
+    const oldScale = this.scale();
+    const newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, oldScale * factor));
+    const eff = newScale / oldScale;
+    if (eff === 1) return;
+    this.scale.set(newScale);
+    this.tx.update((v) => cx - eff * (cx - v));
+    this.ty.update((v) => cy - eff * (cy - v));
+  }
+
+  zoomIn(): void {
+    const rect = this.svgRef?.nativeElement.getBoundingClientRect();
+    if (rect) this.zoomAt(rect.width / 2, rect.height / 2, 1.3);
+  }
+
+  zoomOut(): void {
+    const rect = this.svgRef?.nativeElement.getBoundingClientRect();
+    if (rect) this.zoomAt(rect.width / 2, rect.height / 2, 1 / 1.3);
+  }
+
+  fitToScreen(): void {
+    const rect = this.svgRef?.nativeElement.getBoundingClientRect();
+    if (!rect) return;
+    const pad = 40;
+    const gw = this.bounds.maxX - this.bounds.minX + pad * 2;
+    const gh = this.bounds.maxY - this.bounds.minY + pad * 2;
+    if (gw <= 0 || gh <= 0) return;
+    const s = Math.min(rect.width / gw, rect.height / gh, 1.2);
+    this.zone.run(() => {
+      this.scale.set(s);
+      this.tx.set(rect.width / 2 - ((this.bounds.minX + this.bounds.maxX) / 2) * s);
+      this.ty.set(rect.height / 2 - ((this.bounds.minY + this.bounds.maxY) / 2) * s);
+    });
   }
 
   private shortName(name: string): string {

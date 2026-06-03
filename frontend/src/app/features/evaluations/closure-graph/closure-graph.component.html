@@ -18,9 +18,8 @@
   } @else {
     <div class="closure-header">
       <div class="header-left">
-        <button pButton type="button" severity="secondary" class="back-btn" (click)="goBack()">
+        <button class="icon-btn" (click)="goBack()" title="Back">
           <span class="material-symbols-outlined">arrow_back</span>
-          <span>Back</span>
         </button>
         <div class="header-info">
           <div class="header-title">
@@ -36,8 +35,28 @@
           </div>
         </div>
       </div>
+
+      <div class="header-controls">
+        <button class="ctrl-btn" (click)="zoomIn()" title="Zoom in">
+          <span class="material-symbols-outlined">add</span>
+        </button>
+        <button class="ctrl-btn" (click)="zoomOut()" title="Zoom out">
+          <span class="material-symbols-outlined">remove</span>
+        </button>
+        <button class="ctrl-btn" (click)="fitToScreen()" title="Fit to screen">
+          <span class="material-symbols-outlined">fit_screen</span>
+        </button>
+      </div>
     </div>
 
-    <div #sankeyEl class="sankey-canvas"></div>
+    <svg #svgEl class="sankey-svg"
+      (wheel)="onWheel($event)"
+      (mousedown)="onSvgMousedown($event)"
+      (mousemove)="onMousemove($event)"
+      (mouseup)="onMouseup()"
+      (mouseleave)="onMouseup()"
+    >
+      <g #graphEl [attr.transform]="transform()"></g>
+    </svg>
   }
 </div>

@@ -19,7 +19,9 @@ The largest packages render individually; everything outside the top 500 by
 closure size collapses into a per-parent **others** bucket attached to its
 nearest kept ancestor. The header shows the exact total closure size and warns
 when a very large closure had its node list truncated server-side (the total
-stays exact regardless). The diagram uses the open-source `d3-sankey` renderer.
+stays exact regardless). The diagram uses the open-source `d3-sankey` renderer
+and shares the dependency graph's controls: scroll to zoom, drag to pan, and the
+zoom-in / zoom-out / fit-to-screen buttons in the header.
 
 ## API
 
