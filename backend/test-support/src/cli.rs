@@ -33,6 +33,10 @@ pub fn test_cli_with_crypt(crypt_secret_file: String) -> Cli {
             evaluation_timeout: 5,
             eval_workers: 1,
             max_evaluations_per_worker: 0,
+            build_max_attempts: 3,
+            build_retry_backoff_secs: 30,
+            build_default_timeout_secs: 3600,
+            build_default_max_silent_secs: 1800,
         },
         storage: StorageArgs {
             base_path: tempfile::Builder::new()

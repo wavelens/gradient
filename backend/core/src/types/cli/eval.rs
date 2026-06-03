@@ -28,6 +28,14 @@ pub struct EvalArgs {
     /// cap bounds RSS growth by forcing a respawn. Set to 0 to disable.
     #[arg(long, env = "GRADIENT_MAX_EVALUATIONS_PER_WORKER", default_value = "1")]
     pub max_evaluations_per_worker: usize,
+    #[arg(long, env = "GRADIENT_BUILD_MAX_ATTEMPTS", value_parser = greater_than_zero::<u32>, default_value = "3")]
+    pub build_max_attempts: u32,
+    #[arg(long, env = "GRADIENT_BUILD_RETRY_BACKOFF_SECS", default_value = "30")]
+    pub build_retry_backoff_secs: u64,
+    #[arg(long, env = "GRADIENT_BUILD_DEFAULT_TIMEOUT_SECS", default_value = "3600")]
+    pub build_default_timeout_secs: u64,
+    #[arg(long, env = "GRADIENT_BUILD_DEFAULT_MAX_SILENT_SECS", default_value = "1800")]
+    pub build_default_max_silent_secs: u64,
 }
 
 impl Default for EvalArgs {
@@ -38,6 +46,10 @@ impl Default for EvalArgs {
             evaluation_timeout: 10,
             eval_workers: 1,
             max_evaluations_per_worker: 1,
+            build_max_attempts: 3,
+            build_retry_backoff_secs: 30,
+            build_default_timeout_secs: 3600,
+            build_default_max_silent_secs: 1800,
         }
     }
 }
