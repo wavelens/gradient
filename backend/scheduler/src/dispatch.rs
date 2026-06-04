@@ -246,7 +246,11 @@ struct BuildDispatchMaps {
 
 impl BuildDispatchMaps {
     /// Issue one IN-list query per table and build all lookup maps.
-    async fn load(state: &Arc<ServerState>, builds: &[MBuild]) -> anyhow::Result<Self> {
+    async fn load(
+        state: &Arc<ServerState>,
+        builds: &[MBuild],
+        uses_history: bool,
+    ) -> anyhow::Result<Self> {
         let default_timeout_secs = nonzero(state.config.eval.build_default_timeout_secs);
         let default_max_silent_secs = nonzero(state.config.eval.build_default_max_silent_secs);
 
@@ -427,15 +431,17 @@ impl BuildDispatchMaps {
             closure_sizes.insert(*drv_id, size);
         }
 
-        // Historical predictions: only worth a query when the derivation has a
-        // pname to match against. Done outside any scoring lock.
+        // Historical predictions: only loaded when the active policy reads
+        // history, and only for derivations carrying a pname to match against.
         let mut histories: HashMap<DerivationId, score::HistoryPrediction> = HashMap::new();
-        for (drv_id, drv) in &derivations {
-            if let Some(pname) = &drv.pname {
-                let closure_size = closure_sizes.get(drv_id).copied().flatten();
-                let prediction =
-                    crate::history::predict(&state.worker_db, pname, closure_size).await;
-                histories.insert(*drv_id, prediction);
+        if uses_history {
+            for (drv_id, drv) in &derivations {
+                if let Some(pname) = &drv.pname {
+                    let closure_size = closure_sizes.get(drv_id).copied().flatten();
+                    let prediction =
+                        crate::history::predict(&state.worker_db, pname, closure_size).await;
+                    histories.insert(*drv_id, prediction);
+                }
             }
         }
 
@@ -618,7 +624,8 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
         return Ok(());
     }
 
-    let maps = BuildDispatchMaps::load(state, &new_builds).await?;
+    let maps =
+        BuildDispatchMaps::load(state, &new_builds, scheduler.policy.uses_history()).await?;
 
     let mut enqueued = 0usize;
     for build in new_builds {

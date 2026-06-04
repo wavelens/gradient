@@ -9,6 +9,6 @@ pub mod policy;
 pub mod rule;
 pub mod rules;
 
-pub use context::{HistoryPrediction, JobKindView, LazyProviders, ScoredJob, ScoringCtx, WorkerMetricsView};
+pub use context::{HistoryPrediction, JobKindView, LazyProviders, ScoredJob, WorkerMetricsView};
 pub use policy::{policy_by_name, RulePolicy, ScoringPolicy};
 pub use rule::{JobContext, ScoreRule, WorkerContext};

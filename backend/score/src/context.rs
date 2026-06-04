@@ -84,9 +84,6 @@ impl<'a> ScoredJob<'a> {
     }
 }
 
-#[derive(Clone, Copy, Default)]
-pub struct ScoringCtx;
-
 #[cfg(test)]
 mod tests {
     use super::*;
