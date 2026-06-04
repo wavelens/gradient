@@ -1840,19 +1840,23 @@ job's score. The previous default (600s, +60 max) was below
 fully-cached candidates outscored older queued builds indefinitely -
 builds older than 10 minutes were no longer differentiated by wait time.
 The default is now 3600s (+360 max), enough to overcome the cached-fresh
-preference plus typical penalties on the older job.
+preference plus typical penalties on the older job. The scoring rules and
+the composed default policy now live in the `score` crate.
 
-Tests (`cargo test -p scheduler --lib policy`):
+Tests (`cargo test -p score policy`):
 
-- `default_policy_long_waiting_build_overcomes_fresh_cached` - locks in
-  the anti-starvation guarantee by composing the full
-  `Policy::default_build_policy()`: a build queued an hour ago must
-  outscore a fresh candidate the worker can serve directly. Fails if
-  `WaitTimeRule::max_wait_secs` is lowered back below the
-  `MissingPathsRule` scored bonus.
-- `wait_time_rule_longer_wait_scores_higher_but_capped` - preserved from
-  before; still asserts that the score saturates at
-  `max_wait_secs * bonus_per_second` so ancient jobs cannot dominate
+- `default_policy_long_waiting_build_overcomes_fresh_cached` -
+  (`score::policy`) locks in the anti-starvation guarantee by composing
+  the full default policy via `policy_by_name("default")`: a build queued
+  an hour ago must outscore a fresh candidate the worker can serve
+  directly. Fails if `WaitTimeRule::max_wait_secs` is lowered back below
+  the `MissingPathsRule` scored bonus.
+- `default_policy_prefers_ready_over_costly` - (`score::policy`) a ready
+  job (0 missing paths, 0 NAR, real arch) must outscore a builtin job
+  with 5 missing paths and a 50MB NAR.
+- `wait_time_longer_wait_scores_higher_but_capped` -
+  (`score::rules::builtin`) per-rule guard: asserts the score saturates
+  at `max_wait_secs * bonus_per_second` so ancient jobs cannot dominate
   every other rule.
 
 ## Build artefacts - `external_cached` outputs include `hydra-build-products`
