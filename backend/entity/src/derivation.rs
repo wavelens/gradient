@@ -19,6 +19,10 @@ pub struct Model {
     pub hash: String,
     pub name: String,
     pub architecture: super::server::Architecture,
+    pub pname: Option<String>,
+    pub prefer_local_build: bool,
+    pub allow_substitutes: bool,
+    pub closure_size: Option<i64>,
     pub created_at: NaiveDateTime,
 }
 

@@ -138,6 +138,7 @@ fn derivation_row() -> entity::derivation::Model {
         name: "hello-2.12.1".into(),
         architecture: "x86_64-linux".into(),
         created_at: test_date(),
+        ..Default::default()
     }
 }
 

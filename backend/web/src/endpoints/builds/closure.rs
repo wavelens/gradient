@@ -251,6 +251,7 @@ mod tests {
             name: name.into(),
             architecture: "x86_64-linux".into(),
             created_at: now(),
+            ..Default::default()
         }
     }
 
