@@ -8,7 +8,9 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use proto::messages::{BuildOutput, CachedPath, DiscoveredDerivation, EvalMessageLevel, QueryMode};
+use proto::messages::{
+    BuildMetrics, BuildOutput, CachedPath, DiscoveredDerivation, EvalMessageLevel, QueryMode,
+};
 use proto::traits::JobReporter;
 
 /// A reported event captured by [`RecordingJobReporter`].
@@ -31,6 +33,7 @@ pub enum ReportedEvent {
     BuildOutput {
         build_id: String,
         outputs: Vec<BuildOutput>,
+        metrics: Option<BuildMetrics>,
     },
     Compressing,
     LogChunk {
@@ -196,9 +199,13 @@ impl JobReporter for RecordingJobReporter {
         &mut self,
         build_id: String,
         outputs: Vec<BuildOutput>,
+        metrics: Option<BuildMetrics>,
     ) -> Result<()> {
-        self.events
-            .push(ReportedEvent::BuildOutput { build_id, outputs });
+        self.events.push(ReportedEvent::BuildOutput {
+            build_id,
+            outputs,
+            metrics,
+        });
         Ok(())
     }
 

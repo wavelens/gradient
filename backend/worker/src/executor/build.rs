@@ -504,15 +504,15 @@ pub async fn build_derivation(
             None => realize.await,
         };
 
-    // Capture metrics (incl. wall-clock time) for both success and failure so
-    // the scheduler always learns at least how long the build ran.
+    // Capture metrics (incl. wall-clock time) for this build and ship them
+    // inline with its `BuildOutput`. On failure they are dropped with the
+    // error; the scheduler records metrics only for completed builds.
     let build_time_ms = started.elapsed().as_millis() as u64;
     let metrics = capture_build_metrics(build_metrics, cgroup_root, &task.drv_path, build_time_ms);
-    updater.record_build_metrics(metrics);
 
     let outputs = realize_result?;
     updater
-        .report_build_output(task.build_id.clone(), outputs.clone())
+        .report_build_output(task.build_id.clone(), outputs.clone(), Some(metrics))
         .map_err(BuildError::transient)?;
     Ok(outputs)
 }

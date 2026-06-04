@@ -395,7 +395,7 @@ async fn fetch_only_completion_enqueues_cached_eval_followup() {
     scheduler.request_job("w1", JobKind::Flake).await;
 
     scheduler
-        .handle_job_completed("w1", &job_id, None)
+        .handle_job_completed("w1", &job_id)
         .await
         .expect("fetch-only completion should succeed");
 

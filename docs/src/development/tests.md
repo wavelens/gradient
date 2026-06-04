@@ -1456,6 +1456,7 @@ with a valid `id: Uuid`.
 | Test | Scenario | What it checks |
 |------|----------|---------------|
 | `build_output_updates_derivation_output` | Output row exists in DB | `nar_size`, `file_hash`, and `has_artefacts` fields updated via `UPDATE…RETURNING` |
+| `build_output_with_metrics_records_one_metric_row` | `BuildOutput` carries per-build `BuildMetrics` | Persists `build_time_ms` onto the build and inserts one `derivation_metric` row, plus the normal output update |
 | `build_output_missing_row_warns_not_errors` | `derivation_output` row not found | Logs a warning, returns `Ok(())` (best-effort update) |
 | `build_output_unknown_build_errors` | `build_id` not in DB | Returns `Err` (build context is required) |
 

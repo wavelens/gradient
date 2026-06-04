@@ -5,7 +5,7 @@
  */
 
 use gradient_core::types::proto::{
-    BuildFailureKind, BuildMetrics, CandidateScore, EvalMessageLevel, GradientCapabilities, JobKind,
+    BuildFailureKind, CandidateScore, EvalMessageLevel, GradientCapabilities, JobKind,
     JobUpdateKind, QueryMode,
 };
 use rkyv::{Archive, Deserialize, Serialize};
@@ -94,12 +94,8 @@ pub enum ClientMessage {
 
     /// All tasks in a job completed successfully.
     /// Results were already sent via [`ClientMessage::JobUpdate`].
-    /// `metrics` carries per-build resource usage for build jobs; `None` for
-    /// eval/fetch jobs or when capture is disabled.
-    JobCompleted {
-        job_id: String,
-        metrics: Option<BuildMetrics>,
-    },
+    /// Per-build resource metrics travel inline on each `JobUpdate::BuildOutput`.
+    JobCompleted { job_id: String },
 
     /// A task in the job failed; remaining tasks are skipped.
     JobFailed {

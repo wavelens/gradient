@@ -37,8 +37,8 @@ use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 use crate::jobs::{PendingBuildJob, PendingEvalJob};
 use crate::{build as build_handler, eval as eval_handler};
 use gradient_core::types::proto::{
-    BuildFailureKind, BuildOutput, BuildProduct, DerivationOutput, DiscoveredDerivation, FlakeJob,
-    FlakeTask,
+    BuildFailureKind, BuildMetrics, BuildOutput, BuildProduct, DerivationOutput,
+    DiscoveredDerivation, FlakeJob, FlakeTask,
 };
 // ── Fixture helpers ──────────────────────────────────────────────────────────
 
@@ -773,7 +773,7 @@ async fn build_completed_last_build_completes_eval() {
     let state = make_state(db);
     let _job = make_build_job(build_id, eval_id, org_id);
 
-    let result = build_handler::handle_build_job_completed(&state, build_id, None).await;
+    let result = build_handler::handle_build_job_completed(&state, build_id).await;
     assert!(result.is_ok());
 }
 
@@ -803,7 +803,7 @@ async fn build_completed_with_remaining_active() {
         .into_connection();
 
     let state = make_state(db);
-    let result = build_handler::handle_build_job_completed(&state, build_id, None).await;
+    let result = build_handler::handle_build_job_completed(&state, build_id).await;
     assert!(result.is_ok());
 }
 
@@ -844,7 +844,7 @@ async fn build_completed_with_failed_sibling() {
         .into_connection();
 
     let state = make_state(db);
-    let result = build_handler::handle_build_job_completed(&state, build_id, None).await;
+    let result = build_handler::handle_build_job_completed(&state, build_id).await;
     assert!(result.is_ok());
 }
 
@@ -873,7 +873,7 @@ async fn build_completed_eval_not_building_noop() {
         .into_connection();
 
     let state = make_state(db);
-    let result = build_handler::handle_build_job_completed(&state, build_id, None).await;
+    let result = build_handler::handle_build_job_completed(&state, build_id).await;
     assert!(result.is_ok());
 }
 
@@ -888,7 +888,7 @@ async fn build_completed_unknown_build_noop() {
         .into_connection();
 
     let state = make_state(db);
-    let result = build_handler::handle_build_job_completed(&state, build_id, None).await;
+    let result = build_handler::handle_build_job_completed(&state, build_id).await;
     assert!(result.is_ok());
 }
 
@@ -927,7 +927,7 @@ async fn build_completed_dep_failed_siblings_cause_eval_failed() {
         .into_connection();
 
     let state = make_state(db);
-    let result = build_handler::handle_build_job_completed(&state, build_id, None).await;
+    let result = build_handler::handle_build_job_completed(&state, build_id).await;
     assert!(result.is_ok());
 }
 
@@ -1249,8 +1249,85 @@ async fn build_output_updates_derivation_output() {
     let state = make_state(db);
     let job = make_build_job(build_id, eval_id, org_id);
 
-    let result = build_handler::handle_build_output(&state, &job, build_id, outputs).await;
+    let result = build_handler::handle_build_output(&state, &job, build_id, outputs, None).await;
     assert!(result.is_ok());
+}
+
+/// Per-build `BuildMetrics` on a `BuildOutput` persist the worker-measured
+/// `build_time_ms` onto the build and insert one `derivation_metric` row, in
+/// addition to the normal output update.
+#[tokio::test]
+async fn build_output_with_metrics_records_one_metric_row() {
+    let eval_id = EvaluationId::now_v7();
+    let drv_id = DerivationId::now_v7();
+    let build_id = BuildId::now_v7();
+    let drv_out_id = DerivationOutputId::now_v7();
+    let org_id = OrganizationId::now_v7();
+
+    let build = make_build(build_id, eval_id, drv_id, BuildStatus::Building);
+    let derivation = make_derivation(
+        drv_id,
+        org_id,
+        "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-out.drv",
+    );
+    let drv_out = make_drv_output(
+        drv_out_id,
+        drv_id,
+        "out",
+        "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-out",
+    );
+    let drv_out_updated = {
+        let mut o = drv_out.clone();
+        o.nar_size = Some(4096);
+        o
+    };
+
+    let outputs = vec![BuildOutput {
+        name: "out".into(),
+        store_path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-out".into(),
+        hash: "aaaa".into(),
+        nar_size: Some(4096),
+        nar_hash: Some("sha256:abc".into()),
+        products: vec![],
+    }];
+    let metrics = Some(BuildMetrics {
+        peak_ram_mb: Some(2048),
+        cpu_time_ms: Some(60_000),
+        avg_cpu_pct: Some(50.0),
+        disk_read_bytes: Some(1024),
+        disk_write_bytes: Some(2048),
+        oom_killed: false,
+        build_time_ms: Some(120_000),
+    });
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        // 1. find_by_id(build)
+        .append_query_results([vec![build.clone()]])
+        // 2. record_metrics: persist build_time_ms (UPDATE...RETURNING)
+        .append_query_results([vec![build]])
+        // 3. record_metrics: find_by_id(derivation) for pname/closure_size
+        .append_query_results([vec![derivation]])
+        // 4. record_metrics: insert derivation_metric → exec
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
+        // 5. find derivation_output row
+        .append_query_results([vec![drv_out]])
+        // 6. update derivation_output (UPDATE...RETURNING)
+        .append_query_results([vec![drv_out_updated]])
+        // 7. delete_many prior build_product rows → exec
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 0,
+        }])
+        .into_connection();
+
+    let state = make_state(db);
+    let job = make_build_job(build_id, eval_id, org_id);
+
+    let result = build_handler::handle_build_output(&state, &job, build_id, outputs, metrics).await;
+    assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
 }
 
 /// When the derivation_output row is not found, a warning is logged but the
@@ -1283,7 +1360,7 @@ async fn build_output_missing_row_warns_not_errors() {
     let state = make_state(db);
     let job = make_build_job(build_id, eval_id, org_id);
 
-    let result = build_handler::handle_build_output(&state, &job, build_id, outputs).await;
+    let result = build_handler::handle_build_output(&state, &job, build_id, outputs, None).await;
     assert!(result.is_ok());
 }
 
@@ -1362,7 +1439,7 @@ async fn build_output_inserts_build_product_rows() {
     let state = make_state(db);
     let job = make_build_job(build_id, eval_id, org_id);
 
-    let result = build_handler::handle_build_output(&state, &job, build_id, outputs).await;
+    let result = build_handler::handle_build_output(&state, &job, build_id, outputs, None).await;
     assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
 }
 
@@ -1380,7 +1457,7 @@ async fn build_output_unknown_build_errors() {
     let state = make_state(db);
     let job = make_build_job(build_id, eval_id, org_id);
 
-    let result = build_handler::handle_build_output(&state, &job, build_id, vec![]).await;
+    let result = build_handler::handle_build_output(&state, &job, build_id, vec![], None).await;
     assert!(result.is_err());
 }
 
@@ -1993,7 +2070,7 @@ async fn action_dispatched_on_build_completed() {
         .into_connection();
 
     let state = make_state(db);
-    let result = build_handler::handle_build_job_completed(&state, build_id, None).await;
+    let result = build_handler::handle_build_job_completed(&state, build_id).await;
     assert!(result.is_ok());
     tokio::task::yield_now().await;
 }

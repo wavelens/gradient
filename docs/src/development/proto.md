@@ -875,7 +875,7 @@ enum ClientMessage {
     RequestJob { kind: JobKind },               // "I have capacity for one job" - re-sent every 10s as heartbeat
     RequestAllCandidates,                       // startup-only: ask server to re-send all active candidates once
     JobUpdate { job_id: Uuid, update: JobUpdateKind },
-    JobCompleted { job_id: Uuid, metrics: Option<BuildMetrics> }, // all tasks done; results already sent via JobUpdate. metrics: per-build resource usage (build jobs only)
+    JobCompleted { job_id: Uuid },              // all tasks done; results already sent via JobUpdate. Per-build metrics travel on JobUpdate::BuildOutput
     JobFailed { job_id: Uuid, error: String },
     Draining,                                   // no more jobs; finishing in-flight work then disconnecting
 
@@ -977,7 +977,7 @@ enum JobUpdateKind {
 
     // BuildJob phases → BuildStatus
     Building { build_id: Uuid },                        // → Building (per derivation in chain)
-    BuildOutput { build_id: Uuid, outputs: Vec<BuildOutput> }, // per-derivation result
+    BuildOutput { build_id: Uuid, outputs: Vec<BuildOutput>, metrics: Option<BuildMetrics> }, // per-build result + per-build resource usage
     Compressing,                                        // packing outputs into zstd NARs (no DB status change)
 }
 
@@ -997,7 +997,8 @@ struct BuildProduct {
     size: Option<u64>,                  // product file size in bytes, if stat succeeded
 }
 
-// Carried on JobCompleted for build jobs (last build of the job).
+// Carried per build on JobUpdate::BuildOutput. A multi-build job yields one
+// BuildOutput (and thus one metrics record) per build.
 struct BuildMetrics {
     peak_ram_mb: Option<u64>,           // peak resident set, from cgroup memory.peak
     cpu_time_ms: Option<u64>,           // total CPU time, from cgroup cpu.stat usage_usec
@@ -1009,7 +1010,7 @@ struct BuildMetrics {
 }
 ```
 
-The worker captures `BuildMetrics` best-effort from the build's cgroup (requires Nix's experimental `use-cgroups` feature). `build_time_ms` is always reported; when the cgroup cannot be located or read, the cgroup-derived fields degrade to `None`. Recording these server-side into `derivation_metric` is a later phase; for now the server logs them at debug.
+The worker captures `BuildMetrics` best-effort from each build's cgroup (requires Nix's experimental `use-cgroups` feature) and attaches them to that build's `BuildOutput` update. `build_time_ms` is always reported; when the cgroup cannot be located or read, the cgroup-derived fields degrade to `None`. The server records one `derivation_metric` row per build from these metrics and persists the worker-measured `build_time_ms` onto the build. A multi-build job therefore yields one metrics record per build. `metrics` is `None` for external-cached builds and when capture is disabled; in that case no metric row is written and the wall-clock build-time fallback applies.
 
 **Mapping to database status:**
 

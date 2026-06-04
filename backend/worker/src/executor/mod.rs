@@ -334,7 +334,7 @@ impl JobExecutor {
                                 products,
                             });
                         }
-                        updater.report_build_output(build_task.build_id.clone(), reported)?;
+                        updater.report_build_output(build_task.build_id.clone(), reported, None)?;
                         for (_, p) in &outputs {
                             gc_handles.push(self.gcroots.add(p).await);
                         }
