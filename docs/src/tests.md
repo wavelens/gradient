@@ -3173,3 +3173,16 @@ out of `projects/metrics.rs`) keep their existing coverage in
 - adds no bucket nodes when the whole closure fits within `N`.
 - treats nodes unreachable from any root (their consumer was truncated
   server-side) as their own top-level roots.
+
+## Worker host metrics - issue #304
+
+Backend (`cargo test -p worker --bins metrics::`):
+
+- `cpu_core_score_in_bounds_and_positive` — the deterministic single-core
+  micro-benchmark (`cpu_core_score`) always returns a value in `1..=100_000`.
+- `host_static_reports_nonzero` — `host_static` reports at least one CPU and at
+  least 1 MiB of total RAM.
+
+`host_static` (logical CPU count, total RAM) is sampled once and advertised via
+`WorkerCapabilities`; `host_dynamic` (available RAM, global CPU usage) is sampled
+each heartbeat off the dispatch thread and sent via `WorkerMetrics`.
