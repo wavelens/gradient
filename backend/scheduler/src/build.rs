@@ -1044,6 +1044,7 @@ mod waiting_reason_tests {
             name: "x".into(),
             architecture: arch.into(),
             created_at: chrono::NaiveDateTime::default(),
+            ..Default::default()
         }
     }
 

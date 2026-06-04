@@ -25,6 +25,7 @@ pub mod commit;
 pub mod derivation;
 pub mod derivation_dependency;
 pub mod derivation_feature;
+pub mod derivation_metric;
 pub mod derivation_output;
 pub mod entry_point;
 pub mod entry_point_message;

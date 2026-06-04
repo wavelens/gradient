@@ -112,6 +112,7 @@ async fn narinfo_served_from_db_inner() {
         name: "hello".into(),
         architecture: "x86_64-linux".into(),
         created_at: test_date(),
+        ..Default::default()
     };
 
     // Subscription row proving org_id() can access cache_id().
@@ -269,6 +270,7 @@ async fn narinfo_unsigned_inner() {
         name: "hello".into(),
         architecture: "x86_64-linux".into(),
         created_at: test_date(),
+        ..Default::default()
     };
 
     let org_cache_row = entity::organization_cache::Model {

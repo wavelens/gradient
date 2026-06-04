@@ -105,6 +105,7 @@ fn make_derivation(id: DerivationId, org_id: OrganizationId, path: &str) -> MDer
         name,
         architecture: "x86_64-linux".into(),
         created_at: test_date(),
+        ..Default::default()
     }
 }
 

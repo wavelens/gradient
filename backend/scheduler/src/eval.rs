@@ -68,6 +68,7 @@ impl DerivationInsertBatch {
                 name: Set(drv_name),
                 architecture: Set(d.architecture.clone()),
                 created_at: Set(now),
+                ..Default::default()
             });
             for output in &d.outputs {
                 let (hash, package) = get_hash_from_path(output.path.clone())

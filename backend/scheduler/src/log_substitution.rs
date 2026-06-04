@@ -404,6 +404,7 @@ mod tests {
             name,
             architecture: "x86_64-linux".to_string(),
             created_at: gradient_core::types::now(),
+            ..Default::default()
         }
     }
 

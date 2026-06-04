@@ -101,6 +101,7 @@ pub async fn public_cache_with_narinfo() -> Arc<ServerState> {
         name: "hello".into(),
         architecture: "x86_64-linux".into(),
         created_at: test_date(),
+        ..Default::default()
     };
 
     let org_cache_row = entity::organization_cache::Model {
@@ -313,6 +314,7 @@ fn derivation_row() -> entity::derivation::Model {
         name: "hello".into(),
         architecture: "x86_64-linux".into(),
         created_at: test_date(),
+        ..Default::default()
     }
 }
 

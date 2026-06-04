@@ -777,6 +777,7 @@ mod reelect_leader_tests {
             name: "x".into(),
             architecture: "x86_64-linux".into(),
             created_at: chrono::NaiveDateTime::default(),
+            ..Default::default()
         }
     }
 
@@ -1051,6 +1052,7 @@ mod find_active_leaders_tests {
             name: "x".into(),
             architecture: "x86_64-linux".into(),
             created_at: chrono::NaiveDateTime::default(),
+            ..Default::default()
         }
     }
 
