@@ -46,7 +46,7 @@ impl ScoringPolicy for RulePolicy {
     }
 }
 
-pub fn default_rules() -> Vec<Box<dyn ScoreRule>> {
+pub fn simple_rules() -> Vec<Box<dyn ScoreRule>> {
     vec![
         Box::new(MissingPathsRule::default()),
         Box::new(MissingNarSizeRule::default()),
@@ -58,7 +58,7 @@ pub fn default_rules() -> Vec<Box<dyn ScoreRule>> {
 }
 
 pub fn resource_aware_rules() -> Vec<Box<dyn ScoreRule>> {
-    let mut rules = default_rules();
+    let mut rules = simple_rules();
     rules.push(Box::new(ResourceFitRule::default()));
     rules.push(Box::new(PreferLocalBuildRule::default()));
     rules.push(Box::new(FairShareRule::default()));
@@ -67,13 +67,13 @@ pub fn resource_aware_rules() -> Vec<Box<dyn ScoreRule>> {
 
 pub fn policy_by_name(name: &str) -> std::sync::Arc<dyn ScoringPolicy> {
     match name {
-        "default" => std::sync::Arc::new(RulePolicy::new("default", default_rules(), false)),
+        "simple" => std::sync::Arc::new(RulePolicy::new("simple", simple_rules(), false)),
         "resource-aware" => {
             std::sync::Arc::new(RulePolicy::new("resource-aware", resource_aware_rules(), true))
         }
         other => {
-            tracing::warn!(policy = other, "unknown scoring policy, using \"default\"");
-            std::sync::Arc::new(RulePolicy::new("default", default_rules(), false))
+            tracing::warn!(policy = other, "unknown scoring policy, using \"resource-aware\"");
+            std::sync::Arc::new(RulePolicy::new("resource-aware", resource_aware_rules(), true))
         }
     }
 }
@@ -102,19 +102,18 @@ mod tests {
 
     #[test]
     fn registry_selects_known_and_falls_back() {
-        assert_eq!(policy_by_name("default").name(), "default");
+        assert_eq!(policy_by_name("simple").name(), "simple");
         assert_eq!(policy_by_name("resource-aware").name(), "resource-aware");
-        assert_eq!(policy_by_name("nonsense").name(), "default");
+        assert_eq!(policy_by_name("nonsense").name(), "resource-aware");
     }
 
     // Anti-starvation (#112): a build waiting an hour must outscore a fresh
-    // fully-cached candidate the worker can serve without fetching. Otherwise a
-    // steady stream of fresh candidates starves older builds. Guards the
-    // composed default policy against the WaitTimeRule cap being lowered below
+    // fully-cached candidate the worker can serve without fetching. Guards the
+    // composed simple policy against the WaitTimeRule cap being lowered below
     // the MissingPathsRule scored bonus.
     #[test]
-    fn default_policy_long_waiting_build_overcomes_fresh_cached() {
-        let policy = policy_by_name("default");
+    fn simple_policy_long_waiting_build_overcomes_fresh_cached() {
+        let policy = policy_by_name("simple");
         let archs = vec!["x86_64-linux".to_string()];
         let feats: Vec<String> = vec![];
         let w = worker_ctx(&archs, &feats);
@@ -149,8 +148,8 @@ mod tests {
     }
 
     #[test]
-    fn default_policy_prefers_ready_over_costly() {
-        let policy = policy_by_name("default");
+    fn simple_policy_prefers_ready_over_costly() {
+        let policy = policy_by_name("simple");
         let archs = vec!["x86_64-linux".to_string()];
         let feats: Vec<String> = vec![];
         let w = worker_ctx(&archs, &feats);

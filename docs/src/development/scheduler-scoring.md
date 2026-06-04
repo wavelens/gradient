@@ -9,8 +9,9 @@ rules, and the active policy is selected at startup.
 
 Set the server option `settings.schedulerScoringPolicy` (env
 `GRADIENT_SCHEDULER_SCORING_POLICY`, clap field
-`EvalArgs.scheduler_scoring_policy`). Values: `default` (the standard policy)
-and `resource-aware`. Unknown names log a warning and fall back to `default`.
+`EvalArgs.scheduler_scoring_policy`). Values: `simple` (the basic rule set) and
+`resource-aware`. `resource-aware` is the default selected when the env var is
+unset, and unknown names log a warning and fall back to `resource-aware`.
 `policy_by_name` (`backend/score/src/policy.rs`) resolves the string to an
 `Arc<dyn ScoringPolicy>`.
 
@@ -30,7 +31,7 @@ and `resource-aware`. Unknown names log a warning and fall back to `default`.
 The scheduler builds the contexts, calls the configured policy per candidate,
 and assigns the worker its top-scoring job.
 
-## `default` policy rules
+## `simple` policy rules
 
 | Rule | Effect |
 |---|---|
@@ -43,7 +44,7 @@ and assigns the worker its top-scoring job.
 
 ## `resource-aware` policy rules
 
-Adds the following on top of the `default` rule set:
+Adds the following on top of the `simple` rule set:
 
 | Rule | Effect |
 |---|---|

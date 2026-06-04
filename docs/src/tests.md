@@ -1845,13 +1845,13 @@ the composed default policy now live in the `score` crate.
 
 Tests (`cargo test -p score policy`):
 
-- `default_policy_long_waiting_build_overcomes_fresh_cached` -
+- `simple_policy_long_waiting_build_overcomes_fresh_cached` -
   (`score::policy`) locks in the anti-starvation guarantee by composing
-  the full default policy via `policy_by_name("default")`: a build queued
+  the full simple policy via `policy_by_name("simple")`: a build queued
   an hour ago must outscore a fresh candidate the worker can serve
   directly. Fails if `WaitTimeRule::max_wait_secs` is lowered back below
   the `MissingPathsRule` scored bonus.
-- `default_policy_prefers_ready_over_costly` - (`score::policy`) a ready
+- `simple_policy_prefers_ready_over_costly` - (`score::policy`) a ready
   job (0 missing paths, 0 NAR, real arch) must outscore a builtin job
   with 5 missing paths and a 50MB NAR.
 - `wait_time_longer_wait_scores_higher_but_capped` -

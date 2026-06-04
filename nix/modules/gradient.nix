@@ -395,14 +395,15 @@ in {
         schedulerScoringPolicy = lib.mkOption {
           description = ''
             Scheduler scoring policy used to rank queued jobs against a
-            requesting worker. `default` weighs path availability, NAR size,
+            requesting worker. `simple` weighs path availability, NAR size,
             dependency count, wait-time anti-starvation, builtin
             de-prioritization and fetch-worker reservation. `resource-aware`
             adds RAM/OOM-fit, CPU affinity, preferLocalBuild affinity and
-            per-org fair-share. Unknown values fall back to `default`.
+            per-org fair-share, and is the default. Unknown values fall back to
+            `resource-aware`.
           '';
-          type = lib.types.enum [ "default" "resource-aware" ];
-          default = "default";
+          type = lib.types.enum [ "simple" "resource-aware" ];
+          default = "resource-aware";
         };
 
         maxRequestSize = lib.mkOption {

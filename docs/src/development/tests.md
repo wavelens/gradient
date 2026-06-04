@@ -918,8 +918,8 @@ contribution, the lazy `ScoringCtx` providers, and the composed `default` /
 | `local_worker_with_full_cache_gets_full_bonus` / `more_missing_paths_lowers_bonus_floored_at_zero` / `unknown_missing_count_is_zero` / `not_prefer_local_is_zero_regardless_of_missing_count` | `PreferLocalBuildRule`: full bonus on cached local worker, decays to a floor of 0, no-op without `preferLocalBuild` |
 | `busier_org_scores_more_negative` / `zero_share_and_none_score_zero` / `fair_share_overrides_wait_gradient` | `FairShareRule`: busier org penalised; fair-share dominates the wait-time gradient |
 | `closure_size_computed_at_most_once` / `history_not_computed_unless_read` | `ScoringCtx` lazy providers memoise and skip unread lookups |
-| `registry_selects_known_and_falls_back` | `policy_by_name` resolves known names, falls back to `default` |
-| `default_policy_long_waiting_build_overcomes_fresh_cached` / `default_policy_prefers_ready_over_costly` | Composed `default` policy: anti-starvation and ready-over-costly ordering |
+| `registry_selects_known_and_falls_back` | `policy_by_name` resolves known names, falls back to `resource-aware` |
+| `simple_policy_long_waiting_build_overcomes_fresh_cached` / `simple_policy_prefers_ready_over_costly` | Composed `simple` policy: anti-starvation and ready-over-costly ordering |
 
 ---
 
