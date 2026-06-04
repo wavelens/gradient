@@ -340,6 +340,21 @@ pub struct BuildOutput {
     pub products: Vec<BuildProduct>,
 }
 
+/// Per-build resource usage, captured by the worker from the build's cgroup
+/// (best-effort). `build_time_ms` is always present; cgroup-derived fields
+/// degrade to `None` when the cgroup cannot be located or read.
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
+#[rkyv(derive(Debug, PartialEq))]
+pub struct BuildMetrics {
+    pub peak_ram_mb: Option<u64>,
+    pub cpu_time_ms: Option<u64>,
+    pub avg_cpu_pct: Option<f32>,
+    pub disk_read_bytes: Option<u64>,
+    pub disk_write_bytes: Option<u64>,
+    pub oom_killed: bool,
+    pub build_time_ms: Option<u64>,
+}
+
 // ── Credential types ─────────────────────────────────────────────────────────
 
 /// Type of credential delivered via the protocol.

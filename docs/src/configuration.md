@@ -323,6 +323,8 @@ The token must be the 48-byte random secret returned by the registration API (ge
 | `settings.maxNixdaemonConnections` | `32` | Worker's local nix-daemon connection pool size. Each in-flight NAR import holds one connection; size for `maxConcurrentBuilds * 8` plus headroom |
 | `settings.maxProtoConnections` | `16` | Max simultaneous WebSocket connections (for discoverable mode) |
 | `settings.gcrootsDir` | `/nix/var/nix/gcroots/gradient` | Directory for worker-held indirect GC roots. One symlink per active build (drv + outputs) pins inputs and just-built outputs through the daemon so a concurrent `nix-collect-garbage` cannot race the build. Empty string disables |
+| `settings.buildMetrics` | `true` | Capture per-build resource metrics (peak RAM, CPU time, disk I/O) from the build's cgroup (`GRADIENT_WORKER_BUILD_METRICS`). Requires Nix's experimental `use-cgroups` feature on the daemon; degrades gracefully to wall-clock build time only when the cgroup is unavailable |
+| `settings.buildCgroupRoot` | `/sys/fs/cgroup` | Cgroup-v2 mount root searched for per-build cgroups when `buildMetrics` is enabled (`GRADIENT_WORKER_BUILD_CGROUP_ROOT`) |
 | `settings.logLevel.default` | `info` | Worker log level |
 | `settings.logLevel.eval` | null | Evaluator log level override |
 | `settings.logLevel.build` | null | Builder log level override |

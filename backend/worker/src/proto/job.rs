@@ -16,8 +16,8 @@ use std::time::Duration;
 use anyhow::Result;
 use async_trait::async_trait;
 use proto::messages::{
-    BuildOutput, CachedPath, ClientMessage, DiscoveredDerivation, EvalMessageLevel, JobUpdateKind,
-    QueryMode,
+    BuildMetrics, BuildOutput, CachedPath, ClientMessage, DiscoveredDerivation, EvalMessageLevel,
+    JobUpdateKind, QueryMode,
 };
 use tokio::sync::oneshot;
 use tracing::debug;
@@ -60,6 +60,10 @@ pub struct JobUpdater {
     /// Routes incoming `NarPush` chunks back to the job task that requested
     /// them via `NarRequest`. Cloneable; cheap.
     pub(crate) nar_recv: NarReceiver,
+    /// Per-build resource metrics recorded by the build executor; drained into
+    /// `JobCompleted` once the job finishes. Only the last build's metrics are
+    /// retained for a multi-build job.
+    metrics: Arc<Mutex<Option<BuildMetrics>>>,
 }
 
 impl JobUpdater {
@@ -76,7 +80,19 @@ impl JobUpdater {
             cache_waiters,
             known_derivation_waiters,
             nar_recv,
+            metrics: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Record the resource metrics for the build that just finished. Overwrites
+    /// any previously recorded metrics within the same job.
+    pub fn record_build_metrics(&self, metrics: BuildMetrics) {
+        *self.metrics.lock().unwrap() = Some(metrics);
+    }
+
+    /// Take the last recorded build metrics, leaving `None` behind.
+    pub fn take_build_metrics(&self) -> Option<BuildMetrics> {
+        self.metrics.lock().unwrap().take()
     }
 
     pub async fn query_cache(
@@ -502,7 +518,7 @@ mod tests {
     async fn updater_complete() {
         let (conn, server_task, job_id) = server_then_client!("job-done", |sc| {
             let msg = sc.recv().await.unwrap();
-            if let ClientMessage::JobCompleted { job_id } = msg {
+            if let ClientMessage::JobCompleted { job_id, .. } = msg {
                 assert_eq!(job_id, "job-done");
             } else {
                 panic!("expected JobCompleted, got {msg:?}");
@@ -514,6 +530,7 @@ mod tests {
             .writer
             .send(ClientMessage::JobCompleted {
                 job_id: updater.job_id.clone(),
+                metrics: None,
             })
             .unwrap();
         server_task.await.unwrap();

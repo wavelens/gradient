@@ -434,6 +434,28 @@ Tests for the `StoreFixture` itself, validating that real `.drv` files from
 
 ---
 
+## `worker::executor::build` - Per-Build Metrics
+
+**File:** `backend/worker/src/executor/build.rs`, `backend/worker/src/metrics/cgroup.rs`
+**Run:** `cargo test -p worker executor::build`
+
+Tests for best-effort per-build resource capture. The worker records wall-clock
+`build_time_ms` for every build and, when `--build-metrics` is enabled, reads
+the build's cgroup-v2 files (memory.peak, cpu.stat, io.stat, memory.events).
+Mapping a daemon-forked build to its cgroup is environment-dependent and
+degrades to `None` when the cgroup cannot be located or read.
+
+| Test | What it checks |
+|------|---------------|
+| `locate_build_cgroup_none_for_empty_root` | Returns `None` for a root with no matching dir (temp dir) |
+| `locate_build_cgroup_finds_dir_with_hash` | Bounded walk finds a nested cgroup dir whose name embeds the drv hash |
+| `raw_to_metrics_always_sets_build_time` | `None` raw still yields `build_time_ms`; cgroup fields `None`, `oom_killed` false |
+| `raw_to_metrics_handles_zero_divisors` | `build_time_ms=0` / `cpu_count=0` → `avg_cpu_pct: None` (no divide-by-zero); other fields still converted |
+| `raw_to_metrics_computes_avg_cpu_pct` | `avg_cpu_pct = cpu_time_ms / (build_time_ms * cpu_count) * 100` |
+| `cgroup::*` (Phase 4a) | `parse_cpu_usage_usec`, `parse_io_stat`, `parse_oom_kill`, `parse_memory_peak`, and `read_build_cgroup` degrade gracefully on missing files/dirs |
+
+---
+
 ## `worker::executor::eval` - Evaluation Closure Walk
 
 **File:** `backend/worker/src/executor/eval.rs`

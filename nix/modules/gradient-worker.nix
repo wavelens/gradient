@@ -228,6 +228,27 @@ in {
         default = "/nix/var/nix/gcroots/gradient";
       };
 
+      buildMetrics = lib.mkOption {
+        description = ''
+          Capture per-build resource metrics (peak RAM, CPU time, disk I/O)
+          from each build's cgroup. Requires Nix's experimental
+          <literal>use-cgroups</literal> feature on the daemon. Wall-clock
+          build time is always reported; cgroup-derived fields degrade to
+          null when the cgroup cannot be located or read.
+        '';
+        type = lib.types.bool;
+        default = true;
+      };
+
+      buildCgroupRoot = lib.mkOption {
+        description = ''
+          Cgroup-v2 mount root searched for per-build cgroups when
+          <literal>buildMetrics</literal> is enabled.
+        '';
+        type = lib.types.str;
+        default = "/sys/fs/cgroup";
+      };
+
       logLevel = lib.mkOption {
         default = { };
         description = ''
@@ -347,6 +368,8 @@ in {
           GRADIENT_MAX_EVALUATIONS_PER_WORKER         = toString cfg.settings.maxEvaluationsPerWorker;
           GRADIENT_MAX_PROTO_CONNECTIONS              = toString cfg.settings.maxProtoConnections;
           GRADIENT_WORKER_GCROOTS_DIR                 = cfg.settings.gcrootsDir;
+          GRADIENT_WORKER_BUILD_METRICS               = lib.boolToString cfg.settings.buildMetrics;
+          GRADIENT_WORKER_BUILD_CGROUP_ROOT           = cfg.settings.buildCgroupRoot;
         } // lib.optionalAttrs (cfg.settings.architectures != []) {
           GRADIENT_WORKER_ARCHITECTURES = lib.concatStringsSep "," cfg.settings.architectures;
         } // lib.optionalAttrs (cfg.settings.systemFeatures != []) {
