@@ -67,6 +67,9 @@ impl DerivationInsertBatch {
                 hash: Set(drv_hash),
                 name: Set(drv_name),
                 architecture: Set(d.architecture.clone()),
+                pname: Set(d.pname.clone()),
+                prefer_local_build: Set(d.prefer_local_build),
+                allow_substitutes: Set(d.allow_substitutes),
                 created_at: Set(now),
                 ..Default::default()
             });

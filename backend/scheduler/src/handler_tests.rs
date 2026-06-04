@@ -242,6 +242,8 @@ fn make_discovered(
         timeout_secs: None,
         max_silent_secs: None,
         prefer_local_build: false,
+        allow_substitutes: true,
+        pname: None,
         substituted: false,
     }
 }
@@ -2106,6 +2108,8 @@ async fn eval_result_creates_entry_points_for_project() {
         timeout_secs: None,
         max_silent_secs: None,
         prefer_local_build: false,
+        allow_substitutes: true,
+        pname: None,
         substituted: false,
     }];
 
@@ -2237,6 +2241,8 @@ async fn eval_result_no_entry_points_without_project() {
         timeout_secs: None,
         max_silent_secs: None,
         prefer_local_build: false,
+        allow_substitutes: true,
+        pname: None,
         substituted: false,
     }];
 
@@ -2371,6 +2377,8 @@ async fn eval_result_all_substituted_with_project_completes() {
         timeout_secs: None,
         max_silent_secs: None,
         prefer_local_build: false,
+        allow_substitutes: true,
+        pname: None,
         substituted: true,
     }];
 
