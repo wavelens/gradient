@@ -231,7 +231,7 @@ sequenceDiagram
 
 ## `proto::scheduler::jobs` - Job Tracker
 
-**File:** `backend/proto/src/scheduler/jobs.rs`
+**File:** `backend/scheduler/src/jobs.rs`
 **Run:** `cargo test -p proto`
 
 `JobTracker` is a dual-queue (pending + active) that tracks jobs through their
@@ -297,7 +297,7 @@ lifecycle. Tests exercise the state machine directly without any async runtime.
 
 ## `proto::scheduler::worker_pool` - Worker Registry
 
-**File:** `backend/proto/src/scheduler/worker_pool.rs`
+**File:** `backend/scheduler/src/worker_pool.rs`
 **Run:** `cargo test -p proto`
 
 `WorkerPool` is an in-memory registry of connected workers with capabilities,
@@ -339,7 +339,7 @@ authorized peers, and assigned-job tracking.
 
 ## `proto::scheduler` - Scheduler Coordination
 
-**File:** `backend/proto/src/scheduler/scheduler_tests.rs`
+**File:** `backend/scheduler/src/scheduler_tests.rs`
 **Run:** `cargo test -p proto`
 
 Integration tests for the `Scheduler` struct, which coordinates `WorkerPool`
@@ -1260,7 +1260,7 @@ Unit tests for `resolve_effective_hash_db`, which maps the file-hash embedded in
 
 ## `proto::scheduler::dispatch_tests` - Dispatch Loop Functions
 
-**File:** `backend/proto/src/scheduler/dispatch_tests.rs`
+**File:** `backend/scheduler/src/dispatch_tests.rs`
 **Run:** `cargo test -p proto`
 
 Integration tests for the two background dispatch functions that feed the
@@ -1322,7 +1322,7 @@ call the pending job count is asserted directly on the scheduler.
 
 ## `proto::scheduler::handler_tests` - Scheduler DB Handler Functions
 
-**File:** `backend/proto/src/scheduler/handler_tests.rs`
+**File:** `backend/scheduler/src/handler_tests.rs`
 **Run:** `cargo test -p proto`
 
 Integration tests for the six handler functions that the scheduler calls when

@@ -633,9 +633,6 @@ impl Scheduler {
                     fetch: g.fetch,
                     architectures,
                     system_features,
-                    cpu_count: metrics.map(|m| m.cpu_count).unwrap_or_default(),
-                    cpu_core_score: metrics.map(|m| m.cpu_core_score).unwrap_or_default(),
-                    ram_total_mb: metrics.map(|m| m.ram_total_mb).unwrap_or_default(),
                     metrics,
                 })
             }

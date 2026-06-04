@@ -74,9 +74,6 @@ pub struct WorkerCaps {
     pub fetch: bool,
     pub architectures: Vec<String>,
     pub system_features: Vec<String>,
-    pub cpu_count: u32,
-    pub cpu_core_score: u32,
-    pub ram_total_mb: u64,
     /// Live resource view of the worker, fed into resource-aware scoring rules.
     pub metrics: Option<score::WorkerMetricsView>,
 }
