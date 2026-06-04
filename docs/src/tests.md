@@ -2611,6 +2611,7 @@ loading degrades silently when `/etc/ssl/certs` is missing.
 CLI integration tests in `cli/tests/`:
 
 - `download_attr.rs` - `gradient download '#attr' --json` writes the right files; `--json` without args returns a structured missing-argument envelope and exits 2.
+- `build_watch.rs` (#314) - `gradient build --help` exposes `-b`/`--background` and no longer advertises the removed `--no-stream`; `gradient watch --help` documents the required `<EVALUATION>` argument; `gradient watch` with no argument exits non-zero.
 - `completion.rs` - regression for the broken completion bin name: `gradient completion {bash,zsh}` must emit a script that registers against the real `gradient` binary (`-F _clap_complete_gradient gradient`) and never the capitalised `Gradient` app name, which silently disabled `gradient <TAB>`. Also asserts the zsh script appends the autoload bridge (`[[ ${funcstack[1]} = _gradient ]] && _clap_dynamic_completer_gradient "$@"`) so the fpath autoload file the Nix package installs completes on the first TAB instead of only after a second.
 
 Dynamic completer unit tests live in `cli/src/commands/completion.rs` (`#[cfg(test)]`,
@@ -2990,6 +2991,13 @@ Run with: `cargo test -p gradient-cli`
   triggers quit.
 - `tui::log_view` — `↑`/`↓` scroll adjusts the offset; enabling follow-tail
   pins the view to the last line; `/` search highlights matching lines.
+- `tui::watch` (#314) — the `gradient watch` dashboard view-model:
+  `BuildSummary::of` classifies build statuses into succeeded/failed/building/
+  queued counts; `eval_is_terminal` recognises `Completed`/`Failed`/`Aborted`;
+  `format_duration`/`format_build_time` render elapsed and per-build times;
+  streamed log chunks split on newlines and buffer partial lines; evaluation
+  messages are de-duplicated by id; follow-tail pins to the bottom until an
+  `↑` scroll detaches it.
 
 ## REST API endpoint surface (NixOS integration)
 
