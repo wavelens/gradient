@@ -53,7 +53,7 @@ pub fn resource_aware_rules() -> Vec<Box<dyn ScoreRule>> {
     let mut rules = default_rules();
     rules.push(Box::new(ResourceFitRule::default()));
     rules.push(Box::new(PreferLocalBuildRule::default()));
-    rules.push(Box::new(FairShareRule));
+    rules.push(Box::new(FairShareRule::default()));
     rules
 }
 
@@ -116,6 +116,7 @@ mod tests {
             missing_nar_size: Some(0),
             dependency_count: 0,
             queued_at: now(),
+            org_share: None,
         };
 
         let j_old = scored_job("x86_64-linux");
@@ -125,6 +126,7 @@ mod tests {
             missing_nar_size: None,
             dependency_count: 0,
             queued_at: now() - chrono::Duration::seconds(3600),
+            org_share: None,
         };
 
         let s_old = policy.score(&c_old, &w);
@@ -151,6 +153,7 @@ mod tests {
             missing_nar_size: Some(0),
             dependency_count: 0,
             queued_at: n,
+            org_share: None,
         };
 
         let j_costly = scored_job("builtin");
@@ -160,6 +163,7 @@ mod tests {
             missing_nar_size: Some(50_000_000),
             dependency_count: 0,
             queued_at: n,
+            org_share: None,
         };
 
         assert!(policy.score(&c_ready, &w) > policy.score(&c_costly, &w));
