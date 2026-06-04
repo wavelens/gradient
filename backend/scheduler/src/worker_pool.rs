@@ -148,19 +148,58 @@ impl WorkerPool {
             .map(|slot| slot.shared().capabilities.clone())
     }
 
+    #[allow(clippy::too_many_arguments)] // mirrors the WorkerCapabilities wire fields
     pub fn update_capabilities(
         &mut self,
         id: &str,
         architectures: Vec<String>,
         system_features: Vec<String>,
         max_concurrent_builds: u32,
+        cpu_count: u32,
+        ram_total_mb: u64,
+        cpu_core_score: u32,
     ) {
         if let Some(slot) = self.workers.get_mut(id) {
             let s = slot.shared_mut();
             s.architectures = architectures;
             s.system_features = system_features;
             s.max_concurrent_builds = max_concurrent_builds;
+            s.cpu_count = cpu_count;
+            s.ram_total_mb = ram_total_mb;
+            s.cpu_core_score = cpu_core_score;
         }
+    }
+
+    /// Apply a live-metrics heartbeat to a connected worker. No-op if unknown.
+    pub fn update_metrics(
+        &mut self,
+        id: &str,
+        cpu_usage_pct: f32,
+        ram_free_mb: u64,
+        disk_speed_mbps: Option<f32>,
+    ) {
+        if let Some(slot) = self.workers.get_mut(id) {
+            let s = slot.shared_mut();
+            s.cpu_usage_pct = cpu_usage_pct;
+            s.ram_free_mb = ram_free_mb;
+            s.disk_speed_mbps = disk_speed_mbps;
+        }
+    }
+
+    /// Returns a scoring view of a connected worker's static caps and latest
+    /// live metrics, or `None` if the worker is not connected.
+    pub fn metrics_for(&self, id: &str) -> Option<score::WorkerMetricsView> {
+        self.workers.get(id).map(|slot| {
+            let s = slot.shared();
+            score::WorkerMetricsView {
+                cpu_count: s.cpu_count,
+                cpu_core_score: s.cpu_core_score,
+                ram_total_mb: s.ram_total_mb,
+                ram_free_mb: s.ram_free_mb,
+                cpu_usage_pct: s.cpu_usage_pct,
+                disk_speed_mbps: s.disk_speed_mbps,
+            }
+        })
     }
 
     pub fn unregister(&mut self, id: &str) -> Vec<String> {
@@ -360,13 +399,42 @@ mod tests {
     fn test_update_capabilities() {
         let mut pool = WorkerPool::new();
         pool.register("w1".into(), caps(), HashSet::new());
-        pool.update_capabilities("w1", vec!["x86_64-linux".into()], vec!["kvm".into()], 4);
+        pool.update_capabilities("w1", vec!["x86_64-linux".into()], vec!["kvm".into()], 4, 8, 16384, 1200);
 
         let workers = pool.all_workers();
         assert_eq!(workers.len(), 1);
         assert_eq!(workers[0].architectures, vec!["x86_64-linux"]);
         assert_eq!(workers[0].system_features, vec!["kvm"]);
         assert_eq!(workers[0].max_concurrent_builds, 4);
+
+        let view = pool.metrics_for("w1").unwrap();
+        assert_eq!(view.cpu_count, 8);
+        assert_eq!(view.ram_total_mb, 16384);
+        assert_eq!(view.cpu_core_score, 1200);
+    }
+
+    #[test]
+    fn test_update_metrics_updates_view() {
+        let mut pool = WorkerPool::new();
+        pool.register("w1".into(), caps(), HashSet::new());
+        pool.update_capabilities("w1", vec![], vec![], 1, 4, 8192, 1000);
+
+        // Before any heartbeat the dynamic fields default to zero / None.
+        let view = pool.metrics_for("w1").unwrap();
+        assert_eq!(view.cpu_usage_pct, 0.0);
+        assert_eq!(view.ram_free_mb, 0);
+        assert_eq!(view.disk_speed_mbps, None);
+
+        pool.update_metrics("w1", 42.5, 3000, Some(550.0));
+        let view = pool.metrics_for("w1").unwrap();
+        assert_eq!(view.cpu_usage_pct, 42.5);
+        assert_eq!(view.ram_free_mb, 3000);
+        assert_eq!(view.disk_speed_mbps, Some(550.0));
+        // Static caps survive a metrics update.
+        assert_eq!(view.cpu_count, 4);
+        assert_eq!(view.ram_total_mb, 8192);
+
+        assert!(pool.metrics_for("unknown").is_none());
     }
 
     #[test]
@@ -386,7 +454,7 @@ mod tests {
     fn test_draining_worker_has_no_capacity() {
         let mut pool = WorkerPool::new();
         pool.register("w1".into(), caps(), HashSet::new());
-        pool.update_capabilities("w1", vec![], vec![], 10);
+        pool.update_capabilities("w1", vec![], vec![], 10, 0, 0, 0);
 
         // Active worker has capacity.
         assert!(pool.has_capacity("w1", &JobKind::Build));
@@ -446,7 +514,7 @@ mod tests {
         // Guards against `<` → `<=` off-by-one in `has_build_capacity`.
         let mut pool = WorkerPool::new();
         pool.register("w1".into(), caps(), HashSet::new());
-        pool.update_capabilities("w1", vec!["x86_64-linux".into()], vec![], 2);
+        pool.update_capabilities("w1", vec!["x86_64-linux".into()], vec![], 2, 0, 0, 0);
 
         assert!(pool.has_capacity("w1", &JobKind::Build), "0/2 has capacity");
         pool.assign_job("w1", "j1");
@@ -483,7 +551,7 @@ mod tests {
         let mut pool = WorkerPool::new();
         pool.register("w1".into(), caps(), HashSet::new());
         pool.register("w2".into(), caps(), HashSet::new());
-        pool.update_capabilities("w1", vec!["x86_64-linux".into()], vec![], 2);
+        pool.update_capabilities("w1", vec!["x86_64-linux".into()], vec![], 2, 0, 0, 0);
         pool.assign_job("w1", "j1");
         pool.mark_draining("w2");
 

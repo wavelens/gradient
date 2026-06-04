@@ -202,8 +202,13 @@ WorkerCapabilities {
     architectures: Vec<String>,         // Nix system strings, e.g. ["x86_64-linux", "aarch64-linux"]
     system_features: Vec<String>,       // Nix system features, e.g. ["kvm", "big-parallel"]
     max_concurrent_builds: u32,         // how many parallel builds this worker accepts
+    cpu_count: u32,                     // logical CPUs available to the worker
+    ram_total_mb: u64,                  // total physical RAM in MiB
+    cpu_core_score: u32,                // relative single-core performance (higher is faster)
 }
 ```
+
+The static hardware fields (`cpu_count`, `ram_total_mb`, `cpu_core_score`) are reported once with the capabilities and feed the scheduler's resource-aware scoring rules.
 
 Architectures are free-form strings (e.g. `"x86_64-linux"`, `"aarch64-linux"`) - not an enum. Custom or unusual platforms (e.g. `"riscv64-linux"`) can be advertised without any code changes.
 
@@ -257,6 +262,20 @@ sequenceDiagram
 The server's handler processes mid-connection `WorkerCapabilities` identically to the initial send - it calls `scheduler.update_worker_capabilities()` which atomically replaces the worker's entry in the pool. Any pending build offers for architectures or features no longer advertised are revoked.
 
 Re-sending `WorkerCapabilities` does **not** require reconnecting and does **not** interrupt in-flight jobs. Only future job offers are affected.
+
+### Live Metrics Heartbeat
+
+While `WorkerCapabilities` carries the worker's *static* hardware profile, `WorkerMetrics` is a periodic heartbeat carrying its *current* resource utilisation. The scheduler stores the latest report per worker and feeds it into resource-aware scoring rules so jobs prefer workers with spare capacity.
+
+```rust
+WorkerMetrics {
+    cpu_usage_pct: f32,                 // current CPU load, 0.0-100.0
+    ram_free_mb: u64,                   // currently free RAM in MiB
+    disk_speed_mbps: Option<f32>,       // measured store disk throughput, if known
+}
+```
+
+The server replaces the previous values immediately on each heartbeat; a worker that never reports metrics is scored against zeroed dynamic fields (its static caps still apply).
 
 ### Ephemeral Workers
 
@@ -844,7 +863,8 @@ enum ClientMessage {
     AuthResponse { tokens: Vec<(String, String)> },  // [(peer_id, token), ...]
     ReauthRequest,                              // ask server to re-send AuthChallenge
     Reject { code: u16, reason: String },       // decline connection after InitAck
-    WorkerCapabilities { architectures: Vec<String>, system_features: Vec<String>, max_concurrent_builds: u32 },
+    WorkerCapabilities { architectures: Vec<String>, system_features: Vec<String>, max_concurrent_builds: u32, cpu_count: u32, ram_total_mb: u64, cpu_core_score: u32 },
+    WorkerMetrics { cpu_usage_pct: f32, ram_free_mb: u64, disk_speed_mbps: Option<f32> },
     AssignJobResponse { job_id: Uuid, accepted: bool, reason: Option<String> },
 
     // Job dispatch

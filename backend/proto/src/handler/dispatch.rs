@@ -171,8 +171,27 @@ impl<'a> DispatchContext<'a> {
                 architectures,
                 system_features,
                 max_concurrent_builds,
+                cpu_count,
+                ram_total_mb,
+                cpu_core_score,
             } => {
-                self.on_worker_capabilities(architectures, system_features, max_concurrent_builds)
+                self.on_worker_capabilities(
+                    architectures,
+                    system_features,
+                    max_concurrent_builds,
+                    cpu_count,
+                    ram_total_mb,
+                    cpu_core_score,
+                )
+                .await;
+                true
+            }
+            ClientMessage::WorkerMetrics {
+                cpu_usage_pct,
+                ram_free_mb,
+                disk_speed_mbps,
+            } => {
+                self.on_worker_metrics(cpu_usage_pct, ram_free_mb, disk_speed_mbps)
                     .await;
                 true
             }
@@ -333,20 +352,39 @@ impl<'a> DispatchContext<'a> {
 
     // ── Capability advertisement ──────────────────────────────────────────────
 
+    #[allow(clippy::too_many_arguments)] // mirrors the WorkerCapabilities wire fields
     async fn on_worker_capabilities(
         &mut self,
         architectures: Vec<String>,
         system_features: Vec<String>,
         max_concurrent_builds: u32,
+        cpu_count: u32,
+        ram_total_mb: u64,
+        cpu_core_score: u32,
     ) {
-        debug!(peer_id = %self.peer_id, ?architectures, ?system_features, max_concurrent_builds, "WorkerCapabilities");
+        debug!(peer_id = %self.peer_id, ?architectures, ?system_features, max_concurrent_builds, cpu_count, ram_total_mb, cpu_core_score, "WorkerCapabilities");
         self.scheduler
             .update_worker_capabilities(
                 self.peer_id,
                 architectures,
                 system_features,
                 max_concurrent_builds,
+                cpu_count,
+                ram_total_mb,
+                cpu_core_score,
             )
+            .await;
+    }
+
+    async fn on_worker_metrics(
+        &mut self,
+        cpu_usage_pct: f32,
+        ram_free_mb: u64,
+        disk_speed_mbps: Option<f32>,
+    ) {
+        debug!(peer_id = %self.peer_id, cpu_usage_pct, ram_free_mb, ?disk_speed_mbps, "WorkerMetrics");
+        self.scheduler
+            .update_worker_metrics(self.peer_id, cpu_usage_pct, ram_free_mb, disk_speed_mbps)
             .await;
     }
 

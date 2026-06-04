@@ -299,6 +299,9 @@ async fn perform_setup(
             architectures,
             system_features,
             max_concurrent_builds: config.max_concurrent_builds,
+            cpu_count: 0,
+            ram_total_mb: 0,
+            cpu_core_score: 0,
         })
         .await?;
     }

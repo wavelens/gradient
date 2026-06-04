@@ -48,6 +48,20 @@ pub enum ClientMessage {
         system_features: Vec<String>,
         /// Maximum number of concurrent builds this peer accepts.
         max_concurrent_builds: u32,
+        /// Number of logical CPUs available to the worker.
+        cpu_count: u32,
+        /// Total physical RAM in MiB.
+        ram_total_mb: u64,
+        /// Relative single-core performance score (higher is faster).
+        cpu_core_score: u32,
+    },
+
+    /// Live resource-utilisation heartbeat. Sent periodically while connected so
+    /// the scheduler can score jobs against the worker's current load.
+    WorkerMetrics {
+        cpu_usage_pct: f32,
+        ram_free_mb: u64,
+        disk_speed_mbps: Option<f32>,
     },
 
     /// Request the full current job candidate list as a stream of
@@ -209,6 +223,7 @@ impl ClientMessage {
             ClientMessage::ReauthRequest => "ReauthRequest",
             ClientMessage::Reject { .. } => "Reject",
             ClientMessage::WorkerCapabilities { .. } => "WorkerCapabilities",
+            ClientMessage::WorkerMetrics { .. } => "WorkerMetrics",
             ClientMessage::RequestJobList => "RequestJobList",
             ClientMessage::RequestJobChunk { .. } => "RequestJobChunk",
             ClientMessage::AssignJobResponse { .. } => "AssignJobResponse",

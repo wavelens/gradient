@@ -94,18 +94,25 @@ impl Scheduler {
         self.worker_pool.read().await.request_reauth(worker_id);
     }
 
+    #[allow(clippy::too_many_arguments)] // mirrors the WorkerCapabilities wire fields
     pub async fn update_worker_capabilities(
         &self,
         peer_id: &str,
         architectures: Vec<String>,
         system_features: Vec<String>,
         max_concurrent_builds: u32,
+        cpu_count: u32,
+        ram_total_mb: u64,
+        cpu_core_score: u32,
     ) {
         self.worker_pool.write().await.update_capabilities(
             peer_id,
             architectures,
             system_features,
             max_concurrent_builds,
+            cpu_count,
+            ram_total_mb,
+            cpu_core_score,
         );
         debug!(%peer_id, "worker capabilities updated");
         // Capabilities just changed - a build that was previously "no worker
@@ -115,6 +122,22 @@ impl Scheduler {
         if let Err(e) = self.reconcile_waiting_state().await {
             warn!(error = %e, "reconcile_waiting_state after capability update failed");
         }
+    }
+
+    pub async fn update_worker_metrics(
+        &self,
+        peer_id: &str,
+        cpu_usage_pct: f32,
+        ram_free_mb: u64,
+        disk_speed_mbps: Option<f32>,
+    ) {
+        self.worker_pool.write().await.update_metrics(
+            peer_id,
+            cpu_usage_pct,
+            ram_free_mb,
+            disk_speed_mbps,
+        );
+        debug!(%peer_id, cpu_usage_pct, ram_free_mb, "worker metrics updated");
     }
 
     pub async fn unregister_worker(&self, peer_id: &str) {
