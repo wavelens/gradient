@@ -289,19 +289,26 @@ async fn perform_setup(
             .clone()
             .unwrap_or_else(|| vec![crate::config::host_system()]);
         let system_features = config.system_features.clone().unwrap_or_default();
+        let host = crate::metrics::host_static();
+        let cpu_core_score = config
+            .cpu_core_score
+            .unwrap_or_else(crate::metrics::cpu_core_score);
         info!(
             ?architectures,
             ?system_features,
             max_concurrent_builds = config.max_concurrent_builds,
+            cpu_count = host.cpu_count,
+            ram_total_mb = host.ram_total_mb,
+            cpu_core_score,
             "advertising build capabilities"
         );
         conn.send(ClientMessage::WorkerCapabilities {
             architectures,
             system_features,
             max_concurrent_builds: config.max_concurrent_builds,
-            cpu_count: 0,
-            ram_total_mb: 0,
-            cpu_core_score: 0,
+            cpu_count: host.cpu_count,
+            ram_total_mb: host.ram_total_mb,
+            cpu_core_score,
         })
         .await?;
     }

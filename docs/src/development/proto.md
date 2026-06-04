@@ -275,7 +275,7 @@ WorkerMetrics {
 }
 ```
 
-The server replaces the previous values immediately on each heartbeat; a worker that never reports metrics is scored against zeroed dynamic fields (its static caps still apply).
+The server replaces the previous values immediately on each heartbeat; a worker that never reports metrics is scored against zeroed dynamic fields (its static caps still apply). The reference worker emits `WorkerMetrics` on its ~10 s heartbeat tick, sampling host load off the dispatch thread. `disk_speed_mbps` is currently always `None`; per-build cgroup `io.stat` sampling fills it in a later phase.
 
 ### Ephemeral Workers
 

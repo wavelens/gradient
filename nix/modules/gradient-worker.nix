@@ -161,6 +161,12 @@ in {
         example = [ "nixos-test" "benchmark" "big-parallel" ];
       };
 
+      cpuCoreScore = lib.mkOption {
+        description = "Override the advertised single-core speed score (higher is faster). When null, the worker benchmarks the host at startup.";
+        type = lib.types.nullOr lib.types.ints.positive;
+        default = null;
+      };
+
       maxConcurrentEvaluations = lib.mkOption {
         description = "Maximum number of concurrent evaluations";
         type = lib.types.ints.positive;
@@ -345,6 +351,8 @@ in {
           GRADIENT_WORKER_ARCHITECTURES = lib.concatStringsSep "," cfg.settings.architectures;
         } // lib.optionalAttrs (cfg.settings.systemFeatures != []) {
           GRADIENT_WORKER_SYSTEM_FEATURES = lib.concatStringsSep "," cfg.settings.systemFeatures;
+        } // lib.optionalAttrs (cfg.settings.cpuCoreScore != null) {
+          GRADIENT_WORKER_CPU_CORE_SCORE = toString cfg.settings.cpuCoreScore;
         } // {
           GRADIENT_WORKER_CAPABILITY_FEDERATE         = lib.boolToString cfg.capabilities.federate;
           GRADIENT_WORKER_CAPABILITY_FETCH            = lib.boolToString cfg.capabilities.fetch;

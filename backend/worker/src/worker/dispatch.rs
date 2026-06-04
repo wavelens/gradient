@@ -190,7 +190,8 @@ fn on_job_done(
     Ok(())
 }
 
-/// Heartbeat tick: request more jobs if the worker has capacity.
+/// Heartbeat tick: send live host metrics and request more jobs if the worker
+/// has capacity.
 fn on_heartbeat(
     writer: &ProtoWriter,
     job_kinds: &HashMap<String, JobKind>,
@@ -198,6 +199,7 @@ fn on_heartbeat(
     max_eval: u32,
     max_build: u32,
 ) {
+    send_live_metrics(writer);
     if *draining {
         return;
     }
@@ -228,6 +230,23 @@ fn on_heartbeat(
     {
         warn!(error = %e, "heartbeat RequestJob Build send failed");
     }
+}
+
+/// Sample live host load off the dispatch thread (the CPU sample blocks for
+/// [`sysinfo::MINIMUM_CPU_UPDATE_INTERVAL`]) and send it to the scheduler.
+/// `disk_speed_mbps` is `None` until per-build cgroup io.stat sampling lands.
+fn send_live_metrics(writer: &ProtoWriter) {
+    let writer = writer.clone();
+    tokio::task::spawn_blocking(move || {
+        let m = crate::metrics::host_dynamic();
+        if let Err(e) = writer.send(ClientMessage::WorkerMetrics {
+            cpu_usage_pct: m.cpu_usage_pct,
+            ram_free_mb: m.ram_free_mb,
+            disk_speed_mbps: None,
+        }) {
+            debug!(error = %e, "heartbeat WorkerMetrics send failed");
+        }
+    });
 }
 
 // ── Message handler ───────────────────────────────────────────────────────────

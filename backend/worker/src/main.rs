@@ -9,6 +9,7 @@ mod connection;
 mod connection_state;
 mod executor;
 mod http;
+mod metrics;
 mod nix;
 mod proto;
 mod reconnect;

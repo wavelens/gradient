@@ -169,6 +169,11 @@ pub struct WorkerConfig {
     /// list your daemon's `system-features` here.
     #[arg(long, env = "GRADIENT_WORKER_SYSTEM_FEATURES", value_delimiter = ',')]
     pub system_features: Option<Vec<String>>,
+
+    /// Override the single-core speed score advertised to the scheduler.
+    /// When unset, the worker runs a deterministic micro-benchmark at startup.
+    #[arg(long, env = "GRADIENT_WORKER_CPU_CORE_SCORE")]
+    pub cpu_core_score: Option<u32>,
 }
 
 /// Detect the host's Nix system string from `std::env::consts`.
@@ -314,6 +319,7 @@ mod tests {
             capability_build: false,
             architectures: None,
             system_features: None,
+            cpu_core_score: None,
         }
     }
 
@@ -392,6 +398,7 @@ mod tests {
             capability_build: false,
             architectures: None,
             system_features: None,
+            cpu_core_score: None,
         };
         assert!(cfg.peer_tokens().is_empty());
     }
@@ -454,6 +461,7 @@ mod tests {
             capability_build: false,
             architectures: None,
             system_features: None,
+            cpu_core_score: None,
         };
         let tokens = cfg.peer_tokens();
         let _ = std::fs::remove_file(&path);

@@ -42,6 +42,9 @@ tokio-util   = { version = "0.7", default-features = false }
 anyhow    = { version = "1.0", default-features = false, features = ["std"] }
 thiserror = { version = "2.0", default-features = false }
 
+# System / host metrics
+sysinfo = { version = "0.33", default-features = false, features = ["system"] }
+
 # Time / random / ids
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
 rand   = { version = "0.10", default-features = false, features = ["std", "std_rng", "thread_rng"] }
