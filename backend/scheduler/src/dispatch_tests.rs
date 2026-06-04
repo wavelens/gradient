@@ -125,6 +125,9 @@ fn make_derivation(id: DerivationId, org_id: OrganizationId, path: &str) -> MDer
         hash,
         name,
         architecture: "x86_64-linux".into(),
+        // Pre-set so dispatch's lazy backfill skips the closure walk in these
+        // strictly-ordered MockDatabase fixtures.
+        closure_size: Some(0),
         created_at: test_date(),
         ..Default::default()
     }

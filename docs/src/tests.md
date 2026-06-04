@@ -3160,6 +3160,23 @@ The shared `derivation_closure_reachable` / `sum_output_sizes` helpers (lifted
 out of `projects/metrics.rs`) keep their existing coverage in
 `backend/web/src/endpoints/projects/metrics.rs` (`sum_output_sizes_*`).
 
+### Shared closure-size helper - `backend/core/src/db/closure.rs`
+
+`transitive_closure_size` is the single source of truth for build-closure NAR
+size; both the web closure endpoint and the scheduler's dispatch backfill call
+it.
+
+- `sums_closure_output_sizes` - walks a root→child dependency graph and sums the
+  coalesced per-derivation output sizes (100 + 40 = 140).
+- `empty_roots_is_zero` - an empty root set yields a zero total without touching
+  the DB.
+
+The scheduler's lazy backfill (`BuildDispatchMaps::backfill_closure_size`)
+computes the size once per derivation when `derivation.closure_size` is NULL,
+persists it onto the row, and caches it in the dispatch maps so a dispatch pass
+never recomputes; integration coverage rides on the existing dispatch tests,
+whose MockDatabase fixtures pre-set `closure_size` to skip the walk.
+
 ### Closure Sankey model - `frontend/.../closure-graph/closure-aggregate.spec.ts`
 
 `buildClosureSankey` turns the closure DAG into a flow-conserving tree:

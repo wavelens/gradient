@@ -58,6 +58,12 @@ pub struct PendingBuildJob {
     /// Number of direct derivation dependencies (inputs) this build has.
     /// Used by the scoring policy to prefer builds that unblock more work.
     pub dependency_count: u32,
+    /// Total transitive output NAR size of the build's closure, when known.
+    /// Fed into the scoring policy's resource-aware rules.
+    pub closure_size: Option<i64>,
+    /// `derivation.prefer_local_build`: this build should run on the dispatching
+    /// peer's local workers rather than be offloaded.
+    pub prefer_local_build: bool,
     /// `build.updated_at` at the time this job was dispatched to the tracker.
     /// Used by the scoring policy to prefer builds that have waited longer.
     pub queued_at: chrono::NaiveDateTime,
@@ -281,27 +287,34 @@ impl JobTracker {
         };
         let worker_ctx = worker_ctx.as_ref().unwrap_or(&fallback_ctx);
 
-        // Phase 5 wires real closure-size/history providers; for now both are absent.
-        let no_closure = || None;
+        // History stays default until Phase 5.3 wires real predictions.
         let no_history = || score::HistoryPrediction::default();
         let score_of = |id: &str, job: &PendingJob| -> f64 {
             let s = worker_scores.and_then(|ws| ws.get(id));
-            let (kind_view, arch) = match job {
+            let (kind_view, arch, closure_size, prefer_local_build) = match job {
                 PendingJob::Eval(e) => (
                     JobKindView::Eval {
                         fetch_flake: e.job.tasks.contains(&FlakeTask::FetchFlake),
                     },
                     "",
+                    None,
+                    false,
                 ),
-                PendingJob::Build(b) => (JobKindView::Build, b.architecture.as_str()),
+                PendingJob::Build(b) => (
+                    JobKindView::Build,
+                    b.architecture.as_str(),
+                    b.closure_size,
+                    b.prefer_local_build,
+                ),
             };
+            let closure = move || closure_size;
             let scored = ScoredJob::new(
                 id,
                 job.peer_id(),
                 kind_view,
                 arch,
-                false,
-                LazyProviders { closure_size: &no_closure, history: &no_history },
+                prefer_local_build,
+                LazyProviders { closure_size: &closure, history: &no_history },
             );
             let ctx = JobContext {
                 job: &scored,
@@ -514,6 +527,8 @@ mod tests {
             architecture: architecture.into(),
             required_features,
             dependency_count: 0,
+            closure_size: None,
+            prefer_local_build: false,
             queued_at: gradient_core::types::now(),
         })
     }

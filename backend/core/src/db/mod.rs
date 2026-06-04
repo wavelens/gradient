@@ -7,6 +7,7 @@
 pub mod admin_tasks;
 pub mod cache_reach;
 pub mod cache_upstream;
+pub mod closure;
 pub mod connection;
 pub mod dependency_graph;
 pub mod derivation;
@@ -18,6 +19,7 @@ pub mod status;
 
 pub use self::cache_reach::*;
 pub use self::cache_upstream::{GradientProtoUpstream, gradient_proto_upstreams_for_org, upstream_urls_for_org};
+pub use self::closure::*;
 pub use self::connection::*;
 pub use self::dependency_graph::*;
 pub use self::derivation::*;

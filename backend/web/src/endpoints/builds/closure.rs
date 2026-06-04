@@ -13,7 +13,7 @@ use axum::{Extension, Json};
 use gradient_core::types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use super::BuildAccessContext;
@@ -48,74 +48,12 @@ pub struct ClosureGraph {
 }
 
 /// BFS over `derivation_dependency` from `seed_drv_ids`; returns every reachable
-/// derivation id (seeds included).
+/// derivation id (seeds included). Thin wrapper over the shared core helper.
 pub async fn derivation_closure_reachable<C: sea_orm::ConnectionTrait>(
     db: &C,
     seed_drv_ids: Vec<DerivationId>,
 ) -> WebResult<HashSet<DerivationId>> {
-    let mut visited: HashSet<DerivationId> = seed_drv_ids.iter().cloned().collect();
-    let mut frontier = seed_drv_ids;
-
-    while !frontier.is_empty() {
-        let edges = EDerivationDependency::find()
-            .filter(CDerivationDependency::Derivation.is_in(frontier.clone()))
-            .all(db)
-            .await?;
-        frontier.clear();
-        for edge in edges {
-            if visited.insert(edge.dependency) {
-                frontier.push(edge.dependency);
-            }
-        }
-    }
-
-    Ok(visited)
-}
-
-/// Map each derivation id to its coalesced output NAR size
-/// (`derivation_output.nar_size`, else matching `cached_path.nar_size`).
-async fn output_sizes_by_drv<C: sea_orm::ConnectionTrait>(
-    db: &C,
-    drv_ids: Vec<DerivationId>,
-) -> WebResult<HashMap<DerivationId, i64>> {
-    if drv_ids.is_empty() {
-        return Ok(HashMap::new());
-    }
-    let outputs = EDerivationOutput::find()
-        .filter(CDerivationOutput::Derivation.is_in(drv_ids))
-        .all(db)
-        .await?;
-
-    let missing_hashes: Vec<String> = outputs
-        .iter()
-        .filter(|o| o.nar_size.is_none())
-        .map(|o| o.hash.clone())
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .collect();
-
-    let cached_size_by_hash: HashMap<String, i64> = if missing_hashes.is_empty() {
-        HashMap::new()
-    } else {
-        ECachedPath::find()
-            .filter(CCachedPath::Hash.is_in(missing_hashes))
-            .all(db)
-            .await?
-            .into_iter()
-            .filter_map(|cp| cp.nar_size.map(|n| (cp.hash, n)))
-            .collect()
-    };
-
-    let mut by_drv: HashMap<DerivationId, i64> = HashMap::new();
-    for o in outputs {
-        if let Some(size) = o
-            .nar_size
-            .or_else(|| cached_size_by_hash.get(&o.hash).copied())
-        {
-            *by_drv.entry(o.derivation).or_insert(0) += size;
-        }
-    }
-    Ok(by_drv)
+    Ok(gradient_core::db::transitive_closure_reachable(db, &seed_drv_ids).await?)
 }
 
 /// Sum coalesced output sizes across `drv_ids`. `Some(total)` when > 0 else `None`.
@@ -123,7 +61,7 @@ pub async fn sum_output_sizes<C: sea_orm::ConnectionTrait>(
     db: &C,
     drv_ids: Vec<DerivationId>,
 ) -> WebResult<Option<i64>> {
-    let by_drv = output_sizes_by_drv(db, drv_ids).await?;
+    let by_drv = gradient_core::db::output_sizes_by_drv(db, &drv_ids).await?;
     let total: i64 = by_drv.values().sum();
     Ok(if total > 0 { Some(total) } else { None })
 }
@@ -137,8 +75,9 @@ pub async fn build_closure_graph<C: sea_orm::ConnectionTrait>(
     let closure = derivation_closure_reachable(db, roots.clone()).await?;
     let all_ids: Vec<DerivationId> = closure.iter().cloned().collect();
 
-    let total_size_bytes = sum_output_sizes(db, all_ids.clone()).await?;
-    let size_by_drv = output_sizes_by_drv(db, all_ids.clone()).await?;
+    let size_by_drv = gradient_core::db::output_sizes_by_drv(db, &all_ids).await?;
+    let total: i64 = size_by_drv.values().sum();
+    let total_size_bytes = if total > 0 { Some(total) } else { None };
 
     let drvs = EDerivation::find()
         .filter(CDerivation::Id.is_in(all_ids.clone()))
@@ -288,9 +227,7 @@ mod tests {
             .append_query_results([vec![dep(root, child)]])
             // wave 2 (child) -> no further edges
             .append_query_results([Vec::<derivation_dependency::Model>::new()])
-            // sum_output_sizes (total): outputs for [root, child]
-            .append_query_results([vec![out(root, "r", Some(100)), out(child, "c", Some(40))]])
-            // output_sizes_by_drv (per-node): outputs again
+            // output_sizes_by_drv: outputs for [root, child] (drives both total and per-node)
             .append_query_results([vec![out(root, "r", Some(100)), out(child, "c", Some(40))]])
             // EDerivation::find for nodes
             .append_query_results([vec![drv(root, "root"), drv(child, "child")]])
