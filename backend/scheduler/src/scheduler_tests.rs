@@ -321,6 +321,8 @@ async fn record_eval_message_inserts_for_active_build_job() {
                 architecture: "x86_64-linux".into(),
                 required_features: vec![],
                 dependency_count: 0,
+                closure_size: None,
+                prefer_local_build: false,
                 queued_at: gradient_core::types::now(),
             },
         )
@@ -474,6 +476,8 @@ async fn cancel_evaluation_jobs_drops_eval_and_build_jobs() {
                     architecture: "x86_64-linux".into(),
                     required_features: vec![],
                     dependency_count: 0,
+                    closure_size: None,
+                    prefer_local_build: false,
                     queued_at: gradient_core::types::now(),
                 },
             )

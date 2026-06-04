@@ -234,6 +234,9 @@ struct BuildDispatchMaps {
     /// download to start this build. `inputSrcs` are not included - they
     /// live in the `.drv` file and are not stored in the scheduler DB.
     direct_inputs: HashMap<DerivationId, Vec<RequiredPath>>,
+    /// derivation_id → transitive closure size (bytes). Loaded from
+    /// `derivation.closure_size`; NULLs are computed once and persisted here.
+    closure_sizes: HashMap<DerivationId, Option<i64>>,
     default_timeout_secs: Option<u64>,
     default_max_silent_secs: Option<u64>,
 }
@@ -409,6 +412,18 @@ impl BuildDispatchMaps {
             direct_inputs.insert(*drv_id, paths);
         }
 
+        // Closure sizes: reuse the persisted `derivation.closure_size` when set;
+        // otherwise compute the transitive output size once and backfill the row
+        // so future dispatch passes skip the walk.
+        let mut closure_sizes: HashMap<DerivationId, Option<i64>> = HashMap::new();
+        for (drv_id, drv) in &derivations {
+            let size = match drv.closure_size {
+                Some(s) => Some(s),
+                None => Self::backfill_closure_size(state, *drv_id).await,
+            };
+            closure_sizes.insert(*drv_id, size);
+        }
+
         Ok(Self {
             derivations,
             evaluations,
@@ -417,9 +432,36 @@ impl BuildDispatchMaps {
             feature_names,
             dep_counts,
             direct_inputs,
+            closure_sizes,
             default_timeout_secs,
             default_max_silent_secs,
         })
+    }
+
+    /// Compute the transitive closure size for `drv_id` and persist it onto the
+    /// `derivation` row. Failures degrade to `None` (scoring treats it as
+    /// unknown) and are retried on the next dispatch pass.
+    async fn backfill_closure_size(
+        state: &Arc<ServerState>,
+        drv_id: DerivationId,
+    ) -> Option<i64> {
+        let size = match gradient_core::db::transitive_closure_size(&state.worker_db, &[drv_id]).await
+        {
+            Ok(s) => s,
+            Err(e) => {
+                error!(derivation_id = %drv_id, error = %e, "failed to compute closure size");
+                return None;
+            }
+        };
+        if let Err(e) = EDerivation::update_many()
+            .col_expr(CDerivation::ClosureSize, sea_orm::sea_query::Expr::value(size))
+            .filter(CDerivation::Id.eq(drv_id))
+            .exec(&state.worker_db)
+            .await
+        {
+            error!(derivation_id = %drv_id, error = %e, "failed to persist closure size");
+        }
+        Some(size)
     }
 
     /// Resolve the organization that owns this evaluation (used as `peer_id`
@@ -483,6 +525,8 @@ impl BuildDispatchMaps {
             architecture: derivation.architecture.clone(),
             required_features: self.required_features(build.derivation),
             dependency_count: self.dep_counts.get(&build.derivation).copied().unwrap_or(0),
+            closure_size: self.closure_sizes.get(&build.derivation).copied().flatten(),
+            prefer_local_build: derivation.prefer_local_build,
             queued_at: build.updated_at,
         };
 
