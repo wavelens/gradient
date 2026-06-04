@@ -151,7 +151,7 @@ an evaluation under a per-org reserved `build-request` project.
 gradient build                          # eval the project's wildcard target
 gradient build checks.x86_64-linux.foo  # eval a specific attribute path
 gradient build --system x86_64-linux    # override target system (default: org preference)
-gradient build --no-stream              # dispatch and exit without tailing logs
+gradient build -b                       # dispatch and print the evaluation UUID, then exit
 ```
 
 Requirements and limits:
@@ -160,7 +160,24 @@ Requirements and limits:
 - Only files git tracks are uploaded; untracked files and `.git/` are skipped.
 - Combined upload size must not exceed **20 MiB** (`MAX_BUILD_REQUEST_SIZE`).
 - The default flow streams logs from all queued builds until they complete;
-  pass `--no-stream` to return immediately after dispatch.
+  pass `-b`/`--background` to print only the evaluation UUID and return
+  immediately. Pair it with [`gradient watch`](#watching-an-evaluation) to
+  follow the build later: `eval=$(gradient build -b); gradient watch "$eval"`.
+
+### Watching an evaluation
+
+`gradient watch <evaluation>` opens a live full-screen dashboard for any
+evaluation UUID. It shows the evaluation status and elapsed time, a per-build
+list with statuses and build times, evaluation messages and errors as they
+appear, and a follow-tail log pane that merges every build's output.
+
+```sh
+gradient watch 0190f3c2-...   # live dashboard for an evaluation
+```
+
+Key bindings: `↑`/`↓` scroll the log, `f` toggle follow-tail, `q`/`Esc` quit.
+In `--json` mode the dashboard is skipped and the merged build logs are streamed
+as JSON envelopes to stdout instead.
 
 ### Builds
 
