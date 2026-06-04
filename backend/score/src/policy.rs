@@ -14,17 +14,21 @@ use crate::rules::{FairShareRule, PreferLocalBuildRule, ResourceFitRule};
 pub trait ScoringPolicy: Send + Sync + std::fmt::Debug {
     fn name(&self) -> &str;
     fn score(&self, job: &JobContext<'_>, worker: &WorkerContext<'_>) -> f64;
+    fn uses_history(&self) -> bool {
+        false
+    }
 }
 
 #[derive(Debug)]
 pub struct RulePolicy {
     name: &'static str,
     rules: Vec<Box<dyn ScoreRule>>,
+    uses_history: bool,
 }
 
 impl RulePolicy {
-    pub fn new(name: &'static str, rules: Vec<Box<dyn ScoreRule>>) -> Self {
-        Self { name, rules }
+    pub fn new(name: &'static str, rules: Vec<Box<dyn ScoreRule>>, uses_history: bool) -> Self {
+        Self { name, rules, uses_history }
     }
 }
 
@@ -35,6 +39,10 @@ impl ScoringPolicy for RulePolicy {
 
     fn score(&self, job: &JobContext<'_>, worker: &WorkerContext<'_>) -> f64 {
         self.rules.iter().map(|r| r.score(job, worker)).sum()
+    }
+
+    fn uses_history(&self) -> bool {
+        self.uses_history
     }
 }
 
@@ -59,11 +67,13 @@ pub fn resource_aware_rules() -> Vec<Box<dyn ScoreRule>> {
 
 pub fn policy_by_name(name: &str) -> std::sync::Arc<dyn ScoringPolicy> {
     match name {
-        "default" => std::sync::Arc::new(RulePolicy::new("default", default_rules())),
-        "resource-aware" => std::sync::Arc::new(RulePolicy::new("resource-aware", resource_aware_rules())),
+        "default" => std::sync::Arc::new(RulePolicy::new("default", default_rules(), false)),
+        "resource-aware" => {
+            std::sync::Arc::new(RulePolicy::new("resource-aware", resource_aware_rules(), true))
+        }
         other => {
             tracing::warn!(policy = other, "unknown scoring policy, using \"default\"");
-            std::sync::Arc::new(RulePolicy::new("default", default_rules()))
+            std::sync::Arc::new(RulePolicy::new("default", default_rules(), false))
         }
     }
 }

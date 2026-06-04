@@ -1417,7 +1417,7 @@ On receiving `ServerMessage::Draining`, workers:
 
 ## Versioning
 
- - `PROTO_VERSION` (currently `1`) is incremented on breaking wire changes.
+ - `PROTO_VERSION` (currently `2`) is incremented on breaking wire changes.
  - Server accepts any `client_version == PROTO_VERSION`.
  - New capabilities are gated by `GradientCapabilities` flags, not version numbers.
 
