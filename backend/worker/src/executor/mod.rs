@@ -159,6 +159,8 @@ pub struct JobExecutor {
     pub(crate) gcroots: GcRootKeeper,
     pub(crate) binpath_nix: String,
     pub(crate) binpath_ssh: String,
+    pub(crate) build_metrics: bool,
+    pub(crate) build_cgroup_root: String,
 }
 
 impl JobExecutor {
@@ -168,6 +170,8 @@ impl JobExecutor {
         gcroots: GcRootKeeper,
         binpath_nix: String,
         binpath_ssh: String,
+        build_metrics: bool,
+        build_cgroup_root: String,
     ) -> Self {
         Self {
             store: Arc::new(store),
@@ -175,6 +179,8 @@ impl JobExecutor {
             gcroots,
             binpath_nix,
             binpath_ssh,
+            build_metrics,
+            build_cgroup_root,
         }
     }
 
@@ -361,9 +367,16 @@ impl JobExecutor {
                     );
                     crate::executor::build::BuildError::transient(e)
                 })?;
-            let outputs =
-                build::build_derivation(&self.store, build_task, index as u32, updater, &mut abort)
-                    .await?;
+            let outputs = build::build_derivation(
+                &self.store,
+                build_task,
+                index as u32,
+                updater,
+                &mut abort,
+                self.build_metrics,
+                &self.build_cgroup_root,
+            )
+            .await?;
             for o in &outputs {
                 gc_handles.push(self.gcroots.add(&o.store_path).await);
             }

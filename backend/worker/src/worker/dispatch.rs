@@ -15,7 +15,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
-use proto::messages::{CachedPath, ClientMessage, Job, JobCandidate, JobKind, ServerMessage};
+use proto::messages::{
+    BuildMetrics, CachedPath, ClientMessage, Job, JobCandidate, JobKind, ServerMessage,
+};
 use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
@@ -52,7 +54,8 @@ pub(super) async fn run_dispatch_loop(
     let nar_recv = crate::proto::nar_recv::NarReceiver::new();
     let mut abort_senders: HashMap<String, watch::Sender<bool>> = HashMap::new();
     let mut job_kinds: HashMap<String, JobKind> = HashMap::new();
-    let (done_tx, mut done_rx) = mpsc::unbounded_channel::<(String, Result<()>)>();
+    let (done_tx, mut done_rx) =
+        mpsc::unbounded_channel::<(String, Result<()>, Option<BuildMetrics>)>();
 
     let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(10));
     heartbeat.tick().await;
@@ -71,9 +74,9 @@ pub(super) async fn run_dispatch_loop(
                 break;
             }
 
-            Some((job_id, result)) = done_rx.recv() => {
+            Some((job_id, result, metrics)) = done_rx.recv() => {
                 on_job_done(
-                    job_id, result,
+                    job_id, result, metrics,
                     &writer, &cache_waiters, &known_derivation_waiters, &nar_recv,
                     credentials, &mut job_kinds, &mut abort_senders,
                     &draining, max_eval, max_build,
@@ -136,6 +139,7 @@ pub(super) async fn run_dispatch_loop(
 fn on_job_done(
     job_id: String,
     result: Result<()>,
+    metrics: Option<BuildMetrics>,
     writer: &ProtoWriter,
     cache_waiters: &CacheWaiters,
     known_derivation_waiters: &KnownDerivationWaiters,
@@ -158,7 +162,7 @@ fn on_job_done(
     match result {
         Ok(()) => {
             info!(%job_id, "job completed");
-            writer.send(ClientMessage::JobCompleted { job_id })?;
+            writer.send(ClientMessage::JobCompleted { job_id, metrics })?;
         }
         Err(e) => {
             let error_chain = format!("{e:#}");
@@ -264,7 +268,7 @@ pub(super) struct MessageHandler<'a> {
     pub job_kinds: &'a mut HashMap<String, JobKind>,
     pub max_eval: u32,
     pub max_build: u32,
-    pub done_tx: &'a mpsc::UnboundedSender<(String, Result<()>)>,
+    pub done_tx: &'a mpsc::UnboundedSender<(String, Result<()>, Option<BuildMetrics>)>,
     pub credentials: &'a mut CredentialStore,
     pub candidates: &'a Arc<Mutex<HashMap<String, JobCandidate>>>,
     pub last_scores: &'a Arc<Mutex<HashMap<String, proto::messages::CandidateScore>>>,
@@ -527,7 +531,8 @@ impl<'a> MessageHandler<'a> {
                 job_nar_recv,
             );
             let result = run_job(executor, job, &mut updater, &credentials, abort_rx).await;
-            let _ = job_done_tx.send((jid, result));
+            let metrics = updater.take_build_metrics();
+            let _ = job_done_tx.send((jid, result, metrics));
         });
 
         if active_count + 1 < max {

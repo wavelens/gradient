@@ -875,7 +875,7 @@ enum ClientMessage {
     RequestJob { kind: JobKind },               // "I have capacity for one job" - re-sent every 10s as heartbeat
     RequestAllCandidates,                       // startup-only: ask server to re-send all active candidates once
     JobUpdate { job_id: Uuid, update: JobUpdateKind },
-    JobCompleted { job_id: Uuid },              // all tasks done; results already sent via JobUpdate
+    JobCompleted { job_id: Uuid, metrics: Option<BuildMetrics> }, // all tasks done; results already sent via JobUpdate. metrics: per-build resource usage (build jobs only)
     JobFailed { job_id: Uuid, error: String },
     Draining,                                   // no more jobs; finishing in-flight work then disconnecting
 
@@ -996,7 +996,20 @@ struct BuildProduct {
     path: String,                       // absolute store path to the product (e.g. /nix/store/xxx-name/image.iso)
     size: Option<u64>,                  // product file size in bytes, if stat succeeded
 }
+
+// Carried on JobCompleted for build jobs (last build of the job).
+struct BuildMetrics {
+    peak_ram_mb: Option<u64>,           // peak resident set, from cgroup memory.peak
+    cpu_time_ms: Option<u64>,           // total CPU time, from cgroup cpu.stat usage_usec
+    avg_cpu_pct: Option<f32>,           // cpu_time_ms / (build_time_ms * cpu_count) * 100
+    disk_read_bytes: Option<u64>,       // from cgroup io.stat rbytes
+    disk_write_bytes: Option<u64>,      // from cgroup io.stat wbytes
+    oom_killed: bool,                   // cgroup memory.events oom_kill > 0
+    build_time_ms: Option<u64>,         // wall-clock build duration; always set
+}
 ```
+
+The worker captures `BuildMetrics` best-effort from the build's cgroup (requires Nix's experimental `use-cgroups` feature). `build_time_ms` is always reported; when the cgroup cannot be located or read, the cgroup-derived fields degrade to `None`. Recording these server-side into `derivation_metric` is a later phase; for now the server logs them at debug.
 
 **Mapping to database status:**
 

@@ -174,6 +174,21 @@ pub struct WorkerConfig {
     /// When unset, the worker runs a deterministic micro-benchmark at startup.
     #[arg(long, env = "GRADIENT_WORKER_CPU_CORE_SCORE")]
     pub cpu_core_score: Option<u32>,
+
+    /// Capture per-build resource metrics (peak RAM, CPU time, disk I/O) from
+    /// the build's cgroup. Requires Nix's experimental `use-cgroups` feature on
+    /// the daemon. Wall-clock build time is always reported regardless.
+    #[arg(long, env = "GRADIENT_WORKER_BUILD_METRICS", default_value = "true")]
+    pub build_metrics: bool,
+
+    /// Cgroup-v2 mount root searched for per-build cgroups when
+    /// `--build-metrics` is enabled.
+    #[arg(
+        long,
+        env = "GRADIENT_WORKER_BUILD_CGROUP_ROOT",
+        default_value = "/sys/fs/cgroup"
+    )]
+    pub build_cgroup_root: String,
 }
 
 /// Detect the host's Nix system string from `std::env::consts`.
@@ -320,6 +335,8 @@ mod tests {
             architectures: None,
             system_features: None,
             cpu_core_score: None,
+            build_metrics: true,
+            build_cgroup_root: "/sys/fs/cgroup".to_owned(),
         }
     }
 
@@ -399,6 +416,8 @@ mod tests {
             architectures: None,
             system_features: None,
             cpu_core_score: None,
+            build_metrics: true,
+            build_cgroup_root: "/sys/fs/cgroup".to_owned(),
         };
         assert!(cfg.peer_tokens().is_empty());
     }
@@ -462,6 +481,8 @@ mod tests {
             architectures: None,
             system_features: None,
             cpu_core_score: None,
+            build_metrics: true,
+            build_cgroup_root: "/sys/fs/cgroup".to_owned(),
         };
         let tokens = cfg.peer_tokens();
         let _ = std::fs::remove_file(&path);

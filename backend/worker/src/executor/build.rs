@@ -35,14 +35,20 @@ use harmonia_store_derivation::derivation::{BasicDerivation, DerivationOutput, D
 use harmonia_store_path::StorePath;
 use harmonia_store_remote::DaemonStore as _;
 use harmonia_utils_hash::{Algorithm, Hash};
-use proto::messages::{BuildFailureKind, BuildOutput, BuildProduct, BuildTask};
+use proto::messages::{BuildFailureKind, BuildMetrics, BuildOutput, BuildProduct, BuildTask};
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 use std::pin::{Pin, pin};
 use tokio::sync::watch;
 use tracing::{debug, info, warn};
 
+use crate::metrics::cgroup::{BuildMetricsRaw, read_build_cgroup};
 use crate::nix::store::{LocalNixStore, strip_store_prefix};
 use crate::proto::job::JobUpdater;
+
+const BYTES_PER_MB: u64 = 1_048_576;
+/// Bounded depth for the best-effort cgroup search under the cgroup root.
+const CGROUP_SEARCH_DEPTH: usize = 4;
 
 // ── Failure classification ────────────────────────────────────────────────────
 
@@ -108,6 +114,108 @@ pub(super) fn classify_build_error(msg: &str) -> BuildFailureKind {
     } else {
         BuildFailureKind::Permanent
     }
+}
+
+// ── Build metrics ───────────────────────────────────────────────────────────
+
+/// Convert a raw cgroup snapshot into the wire `BuildMetrics`.
+///
+/// `build_time_ms` is always reported. Cgroup-derived fields are `None` when
+/// `raw` is absent. `avg_cpu_pct` is `None` when it cannot be computed
+/// (zero build time or zero CPU count) to avoid divide-by-zero.
+fn raw_to_build_metrics(
+    raw: Option<BuildMetricsRaw>,
+    build_time_ms: u64,
+    cpu_count: u32,
+) -> BuildMetrics {
+    let Some(raw) = raw else {
+        return BuildMetrics {
+            build_time_ms: Some(build_time_ms),
+            ..Default::default()
+        };
+    };
+
+    let cpu_time_ms = raw.cpu_usage_usec.map(|u| u / 1000);
+    let avg_cpu_pct = match cpu_time_ms {
+        Some(cpu_ms) if build_time_ms > 0 && cpu_count > 0 => {
+            Some(cpu_ms as f32 / (build_time_ms as f32 * cpu_count as f32) * 100.0)
+        }
+        _ => None,
+    };
+
+    BuildMetrics {
+        peak_ram_mb: raw.peak_ram_bytes.map(|b| b / BYTES_PER_MB),
+        cpu_time_ms,
+        avg_cpu_pct,
+        disk_read_bytes: Some(raw.disk_read_bytes),
+        disk_write_bytes: Some(raw.disk_write_bytes),
+        oom_killed: raw.oom_killed,
+        build_time_ms: Some(build_time_ms),
+    }
+}
+
+/// Best-effort search for the cgroup directory of a daemon-forked build.
+///
+/// Nix's experimental `use-cgroups` feature places each build in its own
+/// cgroup whose leaf name embeds the derivation hash. Mapping a build to its
+/// cgroup is environment-specific, so this walks at most a few levels under
+/// `root` and returns the first directory whose name contains the drv hash.
+/// Returns `None` when nothing matches.
+fn locate_build_cgroup(root: &Path, drv_path: &str) -> Option<PathBuf> {
+    let hash = drv_hash(drv_path)?;
+    find_dir_containing(root, &hash, CGROUP_SEARCH_DEPTH)
+}
+
+/// Extract the store-path hash from a `.drv` path (`/nix/store/<hash>-name.drv`).
+fn drv_hash(drv_path: &str) -> Option<String> {
+    let base = drv_path.rsplit('/').next().unwrap_or(drv_path);
+    let hash = base.split('-').next()?;
+    (!hash.is_empty()).then(|| hash.to_owned())
+}
+
+/// Bounded breadth-first walk returning the first directory whose name contains
+/// `needle`. Never follows symlinks; never recurses past `max_depth`.
+fn find_dir_containing(root: &Path, needle: &str, max_depth: usize) -> Option<PathBuf> {
+    let mut frontier = vec![(root.to_path_buf(), 0usize)];
+    while let Some((dir, depth)) = frontier.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                continue;
+            }
+            let path = entry.path();
+            if entry.file_name().to_string_lossy().contains(needle) {
+                return Some(path);
+            }
+            if depth + 1 < max_depth {
+                frontier.push((path, depth + 1));
+            }
+        }
+    }
+    None
+}
+
+/// Capture per-build resource metrics. Always reports `build_time_ms`; cgroup
+/// fields degrade to `None` when metrics are disabled or the cgroup cannot be
+/// located/read.
+fn capture_build_metrics(
+    enabled: bool,
+    cgroup_root: &str,
+    drv_path: &str,
+    build_time_ms: u64,
+) -> BuildMetrics {
+    let cpu_count = crate::metrics::host_static().cpu_count;
+    if !enabled {
+        return raw_to_build_metrics(None, build_time_ms, cpu_count);
+    }
+    let raw = locate_build_cgroup(Path::new(cgroup_root), drv_path)
+        .and_then(|dir| read_build_cgroup(&dir));
+    if raw.is_none() {
+        debug!(drv = %drv_path, "build cgroup not found; reporting wall-clock time only");
+    }
+    raw_to_build_metrics(raw, build_time_ms, cpu_count)
 }
 
 // ── Type-state pipeline ───────────────────────────────────────────────────────
@@ -356,12 +464,15 @@ pub(super) async fn load_products(store_path: &str) -> Vec<BuildProduct> {
 /// [`JobUpdateKind::BuildOutput`] with the realised outputs on success.
 /// Streams build log lines to the server via `LogChunk` messages while the
 /// daemon is running.
+#[allow(clippy::too_many_arguments)]
 pub async fn build_derivation(
     store: &LocalNixStore,
     task: &BuildTask,
     task_index: u32,
     updater: &mut JobUpdater,
     abort: &mut watch::Receiver<bool>,
+    build_metrics: bool,
+    cgroup_root: &str,
 ) -> Result<Vec<BuildOutput>, BuildError> {
     // `report_building` is sent by the caller (`execute_build_job`) before the
     // prefetch step, so a `JobFailed` after a prefetch error finds the build
@@ -380,18 +491,26 @@ pub async fn build_derivation(
         abort,
     );
 
-    let outputs = match task.timeout_secs.map(std::time::Duration::from_secs) {
-        Some(d) => tokio::time::timeout(d, realize)
-            .await
-            .map_err(|_| {
-                BuildError::timeout(anyhow::anyhow!(
+    let started = std::time::Instant::now();
+    let realize_result: Result<Vec<BuildOutput>, BuildError> =
+        match task.timeout_secs.map(std::time::Duration::from_secs) {
+            Some(d) => match tokio::time::timeout(d, realize).await {
+                Ok(r) => r,
+                Err(_) => Err(BuildError::timeout(anyhow::anyhow!(
                     "build exceeded wall-clock timeout of {}s",
                     d.as_secs()
-                ))
-            })??,
-        None => realize.await?,
-    };
+                ))),
+            },
+            None => realize.await,
+        };
 
+    // Capture metrics (incl. wall-clock time) for both success and failure so
+    // the scheduler always learns at least how long the build ran.
+    let build_time_ms = started.elapsed().as_millis() as u64;
+    let metrics = capture_build_metrics(build_metrics, cgroup_root, &task.drv_path, build_time_ms);
+    updater.record_build_metrics(metrics);
+
+    let outputs = realize_result?;
     updater
         .report_build_output(task.build_id.clone(), outputs.clone())
         .map_err(BuildError::transient)?;
@@ -993,6 +1112,75 @@ mod tests {
         assert!(futures::poll!(fut.as_mut()).is_pending());
         tokio::time::advance(std::time::Duration::from_secs(6)).await;
         assert!(fut.await.is_err());
+    }
+
+    #[test]
+    fn locate_build_cgroup_none_for_empty_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let found = locate_build_cgroup(
+            dir.path(),
+            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo.drv",
+        );
+        assert!(found.is_none());
+    }
+
+    #[test]
+    fn locate_build_cgroup_finds_dir_with_hash() {
+        let dir = tempfile::tempdir().unwrap();
+        let hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let nested = dir.path().join("system.slice").join(format!("nix-{hash}-foo.scope"));
+        std::fs::create_dir_all(&nested).unwrap();
+        let found = locate_build_cgroup(
+            dir.path(),
+            &format!("/nix/store/{hash}-foo.drv"),
+        );
+        assert_eq!(found, Some(nested));
+    }
+
+    #[test]
+    fn raw_to_metrics_always_sets_build_time() {
+        let m = raw_to_build_metrics(None, 5_000, 4);
+        assert_eq!(m.build_time_ms, Some(5_000));
+        assert_eq!(m.peak_ram_mb, None);
+        assert_eq!(m.cpu_time_ms, None);
+        assert_eq!(m.avg_cpu_pct, None);
+        assert!(!m.oom_killed);
+    }
+
+    #[test]
+    fn raw_to_metrics_handles_zero_divisors() {
+        let raw = BuildMetricsRaw {
+            peak_ram_bytes: Some(2 * BYTES_PER_MB),
+            cpu_usage_usec: Some(1_000_000),
+            disk_read_bytes: 10,
+            disk_write_bytes: 20,
+            oom_killed: false,
+        };
+        // build_time_ms = 0 → avg_cpu_pct None (no divide-by-zero panic).
+        let m = raw_to_build_metrics(Some(raw), 0, 4);
+        assert_eq!(m.avg_cpu_pct, None);
+        // cpu_count = 0 → avg_cpu_pct None.
+        let m = raw_to_build_metrics(Some(raw), 1_000, 0);
+        assert_eq!(m.avg_cpu_pct, None);
+        assert_eq!(m.peak_ram_mb, Some(2));
+        assert_eq!(m.cpu_time_ms, Some(1_000));
+        assert_eq!(m.disk_read_bytes, Some(10));
+        assert_eq!(m.disk_write_bytes, Some(20));
+    }
+
+    #[test]
+    fn raw_to_metrics_computes_avg_cpu_pct() {
+        let raw = BuildMetricsRaw {
+            peak_ram_bytes: None,
+            cpu_usage_usec: Some(8_000_000), // 8000 ms of CPU
+            disk_read_bytes: 0,
+            disk_write_bytes: 0,
+            oom_killed: false,
+        };
+        // 8000 cpu-ms over 4000 ms wall on 4 cores = 8000/(4000*4)*100 = 50%.
+        let m = raw_to_build_metrics(Some(raw), 4_000, 4);
+        assert_eq!(m.cpu_time_ms, Some(8_000));
+        assert_eq!(m.avg_cpu_pct, Some(50.0));
     }
 
     #[tokio::test]

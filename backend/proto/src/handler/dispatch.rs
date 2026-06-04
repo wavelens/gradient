@@ -214,8 +214,8 @@ impl<'a> DispatchContext<'a> {
                 self.on_job_update(job_id, update).await;
                 true
             }
-            ClientMessage::JobCompleted { job_id } => {
-                self.on_job_completed(job_id).await;
+            ClientMessage::JobCompleted { job_id, metrics } => {
+                self.on_job_completed(job_id, metrics).await;
                 true
             }
             ClientMessage::JobFailed {
@@ -560,8 +560,16 @@ impl<'a> DispatchContext<'a> {
 
     // ── Job terminal states ───────────────────────────────────────────────────
 
-    async fn on_job_completed(&mut self, job_id: String) {
+    async fn on_job_completed(
+        &mut self,
+        job_id: String,
+        metrics: Option<gradient_core::types::proto::BuildMetrics>,
+    ) {
         info!(peer_id = %self.peer_id, %job_id, "job completed");
+        // Phase 5 will persist these into `derivation_metric` / `build`.
+        if let Some(m) = &metrics {
+            debug!(peer_id = %self.peer_id, %job_id, ?m, "received build metrics");
+        }
         if let Err(e) = self
             .scheduler
             .handle_job_completed(self.peer_id, &job_id)

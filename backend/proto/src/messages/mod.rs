@@ -12,9 +12,9 @@ pub mod wire;
 // backward compatibility so existing `proto::messages::FlakeJob` paths still work.
 pub use client::ClientMessage;
 pub use gradient_core::types::proto::{
-    BuildFailureKind, BuildJob, BuildOutput, BuildProduct, BuildTask, CacheInfo, CachedPath,
-    CandidateScore,
-    CredentialKind, DerivationOutput, DiscoveredDerivation, EvalMessageLevel, FlakeInputOverride,
+    BuildFailureKind, BuildJob, BuildMetrics, BuildOutput, BuildProduct, BuildTask, CacheInfo,
+    CachedPath, CandidateScore, CredentialKind, DerivationOutput, DiscoveredDerivation,
+    EvalMessageLevel, FlakeInputOverride,
     FlakeJob, FlakeSource, FlakeTask, GradientCapabilities, Job, JobCandidate, JobKind,
     JobUpdateKind, QueryMode, RequiredPath,
 };

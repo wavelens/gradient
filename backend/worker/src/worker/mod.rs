@@ -261,6 +261,8 @@ impl Worker<Connected> {
             gcroots,
             config.binpath_nix.clone(),
             config.binpath_ssh.clone(),
+            config.build_metrics,
+            config.build_cgroup_root.clone(),
         );
         Ok((executor, JobScorer::new()))
     }
