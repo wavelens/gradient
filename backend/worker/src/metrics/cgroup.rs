@@ -58,11 +58,12 @@ pub fn read_build_cgroup(dir: &std::path::Path) -> Option<BuildMetricsRaw> {
         return None;
     }
     let read = |name| std::fs::read_to_string(dir.join(name)).ok();
+    let io = read("io.stat").map(|s| parse_io_stat(&s)).unwrap_or((0, 0));
     Some(BuildMetricsRaw {
         peak_ram_bytes: read("memory.peak").and_then(|s| parse_memory_peak(&s)),
         cpu_usage_usec: read("cpu.stat").and_then(|s| parse_cpu_usage_usec(&s)),
-        disk_read_bytes: read("io.stat").map(|s| parse_io_stat(&s).0).unwrap_or(0),
-        disk_write_bytes: read("io.stat").map(|s| parse_io_stat(&s).1).unwrap_or(0),
+        disk_read_bytes: io.0,
+        disk_write_bytes: io.1,
         oom_killed: read("memory.events").map(|s| parse_oom_kill(&s)).unwrap_or(false),
     })
 }
