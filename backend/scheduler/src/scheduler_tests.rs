@@ -323,6 +323,7 @@ async fn record_eval_message_inserts_for_active_build_job() {
                 dependency_count: 0,
                 closure_size: None,
                 prefer_local_build: false,
+                history: score::HistoryPrediction::default(),
                 queued_at: gradient_core::types::now(),
             },
         )
@@ -394,7 +395,7 @@ async fn fetch_only_completion_enqueues_cached_eval_followup() {
     scheduler.request_job("w1", JobKind::Flake).await;
 
     scheduler
-        .handle_job_completed("w1", &job_id)
+        .handle_job_completed("w1", &job_id, None)
         .await
         .expect("fetch-only completion should succeed");
 
@@ -478,6 +479,7 @@ async fn cancel_evaluation_jobs_drops_eval_and_build_jobs() {
                     dependency_count: 0,
                     closure_size: None,
                     prefer_local_build: false,
+                    history: score::HistoryPrediction::default(),
                     queued_at: gradient_core::types::now(),
                 },
             )

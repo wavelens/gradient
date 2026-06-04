@@ -25,6 +25,7 @@ use tracing::{error, info, warn};
 use super::jobs::PendingBuildJob;
 use gradient_core::types::BuildOutputMetadata;
 use gradient_core::types::proto::BuildFailureKind;
+use gradient_core::types::proto::BuildMetrics;
 use gradient_core::types::proto::BuildOutput;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -149,8 +150,12 @@ impl<'a> BuildStateHandler<'a> {
         Ok(())
     }
 
-    pub async fn handle_build_job_completed(&self, build_id: BuildId) -> Result<()> {
-        let build = match EBuild::find_by_id(build_id)
+    pub async fn handle_build_job_completed(
+        &self,
+        build_id: BuildId,
+        metrics: Option<BuildMetrics>,
+    ) -> Result<()> {
+        let mut build = match EBuild::find_by_id(build_id)
             .one(&self.state.worker_db)
             .await?
         {
@@ -163,6 +168,12 @@ impl<'a> BuildStateHandler<'a> {
         let evaluation_id = build.evaluation;
         let derivation_id = build.derivation;
         let was_external_cached = build.external_cached;
+
+        if let Some(metrics) = metrics {
+            self.record_metrics(&mut build, derivation_id, &metrics)
+                .await;
+        }
+
         let leader =
             update_build_status(Arc::clone(self.state), build, BuildStatus::Completed).await;
         self.propagate_to_followers(&leader).await?;
@@ -200,6 +211,55 @@ impl<'a> BuildStateHandler<'a> {
         }
 
         self.check_evaluation_done(evaluation_id).await
+    }
+
+    /// Insert a `derivation_metric` history row from a completed build's worker
+    /// metrics and adopt the worker-measured build time onto the build model
+    /// (overriding the wall-clock fallback in `update_build_status`).
+    async fn record_metrics(
+        &self,
+        build: &mut MBuild,
+        derivation_id: DerivationId,
+        metrics: &BuildMetrics,
+    ) {
+        if let Some(ms) = metrics.build_time_ms {
+            build.build_time_ms = Some(ms as i64);
+        }
+
+        let (pname, closure_size) = match EDerivation::find_by_id(derivation_id)
+            .one(&self.state.worker_db)
+            .await
+        {
+            Ok(Some(d)) => (d.pname, d.closure_size),
+            Ok(None) => {
+                warn!(%derivation_id, "derivation row missing; skipping metric history");
+                return;
+            }
+            Err(e) => {
+                warn!(%derivation_id, error = %e, "derivation lookup failed; skipping metric history");
+                return;
+            }
+        };
+
+        let metric = ADerivationMetric {
+            id: Set(DerivationMetricId::now_v7()),
+            derivation: Set(derivation_id),
+            pname: Set(pname),
+            closure_size: Set(closure_size),
+            peak_ram_mb: Set(metrics.peak_ram_mb.map(|v| v as i64)),
+            cpu_time_ms: Set(metrics.cpu_time_ms.map(|v| v as i64)),
+            avg_cpu_pct: Set(metrics.avg_cpu_pct.map(|v| v as f64)),
+            disk_read_bytes: Set(metrics.disk_read_bytes.map(|v| v as i64)),
+            disk_write_bytes: Set(metrics.disk_write_bytes.map(|v| v as i64)),
+            oom_killed: Set(metrics.oom_killed),
+            build_time_ms: Set(metrics.build_time_ms.map(|v| v as i64)),
+            worker_id: Set(build.worker.clone().unwrap_or_default()),
+            created_at: Set(gradient_core::types::now()),
+        };
+
+        if let Err(e) = metric.insert(&self.state.worker_db).await {
+            warn!(%derivation_id, error = %e, "failed to record derivation_metric");
+        }
     }
 
     pub async fn handle_build_job_failed(
@@ -727,9 +787,13 @@ pub async fn handle_build_output(
         .await
 }
 
-pub async fn handle_build_job_completed(state: &Arc<ServerState>, build_id: BuildId) -> Result<()> {
+pub async fn handle_build_job_completed(
+    state: &Arc<ServerState>,
+    build_id: BuildId,
+    metrics: Option<BuildMetrics>,
+) -> Result<()> {
     BuildStateHandler::new(state)
-        .handle_build_job_completed(build_id)
+        .handle_build_job_completed(build_id, metrics)
         .await
 }
 

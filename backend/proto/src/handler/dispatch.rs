@@ -566,13 +566,12 @@ impl<'a> DispatchContext<'a> {
         metrics: Option<gradient_core::types::proto::BuildMetrics>,
     ) {
         info!(peer_id = %self.peer_id, %job_id, "job completed");
-        // Phase 5 will persist these into `derivation_metric` / `build`.
         if let Some(m) = &metrics {
             debug!(peer_id = %self.peer_id, %job_id, ?m, "received build metrics");
         }
         if let Err(e) = self
             .scheduler
-            .handle_job_completed(self.peer_id, &job_id)
+            .handle_job_completed(self.peer_id, &job_id, metrics)
             .await
         {
             error!(peer_id = %self.peer_id, %job_id, error = %e, "handle_job_completed failed");

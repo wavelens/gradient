@@ -15,6 +15,7 @@
 pub mod build;
 pub mod dispatch;
 pub mod eval;
+pub mod history;
 pub mod jobs;
 pub mod log_substitution;
 pub mod peer_auth;

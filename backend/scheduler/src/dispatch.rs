@@ -237,6 +237,9 @@ struct BuildDispatchMaps {
     /// derivation_id → transitive closure size (bytes). Loaded from
     /// `derivation.closure_size`; NULLs are computed once and persisted here.
     closure_sizes: HashMap<DerivationId, Option<i64>>,
+    /// derivation_id → historical resource prediction (default when the
+    /// derivation has no `pname` or no matching history).
+    histories: HashMap<DerivationId, score::HistoryPrediction>,
     default_timeout_secs: Option<u64>,
     default_max_silent_secs: Option<u64>,
 }
@@ -424,6 +427,18 @@ impl BuildDispatchMaps {
             closure_sizes.insert(*drv_id, size);
         }
 
+        // Historical predictions: only worth a query when the derivation has a
+        // pname to match against. Done outside any scoring lock.
+        let mut histories: HashMap<DerivationId, score::HistoryPrediction> = HashMap::new();
+        for (drv_id, drv) in &derivations {
+            if let Some(pname) = &drv.pname {
+                let closure_size = closure_sizes.get(drv_id).copied().flatten();
+                let prediction =
+                    crate::history::predict(&state.worker_db, pname, closure_size).await;
+                histories.insert(*drv_id, prediction);
+            }
+        }
+
         Ok(Self {
             derivations,
             evaluations,
@@ -433,6 +448,7 @@ impl BuildDispatchMaps {
             dep_counts,
             direct_inputs,
             closure_sizes,
+            histories,
             default_timeout_secs,
             default_max_silent_secs,
         })
@@ -527,6 +543,11 @@ impl BuildDispatchMaps {
             dependency_count: self.dep_counts.get(&build.derivation).copied().unwrap_or(0),
             closure_size: self.closure_sizes.get(&build.derivation).copied().flatten(),
             prefer_local_build: derivation.prefer_local_build,
+            history: self
+                .histories
+                .get(&build.derivation)
+                .copied()
+                .unwrap_or_default(),
             queued_at: build.updated_at,
         };
 

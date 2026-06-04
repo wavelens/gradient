@@ -3203,3 +3203,25 @@ Backend (`cargo test -p worker --bins metrics::`):
 `host_static` (logical CPU count, total RAM) is sampled once and advertised via
 `WorkerCapabilities`; `host_dynamic` (available RAM, global CPU usage) is sampled
 each heartbeat off the dispatch thread and sent via `WorkerMetrics`.
+
+## History-based prediction - issue #304 (Phase 5.3)
+
+Backend (`cargo test -p scheduler --tests history::`):
+
+- `buckets_are_log2_of_mb` — `closure_bucket` maps closure bytes to a
+  log2-of-megabytes bucket (1 MiB → 0, 4 MiB → 2, 1000 MiB → 9).
+- `empty_rows_yield_default` — `summarize` over no rows returns the zeroed
+  `HistoryPrediction` (samples 0).
+- `summarize_aggregates_peak_cpu_and_oom` — peak RAM is the max of non-null
+  samples (few-sample fallback for p95), CPU time is the mean of non-null
+  samples, and `oom_rate` is the fraction of OOM-killed rows.
+- `bucket_bounds_widen_by_one_bucket_each_side` — the byte bounds passed to the
+  `derivation_metric` query span ±1 closure bucket around the target size.
+
+`scheduler::history::predict` queries the most recent 200 `derivation_metric`
+rows for a `pname` (narrowed to comparable closure sizes when known), index-served
+by `idx-derivation_metric-pname-closure_size`. `BuildDispatchMaps` preloads one
+prediction per candidate derivation outside the scoring lock; `take_best_of_kind`
+feeds each build's prediction to the lazy `history` provider. On build completion,
+`BuildStateHandler::record_metrics` inserts a `derivation_metric` row from the
+worker's `BuildMetrics` and adopts the worker-measured `build_time_ms`.
