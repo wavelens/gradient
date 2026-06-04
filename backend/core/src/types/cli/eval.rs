@@ -36,6 +36,10 @@ pub struct EvalArgs {
     pub build_default_timeout_secs: u64,
     #[arg(long, env = "GRADIENT_BUILD_DEFAULT_MAX_SILENT_SECS", default_value = "1800")]
     pub build_default_max_silent_secs: u64,
+    /// Name of the scheduler scoring policy (`default`, `resource-aware`).
+    /// Unknown names fall back to `default`.
+    #[arg(long, env = "GRADIENT_SCHEDULER_SCORING_POLICY", default_value = "default")]
+    pub scheduler_scoring_policy: String,
 }
 
 impl Default for EvalArgs {
@@ -50,6 +54,7 @@ impl Default for EvalArgs {
             build_retry_backoff_secs: 30,
             build_default_timeout_secs: 3600,
             build_default_max_silent_secs: 1800,
+            scheduler_scoring_policy: "default".into(),
         }
     }
 }

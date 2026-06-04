@@ -4777,6 +4777,7 @@ dependencies = [
  "entity",
  "futures",
  "reqwest 0.13.3",
+ "score",
  "sea-orm",
  "serde",
  "serde_json",
