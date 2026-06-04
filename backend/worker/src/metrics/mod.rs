@@ -10,6 +10,8 @@
 //! and advertised via `WorkerCapabilities`. Dynamic load ([`host_dynamic`]) is
 //! sampled each heartbeat and sent via `WorkerMetrics`.
 
+pub mod cgroup;
+
 use std::time::Instant;
 
 use sysinfo::{CpuRefreshKind, MemoryRefreshKind, RefreshKind, System};
