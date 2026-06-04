@@ -68,6 +68,17 @@ impl Derivation {
             .unwrap_or_default()
     }
 
+    /// Whether the derivation permits substitution from a binary cache.
+    /// Nix defaults to `true`; a present attr disables it unless it reads as
+    /// truthy (`"1"`/`"true"`). Nix serializes `allowSubstitutes = false` as
+    /// `""` in the env, so an empty or `"0"`/`"false"` value means disabled.
+    pub fn allow_substitutes(&self) -> bool {
+        self.environment
+            .get("allowSubstitutes")
+            .map(|v| matches!(v.trim(), "1" | "true"))
+            .unwrap_or(true)
+    }
+
     /// Extract all build-relevant attributes in one pass.
     pub fn build_meta(&self) -> BuildMeta {
         let secs = |key: &str| {
@@ -86,6 +97,27 @@ impl Derivation {
             prefer_local_build,
             required_features: self.required_system_features(),
         }
+    }
+}
+
+/// Resolve a package name. Prefers a non-empty `env_pname`; otherwise strips a
+/// trailing `-<version>` (version starts with a digit) from the derivation name.
+pub fn derive_pname(env_pname: Option<&str>, name: &str) -> Option<String> {
+    if let Some(p) = env_pname
+        && !p.is_empty()
+    {
+        return Some(p.to_owned());
+    }
+    if name.is_empty() {
+        return None;
+    }
+    match name.rsplit_once('-') {
+        Some((prefix, version))
+            if version.chars().next().is_some_and(|c| c.is_ascii_digit()) =>
+        {
+            Some(prefix.to_owned())
+        }
+        _ => Some(name.to_owned()),
     }
 }
 
@@ -364,5 +396,26 @@ mod tests {
     fn build_meta_ignores_unparseable_timeout() {
         let bad = br#"Derive([("out","/nix/store/abc-hello","","")],[],[],"x86_64-linux","/nix/store/bash",[],[("name","x"),("timeout","forever")])"#;
         assert_eq!(parse_drv(bad).unwrap().build_meta().timeout_secs, None);
+    }
+
+    #[test]
+    fn pname_prefers_env_then_strips_version() {
+        assert_eq!(derive_pname(Some("hello"), "hello-2.12.1"), Some("hello".into()));
+        assert_eq!(derive_pname(None, "hello-2.12.1"), Some("hello".into()));
+        assert_eq!(derive_pname(None, "hello"), Some("hello".into()));
+        assert_eq!(derive_pname(None, "gcc-wrapper-13.2.0"), Some("gcc-wrapper".into()));
+        assert_eq!(derive_pname(Some(""), "hello-1.0"), Some("hello".into()));
+    }
+
+    #[test]
+    fn allow_substitutes_defaults_true_and_parses_false() {
+        let absent = br#"Derive([("out","/nix/store/a","","")],[],[],"x86_64-linux","/nix/store/bash",[],[("name","x")])"#;
+        assert!(parse_drv(absent).unwrap().allow_substitutes());
+        let empty = br#"Derive([("out","/nix/store/a","","")],[],[],"x86_64-linux","/nix/store/bash",[],[("name","x"),("allowSubstitutes","")])"#;
+        assert!(!parse_drv(empty).unwrap().allow_substitutes());
+        let zero = br#"Derive([("out","/nix/store/a","","")],[],[],"x86_64-linux","/nix/store/bash",[],[("name","x"),("allowSubstitutes","0")])"#;
+        assert!(!parse_drv(zero).unwrap().allow_substitutes());
+        let on = br#"Derive([("out","/nix/store/a","","")],[],[],"x86_64-linux","/nix/store/bash",[],[("name","x"),("allowSubstitutes","1")])"#;
+        assert!(parse_drv(on).unwrap().allow_substitutes());
     }
 }

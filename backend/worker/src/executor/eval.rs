@@ -267,6 +267,11 @@ fn build_discovered_derivation(
         .collect();
 
     let meta = drv.build_meta();
+    let name = drv.environment.get("name").map(String::as_str).unwrap_or("");
+    let pname = gradient_core::db::derive_pname(
+        drv.environment.get("pname").map(String::as_str),
+        name,
+    );
     DiscoveredDerivation {
         attr: attr.unwrap_or_default(),
         drv_path,
@@ -277,6 +282,8 @@ fn build_discovered_derivation(
         timeout_secs: meta.timeout_secs,
         max_silent_secs: meta.max_silent_secs,
         prefer_local_build: meta.prefer_local_build,
+        allow_substitutes: drv.allow_substitutes(),
+        pname,
         substituted: false,
     }
 }
@@ -413,6 +420,8 @@ impl<'a> ClosureWalker<'a> {
                     timeout_secs: None,
                     max_silent_secs: None,
                     prefer_local_build: false,
+                    allow_substitutes: true,
+                    pname: None,
                     substituted: true, // already built - skip dispatch
                 });
             } else {
