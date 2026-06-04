@@ -1859,6 +1859,32 @@ Tests (`cargo test -p score policy`):
   at `max_wait_secs * bonus_per_second` so ancient jobs cannot dominate
   every other rule.
 
+## Scheduler policy - per-org fair share (#111)
+
+A tenant flooding the queue with hundreds of builds previously starved a
+quiet tenant: `WaitTimeRule` plateaus at +360, so once the busy org's jobs
+maxed out their wait bonus there was nothing left to favour the quiet org.
+`FairShareRule` penalizes a candidate proportional to its owning org's
+share of currently-active builds (`org_share`, computed in-memory by the
+scheduler in `take_best_of_kind` from the active-job map and threaded into
+`JobContext`). The default weight (500) exceeds the wait plateau (360) so
+fairness overrides the wait gradient. The rule is part of the
+`resource-aware` policy; `org_share` is `None` (no penalty) when no builds
+are active.
+
+Tests (`cargo test -p score fair_share`, `cargo test -p scheduler fair_share`):
+
+- `busier_org_scores_more_negative` - (`score::rules::fair_share`) a job
+  with `org_share = Some(0.99)` scores more negative than `Some(0.01)`.
+- `zero_share_and_none_score_zero` - (`score::rules::fair_share`)
+  `Some(0.0)` and `None` both contribute exactly 0.
+- `fair_share_overrides_wait_gradient` - (`score::rules::fair_share`) a
+  quiet org (share 0) outscores a busy org (share 1) even when the busy
+  job has saturated `WaitTimeRule`, proving the weight beats the plateau.
+- `fair_share_quiet_org_wins_over_busy_org` - (`scheduler::jobs`) end to
+  end: org A already has five active builds, org B none; with the
+  `resource-aware` policy the next build is assigned to B's pending job.
+
 ## Build artefacts - `external_cached` outputs include `hydra-build-products`
 
 Builds that are dispatched as `external_cached` (substituted from upstream,

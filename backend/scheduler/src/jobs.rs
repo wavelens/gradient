@@ -290,6 +290,20 @@ impl JobTracker {
         };
         let worker_ctx = worker_ctx.as_ref().unwrap_or(&fallback_ctx);
 
+        let mut org_active_builds: HashMap<OrganizationId, u32> = HashMap::new();
+        let mut total_active_builds: u32 = 0;
+        for (_, job) in self.active.values() {
+            if matches!(job, PendingJob::Build(_)) {
+                *org_active_builds.entry(job.peer_id()).or_default() += 1;
+                total_active_builds += 1;
+            }
+        }
+        let org_share = |peer: OrganizationId| -> Option<f32> {
+            (total_active_builds > 0).then(|| {
+                org_active_builds.get(&peer).copied().unwrap_or(0) as f32 / total_active_builds as f32
+            })
+        };
+
         let score_of = |id: &str, job: &PendingJob| -> f64 {
             let s = worker_scores.and_then(|ws| ws.get(id));
             let (kind_view, arch, closure_size, prefer_local_build, history) = match job {
@@ -326,6 +340,7 @@ impl JobTracker {
                 missing_nar_size: s.map(|s| s.missing_nar_size),
                 dependency_count: job.dependency_count(),
                 queued_at: job.queued_at(),
+                org_share: org_share(job.peer_id()),
             };
             policy.score(&ctx, worker_ctx)
         };
@@ -780,6 +795,36 @@ mod tests {
         assert_eq!(assignment.unwrap().job_id, "j1");
         assert_eq!(tracker.pending_count(), 0);
         assert_eq!(tracker.active_count(), 1);
+    }
+
+    #[test]
+    fn fair_share_quiet_org_wins_over_busy_org() {
+        // #111: org A floods the queue and already has builds running; org B is
+        // quiet. With the resource-aware policy the next build must go to B so a
+        // busy tenant cannot starve a quiet one.
+        let mut tracker = JobTracker::new();
+        let org_a = OrganizationId::now_v7();
+        let org_b = OrganizationId::now_v7();
+        let p = score::policy_by_name("resource-aware");
+
+        // Seed several active builds for org A.
+        for i in 0..5 {
+            tracker.add_pending(format!("a_active_{i}"), build_job(org_a, vec![]));
+            tracker.take_best_of_kind("wa", None, None, &JobKind::Build, &*p);
+        }
+        assert_eq!(tracker.active_count(), 5);
+
+        // One pending build each for A and B.
+        tracker.add_pending("a_pending".into(), build_job(org_a, vec![]));
+        tracker.add_pending("b_pending".into(), build_job(org_b, vec![]));
+
+        let assignment = tracker
+            .take_best_of_kind("wb", None, None, &JobKind::Build, &*p)
+            .expect("a build must be assigned");
+        assert_eq!(
+            assignment.job_id, "b_pending",
+            "quiet org B must win over busy org A"
+        );
     }
 
     #[test]

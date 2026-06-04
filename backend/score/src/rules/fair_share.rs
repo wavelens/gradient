@@ -6,11 +6,103 @@
 
 use crate::rule::{JobContext, ScoreRule, WorkerContext};
 
-#[derive(Debug, Default)]
-pub struct FairShareRule;
+/// Penalizes a job proportional to its owning org's share of currently-active
+/// builds, so a quiet org's job is picked promptly even when a busy org floods
+/// the queue (#111).
+#[derive(Debug)]
+pub struct FairShareRule {
+    pub weight: f64,
+}
+
+impl Default for FairShareRule {
+    fn default() -> Self {
+        Self { weight: 500.0 }
+    }
+}
 
 impl ScoreRule for FairShareRule {
-    fn score(&self, _job: &JobContext<'_>, _worker: &WorkerContext<'_>) -> f64 {
-        0.0
+    fn score(&self, job: &JobContext<'_>, _worker: &WorkerContext<'_>) -> f64 {
+        match job.org_share {
+            Some(share) => -self.weight * share as f64,
+            None => 0.0,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::context::{HistoryPrediction, JobKindView, LazyProviders, ScoredJob};
+    use crate::rules::builtin::WaitTimeRule;
+    use gradient_core::types::ids::OrganizationId;
+    use gradient_core::types::now;
+
+    fn build_job() -> ScoredJob<'static> {
+        ScoredJob::new(
+            "j",
+            OrganizationId::now_v7(),
+            JobKindView::Build,
+            "x86_64-linux",
+            false,
+            LazyProviders { closure_size: &|| None, history: &|| HistoryPrediction::default() },
+        )
+    }
+
+    fn ctx<'a>(job: &'a ScoredJob<'a>, org_share: Option<f32>) -> JobContext<'a> {
+        JobContext {
+            job,
+            missing_count: None,
+            missing_nar_size: None,
+            dependency_count: 0,
+            queued_at: now(),
+            org_share,
+        }
+    }
+
+    fn worker() -> WorkerContext<'static> {
+        WorkerContext { architectures: &[], system_features: &[], fetch: false, metrics: None }
+    }
+
+    #[test]
+    fn busier_org_scores_more_negative() {
+        let rule = FairShareRule::default();
+        let job = build_job();
+        let w = worker();
+        let busy = rule.score(&ctx(&job, Some(0.99)), &w);
+        let quiet = rule.score(&ctx(&job, Some(0.01)), &w);
+        assert!(busy < quiet, "busy org must score lower: {busy} vs {quiet}");
+    }
+
+    #[test]
+    fn zero_share_and_none_score_zero() {
+        let rule = FairShareRule::default();
+        let job = build_job();
+        let w = worker();
+        assert_eq!(rule.score(&ctx(&job, Some(0.0)), &w), 0.0);
+        assert_eq!(rule.score(&ctx(&job, None), &w), 0.0);
+    }
+
+    // #111: a quiet org (share ~0) must overcome a busy org (share ~1) even when
+    // the busy job has maxed out WaitTimeRule's wait bonus. The fair-share weight
+    // (500) must exceed WaitTimeRule's plateau (max_wait_secs*bonus_per_second).
+    #[test]
+    fn fair_share_overrides_wait_gradient() {
+        let fair = FairShareRule::default();
+        let wait = WaitTimeRule::default();
+        let job = build_job();
+        let w = worker();
+
+        let quiet = ctx(&job, Some(0.0));
+        let busy = JobContext {
+            queued_at: now() - chrono::Duration::seconds(10_000),
+            ..ctx(&job, Some(1.0))
+        };
+
+        let quiet_total = fair.score(&quiet, &w) + wait.score(&quiet, &w);
+        let busy_total = fair.score(&busy, &w) + wait.score(&busy, &w);
+        assert!(
+            quiet_total > busy_total,
+            "quiet org must win despite busy org's wait bonus: quiet={quiet_total} busy={busy_total}"
+        );
     }
 }

@@ -49,7 +49,7 @@ mod tests {
     }
 
     fn ctx<'a>(job: &'a ScoredJob<'a>, missing_count: Option<u32>) -> JobContext<'a> {
-        JobContext { job, missing_count, missing_nar_size: None, dependency_count: 0, queued_at: gradient_core::types::now() }
+        JobContext { job, missing_count, missing_nar_size: None, dependency_count: 0, queued_at: gradient_core::types::now(), org_share: None }
     }
 
     fn worker() -> WorkerContext<'static> {
