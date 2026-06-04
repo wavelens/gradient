@@ -51,8 +51,8 @@ pub fn default_rules() -> Vec<Box<dyn ScoreRule>> {
 
 pub fn resource_aware_rules() -> Vec<Box<dyn ScoreRule>> {
     let mut rules = default_rules();
-    rules.push(Box::new(ResourceFitRule));
-    rules.push(Box::new(PreferLocalBuildRule));
+    rules.push(Box::new(ResourceFitRule::default()));
+    rules.push(Box::new(PreferLocalBuildRule::default()));
     rules.push(Box::new(FairShareRule));
     rules
 }
