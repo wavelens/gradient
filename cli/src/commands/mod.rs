@@ -19,4 +19,5 @@ pub mod download;
 pub mod generate;
 pub mod organization;
 pub mod project;
+pub mod watch;
 pub mod worker;
