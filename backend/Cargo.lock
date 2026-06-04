@@ -4795,6 +4795,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
+name = "score"
+version = "1.2.0"
+dependencies = [
+ "chrono",
+ "core",
+ "tracing",
+]
+
+[[package]]
 name = "sea-bae"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

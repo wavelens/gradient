@@ -1,6 +1,6 @@
 [workspace]
-members      = [".", "cache", "core", "entity", "migration", "proto", "scheduler", "test-support", "web", "worker"]
-default-members = [".", "cache", "core", "entity", "migration", "proto", "scheduler", "test-support", "web", "worker"]
+members      = [".", "cache", "core", "entity", "migration", "proto", "scheduler", "score", "test-support", "web", "worker"]
+default-members = [".", "cache", "core", "entity", "migration", "proto", "scheduler", "score", "test-support", "web", "worker"]
 resolver     = "2"
 
 [workspace.package]
@@ -20,6 +20,7 @@ todo      = "warn"
 cache         = { path = "cache" }
 core          = { path = "core", package = "core" }
 gradient-core = { path = "core", package = "core" }
+score         = { path = "score" }
 entity        = { path = "entity" }
 migration     = { path = "migration" }
 proto         = { path = "proto" }
