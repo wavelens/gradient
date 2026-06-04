@@ -17,6 +17,7 @@ workspace = true
 [dependencies]
 gradient-core = { workspace = true }
 entity        = { workspace = true }
+score         = { workspace = true }
 
 anyhow     = { workspace = true }
 chrono     = { workspace = true }

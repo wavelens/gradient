@@ -255,6 +255,7 @@ mod tests {
                 build_retry_backoff_secs: 30,
                 build_default_timeout_secs: 3600,
                 build_default_max_silent_secs: 1800,
+                scheduler_scoring_policy: "default".into(),
             },
             storage: StorageArgs {
                 base_path: "/tmp/gradient-test".into(),

@@ -14,7 +14,7 @@ use gradient_core::types::proto::{
     RequiredPath,
 };
 
-use crate::policy::{JobContext, Policy, WorkerContext};
+use score::{JobContext, JobKindView, LazyProviders, ScoredJob, ScoringPolicy, WorkerContext};
 
 #[derive(Debug, Clone)]
 pub struct PendingEvalJob {
@@ -259,7 +259,7 @@ impl JobTracker {
         authorized: Option<&HashSet<OrganizationId>>,
         caps: Option<&WorkerCaps>,
         kind: &JobKind,
-        policy: &Policy,
+        policy: &dyn ScoringPolicy,
     ) -> Option<Assignment> {
         let worker_scores = self.scores.get(peer_id);
 
@@ -267,6 +267,7 @@ impl JobTracker {
             architectures: &c.architectures,
             system_features: &c.system_features,
             fetch: c.fetch,
+            metrics: None,
         });
         let empty_archs: Vec<String> = vec![];
         let empty_feats: Vec<String> = vec![];
@@ -274,8 +275,41 @@ impl JobTracker {
             architectures: &empty_archs,
             system_features: &empty_feats,
             fetch: false,
+            metrics: None,
         };
         let worker_ctx = worker_ctx.as_ref().unwrap_or(&fallback_ctx);
+
+        // Phase 5 wires real closure-size/history providers; for now both are absent.
+        let no_closure = || None;
+        let no_history = || score::HistoryPrediction::default();
+        let score_of = |id: &str, job: &PendingJob| -> f64 {
+            let s = worker_scores.and_then(|ws| ws.get(id));
+            let (kind_view, arch) = match job {
+                PendingJob::Eval(e) => (
+                    JobKindView::Eval {
+                        fetch_flake: e.job.tasks.contains(&FlakeTask::FetchFlake),
+                    },
+                    "",
+                ),
+                PendingJob::Build(b) => (JobKindView::Build, b.architecture.as_str()),
+            };
+            let scored = ScoredJob::new(
+                id,
+                job.peer_id(),
+                kind_view,
+                arch,
+                false,
+                LazyProviders { closure_size: &no_closure, history: &no_history },
+            );
+            let ctx = JobContext {
+                job: &scored,
+                missing_count: s.map(|s| s.missing_count),
+                missing_nar_size: s.map(|s| s.missing_nar_size),
+                dependency_count: job.dependency_count(),
+                queued_at: job.queued_at(),
+            };
+            policy.score(&ctx, worker_ctx)
+        };
 
         let job_id = self
             .pending
@@ -290,30 +324,8 @@ impl JobTracker {
                     && job_eligible_for_caps(j, caps)
             })
             .max_by(|(id_a, job_a), (id_b, job_b)| {
-                let score_a = {
-                    let s = worker_scores.and_then(|ws| ws.get(id_a.as_str()));
-                    let ctx = JobContext {
-                        job: job_a,
-                        missing_count: s.map(|s| s.missing_count),
-                        missing_nar_size: s.map(|s| s.missing_nar_size),
-                        dependency_count: job_a.dependency_count(),
-                        queued_at: job_a.queued_at(),
-                    };
-                    policy.score(&ctx, worker_ctx)
-                };
-                let score_b = {
-                    let s = worker_scores.and_then(|ws| ws.get(id_b.as_str()));
-                    let ctx = JobContext {
-                        job: job_b,
-                        missing_count: s.map(|s| s.missing_count),
-                        missing_nar_size: s.map(|s| s.missing_nar_size),
-                        dependency_count: job_b.dependency_count(),
-                        queued_at: job_b.queued_at(),
-                    };
-                    policy.score(&ctx, worker_ctx)
-                };
-                score_a
-                    .partial_cmp(&score_b)
+                score_of(id_a, job_a)
+                    .partial_cmp(&score_of(id_b, job_b))
                     .unwrap_or(std::cmp::Ordering::Equal)
                     // Tie-break by job_id for determinism.
                     .then_with(|| id_b.cmp(id_a))
@@ -423,7 +435,6 @@ impl JobTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::policy::Policy;
     use gradient_core::types::proto::{BuildJob, BuildTask, FlakeJob, FlakeSource, FlakeTask};
 
     fn eval_job(peer: OrganizationId) -> PendingJob {
@@ -610,10 +621,10 @@ mod tests {
             architectures: vec!["x86_64-linux".into()],
             system_features: vec![],
         };
-        let p = Policy::default_build_policy();
+        let p = score::policy_by_name("default");
         assert!(
             tracker
-                .take_best_of_kind("w1", None, Some(&no_fetch), &JobKind::Flake, &p)
+                .take_best_of_kind("w1", None, Some(&no_fetch), &JobKind::Flake, &*p)
                 .is_none(),
             "worker without fetch must not receive a fetch flake job"
         );
@@ -626,7 +637,7 @@ mod tests {
         };
         assert!(
             tracker
-                .take_best_of_kind("w2", None, Some(&with_fetch), &JobKind::Flake, &p)
+                .take_best_of_kind("w2", None, Some(&with_fetch), &JobKind::Flake, &*p)
                 .is_some(),
             "fetch-capable worker must receive the fetch flake job"
         );
@@ -645,10 +656,10 @@ mod tests {
             architectures: vec![],
             system_features: vec![],
         };
-        let p = Policy::default_build_policy();
+        let p = score::policy_by_name("default");
         assert!(
             tracker
-                .take_best_of_kind("w1", None, Some(&no_fetch), &JobKind::Flake, &p)
+                .take_best_of_kind("w1", None, Some(&no_fetch), &JobKind::Flake, &*p)
                 .is_some(),
             "cached eval job must run on a worker without fetch"
         );
@@ -668,9 +679,9 @@ mod tests {
             system_features: vec![],
         };
         // Worker requesting Build → arm-only build is filtered out → no assignment.
-        let p = Policy::default_build_policy();
+        let p = score::policy_by_name("default");
         let assignment =
-            tracker.take_best_of_kind("w1", None, Some(&x86_caps), &JobKind::Build, &p);
+            tracker.take_best_of_kind("w1", None, Some(&x86_caps), &JobKind::Build, &*p);
         assert!(assignment.is_none());
         assert_eq!(tracker.pending_count(), 1);
     }
@@ -693,17 +704,17 @@ mod tests {
             architectures: vec!["x86_64-linux".into()],
             system_features: vec!["kvm".into()],
         };
-        let p = Policy::default_build_policy();
+        let p = score::policy_by_name("default");
         // Worker without kvm - no assignment.
         assert!(
             tracker
-                .take_best_of_kind("w1", None, Some(&no_kvm), &JobKind::Build, &p)
+                .take_best_of_kind("w1", None, Some(&no_kvm), &JobKind::Build, &*p)
                 .is_none()
         );
         // Worker with kvm - assigned.
         assert!(
             tracker
-                .take_best_of_kind("w2", None, Some(&with_kvm), &JobKind::Build, &p)
+                .take_best_of_kind("w2", None, Some(&with_kvm), &JobKind::Build, &*p)
                 .is_some()
         );
     }
@@ -732,8 +743,8 @@ mod tests {
                 missing_nar_size: 0,
             }],
         );
-        let p = Policy::default_build_policy();
-        let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &p);
+        let p = score::policy_by_name("default");
+        let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &*p);
         assert!(assignment.is_some());
         assert_eq!(assignment.unwrap().job_id, "j1");
         assert_eq!(tracker.pending_count(), 0);
@@ -756,8 +767,8 @@ mod tests {
         );
 
         // No scores recorded - take_best_of_kind still assigns (unscored = MAX).
-        let p = Policy::default_build_policy();
-        let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &p);
+        let p = score::policy_by_name("default");
+        let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &*p);
         assert!(assignment.is_some());
         assert_eq!(assignment.unwrap().job_id, "j1");
         assert_eq!(tracker.pending_count(), 0);
@@ -771,8 +782,8 @@ mod tests {
         tracker.add_pending("j1".into(), eval_job(peer));
 
         // Assign it.
-        let p = Policy::default_build_policy();
-        let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Flake, &p);
+        let p = score::policy_by_name("default");
+        let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Flake, &*p);
         assert!(assignment.is_some());
         assert_eq!(tracker.pending_count(), 0);
         assert_eq!(tracker.active_count(), 1);
@@ -799,14 +810,14 @@ mod tests {
             None,
             None,
             &JobKind::Flake,
-            &Policy::default_build_policy(),
+            &*score::policy_by_name("default"),
         );
         tracker.take_best_of_kind(
             "w1",
             None,
             None,
             &JobKind::Flake,
-            &Policy::default_build_policy(),
+            &*score::policy_by_name("default"),
         );
         assert_eq!(tracker.active_count(), 2);
         assert_eq!(tracker.pending_count(), 0);
@@ -835,8 +846,8 @@ mod tests {
         // Job with no required paths - should be taken.
         tracker.add_pending("j2".into(), eval_job(peer));
 
-        let p = Policy::default_build_policy();
-        let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Flake, &p);
+        let p = score::policy_by_name("default");
+        let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Flake, &*p);
         assert!(assignment.is_some());
         assert_eq!(assignment.unwrap().job_id, "j2");
     }
@@ -856,21 +867,21 @@ mod tests {
             None,
             None,
             &JobKind::Flake,
-            &Policy::default_build_policy(),
+            &*score::policy_by_name("default"),
         );
         tracker.take_best_of_kind(
             "w1",
             None,
             None,
             &JobKind::Flake,
-            &Policy::default_build_policy(),
+            &*score::policy_by_name("default"),
         );
         tracker.take_best_of_kind(
             "w1",
             None,
             None,
             &JobKind::Flake,
-            &Policy::default_build_policy(),
+            &*score::policy_by_name("default"),
         );
         assert_eq!(tracker.active_jobs().count(), 3);
 
@@ -895,7 +906,7 @@ mod tests {
             None,
             None,
             &JobKind::Flake,
-            &Policy::default_build_policy(),
+            &*score::policy_by_name("default"),
         );
 
         let aborted = tracker.drain_peer_jobs_on_worker("w1", &HashSet::new());
@@ -916,7 +927,7 @@ mod tests {
             None,
             None,
             &JobKind::Flake,
-            &Policy::default_build_policy(),
+            &*score::policy_by_name("default"),
         );
         // Now in active, not pending - should still be "contained".
         assert!(tracker.contains_job("j1"));
@@ -942,7 +953,7 @@ mod tests {
             None,
             None,
             &JobKind::Flake,
-            &Policy::default_build_policy(),
+            &*score::policy_by_name("default"),
         );
         assert!(tracker.contains_job("j1"));
         tracker.remove_job("j1");

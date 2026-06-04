@@ -37,6 +37,7 @@ pub fn test_cli_with_crypt(crypt_secret_file: String) -> Cli {
             build_retry_backoff_secs: 30,
             build_default_timeout_secs: 3600,
             build_default_max_silent_secs: 1800,
+            scheduler_scoring_policy: "default".into(),
         },
         storage: StorageArgs {
             base_path: tempfile::Builder::new()
