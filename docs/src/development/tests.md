@@ -1,7 +1,7 @@
 # Tests
 
 This page documents all unit and integration tests in the Rust backend workspace
-(**393 tests** across **7 crates**). Run them with:
+(across **8 crates**, including the `score` scoring crate). Run them with:
 
 ```sh
 cargo test --workspace --tests
@@ -893,6 +893,84 @@ The scheduler uses this score to prefer jobs whose inputs are already cached.
 | `score_empty_candidates` | Empty input → empty output |
 | `score_sets_missing_to_required_count` | 5 `required_paths`, none in store → `missing = 5` |
 | `score_multiple_candidates` | 3 candidates with 0, 3, and 5 required paths → correct `missing` counts and `job_id`s preserved |
+
+---
+
+## `score` - Scheduler Scoring Policies
+
+**File:** `backend/score/src/policy.rs`, `backend/score/src/context.rs`, `backend/score/src/rules/*.rs`
+**Run:** `cargo test -p score`
+
+Tests for the pluggable scheduler scoring crate: each `ScoreRule`'s individual
+contribution, the lazy `ScoringCtx` providers, and the composed `default` /
+`resource-aware` policies. See [scheduler scoring](scheduler-scoring.md).
+
+| Test | What it checks |
+|------|---------------|
+| `missing_paths_scored_zero_wins_over_unscored` / `missing_paths_fewer_missing_wins` | `MissingPathsRule`: known availability beats unknown; fewer missing paths score higher |
+| `missing_nar_size_smaller_wins` | `MissingNarSizeRule`: smaller fetch volume scores higher |
+| `builtin_deprioritize_penalises_builtin` | `BuiltinDeprioritizeRule`: `builtin`-arch builds penalised |
+| `dependency_count_more_deps_wins` / `dependency_count_zero_deps_zero_score` | `DependencyCountRule`: more deps score higher; zero deps score zero |
+| `wait_time_longer_wait_scores_higher_but_capped` | `WaitTimeRule`: bonus grows with wait, capped at one hour |
+| `reserve_rule_penalizes_fetch_worker_for_cached_eval_only` | `ReserveFetchWorkersRule`: only fetch-worker + cached-eval combo penalised |
+| `ram_overshoot_is_negative_and_scales_with_overshoot` / `higher_oom_rate_is_more_negative_for_same_overshoot` | `ResourceFitRule`: RAM overshoot penalty scales with overshoot and past OOM rate |
+| `cpu_heavy_on_strong_worker_is_positive_and_capped` / `no_samples_is_zero` / `no_metrics_is_zero` | `ResourceFitRule`: CPU-heavy bonus capped; no-op without history samples or worker metrics |
+| `local_worker_with_full_cache_gets_full_bonus` / `more_missing_paths_lowers_bonus_floored_at_zero` / `unknown_missing_count_is_zero` / `not_prefer_local_is_zero_regardless_of_missing_count` | `PreferLocalBuildRule`: full bonus on cached local worker, decays to a floor of 0, no-op without `preferLocalBuild` |
+| `busier_org_scores_more_negative` / `zero_share_and_none_score_zero` / `fair_share_overrides_wait_gradient` | `FairShareRule`: busier org penalised; fair-share dominates the wait-time gradient |
+| `closure_size_computed_at_most_once` / `history_not_computed_unless_read` | `ScoringCtx` lazy providers memoise and skip unread lookups |
+| `registry_selects_known_and_falls_back` | `policy_by_name` resolves known names, falls back to `default` |
+| `default_policy_long_waiting_build_overcomes_fresh_cached` / `default_policy_prefers_ready_over_costly` | Composed `default` policy: anti-starvation and ready-over-costly ordering |
+
+---
+
+## `scheduler::history` - Build History Prediction
+
+**File:** `backend/scheduler/src/history.rs`
+**Run:** `cargo test -p scheduler`
+
+Tests for the closure-size-bucketed prediction that feeds `ResourceFitRule`:
+log2-MiB bucketing, neighbour-bucket widening when a bucket is sparse, and
+aggregation of peak RAM, average CPU time and OOM rate from `derivation_metric`
+rows.
+
+| Test | What it checks |
+|------|---------------|
+| `buckets_are_log2_of_mb` | Closure size maps to a log2-MiB bucket index |
+| `bucket_bounds_bucket0_lower_bound_is_zero` | Bucket 0's lower bound is zero |
+| `bucket_bounds_widen_by_one_bucket_each_side` | Sparse buckets widen to neighbours for more samples |
+| `empty_rows_yield_default` | No history rows yields the default (zero-sample) prediction |
+| `summarize_aggregates_peak_cpu_and_oom` | Aggregates peak RAM, avg CPU time and OOM rate across rows |
+
+---
+
+## `core::db::closure` - Derivation Closure Helpers
+
+**File:** `backend/core/src/db/closure.rs`
+**Run:** `cargo test -p core --tests`
+
+Tests for the shared closure helpers (`transitive_closure_reachable`,
+`output_sizes_by_drv`, `transitive_closure_size`) extracted from the web
+closure-graph endpoint and reused by scheduler scoring.
+
+| Test | What it checks |
+|------|---------------|
+| `sums_closure_output_sizes` | Sums coalesced output NAR sizes over the reachable closure |
+| `empty_roots_is_zero` | Empty seed set yields a zero/empty result |
+
+---
+
+## `worker::metrics` - Host Metrics & CPU-Core Score
+
+**File:** `backend/worker/src/metrics/mod.rs`
+**Run:** `cargo test -p worker metrics`
+
+Tests for the host static/dynamic metrics the worker advertises, including the
+single-core speed benchmark used for `cpu_core_score`.
+
+| Test | What it checks |
+|------|---------------|
+| `cpu_core_score_in_bounds_and_positive` | Benchmarked single-core score is positive and within sane bounds |
+| `host_static_reports_nonzero` | Static host metrics (cores, total RAM) report non-zero values |
 
 ---
 
