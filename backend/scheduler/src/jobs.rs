@@ -64,6 +64,9 @@ pub struct PendingBuildJob {
     /// `derivation.prefer_local_build`: this build should run on the dispatching
     /// peer's local workers rather than be offloaded.
     pub prefer_local_build: bool,
+    /// Historical resource-usage prediction for this build's derivation,
+    /// preloaded once per dispatch round and consumed by scoring rules.
+    pub history: score::HistoryPrediction,
     /// `build.updated_at` at the time this job was dispatched to the tracker.
     /// Used by the scoring policy to prefer builds that have waited longer.
     pub queued_at: chrono::NaiveDateTime,
@@ -287,11 +290,9 @@ impl JobTracker {
         };
         let worker_ctx = worker_ctx.as_ref().unwrap_or(&fallback_ctx);
 
-        // History stays default until Phase 5.3 wires real predictions.
-        let no_history = || score::HistoryPrediction::default();
         let score_of = |id: &str, job: &PendingJob| -> f64 {
             let s = worker_scores.and_then(|ws| ws.get(id));
-            let (kind_view, arch, closure_size, prefer_local_build) = match job {
+            let (kind_view, arch, closure_size, prefer_local_build, history) = match job {
                 PendingJob::Eval(e) => (
                     JobKindView::Eval {
                         fetch_flake: e.job.tasks.contains(&FlakeTask::FetchFlake),
@@ -299,22 +300,25 @@ impl JobTracker {
                     "",
                     None,
                     false,
+                    score::HistoryPrediction::default(),
                 ),
                 PendingJob::Build(b) => (
                     JobKindView::Build,
                     b.architecture.as_str(),
                     b.closure_size,
                     b.prefer_local_build,
+                    b.history,
                 ),
             };
             let closure = move || closure_size;
+            let history_provider = move || history;
             let scored = ScoredJob::new(
                 id,
                 job.peer_id(),
                 kind_view,
                 arch,
                 prefer_local_build,
-                LazyProviders { closure_size: &closure, history: &no_history },
+                LazyProviders { closure_size: &closure, history: &history_provider },
             );
             let ctx = JobContext {
                 job: &scored,
@@ -529,6 +533,7 @@ mod tests {
             dependency_count: 0,
             closure_size: None,
             prefer_local_build: false,
+            history: score::HistoryPrediction::default(),
             queued_at: gradient_core::types::now(),
         })
     }

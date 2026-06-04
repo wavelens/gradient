@@ -219,6 +219,7 @@ fn make_build_job(
         dependency_count: 0,
         closure_size: None,
         prefer_local_build: false,
+        history: score::HistoryPrediction::default(),
         queued_at: gradient_core::types::now(),
     }
 }
@@ -772,7 +773,7 @@ async fn build_completed_last_build_completes_eval() {
     let state = make_state(db);
     let _job = make_build_job(build_id, eval_id, org_id);
 
-    let result = build_handler::handle_build_job_completed(&state, build_id).await;
+    let result = build_handler::handle_build_job_completed(&state, build_id, None).await;
     assert!(result.is_ok());
 }
 
@@ -802,7 +803,7 @@ async fn build_completed_with_remaining_active() {
         .into_connection();
 
     let state = make_state(db);
-    let result = build_handler::handle_build_job_completed(&state, build_id).await;
+    let result = build_handler::handle_build_job_completed(&state, build_id, None).await;
     assert!(result.is_ok());
 }
 
@@ -843,7 +844,7 @@ async fn build_completed_with_failed_sibling() {
         .into_connection();
 
     let state = make_state(db);
-    let result = build_handler::handle_build_job_completed(&state, build_id).await;
+    let result = build_handler::handle_build_job_completed(&state, build_id, None).await;
     assert!(result.is_ok());
 }
 
@@ -872,7 +873,7 @@ async fn build_completed_eval_not_building_noop() {
         .into_connection();
 
     let state = make_state(db);
-    let result = build_handler::handle_build_job_completed(&state, build_id).await;
+    let result = build_handler::handle_build_job_completed(&state, build_id, None).await;
     assert!(result.is_ok());
 }
 
@@ -887,7 +888,7 @@ async fn build_completed_unknown_build_noop() {
         .into_connection();
 
     let state = make_state(db);
-    let result = build_handler::handle_build_job_completed(&state, build_id).await;
+    let result = build_handler::handle_build_job_completed(&state, build_id, None).await;
     assert!(result.is_ok());
 }
 
@@ -926,7 +927,7 @@ async fn build_completed_dep_failed_siblings_cause_eval_failed() {
         .into_connection();
 
     let state = make_state(db);
-    let result = build_handler::handle_build_job_completed(&state, build_id).await;
+    let result = build_handler::handle_build_job_completed(&state, build_id, None).await;
     assert!(result.is_ok());
 }
 
@@ -1992,7 +1993,7 @@ async fn action_dispatched_on_build_completed() {
         .into_connection();
 
     let state = make_state(db);
-    let result = build_handler::handle_build_job_completed(&state, build_id).await;
+    let result = build_handler::handle_build_job_completed(&state, build_id, None).await;
     assert!(result.is_ok());
     tokio::task::yield_now().await;
 }

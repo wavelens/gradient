@@ -356,7 +356,12 @@ impl Scheduler {
 
     // ── Job completion ────────────────────────────────────────────────────────
 
-    pub async fn handle_job_completed(&self, peer_id: &str, job_id: &str) -> Result<()> {
+    pub async fn handle_job_completed(
+        &self,
+        peer_id: &str,
+        job_id: &str,
+        metrics: Option<gradient_core::types::proto::BuildMetrics>,
+    ) -> Result<()> {
         self.worker_pool.write().await.release_job(peer_id, job_id);
         let job = self.job_tracker.write().await.remove_active(job_id);
         match job {
@@ -406,9 +411,7 @@ impl Scheduler {
                 eval::handle_eval_job_completed(&self.state, j.evaluation_id).await
             }
             Some(PendingJob::Build(j)) => {
-                build::handle_build_job_completed(&self.state, j.build_id).await
-                // Same: the worker chains a RequestJob after JobCompleted,
-                // which triggers on-demand dispatch if needed.
+                build::handle_build_job_completed(&self.state, j.build_id, metrics).await
             }
             None => {
                 warn!(%job_id, "job_completed for unknown job");
