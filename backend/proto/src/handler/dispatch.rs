@@ -214,8 +214,8 @@ impl<'a> DispatchContext<'a> {
                 self.on_job_update(job_id, update).await;
                 true
             }
-            ClientMessage::JobCompleted { job_id, metrics } => {
-                self.on_job_completed(job_id, metrics).await;
+            ClientMessage::JobCompleted { job_id } => {
+                self.on_job_completed(job_id).await;
                 true
             }
             ClientMessage::JobFailed {
@@ -545,10 +545,14 @@ impl<'a> DispatchContext<'a> {
                     .handle_build_status_update(&build_id, self.peer_id)
                     .await;
             }
-            JobUpdateKind::BuildOutput { build_id, outputs } => {
+            JobUpdateKind::BuildOutput {
+                build_id,
+                outputs,
+                metrics,
+            } => {
                 if let Err(e) = self
                     .scheduler
-                    .handle_build_output(&job_id, &build_id, outputs)
+                    .handle_build_output(&job_id, &build_id, outputs, metrics)
                     .await
                 {
                     error!(peer_id = %self.peer_id, %job_id, error = %e, "handle_build_output failed");
@@ -560,18 +564,11 @@ impl<'a> DispatchContext<'a> {
 
     // ── Job terminal states ───────────────────────────────────────────────────
 
-    async fn on_job_completed(
-        &mut self,
-        job_id: String,
-        metrics: Option<gradient_core::types::proto::BuildMetrics>,
-    ) {
+    async fn on_job_completed(&mut self, job_id: String) {
         info!(peer_id = %self.peer_id, %job_id, "job completed");
-        if let Some(m) = &metrics {
-            debug!(peer_id = %self.peer_id, %job_id, ?m, "received build metrics");
-        }
         if let Err(e) = self
             .scheduler
-            .handle_job_completed(self.peer_id, &job_id, metrics)
+            .handle_job_completed(self.peer_id, &job_id)
             .await
         {
             error!(peer_id = %self.peer_id, %job_id, error = %e, "handle_job_completed failed");

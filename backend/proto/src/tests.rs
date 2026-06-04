@@ -5,8 +5,9 @@
  */
 
 use crate::messages::{
-    BuildMetrics, CachedPath, ClientMessage, FlakeInputOverride, FlakeJob, FlakeSource, FlakeTask,
-    GradientCapabilities, Job, JobCandidate, PROTO_VERSION, QueryMode, RequiredPath, ServerMessage,
+    BuildMetrics, BuildOutput, CachedPath, ClientMessage, FlakeInputOverride, FlakeJob,
+    FlakeSource, FlakeTask, GradientCapabilities, Job, JobCandidate, JobUpdateKind, PROTO_VERSION,
+    QueryMode, RequiredPath, ServerMessage,
 };
 use rkyv::rancor::Error as RkyvError;
 
@@ -264,15 +265,6 @@ fn cached_path_not_cached_no_url() {
 fn job_completed_roundtrip() {
     let original = ClientMessage::JobCompleted {
         job_id: "job-123".to_string(),
-        metrics: Some(BuildMetrics {
-            peak_ram_mb: Some(2048),
-            cpu_time_ms: Some(60_000),
-            avg_cpu_pct: Some(50.0),
-            disk_read_bytes: Some(1024),
-            disk_write_bytes: Some(2048),
-            oom_killed: true,
-            build_time_ms: Some(120_000),
-        }),
     };
     let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
     let decoded = rkyv::from_bytes::<ClientMessage, RkyvError>(&bytes).unwrap();
@@ -280,10 +272,44 @@ fn job_completed_roundtrip() {
 }
 
 #[test]
-fn job_completed_no_metrics_roundtrip() {
-    let original = ClientMessage::JobCompleted {
+fn build_output_with_metrics_roundtrip() {
+    let original = ClientMessage::JobUpdate {
+        job_id: "job-123".to_string(),
+        update: JobUpdateKind::BuildOutput {
+            build_id: "build-1".to_string(),
+            outputs: vec![BuildOutput {
+                name: "out".into(),
+                store_path: "/nix/store/aaaa-foo".into(),
+                hash: "aaaa".into(),
+                nar_size: Some(4096),
+                nar_hash: Some("sha256:abc".into()),
+                products: vec![],
+            }],
+            metrics: Some(BuildMetrics {
+                peak_ram_mb: Some(2048),
+                cpu_time_ms: Some(60_000),
+                avg_cpu_pct: Some(50.0),
+                disk_read_bytes: Some(1024),
+                disk_write_bytes: Some(2048),
+                oom_killed: true,
+                build_time_ms: Some(120_000),
+            }),
+        },
+    };
+    let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
+    let decoded = rkyv::from_bytes::<ClientMessage, RkyvError>(&bytes).unwrap();
+    assert_eq!(decoded, original);
+}
+
+#[test]
+fn build_output_no_metrics_roundtrip() {
+    let original = ClientMessage::JobUpdate {
         job_id: "job-456".to_string(),
-        metrics: None,
+        update: JobUpdateKind::BuildOutput {
+            build_id: "build-2".to_string(),
+            outputs: vec![],
+            metrics: None,
+        },
     };
     let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
     let decoded = rkyv::from_bytes::<ClientMessage, RkyvError>(&bytes).unwrap();

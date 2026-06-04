@@ -13,7 +13,8 @@ use anyhow::Result;
 use async_trait::async_trait;
 
 use crate::messages::{
-    BuildOutput, CachedPath, DiscoveredDerivation, FailedPeer, GradientCapabilities, QueryMode,
+    BuildMetrics, BuildOutput, CachedPath, DiscoveredDerivation, FailedPeer, GradientCapabilities,
+    QueryMode,
 };
 
 // ── Store access ─────────────────────────────────────────────────────────────
@@ -81,6 +82,7 @@ pub trait JobReporter: Send {
         &mut self,
         build_id: String,
         outputs: Vec<BuildOutput>,
+        metrics: Option<BuildMetrics>,
     ) -> Result<()>;
     async fn report_compressing(&mut self) -> Result<()>;
     async fn send_log_chunk(&mut self, task_index: u32, data: Vec<u8>) -> Result<()>;

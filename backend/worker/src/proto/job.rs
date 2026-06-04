@@ -60,10 +60,6 @@ pub struct JobUpdater {
     /// Routes incoming `NarPush` chunks back to the job task that requested
     /// them via `NarRequest`. Cloneable; cheap.
     pub(crate) nar_recv: NarReceiver,
-    /// Per-build resource metrics recorded by the build executor; drained into
-    /// `JobCompleted` once the job finishes. Only the last build's metrics are
-    /// retained for a multi-build job.
-    metrics: Arc<Mutex<Option<BuildMetrics>>>,
 }
 
 impl JobUpdater {
@@ -80,19 +76,7 @@ impl JobUpdater {
             cache_waiters,
             known_derivation_waiters,
             nar_recv,
-            metrics: Arc::new(Mutex::new(None)),
         }
-    }
-
-    /// Record the resource metrics for the build that just finished. Overwrites
-    /// any previously recorded metrics within the same job.
-    pub fn record_build_metrics(&self, metrics: BuildMetrics) {
-        *self.metrics.lock().unwrap() = Some(metrics);
-    }
-
-    /// Take the last recorded build metrics, leaving `None` behind.
-    pub fn take_build_metrics(&self) -> Option<BuildMetrics> {
-        self.metrics.lock().unwrap().take()
     }
 
     pub async fn query_cache(
@@ -179,8 +163,17 @@ impl JobUpdater {
         self.send_update(JobUpdateKind::Building { build_id })
     }
 
-    pub fn report_build_output(&self, build_id: String, outputs: Vec<BuildOutput>) -> Result<()> {
-        self.send_update(JobUpdateKind::BuildOutput { build_id, outputs })
+    pub fn report_build_output(
+        &self,
+        build_id: String,
+        outputs: Vec<BuildOutput>,
+        metrics: Option<BuildMetrics>,
+    ) -> Result<()> {
+        self.send_update(JobUpdateKind::BuildOutput {
+            build_id,
+            outputs,
+            metrics,
+        })
     }
 
     pub fn report_compressing(&self) -> Result<()> {
@@ -350,8 +343,13 @@ impl JobReporter for JobUpdater {
         &mut self,
         build_id: String,
         outputs: Vec<BuildOutput>,
+        metrics: Option<BuildMetrics>,
     ) -> Result<()> {
-        self.send_update(JobUpdateKind::BuildOutput { build_id, outputs })
+        self.send_update(JobUpdateKind::BuildOutput {
+            build_id,
+            outputs,
+            metrics,
+        })
     }
 
     async fn report_compressing(&mut self) -> Result<()> {
@@ -530,7 +528,6 @@ mod tests {
             .writer
             .send(ClientMessage::JobCompleted {
                 job_id: updater.job_id.clone(),
-                metrics: None,
             })
             .unwrap();
         server_task.await.unwrap();

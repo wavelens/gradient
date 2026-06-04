@@ -84,14 +84,22 @@ impl<'a> BuildStateHandler<'a> {
         _job: &PendingBuildJob,
         build_id: BuildId,
         outputs: Vec<BuildOutput>,
+        metrics: Option<BuildMetrics>,
     ) -> Result<()> {
-        let build = EBuild::find_by_id(build_id)
+        let mut build = EBuild::find_by_id(build_id)
             .one(&self.state.worker_db)
             .await
             .context("fetch build")?
             .with_context(|| format!("build {} not found", build_id))?;
 
         let derivation_id = build.derivation;
+
+        // Per-build metrics: a multi-build job yields one `BuildOutput` per
+        // build, so this records exactly one `derivation_metric` row per build.
+        if let Some(metrics) = metrics {
+            self.record_metrics(&mut build, derivation_id, &metrics)
+                .await;
+        }
 
         for output in &outputs {
             let existing = EDerivationOutput::find()
@@ -150,12 +158,8 @@ impl<'a> BuildStateHandler<'a> {
         Ok(())
     }
 
-    pub async fn handle_build_job_completed(
-        &self,
-        build_id: BuildId,
-        metrics: Option<BuildMetrics>,
-    ) -> Result<()> {
-        let mut build = match EBuild::find_by_id(build_id)
+    pub async fn handle_build_job_completed(&self, build_id: BuildId) -> Result<()> {
+        let build = match EBuild::find_by_id(build_id)
             .one(&self.state.worker_db)
             .await?
         {
@@ -168,11 +172,6 @@ impl<'a> BuildStateHandler<'a> {
         let evaluation_id = build.evaluation;
         let derivation_id = build.derivation;
         let was_external_cached = build.external_cached;
-
-        if let Some(metrics) = metrics {
-            self.record_metrics(&mut build, derivation_id, &metrics)
-                .await;
-        }
 
         let leader =
             update_build_status(Arc::clone(self.state), build, BuildStatus::Completed).await;
@@ -213,9 +212,10 @@ impl<'a> BuildStateHandler<'a> {
         self.check_evaluation_done(evaluation_id).await
     }
 
-    /// Insert a `derivation_metric` history row from a completed build's worker
-    /// metrics and adopt the worker-measured build time onto the build model
-    /// (overriding the wall-clock fallback in `update_build_status`).
+    /// Insert a `derivation_metric` history row from a build's worker metrics
+    /// and persist the worker-measured build time onto the build row (overriding
+    /// the wall-clock fallback in `update_build_status`). Called once per build
+    /// from the `BuildOutput` handler.
     async fn record_metrics(
         &self,
         build: &mut MBuild,
@@ -224,6 +224,12 @@ impl<'a> BuildStateHandler<'a> {
     ) {
         if let Some(ms) = metrics.build_time_ms {
             build.build_time_ms = Some(ms as i64);
+            let build_id = build.id;
+            let mut am: ABuild = build.clone().into_active_model();
+            am.build_time_ms = Set(Some(ms as i64));
+            if let Err(e) = am.update(&self.state.worker_db).await {
+                warn!(%build_id, error = %e, "failed to persist build_time_ms");
+            }
         }
 
         let (pname, closure_size) = match EDerivation::find_by_id(derivation_id)
@@ -781,19 +787,19 @@ pub async fn handle_build_output(
     job: &PendingBuildJob,
     build_id: BuildId,
     outputs: Vec<BuildOutput>,
+    metrics: Option<BuildMetrics>,
 ) -> Result<()> {
     BuildStateHandler::new(state)
-        .handle_build_output(job, build_id, outputs)
+        .handle_build_output(job, build_id, outputs, metrics)
         .await
 }
 
 pub async fn handle_build_job_completed(
     state: &Arc<ServerState>,
     build_id: BuildId,
-    metrics: Option<BuildMetrics>,
 ) -> Result<()> {
     BuildStateHandler::new(state)
-        .handle_build_job_completed(build_id, metrics)
+        .handle_build_job_completed(build_id)
         .await
 }
 

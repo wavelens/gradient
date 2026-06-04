@@ -166,6 +166,10 @@ pub enum JobUpdateKind {
     BuildOutput {
         build_id: String,
         outputs: Vec<BuildOutput>,
+        /// Per-build resource usage for this build; `None` when capture is
+        /// disabled. A multi-build job yields one `BuildOutput` (and thus one
+        /// metrics record) per build.
+        metrics: Option<BuildMetrics>,
     },
     Compressing,
 }
