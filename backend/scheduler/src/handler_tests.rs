@@ -1300,27 +1300,28 @@ async fn build_output_with_metrics_records_one_metric_row() {
         build_time_ms: Some(120_000),
     });
 
+    // Queries (ordered): find build, find derivation, find derivation_output,
+    // update derivation_output (RETURNING). Execs (ordered): persist
+    // build_time_ms, insert derivation_metric, delete prior build_product.
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        // 1. find_by_id(build)
-        .append_query_results([vec![build.clone()]])
-        // 2. record_metrics: persist build_time_ms (UPDATE...RETURNING)
         .append_query_results([vec![build]])
-        // 3. record_metrics: find_by_id(derivation) for pname/closure_size
         .append_query_results([vec![derivation]])
-        // 4. record_metrics: insert derivation_metric → exec
-        .append_exec_results([MockExecResult {
-            last_insert_id: 0,
-            rows_affected: 1,
-        }])
-        // 5. find derivation_output row
         .append_query_results([vec![drv_out]])
-        // 6. update derivation_output (UPDATE...RETURNING)
         .append_query_results([vec![drv_out_updated]])
-        // 7. delete_many prior build_product rows → exec
-        .append_exec_results([MockExecResult {
-            last_insert_id: 0,
-            rows_affected: 0,
-        }])
+        .append_exec_results([
+            MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            },
+            MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            },
+            MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 0,
+            },
+        ])
         .into_connection();
 
     let state = make_state(db);
