@@ -662,7 +662,7 @@ mod tests {
             system_features: vec![],
             ..Default::default()
         };
-        let p = score::policy_by_name("default");
+        let p = score::policy_by_name("simple");
         assert!(
             tracker
                 .take_best_of_kind("w1", None, Some(&no_fetch), &JobKind::Flake, &*p)
@@ -699,7 +699,7 @@ mod tests {
             system_features: vec![],
             ..Default::default()
         };
-        let p = score::policy_by_name("default");
+        let p = score::policy_by_name("simple");
         assert!(
             tracker
                 .take_best_of_kind("w1", None, Some(&no_fetch), &JobKind::Flake, &*p)
@@ -723,7 +723,7 @@ mod tests {
             ..Default::default()
         };
         // Worker requesting Build → arm-only build is filtered out → no assignment.
-        let p = score::policy_by_name("default");
+        let p = score::policy_by_name("simple");
         let assignment =
             tracker.take_best_of_kind("w1", None, Some(&x86_caps), &JobKind::Build, &*p);
         assert!(assignment.is_none());
@@ -750,7 +750,7 @@ mod tests {
             system_features: vec!["kvm".into()],
             ..Default::default()
         };
-        let p = score::policy_by_name("default");
+        let p = score::policy_by_name("simple");
         // Worker without kvm - no assignment.
         assert!(
             tracker
@@ -789,7 +789,7 @@ mod tests {
                 missing_nar_size: 0,
             }],
         );
-        let p = score::policy_by_name("default");
+        let p = score::policy_by_name("simple");
         let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &*p);
         assert!(assignment.is_some());
         assert_eq!(assignment.unwrap().job_id, "j1");
@@ -843,7 +843,7 @@ mod tests {
         );
 
         // No scores recorded - take_best_of_kind still assigns (unscored = MAX).
-        let p = score::policy_by_name("default");
+        let p = score::policy_by_name("simple");
         let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &*p);
         assert!(assignment.is_some());
         assert_eq!(assignment.unwrap().job_id, "j1");
@@ -858,7 +858,7 @@ mod tests {
         tracker.add_pending("j1".into(), eval_job(peer));
 
         // Assign it.
-        let p = score::policy_by_name("default");
+        let p = score::policy_by_name("simple");
         let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Flake, &*p);
         assert!(assignment.is_some());
         assert_eq!(tracker.pending_count(), 0);
@@ -886,14 +886,14 @@ mod tests {
             None,
             None,
             &JobKind::Flake,
-            &*score::policy_by_name("default"),
+            &*score::policy_by_name("simple"),
         );
         tracker.take_best_of_kind(
             "w1",
             None,
             None,
             &JobKind::Flake,
-            &*score::policy_by_name("default"),
+            &*score::policy_by_name("simple"),
         );
         assert_eq!(tracker.active_count(), 2);
         assert_eq!(tracker.pending_count(), 0);
@@ -922,7 +922,7 @@ mod tests {
         // Job with no required paths - should be taken.
         tracker.add_pending("j2".into(), eval_job(peer));
 
-        let p = score::policy_by_name("default");
+        let p = score::policy_by_name("simple");
         let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Flake, &*p);
         assert!(assignment.is_some());
         assert_eq!(assignment.unwrap().job_id, "j2");
@@ -943,21 +943,21 @@ mod tests {
             None,
             None,
             &JobKind::Flake,
-            &*score::policy_by_name("default"),
+            &*score::policy_by_name("simple"),
         );
         tracker.take_best_of_kind(
             "w1",
             None,
             None,
             &JobKind::Flake,
-            &*score::policy_by_name("default"),
+            &*score::policy_by_name("simple"),
         );
         tracker.take_best_of_kind(
             "w1",
             None,
             None,
             &JobKind::Flake,
-            &*score::policy_by_name("default"),
+            &*score::policy_by_name("simple"),
         );
         assert_eq!(tracker.active_jobs().count(), 3);
 
@@ -982,7 +982,7 @@ mod tests {
             None,
             None,
             &JobKind::Flake,
-            &*score::policy_by_name("default"),
+            &*score::policy_by_name("simple"),
         );
 
         let aborted = tracker.drain_peer_jobs_on_worker("w1", &HashSet::new());
@@ -1003,7 +1003,7 @@ mod tests {
             None,
             None,
             &JobKind::Flake,
-            &*score::policy_by_name("default"),
+            &*score::policy_by_name("simple"),
         );
         // Now in active, not pending - should still be "contained".
         assert!(tracker.contains_job("j1"));
@@ -1029,7 +1029,7 @@ mod tests {
             None,
             None,
             &JobKind::Flake,
-            &*score::policy_by_name("default"),
+            &*score::policy_by_name("simple"),
         );
         assert!(tracker.contains_job("j1"));
         tracker.remove_job("j1");
