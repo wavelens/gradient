@@ -225,9 +225,12 @@ impl<'a> BuildStateHandler<'a> {
         if let Some(ms) = metrics.build_time_ms {
             build.build_time_ms = Some(ms as i64);
             let build_id = build.id;
-            let mut am: ABuild = build.clone().into_active_model();
-            am.build_time_ms = Set(Some(ms as i64));
-            if let Err(e) = am.update(&self.state.worker_db).await {
+            let res = EBuild::update_many()
+                .col_expr(CBuild::BuildTimeMs, sea_orm::sea_query::Expr::value(ms as i64))
+                .filter(CBuild::Id.eq(build_id))
+                .exec(&self.state.worker_db)
+                .await;
+            if let Err(e) = res {
                 warn!(%build_id, error = %e, "failed to persist build_time_ms");
             }
         }

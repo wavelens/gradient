@@ -24,7 +24,7 @@ fn bucket_bounds(closure_size_bytes: i64) -> (i64, i64) {
     let bucket = closure_bucket(closure_size_bytes);
     let lo_bucket = (bucket - 1).max(0);
     let hi_bucket = bucket + 1;
-    let lo = (1i64 << lo_bucket) * 1_048_576;
+    let lo = if lo_bucket == 0 { 0 } else { (1i64 << lo_bucket) * 1_048_576 };
     let hi = ((1i64 << (hi_bucket + 1)) * 1_048_576) - 1;
     (lo, hi)
 }
@@ -149,5 +149,13 @@ mod tests {
         let (lo, hi) = bucket_bounds(4 * 1_048_576);
         assert!(lo <= 2 * 1_048_576);
         assert!(hi >= 8 * 1_048_576);
+    }
+
+    #[test]
+    fn bucket_bounds_bucket0_lower_bound_is_zero() {
+        // Bucket 0 covers closures < 2 MiB; lo_bucket clamps to 0, so the
+        // lower bound must be 0 (not 1 MiB) to include sub-1-MiB metrics.
+        let (lo, _hi) = bucket_bounds(1_048_576);
+        assert_eq!(lo, 0);
     }
 }
