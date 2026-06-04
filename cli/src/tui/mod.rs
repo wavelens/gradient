@@ -6,6 +6,7 @@
 pub mod graph;
 pub mod log_view;
 pub mod nar_browser;
+pub mod watch;
 
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;

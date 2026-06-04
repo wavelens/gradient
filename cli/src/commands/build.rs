@@ -18,7 +18,7 @@ pub async fn handle_build(
     target: Option<String>,
     system: Option<String>,
     organization: Option<String>,
-    no_stream: bool,
+    background: bool,
     quiet: bool,
     out: Output,
 ) {
@@ -181,6 +181,12 @@ pub async fn handle_build(
         }
     };
 
+    if background {
+        out.ok(&dispatch);
+        out.human(dispatch.evaluation.clone());
+        return;
+    }
+
     if quiet {
         out.human(dispatch.evaluation.clone());
     } else {
@@ -188,10 +194,6 @@ pub async fn handle_build(
         out.human(format!("Evaluation: {}", dispatch.evaluation));
         out.human(format!("Project:    {}", dispatch.project));
         out.human(format!("Commit:     {}", dispatch.commit));
-    }
-
-    if no_stream {
-        return;
     }
 
     if !quiet {

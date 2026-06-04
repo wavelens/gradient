@@ -95,11 +95,16 @@ enum MainCommands {
         system: Option<String>,
         #[arg(short, long)]
         organization: Option<String>,
-        /// Skip log streaming and exit after dispatch
-        #[arg(long)]
-        no_stream: bool,
+        /// Dispatch and return the evaluation UUID without streaming logs
+        #[arg(short, long)]
+        background: bool,
         #[arg(short, long)]
         quiet: bool,
+    },
+    /// Watch a running evaluation's live build logs and status
+    Watch {
+        /// Evaluation UUID to watch
+        evaluation: String,
     },
     /// Download evaluation artefacts
     Download {
@@ -291,9 +296,10 @@ pub async fn run_cli() -> std::io::Result<()> {
             target,
             system,
             organization,
-            no_stream,
+            background,
             quiet,
-        } => build::handle_build(target, system, organization, no_stream, quiet, out).await,
+        } => build::handle_build(target, system, organization, background, quiet, out).await,
+        MainCommands::Watch { evaluation } => watch::handle_watch(&evaluation, out).await,
         MainCommands::Download {
             flake_ref,
             evaluation,
