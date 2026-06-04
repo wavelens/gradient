@@ -77,6 +77,7 @@ openssl rand -base64 48 > /run/secrets/gradient-crypt
 | `settings.buildRetryBackoffSecs` | `30` | Base back-off in seconds before retrying a transient build failure; doubled after each prior attempt (exponential). (`GRADIENT_BUILD_RETRY_BACKOFF_SECS`) |
 | `settings.buildDefaultTimeoutSecs` | `3600` | Default wall-clock timeout (seconds) for builds whose `.drv` does not set a `timeout` attribute. `0` disables. (`GRADIENT_BUILD_DEFAULT_TIMEOUT_SECS`) |
 | `settings.buildDefaultMaxSilentSecs` | `1800` | Default silent-output timeout (seconds) for builds whose `.drv` does not set a `maxSilent` attribute. `0` disables. (`GRADIENT_BUILD_DEFAULT_MAX_SILENT_SECS`) |
+| `settings.schedulerScoringPolicy` | `default` | Scheduler scoring policy ranking queued jobs against a requesting worker (`GRADIENT_SCHEDULER_SCORING_POLICY`). Values: `default`, `resource-aware`. `default` weighs path availability, NAR size, dependency count, wait-time anti-starvation, builtin de-prioritization and fetch-worker reservation. `resource-aware` adds RAM/OOM-fit, CPU affinity, preferLocalBuild affinity and per-org fair-share on top. Unknown values fall back to `default`. See [scheduler scoring](development/scheduler-scoring.md). |
 
 ### Build failure states and retries
 

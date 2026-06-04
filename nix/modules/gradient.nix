@@ -392,6 +392,19 @@ in {
           default = 1800;
         };
 
+        schedulerScoringPolicy = lib.mkOption {
+          description = ''
+            Scheduler scoring policy used to rank queued jobs against a
+            requesting worker. `default` weighs path availability, NAR size,
+            dependency count, wait-time anti-starvation, builtin
+            de-prioritization and fetch-worker reservation. `resource-aware`
+            adds RAM/OOM-fit, CPU affinity, preferLocalBuild affinity and
+            per-org fair-share. Unknown values fall back to `default`.
+          '';
+          type = lib.types.enum [ "default" "resource-aware" ];
+          default = "default";
+        };
+
         maxRequestSize = lib.mkOption {
           description = ''
             Maximum size in bytes of an HTTP request body for most endpoints.
@@ -644,6 +657,7 @@ in {
         GRADIENT_BUILD_RETRY_BACKOFF_SECS = toString cfg.settings.buildRetryBackoffSecs;
         GRADIENT_BUILD_DEFAULT_TIMEOUT_SECS = toString cfg.settings.buildDefaultTimeoutSecs;
         GRADIENT_BUILD_DEFAULT_MAX_SILENT_SECS = toString cfg.settings.buildDefaultMaxSilentSecs;
+        GRADIENT_SCHEDULER_SCORING_POLICY = cfg.settings.schedulerScoringPolicy;
         GRADIENT_MAX_REQUEST_SIZE = toString cfg.settings.maxRequestSize;
         GRADIENT_MAX_NAR_UPLOAD_SIZE = toString cfg.settings.maxNarUploadSize;
         GRADIENT_MAX_PROTO_CONNECTIONS = toString cfg.settings.maxProtoConnections;
