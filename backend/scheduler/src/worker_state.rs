@@ -65,6 +65,14 @@ pub struct WorkerShared {
     pub architectures: Vec<String>,
     pub system_features: Vec<String>,
     pub max_concurrent_builds: u32,
+    /// Static hardware capabilities reported alongside build capabilities.
+    pub cpu_count: u32,
+    pub ram_total_mb: u64,
+    pub cpu_core_score: u32,
+    /// Latest live-metrics heartbeat; all zero / `None` until the first report.
+    pub cpu_usage_pct: f32,
+    pub ram_free_mb: u64,
+    pub disk_speed_mbps: Option<f32>,
     pub assigned_jobs: HashSet<String>,
     /// Whether this worker operates in open (no peer filter) or restricted mode.
     pub peer_auth: PeerAuth,
@@ -116,6 +124,12 @@ impl TypedWorker<Active> {
                 architectures: vec![],
                 system_features: vec![],
                 max_concurrent_builds: 1,
+                cpu_count: 0,
+                ram_total_mb: 0,
+                cpu_core_score: 0,
+                cpu_usage_pct: 0.0,
+                ram_free_mb: 0,
+                disk_speed_mbps: None,
                 assigned_jobs: HashSet::new(),
                 peer_auth: PeerAuth::from_peers(authorized_peers),
                 sent_candidates: HashSet::new(),

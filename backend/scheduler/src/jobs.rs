@@ -74,6 +74,11 @@ pub struct WorkerCaps {
     pub fetch: bool,
     pub architectures: Vec<String>,
     pub system_features: Vec<String>,
+    pub cpu_count: u32,
+    pub cpu_core_score: u32,
+    pub ram_total_mb: u64,
+    /// Live resource view of the worker, fed into resource-aware scoring rules.
+    pub metrics: Option<score::WorkerMetricsView>,
 }
 
 impl WorkerCaps {
@@ -267,7 +272,7 @@ impl JobTracker {
             architectures: &c.architectures,
             system_features: &c.system_features,
             fetch: c.fetch,
-            metrics: None,
+            metrics: c.metrics,
         });
         let empty_archs: Vec<String> = vec![];
         let empty_feats: Vec<String> = vec![];
@@ -525,6 +530,7 @@ mod tests {
             fetch: false,
             architectures: vec!["x86_64-linux".into(), "aarch64-linux".into()],
             system_features: vec![],
+            ..Default::default()
         };
         assert!(caps.can_build("x86_64-linux", &[]));
         assert!(caps.can_build("aarch64-linux", &[]));
@@ -539,6 +545,7 @@ mod tests {
             fetch: false,
             architectures: vec!["x86_64-linux".into()],
             system_features: vec!["kvm".into()],
+            ..Default::default()
         };
         assert!(caps.can_build("x86_64-linux", &["kvm".into()]));
         // kvm is provided but big-parallel is not → must reject.
@@ -598,6 +605,7 @@ mod tests {
             fetch: false,
             architectures: vec!["x86_64-linux".into()],
             system_features: vec![],
+            ..Default::default()
         };
         let candidates = tracker.candidates_for_worker(None, Some(&x86_caps));
         let mut ids: Vec<_> = candidates.iter().map(|c| c.job_id.clone()).collect();
@@ -620,6 +628,7 @@ mod tests {
             fetch: false,
             architectures: vec!["x86_64-linux".into()],
             system_features: vec![],
+            ..Default::default()
         };
         let p = score::policy_by_name("default");
         assert!(
@@ -634,6 +643,7 @@ mod tests {
             fetch: true,
             architectures: vec!["x86_64-linux".into()],
             system_features: vec![],
+            ..Default::default()
         };
         assert!(
             tracker
@@ -655,6 +665,7 @@ mod tests {
             fetch: false,
             architectures: vec![],
             system_features: vec![],
+            ..Default::default()
         };
         let p = score::policy_by_name("default");
         assert!(
@@ -677,6 +688,7 @@ mod tests {
             fetch: false,
             architectures: vec!["x86_64-linux".into()],
             system_features: vec![],
+            ..Default::default()
         };
         // Worker requesting Build → arm-only build is filtered out → no assignment.
         let p = score::policy_by_name("default");
@@ -698,11 +710,13 @@ mod tests {
             fetch: false,
             architectures: vec!["x86_64-linux".into()],
             system_features: vec![],
+            ..Default::default()
         };
         let with_kvm = WorkerCaps {
             fetch: false,
             architectures: vec!["x86_64-linux".into()],
             system_features: vec!["kvm".into()],
+            ..Default::default()
         };
         let p = score::policy_by_name("default");
         // Worker without kvm - no assignment.

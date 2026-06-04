@@ -327,7 +327,8 @@ authorized peers, and assigned-job tracking.
 | `test_register_and_is_connected` | Register "w1": `is_connected` true, count is 1 |
 | `test_unregister_returns_assigned_jobs` | Assign 2 jobs, unregister: returns both job IDs, count drops to 0 |
 | `test_unregister_unknown_returns_empty` | Unregistering unknown worker returns empty vec |
-| `test_update_capabilities` | Set architectures/features/max_builds, verify via `all_workers()` |
+| `test_update_capabilities` | Set architectures/features/max_builds + static hardware caps, verify via `all_workers()` and `metrics_for()` |
+| `test_update_metrics_updates_view` | Live-metrics heartbeat updates the worker's `WorkerMetricsView`; static caps survive; unknown worker returns `None` |
 | `test_mark_draining` | Draining flag is reflected in `all_workers()` output |
 | `test_authorized_peers_for` | Registered peers are accessible; unknown worker returns `None` |
 | `test_update_authorized_peers` | Adding a peer via reauth expands the authorized set |
