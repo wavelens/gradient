@@ -20,6 +20,15 @@ pub enum Commands {
         id: String,
         #[arg(short = 'i', long)]
         interactive: bool,
+        /// Print only a line range, e.g. `L120-L130`, `120-130`, or `120`.
+        #[arg(long)]
+        lines: Option<String>,
+        /// Search the log for a substring and stream matching lines.
+        #[arg(long)]
+        search: Option<String>,
+        /// Make `--search` case-sensitive.
+        #[arg(long)]
+        case: bool,
     },
 }
 
@@ -40,8 +49,14 @@ pub async fn handle(cmd: Commands, out: Output) {
                 Err(e) => out.err(to_exit_kind(&e), e),
             }
         }
-        Commands::Log { id, interactive } => {
-            crate::commands::builds_log::handle_log(&id, interactive, out).await
+        Commands::Log {
+            id,
+            interactive,
+            lines,
+            search,
+            case,
+        } => {
+            crate::commands::builds_log::handle_log(&id, interactive, lines, search, case, out).await
         }
     }
 }

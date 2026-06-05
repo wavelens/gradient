@@ -87,6 +87,71 @@ impl BuildsApi<'_> {
         }))
     }
 
+    /// Fetch a 1-based inclusive line range of a completed build's log.
+    pub async fn log_lines(
+        &self,
+        id: &str,
+        start: u64,
+        end: Option<u64>,
+    ) -> Result<String, ConnectorError> {
+        let mut query = vec![("start".to_string(), start.to_string())];
+        if let Some(e) = end {
+            query.push(("end".to_string(), e.to_string()));
+        }
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("builds/{id}/log/lines"),
+            true,
+        )?
+        .query(&query);
+        let res = req.send().await?;
+        let status = res.status();
+        if !status.is_success() {
+            return Err(ConnectorError::Api {
+                status,
+                message: res.text().await?,
+            });
+        }
+        Ok(res.text().await?)
+    }
+
+    /// Stream search hits over a completed build's log. Each item is a JSON
+    /// object (a `LogSearchHit`, or a terminal `{ "done": true, ... }` frame).
+    pub async fn log_search(
+        &self,
+        id: &str,
+        q: &str,
+        case: bool,
+    ) -> Result<impl Stream<Item = Result<serde_json::Value, ConnectorError>> + use<>, ConnectorError>
+    {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("builds/{id}/log/search"),
+            true,
+        )?
+        .query(&[("q", q), ("case", if case { "true" } else { "false" })]);
+        let res = req.send().await?;
+        let status = res.status();
+        if !status.is_success() {
+            return Err(ConnectorError::Api {
+                status,
+                message: res.text().await?,
+            });
+        }
+        Ok(res.json_nl_stream::<serde_json::Value>(1_024_000).map(|r| {
+            r.map_err(|e| ConnectorError::Api {
+                status: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+                message: e.to_string(),
+            })
+        }))
+    }
+
     pub async fn graph(&self, id: &str) -> Result<BuildGraph, ConnectorError> {
         let req = http::request(
             self.0.http(),
