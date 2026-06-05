@@ -189,6 +189,31 @@ pub struct WorkerConfig {
         default_value = "/sys/fs/cgroup"
     )]
     pub build_cgroup_root: String,
+
+    // ── Log limits ────────────────────────────────────────────────────────────
+    /// Burst bucket: max log bytes forwarded to the server per build in any
+    /// 1-minute window. Defaults to 8 MiB. On trip the worker stops forwarding
+    /// log output for that build (the build still runs).
+    #[arg(
+        long,
+        env = "GRADIENT_LOG_BURST_BYTES_PER_MIN",
+        default_value_t = 8 * 1024 * 1024
+    )]
+    pub log_burst_bytes_per_min: u64,
+
+    /// Sustained bucket: max log bytes forwarded to the server per build in any
+    /// 1-hour window. Defaults to 64 MiB.
+    #[arg(
+        long,
+        env = "GRADIENT_LOG_SUSTAINED_BYTES_PER_HOUR",
+        default_value_t = 64 * 1024 * 1024
+    )]
+    pub log_sustained_bytes_per_hour: u64,
+
+    /// Fetch a derivation's existing nix-store build log (`.bz2`) and forward it
+    /// when the outputs are already built locally and no new log is produced.
+    #[arg(long, env = "GRADIENT_LOG_FETCH_FROM_STORE", default_value = "true")]
+    pub log_fetch_from_store: bool,
 }
 
 /// Detect the host's Nix system string from `std::env::consts`.
@@ -337,6 +362,9 @@ mod tests {
             cpu_core_score: None,
             build_metrics: true,
             build_cgroup_root: "/sys/fs/cgroup".to_owned(),
+            log_burst_bytes_per_min: 8 * 1024 * 1024,
+            log_sustained_bytes_per_hour: 64 * 1024 * 1024,
+            log_fetch_from_store: true,
         }
     }
 
@@ -418,6 +446,9 @@ mod tests {
             cpu_core_score: None,
             build_metrics: true,
             build_cgroup_root: "/sys/fs/cgroup".to_owned(),
+            log_burst_bytes_per_min: 8 * 1024 * 1024,
+            log_sustained_bytes_per_hour: 64 * 1024 * 1024,
+            log_fetch_from_store: true,
         };
         assert!(cfg.peer_tokens().is_empty());
     }
@@ -483,6 +514,9 @@ mod tests {
             cpu_core_score: None,
             build_metrics: true,
             build_cgroup_root: "/sys/fs/cgroup".to_owned(),
+            log_burst_bytes_per_min: 8 * 1024 * 1024,
+            log_sustained_bytes_per_hour: 64 * 1024 * 1024,
+            log_fetch_from_store: true,
         };
         let tokens = cfg.peer_tokens();
         let _ = std::fs::remove_file(&path);

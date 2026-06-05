@@ -263,6 +263,11 @@ impl Worker<Connected> {
             config.binpath_ssh.clone(),
             config.build_metrics,
             config.build_cgroup_root.clone(),
+            crate::executor::log_limit::LogRateLimits {
+                burst_bytes_per_min: config.log_burst_bytes_per_min,
+                sustained_bytes_per_hour: config.log_sustained_bytes_per_hour,
+            },
+            config.log_fetch_from_store,
         );
         Ok((executor, JobScorer::new()))
     }
