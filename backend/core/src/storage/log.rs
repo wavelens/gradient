@@ -52,6 +52,29 @@ pub trait LogStorage: Send + Sync + std::fmt::Debug {
 
     /// Delete all chunk objects for `build_id`.
     fn delete_chunks<'a>(&'a self, build_id: BuildId) -> BoxFuture<'a, Result<()>>;
+
+    /// Drop only the inline (uncompressed) log, keeping any chunk objects.
+    /// Called after `finalize` has written the chunked representation so the
+    /// compressed chunks become the sole at-rest copy. Default is a no-op.
+    fn delete_inline_log<'a>(&'a self, _build_id: BuildId) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    /// Concatenate the decompressed chunk objects in order. Used as a fallback
+    /// by `read` once the inline log has been dropped. Stops at the first
+    /// missing chunk index.
+    fn reassemble_chunks<'a>(&'a self, build_id: BuildId) -> BoxFuture<'a, Result<String>> {
+        Box::pin(async move {
+            let mut out = String::new();
+            let mut index = 0u32;
+            while let Ok(raw) = self.read_chunk(build_id, index).await {
+                let bytes = zstd::stream::decode_all(&raw[..])?;
+                out.push_str(&String::from_utf8_lossy(&bytes));
+                index += 1;
+            }
+            Ok(out)
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -98,8 +121,11 @@ impl LogStorage for FileLogStorage {
         Box::pin(async move {
             let path = self.log_path(build_id);
             match fs::read_to_string(&path).await {
-                Ok(content) => Ok(content),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+                Ok(content) if !content.is_empty() => Ok(content),
+                Ok(_) => self.reassemble_chunks(build_id).await,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    self.reassemble_chunks(build_id).await
+                }
                 Err(e) => Err(e.into()),
             }
         })
@@ -107,6 +133,7 @@ impl LogStorage for FileLogStorage {
 
     fn delete<'a>(&'a self, build_id: BuildId) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
+            self.delete_chunks(build_id).await.ok();
             let path = self.log_path(build_id);
             match fs::remove_file(&path).await {
                 Ok(()) => Ok(()),
@@ -158,6 +185,16 @@ impl LogStorage for FileLogStorage {
     fn delete_chunks<'a>(&'a self, build_id: BuildId) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             match fs::remove_dir_all(self.chunk_dir(build_id)).await {
+                Ok(()) => Ok(()),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(e) => Err(e.into()),
+            }
+        })
+    }
+
+    fn delete_inline_log<'a>(&'a self, build_id: BuildId) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            match fs::remove_file(self.log_path(build_id)).await {
                 Ok(()) => Ok(()),
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
                 Err(e) => Err(e.into()),
@@ -227,7 +264,9 @@ impl LogStorage for S3LogStorage {
                     let bytes = result.bytes().await?;
                     Ok(String::from_utf8_lossy(&bytes).into_owned())
                 }
-                Err(object_store::Error::NotFound { .. }) => Ok(String::new()),
+                Err(object_store::Error::NotFound { .. }) => {
+                    self.reassemble_chunks(build_id).await
+                }
                 Err(e) => Err(e.into()),
             }
         })
@@ -252,6 +291,7 @@ impl LogStorage for S3LogStorage {
 
     fn delete<'a>(&'a self, build_id: BuildId) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
+            self.delete_chunks(build_id).await.ok();
             if let Err(e) = self.local.delete(build_id).await {
                 warn!(error = %e, build_id = %build_id, "Failed to delete local build log");
             }
@@ -333,6 +373,16 @@ impl LogStorage for S3LogStorage {
                 let _ = self.object_store.delete(&meta.location).await;
             }
             Ok(())
+        })
+    }
+
+    fn delete_inline_log<'a>(&'a self, build_id: BuildId) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            let _ = self.local.delete_inline_log(build_id).await;
+            match self.object_store.delete(&self.object_path(build_id)).await {
+                Ok(_) | Err(object_store::Error::NotFound { .. }) => Ok(()),
+                Err(e) => Err(e.into()),
+            }
         })
     }
 }

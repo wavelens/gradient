@@ -24,6 +24,69 @@ use crate::ci::actions::{dispatch_build_event, dispatch_evaluation_event};
 use crate::state_machine::{BuildStateMachine, EvalStateMachine};
 use crate::types::*;
 
+/// Compress a finalized build log into zstd chunks, persist the chunk index,
+/// and drop the inline copy. Best-effort: failures are logged, never propagated.
+pub async fn finalize_build_log(state: &Arc<ServerState>, log_id: entity::ids::BuildId) {
+    let log_text = state.log_storage.read(log_id).await.unwrap_or_default();
+    if log_text.is_empty() {
+        return;
+    }
+    let descs = match crate::storage::log_chunk::compress_and_store_chunks(
+        state.log_storage.as_ref(),
+        log_id,
+        &log_text,
+        state.config.storage.log_chunk_bytes,
+    )
+    .await
+    {
+        Ok(d) => d,
+        Err(e) => {
+            error!(error = %e, build_id = %log_id, "Failed to chunk build log");
+            return;
+        }
+    };
+    if let Err(e) = replace_log_chunk_index(&state.worker_db, log_id, &descs).await {
+        error!(error = %e, build_id = %log_id, "Failed to write log chunk index");
+        return;
+    }
+    if let Err(e) = state.log_storage.delete_inline_log(log_id).await {
+        warn!(error = %e, build_id = %log_id, "Failed to drop inline log after chunking");
+    }
+}
+
+/// Replace the `build_log_chunk` rows for `log_id` with `descs` (idempotent).
+async fn replace_log_chunk_index(
+    db: &impl ConnectionTrait,
+    log_id: entity::ids::BuildId,
+    descs: &[crate::storage::log_chunk::StoredChunkDesc],
+) -> Result<(), sea_orm::DbErr> {
+    use entity::build_log_chunk::{ActiveModel, Column, Entity};
+    Entity::delete_many()
+        .filter(Column::Build.eq(log_id))
+        .exec(db)
+        .await?;
+    if descs.is_empty() {
+        return Ok(());
+    }
+    let rows: Vec<ActiveModel> = descs
+        .iter()
+        .enumerate()
+        .map(|(i, d)| ActiveModel {
+            id: Set(entity::ids::BuildLogChunkId::now_v7()),
+            build: Set(log_id),
+            chunk_index: Set(i as i32),
+            byte_start: Set(d.byte_start as i64),
+            byte_len: Set(d.byte_len as i32),
+            line_start: Set(d.line_start as i64),
+            line_count: Set(d.line_count as i32),
+            compressed_size: Set(d.compressed_size as i32),
+            color_prefix: Set(d.color_prefix.clone()),
+        })
+        .collect();
+    Entity::insert_many(rows).exec(db).await?;
+    Ok(())
+}
+
 pub async fn update_build_status(
     state: Arc<ServerState>,
     build: MBuild,
@@ -87,8 +150,9 @@ pub async fn update_build_status(
                 dispatch_build_event_for_status(&action_state, action_build, event_status).await;
             });
 
-            // Finalize the build log on terminal state transitions so backends
-            // like S3 can upload the local file to remote storage.
+            // On terminal state, compress the build log into zstd chunks and
+            // record the chunk index, then drop the inline copy so the chunks
+            // are the sole at-rest representation.
             if matches!(
                 updated_build.status,
                 BuildStatus::Completed
@@ -100,9 +164,7 @@ pub async fn update_build_status(
                 let log_state = Arc::clone(&state);
                 let log_id = updated_build.log_id.unwrap_or(updated_build.id);
                 state.shutdown.spawn(async move {
-                    if let Err(e) = log_state.log_storage.finalize(log_id).await {
-                        error!(error = %e, build_id = %log_id, "Failed to finalize build log");
-                    }
+                    finalize_build_log(&log_state, log_id).await;
                 });
             }
 
