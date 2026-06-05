@@ -33,6 +33,11 @@ pub struct StorageArgs {
         default_value_t = 24
     )]
     pub keep_orphan_derivations_hours: i64,
+    /// Target uncompressed size in bytes for each zstd log chunk written when a
+    /// build finalizes. Chunks split on line boundaries, so an over-long line
+    /// may exceed this. Defaults to 262144 (256 KiB).
+    #[arg(long, env = "GRADIENT_LOG_CHUNK_BYTES", default_value_t = 262144)]
+    pub log_chunk_bytes: usize,
 }
 
 impl Default for StorageArgs {
@@ -45,6 +50,7 @@ impl Default for StorageArgs {
             keep_evaluations: 30,
             nar_ttl_hours: 336,
             keep_orphan_derivations_hours: 24,
+            log_chunk_bytes: 262144,
         }
     }
 }
