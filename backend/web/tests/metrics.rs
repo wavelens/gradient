@@ -63,6 +63,7 @@ fn state_with_metrics(enabled: bool, db: DatabaseConnection) -> Arc<ServerState>
         jwt_secret: SecretString::new("test-jwt-secret".into()),
         started_at: chrono::Utc::now(),
         pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
+        oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
     })
 }
 

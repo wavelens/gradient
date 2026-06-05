@@ -437,6 +437,7 @@ mod tests {
             jwt_secret: gradient_core::types::SecretString::new("test-jwt-secret".to_string()),
             started_at: chrono::Utc::now(),
             pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
+            oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         })
     }
 
@@ -527,6 +528,7 @@ mod tests {
             jwt_secret: gradient_core::types::SecretString::new("test-jwt-secret".to_string()),
             started_at: chrono::Utc::now(),
             pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
+            oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         });
 
         cleanup_stale_cached_nars(state).await.unwrap();
@@ -618,6 +620,7 @@ mod tests {
             jwt_secret: gradient_core::types::SecretString::new("test-jwt-secret".to_string()),
             started_at: chrono::Utc::now(),
             pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
+            oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         });
 
         cleanup_orphaned_cache_files(Arc::clone(&state))
@@ -649,6 +652,7 @@ mod tests {
             jwt_secret: gradient_core::types::SecretString::new("test-jwt-secret".to_string()),
             started_at: chrono::Utc::now(),
             pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
+            oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         })
     }
 
@@ -724,6 +728,7 @@ mod tests {
             jwt_secret: gradient_core::types::SecretString::new("test-jwt-secret".to_string()),
             started_at: chrono::Utc::now(),
             pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
+            oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         });
 
         cleanup_stale_build_request_blobs(state).await.unwrap();

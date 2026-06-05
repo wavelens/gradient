@@ -44,6 +44,13 @@ pub struct PendingOrgMembership {
 
 pub type PendingOrgMemberships = HashMap<String, Vec<PendingOrgMembership>>;
 
+/// Outcome of applying declarative state: memberships deferred until their user
+/// exists, and the OIDC group → role grants resolved from `StateRole.oidc_group`.
+pub struct StateApplyResult {
+    pub pending: PendingOrgMemberships,
+    pub oidc_group_roles: crate::state::OidcGroupRoles,
+}
+
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 pub(super) async fn apply_state_to_database(
@@ -52,7 +59,7 @@ pub(super) async fn apply_state_to_database(
     crypt_secret_file: &str,
     delete_state: bool,
     email_enabled: bool,
-) -> Result<PendingOrgMemberships, DynError> {
+) -> Result<StateApplyResult, DynError> {
     tracing::info!("Applying state to database");
 
     let app = StateApplicator {
@@ -66,7 +73,7 @@ pub(super) async fn apply_state_to_database(
     app.apply_users(&config.users).await?;
     app.apply_organizations_without_members(&config.organizations)
         .await?;
-    app.apply_roles(&config.roles).await?;
+    let role_ids = app.apply_roles(&config.roles).await?;
     app.apply_organization_members(&config.organizations, &mut pending)
         .await?;
     app.apply_projects(&config.projects).await?;
@@ -76,8 +83,13 @@ pub(super) async fn apply_state_to_database(
     app.apply_workers(&config.workers).await?;
     app.unmark_removed_entities(config, delete_state).await?;
 
+    let oidc_group_roles = super::resolve_oidc_group_roles(config, &role_ids);
+
     tracing::info!("State applied successfully");
-    Ok(pending)
+    Ok(StateApplyResult {
+        pending,
+        oidc_group_roles,
+    })
 }
 
 // ── Credential / lookup helpers ───────────────────────────────────────────────
@@ -1269,8 +1281,12 @@ impl<'a> StateApplicator<'a> {
 
     // ── apply_roles ───────────────────────────────────────────────────────────
 
-    async fn apply_roles(&self, state_roles: &HashMap<String, StateRole>) -> Result<(), DynError> {
+    async fn apply_roles(
+        &self,
+        state_roles: &HashMap<String, StateRole>,
+    ) -> Result<HashMap<(String, String), (OrganizationId, RoleId)>, DynError> {
         let org_lookup = self.org_lookup().await?;
+        let mut role_ids: HashMap<(String, String), (OrganizationId, RoleId)> = HashMap::new();
 
         for state_role in state_roles.values() {
             let org_id = lookup_id(&org_lookup, &state_role.organization, "Organization")?;
@@ -1300,15 +1316,18 @@ impl<'a> StateApplicator<'a> {
                 .one(self.db)
                 .await?;
 
-            if let Some(existing) = existing {
+            let role_id = if let Some(existing) = existing {
+                let id = existing.id;
                 let mut active: role::ActiveModel = existing.into();
                 active.permission = Set(mask);
                 active.managed = Set(true);
                 active.update(self.db).await?;
                 tracing::info!(name = %state_role.name, "Updated managed role");
+                id
             } else {
+                let id = RoleId::now_v7();
                 let active = role::ActiveModel {
-                    id: Set(RoleId::now_v7()),
+                    id: Set(id),
                     name: Set(state_role.name.clone()),
                     organization: Set(Some(org_id)),
                     permission: Set(mask),
@@ -1316,10 +1335,16 @@ impl<'a> StateApplicator<'a> {
                 };
                 active.insert(self.db).await?;
                 tracing::info!(name = %state_role.name, "Created managed role");
-            }
+                id
+            };
+
+            role_ids.insert(
+                (state_role.organization.clone(), state_role.name.clone()),
+                (org_id, role_id),
+            );
         }
 
-        Ok(())
+        Ok(role_ids)
     }
 
     // ── apply_api_keys ────────────────────────────────────────────────────────

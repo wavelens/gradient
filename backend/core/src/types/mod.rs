@@ -138,6 +138,10 @@ pub struct ServerState {
     /// signs in via OIDC for the first time. Empty when no state file is
     /// configured or when every declared member already existed.
     pub pending_org_memberships: Arc<crate::state::PendingOrgMemberships>,
+    /// OIDC group → (organization, role) grants resolved from state at startup
+    /// (`StateRole.oidc_group`). Applied additively on every OIDC login. Empty
+    /// when no state file is configured.
+    pub oidc_group_roles: Arc<crate::state::OidcGroupRoles>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

@@ -65,7 +65,7 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
         }
     };
 
-    let pending_org_memberships = match load_and_apply_state(
+    let (pending_org_memberships, oidc_group_roles) = match load_and_apply_state(
         &db,
         cli.storage.state_file.as_deref(),
         &cli.secrets.crypt_secret_file,
@@ -74,7 +74,7 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
     )
     .await
     {
-        Ok(p) => Arc::new(p),
+        Ok(r) => (Arc::new(r.pending), Arc::new(r.oidc_group_roles)),
         Err(e) => {
             tracing::error!(error = %e, "Failed to load state configuration");
             std::process::exit(1);
@@ -225,5 +225,6 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
         jwt_secret,
         started_at: chrono::Utc::now(),
         pending_org_memberships,
+        oidc_group_roles,
     })
 }
