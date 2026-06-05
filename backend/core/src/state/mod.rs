@@ -1441,6 +1441,6 @@ mod tests {
         let resolved = resolve_oidc_group_roles(&cfg, &role_ids);
         assert_eq!(resolved.get("platform-team"), Some(&vec![(org, role)]));
         assert_eq!(resolved.get("ops"), Some(&vec![(org, role)]));
-        assert!(resolved.get("unmapped").is_none());
+        assert!(!resolved.contains_key("unmapped"));
     }
 }

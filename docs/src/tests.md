@@ -31,6 +31,12 @@ challenge (issue #318).
 claiming (issue #319): a provisioned password-less, OIDC-unbound account is
 claimed on first login, while password-bearing or already-bound accounts are
 not.
+
+OIDC group → role mapping (issue #322) is covered by
+`core` `state::tests::resolves_group_to_org_role_grants` (declared `oidc_group`
+lists resolve to `(organization, role)` grants) and
+`oidc.rs::tests::collects_distinct_grants_for_presented_groups` (a user's group
+claims collect the distinct grants applied additively on login).
 ## Unified resource access - `crate::access` and `crate::permissions`
 
 All "load resource by name and check the caller may use it" logic lives in

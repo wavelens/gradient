@@ -878,6 +878,18 @@
         '';
         example = [ "viewOrg" "triggerEvaluation" ];
       };
+
+      oidc_group = mkOption {
+        type = types.listOf types.str;
+        default = [];
+        description = ''
+          OIDC group claims that grant this role on login. A user whose
+          `groups` claim contains any listed group is granted this role in
+          the role's organization. Grants are additive - they never remove a
+          membership. Requires the `groups` scope on the OIDC client.
+        '';
+        example = [ "platform-team" "ops" ];
+      };
     };
   });
 
