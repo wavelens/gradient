@@ -86,9 +86,6 @@ impl LogRateLimiter {
         }
     }
 
-    pub fn just_tripped(&self) -> bool {
-        self.tripped
-    }
 }
 
 #[cfg(test)]
