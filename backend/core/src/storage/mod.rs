@@ -6,6 +6,7 @@
 
 pub mod email;
 pub mod log;
+pub mod log_chunk;
 pub mod nar;
 pub mod nar_extract;
 pub mod sgr;
