@@ -9,8 +9,41 @@ mod provisioning;
 
 pub use export::export_state;
 pub use provisioning::{
-    PendingOrgMembership, PendingOrgMemberships, apply_pending_org_memberships,
+    PendingOrgMembership, PendingOrgMemberships, StateApplyResult, apply_pending_org_memberships,
 };
+
+use crate::types::{OrganizationId, RoleId};
+
+/// Resolved at startup from [`StateRole::oidc_group`]: OIDC group name → the
+/// `(organization, role)` grants a user presenting that group receives on login.
+pub type OidcGroupRoles = HashMap<String, Vec<(OrganizationId, RoleId)>>;
+
+/// Build the OIDC group → grants map from declared roles. `role_ids` maps
+/// `(organization_name, role_name)` to the provisioned `(OrganizationId, RoleId)`.
+pub fn resolve_oidc_group_roles(
+    config: &StateConfiguration,
+    role_ids: &HashMap<(String, String), (OrganizationId, RoleId)>,
+) -> OidcGroupRoles {
+    let mut map: OidcGroupRoles = HashMap::new();
+    for role in config.roles.values() {
+        if role.oidc_group.is_empty() {
+            continue;
+        }
+        let key = (role.organization.clone(), role.name.clone());
+        let Some(&grant) = role_ids.get(&key) else {
+            tracing::warn!(
+                organization = %role.organization,
+                role = %role.name,
+                "oidc_group references a role that was not provisioned; skipping",
+            );
+            continue;
+        };
+        for group in &role.oidc_group {
+            map.entry(group.clone()).or_default().push(grant);
+        }
+    }
+    map
+}
 
 use crate::types::triggers::{ConcurrencyPolicy, TriggerType};
 use entity::organization_cache::CacheSubscriptionMode;
@@ -260,6 +293,10 @@ pub struct StateRole {
     /// Capability identifiers (matching `Permission::as_wire_name`) the role
     /// grants. Required - there is no safe default.
     pub permissions: Vec<String>,
+    /// OIDC group claims that grant this role on login. Resolved at startup
+    /// into [`OidcGroupRoles`] and applied additively per OIDC login.
+    #[serde(default)]
+    pub oidc_group: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -680,10 +717,13 @@ pub async fn load_and_apply_state(
     crypt_secret_file: &str,
     delete_state: bool,
     email_enabled: bool,
-) -> Result<PendingOrgMemberships, Box<dyn std::error::Error>> {
+) -> Result<StateApplyResult, Box<dyn std::error::Error>> {
     let Some(path) = state_file_path else {
         tracing::info!("No state file configured, skipping state management");
-        return Ok(PendingOrgMemberships::new());
+        return Ok(StateApplyResult {
+            pending: PendingOrgMemberships::new(),
+            oidc_group_roles: OidcGroupRoles::new(),
+        });
     };
 
     tracing::info!(path, "Loading state configuration");
@@ -707,7 +747,7 @@ pub async fn load_and_apply_state(
 
     tracing::info!("State configuration validated successfully");
 
-    let pending = provisioning::apply_state_to_database(
+    let result = provisioning::apply_state_to_database(
         db,
         &config,
         crypt_secret_file,
@@ -716,7 +756,7 @@ pub async fn load_and_apply_state(
     )
     .await?;
 
-    Ok(pending)
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -1368,5 +1408,39 @@ mod tests {
             "expected unknown-org error mentioning 'ghost', got: {:?}",
             v.errors
         );
+    }
+
+    #[test]
+    fn resolves_group_to_org_role_grants() {
+        let json = r#"{
+            "roles": {
+                "platform": {
+                    "name": "platform-admin",
+                    "organization": "acme",
+                    "permissions": ["create_project"],
+                    "oidc_group": ["platform-team", "ops"]
+                },
+                "unmapped": {
+                    "name": "viewer",
+                    "organization": "acme",
+                    "permissions": ["view_project"]
+                }
+            }
+        }"#;
+        let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
+
+        let org = OrganizationId::now_v7();
+        let role = RoleId::now_v7();
+        let mut role_ids = HashMap::new();
+        role_ids.insert(("acme".to_string(), "platform-admin".to_string()), (org, role));
+        role_ids.insert(
+            ("acme".to_string(), "viewer".to_string()),
+            (org, RoleId::now_v7()),
+        );
+
+        let resolved = resolve_oidc_group_roles(&cfg, &role_ids);
+        assert_eq!(resolved.get("platform-team"), Some(&vec![(org, role)]));
+        assert_eq!(resolved.get("ops"), Some(&vec![(org, role)]));
+        assert!(resolved.get("unmapped").is_none());
     }
 }

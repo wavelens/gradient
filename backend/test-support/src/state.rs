@@ -37,6 +37,7 @@ pub fn test_state(db: DatabaseConnection) -> Arc<ServerState> {
         jwt_secret: SecretString::new("test-jwt-secret".to_string()),
         started_at: chrono::Utc::now(),
         pending_org_memberships: Arc::new(std::collections::HashMap::new()),
+        oidc_group_roles: Arc::new(std::collections::HashMap::new()),
     })
 }
 
@@ -62,5 +63,6 @@ pub fn test_state_with_log_storage(
         jwt_secret: SecretString::new("test-jwt-secret".to_string()),
         started_at: chrono::Utc::now(),
         pending_org_memberships: Arc::new(std::collections::HashMap::new()),
+        oidc_group_roles: Arc::new(std::collections::HashMap::new()),
     })
 }

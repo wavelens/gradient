@@ -113,6 +113,7 @@ fn server_with(web_db_setup: impl FnOnce(MockDatabase) -> MockDatabase) -> TestS
         jwt_secret: SecretString::new(JWT_SECRET.to_string()),
         started_at: chrono::Utc::now(),
         pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
+        oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
     });
     TestServer::new(create_router(state))
 }
