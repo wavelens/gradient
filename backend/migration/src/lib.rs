@@ -125,6 +125,7 @@ mod m20260529_000000_add_cache_upstream_kind;
 mod m20260603_000000_add_build_failure_retry_fields;
 mod m20260604_000001_add_derivation_scoring_columns;
 mod m20260604_000002_create_derivation_metric;
+mod m20260605_000000_index_hot_lookups;
 
 pub struct Migrator;
 
@@ -251,6 +252,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260603_000000_add_build_failure_retry_fields::Migration),
             Box::new(m20260604_000001_add_derivation_scoring_columns::Migration),
             Box::new(m20260604_000002_create_derivation_metric::Migration),
+            Box::new(m20260605_000000_index_hot_lookups::Migration),
         ]
     }
 }
