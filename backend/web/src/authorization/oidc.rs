@@ -58,6 +58,12 @@ struct IdTokenClaims {
     preferred_username: Option<String>,
 }
 
+/// A provisioned/managed placeholder is claimable by the first matching OIDC
+/// login: no local password set and not yet bound to an OIDC identity.
+fn is_claimable(password: &Option<String>, oidc_subject: &Option<String>) -> bool {
+    password.is_none() && oidc_subject.is_none()
+}
+
 fn random_url_safe(bytes: usize) -> String {
     let mut buf = vec![0u8; bytes];
     rand::rng().fill(buf.as_mut_slice());
@@ -349,8 +355,46 @@ async fn create_or_update_user(
         .await
         .context("Database error while checking for OIDC username/email collision")?;
 
-    if collision.is_some() {
-        bail!("An account already exists with this username or email.");
+    if let Some(existing) = collision {
+        if !is_claimable(&existing.password, &existing.oidc_subject) {
+            bail!("An account already exists with this username or email.");
+        }
+
+        let user_id = existing.id;
+        let mut auser: AUser = existing.into();
+        auser.oidc_issuer = Set(Some(claims.iss));
+        auser.oidc_subject = Set(Some(claims.sub));
+        auser.last_login_at = Set(gradient_core::types::now());
+        if let Some(ref new_email) = claims.email {
+            auser.email = Set(new_email.clone());
+        }
+        if let Some(ref new_name) = claims.name {
+            auser.name = Set(new_name.clone());
+        }
+        let user = auser
+            .update(&tx)
+            .await
+            .context("Failed to claim OIDC account")?;
+
+        if let Err(e) = gradient_core::state::apply_pending_org_memberships(
+            &tx,
+            &state.pending_org_memberships,
+            &user.username,
+            user_id,
+        )
+        .await
+        {
+            tracing::warn!(
+                error = %e,
+                username = %user.username,
+                "Failed to apply pending state-managed org memberships for claimed OIDC user"
+            );
+        }
+
+        tx.commit()
+            .await
+            .context("Failed to commit OIDC account claim")?;
+        return Ok(user);
     }
 
     let user = AUser {
@@ -476,6 +520,17 @@ mod tests {
             &Validation::new(Algorithm::HS256),
         );
         assert!(decoded.is_err());
+    }
+
+    #[test]
+    fn claimable_only_when_passwordless_and_unbound() {
+        assert!(super::is_claimable(&None, &None));
+        assert!(!super::is_claimable(&Some("$argon2id$...".into()), &None));
+        assert!(!super::is_claimable(&None, &Some("existing-subject".into())));
+        assert!(!super::is_claimable(
+            &Some("$argon2id$...".into()),
+            &Some("existing-subject".into())
+        ));
     }
 
     #[test]

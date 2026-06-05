@@ -26,6 +26,11 @@ JWKS, `iss`/`aud`/`exp`/`nonce` checks, identity bound to
 asserts the login redirect carries `code_challenge` + `code_challenge_method=S256`
 and that the verifier stored in the signed `oidc_csrf` cookie hashes to that
 challenge (issue #318).
+
+`oidc.rs::tests::claimable_only_when_passwordless_and_unbound` covers account
+claiming (issue #319): a provisioned password-less, OIDC-unbound account is
+claimed on first login, while password-bearing or already-bound accounts are
+not.
 ## Unified resource access - `crate::access` and `crate::permissions`
 
 All "load resource by name and check the caller may use it" logic lives in
