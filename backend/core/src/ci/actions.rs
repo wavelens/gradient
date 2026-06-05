@@ -954,6 +954,27 @@ mod tests {
             fn list_logs<'a>(&'a self) -> BoxFuture<'a, anyhow::Result<Vec<entity::ids::BuildId>>> {
                 Box::pin(async { Ok(Vec::new()) })
             }
+            fn write_chunk<'a>(
+                &'a self,
+                _: entity::ids::BuildId,
+                _: u32,
+                _: &'a [u8],
+            ) -> BoxFuture<'a, anyhow::Result<()>> {
+                Box::pin(async { Ok(()) })
+            }
+            fn read_chunk<'a>(
+                &'a self,
+                _: entity::ids::BuildId,
+                _: u32,
+            ) -> BoxFuture<'a, anyhow::Result<Vec<u8>>> {
+                Box::pin(async { anyhow::bail!("no chunk") })
+            }
+            fn delete_chunks<'a>(
+                &'a self,
+                _: entity::ids::BuildId,
+            ) -> BoxFuture<'a, anyhow::Result<()>> {
+                Box::pin(async { Ok(()) })
+            }
         }
 
         #[derive(Debug)]

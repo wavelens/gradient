@@ -38,6 +38,20 @@ pub trait LogStorage: Send + Sync + std::fmt::Debug {
     /// Enumerate every `BuildId` that currently has a log in this backend.
     /// Used by the deep-GC sweep to find orphan logs.
     fn list_logs<'a>(&'a self) -> BoxFuture<'a, Result<Vec<BuildId>>>;
+
+    /// Write one compressed log chunk object.
+    fn write_chunk<'a>(
+        &'a self,
+        build_id: BuildId,
+        index: u32,
+        bytes: &'a [u8],
+    ) -> BoxFuture<'a, Result<()>>;
+
+    /// Read one compressed log chunk object's bytes.
+    fn read_chunk<'a>(&'a self, build_id: BuildId, index: u32) -> BoxFuture<'a, Result<Vec<u8>>>;
+
+    /// Delete all chunk objects for `build_id`.
+    fn delete_chunks<'a>(&'a self, build_id: BuildId) -> BoxFuture<'a, Result<()>>;
 }
 
 #[derive(Debug)]
@@ -54,6 +68,15 @@ impl FileLogStorage {
 
     pub fn log_path(&self, build_id: BuildId) -> PathBuf {
         self.logs_dir.join(format!("{}.log", build_id))
+    }
+
+    fn chunk_dir(&self, build_id: BuildId) -> PathBuf {
+        self.logs_dir.join(build_id.to_string())
+    }
+
+    fn chunk_path(&self, build_id: BuildId, index: u32) -> PathBuf {
+        self.chunk_dir(build_id)
+            .join(format!("chunk_{:08}.zst", index))
     }
 }
 
@@ -114,6 +137,33 @@ impl LogStorage for FileLogStorage {
             Ok(out)
         })
     }
+
+    fn write_chunk<'a>(
+        &'a self,
+        build_id: BuildId,
+        index: u32,
+        bytes: &'a [u8],
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            fs::create_dir_all(self.chunk_dir(build_id)).await?;
+            fs::write(self.chunk_path(build_id, index), bytes).await?;
+            Ok(())
+        })
+    }
+
+    fn read_chunk<'a>(&'a self, build_id: BuildId, index: u32) -> BoxFuture<'a, Result<Vec<u8>>> {
+        Box::pin(async move { Ok(fs::read(self.chunk_path(build_id, index)).await?) })
+    }
+
+    fn delete_chunks<'a>(&'a self, build_id: BuildId) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            match fs::remove_dir_all(self.chunk_dir(build_id)).await {
+                Ok(()) => Ok(()),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(e) => Err(e.into()),
+            }
+        })
+    }
 }
 
 /// Log storage that keeps a local copy for fast appends and uploads the final
@@ -151,6 +201,13 @@ impl S3LogStorage {
 
     fn object_path(&self, build_id: BuildId) -> ObjectPath {
         ObjectPath::from(format!("{}logs/{}.log", self.prefix, build_id))
+    }
+
+    fn chunk_object_path(&self, build_id: BuildId, index: u32) -> ObjectPath {
+        ObjectPath::from(format!(
+            "{}logs/{}/chunk_{:08}.zst",
+            self.prefix, build_id, index
+        ))
     }
 }
 
@@ -230,5 +287,71 @@ impl LogStorage for S3LogStorage {
             }
             Ok(local)
         })
+    }
+
+    fn write_chunk<'a>(
+        &'a self,
+        build_id: BuildId,
+        index: u32,
+        bytes: &'a [u8],
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            self.local.write_chunk(build_id, index, bytes).await?;
+            self.object_store
+                .put(
+                    &self.chunk_object_path(build_id, index),
+                    PutPayload::from(bytes.to_vec()),
+                )
+                .await?;
+            Ok(())
+        })
+    }
+
+    fn read_chunk<'a>(&'a self, build_id: BuildId, index: u32) -> BoxFuture<'a, Result<Vec<u8>>> {
+        Box::pin(async move {
+            if let Ok(bytes) = self.local.read_chunk(build_id, index).await {
+                return Ok(bytes);
+            }
+            let result = self
+                .object_store
+                .get(&self.chunk_object_path(build_id, index))
+                .await?;
+            Ok(result.bytes().await?.to_vec())
+        })
+    }
+
+    fn delete_chunks<'a>(&'a self, build_id: BuildId) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            use futures::StreamExt as _;
+            if let Err(e) = self.local.delete_chunks(build_id).await {
+                warn!(error = %e, build_id = %build_id, "Failed to delete local log chunks");
+            }
+            let prefix = ObjectPath::from(format!("{}logs/{}", self.prefix, build_id));
+            let mut stream = self.object_store.list(Some(&prefix));
+            while let Some(item) = stream.next().await {
+                let meta = item?;
+                let _ = self.object_store.delete(&meta.location).await;
+            }
+            Ok(())
+        })
+    }
+}
+
+#[cfg(test)]
+mod chunk_tests {
+    use super::*;
+    use crate::types::ids::BuildId;
+
+    #[tokio::test]
+    async fn write_read_delete_chunk_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = FileLogStorage::new(dir.path()).await.unwrap();
+        let id = BuildId::new(uuid::Uuid::new_v4());
+        storage.write_chunk(id, 0, b"hello").await.unwrap();
+        storage.write_chunk(id, 1, b"world").await.unwrap();
+        assert_eq!(storage.read_chunk(id, 0).await.unwrap(), b"hello");
+        assert_eq!(storage.read_chunk(id, 1).await.unwrap(), b"world");
+        storage.delete_chunks(id).await.unwrap();
+        assert!(storage.read_chunk(id, 0).await.is_err());
     }
 }
