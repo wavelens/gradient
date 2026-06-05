@@ -368,6 +368,12 @@ in {
           default = 30;
         };
 
+        logChunkBytes = lib.mkOption {
+          description = "Target uncompressed size in bytes for each zstd build-log chunk written on finalize. Chunks split on line boundaries, so an over-long line may exceed this.";
+          type = lib.types.ints.positive;
+          default = 262144;
+        };
+
         buildMaxAttempts = lib.mkOption {
           description = "Maximum number of build attempts before a transient failure becomes permanent (must be ≥ 1).";
           type = lib.types.ints.positive;
@@ -654,6 +660,7 @@ in {
         GRADIENT_JWT_SECRET_FILE = "%d/gradient_jwt_secret";
         GRADIENT_REPORT_ERRORS = lib.boolToString cfg.reportErrors;
         GRADIENT_KEEP_EVALUATIONS = toString cfg.settings.keepEvaluations;
+        GRADIENT_LOG_CHUNK_BYTES = toString cfg.settings.logChunkBytes;
         GRADIENT_BUILD_MAX_ATTEMPTS = toString cfg.settings.buildMaxAttempts;
         GRADIENT_BUILD_RETRY_BACKOFF_SECS = toString cfg.settings.buildRetryBackoffSecs;
         GRADIENT_BUILD_DEFAULT_TIMEOUT_SECS = toString cfg.settings.buildDefaultTimeoutSecs;

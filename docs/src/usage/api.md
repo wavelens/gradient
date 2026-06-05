@@ -273,7 +273,11 @@ Set `GRADIENT_WORKER_PEERS_FILE` (or the NixOS `peersFile` option) to this path.
 | `POST` | `/builds` | Submit direct build (multipart) |
 | `GET` | `/builds/direct/recent` | Recent direct builds |
 | `GET` | `/builds/{id}` | Build with outputs |
-| `GET/POST` | `/builds/{id}/log` | Get log / stream live log |
+| `GET/POST` | `/builds/{id}/log` | Get full log / stream live log |
+| `GET` | `/builds/{id}/log/chunks` | Chunk index of a finalized log |
+| `GET` | `/builds/{id}/log/chunk/{index}` | One decompressed chunk (plaintext) |
+| `GET` | `/builds/{id}/log/lines` | Line range, e.g. `?range=L120-L130` |
+| `GET` | `/builds/{id}/log/search` | NDJSON stream of search hits (`?q=`) |
 | `GET` | `/builds/{id}/graph` | Full dependency graph |
 | `GET` | `/builds/{id}/dependencies` | Direct dependencies |
 | `GET` | `/builds/{id}/downloads` | List artefacts |

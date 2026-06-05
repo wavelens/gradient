@@ -54,6 +54,7 @@ openssl rand -base64 48 > /run/secrets/gradient-crypt
 | `discoverable` | `true` | Accept incoming `/proto` WebSocket connections from workers |
 | `settings.maxProtoConnections` | `256` | Max simultaneous worker WebSocket connections; further upgrades return `503 Service Unavailable` with `Retry-After: 10` until a slot frees |
 | `settings.keepEvaluations` | `30` | Global maximum of evaluations kept per project (caps the per-project setting) |
+| `settings.logChunkBytes` | `262144` (256 KiB) | Target uncompressed size for each zstd build-log chunk written on finalize. Chunks split on line boundaries, so an over-long line may exceed this. (`GRADIENT_LOG_CHUNK_BYTES`) |
 | `settings.maxRequestSize` | `2097152` (2 MiB) | Max HTTP request body in bytes for most endpoints (caps webhook/JSON payloads to prevent OOM). The build-request blob endpoint uses a fixed 20 MiB cap. |
 | `settings.maxNarUploadSize` | `536870912` (512 MiB) | Max body in bytes for `POST /caches/{cache}/nars`; overrides the general `maxRequestSize` cap for NAR uploads. (`GRADIENT_MAX_NAR_UPLOAD_SIZE`) |
 | `settings.logLevel.default` | `info` | Log level: `trace` `debug` `info` `warn` `error` |
@@ -328,6 +329,9 @@ The token must be the 48-byte random secret returned by the registration API (ge
 | `settings.gcrootsDir` | `/nix/var/nix/gcroots/gradient` | Directory for worker-held indirect GC roots. One symlink per active build (drv + outputs) pins inputs and just-built outputs through the daemon so a concurrent `nix-collect-garbage` cannot race the build. Empty string disables |
 | `settings.buildMetrics` | `true` | Capture per-build resource metrics (peak RAM, CPU time, disk I/O) from the build's cgroup (`GRADIENT_WORKER_BUILD_METRICS`). Requires Nix's experimental `use-cgroups` feature on the daemon; degrades gracefully to wall-clock build time only when the cgroup is unavailable |
 | `settings.buildCgroupRoot` | `/sys/fs/cgroup` | Cgroup-v2 mount root searched for per-build cgroups when `buildMetrics` is enabled (`GRADIENT_WORKER_BUILD_CGROUP_ROOT`) |
+| `settings.logBurstBytesPerMin` | `8388608` (8 MiB) | Burst token bucket: max build-log bytes forwarded to the server per build in any 1-minute window. On trip the worker appends a truncation marker and stops forwarding that build's log (the build still runs). (`GRADIENT_LOG_BURST_BYTES_PER_MIN`) |
+| `settings.logSustainedBytesPerHour` | `67108864` (64 MiB) | Sustained token bucket: max build-log bytes forwarded per build in any 1-hour window. (`GRADIENT_LOG_SUSTAINED_BYTES_PER_HOUR`) |
+| `settings.logFetchFromStore` | `true` | When a derivation is already built locally (no fresh log), read nix's stored `.bz2` build log and forward it so the UI still shows output. (`GRADIENT_LOG_FETCH_FROM_STORE`) |
 | `settings.logLevel.default` | `info` | Worker log level |
 | `settings.logLevel.eval` | null | Evaluator log level override |
 | `settings.logLevel.build` | null | Builder log level override |
