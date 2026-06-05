@@ -444,13 +444,8 @@ impl Scheduler {
 
     pub async fn append_log(&self, job_id: &str, task_index: u32, data: Vec<u8>) -> Result<()> {
         let bytes_len = data.len();
-        let text = match std::str::from_utf8(&data) {
-            Ok(s) => s,
-            Err(_) => {
-                debug!(%job_id, task_index, bytes = bytes_len, "log chunk dropped: non-UTF-8");
-                return Ok(());
-            }
-        };
+        let text = String::from_utf8_lossy(&data);
+        let text = text.as_ref();
 
         let build_id_str = {
             let tracker = self.job_tracker.read().await;
