@@ -267,8 +267,42 @@
               <code class="log-build-path">{{ selectedBuild()?.name }}</code>
               <span class="status-badge status-{{ selectedBuild()?.status?.toLowerCase() }}">{{ selectedBuild()?.status }}</span>
             </div>
+            @if (chunkedMode() && searchOpen()) {
+              <div class="log-search-bar">
+                <input
+                  class="log-search-input"
+                  type="text"
+                  placeholder="Search log…"
+                  [value]="searchQuery()"
+                  (input)="onSearchInput($event)"
+                  (keydown.enter)="searchHits().length ? nextHit() : runSearch()"
+                  (keydown.shift.enter)="prevHit()"
+                />
+                <span class="log-search-count">
+                  {{ searchHits().length === 0 ? 0 : currentHit() + 1 }} / {{ searchTotal() }}
+                </span>
+                <button class="log-search-btn" (click)="prevHit()" title="Previous match">↑</button>
+                <button class="log-search-btn" (click)="nextHit()" title="Next match">↓</button>
+                <button class="log-search-btn" (click)="closeSearch()" title="Close (Esc)">✕</button>
+              </div>
+            }
             <div class="log-container" #logContainer (scroll)="onLogScroll($event)">
-              @if (logHtml().toString()) {
+              @if (chunkedMode()) {
+                <div class="log-spacer" [style.height.px]="topSpacerPx()"></div>
+                <div class="log-lines">
+                  @for (ln of windowLines(); track ln.n) {
+                    <div
+                      class="log-line"
+                      [class.log-line--hl]="ln.n === highlightLine()"
+                      [attr.data-line]="ln.n"
+                    >
+                      <span class="log-gutter" (click)="copyLineLink(ln.n)" title="Copy link to line">{{ ln.n }}</span>
+                      <pre class="log-line-content" [innerHTML]="ln.html"></pre>
+                    </div>
+                  }
+                </div>
+                <div class="log-spacer" [style.height.px]="bottomSpacerPx()"></div>
+              } @else if (logHtml().toString()) {
                 <pre class="log-output" [innerHTML]="logHtml()"></pre>
               } @else {
                 <div class="no-log-hint">

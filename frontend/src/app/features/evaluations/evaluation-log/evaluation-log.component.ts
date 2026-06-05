@@ -14,7 +14,14 @@ import {
   ViewChild,
   ElementRef,
   ChangeDetectorRef,
+  HostListener,
 } from '@angular/core';
+import {
+  LogChunkIndex,
+  LogSearchHit,
+  parseLineFragment,
+  windowAround,
+} from './log-window';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
@@ -107,6 +114,26 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private totalBuilds = 0;
   private loadingMore = false;
 
+  // ── Chunked log viewing (completed builds) ──────────────────────────────────
+  chunkedMode = signal(false);
+  windowLines = signal<{ n: number; html: SafeHtml }[]>([]);
+  topSpacerPx = signal(0);
+  bottomSpacerPx = signal(0);
+  highlightLine = signal<number | null>(null);
+  searchOpen = signal(false);
+  searchQuery = signal('');
+  searchHits = signal<LogSearchHit[]>([]);
+  searchTotal = signal(0);
+  currentHit = signal(-1);
+  private chunkIndex: LogChunkIndex | null = null;
+  private windowStart = 1;
+  private windowText: string[] = [];
+  private loadingWindow = false;
+  private pendingDeepLink: number | null = null;
+  private readonly LINE_PX = 18;
+  private readonly WINDOW_PAGE = 800;
+  private readonly MAX_WINDOW = 4000;
+
   ngOnInit(): void {
     document.documentElement.style.overflow = 'hidden';
     document.body.style.overflow = 'hidden';
@@ -114,6 +141,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.evaluationId = this.route.snapshot.paramMap.get('evaluationId') || '';
     this.initialBuildId = this.route.snapshot.queryParamMap.get('build');
     this.initialShowEval = this.route.snapshot.queryParamMap.get('eval') !== null;
+    this.pendingDeepLink = parseLineFragment(this.route.snapshot.fragment);
     if (!this.evaluationId) {
       this.loading.set(false);
       return;
@@ -415,6 +443,14 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   }
 
   private async fetchInitialLogs(buildId: string): Promise<void> {
+    this.resetChunkedState();
+    const selected = this.builds().find(b => b.id === buildId);
+    const terminal = selected && !['Queued', 'Building', 'Created'].includes(selected.status);
+    if (terminal && (await this.fetchChunkedLog(buildId))) {
+      this.logLoading.set(false);
+      return;
+    }
+
     try {
       const response = await fetch(`${environment.apiUrl}/builds/${buildId}/log`, {
         method: 'GET',
@@ -492,6 +528,209 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.pendingLogLines = [];
     this.stopLogDrainTimer();
   }
+
+  // ── Chunked log viewing ─────────────────────────────────────────────────────
+
+  private resetChunkedState(): void {
+    this.chunkedMode.set(false);
+    this.chunkIndex = null;
+    this.windowText = [];
+    this.windowStart = 1;
+    this.windowLines.set([]);
+    this.topSpacerPx.set(0);
+    this.bottomSpacerPx.set(0);
+    this.highlightLine.set(null);
+    this.searchOpen.set(false);
+    this.searchHits.set([]);
+    this.searchTotal.set(0);
+    this.currentHit.set(-1);
+  }
+
+  /** Returns true when the build has finalized chunks and chunked mode is active. */
+  private async fetchChunkedLog(buildId: string): Promise<boolean> {
+    let index: LogChunkIndex;
+    try {
+      const res = await fetch(`${environment.apiUrl}/builds/${buildId}/log/chunks`, {
+        method: 'GET',
+        credentials: 'include',
+      });
+      if (!res.ok) return false;
+      const data = await res.json();
+      index = data.message as LogChunkIndex;
+    } catch {
+      return false;
+    }
+    if (!index || index.total_chunks === 0 || index.total_lines === 0) return false;
+
+    this.chunkIndex = index;
+    this.chunkedMode.set(true);
+
+    const target = this.pendingDeepLink;
+    this.pendingDeepLink = null;
+    if (target && target <= index.total_lines) {
+      await this.jumpToLine(buildId, target);
+    } else {
+      const start = Math.max(1, index.total_lines - this.WINDOW_PAGE + 1);
+      await this.loadWindow(buildId, start, index.total_lines, 'replace');
+      this.scrollToBottomIfAuto();
+    }
+    return true;
+  }
+
+  private async fetchLines(buildId: string, start: number, end: number): Promise<string[]> {
+    const res = await fetch(
+      `${environment.apiUrl}/builds/${buildId}/log/lines?start=${start}&end=${end}`,
+      { method: 'GET', credentials: 'include' },
+    );
+    if (!res.ok) return [];
+    const text = await res.text();
+    const lines = text.split('\n');
+    if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+    return lines;
+  }
+
+  private async loadWindow(
+    buildId: string,
+    start: number,
+    end: number,
+    mode: 'replace' | 'append' | 'prepend',
+  ): Promise<void> {
+    if (this.loadingWindow) return;
+    this.loadingWindow = true;
+    try {
+      const lines = await this.fetchLines(buildId, start, end);
+      if (mode === 'replace') {
+        this.windowStart = start;
+        this.windowText = lines;
+      } else if (mode === 'append') {
+        this.windowText = this.windowText.concat(lines);
+        if (this.windowText.length > this.MAX_WINDOW) {
+          const drop = this.windowText.length - this.MAX_WINDOW;
+          this.windowText = this.windowText.slice(drop);
+          this.windowStart += drop;
+        }
+      } else {
+        this.windowText = lines.concat(this.windowText);
+        this.windowStart = start;
+        if (this.windowText.length > this.MAX_WINDOW) {
+          this.windowText = this.windowText.slice(0, this.MAX_WINDOW);
+        }
+      }
+      this.renderWindow();
+    } finally {
+      this.loadingWindow = false;
+    }
+  }
+
+  private renderWindow(): void {
+    const total = this.chunkIndex?.total_lines ?? this.windowText.length;
+    const rendered = this.windowText.map((text, i) => ({
+      n: this.windowStart + i,
+      html: this.sanitizer.bypassSecurityTrustHtml(this.convertAnsiToHtml(text)),
+    }));
+    this.windowLines.set(rendered);
+    const before = this.windowStart - 1;
+    const after = Math.max(0, total - (this.windowStart - 1 + this.windowText.length));
+    this.topSpacerPx.set(before * this.LINE_PX);
+    this.bottomSpacerPx.set(after * this.LINE_PX);
+    this.cdr.detectChanges();
+  }
+
+  private async jumpToLine(buildId: string, line: number): Promise<void> {
+    const total = this.chunkIndex?.total_lines ?? 0;
+    const { start, end } = windowAround(total, line, this.WINDOW_PAGE);
+    await this.loadWindow(buildId, start, end, 'replace');
+    this.highlightLine.set(line);
+    this.autoScroll.set(false);
+    setTimeout(() => {
+      const el = this.logContainerRef?.nativeElement;
+      const target = el?.querySelector(`[data-line="${line}"]`) as HTMLElement | null;
+      target?.scrollIntoView({ block: 'center' });
+    }, 0);
+  }
+
+  copyLineLink(line: number): void {
+    const url = `${window.location.origin}${window.location.pathname}${window.location.search}#L${line}`;
+    navigator.clipboard?.writeText(url).catch(() => { /* ignore */ });
+    this.highlightLine.set(line);
+  }
+
+  // ── Ctrl+F search ───────────────────────────────────────────────────────────
+
+  @HostListener('document:keydown', ['$event'])
+  onKeydown(event: KeyboardEvent): void {
+    if (!this.chunkedMode() || !this.selectedBuildId()) return;
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') {
+      event.preventDefault();
+      this.searchOpen.set(true);
+      setTimeout(() => {
+        (document.querySelector('.log-search-input') as HTMLInputElement | null)?.focus();
+      }, 0);
+    } else if (event.key === 'Escape' && this.searchOpen()) {
+      this.closeSearch();
+    }
+  }
+
+  onSearchInput(event: Event): void {
+    this.searchQuery.set((event.target as HTMLInputElement).value);
+  }
+
+  closeSearch(): void {
+    this.searchOpen.set(false);
+    this.highlightLine.set(null);
+  }
+
+  async runSearch(): Promise<void> {
+    const buildId = this.selectedBuildId();
+    const q = this.searchQuery().trim();
+    if (!buildId || q === '') return;
+    this.searchHits.set([]);
+    this.searchTotal.set(0);
+    this.currentHit.set(-1);
+    try {
+      const res = await fetch(
+        `${environment.apiUrl}/builds/${buildId}/log/search?q=${encodeURIComponent(q)}`,
+        { method: 'GET', credentials: 'include' },
+      );
+      if (!res.ok || !res.body) return;
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffered = '';
+      const hits: LogSearchHit[] = [];
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffered += decoder.decode(value, { stream: true });
+        const parts = buffered.split('\n');
+        buffered = parts.pop() ?? '';
+        for (const part of parts) {
+          if (!part.trim()) continue;
+          const obj = JSON.parse(part);
+          if (obj.done === true) {
+            this.searchTotal.set(obj.total_matches ?? hits.length);
+          } else {
+            hits.push(obj as LogSearchHit);
+            this.searchHits.set([...hits]);
+          }
+        }
+      }
+      if (hits.length > 0) this.gotoHit(0);
+    } catch {
+      // ignore
+    }
+  }
+
+  gotoHit(i: number): void {
+    const hits = this.searchHits();
+    if (hits.length === 0) return;
+    const idx = ((i % hits.length) + hits.length) % hits.length;
+    this.currentHit.set(idx);
+    const buildId = this.selectedBuildId();
+    if (buildId) this.jumpToLine(buildId, hits[idx].line_number);
+  }
+
+  nextHit(): void { this.gotoHit(this.currentHit() + 1); }
+  prevHit(): void { this.gotoHit(this.currentHit() - 1); }
 
   // ── Build reveal animation ──────────────────────────────────────────────────
 
@@ -666,6 +905,31 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
     this.autoScroll.set(atBottom);
     this.showScrollBtn.set(!atBottom);
+    if (this.chunkedMode()) this.maybePageChunked(el);
+  }
+
+  private maybePageChunked(el: HTMLElement): void {
+    if (this.loadingWindow || !this.chunkIndex) return;
+    const buildId = this.selectedBuildId();
+    if (!buildId) return;
+    const total = this.chunkIndex.total_lines;
+    const windowEnd = this.windowStart + this.windowText.length - 1;
+
+    if (el.scrollTop < 200 && this.windowStart > 1) {
+      const start = Math.max(1, this.windowStart - this.WINDOW_PAGE);
+      const end = this.windowStart - 1;
+      const prevHeight = el.scrollHeight;
+      const prevTop = el.scrollTop;
+      this.loadWindow(buildId, start, end, 'prepend').then(() => {
+        setTimeout(() => {
+          el.scrollTop = prevTop + (el.scrollHeight - prevHeight);
+        }, 0);
+      });
+    } else if (el.scrollHeight - el.scrollTop - el.clientHeight < 200 && windowEnd < total) {
+      const start = windowEnd + 1;
+      const end = Math.min(total, windowEnd + this.WINDOW_PAGE);
+      this.loadWindow(buildId, start, end, 'append');
+    }
   }
 
   scrollToBottom(): void {
