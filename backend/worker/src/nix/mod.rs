@@ -9,5 +9,6 @@
 pub mod eval_worker;
 pub mod flake;
 pub mod gcroots;
+pub mod log;
 pub mod nix_eval;
 pub mod store;

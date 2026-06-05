@@ -272,6 +272,7 @@ impl ParsedDerivation {
         max_silent_secs: Option<u64>,
         abort: &mut watch::Receiver<bool>,
         log_limits: crate::executor::log_limit::LogRateLimits,
+        log_fetch_from_store: bool,
     ) -> Result<Vec<BuildOutput>, BuildError> {
         let mut guard = store.scoped().await.map_err(BuildError::transient)?;
 
@@ -367,6 +368,9 @@ impl ParsedDerivation {
                         "daemon returned empty built_outputs (output already valid or legacy \
                          protocol); recovering input-addressed/FOD paths from .drv"
                     );
+                    if log_fetch_from_store {
+                        forward_store_build_log(updater, task_index, drv_path);
+                    }
                 }
                 let mut outputs = Vec::with_capacity(pairs.len());
                 for (output_name, store_path_str) in pairs {
@@ -474,7 +478,6 @@ pub(super) async fn load_products(store_path: &str) -> Vec<BuildProduct> {
 /// Streams build log lines to the server via `LogChunk` messages while the
 /// daemon is running.
 #[allow(clippy::too_many_arguments)]
-#[allow(clippy::too_many_arguments)]
 pub async fn build_derivation(
     store: &LocalNixStore,
     task: &BuildTask,
@@ -484,6 +487,7 @@ pub async fn build_derivation(
     build_metrics: bool,
     cgroup_root: &str,
     log_limits: crate::executor::log_limit::LogRateLimits,
+    log_fetch_from_store: bool,
 ) -> Result<Vec<BuildOutput>, BuildError> {
     // `report_building` is sent by the caller (`execute_build_job`) before the
     // prefetch step, so a `JobFailed` after a prefetch error finds the build
@@ -501,6 +505,7 @@ pub async fn build_derivation(
         task.max_silent_secs,
         abort,
         log_limits,
+        log_fetch_from_store,
     );
 
     let started = std::time::Instant::now();
@@ -530,6 +535,27 @@ pub async fn build_derivation(
 }
 
 // ── Log helpers ───────────────────────────────────────────────────────────────
+
+/// When a derivation is already built locally the daemon produces no log.
+/// Read nix's stored `.bz2` log and forward it so the UI still shows output.
+/// Best-effort: missing logs and read errors are logged at debug and ignored.
+fn forward_store_build_log(updater: &mut JobUpdater, task_index: u32, drv_path: &str) {
+    match crate::nix::log::read_store_build_log(drv_path) {
+        Ok(Some(text)) if !text.is_empty() => {
+            const SEND_CHUNK: usize = 256 * 1024;
+            let bytes = text.into_bytes();
+            for slice in bytes.chunks(SEND_CHUNK) {
+                if let Err(e) = updater.send_log_chunk(task_index, slice.to_vec()) {
+                    warn!(error = %e, "failed to forward stored build log; continuing");
+                    break;
+                }
+            }
+            debug!(drv = %drv_path, "forwarded stored nix build log for already-built derivation");
+        }
+        Ok(_) => debug!(drv = %drv_path, "no stored nix build log for already-built derivation"),
+        Err(e) => debug!(drv = %drv_path, error = %e, "failed to read stored nix build log"),
+    }
+}
 
 /// Counters collected while draining the harmonia build log stream.
 #[derive(Default)]

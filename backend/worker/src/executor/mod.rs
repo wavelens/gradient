@@ -384,6 +384,7 @@ impl JobExecutor {
                 self.build_metrics,
                 &self.build_cgroup_root,
                 self.log_limits,
+                self.log_fetch_from_store,
             )
             .await?;
             for o in &outputs {
