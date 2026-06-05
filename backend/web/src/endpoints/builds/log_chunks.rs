@@ -228,9 +228,8 @@ pub async fn get_build_log_search(
                     Err(_) => continue,
                 };
                 let text = String::from_utf8_lossy(&bytes);
-                let mut line_no = row.line_start as u64;
                 let mut byte_off = row.byte_start as u64;
-                for line in text.split_inclusive('\n') {
+                for (line_no, line) in (row.line_start as u64..).zip(text.split_inclusive('\n')) {
                     let haystack = if case { line.to_string() } else { line.to_lowercase() };
                     if haystack.contains(&needle) {
                         total += 1;
@@ -242,7 +241,6 @@ pub async fn get_build_log_search(
                         };
                         yield serde_json::to_value(&hit).unwrap_or(serde_json::Value::Null);
                     }
-                    line_no += 1;
                     byte_off += line.len() as u64;
                 }
             }
