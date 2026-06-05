@@ -56,12 +56,71 @@ struct IdTokenClaims {
     name: Option<String>,
     #[serde(default)]
     preferred_username: Option<String>,
+    #[serde(default)]
+    groups: Vec<String>,
 }
 
 /// A provisioned/managed placeholder is claimable by the first matching OIDC
 /// login: no local password set and not yet bound to an OIDC identity.
 fn is_claimable(password: &Option<String>, oidc_subject: &Option<String>) -> bool {
     password.is_none() && oidc_subject.is_none()
+}
+
+/// Distinct `(org, role)` grants for the groups a user presents on login.
+fn grants_for_groups(
+    map: &gradient_core::state::OidcGroupRoles,
+    groups: &[String],
+) -> Vec<(OrganizationId, RoleId)> {
+    let mut out: Vec<(OrganizationId, RoleId)> = Vec::new();
+    for group in groups {
+        for &grant in map.get(group).into_iter().flatten() {
+            if !out.contains(&grant) {
+                out.push(grant);
+            }
+        }
+    }
+    out
+}
+
+/// Apply OIDC group → role grants additively: insert the membership when
+/// missing, upgrade the role when it differs. Never removes a membership.
+async fn apply_oidc_group_grants<C: sea_orm::ConnectionTrait>(
+    tx: &C,
+    map: &gradient_core::state::OidcGroupRoles,
+    groups: &[String],
+    user_id: UserId,
+) -> Result<()> {
+    for (org_id, role_id) in grants_for_groups(map, groups) {
+        let existing = EOrganizationUser::find()
+            .filter(COrganizationUser::Organization.eq(org_id))
+            .filter(COrganizationUser::User.eq(user_id))
+            .one(tx)
+            .await
+            .context("query org membership for OIDC group grant")?;
+        match existing {
+            Some(row) if row.role == role_id => {}
+            Some(row) => {
+                let mut active: AOrganizationUser = row.into();
+                active.role = Set(role_id);
+                active
+                    .update(tx)
+                    .await
+                    .context("update org role from OIDC group")?;
+            }
+            None => {
+                AOrganizationUser {
+                    id: Set(OrganizationUserId::now_v7()),
+                    organization: Set(org_id),
+                    user: Set(user_id),
+                    role: Set(role_id),
+                }
+                .insert(tx)
+                .await
+                .context("insert org membership from OIDC group")?;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn random_url_safe(bytes: usize) -> String {
@@ -303,6 +362,7 @@ async fn create_or_update_user(
         .preferred_username
         .clone()
         .unwrap_or_else(|| claims.sub.clone());
+    let groups = claims.groups.clone();
 
     let tx = state
         .web_db
@@ -338,6 +398,13 @@ async fn create_or_update_user(
             .update(&tx)
             .await
             .context("Failed to update OIDC user")?;
+
+        if let Err(e) =
+            apply_oidc_group_grants(&tx, &state.oidc_group_roles, &groups, user.id).await
+        {
+            tracing::warn!(error = %e, username = %user.username,
+                "Failed to apply OIDC group role grants");
+        }
 
         tx.commit()
             .await
@@ -391,6 +458,13 @@ async fn create_or_update_user(
             );
         }
 
+        if let Err(e) =
+            apply_oidc_group_grants(&tx, &state.oidc_group_roles, &groups, user_id).await
+        {
+            tracing::warn!(error = %e, username = %user.username,
+                "Failed to apply OIDC group role grants");
+        }
+
         tx.commit()
             .await
             .context("Failed to commit OIDC account claim")?;
@@ -430,6 +504,11 @@ async fn create_or_update_user(
             username = %user.username,
             "Failed to apply pending state-managed org memberships for new OIDC user"
         );
+    }
+
+    if let Err(e) = apply_oidc_group_grants(&tx, &state.oidc_group_roles, &groups, user.id).await {
+        tracing::warn!(error = %e, username = %user.username,
+            "Failed to apply OIDC group role grants");
     }
 
     tx.commit()
@@ -531,6 +610,24 @@ mod tests {
             &Some("$argon2id$...".into()),
             &Some("existing-subject".into())
         ));
+    }
+
+    #[test]
+    fn collects_distinct_grants_for_presented_groups() {
+        use std::collections::HashMap;
+        let org = OrganizationId::now_v7();
+        let role = RoleId::now_v7();
+        let mut map: gradient_core::state::OidcGroupRoles = HashMap::new();
+        map.insert("platform-team".into(), vec![(org, role)]);
+        map.insert("ops".into(), vec![(org, role)]);
+
+        let grants = super::grants_for_groups(
+            &map,
+            &["platform-team".into(), "ops".into(), "irrelevant".into()],
+        );
+        assert_eq!(grants, vec![(org, role)]);
+
+        assert!(super::grants_for_groups(&map, &["nobody".into()]).is_empty());
     }
 
     #[test]

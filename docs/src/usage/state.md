@@ -350,6 +350,26 @@ Role names must not collide with the built-in roles (`Admin`, `Write`,
 `View`) or with another state-managed role in the same organization -
 startup fails on collision.
 
+### Mapping OIDC groups to roles
+
+A role may list `oidc_group` values. On each OIDC login, a user whose
+`groups` claim contains any listed group is granted that role in the role's
+organization (creating the membership if missing, upgrading the role if it
+differs). Grants are **additive**: OIDC groups only ever add or upgrade a
+membership, never remove one - removal stays with explicit `members` lists
+and the API. This targets state-managed custom roles only; to grant
+admin-level access via a group, declare a custom role with those permissions
+and an `oidc_group`. Requires the `groups` scope on the OIDC client (add
+`"groups"` to `services.gradient.oidc.scopes`).
+
+```nix
+services.gradient.state.roles.platform-admin = {
+  organization = "acme";
+  permissions  = [ "viewOrg" "triggerEvaluation" ];
+  oidc_group   = [ "platform-team" "ops" ];
+};
+```
+
 ### Role options
 
 | Option | Default | Description |
@@ -357,6 +377,7 @@ startup fails on collision.
 | `name` | `<attrset key>` | Role name. Must be unique within the organization and must not collide with a built-in role |
 | `organization` | - | Owning organization name (required) |
 | `permissions` | - | List of capability identifiers granted by the role (required, see `GET /user/keys/permissions` for the catalogue) |
+| `oidc_group` | `[]` | OIDC group claims that grant this role on login (additive). Requires the `groups` scope |
 
 ## API Keys
 

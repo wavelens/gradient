@@ -155,7 +155,7 @@ services.gradient.oidc = {
 
 Gradient uses PKCE (S256) and discovers all provider endpoints from `discoveryUrl/.well-known/openid-configuration` and callback url is at `https://$domain/api/v1/auth/oidc/callback`. Set `required` to `true` to disable basic auth and require OIDC for all users. Because PKCE is sent on every request, providers that gate it (e.g. kanidm) do not need `allowInsecureClientDisablePkce`.
 
-To map OIDC groups to organization roles, request the `groups` scope (add `"groups"` to `scopes`) so the ID token carries the user's group claims, then attach `oidcGroup` lists to state-managed roles (see [Declarative State](usage/state.md)).
+To map OIDC groups to organization roles, request the `groups` scope (add `"groups"` to `scopes`) so the ID token carries the user's group claims, then attach `oidc_group` lists to state-managed roles (see [Declarative State](usage/state.md)).
 
 ## Email
 
