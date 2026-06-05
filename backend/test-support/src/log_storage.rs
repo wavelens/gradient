@@ -29,6 +29,20 @@ impl LogStorage for NoopLogStorage {
     fn list_logs<'a>(&'a self) -> BoxFuture<'a, Result<Vec<BuildId>>> {
         Box::pin(async { Ok(Vec::new()) })
     }
+    fn write_chunk<'a>(
+        &'a self,
+        _build_id: BuildId,
+        _index: u32,
+        _bytes: &'a [u8],
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+    fn read_chunk<'a>(&'a self, _build_id: BuildId, _index: u32) -> BoxFuture<'a, Result<Vec<u8>>> {
+        Box::pin(async { anyhow::bail!("no chunk") })
+    }
+    fn delete_chunks<'a>(&'a self, _build_id: BuildId) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
 }
 
 /// Recording log storage: keeps every `(build_id, text)` append in memory so
@@ -98,6 +112,21 @@ impl LogStorage for RecordingLogStorage {
             Ok(out)
         })
     }
+
+    fn write_chunk<'a>(
+        &'a self,
+        _build_id: BuildId,
+        _index: u32,
+        _bytes: &'a [u8],
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+    fn read_chunk<'a>(&'a self, _build_id: BuildId, _index: u32) -> BoxFuture<'a, Result<Vec<u8>>> {
+        Box::pin(async { anyhow::bail!("no chunk") })
+    }
+    fn delete_chunks<'a>(&'a self, _build_id: BuildId) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
 }
 
 /// Pre-seeded in-memory log storage for fixture tests that need `read` to
@@ -105,6 +134,7 @@ impl LogStorage for RecordingLogStorage {
 #[derive(Debug, Default)]
 pub struct InMemoryLogStorage {
     store: Mutex<HashMap<BuildId, String>>,
+    chunks: Mutex<HashMap<(BuildId, u32), Vec<u8>>>,
 }
 
 impl InMemoryLogStorage {
@@ -164,6 +194,42 @@ impl LogStorage for InMemoryLogStorage {
                 .keys()
                 .copied()
                 .collect())
+        })
+    }
+
+    fn write_chunk<'a>(
+        &'a self,
+        build_id: BuildId,
+        index: u32,
+        bytes: &'a [u8],
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            self.chunks
+                .lock()
+                .expect("in-memory chunk mutex")
+                .insert((build_id, index), bytes.to_vec());
+            Ok(())
+        })
+    }
+
+    fn read_chunk<'a>(&'a self, build_id: BuildId, index: u32) -> BoxFuture<'a, Result<Vec<u8>>> {
+        Box::pin(async move {
+            self.chunks
+                .lock()
+                .expect("in-memory chunk mutex")
+                .get(&(build_id, index))
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("no chunk"))
+        })
+    }
+
+    fn delete_chunks<'a>(&'a self, build_id: BuildId) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            self.chunks
+                .lock()
+                .expect("in-memory chunk mutex")
+                .retain(|(b, _), _| *b != build_id);
+            Ok(())
         })
     }
 }
