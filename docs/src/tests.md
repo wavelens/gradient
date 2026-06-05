@@ -3267,3 +3267,49 @@ prediction per candidate derivation outside the scoring lock; `take_best_of_kind
 feeds each build's prediction to the lazy `history` provider. On build completion,
 `BuildStateHandler::record_metrics` inserts a `derivation_metric` row from the
 worker's `BuildMetrics` and adopts the worker-measured `build_time_ms`.
+
+## Log compression, chunking, limiting & store-fetch (#246)
+
+Completed build logs are zstd-compressed into line-bounded chunks at finalize and
+served lazily by chunk, line range, or streaming search. Workers cap log
+throughput with two token buckets and fetch nix-store logs for already-built
+derivations.
+
+**`core::storage::sgr` (`SgrState`)** — ANSI SGR carry-forward: `to_prefix()` is
+empty for the default state, reconstructs an active foreground colour, clears on
+reset (`\e[0m`), combines bold+colour minimally, handles 256-colour sequences,
+and ignores an incomplete escape at end of input.
+
+**`core::storage::log_chunk`** — `chunk_log` splits on line boundaries respecting
+the byte target, keeps an over-long line whole, carries the active colour as each
+chunk's `color_prefix`, and yields no chunks for an empty log.
+`compress_and_store_chunks` zstd-encodes each chunk, writes it via `LogStorage`,
+and the round-trip (`read_chunk` → `zstd::decode_all`) reproduces the chunk text.
+
+**`core::storage::log` chunk objects** — `write_chunk`/`read_chunk`/`delete_chunks`
+round-trip on `FileLogStorage`; `read` reassembles from chunks once the inline log
+is dropped (`delete_inline_log`), so full-log reads and dedup keep working.
+
+**`worker::executor::log_limit` (`LogRateLimiter`)** — admits bytes under the
+limit, trips permanently on a burst (1-minute bucket exhausted), trips on the
+sustained (1-hour) bucket even when the burst bucket would allow, and refills the
+minute bucket over elapsed time while not yet tripped.
+
+**`worker::nix::log`** — `store_log_path` computes
+`$NIX_LOG_DIR/drvs/<first2>/<rest>.bz2` from a drv store path (and a bare
+basename); `read_store_build_log` bzip2-decodes the stored log or returns `None`.
+
+**`web::endpoints::builds::log_chunks`** — `parse_line_range` accepts `start`/`end`,
+defaults the start to 1, parses `L120-L130` and bare `3-8`, and rejects malformed
+ranges. (The chunk/line/search endpoints' full request/response behaviour is
+covered by CI integration tests, not run locally.)
+
+**Frontend `log-window`** — `parseLineFragment` parses `#L`-style deep-link
+fragments and rejects garbage/non-positive; `chunkIndexForLine` maps a line to its
+chunk index (or `-1`); `windowAround` centres and clamps a fetch window to the log
+bounds and handles empty logs. Run a single spec with
+`pnpm exec vitest run <file> --globals --environment node`.
+
+**CLI** — `gradient builds log <id>` keeps streaming parity (the server's
+`GET /log` reassembles chunks); `--lines L120-L130` fetches a line range and
+`--search <term>` streams matches.

@@ -249,6 +249,35 @@ in {
         default = "/sys/fs/cgroup";
       };
 
+      logBurstBytesPerMin = lib.mkOption {
+        description = ''
+          Burst token bucket: maximum build-log bytes forwarded to the server
+          per build in any 1-minute window. On trip the worker stops forwarding
+          log output for that build (the build still runs). Default 8 MiB.
+        '';
+        type = lib.types.int;
+        default = 8 * 1024 * 1024;
+      };
+
+      logSustainedBytesPerHour = lib.mkOption {
+        description = ''
+          Sustained token bucket: maximum build-log bytes forwarded to the
+          server per build in any 1-hour window. Default 64 MiB.
+        '';
+        type = lib.types.int;
+        default = 64 * 1024 * 1024;
+      };
+
+      logFetchFromStore = lib.mkOption {
+        description = ''
+          When a derivation is already built in the local store (so the daemon
+          produces no fresh log), read nix's stored <literal>.bz2</literal> build
+          log and forward it so the UI still shows output.
+        '';
+        type = lib.types.bool;
+        default = true;
+      };
+
       logLevel = lib.mkOption {
         default = { };
         description = ''
@@ -370,6 +399,9 @@ in {
           GRADIENT_WORKER_GCROOTS_DIR                 = cfg.settings.gcrootsDir;
           GRADIENT_WORKER_BUILD_METRICS               = lib.boolToString cfg.settings.buildMetrics;
           GRADIENT_WORKER_BUILD_CGROUP_ROOT           = cfg.settings.buildCgroupRoot;
+          GRADIENT_LOG_BURST_BYTES_PER_MIN            = toString cfg.settings.logBurstBytesPerMin;
+          GRADIENT_LOG_SUSTAINED_BYTES_PER_HOUR       = toString cfg.settings.logSustainedBytesPerHour;
+          GRADIENT_LOG_FETCH_FROM_STORE               = lib.boolToString cfg.settings.logFetchFromStore;
         } // lib.optionalAttrs (cfg.settings.architectures != []) {
           GRADIENT_WORKER_ARCHITECTURES = lib.concatStringsSep "," cfg.settings.architectures;
         } // lib.optionalAttrs (cfg.settings.systemFeatures != []) {
