@@ -949,13 +949,16 @@ rows.
 **Run:** `cargo test -p core --tests`
 
 Tests for the shared closure helpers (`transitive_closure_reachable`,
-`output_sizes_by_drv`, `transitive_closure_size`) extracted from the web
-closure-graph endpoint and reused by scheduler scoring.
+`output_sizes_by_drv`, `transitive_closure_size`, `transitive_closure_sizes`)
+extracted from the web closure-graph endpoint and reused by scheduler scoring.
+`transitive_closure_sizes` sizes many roots in one batched walk (used by the
+dispatch backfill).
 
 | Test | What it checks |
 |------|---------------|
 | `sums_closure_output_sizes` | Sums coalesced output NAR sizes over the reachable closure |
 | `empty_roots_is_zero` | Empty seed set yields a zero/empty result |
+| `bulk_sizes_dedup_diamond` | Multi-root bulk sizing counts a shared (diamond) dependency once |
 
 ---
 
