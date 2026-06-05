@@ -451,6 +451,19 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         .route("/builds/{build}", get(builds::get_build))
         .route("/builds/{build}/log", get(builds::get_build_log))
         .route(
+            "/builds/{build}/log/chunks",
+            get(builds::get_build_log_chunks),
+        )
+        .route(
+            "/builds/{build}/log/chunk/{index}",
+            get(builds::get_build_log_chunk),
+        )
+        .route("/builds/{build}/log/lines", get(builds::get_build_log_lines))
+        .route(
+            "/builds/{build}/log/search",
+            get(builds::get_build_log_search),
+        )
+        .route(
             "/builds/{build}/dependencies",
             get(builds::get_build_dependencies),
         )

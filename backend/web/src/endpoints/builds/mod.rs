@@ -8,6 +8,7 @@ pub mod closure;
 pub mod downloads;
 pub mod graph;
 pub mod log;
+pub mod log_chunks;
 pub mod query;
 
 pub use self::closure::{
@@ -21,6 +22,9 @@ pub use self::graph::{
     BuildGraph, DependencyEdge, DependencyNode, get_build_dependencies, get_build_graph,
 };
 pub use self::log::{get_build_log, post_build_log};
+pub use self::log_chunks::{
+    get_build_log_chunk, get_build_log_chunks, get_build_log_lines, get_build_log_search,
+};
 pub use self::query::{BuildWithOutputs, get_build};
 
 use crate::access::is_org_member;
