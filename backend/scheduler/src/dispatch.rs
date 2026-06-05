@@ -419,29 +419,51 @@ impl BuildDispatchMaps {
             direct_inputs.insert(*drv_id, paths);
         }
 
-        // Closure sizes: reuse the persisted `derivation.closure_size` when set;
-        // otherwise compute the transitive output size once and backfill the row
-        // so future dispatch passes skip the walk.
+        // Closure sizes and historical predictions are only consumed by
+        // policies that read history (resource-aware). Under the simple policy
+        // we skip the walk entirely and use whatever is already persisted.
+        // Derivations missing `closure_size` are sized in one batched walk
+        // rather than one DB walk per derivation, then backfilled.
         let mut closure_sizes: HashMap<DerivationId, Option<i64>> = HashMap::new();
-        for (drv_id, drv) in &derivations {
-            let size = match drv.closure_size {
-                Some(s) => Some(s),
-                None => Self::backfill_closure_size(state, *drv_id).await,
-            };
-            closure_sizes.insert(*drv_id, size);
-        }
-
-        // Historical predictions: only loaded when the active policy reads
-        // history, and only for derivations carrying a pname to match against.
         let mut histories: HashMap<DerivationId, score::HistoryPrediction> = HashMap::new();
         if uses_history {
+            let need: Vec<DerivationId> = derivations
+                .iter()
+                .filter(|(_, d)| d.closure_size.is_none())
+                .map(|(id, _)| *id)
+                .collect();
+            let computed = if need.is_empty() {
+                HashMap::new()
+            } else {
+                gradient_core::db::transitive_closure_sizes(&state.worker_db, &need)
+                    .await
+                    .unwrap_or_else(|e| {
+                        error!(error = %e, "failed to compute closure sizes");
+                        HashMap::new()
+                    })
+            };
+            for (drv_id, size) in &computed {
+                if let Err(e) = EDerivation::update_many()
+                    .col_expr(CDerivation::ClosureSize, sea_orm::sea_query::Expr::value(*size))
+                    .filter(CDerivation::Id.eq(*drv_id))
+                    .exec(&state.worker_db)
+                    .await
+                {
+                    error!(derivation_id = %drv_id, error = %e, "failed to persist closure size");
+                }
+            }
             for (drv_id, drv) in &derivations {
+                let size = drv.closure_size.or_else(|| computed.get(drv_id).copied());
+                closure_sizes.insert(*drv_id, size);
                 if let Some(pname) = &drv.pname {
-                    let closure_size = closure_sizes.get(drv_id).copied().flatten();
                     let prediction =
-                        crate::history::predict(&state.worker_db, pname, closure_size).await;
+                        crate::history::predict(&state.worker_db, pname, size).await;
                     histories.insert(*drv_id, prediction);
                 }
+            }
+        } else {
+            for (drv_id, drv) in &derivations {
+                closure_sizes.insert(*drv_id, drv.closure_size);
             }
         }
 
@@ -458,32 +480,6 @@ impl BuildDispatchMaps {
             default_timeout_secs,
             default_max_silent_secs,
         })
-    }
-
-    /// Compute the transitive closure size for `drv_id` and persist it onto the
-    /// `derivation` row. Failures degrade to `None` (scoring treats it as
-    /// unknown) and are retried on the next dispatch pass.
-    async fn backfill_closure_size(
-        state: &Arc<ServerState>,
-        drv_id: DerivationId,
-    ) -> Option<i64> {
-        let size = match gradient_core::db::transitive_closure_size(&state.worker_db, &[drv_id]).await
-        {
-            Ok(s) => s,
-            Err(e) => {
-                error!(derivation_id = %drv_id, error = %e, "failed to compute closure size");
-                return None;
-            }
-        };
-        if let Err(e) = EDerivation::update_many()
-            .col_expr(CDerivation::ClosureSize, sea_orm::sea_query::Expr::value(size))
-            .filter(CDerivation::Id.eq(drv_id))
-            .exec(&state.worker_db)
-            .await
-        {
-            error!(derivation_id = %drv_id, error = %e, "failed to persist closure size");
-        }
-        Some(size)
     }
 
     /// Resolve the organization that owns this evaluation (used as `peer_id`

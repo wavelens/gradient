@@ -10,9 +10,9 @@ use crate::types::*;
 use anyhow::Result;
 use async_trait::async_trait;
 use git2::{Direction, RemoteCallbacks};
-use sea_orm::EntityTrait;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, sea_query::Expr};
 use std::sync::Arc;
-use tracing::{debug, info, instrument};
+use tracing::{debug, info, instrument, warn};
 
 // ── ProjectGitContext ─────────────────────────────────────────────────────────
 
@@ -96,7 +96,31 @@ impl<'a> ProjectGitContext<'a> {
         debug!(remote_hash = %remote_hash_str, "Retrieved remote hash");
 
         if self.project.force_evaluation {
+            // Never supersede an in-flight evaluation: the one-shot force is
+            // already satisfied by whatever is running, and re-triggering would
+            // let the concurrency policy abort a build that is still making
+            // progress (perpetual re-eval under a fast poll interval).
+            if let Some(last_evaluation) = self.project.last_evaluation
+                && let Some(evaluation) = EEvaluation::find_by_id(last_evaluation)
+                    .one(&self.state.worker_db)
+                    .await
+                    .map_err(|e| SourceError::Database { reason: e.to_string() })?
+                && evaluation.status.is_active()
+            {
+                debug!(status = ?evaluation.status, "Evaluation already in progress, skipping forced re-eval");
+                return Ok((false, remote_hash));
+            }
             info!("Force evaluation enabled, updating project");
+            // Consume the one-shot flag so subsequent polls fall back to normal
+            // commit-change detection instead of forcing on every cycle.
+            if let Err(e) = EProject::update_many()
+                .col_expr(CProject::ForceEvaluation, Expr::value(false))
+                .filter(CProject::Id.eq(self.project.id))
+                .exec(&self.state.worker_db)
+                .await
+            {
+                warn!(error = %e, "failed to clear force_evaluation flag");
+            }
             return Ok((true, remote_hash));
         }
 

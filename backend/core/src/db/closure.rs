@@ -101,6 +101,59 @@ pub async fn transitive_closure_size<C: ConnectionTrait>(
     Ok(by_drv.values().sum())
 }
 
+/// Closure size for many roots at once. Loads the dependency graph and output
+/// sizes for the combined reachable set in a handful of batched queries, then
+/// sums each root's closure in memory (diamonds deduped via a per-root visited
+/// set). This is `O(depth)` DB round-trips for the whole batch instead of one
+/// full DB walk per root, which matters when a dispatch round backfills many
+/// derivations that share most of their closure.
+pub async fn transitive_closure_sizes<C: ConnectionTrait>(
+    db: &C,
+    roots: &[DerivationId],
+) -> Result<HashMap<DerivationId, i64>, DbErr> {
+    if roots.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let mut adjacency: HashMap<DerivationId, Vec<DerivationId>> = HashMap::new();
+    let mut reachable: HashSet<DerivationId> = roots.iter().copied().collect();
+    let mut frontier: Vec<DerivationId> = roots.to_vec();
+    while !frontier.is_empty() {
+        let edges = EDerivationDependency::find()
+            .filter(CDerivationDependency::Derivation.is_in(frontier.clone()))
+            .all(db)
+            .await?;
+        frontier.clear();
+        for edge in edges {
+            adjacency.entry(edge.derivation).or_default().push(edge.dependency);
+            if reachable.insert(edge.dependency) {
+                frontier.push(edge.dependency);
+            }
+        }
+    }
+
+    let sizes = output_sizes_by_drv(db, &reachable.iter().copied().collect::<Vec<_>>()).await?;
+
+    let mut result: HashMap<DerivationId, i64> = HashMap::with_capacity(roots.len());
+    for &root in roots {
+        let mut visited: HashSet<DerivationId> = HashSet::from([root]);
+        let mut stack = vec![root];
+        let mut total = 0i64;
+        while let Some(node) = stack.pop() {
+            total += sizes.get(&node).copied().unwrap_or(0);
+            if let Some(children) = adjacency.get(&node) {
+                for &child in children {
+                    if visited.insert(child) {
+                        stack.push(child);
+                    }
+                }
+            }
+        }
+        result.insert(root, total);
+    }
+    Ok(result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,5 +209,28 @@ mod tests {
         let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
         let total = transitive_closure_size(&db, &[]).await.unwrap();
         assert_eq!(total, 0);
+    }
+
+    #[tokio::test]
+    async fn bulk_sizes_dedup_diamond() {
+        // root -> a, root -> b, a -> c, b -> c. c must be counted once.
+        let root = DerivationId::now_v7();
+        let a = DerivationId::now_v7();
+        let b = DerivationId::now_v7();
+        let c = DerivationId::now_v7();
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![dep(root, a), dep(root, b)]])
+            .append_query_results([vec![dep(a, c), dep(b, c)]])
+            .append_query_results([Vec::<derivation_dependency::Model>::new()])
+            .append_query_results([vec![
+                out(root, "r", Some(10)),
+                out(a, "a", Some(20)),
+                out(b, "b", Some(30)),
+                out(c, "c", Some(40)),
+            ]])
+            .into_connection();
+
+        let sizes = transitive_closure_sizes(&db, &[root]).await.unwrap();
+        assert_eq!(sizes.get(&root).copied(), Some(100));
     }
 }
