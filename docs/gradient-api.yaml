@@ -3268,6 +3268,154 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /builds/{build}/log/chunks:
+    parameters:
+      - $ref: '#/components/parameters/BuildId'
+    get:
+      tags: [builds]
+      summary: Get build log chunk index
+      description: |-
+        Returns the index of the zstd-compressed log chunks written when the build
+        finalized: total chunk/line/byte counts and per-chunk line/byte offsets.
+        `total_chunks` is `0` for builds whose log has not been finalized yet (use the
+        streaming `POST /log` endpoint for in-progress builds).
+
+        **Access:** Same as `GET /builds/{build}/log`.
+      operationId: getBuildLogChunks
+      responses:
+        '200':
+          description: Chunk index
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/LogChunkIndex'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /builds/{build}/log/chunk/{index}:
+    parameters:
+      - $ref: '#/components/parameters/BuildId'
+      - name: index
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int32
+        description: Zero-based chunk index from the chunk index response.
+    get:
+      tags: [builds]
+      summary: Get a single decompressed log chunk
+      description: |-
+        Returns one chunk's plaintext (server-decompressed) with the active ANSI
+        color state at the chunk boundary already prepended, so the chunk renders
+        correctly standalone.
+
+        **Access:** Same as `GET /builds/{build}/log`.
+      operationId: getBuildLogChunk
+      responses:
+        '200':
+          description: Chunk plaintext
+          content:
+            text/plain:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /builds/{build}/log/lines:
+    parameters:
+      - $ref: '#/components/parameters/BuildId'
+      - name: start
+        in: query
+        schema:
+          type: integer
+          format: int64
+        description: 1-based first line (inclusive). Defaults to 1.
+      - name: end
+        in: query
+        schema:
+          type: integer
+          format: int64
+        description: 1-based last line (inclusive). Defaults to the last line.
+      - name: range
+        in: query
+        schema:
+          type: string
+        description: Alternative to start/end, e.g. `L1234-L1243` (the `L` is optional).
+    get:
+      tags: [builds]
+      summary: Get a build log line range
+      description: |-
+        Returns the plaintext for an inclusive 1-based logical line range, resolving
+        the covering chunk(s) server-side and prepending the correct color prefix for
+        the first line. Hand- and CLI-friendly; the frontend also uses this as its
+        lazy fetch path.
+
+        **Access:** Same as `GET /builds/{build}/log`.
+      operationId: getBuildLogLines
+      responses:
+        '200':
+          description: Line range plaintext
+          content:
+            text/plain:
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /builds/{build}/log/search:
+    parameters:
+      - $ref: '#/components/parameters/BuildId'
+      - name: q
+        in: query
+        required: true
+        schema:
+          type: string
+        description: Substring to search for.
+      - name: case
+        in: query
+        schema:
+          type: boolean
+          default: false
+        description: Case-sensitive match when true.
+    get:
+      tags: [builds]
+      summary: Search a build log
+      description: |-
+        Streams NDJSON search hits in scan order as the server decompresses chunks,
+        so first matches and a running count appear immediately. Each line is a
+        `LogSearchHit`; the final frame is a `LogSearchDone` carrying `total_matches`.
+        Matches are per-line substrings (no multi-line matches).
+
+        **Access:** Same as `GET /builds/{build}/log`.
+      operationId: searchBuildLog
+      responses:
+        '200':
+          description: NDJSON stream of search hits, terminated by a done frame
+          content:
+            application/x-ndjson:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/LogSearchHit'
+                  - $ref: '#/components/schemas/LogSearchDone'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /builds/{build}/graph:
     parameters:
       - $ref: '#/components/parameters/BuildId'
@@ -7321,6 +7469,76 @@ components:
           type: string
           format: uuid
           description: Build that depends on `source`
+
+    LogChunkMeta:
+      type: object
+      required: [index, line_start, line_count, byte_start, byte_len]
+      properties:
+        index:
+          type: integer
+          format: int32
+          description: Zero-based chunk index.
+        line_start:
+          type: integer
+          format: int64
+          description: Zero-based index of this chunk's first line.
+        line_count:
+          type: integer
+          format: int32
+        byte_start:
+          type: integer
+          format: int64
+          description: Uncompressed byte offset of this chunk's first byte.
+        byte_len:
+          type: integer
+          format: int32
+
+    LogChunkIndex:
+      type: object
+      required: [total_chunks, total_lines, total_bytes, chunks]
+      properties:
+        total_chunks:
+          type: integer
+          format: int32
+        total_lines:
+          type: integer
+          format: int64
+        total_bytes:
+          type: integer
+          format: int64
+        chunks:
+          type: array
+          items:
+            $ref: '#/components/schemas/LogChunkMeta'
+
+    LogSearchHit:
+      type: object
+      required: [line_number, chunk_index, byte_offset, preview]
+      properties:
+        line_number:
+          type: integer
+          format: int64
+          description: 1-based line number of the match.
+        chunk_index:
+          type: integer
+          format: int32
+        byte_offset:
+          type: integer
+          format: int64
+        preview:
+          type: string
+          description: The matching line (trimmed, max 200 chars).
+
+    LogSearchDone:
+      type: object
+      required: [done, total_matches]
+      properties:
+        done:
+          type: boolean
+          enum: [true]
+        total_matches:
+          type: integer
+          format: int64
 
     BuildGraph:
       type: object
