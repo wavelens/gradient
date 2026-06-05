@@ -78,6 +78,13 @@ attempting to sign in as that user via OIDC is rejected by the server
 (`User already exists with password authentication`), so OIDC-only users
 must be declared without one.
 
+A *claimable* account is one provisioned without a password that has not yet
+been bound to an OIDC identity. On the first OIDC login whose username or email
+matches it, the server records its `(iss, sub)` and binds the account;
+`superuser` and the other provisioned fields are preserved. This is the
+supported way to **bootstrap an OIDC superuser**: declare the user with
+`superuser = true` and `password_file = null`, then sign in via OIDC.
+
 ### User options
 
 | Option | Default | Description |
