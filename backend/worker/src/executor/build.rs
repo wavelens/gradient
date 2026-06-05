@@ -262,6 +262,7 @@ impl ParsedDerivation {
     /// running.  Returns one [`BuildOutput`] per output name; `nar_size` and
     /// `nar_hash` are `None` at this stage and are filled in by the compress
     /// step.
+    #[allow(clippy::too_many_arguments)]
     pub(super) async fn realize(
         self,
         store: &LocalNixStore,
@@ -270,6 +271,7 @@ impl ParsedDerivation {
         drv_path: &str,
         max_silent_secs: Option<u64>,
         abort: &mut watch::Receiver<bool>,
+        log_limits: crate::executor::log_limit::LogRateLimits,
     ) -> Result<Vec<BuildOutput>, BuildError> {
         let mut guard = store.scoped().await.map_err(BuildError::transient)?;
 
@@ -314,8 +316,15 @@ impl ParsedDerivation {
                 BuildMode::Normal,
             );
             let mut logs = pin!(logs);
-            match drain_build_logs_with_timeout(logs.as_mut(), updater, task_index, silent, abort)
-                .await
+            match drain_build_logs_with_timeout(
+                logs.as_mut(),
+                updater,
+                task_index,
+                silent,
+                abort,
+                log_limits,
+            )
+            .await
             {
                 Ok(DrainOutcome::Completed(stats)) => log_stream_summary(&stats, drv_path),
                 Ok(DrainOutcome::Aborted) => return Err(BuildError::aborted(drv_path)),
@@ -465,6 +474,7 @@ pub(super) async fn load_products(store_path: &str) -> Vec<BuildProduct> {
 /// Streams build log lines to the server via `LogChunk` messages while the
 /// daemon is running.
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)]
 pub async fn build_derivation(
     store: &LocalNixStore,
     task: &BuildTask,
@@ -473,6 +483,7 @@ pub async fn build_derivation(
     abort: &mut watch::Receiver<bool>,
     build_metrics: bool,
     cgroup_root: &str,
+    log_limits: crate::executor::log_limit::LogRateLimits,
 ) -> Result<Vec<BuildOutput>, BuildError> {
     // `report_building` is sent by the caller (`execute_build_job`) before the
     // prefetch step, so a `JobFailed` after a prefetch error finds the build
@@ -489,6 +500,7 @@ pub async fn build_derivation(
         &task.drv_path,
         task.max_silent_secs,
         abort,
+        log_limits,
     );
 
     let started = std::time::Instant::now();
@@ -595,11 +607,16 @@ async fn drain_build_logs_with_timeout<S>(
     task_index: u32,
     silent: Option<std::time::Duration>,
     abort: &mut watch::Receiver<bool>,
+    log_limits: crate::executor::log_limit::LogRateLimits,
 ) -> Result<DrainOutcome>
 where
     S: futures::Stream<Item = LogMessage>,
 {
+    use crate::executor::log_limit::LogRateLimiter;
     let mut stats = LogStreamStats::default();
+    let mut limiter = LogRateLimiter::from_limits(log_limits);
+    let started = std::time::Instant::now();
+    let mut limit_hit = false;
     loop {
         let msg = match next_log_event(logs.as_mut(), silent, abort).await? {
             NextLog::Message(msg) => msg,
@@ -608,7 +625,19 @@ where
         };
         stats.total_msgs += 1;
         if let Some(line) = log_message_to_text(&msg) {
+            if limit_hit {
+                continue;
+            }
             let len = line.len();
+            if !limiter.admit(len as u64, started.elapsed().as_secs_f64()) {
+                limit_hit = true;
+                let _ = updater.send_log_chunk(
+                    task_index,
+                    b"\x1b[0m[gradient: log truncated \xe2\x80\x94 rate limit exceeded]\n".to_vec(),
+                );
+                warn!("build log rate limit exceeded; truncating remaining output");
+                continue;
+            }
             // Log streaming is best-effort - never fail the build because the
             // server connection hiccupped.
             match updater.send_log_chunk(task_index, line.into_bytes()) {

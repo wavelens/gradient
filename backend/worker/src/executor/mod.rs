@@ -13,6 +13,7 @@ pub mod build;
 pub mod compress;
 pub mod eval;
 pub mod fetch;
+pub mod log_limit;
 
 use std::sync::Arc;
 
@@ -161,9 +162,12 @@ pub struct JobExecutor {
     pub(crate) binpath_ssh: String,
     pub(crate) build_metrics: bool,
     pub(crate) build_cgroup_root: String,
+    pub(crate) log_limits: crate::executor::log_limit::LogRateLimits,
+    pub(crate) log_fetch_from_store: bool,
 }
 
 impl JobExecutor {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         store: LocalNixStore,
         evaluator: WorkerEvaluator,
@@ -172,6 +176,8 @@ impl JobExecutor {
         binpath_ssh: String,
         build_metrics: bool,
         build_cgroup_root: String,
+        log_limits: crate::executor::log_limit::LogRateLimits,
+        log_fetch_from_store: bool,
     ) -> Self {
         Self {
             store: Arc::new(store),
@@ -181,6 +187,8 @@ impl JobExecutor {
             binpath_ssh,
             build_metrics,
             build_cgroup_root,
+            log_limits,
+            log_fetch_from_store,
         }
     }
 
@@ -375,6 +383,7 @@ impl JobExecutor {
                 &mut abort,
                 self.build_metrics,
                 &self.build_cgroup_root,
+                self.log_limits,
             )
             .await?;
             for o in &outputs {
