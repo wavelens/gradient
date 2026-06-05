@@ -154,7 +154,7 @@ Batching the BFS (one DB round-trip per level) keeps the query count proportiona
 
 **API keys** - 32 random bytes encoded as hex, stored hashed in `api.key`, prefixed with `GRAD` when returned to the user. The `authorization::authorize` middleware accepts both token types in the `Authorization: Bearer` header.
 
-**OIDC** - `oidc_login_create` starts the PKCE flow and stores the verifier in the database. `oidc_login_verify` exchanges the code, fetches user info, upserts the user row, and returns a JWT. Endpoint discovery is automatic from `GRADIENT_OIDC_DISCOVERY_URL/.well-known/openid-configuration`.
+**OIDC** - `oidc_login_create` builds the authorization URL with PKCE (S256), storing `state`, `nonce`, and the PKCE verifier in a short-lived signed `oidc_csrf` cookie. `oidc_login_verify` validates `state`, exchanges the code (sending `code_verifier`), verifies the ID token against the provider JWKS, then upserts the user row and returns a JWT. Endpoint discovery is automatic from `GRADIENT_OIDC_DISCOVERY_URL/.well-known/openid-configuration`.
 
 ---
 

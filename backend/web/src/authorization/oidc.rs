@@ -19,6 +19,7 @@ use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use subtle::ConstantTimeEq;
 use url::Url;
@@ -39,6 +40,7 @@ struct CsrfClaims {
     iat: i64,
     state: String,
     nonce: String,
+    pkce_verifier: String,
 }
 
 /// Subset of ID-token claims we trust as identity.
@@ -125,6 +127,8 @@ pub async fn oidc_login_create(state: State<Arc<ServerState>>) -> Result<OidcAut
 
     let csrf_state = random_url_safe(32);
     let nonce = random_url_safe(32);
+    let pkce_verifier = random_url_safe(32);
+    let pkce_challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(pkce_verifier.as_bytes()));
 
     let now = Utc::now();
     let claims = CsrfClaims {
@@ -132,6 +136,7 @@ pub async fn oidc_login_create(state: State<Arc<ServerState>>) -> Result<OidcAut
         exp: (now + Duration::minutes(10)).timestamp(),
         state: csrf_state.clone(),
         nonce: nonce.clone(),
+        pkce_verifier,
     };
     let cookie_value = encode(
         &Header::default(),
@@ -147,6 +152,8 @@ pub async fn oidc_login_create(state: State<Arc<ServerState>>) -> Result<OidcAut
         ("scope", scope.as_str()),
         ("state", csrf_state.as_str()),
         ("nonce", nonce.as_str()),
+        ("code_challenge", pkce_challenge.as_str()),
+        ("code_challenge_method", "S256"),
     ];
 
     let auth_url = Url::parse_with_params(auth_endpoint, &params)
@@ -189,6 +196,7 @@ pub async fn oidc_login_verify(
     }
 
     let expected_nonce = csrf_data.claims.nonce;
+    let pkce_verifier = csrf_data.claims.pkce_verifier;
 
     let metadata = get_oidc_metadata(&state.http, &oidc.discovery_url).await?;
 
@@ -220,6 +228,7 @@ pub async fn oidc_login_verify(
             ("redirect_uri", redirect_uri.as_str()),
             ("client_id", oidc.client_id.as_str()),
             ("client_secret", client_secret.expose()),
+            ("code_verifier", pkce_verifier.as_str()),
         ])
         .send()
         .await
@@ -418,6 +427,7 @@ mod tests {
             exp: (now + Duration::minutes(5)).timestamp(),
             state: "abc".into(),
             nonce: "xyz".into(),
+            pkce_verifier: "verifier".into(),
         };
         let token = jwt_with_secret(&claims, "shh");
         let decoded = decode::<CsrfClaims>(
@@ -438,6 +448,7 @@ mod tests {
             exp: (now + Duration::minutes(5)).timestamp(),
             state: "abc".into(),
             nonce: "xyz".into(),
+            pkce_verifier: "verifier".into(),
         };
         let token = jwt_with_secret(&claims, "secret-a");
         let decoded = decode::<CsrfClaims>(
@@ -456,6 +467,7 @@ mod tests {
             exp: past.timestamp(),
             state: "abc".into(),
             nonce: "xyz".into(),
+            pkce_verifier: "verifier".into(),
         };
         let token = jwt_with_secret(&claims, "shh");
         let decoded = decode::<CsrfClaims>(

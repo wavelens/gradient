@@ -454,9 +454,9 @@ paths:
       tags: [auth]
       summary: OIDC login redirect
       description: |-
-        Redirects the browser to the OIDC provider's authorization endpoint (HTTP 302) and
-        sets a short-lived `oidc_csrf` cookie carrying the signed `state` and `nonce` values
-        that must be returned on the callback.
+        Redirects the browser to the OIDC provider's authorization endpoint (HTTP 302) using
+        PKCE (S256), and sets a short-lived `oidc_csrf` cookie carrying the signed `state`,
+        `nonce`, and PKCE verifier that must be returned on the callback.
       security: []
       operationId: oidcLogin
       responses:
