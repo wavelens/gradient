@@ -21,6 +21,11 @@ JWKS, `iss`/`aud`/`exp`/`nonce` checks, identity bound to
 `(oidc_issuer, oidc_subject)` rather than email) is enforced in
 `oidc_login_verify` and exercised end-to-end via the
 `/auth/oauth/authorize` and `/auth/oidc/callback` endpoints.
+
+`backend/web/tests/oidc_pkce.rs::authorize_redirect_carries_pkce_and_cookie_holds_verifier`
+asserts the login redirect carries `code_challenge` + `code_challenge_method=S256`
+and that the verifier stored in the signed `oidc_csrf` cookie hashes to that
+challenge (issue #318).
 ## Unified resource access - `crate::access` and `crate::permissions`
 
 All "load resource by name and check the caller may use it" logic lives in
