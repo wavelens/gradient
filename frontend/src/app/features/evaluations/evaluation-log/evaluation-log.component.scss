@@ -709,3 +709,78 @@ cdk-virtual-scroll-viewport.builds-list {
   word-break: break-word;
   line-height: 1.6;
 }
+
+// ── Chunked log viewer ──────────────────────────────────────────────────────
+.log-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: $color-tertiary;
+  border-bottom: 1px solid $color-border;
+}
+
+.log-search-input {
+  flex: 1;
+  padding: 4px 8px;
+  font-family: $font-family-mono;
+  font-size: $font-size-xs;
+  background: $color-primary;
+  color: $text-primary;
+  border: 1px solid $color-border;
+  border-radius: 4px;
+}
+
+.log-search-count {
+  font-size: $font-size-xs;
+  color: $text-secondary;
+  white-space: nowrap;
+}
+
+.log-search-btn {
+  background: transparent;
+  border: 1px solid $color-border;
+  border-radius: 4px;
+  color: $text-secondary;
+  cursor: pointer;
+  padding: 2px 8px;
+
+  &:hover { color: $text-primary; }
+}
+
+.log-spacer {
+  width: 100%;
+}
+
+.log-line {
+  display: flex;
+  align-items: flex-start;
+  font-family: $font-family-mono;
+  font-size: $font-size-xs;
+  line-height: 1.6;
+
+  &--hl {
+    background: rgba(234, 179, 8, 0.18);
+  }
+}
+
+.log-gutter {
+  flex: 0 0 auto;
+  width: 56px;
+  padding-right: 12px;
+  text-align: right;
+  color: $text-secondary;
+  user-select: none;
+  cursor: pointer;
+  opacity: 0.55;
+
+  &:hover { opacity: 1; }
+}
+
+.log-line-content {
+  margin: 0;
+  flex: 1 1 auto;
+  color: $text-primary;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
