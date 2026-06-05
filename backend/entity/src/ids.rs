@@ -85,6 +85,7 @@ macro_rules! id_newtype {
 id_newtype!(AdminTaskId);
 id_newtype!(ApiId);
 id_newtype!(BuildId);
+id_newtype!(BuildLogChunkId);
 id_newtype!(BuildProductId);
 id_newtype!(BuildRequestBlobId);
 id_newtype!(CacheId);
