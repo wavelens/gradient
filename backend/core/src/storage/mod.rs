@@ -8,6 +8,7 @@ pub mod email;
 pub mod log;
 pub mod nar;
 pub mod nar_extract;
+pub mod sgr;
 pub mod source_nar;
 
 pub use self::email::*;
