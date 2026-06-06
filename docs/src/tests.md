@@ -3446,3 +3446,29 @@ emits `source` → `target` edges (referrer depends on reference).
 **Frontend `closure-graph`** — the view requests the runtime closure by default
 and the build-time closure only under `?type=build` (eval scope uses the eval
 runtime endpoint).
+
+## Cache storage limits (#216)
+
+Per-instance (`GRADIENT_MAX_STORAGE_GB`) and per-cache (`max_storage_gb`, GB,
+0 = unlimited) storage caps. When every writable cache for an org has less than
+10 MiB headroom, new evaluations park in `Waiting` with `CacheStorageFull`.
+
+- **`core::types::waiting_reason::tests::cache_storage_full_round_trip`** — the
+  `CacheStorageFull` reason serialises to `kind=cache_storage_full` and decodes
+  back.
+- **`core::db::cache_storage::tests`** — `zero_limit_is_unlimited`,
+  `headroom_bounded_by_tighter_axis`, `headroom_instance_axis_can_dominate`,
+  `both_unlimited_is_max` cover the GB→bytes conversion and the per-cache /
+  instance headroom math (the decision input for the gate).
+- **`core::ci::apply::tests::storage_gate_ignores_non_queued_eval`** —
+  `park_if_storage_full` returns an already-`Waiting` eval untouched, issuing no
+  cache queries. The `no_eval_capable_worker_parks_*` flow also exercises the
+  gate's not-full pass-through.
+- **`core::ci::unpark::tests::unpark_storage_full_requeues_when_headroom_returns`**
+  — a `CacheStorageFull`-parked eval is re-queued once the org regains headroom.
+- **`core::types::cli::storage::tests`** — `default_max_storage_gb_is_unlimited`
+  / `clap_default_max_storage_gb_is_zero` pin the `0` default.
+- **`web::endpoints::caches::management::tests`** —
+  `validate_max_storage_gb_accepts_zero_and_positive` /
+  `validate_max_storage_gb_rejects_negative` cover the API validator. Full
+  create/patch/get round-trips of `max_storage_gb` run in CI integration tests.

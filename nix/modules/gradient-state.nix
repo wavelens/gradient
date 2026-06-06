@@ -678,6 +678,16 @@
         '';
       };
 
+      max_storage_gb = mkOption {
+        type = types.ints.unsigned;
+        default = 0;
+        description = ''
+          Max storage for this cache in GB. When all writable caches for an
+          org have less than 10 MiB headroom, new evaluations park in Waiting.
+          0 = unlimited.
+        '';
+      };
+
       signing_key_file = mkOption {
         type = types.str;
         description = "Path to file containing the Nix cache signing key";
