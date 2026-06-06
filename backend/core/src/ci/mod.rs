@@ -21,7 +21,7 @@ pub mod unpark;
 pub use self::abort::{AbortKind, abort_evaluation};
 pub use self::apply::{
     ApplyError, ApplyInput, ApplyOutcome, ApprovalInfo, apply_trigger, park_if_no_cache,
-    park_if_no_workers, park_if_pending_approval,
+    park_if_no_workers, park_if_pending_approval, park_if_storage_full,
 };
 pub use self::github_app::*;
 pub use self::http_validation::validate_webhook_url;
