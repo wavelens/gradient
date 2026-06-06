@@ -78,7 +78,7 @@
         >
           <div
             *cdkVirtualFor="let build of visibleBuilds(); trackBy: trackBuildById; let i = index"
-            class="build-item status-{{ build.status.toLowerCase() }}"
+            class="build-item status-{{ statusClass(build.status) }}"
             [class.selected]="selectedBuildId() === build.id"
             [attr.data-build-id]="build.id"
             (click)="selectBuild(build, true)"
@@ -91,7 +91,7 @@
             role="option"
             [attr.aria-selected]="selectedBuildId() === build.id"
           >
-            <span class="build-dot status-{{ build.status.toLowerCase() }}"></span>
+            <span class="build-dot status-{{ statusClass(build.status) }}"></span>
             <span class="build-name">{{ buildDisplayName(build.name) }}</span>
             @if (getBuildElapsed(build)) {
               <span class="build-elapsed" [class.build-elapsed--running]="build.status === 'Building'">{{ getBuildElapsed(build) }}</span>
@@ -265,7 +265,7 @@
           <div class="log-container-wrapper">
             <div class="log-build-header">
               <code class="log-build-path">{{ selectedBuild()?.name }}</code>
-              <span class="status-badge status-{{ selectedBuild()?.status?.toLowerCase() }}">{{ selectedBuild()?.status }}</span>
+              <span class="status-badge status-{{ statusClass(selectedBuild()?.status) }}">{{ selectedBuild()?.status }}</span>
             </div>
             @if (chunkedMode() && searchOpen()) {
               <div class="log-search-bar">
@@ -279,7 +279,11 @@
                   (keydown.shift.enter)="prevHit()"
                 />
                 <span class="log-search-count">
-                  {{ searchHits().length === 0 ? 0 : currentHit() + 1 }} / {{ searchTotal() }}
+                  @if (searchLoading()) {
+                    <i class="pi pi-spin pi-spinner"></i>
+                  } @else {
+                    {{ searchHits().length === 0 ? 0 : currentHit() + 1 }} / {{ searchTotal() }}
+                  }
                 </span>
                 <button class="log-search-btn" (click)="prevHit()" title="Previous match">↑</button>
                 <button class="log-search-btn" (click)="nextHit()" title="Next match">↓</button>
