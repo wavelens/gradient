@@ -143,6 +143,7 @@ pub fn load_store(dir: &Path) -> StoreFixture {
             timeout_secs: None,
             max_silent_secs: None,
             prefer_local_build: false,
+            is_fixed_output: drv.build_meta().is_fixed_output,
             allow_substitutes: drv.allow_substitutes(),
             pname: gradient_core::db::derive_pname(
                 drv.environment.get("pname").map(String::as_str),

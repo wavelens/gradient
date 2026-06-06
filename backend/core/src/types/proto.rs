@@ -309,6 +309,7 @@ pub struct DiscoveredDerivation {
     pub timeout_secs: Option<u64>,
     pub max_silent_secs: Option<u64>,
     pub prefer_local_build: bool,
+    pub is_fixed_output: bool,
     pub allow_substitutes: bool,
     pub pname: Option<String>,
     pub substituted: bool,

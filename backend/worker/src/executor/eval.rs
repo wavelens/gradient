@@ -282,6 +282,7 @@ fn build_discovered_derivation(
         timeout_secs: meta.timeout_secs,
         max_silent_secs: meta.max_silent_secs,
         prefer_local_build: meta.prefer_local_build,
+        is_fixed_output: meta.is_fixed_output,
         allow_substitutes: drv.allow_substitutes(),
         pname,
         substituted: false,
@@ -420,6 +421,7 @@ impl<'a> ClosureWalker<'a> {
                     timeout_secs: None,
                     max_silent_secs: None,
                     prefer_local_build: false,
+                    is_fixed_output: false,
                     allow_substitutes: true,
                     pname: None,
                     substituted: true, // already built - skip dispatch
