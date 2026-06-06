@@ -7,6 +7,15 @@ taking up space?" when trimming netboot images, ISOs, or container layers.
 Open it from an entry point's metrics page via the **View Closure** button, which
 links to the closure of that entry point's most recent build.
 
+## Runtime vs build closure
+
+The view shows the **runtime** closure by default — the transitive store-path
+references (narinfo `References:`) of the build's outputs, i.e. what the artefact
+actually needs to run. It is only as complete as the cached outputs. Append
+`?type=build` to the URL to see the **build-time** closure instead (the full
+`derivation` dependency graph); there is no button for this, it is reached by URL
+only. The header badge shows which closure is displayed.
+
 The dependency graph is a DAG, which has no conserved flow; rendering it as a
 Sankey directly produces meaningless bar heights and backward links. The view
 therefore reduces it to a rooted tree (each package keeps a single parent, via
@@ -29,10 +38,14 @@ Both endpoints return per-node sizes plus an exact `total_size_bytes`, so they
 are also useful for custom tooling and scripts:
 
 ```sh
-GET /api/v1/builds/{build}/closure
+GET /api/v1/builds/{build}/closure          # build-time closure
 GET /api/v1/evals/{evaluation}/closure
+GET /api/v1/builds/{build}/runtime-closure  # runtime reference closure
+GET /api/v1/evals/{evaluation}/runtime-closure
 ```
 
 Response (`ClosureGraph`): `roots`, `total_size_bytes`, `node_count`,
 `edge_count`, `truncated`, `nodes` (`id`, `name`, `path`, `nar_size`), and
-`edges` (`source` → `target`, where `target` depends on `source`).
+`edges` (`source` → `target`, where `target` depends on `source`). Node ids are
+derivation UUIDs for the build closure and store-path hashes for the runtime
+closure.
