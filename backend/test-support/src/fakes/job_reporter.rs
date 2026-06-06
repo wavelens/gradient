@@ -34,6 +34,7 @@ pub enum ReportedEvent {
         build_id: String,
         outputs: Vec<BuildOutput>,
         metrics: Option<BuildMetrics>,
+        substituted: bool,
     },
     Compressing,
     LogChunk {
@@ -200,11 +201,13 @@ impl JobReporter for RecordingJobReporter {
         build_id: String,
         outputs: Vec<BuildOutput>,
         metrics: Option<BuildMetrics>,
+        substituted: bool,
     ) -> Result<()> {
         self.events.push(ReportedEvent::BuildOutput {
             build_id,
             outputs,
             metrics,
+            substituted,
         });
         Ok(())
     }

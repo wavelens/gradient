@@ -294,6 +294,7 @@ fn build_output_with_metrics_roundtrip() {
                 oom_killed: true,
                 build_time_ms: Some(120_000),
             }),
+            substituted: false,
         },
     };
     let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
@@ -309,6 +310,7 @@ fn build_output_no_metrics_roundtrip() {
             build_id: "build-2".to_string(),
             outputs: vec![],
             metrics: None,
+            substituted: true,
         },
     };
     let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();

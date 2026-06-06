@@ -337,6 +337,7 @@ impl Scheduler {
         build_id_str: &str,
         outputs: Vec<BuildOutput>,
         metrics: Option<BuildMetrics>,
+        substituted: bool,
     ) -> Result<()> {
         let build_id: BuildId = build_id_str
             .parse()
@@ -353,7 +354,7 @@ impl Scheduler {
                 }
             }
         };
-        build::handle_build_output(&self.state, &job, build_id, outputs, metrics).await
+        build::handle_build_output(&self.state, &job, build_id, outputs, metrics, substituted).await
     }
 
     // ── Job completion ────────────────────────────────────────────────────────

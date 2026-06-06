@@ -549,10 +549,11 @@ impl<'a> DispatchContext<'a> {
                 build_id,
                 outputs,
                 metrics,
+                substituted,
             } => {
                 if let Err(e) = self
                     .scheduler
-                    .handle_build_output(&job_id, &build_id, outputs, metrics)
+                    .handle_build_output(&job_id, &build_id, outputs, metrics, substituted)
                     .await
                 {
                     error!(peer_id = %self.peer_id, %job_id, error = %e, "handle_build_output failed");
