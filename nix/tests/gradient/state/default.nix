@@ -16,6 +16,13 @@
         networking.hosts = {
           "127.0.0.1" = [ "gradient.local" ];
         };
+
+        environment.systemPackages = with pkgs; [
+          curl
+          jq
+          gradient-cli
+        ];
+
         environment.etc = {
           "gradient/secrets/alice_password" = {
             mode = "0600";
@@ -96,7 +103,7 @@
                   name = "Bob Smith";
                   email = "bob@example.com";
                   password_file = "/etc/gradient/secrets/bob_password";
-                  email_verified = false;
+                  email_verified = true;
                 };
               };
 
@@ -106,6 +113,10 @@
                   description = "Main development organization";
                   private_key_file = "/etc/gradient/secrets/corp_ssh_key";
                   created_by = "alice";
+                  members = [
+                    { user = "alice"; role = "Admin"; }
+                    { user = "bob"; role = "View"; }
+                  ];
                 };
               };
 

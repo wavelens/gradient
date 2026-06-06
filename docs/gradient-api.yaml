@@ -4324,6 +4324,11 @@ paths:
     get:
       tags: [caches]
       summary: Get cache
+      description: >-
+        Returns cache details. Public caches are visible to anyone. A private
+        cache is visible to its cache members and to members of any organization
+        subscribed to it (matching the visibility of `GET /caches`); other
+        callers receive `404`.
       operationId: getCache
       responses:
         '200':

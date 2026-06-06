@@ -601,6 +601,20 @@ Backend (`cargo test -p core --lib state::provisioning::trigger_helper_tests`):
   otherwise persist an id no webhook ever resolves to and the trigger would
   silently never fire.
 
+## Org members can view subscribed caches (#327)
+
+NixOS VM (`nix/tests/gradient/state`):
+- `org member can view subscribed caches they do not own` - a state-provisioned
+  cache appears in `GET /caches` for any member of a subscribed organization,
+  so viewing it by name (`GET /caches/{cache}`, `gradient cache show`) must
+  succeed too. `bob` (a plain `corp` member who created none of the caches and
+  holds no cache membership) lists and shows both the active `main` and inactive
+  `dev` caches. Regression: detail lookups previously required a direct
+  `cache_user` row, so org members got a 404 via the API, CLI and WebUI.
+- `non-members cannot see private caches` - `charlie`, who belongs to no
+  subscribing org, neither lists nor can show the private caches, pinning the
+  broadened read access so it does not leak caches to unrelated users.
+
 ## Hashed API keys at rest
 
 Backend (`cargo test -p core --lib state::provisioning::api_key_hash_tests`):

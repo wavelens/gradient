@@ -30,9 +30,9 @@ use gradient_core::db::{
 };
 use gradient_core::types::ids::{CacheId, IntegrationId, OrganizationId, UserId};
 use gradient_core::types::{
-    CCacheUser, CIntegration, COrganizationUser, ECacheRole, ECacheUser, EIntegration,
-    EOrganizationUser, ERole, MCache, MIntegration, MOrganization, MOrganizationUser, MProject,
-    MUser, ServerState,
+    CCacheUser, CIntegration, COrganizationCache, COrganizationUser, ECacheRole, ECacheUser,
+    EIntegration, EOrganizationCache, EOrganizationUser, ERole, MCache, MIntegration, MOrganization,
+    MOrganizationUser, MProject, MUser, ServerState,
 };
 use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter};
 use std::sync::Arc;
@@ -262,7 +262,10 @@ pub async fn load_cache(
         CacheAccess::Readable => {
             if !cache.public {
                 let visible = match caller.user_id() {
-                    Some(uid) => is_cache_member(state, uid, cache.id, api_key).await?,
+                    Some(uid) => {
+                        is_cache_member(state, uid, cache.id, api_key).await?
+                            || is_cache_org_subscriber(state, uid, cache.id, api_key).await?
+                    }
                     None => false,
                 };
                 if !visible {
@@ -443,6 +446,39 @@ async fn is_cache_member(
         .one(&state.web_db)
         .await?;
     Ok(row.is_some())
+}
+
+/// True when `user_id` belongs to an organization that subscribes to `cache_id`.
+/// Mirrors `GET /caches` visibility so a cache the user can list is also
+/// readable, even without a direct `cache_user` membership row.
+async fn is_cache_org_subscriber(
+    state: &Arc<ServerState>,
+    user_id: UserId,
+    cache_id: CacheId,
+    api_key: Option<&ApiKeyContext>,
+) -> WebResult<bool> {
+    let subscriber_orgs: Vec<OrganizationId> = EOrganizationCache::find()
+        .filter(COrganizationCache::Cache.eq(cache_id))
+        .all(&state.web_db)
+        .await?
+        .into_iter()
+        .map(|oc| oc.organization)
+        .collect();
+
+    let allowed: Vec<OrganizationId> = match api_key.and_then(|k| k.organization) {
+        Some(pinned) => subscriber_orgs.into_iter().filter(|o| *o == pinned).collect(),
+        None => subscriber_orgs,
+    };
+    if allowed.is_empty() {
+        return Ok(false);
+    }
+
+    let member = EOrganizationUser::find()
+        .filter(COrganizationUser::User.eq(user_id))
+        .filter(COrganizationUser::Organization.is_in(allowed))
+        .one(&state.web_db)
+        .await?;
+    Ok(member.is_some())
 }
 
 async fn cache_role_mask(
