@@ -663,6 +663,30 @@ NixOS VM (`nix/tests/gradient/state`):
   subscribing org, neither lists nor can show the private caches, pinning the
   broadened read access so it does not leak caches to unrelated users.
 
+## Org members get read-only cache access (#334)
+
+Backend (`cargo test -p web --lib access::tests`):
+- `effective_cache_mask_returns_role_for_member` - a direct cache member's API
+  key is capped by their cache role mask.
+- `effective_cache_mask_returns_view_for_org_subscriber` - a member of a
+  subscribed organization with no `cache_user` row is treated as read-only
+  (`cache_view_mask`), so they can mint a read-only cache key and view stats.
+- `effective_cache_mask_none_for_outsider` - a user with neither a cache role
+  nor a subscribing org gets no mask, so cache-pinned key creation 404s.
+
+These pin the fix for the remaining "cache not found" responses: creating a
+read-only cache API key (`POST /user/keys`) and reading cache traffic/storage
+metrics (`GET /caches/{cache}/stats`) now route through the same
+member-or-subscriber visibility as `GET /caches/{cache}`, instead of requiring
+`ManageCacheMembers` / cache ownership.
+
+NixOS VM (`nix/tests/gradient/state`):
+- `org member reads cache stats and mints a read-only key` - `bob` (a `corp`
+  member with no cache role) reads `GET /caches/main/stats` and creates a
+  read-only cache key, but is denied a `writeStore` key he could not use.
+- `non-members cannot see private caches` also asserts `charlie` gets a 404 on
+  `GET /caches/main/stats`.
+
 ## Hashed API keys at rest
 
 Backend (`cargo test -p core --lib state::provisioning::api_key_hash_tests`):

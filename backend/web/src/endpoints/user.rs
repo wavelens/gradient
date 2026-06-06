@@ -4,14 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::access::{CacheAccess, Caller, load_cache};
+use crate::access::{CacheAccess, Caller, effective_cache_mask, load_cache};
 use crate::audit::{RequestInfo, events, record as audit_record};
 use crate::authorization::{MaybeApiKey, generate_api_key, hash_api_key};
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::{
-    CachePermission, PermissionEntry, available_cache_permissions, available_permissions,
-    mask_to_vec, parse_cache_permission_list, parse_permission_list,
+    PermissionEntry, available_cache_permissions, available_permissions, mask_to_vec,
+    parse_cache_permission_list, parse_permission_list,
 };
 use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
@@ -421,16 +421,21 @@ pub async fn post_keys(
             Caller::User(&user),
             None,
             cache_name,
-            CacheAccess::Require {
-                permission: CachePermission::ManageCacheMembers,
-                reject_managed: false,
-            },
+            CacheAccess::Readable,
         )
         .await?;
         let m = parse_cache_permission_list(&body.permissions, "GET /user/keys/permissions")?;
         if m == 0 {
             return Err(WebError::bad_request(
                 "At least one permission is required for an API key.",
+            ));
+        }
+        let granted = effective_cache_mask(&state, user.id, cache.id, None)
+            .await?
+            .ok_or_else(|| WebError::not_found("Cache"))?;
+        if m & !granted != 0 {
+            return Err(WebError::forbidden(
+                "API key cannot grant cache permissions you do not hold.",
             ));
         }
         (m, None, Some(cache.id))
