@@ -7,6 +7,7 @@
 use crate::access::{Caller, OrgAccess, load_org};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::endpoints::builds::closure::{derivation_closure_reachable, sum_output_sizes};
+use gradient_core::db::{output_hashes_for_drvs, runtime_closure_size};
 use crate::error::WebResult;
 use crate::helpers::{OptionExt, ok_json};
 use axum::extract::{Path, Query, State};
@@ -24,6 +25,7 @@ pub struct ProjectMetricPoint {
     pub eval_time_ms: i64,
     pub output_size_bytes: Option<i64>,
     pub closure_size_bytes: Option<i64>,
+    pub runtime_closure_size_bytes: Option<i64>,
     pub dependencies_count: i64,
 }
 
@@ -102,9 +104,13 @@ pub async fn get_project_metrics(
         let closure = derivation_closure_reachable(&state.web_db, ep_drv_ids.clone()).await?;
         let dependencies_count = (closure.len() as i64) - entry_point_count;
 
-        let output_size_bytes = sum_output_sizes(&state.web_db, ep_drv_ids).await?;
+        let output_size_bytes = sum_output_sizes(&state.web_db, ep_drv_ids.clone()).await?;
         let closure_size_bytes =
             sum_output_sizes(&state.web_db, closure.into_iter().collect()).await?;
+
+        let seeds = output_hashes_for_drvs(&state.web_db, &ep_drv_ids).await?;
+        let runtime = runtime_closure_size(&state.web_db, &seeds).await?;
+        let runtime_closure_size_bytes = (runtime > 0).then_some(runtime);
 
         points.push(ProjectMetricPoint {
             evaluation_id: evaluation.id,
@@ -113,6 +119,7 @@ pub async fn get_project_metrics(
             eval_time_ms,
             output_size_bytes,
             closure_size_bytes,
+            runtime_closure_size_bytes,
             dependencies_count,
         });
     }
@@ -142,6 +149,7 @@ pub struct EntryPointMetricPoint {
     pub build_time_ms: Option<i64>,
     pub output_size_bytes: Option<i64>,
     pub closure_size_bytes: Option<i64>,
+    pub runtime_closure_size_bytes: Option<i64>,
     pub dependencies_count: i64,
 }
 
@@ -210,6 +218,10 @@ pub async fn get_entry_point_metrics(
         let closure_size_bytes =
             sum_output_sizes(&state.web_db, closure.into_iter().collect()).await?;
 
+        let seeds = output_hashes_for_drvs(&state.web_db, &[build.derivation]).await?;
+        let runtime = runtime_closure_size(&state.web_db, &seeds).await?;
+        let runtime_closure_size_bytes = (runtime > 0).then_some(runtime);
+
         points.push(EntryPointMetricPoint {
             evaluation_id: evaluation.id,
             build_id: build.id,
@@ -218,6 +230,7 @@ pub async fn get_entry_point_metrics(
             build_time_ms,
             output_size_bytes,
             closure_size_bytes,
+            runtime_closure_size_bytes,
             dependencies_count,
         });
     }
