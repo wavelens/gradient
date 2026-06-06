@@ -609,6 +609,26 @@ Backend (`cargo test -p core --lib state::provisioning::trigger_helper_tests`):
   otherwise persist an id no webhook ever resolves to and the trigger would
   silently never fire.
 
+## Integrations apply before projects, validated at build time (#332)
+
+Backend (`cargo test -p core --lib state::tests`):
+- `state_reporter_trigger_accepts_declared_inbound_integration` - a
+  `reporter_push` trigger naming a declared inbound integration in the same
+  org passes validation.
+- `state_reporter_trigger_rejects_unknown_integration` - a reporter trigger
+  naming an integration that is not declared yields a
+  `projects.<project>.triggers` validation error, surfacing the mistake at
+  build/`--validate-state` time instead of mid state-apply.
+- `state_reporter_trigger_rejects_outbound_integration` - a reporter trigger
+  pointing at an `outbound`-kind integration is rejected (reporters resolve
+  against inbound integrations only).
+- `state_reporter_trigger_accepts_github_app_name` - the reserved `github`
+  integration name needs no explicit declaration (auto-managed GitHub App row).
+
+The apply order in `apply_state_to_database` now runs `apply_integrations`
+before `apply_projects` so trigger/action integration lookups resolve against
+rows already in the DB.
+
 ## Scheduler does not double-dispatch a build
 
 Backend (`cargo test -p scheduler --lib jobs::tests::add_pending_does_not_requeue_active_job`):

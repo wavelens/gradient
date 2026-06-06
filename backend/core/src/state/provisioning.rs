@@ -76,8 +76,11 @@ pub(super) async fn apply_state_to_database(
     let role_ids = app.apply_roles(&config.roles).await?;
     app.apply_organization_members(&config.organizations, &mut pending)
         .await?;
-    app.apply_projects(&config.projects).await?;
+    // Integrations must land before projects: project triggers
+    // (reporter_push/reporter_pull_request) and `forge_status_report` actions
+    // resolve integrations by name from the DB at apply time (#332).
     app.apply_integrations(&config.integrations).await?;
+    app.apply_projects(&config.projects).await?;
     app.apply_caches(&config.caches).await?;
     app.apply_api_keys(&config.api_keys).await?;
     app.apply_workers(&config.workers).await?;
