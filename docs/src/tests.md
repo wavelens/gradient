@@ -680,12 +680,9 @@ metrics (`GET /caches/{cache}/stats`) now route through the same
 member-or-subscriber visibility as `GET /caches/{cache}`, instead of requiring
 `ManageCacheMembers` / cache ownership.
 
-NixOS VM (`nix/tests/gradient/state`):
-- `org member reads cache stats and mints a read-only key` - `bob` (a `corp`
-  member with no cache role) reads `GET /caches/main/stats` and creates a
-  read-only cache key, but is denied a `writeStore` key he could not use.
-- `non-members cannot see private caches` also asserts `charlie` gets a 404 on
-  `GET /caches/main/stats`.
+Integration (`cargo test -p web --test cache_api_key_pinning`):
+- `create_cache_pinned_key_cannot_exceed_member_mask` - a View-mask member is
+  denied a `writeStore` cache-pinned key (perms beyond their mask) → 403.
 
 ## Hashed API keys at rest
 
