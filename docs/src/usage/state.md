@@ -522,6 +522,8 @@ services.gradient.state.projects.my-project = {
 - **reporter_pull_request** - fires on PR/MR events. Filters: `branches`, `actions` (default: opened/synchronize/reopened).
 - **time** - fires on a six-field cron schedule (UTC). Re-evaluates the project HEAD even if the commit hasn't changed.
 
+`reporter_push` and `reporter_pull_request` triggers must reference an **`inbound`** integration - the row whose `secret_file` validates incoming forge webhooks. Pointing one at an `outbound` integration is rejected at startup; outbound integrations are wired up separately via the project's `outbound_integration` or a `forge_status_report` action. For non-GitHub forges this usually means declaring two integration rows (one `inbound`, one `outbound`).
+
 ### Concurrency policies
 
 Each project has a single concurrency policy that applies to all of its triggers:
