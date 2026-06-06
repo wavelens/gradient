@@ -176,6 +176,7 @@ pub async fn push_direct(
     let mut nar_hasher = Sha256::new();
     let mut offset: u64 = 0;
     let mut nar_size: u64 = 0;
+    let started = std::time::Instant::now();
 
     while let Some(chunk_result) = nar_stream.next().await {
         let chunk = chunk_result.context("NAR stream error")?;
@@ -223,6 +224,9 @@ pub async fn push_direct(
         offset,
         is_final: true,
     })?;
+
+    crate::metrics::throughput::NETWORK
+        .observe(offset as f64 * 8.0 / started.elapsed().as_secs_f64().max(1e-6) / 1_000_000.0);
 
     let file_hash = format!("sha256:{}", nix32_encode(&file_hasher.finalize()));
     let nar_hash = format!("sha256:{}", nix32_encode(&nar_hasher.finalize()));

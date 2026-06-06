@@ -47,6 +47,9 @@ struct Inner {
     /// Outstanding waiters; the dispatch loop sends to these on `is_final`
     /// (success) or on `NarUnavailable` / `NarAbort` (failure).
     waiters: HashMap<Key, oneshot::Sender<Result<Vec<u8>, String>>>,
+    /// Arrival time of the first chunk per key, used to estimate download
+    /// throughput for the passive network-speed EWMA.
+    started: HashMap<Key, std::time::Instant>,
 }
 
 /// Shared state between the dispatch loop and job tasks for routing inbound
@@ -124,6 +127,7 @@ impl NarReceiver {
                 let mut g = self.inner.lock().unwrap();
                 g.buffers.remove(&key);
                 g.waiters.remove(&key);
+                g.started.remove(&key);
                 Err(anyhow::anyhow!(
                     "NarRequest for {} timed out after {}s waiting for NarPush \
                      (job_id={})",
@@ -150,6 +154,7 @@ impl NarReceiver {
         let key = (job_id.to_owned(), store_path.to_owned());
         let mut g = self.inner.lock().unwrap();
         if !data.is_empty() {
+            g.started.entry(key.clone()).or_insert_with(std::time::Instant::now);
             g.buffers
                 .entry(key.clone())
                 .or_default()
@@ -157,6 +162,11 @@ impl NarReceiver {
         }
         if is_final {
             let buf = g.buffers.remove(&key).unwrap_or_default();
+            if let Some(start) = g.started.remove(&key) {
+                crate::metrics::throughput::NETWORK.observe(
+                    buf.len() as f64 * 8.0 / start.elapsed().as_secs_f64().max(1e-6) / 1_000_000.0,
+                );
+            }
             match g.waiters.remove(&key) {
                 Some(tx) => {
                     let bytes_len = buf.len();
@@ -188,6 +198,7 @@ impl NarReceiver {
         let key = (job_id.to_owned(), store_path.to_owned());
         let mut g = self.inner.lock().unwrap();
         g.buffers.remove(&key);
+        g.started.remove(&key);
         match g.waiters.remove(&key) {
             Some(tx) => {
                 if tx.send(Err(reason)).is_err() {
@@ -216,6 +227,7 @@ impl NarReceiver {
         let mut g = self.inner.lock().unwrap();
         g.buffers.retain(|(j, _), _| j != job_id);
         g.waiters.retain(|(j, _), _| j != job_id);
+        g.started.retain(|(j, _), _| j != job_id);
     }
 }
 

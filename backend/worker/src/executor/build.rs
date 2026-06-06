@@ -215,6 +215,13 @@ fn capture_build_metrics(
     if raw.is_none() {
         debug!(drv = %drv_path, "build cgroup not found; reporting wall-clock time only");
     }
+    if let Some(r) = raw.as_ref() {
+        let bytes = r.disk_read_bytes + r.disk_write_bytes;
+        if build_time_ms > 0 && bytes > 0 {
+            let mb_per_s = (bytes as f64 / 1_048_576.0) / (build_time_ms as f64 / 1000.0);
+            crate::metrics::throughput::DISK.observe(mb_per_s);
+        }
+    }
     raw_to_build_metrics(raw, build_time_ms, cpu_count)
 }
 
