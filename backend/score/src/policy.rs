@@ -9,7 +9,9 @@ use crate::rules::builtin::{
     BuiltinDeprioritizeRule, DependencyCountRule, MissingNarSizeRule, MissingPathsRule,
     ReserveFetchWorkersRule, WaitTimeRule,
 };
-use crate::rules::{FairShareRule, PreferLocalBuildRule, ResourceFitRule};
+use crate::rules::{
+    DiskAffinityRule, FairShareRule, NetworkAffinityRule, PreferLocalBuildRule, ResourceFitRule,
+};
 
 pub trait ScoringPolicy: Send + Sync + std::fmt::Debug {
     fn name(&self) -> &str;
@@ -62,6 +64,8 @@ pub fn resource_aware_rules() -> Vec<Box<dyn ScoreRule>> {
     rules.push(Box::new(ResourceFitRule::default()));
     rules.push(Box::new(PreferLocalBuildRule::default()));
     rules.push(Box::new(FairShareRule::default()));
+    rules.push(Box::new(NetworkAffinityRule::default()));
+    rules.push(Box::new(DiskAffinityRule::default()));
     rules
 }
 
@@ -146,6 +150,44 @@ mod tests {
             "1-hour-old build must beat fresh fully-cached candidate \
              (anti-starvation): old={s_old} fresh={s_fresh}"
         );
+    }
+
+    #[test]
+    fn resource_aware_prefers_fast_net_for_fod() {
+        use crate::context::WorkerMetricsView;
+        let policy = policy_by_name("resource-aware");
+        let archs = vec!["x86_64-linux".to_string()];
+        let feats: Vec<String> = vec![];
+        let j = ScoredJob::new(
+            "j",
+            OrganizationId::now_v7(),
+            JobKindView::Build,
+            "x86_64-linux",
+            false,
+            true,
+            LazyProviders { closure_size: &|| None, history: &|| HistoryPrediction::default() },
+        );
+        let c = JobContext {
+            job: &j,
+            missing_count: Some(0),
+            missing_nar_size: Some(0),
+            dependency_count: 0,
+            queued_at: now(),
+            org_share: None,
+        };
+        let fast = WorkerContext {
+            architectures: &archs,
+            system_features: &feats,
+            fetch: false,
+            metrics: Some(WorkerMetricsView { network_speed_mbps: Some(100.0), ..Default::default() }),
+        };
+        let slow = WorkerContext {
+            architectures: &archs,
+            system_features: &feats,
+            fetch: false,
+            metrics: Some(WorkerMetricsView { network_speed_mbps: Some(5.0), ..Default::default() }),
+        };
+        assert!(policy.score(&c, &fast) > policy.score(&c, &slow));
     }
 
     #[test]
