@@ -72,12 +72,6 @@ export class CacheNarsComponent implements OnInit {
   pendingDelete = signal<NarSummary | null>(null);
   deletingHash = signal<string | null>(null);
 
-  readonly sortOptions: { value: SortKey; label: string }[] = [
-    { value: 'created_at', label: 'Created' },
-    { value: 'nar_size', label: 'Size' },
-    { value: 'last_fetched_at', label: 'Last fetched' },
-  ];
-
   totalPages = computed(() => {
     const pp = this.perPage();
     return pp > 0 ? Math.max(1, Math.ceil(this.total() / pp)) : 1;
@@ -164,13 +158,13 @@ export class CacheNarsComponent implements OnInit {
     });
   }
 
-  toggleOrder(): void {
-    this.order.set(this.order() === 'asc' ? 'desc' : 'asc');
-    this.applyFilters();
-  }
-
-  setSort(value: SortKey): void {
-    this.sort.set(value);
+  sortBy(key: SortKey): void {
+    if (this.sort() === key) {
+      this.order.set(this.order() === 'asc' ? 'desc' : 'asc');
+    } else {
+      this.sort.set(key);
+      this.order.set('desc');
+    }
     this.applyFilters();
   }
 
@@ -210,6 +204,12 @@ export class CacheNarsComponent implements OnInit {
         this.deletingHash.set(null);
       },
     });
+  }
+
+  formatDate(iso: string | null | undefined, fallback = '-'): string {
+    if (!iso) return fallback;
+    const d = new Date(iso.includes('T') ? iso : iso.replace(' ', 'T') + 'Z');
+    return isNaN(d.getTime()) ? iso : d.toLocaleString();
   }
 
   formatBytes(bytes: number | null | undefined): string {

@@ -110,7 +110,7 @@
 
 .nar-row {
   display: grid;
-  grid-template-columns: 220px 1fr 110px 110px 180px 100px;
+  grid-template-columns: 220px 1fr 110px 110px 160px 160px 100px;
   gap: $spacing-md;
   align-items: center;
   padding: $spacing-md $spacing-lg;
@@ -130,6 +130,18 @@
     letter-spacing: 0.04em;
     color: $text-secondary;
     font-weight: 600;
+
+    .sortable {
+      cursor: pointer;
+      user-select: none;
+      display: inline-flex;
+      align-items: center;
+      gap: $spacing-xs;
+
+      &:hover { color: $text-primary; }
+
+      .pi { font-size: $font-size-xs; }
+    }
   }
 }
 

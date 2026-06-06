@@ -35,11 +35,11 @@
       </div>
       <div class="stat-card">
         <span class="stat-label">Last uploaded</span>
-        <span class="stat-value small">{{ s.last_uploaded_at ?? '-' }}</span>
+        <span class="stat-value small">{{ formatDate(s.last_uploaded_at) }}</span>
       </div>
       <div class="stat-card">
         <span class="stat-label">Oldest fetched</span>
-        <span class="stat-value small">{{ s.oldest_fetched_at ?? '-' }}</span>
+        <span class="stat-value small">{{ formatDate(s.oldest_fetched_at) }}</span>
       </div>
     </div>
   }
@@ -53,16 +53,7 @@
       <label for="filter-package">Package</label>
       <input pInputText id="filter-package" [ngModel]="package()" (ngModelChange)="package.set($event)" placeholder="package name" class="w-full" (keydown.enter)="applyFilters()" />
     </div>
-    <div class="filter-group">
-      <label for="filter-sort">Sort by</label>
-      <select id="filter-sort" [ngModel]="sort()" (ngModelChange)="setSort($event)" class="role-select w-full">
-        @for (o of sortOptions; track o.value) {
-          <option [value]="o.value">{{ o.label }}</option>
-        }
-      </select>
-    </div>
     <div class="filter-actions">
-      <button pButton type="button" [icon]="order() === 'asc' ? 'pi pi-sort-amount-up' : 'pi pi-sort-amount-down'" severity="secondary" (click)="toggleOrder()" [title]="order() === 'asc' ? 'Ascending' : 'Descending'"></button>
       <button pButton type="button" label="Apply" icon="pi pi-filter" (click)="applyFilters()"></button>
       <button pButton type="button" label="Reset" severity="secondary" (click)="reset()"></button>
     </div>
@@ -88,9 +79,25 @@
       <div class="nar-row nar-head">
         <span class="col col-hash">Hash</span>
         <span class="col col-package">Package</span>
-        <span class="col col-size">NAR size</span>
+        <span class="col col-size sortable" (click)="sortBy('nar_size')">
+          NAR size
+          @if (sort() === 'nar_size') {
+            <i class="pi" [class.pi-sort-amount-up]="order() === 'asc'" [class.pi-sort-amount-down]="order() === 'desc'"></i>
+          }
+        </span>
         <span class="col col-size">File size</span>
-        <span class="col col-time">Last fetched</span>
+        <span class="col col-time sortable" (click)="sortBy('created_at')">
+          Created
+          @if (sort() === 'created_at') {
+            <i class="pi" [class.pi-sort-amount-up]="order() === 'asc'" [class.pi-sort-amount-down]="order() === 'desc'"></i>
+          }
+        </span>
+        <span class="col col-time sortable" (click)="sortBy('last_fetched_at')">
+          Last fetched
+          @if (sort() === 'last_fetched_at') {
+            <i class="pi" [class.pi-sort-amount-up]="order() === 'asc'" [class.pi-sort-amount-down]="order() === 'desc'"></i>
+          }
+        </span>
         <span class="col col-actions"></span>
       </div>
       @for (row of rows(); track row.hash) {
@@ -99,7 +106,8 @@
           <span class="col col-package">{{ row.package }}</span>
           <span class="col col-size">{{ formatBytes(row.nar_size) }}</span>
           <span class="col col-size">{{ formatBytes(row.file_size) }}</span>
-          <span class="col col-time text-secondary">{{ row.last_fetched_at ?? 'never' }}</span>
+          <span class="col col-time text-secondary">{{ formatDate(row.created_at) }}</span>
+          <span class="col col-time text-secondary">{{ formatDate(row.last_fetched_at, 'never') }}</span>
           <span class="col col-actions" (click)="$event.stopPropagation()">
             <button pButton icon="pi pi-eye" severity="secondary" [text]="true" (click)="show(row)" title="Show details"></button>
             <button
