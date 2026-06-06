@@ -84,6 +84,14 @@
   font-size: $font-size-sm;
 }
 
+.type-badge {
+  color: $text-secondary;
+  font-size: $font-size-sm;
+  border: 1px solid $color-border;
+  border-radius: $border-radius-sm;
+  padding: 1px 8px;
+}
+
 .icon-btn {
   background: none;
   border: none;
