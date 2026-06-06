@@ -170,6 +170,9 @@ pub enum JobUpdateKind {
         /// disabled. A multi-build job yields one `BuildOutput` (and thus one
         /// metrics record) per build.
         metrics: Option<BuildMetrics>,
+        /// True when the daemon reported the outputs as already valid (no work
+        /// performed) - the build is finalized as `Substituted`, not `Completed`.
+        substituted: bool,
     },
     Compressing,
 }

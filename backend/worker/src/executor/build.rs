@@ -259,9 +259,10 @@ impl ParsedDerivation {
     /// outputs.
     ///
     /// Streams build log lines to the server via `updater` while the daemon is
-    /// running.  Returns one [`BuildOutput`] per output name; `nar_size` and
-    /// `nar_hash` are `None` at this stage and are filled in by the compress
-    /// step.
+    /// running.  Returns one [`BuildOutput`] per output name (`nar_size` and
+    /// `nar_hash` are `None` at this stage, filled in by the compress step)
+    /// plus a `substituted` flag - true when the daemon reported the outputs as
+    /// already valid (empty `built_outputs`), i.e. no work was performed.
     #[allow(clippy::too_many_arguments)]
     pub(super) async fn realize(
         self,
@@ -273,7 +274,7 @@ impl ParsedDerivation {
         abort: &mut watch::Receiver<bool>,
         log_limits: crate::executor::log_limit::LogRateLimits,
         log_fetch_from_store: bool,
-    ) -> Result<Vec<BuildOutput>, BuildError> {
+    ) -> Result<(Vec<BuildOutput>, bool), BuildError> {
         let mut guard = store.scoped().await.map_err(BuildError::transient)?;
 
         debug!(
@@ -361,7 +362,8 @@ impl ParsedDerivation {
                         drv_path
                     )));
                 }
-                if s.built_outputs.is_empty() {
+                let substituted = s.built_outputs.is_empty();
+                if substituted {
                     debug!(
                         drv = %drv_path,
                         recovered = pairs.len(),
@@ -387,7 +389,7 @@ impl ParsedDerivation {
                         products,
                     });
                 }
-                Ok(outputs)
+                Ok((outputs, substituted))
             }
 
             BuildResultInner::Failure(f) => {
@@ -509,7 +511,7 @@ pub async fn build_derivation(
     );
 
     let started = std::time::Instant::now();
-    let realize_result: Result<Vec<BuildOutput>, BuildError> =
+    let realize_result: Result<(Vec<BuildOutput>, bool), BuildError> =
         match task.timeout_secs.map(std::time::Duration::from_secs) {
             Some(d) => match tokio::time::timeout(d, realize).await {
                 Ok(r) => r,
@@ -527,9 +529,9 @@ pub async fn build_derivation(
     let build_time_ms = started.elapsed().as_millis() as u64;
     let metrics = capture_build_metrics(build_metrics, cgroup_root, &task.drv_path, build_time_ms);
 
-    let outputs = realize_result?;
+    let (outputs, substituted) = realize_result?;
     updater
-        .report_build_output(task.build_id.clone(), outputs.clone(), Some(metrics))
+        .report_build_output(task.build_id.clone(), outputs.clone(), Some(metrics), substituted)
         .map_err(BuildError::transient)?;
     Ok(outputs)
 }

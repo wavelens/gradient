@@ -777,6 +777,44 @@ async fn build_completed_last_build_completes_eval() {
     assert!(result.is_ok());
 }
 
+/// A build already moved to `Substituted` by `handle_build_output` keeps that
+/// terminal status on completion instead of being overwritten with `Completed`.
+#[tokio::test]
+async fn build_completed_preserves_substituted_status() {
+    let eval_id = EvaluationId::now_v7();
+    let drv_id = DerivationId::now_v7();
+    let build_id = BuildId::now_v7();
+
+    let build = make_build(build_id, eval_id, drv_id, BuildStatus::Substituted);
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        // 1. find_by_id(build) → Substituted (already terminal)
+        .append_query_results([vec![build]])
+        // update_build_status sees from == to and skips the UPDATE entirely.
+        // 2. propagate_to_followers: find via=leader.id → empty
+        .append_query_results([Vec::<MBuild>::new()])
+        // 3. find active builds → empty
+        .append_query_results([Vec::<MBuild>::new()])
+        // 4. find_by_id(eval) → Building
+        .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Building)]])
+        // 5. find failed builds → empty
+        .append_query_results([Vec::<MBuild>::new()])
+        // 6. find eval error messages → empty
+        .append_query_results([Vec::<MEvaluationMessage>::new()])
+        // 7. update_many eval → Completed
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
+        // 8. find_by_id(eval) → Completed
+        .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Completed)]])
+        .into_connection();
+
+    let state = make_state(db);
+    let result = build_handler::handle_build_job_completed(&state, build_id).await;
+    assert!(result.is_ok());
+}
+
 /// When active builds remain, check_evaluation_done returns early (eval stays Building).
 #[tokio::test]
 async fn build_completed_with_remaining_active() {
@@ -1249,7 +1287,7 @@ async fn build_output_updates_derivation_output() {
     let state = make_state(db);
     let job = make_build_job(build_id, eval_id, org_id);
 
-    let result = build_handler::handle_build_output(&state, &job, build_id, outputs, None).await;
+    let result = build_handler::handle_build_output(&state, &job, build_id, outputs, None, false).await;
     assert!(result.is_ok());
 }
 
@@ -1327,7 +1365,7 @@ async fn build_output_with_metrics_records_one_metric_row() {
     let state = make_state(db);
     let job = make_build_job(build_id, eval_id, org_id);
 
-    let result = build_handler::handle_build_output(&state, &job, build_id, outputs, metrics).await;
+    let result = build_handler::handle_build_output(&state, &job, build_id, outputs, metrics, false).await;
     assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
 }
 
@@ -1361,7 +1399,7 @@ async fn build_output_missing_row_warns_not_errors() {
     let state = make_state(db);
     let job = make_build_job(build_id, eval_id, org_id);
 
-    let result = build_handler::handle_build_output(&state, &job, build_id, outputs, None).await;
+    let result = build_handler::handle_build_output(&state, &job, build_id, outputs, None, false).await;
     assert!(result.is_ok());
 }
 
@@ -1440,7 +1478,7 @@ async fn build_output_inserts_build_product_rows() {
     let state = make_state(db);
     let job = make_build_job(build_id, eval_id, org_id);
 
-    let result = build_handler::handle_build_output(&state, &job, build_id, outputs, None).await;
+    let result = build_handler::handle_build_output(&state, &job, build_id, outputs, None, false).await;
     assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
 }
 
@@ -1458,7 +1496,7 @@ async fn build_output_unknown_build_errors() {
     let state = make_state(db);
     let job = make_build_job(build_id, eval_id, org_id);
 
-    let result = build_handler::handle_build_output(&state, &job, build_id, vec![], None).await;
+    let result = build_handler::handle_build_output(&state, &job, build_id, vec![], None, false).await;
     assert!(result.is_err());
 }
 

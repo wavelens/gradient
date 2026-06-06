@@ -156,6 +156,7 @@ pub async fn update_build_status(
             if matches!(
                 updated_build.status,
                 BuildStatus::Completed
+                    | BuildStatus::Substituted
                     | BuildStatus::FailedPermanent
                     | BuildStatus::FailedTimeout
                     | BuildStatus::Aborted

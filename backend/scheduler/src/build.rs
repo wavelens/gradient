@@ -85,6 +85,7 @@ impl<'a> BuildStateHandler<'a> {
         build_id: BuildId,
         outputs: Vec<BuildOutput>,
         metrics: Option<BuildMetrics>,
+        substituted: bool,
     ) -> Result<()> {
         let mut build = EBuild::find_by_id(build_id)
             .one(&self.state.worker_db)
@@ -155,6 +156,14 @@ impl<'a> BuildStateHandler<'a> {
         }
 
         info!(%build_id, output_count = outputs.len(), "build outputs recorded");
+
+        // The daemon found the outputs already valid - no build ran. Mark the
+        // build `Substituted` here so the later `JobCompleted` finalizes it as
+        // such instead of `Completed` (issue #303).
+        if substituted {
+            update_build_status(Arc::clone(self.state), build, BuildStatus::Substituted).await;
+        }
+
         Ok(())
     }
 
@@ -173,8 +182,15 @@ impl<'a> BuildStateHandler<'a> {
         let derivation_id = build.derivation;
         let was_external_cached = build.external_cached;
 
-        let leader =
-            update_build_status(Arc::clone(self.state), build, BuildStatus::Completed).await;
+        // `handle_build_output` already moved the build to `Substituted` when the
+        // outputs were found already valid; preserve that terminal state instead
+        // of overwriting it with `Completed`.
+        let terminal = if build.status == BuildStatus::Substituted {
+            BuildStatus::Substituted
+        } else {
+            BuildStatus::Completed
+        };
+        let leader = update_build_status(Arc::clone(self.state), build, terminal).await;
         self.propagate_to_followers(&leader).await?;
 
         if was_external_cached {
@@ -791,9 +807,10 @@ pub async fn handle_build_output(
     build_id: BuildId,
     outputs: Vec<BuildOutput>,
     metrics: Option<BuildMetrics>,
+    substituted: bool,
 ) -> Result<()> {
     BuildStateHandler::new(state)
-        .handle_build_output(job, build_id, outputs, metrics)
+        .handle_build_output(job, build_id, outputs, metrics, substituted)
         .await
 }
 

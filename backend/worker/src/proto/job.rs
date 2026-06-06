@@ -168,11 +168,13 @@ impl JobUpdater {
         build_id: String,
         outputs: Vec<BuildOutput>,
         metrics: Option<BuildMetrics>,
+        substituted: bool,
     ) -> Result<()> {
         self.send_update(JobUpdateKind::BuildOutput {
             build_id,
             outputs,
             metrics,
+            substituted,
         })
     }
 
@@ -344,11 +346,13 @@ impl JobReporter for JobUpdater {
         build_id: String,
         outputs: Vec<BuildOutput>,
         metrics: Option<BuildMetrics>,
+        substituted: bool,
     ) -> Result<()> {
         self.send_update(JobUpdateKind::BuildOutput {
             build_id,
             outputs,
             metrics,
+            substituted,
         })
     }
 

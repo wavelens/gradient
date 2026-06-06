@@ -31,7 +31,7 @@ impl std::error::Error for InvalidBuildTransition {}
 /// ```text
 /// Created → Queued
 /// Queued  → Building
-/// Building → Completed | FailedPermanent | FailedTransient | FailedTimeout
+/// Building → Completed | Substituted | FailedPermanent | FailedTransient | FailedTimeout
 /// FailedTransient → Queued | FailedPermanent
 /// * → Aborted          (except terminal states)
 /// * → DependencyFailed (except terminal states)
@@ -73,6 +73,7 @@ impl BuildStateMachine {
             (_, BuildStatus::FailedTransient) => Ok(to),
             (_, BuildStatus::FailedTimeout) => Ok(to),
             (_, BuildStatus::Completed) => Ok(to),
+            (_, BuildStatus::Substituted) => Ok(to),
             (_, BuildStatus::Aborted) => Ok(to),
             (_, BuildStatus::DependencyFailed) => Ok(to),
 
@@ -111,6 +112,13 @@ mod tests {
     #[test]
     fn build_sm_building_to_completed() {
         assert!(BuildStateMachine::validate(BuildStatus::Building, BuildStatus::Completed).is_ok());
+    }
+
+    #[test]
+    fn build_sm_building_to_substituted() {
+        assert!(
+            BuildStateMachine::validate(BuildStatus::Building, BuildStatus::Substituted).is_ok()
+        );
     }
 
     #[test]

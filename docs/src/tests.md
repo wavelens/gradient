@@ -1886,6 +1886,25 @@ Tests (`cargo test -p scheduler --tests substitut`):
   eval completes without dispatching a build. Confirms the hash-based
   fallback in `compute_truly_substituted`.
 
+## Substituted at build time - outputs already valid on the worker (#303)
+
+When the daemon reports a build's outputs as already valid (empty
+`built_outputs`), no build actually ran. The worker now sets the
+`substituted` flag on its `BuildOutput` job update; `handle_build_output`
+moves the build to `Substituted`, and `handle_build_job_completed`
+preserves that terminal status instead of overwriting it with `Completed`.
+This is distinct from eval-time `compute_truly_substituted` (above), which
+covers outputs already cached before evaluation.
+
+Tests:
+
+- `build_sm_building_to_substituted` (`core`) - the `Building → Substituted`
+  transition is permitted by the state machine.
+- `build_completed_preserves_substituted_status` (`scheduler`) - a build
+  already moved to `Substituted` keeps that status on `JobCompleted`; the
+  `from == to` transition skips the build UPDATE and the evaluation still
+  finalises as `Completed`.
+
 ## Scheduler policy - anti-starvation cap (#112)
 
 `WaitTimeRule::max_wait_secs` caps how much wait time can contribute to a
@@ -3182,6 +3201,9 @@ Run with: `cargo test -p core --lib state_machine::build`
   and `FailedTimeout` are terminal; no outgoing transitions are accepted.
 - `build_sm_terminal_failure_rejects_requeue` — attempting to transition
   either terminal failure status back to `Queued` is rejected.
+- `build_sm_building_to_substituted` — `Building → Substituted` is valid, so
+  a worker that finds the outputs already valid can finalize the build as
+  `Substituted` rather than `Completed` (issue #303).
 
 ### Retry decision and backoff — `scheduler/src/build.rs`
 
