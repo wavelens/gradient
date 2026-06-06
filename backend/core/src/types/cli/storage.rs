@@ -44,6 +44,12 @@ pub struct StorageArgs {
     /// may exceed this. Defaults to 262144 (256 KiB).
     #[arg(long, env = "GRADIENT_LOG_CHUNK_BYTES", default_value_t = 262144)]
     pub log_chunk_bytes: usize,
+    /// Instance-wide cap on total cached NAR bytes, in gigabytes. When the
+    /// stored compressed-NAR total leaves every writable cache for an org with
+    /// less than 10 MiB of headroom, new evaluations park in `Waiting`. `0`
+    /// (default) disables the instance-wide limit; per-cache limits still apply.
+    #[arg(long, env = "GRADIENT_MAX_STORAGE_GB", default_value_t = 0)]
+    pub max_storage_gb: i32,
 }
 
 impl Default for StorageArgs {
@@ -58,6 +64,7 @@ impl Default for StorageArgs {
             nar_ttl_hours: 336,
             keep_orphan_derivations_hours: 24,
             log_chunk_bytes: 262144,
+            max_storage_gb: 0,
         }
     }
 }
@@ -93,5 +100,16 @@ mod tests {
     fn clap_default_nar_ttl_hours_is_two_weeks() {
         let parsed = StorageOnlyCli::try_parse_from(["test"]).unwrap();
         assert_eq!(parsed.storage.nar_ttl_hours, 336);
+    }
+
+    #[test]
+    fn default_max_storage_gb_is_unlimited() {
+        assert_eq!(StorageArgs::default().max_storage_gb, 0);
+    }
+
+    #[test]
+    fn clap_default_max_storage_gb_is_zero() {
+        let parsed = StorageOnlyCli::try_parse_from(["test"]).unwrap();
+        assert_eq!(parsed.storage.max_storage_gb, 0);
     }
 }
