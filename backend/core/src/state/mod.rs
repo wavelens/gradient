@@ -45,6 +45,7 @@ pub fn resolve_oidc_group_roles(
     map
 }
 
+use crate::ci::GITHUB_APP_INTEGRATION_NAME;
 use crate::types::triggers::{ConcurrencyPolicy, TriggerType};
 use entity::organization_cache::CacheSubscriptionMode;
 use sea_orm::DatabaseConnection;
@@ -517,6 +518,42 @@ impl StateConfiguration {
                     });
                 }
             }
+
+            // Reporter triggers resolve their `integration` against the org's
+            // inbound integrations at apply time; catch a missing/outbound/typo
+            // reference here so it fails validation instead of mid-apply (#332).
+            for trigger in project.triggers.iter().flatten() {
+                if !matches!(
+                    trigger.trigger_type,
+                    TriggerType::ReporterPush | TriggerType::ReporterPullRequest
+                ) {
+                    continue;
+                }
+                let Some(name) = &trigger.integration else {
+                    errors.push(ValidationError {
+                        field: format!("projects.{}.triggers", project.name),
+                        message: "reporter_push/reporter_pull_request triggers require an `integration`".into(),
+                    });
+                    continue;
+                };
+                if name == GITHUB_APP_INTEGRATION_NAME {
+                    continue;
+                }
+                let declared_inbound = self.integrations.values().any(|i| {
+                    i.name == *name
+                        && i.organization == project.organization
+                        && i.kind == "inbound"
+                });
+                if !declared_inbound {
+                    errors.push(ValidationError {
+                        field: format!("projects.{}.triggers", project.name),
+                        message: format!(
+                            "Reporter trigger references integration '{}' which is not a declared inbound integration in organization '{}'",
+                            name, project.organization
+                        ),
+                    });
+                }
+            }
         }
 
         for integration in self.integrations.values() {
@@ -734,6 +771,20 @@ impl StateConfiguration {
             errors,
         }
     }
+}
+
+/// Load and validate a state file without touching the database. Returns the
+/// human-readable validation errors (empty `Vec` = valid). Backs the
+/// `--validate-state` CLI flag so config mistakes surface at build/CI time
+/// instead of on server start.
+pub fn validate_state_file(path: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    let config = StateConfiguration::from_file(path)?;
+    Ok(config
+        .validate()
+        .errors
+        .into_iter()
+        .map(|e| format!("{}: {}", e.field, e.message))
+        .collect())
 }
 
 pub async fn load_and_apply_state(
@@ -1011,6 +1062,75 @@ mod tests {
         assert_eq!(cfg.projects["web"].actions.len(), 3);
         assert_eq!(cfg.projects["web"].actions[0].action_type, "send_mail");
         assert!(cfg.projects["web"].actions[2].events.is_empty());
+    }
+
+    fn reporter_cfg(integration_name: &str, integrations_json: &str) -> StateConfiguration {
+        let json = format!(
+            r#"{{
+                "users": {{
+                    "alice": {{ "username": "alice", "name": "Alice", "email": "a@x.io", "password_file": "/dev/null" }}
+                }},
+                "organizations": {{
+                    "acme": {{ "name": "acme", "display_name": "ACME", "private_key_file": "/dev/null", "public": false, "created_by": "alice" }}
+                }},
+                "integrations": {integrations_json},
+                "projects": {{
+                    "web": {{
+                        "name": "web", "organization": "acme", "display_name": "Web",
+                        "repository": "https://example.com/acme/web.git", "created_by": "alice",
+                        "triggers": [
+                            {{ "type": "reporter_push", "integration": "{integration_name}", "config": {{ "branches": ["main"] }} }}
+                        ]
+                    }}
+                }}
+            }}"#
+        );
+        serde_json::from_str(&json).unwrap()
+    }
+
+    #[test]
+    fn state_reporter_trigger_accepts_declared_inbound_integration() {
+        let integrations = r#"{
+            "forge": { "name": "forge", "organization": "acme", "kind": "inbound", "forge_type": "forgejo", "created_by": "alice" }
+        }"#;
+        let cfg = reporter_cfg("forge", integrations);
+        let v = cfg.validate();
+        assert!(v.is_valid, "errors: {:?}", v.errors);
+    }
+
+    #[test]
+    fn state_reporter_trigger_rejects_unknown_integration() {
+        let cfg = reporter_cfg("ghost", "{}");
+        let v = cfg.validate();
+        assert!(!v.is_valid);
+        assert!(
+            v.errors.iter().any(|e| e.field == "projects.web.triggers"
+                && e.message.contains("ghost")),
+            "expected unknown-integration trigger error, got: {:?}",
+            v.errors
+        );
+    }
+
+    #[test]
+    fn state_reporter_trigger_rejects_outbound_integration() {
+        let integrations = r#"{
+            "forge": { "name": "forge", "organization": "acme", "kind": "outbound", "forge_type": "forgejo", "created_by": "alice" }
+        }"#;
+        let cfg = reporter_cfg("forge", integrations);
+        let v = cfg.validate();
+        assert!(!v.is_valid);
+        assert!(
+            v.errors.iter().any(|e| e.field == "projects.web.triggers"),
+            "expected outbound-integration trigger error, got: {:?}",
+            v.errors
+        );
+    }
+
+    #[test]
+    fn state_reporter_trigger_accepts_github_app_name() {
+        let cfg = reporter_cfg("github", "{}");
+        let v = cfg.validate();
+        assert!(v.is_valid, "errors: {:?}", v.errors);
     }
 
     #[test]
