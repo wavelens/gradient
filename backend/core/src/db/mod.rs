@@ -6,6 +6,7 @@
 
 pub mod admin_tasks;
 pub mod cache_reach;
+pub mod cache_storage;
 pub mod cache_upstream;
 pub mod closure;
 pub mod connection;
@@ -19,6 +20,10 @@ pub mod runtime_closure;
 pub mod status;
 
 pub use self::cache_reach::*;
+pub use self::cache_storage::{
+    STORAGE_HEADROOM_BYTES, cache_used_bytes, instance_used_bytes, org_caches_all_full,
+    org_writable_caches,
+};
 pub use self::cache_upstream::{GradientProtoUpstream, gradient_proto_upstreams_for_org, upstream_urls_for_org};
 pub use self::closure::*;
 pub use self::connection::*;
