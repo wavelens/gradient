@@ -448,6 +448,10 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         )
         .route("/evals/{evaluation}/artefacts", get(evals::get_artefacts))
         .route("/evals/{evaluation}/closure", get(builds::get_eval_closure))
+        .route(
+            "/evals/{evaluation}/runtime-closure",
+            get(builds::get_eval_runtime_closure),
+        )
         .route("/builds/{build}", get(builds::get_build))
         .route("/builds/{build}/log", get(builds::get_build_log))
         .route(
@@ -469,6 +473,10 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         )
         .route("/builds/{build}/graph", get(builds::get_build_graph))
         .route("/builds/{build}/closure", get(builds::get_build_closure))
+        .route(
+            "/builds/{build}/runtime-closure",
+            get(builds::get_build_runtime_closure),
+        )
         .route(
             "/builds/{build}/downloads",
             get(builds::get_build_downloads),

@@ -12,8 +12,9 @@ pub mod log_chunks;
 pub mod query;
 
 pub use self::closure::{
-    ClosureEdge, ClosureGraph, ClosureNode, build_closure_graph, derivation_closure_reachable,
-    get_build_closure, get_eval_closure, sum_output_sizes,
+    ClosureEdge, ClosureGraph, ClosureNode, build_closure_graph, build_runtime_closure_graph,
+    derivation_closure_reachable, get_build_closure, get_build_runtime_closure, get_eval_closure,
+    get_eval_runtime_closure, sum_output_sizes,
 };
 pub use self::downloads::{
     BuildProduct, DownloadQuery, get_build_download, get_build_download_token, get_build_downloads,

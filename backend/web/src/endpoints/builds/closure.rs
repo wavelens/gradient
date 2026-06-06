@@ -24,7 +24,7 @@ const CLOSURE_NODE_CAP: usize = 1000;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub struct ClosureNode {
-    pub id: DerivationId,
+    pub id: String,
     pub name: String,
     pub path: String,
     pub nar_size: Option<i64>,
@@ -32,13 +32,13 @@ pub struct ClosureNode {
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub struct ClosureEdge {
-    pub source: DerivationId,
-    pub target: DerivationId,
+    pub source: String,
+    pub target: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub struct ClosureGraph {
-    pub roots: Vec<DerivationId>,
+    pub roots: Vec<String>,
     pub total_size_bytes: Option<i64>,
     pub node_count: usize,
     pub edge_count: usize,
@@ -88,7 +88,7 @@ pub async fn build_closure_graph<C: sea_orm::ConnectionTrait>(
         .into_iter()
         .map(|d| ClosureNode {
             nar_size: size_by_drv.get(&d.id).copied(),
-            id: d.id,
+            id: d.id.to_string(),
             name: d.name.clone(),
             path: d.store_path(),
         })
@@ -100,7 +100,7 @@ pub async fn build_closure_graph<C: sea_orm::ConnectionTrait>(
     if truncated {
         nodes.truncate(CLOSURE_NODE_CAP);
     }
-    let kept: HashSet<DerivationId> = nodes.iter().map(|n| n.id).collect();
+    let kept: HashSet<String> = nodes.iter().map(|n| n.id.clone()).collect();
 
     let dep_rows = EDerivationDependency::find()
         .filter(CDerivationDependency::Derivation.is_in(all_ids))
@@ -108,15 +108,15 @@ pub async fn build_closure_graph<C: sea_orm::ConnectionTrait>(
         .await?;
     let edges: Vec<ClosureEdge> = dep_rows
         .into_iter()
-        .filter(|e| kept.contains(&e.derivation) && kept.contains(&e.dependency))
         .map(|e| ClosureEdge {
-            source: e.dependency,
-            target: e.derivation,
+            source: e.dependency.to_string(),
+            target: e.derivation.to_string(),
         })
+        .filter(|e| kept.contains(&e.source) && kept.contains(&e.target))
         .collect();
 
     Ok(ClosureGraph {
-        roots,
+        roots: roots.iter().map(|r| r.to_string()).collect(),
         total_size_bytes,
         node_count: nodes.len(),
         edge_count: edges.len(),
@@ -169,6 +169,115 @@ pub async fn get_eval_closure(
     };
 
     let graph = build_closure_graph(&state.web_db, roots).await?;
+    Ok(ok_json(graph))
+}
+
+/// Build a runtime closure graph seeded at the output store-path hashes
+/// `seed_hashes`: the transitive `cached_path.references` set with per-node and
+/// exact total NAR sizes. Reachability is only as complete as the cached outputs.
+pub async fn build_runtime_closure_graph<C: sea_orm::ConnectionTrait>(
+    db: &C,
+    seed_hashes: Vec<String>,
+) -> WebResult<ClosureGraph> {
+    let reached = gradient_core::db::runtime_closure_reachable(db, &seed_hashes).await?;
+
+    let total: i64 = reached.values().filter_map(|r| r.nar_size).sum();
+    let total_size_bytes = (total > 0).then_some(total);
+
+    let mut nodes: Vec<ClosureNode> = reached
+        .values()
+        .map(|r| ClosureNode {
+            id: r.hash.clone(),
+            name: r.package.clone(),
+            path: r.store_path.clone(),
+            nar_size: r.nar_size,
+        })
+        .collect();
+    nodes.sort_by_key(|n| std::cmp::Reverse(n.nar_size.unwrap_or(0)));
+
+    let truncated = nodes.len() > CLOSURE_NODE_CAP;
+    if truncated {
+        nodes.truncate(CLOSURE_NODE_CAP);
+    }
+    let kept: HashSet<String> = nodes.iter().map(|n| n.id.clone()).collect();
+
+    let mut edges: Vec<ClosureEdge> = Vec::new();
+    for row in reached.values().filter(|r| kept.contains(&r.hash)) {
+        for token in row.references.clone().unwrap_or_default().split_whitespace() {
+            if let Some(dep) = gradient_core::db::parse_reference_hash(token)
+                && dep != row.hash
+                && kept.contains(&dep)
+            {
+                edges.push(ClosureEdge {
+                    source: dep,
+                    target: row.hash.clone(),
+                });
+            }
+        }
+    }
+
+    let roots: Vec<String> = seed_hashes
+        .into_iter()
+        .filter(|h| reached.contains_key(h))
+        .collect();
+
+    Ok(ClosureGraph {
+        roots,
+        total_size_bytes,
+        node_count: nodes.len(),
+        edge_count: edges.len(),
+        truncated,
+        nodes,
+        edges,
+    })
+}
+
+/// GET /builds/{build}/runtime-closure - runtime reference closure of a build.
+pub async fn get_build_runtime_closure(
+    state: State<Arc<ServerState>>,
+    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
+    Path(build_id): Path<BuildId>,
+) -> WebResult<Json<BaseResponse<ClosureGraph>>> {
+    let ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
+    let seeds =
+        gradient_core::db::output_hashes_for_drvs(&state.web_db, &[ctx.build.derivation]).await?;
+    let graph = build_runtime_closure_graph(&state.web_db, seeds).await?;
+    Ok(ok_json(graph))
+}
+
+/// GET /evals/{evaluation}/runtime-closure - union runtime closure of entry points.
+pub async fn get_eval_runtime_closure(
+    state: State<Arc<ServerState>>,
+    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
+    Path(evaluation_id): Path<EvaluationId>,
+) -> WebResult<Json<BaseResponse<ClosureGraph>>> {
+    let _ctx =
+        EvalAccessContext::load(&state, evaluation_id, &maybe_user, api_key.as_ref()).await?;
+
+    let ep_build_ids: Vec<BuildId> = EEntryPoint::find()
+        .filter(CEntryPoint::Evaluation.eq(evaluation_id))
+        .all(&state.web_db)
+        .await?
+        .into_iter()
+        .map(|ep| ep.build)
+        .collect();
+
+    let roots: Vec<DerivationId> = if ep_build_ids.is_empty() {
+        vec![]
+    } else {
+        EBuild::find()
+            .filter(CBuild::Id.is_in(ep_build_ids))
+            .all(&state.web_db)
+            .await?
+            .into_iter()
+            .map(|b| b.derivation)
+            .collect()
+    };
+
+    let seeds = gradient_core::db::output_hashes_for_drvs(&state.web_db, &roots).await?;
+    let graph = build_runtime_closure_graph(&state.web_db, seeds).await?;
     Ok(ok_json(graph))
 }
 
@@ -241,13 +350,55 @@ mod tests {
         assert_eq!(g.edge_count, 1);
         assert!(!g.truncated);
         // Largest first.
-        assert_eq!(g.nodes[0].id, root);
+        assert_eq!(g.nodes[0].id, root.to_string());
         assert_eq!(g.nodes[0].nar_size, Some(100));
         assert_eq!(
             g.edges[0],
             ClosureEdge {
-                source: child,
-                target: root
+                source: child.to_string(),
+                target: root.to_string(),
+            }
+        );
+    }
+
+    fn cached(hash: &str, nar_size: i64, references: &str) -> entity::cached_path::Model {
+        entity::cached_path::Model {
+            id: CachedPathId::now_v7(),
+            store_path: format!("/nix/store/{hash}-foo"),
+            hash: hash.into(),
+            package: "foo".into(),
+            file_hash: Some("sha256:dummy".into()),
+            file_size: Some(nar_size / 2),
+            nar_size: Some(nar_size),
+            nar_hash: None,
+            references: (!references.is_empty()).then(|| references.to_string()),
+            ca: None,
+            deriver: None,
+            created_at: now(),
+        }
+    }
+
+    // root -refs-> child; sizes 100 + 40 => total 140, two nodes, one edge.
+    #[tokio::test]
+    async fn runtime_closure_graph_sums_and_links() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![cached("root", 100, "child-foo")]])
+            .append_query_results([vec![cached("child", 40, "")]])
+            .into_connection();
+
+        let g = build_runtime_closure_graph(&db, vec!["root".into()])
+            .await
+            .unwrap();
+        assert_eq!(g.total_size_bytes, Some(140));
+        assert_eq!(g.node_count, 2);
+        assert_eq!(g.edge_count, 1);
+        assert_eq!(g.roots, vec!["root".to_string()]);
+        assert_eq!(g.nodes[0].id, "root");
+        assert_eq!(
+            g.edges[0],
+            ClosureEdge {
+                source: "child".into(),
+                target: "root".into(),
             }
         );
     }
