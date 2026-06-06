@@ -55,6 +55,7 @@ openssl rand -base64 48 > /run/secrets/gradient-crypt
 | `settings.maxProtoConnections` | `256` | Max simultaneous worker WebSocket connections; further upgrades return `503 Service Unavailable` with `Retry-After: 10` until a slot frees |
 | `settings.keepEvaluations` | `30` | Global maximum of evaluations kept per project (caps the per-project setting) |
 | `settings.logChunkBytes` | `262144` (256 KiB) | Target uncompressed size for each zstd build-log chunk written on finalize. Chunks split on line boundaries, so an over-long line may exceed this. (`GRADIENT_LOG_CHUNK_BYTES`) |
+| `settings.maxStorageGb` | `0` | Instance-wide cap on total cached NAR storage, in GB. When all writable caches for an org have less than 10 MiB headroom, new evaluations park in `Waiting`. `0` = unlimited; per-cache `max_storage_gb` limits still apply. (`GRADIENT_MAX_STORAGE_GB`) |
 | `settings.maxRequestSize` | `2097152` (2 MiB) | Max HTTP request body in bytes for most endpoints (caps webhook/JSON payloads to prevent OOM). The build-request blob endpoint uses a fixed 20 MiB cap. |
 | `settings.maxNarUploadSize` | `536870912` (512 MiB) | Max body in bytes for `POST /caches/{cache}/nars`; overrides the general `maxRequestSize` cap for NAR uploads. (`GRADIENT_MAX_NAR_UPLOAD_SIZE`) |
 | `settings.logLevel.default` | `info` | Log level: `trace` `debug` `info` `warn` `error` |

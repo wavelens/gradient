@@ -397,6 +397,12 @@ in {
           default = 262144;
         };
 
+        maxStorageGb = lib.mkOption {
+          description = "Instance-wide cap on total cached NAR storage in GB. When all writable caches for an org have less than 10 MiB headroom, new evaluations park in Waiting. 0 = unlimited; per-cache limits still apply.";
+          type = lib.types.ints.unsigned;
+          default = 0;
+        };
+
         buildMaxAttempts = lib.mkOption {
           description = "Maximum number of build attempts before a transient failure becomes permanent (must be ≥ 1).";
           type = lib.types.ints.positive;
@@ -684,6 +690,7 @@ in {
         GRADIENT_REPORT_ERRORS = lib.boolToString cfg.reportErrors;
         GRADIENT_KEEP_EVALUATIONS = toString cfg.settings.keepEvaluations;
         GRADIENT_LOG_CHUNK_BYTES = toString cfg.settings.logChunkBytes;
+        GRADIENT_MAX_STORAGE_GB = toString cfg.settings.maxStorageGb;
         GRADIENT_BUILD_MAX_ATTEMPTS = toString cfg.settings.buildMaxAttempts;
         GRADIENT_BUILD_RETRY_BACKOFF_SECS = toString cfg.settings.buildRetryBackoffSecs;
         GRADIENT_BUILD_DEFAULT_TIMEOUT_SECS = toString cfg.settings.buildDefaultTimeoutSecs;
