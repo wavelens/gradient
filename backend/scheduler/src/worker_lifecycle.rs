@@ -130,12 +130,14 @@ impl Scheduler {
         cpu_usage_pct: f32,
         ram_free_mb: u64,
         disk_speed_mbps: Option<f32>,
+        network_speed_mbps: Option<f32>,
     ) {
         self.worker_pool.write().await.update_metrics(
             peer_id,
             cpu_usage_pct,
             ram_free_mb,
             disk_speed_mbps,
+            network_speed_mbps,
         );
         debug!(%peer_id, cpu_usage_pct, ram_free_mb, "worker metrics updated");
     }

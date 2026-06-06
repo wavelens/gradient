@@ -22,4 +22,4 @@ pub use server::{FailedPeer, ServerMessage};
 pub use wire::{decode_client_message, decode_server_message};
 
 /// Wire protocol version implemented by this build.
-pub const PROTO_VERSION: u16 = 2;
+pub const PROTO_VERSION: u16 = 3;

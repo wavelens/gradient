@@ -177,12 +177,14 @@ impl WorkerPool {
         cpu_usage_pct: f32,
         ram_free_mb: u64,
         disk_speed_mbps: Option<f32>,
+        network_speed_mbps: Option<f32>,
     ) {
         if let Some(slot) = self.workers.get_mut(id) {
             let s = slot.shared_mut();
             s.cpu_usage_pct = cpu_usage_pct;
             s.ram_free_mb = ram_free_mb;
             s.disk_speed_mbps = disk_speed_mbps;
+            s.network_speed_mbps = network_speed_mbps;
         }
     }
 
@@ -198,6 +200,7 @@ impl WorkerPool {
                 ram_free_mb: s.ram_free_mb,
                 cpu_usage_pct: s.cpu_usage_pct,
                 disk_speed_mbps: s.disk_speed_mbps,
+                network_speed_mbps: s.network_speed_mbps,
             }
         })
     }
@@ -424,12 +427,14 @@ mod tests {
         assert_eq!(view.cpu_usage_pct, 0.0);
         assert_eq!(view.ram_free_mb, 0);
         assert_eq!(view.disk_speed_mbps, None);
+        assert_eq!(view.network_speed_mbps, None);
 
-        pool.update_metrics("w1", 42.5, 3000, Some(550.0));
+        pool.update_metrics("w1", 42.5, 3000, Some(550.0), Some(120.0));
         let view = pool.metrics_for("w1").unwrap();
         assert_eq!(view.cpu_usage_pct, 42.5);
         assert_eq!(view.ram_free_mb, 3000);
         assert_eq!(view.disk_speed_mbps, Some(550.0));
+        assert_eq!(view.network_speed_mbps, Some(120.0));
         // Static caps survive a metrics update.
         assert_eq!(view.cpu_count, 4);
         assert_eq!(view.ram_total_mb, 8192);
