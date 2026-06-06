@@ -8,7 +8,7 @@ Gradient is a multi-crate Rust workspace with two separate binaries: **`gradient
 
 The server binary starts three concurrent async tasks:
 
-```
+```text
 ┌────────────────────────────────────────┐
 │           gradient binary              │
 │                                        │
@@ -39,7 +39,7 @@ The server does not require access to a Nix daemon. All store interaction (eval,
 
 ## Crates
 
-```
+```text
 backend/
 ├── core/         Shared state, config, DB pool, utility functions
 ├── entity/       SeaORM entity definitions (one module per table)
@@ -73,7 +73,7 @@ One module per database table using SeaORM derive macros. The naming convention 
 
 Key entities and their relationships:
 
-```
+```text
 organization
   ├── worker_registration[]    registered worker auth tokens
   ├── cache[]                  binary caches (via subscription)
@@ -127,7 +127,7 @@ Axum HTTP server. All API routes live under `/api/v1` via `Router::nest`. Auth r
 
 Endpoints are split by resource in `web/src/endpoints/`:
 
-```
+```text
 auth.rs          Login, register, OIDC/OAuth2
 builds/          Build detail, log streaming, graph, downloads, direct build
 caches.rs        Cache CRUD + Nix cache protocol handlers

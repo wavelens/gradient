@@ -249,7 +249,7 @@ Project and worker name completion uses the currently selected organization
 
 ## Global Options
 
-```
+```text
 gradient --help      Show help for any command
 gradient --version   Print CLI version
 gradient --json      Emit machine-readable JSON output

@@ -32,7 +32,7 @@
 
 A public binary cache with pre-built Gradient packages is available:
 
-```
+```text
 URL:        https://public.gradient.ci/cache/main
 Public Key: public.gradient.ci-main:qmxRE+saUvhNa3jqaCMWje+feVU77TjABchZrPGf7A8=
 ```

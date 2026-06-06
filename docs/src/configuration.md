@@ -296,7 +296,7 @@ echo "<peer_id>:<token>" > /run/secrets/gradient-worker-peers
 
 The special peer ID `*` can be used instead of a specific UUID to respond with that token for any peer the server challenges:
 
-```
+```text
 # /run/secrets/gradient-worker-peers
 *:<token>
 ```
