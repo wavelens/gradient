@@ -543,6 +543,14 @@ Backend (`cargo test -p core --lib state::tests`):
   `force_evaluation`; serde's default unknown-field handling drops it
   silently so existing deployments parse cleanly after the field's
   removal from the schema.
+- `state_org_accepts_explicit_id` / `state_org_id_defaults_none` -
+  `StateOrganization.id` deserialises from a UUID string and defaults to
+  `None`, so a declarative deployment can pin the org UUID a worker's
+  `peersFile` references (`<org_id>:<token>`) (issue #333).
+- `state_org_validator_rejects_malformed_id` - a non-UUID `id` yields a
+  validation error pinpointing `organizations.<org>.id`.
+- `state_org_validator_rejects_duplicate_ids` - two organizations
+  declaring the same `id` is an error.
 - `state_org_members_serde_round_trip` - `StateOrganization.members`
   round-trips through JSON as `[{ user, role }]` entries, covering both
   built-in (`Write`) and custom (`releaser`) role names.

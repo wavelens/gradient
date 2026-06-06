@@ -105,10 +105,20 @@
         description = "Display name for the organization";
       };
 
-      description = mkOption {
+      id = mkOption {
         type = types.nullOr types.str;
         default = null;
-        description = "Description of the organization";
+        example = "018f6f3a-0000-7000-8000-000000000001";
+        description = ''
+          Explicit organization UUID. When set, a freshly created
+          organization is given this id instead of a server-generated one,
+          so a worker's `peersFile` can reference it (`<id>:<token>`) in a
+          fully declarative deployment without first looking up the
+          auto-generated id. Applied on create only; the id is immutable, so
+          a value conflicting with an existing organization is rejected.
+
+          Generate one with `uuidgen`.
+        '';
       };
 
       private_key_file = mkOption {

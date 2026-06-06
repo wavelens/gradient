@@ -117,12 +117,28 @@ ssh-keygen -t ed25519 -N "" -f /run/secrets/acme-ssh-key
 # Add the public key (.pub) to your Git host as a deploy key
 ```
 
+To pin the organization UUID for a fully declarative deployment (so a worker's `peersFile` can reference it before the server first starts), generate one with `uuidgen` and set it as `id`:
+
+```sh
+uuidgen   # e.g. 018f6f3a-0000-7000-8000-000000000001
+```
+
+```nix
+services.gradient.state.organizations.acme = {
+  id               = "018f6f3a-0000-7000-8000-000000000001";
+  display_name     = "ACME Corp";
+  private_key_file = "/run/secrets/acme-ssh-key";
+  created_by       = "alice";
+};
+```
+
 ### Organization options
 
 | Option | Default | Description |
 |---|---|---|
 | `name` | `<attrset key>` | Unique organization name |
 | `display_name` | `<name>` | Display name |
+| `id` | `null` | Explicit organization UUID, applied on create only. Pin it to reference the org in a worker's `peersFile` (`<id>:<token>`) without first looking up the server-generated id. Immutable — a value conflicting with an existing org is rejected |
 | `description` | `null` | Optional description |
 | `private_key_file` | - | Path to SSH private key (required) |
 | `public` | `false` | Visible to all users |
@@ -459,6 +475,8 @@ services.gradient.worker.workerId = "550e8400-e29b-41d4-a716-446655440001";
 ```
 
 State-managed worker registrations are deleted automatically when removed from `state.workers`, and per-(worker_id, organization) rows are deleted when an organization is dropped from `organizations` (subject to `settings.deleteState`).
+
+On the worker machine, the `peersFile` authenticates with `<org_id>:<token>` lines. The `org_id` is the organization's UUID — to know it ahead of the first server start, pin it with `state.organizations.<name>.id` and reference that same value in the worker's `peersFile`. The `*:<token>` wildcard remains the alternative when a single token may serve any org.
 
 ### Worker options
 

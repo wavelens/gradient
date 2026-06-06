@@ -343,8 +343,24 @@ impl<'a> StateApplicator<'a> {
 
             let now = now();
 
+            let declared_id = match &state_org.id {
+                Some(s) => Some(s.trim().parse::<OrganizationId>().map_err(|e| {
+                    format!("Organization '{}' has an invalid id '{}': {}", state_org.name, s, e)
+                })?),
+                None => None,
+            };
+
             let org_id = if let Some(existing) = existing_org {
                 let org_id = existing.id;
+                if let Some(declared) = declared_id
+                    && declared != org_id
+                {
+                    return Err(format!(
+                        "Organization '{}' already exists with id {} but state declares id {}; the id is immutable",
+                        state_org.name, org_id, declared
+                    )
+                    .into());
+                }
                 let mut org: organization::ActiveModel = existing.into();
                 org.display_name = Set(state_org.display_name.clone());
                 org.description = Set(state_org.description.clone().unwrap_or_default());
@@ -364,7 +380,7 @@ impl<'a> StateApplicator<'a> {
                 tracing::info!(name = %state_org.name, "Updated managed organization");
                 org_id
             } else {
-                let org_id = OrganizationId::now_v7();
+                let org_id = declared_id.unwrap_or_else(OrganizationId::now_v7);
                 let org = organization::ActiveModel {
                     id: Set(org_id),
                     name: Set(state_org.name.clone()),
