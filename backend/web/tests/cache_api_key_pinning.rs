@@ -204,7 +204,7 @@ fn create_key_rejects_both_org_and_cache_pin() {
             .add_header("authorization", format!("Bearer {}", token))
             .json(&serde_json::json!({
                 "name": "bad-key",
-                "permissions": ["view-cache"],
+                "permissions": ["viewCache"],
                 "organization": "test-org",
                 "cache": "test-cache",
             }))
@@ -217,24 +217,26 @@ fn create_key_rejects_both_org_and_cache_pin() {
 }
 
 #[test]
-fn create_cache_pinned_key_requires_manage_cache_members() {
+fn create_cache_pinned_key_cannot_exceed_member_mask() {
     run(async {
         let session_id = gradient_core::types::SessionId::now_v7();
         let token = test_support::web::make_token(session_id);
         let session = test_support::web::live_session(session_id);
 
-        // User has View role on the cache (lacks ManageCacheMembers) → 403.
+        // A View-role member (or org member, same View mask) may mint a
+        // read-only key, but not one granting `writeStore` beyond their mask → 403 (#334).
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![session.clone()]])
             .append_query_results([vec![session]])
             .append_query_results([vec![user()]])
             // Name-clash check returns empty (no existing key with that name)
             .append_query_results([Vec::<api::Model>::new()])
-            // load_cache(ManageCacheMembers): cache lookup
+            // load_cache(Readable): cache lookup
             .append_query_results([vec![private_cache_row()]])
-            // load_cache: member lookup
+            // load_cache(Readable): membership visibility check
             .append_query_results([vec![view_cache_member()]])
-            // load_cache: role lookup
+            // effective_cache_mask: member + role lookup → View mask
+            .append_query_results([vec![view_cache_member()]])
             .append_query_results([vec![view_cache_role()]]);
 
         let server = make_test_server(db.into_connection());
@@ -243,7 +245,7 @@ fn create_cache_pinned_key_requires_manage_cache_members() {
             .add_header("authorization", format!("Bearer {}", token))
             .json(&serde_json::json!({
                 "name": "my-cache-key",
-                "permissions": ["view-cache"],
+                "permissions": ["writeStore"],
                 "cache": "test-cache",
             }))
             .await;
