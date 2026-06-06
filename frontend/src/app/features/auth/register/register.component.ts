@@ -15,6 +15,7 @@ import {
   ValidationErrors,
 } from '@angular/forms';
 import { Router, RouterModule } from '@angular/router';
+import { ButtonModule } from 'primeng/button';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
 import { environment } from '@environments/environment';
@@ -24,7 +25,7 @@ import { of, timer } from 'rxjs';
 @Component({
   selector: 'app-register',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, RouterModule],
+  imports: [CommonModule, ReactiveFormsModule, RouterModule, ButtonModule],
   templateUrl: './register.component.html',
   styleUrl: './register.component.scss',
 })

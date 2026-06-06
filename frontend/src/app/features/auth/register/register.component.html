@@ -17,10 +17,14 @@
         <span class="material-symbols-outlined">lock</span>
         <p>This server requires SSO sign-in. Use the button below to create or access your account.</p>
       </div>
-      <button type="button" class="btn-primary" (click)="loginWithOIDC()">
-        <span class="material-symbols-outlined">login</span>
-        Continue with SSO
-      </button>
+      <button
+        pButton
+        type="button"
+        class="w-full"
+        icon="pi pi-sign-in"
+        label="Continue with SSO"
+        (click)="loginWithOIDC()"
+      ></button>
       <div class="auth-footer">
         Already have an account?
         <a routerLink="/account/login">Sign in</a>
@@ -184,16 +188,13 @@
           </div>
 
           <button
+            pButton
             type="submit"
-            class="btn-primary"
+            class="w-full"
+            [label]="loading() ? 'Creating account...' : 'Create Account'"
+            [loading]="loading()"
             [disabled]="!registerForm.valid || loading()"
-          >
-            @if (loading()) {
-              <span>Creating account...</span>
-            } @else {
-              <span>Create Account</span>
-            }
-          </button>
+          ></button>
         </form>
 
         <div class="auth-footer">

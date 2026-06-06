@@ -64,16 +64,13 @@
         </div>
 
         <button
+          pButton
           type="submit"
-          class="btn-primary"
+          class="w-full"
+          [label]="loading() ? 'Signing in...' : 'Sign In'"
+          [loading]="loading()"
           [disabled]="!loginForm.valid || loading()"
-        >
-          @if (loading()) {
-            <span>Signing in...</span>
-          } @else {
-            <span>Sign In</span>
-          }
-        </button>
+        ></button>
       </form>
     }
 
@@ -83,10 +80,15 @@
           <span>OR</span>
         </div>
       }
-      <button type="button" class="btn-secondary" (click)="loginWithOIDC()">
-        <span class="material-symbols-outlined">login</span>
-        Sign in with SSO
-      </button>
+      <button
+        pButton
+        type="button"
+        class="w-full"
+        severity="secondary"
+        icon="pi pi-sign-in"
+        label="Sign in with SSO"
+        (click)="loginWithOIDC()"
+      ></button>
     }
 
     @if (!registrationDisabled) {
