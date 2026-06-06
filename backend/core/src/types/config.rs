@@ -253,8 +253,8 @@ mod tests {
                 max_evaluations_per_worker: 0,
                 build_max_attempts: 3,
                 build_retry_backoff_secs: 30,
-                build_default_timeout_secs: 3600,
-                build_default_max_silent_secs: 1800,
+                build_default_timeout_secs: 14400,
+                build_default_max_silent_secs: 3600,
                 scheduler_scoring_policy: "resource-aware".into(),
             },
             storage: StorageArgs {
