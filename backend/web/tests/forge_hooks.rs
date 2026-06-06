@@ -388,6 +388,7 @@ fn apply_trigger_db_chain(db: MockDatabase) -> MockDatabase {
         }]) // UPDATE project
         .append_query_results([vec![org_cache_row()]]) // org_has_writable_cache: subscription rows
         .append_query_results([vec![cache_row()]]) // org_has_writable_cache: active cache rows
+        .append_query_results([Vec::<entity::organization_cache::Model>::new()]) // park_if_storage_full: org_writable_caches → none → not full
         .append_query_results([vec![worker_registration_row()]]) // org_has_eval_capable_worker_registration
         .append_query_results([vec![trigger_row(reporter_push_trigger(vec![]))]]) // touch_trigger_last_fired: SELECT for UPDATE
         .append_exec_results([MockExecResult {
