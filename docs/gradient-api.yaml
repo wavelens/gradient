@@ -3044,6 +3044,33 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /evals/{evaluation}/runtime-closure:
+    parameters:
+      - $ref: '#/components/parameters/EvaluationId'
+    get:
+      tags: [evals]
+      summary: Get runtime closure size graph for an evaluation
+      description: |-
+        Union runtime reference closure of all the evaluation's entry-point build
+        outputs. Runtime counterpart of `/evals/{evaluation}/closure`.
+      operationId: getEvalRuntimeClosure
+      responses:
+        '200':
+          description: Runtime closure size graph
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/ClosureGraph'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   # ── Build Requests ───────────────────────────────────────────────────────────
 
   /build-requests/manifest:
@@ -3464,6 +3491,35 @@ paths:
       responses:
         '200':
           description: Closure size graph
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/ClosureGraph'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /builds/{build}/runtime-closure:
+    parameters:
+      - $ref: '#/components/parameters/BuildId'
+    get:
+      tags: [builds]
+      summary: Get runtime closure size graph
+      description: |-
+        Like `/builds/{build}/closure` but walks runtime store-path references
+        (narinfo `References:`) from the build's outputs instead of build-time
+        dependencies. Only as complete as the cached outputs; node ids are
+        store-path hashes. Same `ClosureGraph` shape.
+      operationId: getBuildRuntimeClosure
+      responses:
+        '200':
+          description: Runtime closure size graph
           content:
             application/json:
               schema:
@@ -6886,6 +6942,10 @@ components:
           type: integer
           nullable: true
           description: Total closure size including all transitive dependencies
+        runtime_closure_size_bytes:
+          type: integer
+          nullable: true
+          description: Total runtime reference closure size of the entry-point outputs
         dependencies_count:
           type: integer
           description: Number of dependency builds (excluding entry points)
@@ -6937,6 +6997,11 @@ components:
           format: int64
           nullable: true
           description: Total closure size including all transitive dependency outputs
+        runtime_closure_size_bytes:
+          type: integer
+          format: int64
+          nullable: true
+          description: Total runtime reference closure size of the entry-point build's outputs
         dependencies_count:
           type: integer
           format: int64
@@ -7573,14 +7638,13 @@ components:
       properties:
         id:
           type: string
-          format: uuid
-          description: Derivation UUID
+          description: Node id - derivation UUID (build closure) or store-path hash (runtime closure)
         name:
           type: string
           example: hello-2.12.1
         path:
           type: string
-          description: Full Nix store path of the `.drv`
+          description: Full Nix store path
         nar_size:
           type: integer
           format: int64
@@ -7593,12 +7657,10 @@ components:
       properties:
         source:
           type: string
-          format: uuid
-          description: Dependency derivation
+          description: Dependency node id
         target:
           type: string
-          format: uuid
-          description: Derivation that depends on `source`
+          description: Node id that depends on `source`
 
     ClosureGraph:
       type: object
@@ -7608,8 +7670,7 @@ components:
           type: array
           items:
             type: string
-            format: uuid
-          description: Seed derivations (one for a build, all entry points for an evaluation)
+          description: Seed node ids (one for a build, all entry points for an evaluation)
         total_size_bytes:
           type: integer
           format: int64

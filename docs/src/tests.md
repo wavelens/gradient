@@ -3410,3 +3410,18 @@ bounds and handles empty logs. Run a single spec with
 **CLI** — `gradient builds log <id>` keeps streaming parity (the server's
 `GET /log` reassembles chunks); `--lines L120-L130` fetches a line range and
 `--search <term>` streams matches.
+
+## Runtime closure (#338)
+
+**`core::db::runtime_closure`** — `parse_reference_hash` strips the `-name`
+suffix from a `hash-name` reference token; `runtime_closure_reachable` walks
+`cached_path.references` and sums NAR sizes, deduping diamonds and returning zero
+for empty seeds.
+
+**`web::endpoints::builds::closure::runtime_closure_graph_sums_and_links`** —
+`build_runtime_closure_graph` sums sizes, keys nodes by store-path hash, and
+emits `source` → `target` edges (referrer depends on reference).
+
+**Frontend `closure-graph`** — the view requests the runtime closure by default
+and the build-time closure only under `?type=build` (eval scope uses the eval
+runtime endpoint).
