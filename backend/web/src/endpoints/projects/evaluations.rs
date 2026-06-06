@@ -247,6 +247,13 @@ pub async fn post_project_evaluate(
 
     let eval =
         gradient_core::ci::park_if_no_cache(&state.web_db, eval, project.organization).await?;
+    let eval = gradient_core::ci::park_if_storage_full(
+        &state.web_db,
+        eval,
+        project.organization,
+        state.config.storage.max_storage_gb,
+    )
+    .await?;
     let eval =
         gradient_core::ci::park_if_no_workers(&state.web_db, eval, project.organization).await?;
     gradient_core::ci::actions::dispatch_evaluation_created(&state, &eval).await;

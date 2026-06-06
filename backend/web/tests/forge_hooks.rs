@@ -295,6 +295,7 @@ fn cache_row() -> entity::cache::Model {
         created_by: UserId::nil(),
         created_at: fixture_date(),
         managed: false,
+        max_storage_gb: 0,
     }
 }
 

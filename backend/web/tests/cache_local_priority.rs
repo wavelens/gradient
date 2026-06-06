@@ -50,6 +50,7 @@ fn cache_row(local_priority: Option<i32>) -> entity::cache::Model {
         created_by: user_id(),
         created_at: test_date(),
         managed: false,
+        max_storage_gb: 0,
     }
 }
 

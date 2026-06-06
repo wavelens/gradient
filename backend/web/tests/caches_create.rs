@@ -48,6 +48,7 @@ fn cache_row(name: &str) -> cache::Model {
         created_by: user_id(),
         created_at: test_date(),
         managed: false,
+        max_storage_gb: 0,
     }
 }
 
