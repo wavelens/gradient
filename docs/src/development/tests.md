@@ -456,6 +456,24 @@ degrades to `None` when the cgroup cannot be located or read.
 
 ---
 
+## `worker::metrics::throughput` - Passive Throughput EWMA
+
+**File:** `backend/worker/src/metrics/throughput.rs`
+**Run:** `cargo test -p worker metrics::throughput`
+
+Tests for the thread-safe EWMA accumulators that turn real NAR transfers and
+per-build disk I/O into the `network_speed_mbps` / `disk_speed_mbps` heartbeat
+values.
+
+| Test | What it checks |
+|------|---------------|
+| `empty_is_none` | Reports `None` until the first observation |
+| `first_sample_sets_value` | First observation seeds the EWMA exactly |
+| `converges_toward_steady_state` | Repeated observations converge toward the steady-state rate |
+| `non_positive_ignored` | Zero / negative / non-finite samples are ignored |
+
+---
+
 ## `worker::executor::eval` - Evaluation Closure Walk
 
 **File:** `backend/worker/src/executor/eval.rs`
@@ -644,6 +662,7 @@ Derive(
 | `test_parse_full` | All fields are parsed: one output `("out", "/nix/store/abc-hello")`, one input derivation with its output names, one input source, `system = "x86_64-linux"`, `builder = "/nix/store/bash"`, two args `["-e", "/nix/store/builder.sh"]`, and `environment["name"] = "hello"` |
 | `test_required_system_features` | `required_system_features()` splits the space-separated `requiredSystemFeatures` env var into `["kvm", "big-parallel"]` |
 | `test_no_features` | A derivation with no `requiredSystemFeatures` env entry returns an empty vec from `required_system_features()` |
+| `build_meta_detects_fixed_output` | `build_meta().is_fixed_output` is true when an output carries a non-empty hash, false otherwise |
 
 ---
 
@@ -917,6 +936,9 @@ contribution, the lazy `ScoringCtx` providers, and the composed `default` /
 | `cpu_heavy_on_strong_worker_is_positive_and_capped` / `no_samples_is_zero` / `no_metrics_is_zero` | `ResourceFitRule`: CPU-heavy bonus capped; no-op without history samples or worker metrics |
 | `local_worker_with_full_cache_gets_full_bonus` / `more_missing_paths_lowers_bonus_floored_at_zero` / `unknown_missing_count_is_zero` / `not_prefer_local_is_zero_regardless_of_missing_count` | `PreferLocalBuildRule`: full bonus on cached local worker, decays to a floor of 0, no-op without `preferLocalBuild` |
 | `busier_org_scores_more_negative` / `zero_share_and_none_score_zero` / `fair_share_overrides_wait_gradient` | `FairShareRule`: busier org penalised; fair-share dominates the wait-time gradient |
+| `network_rule_prefers_fast_net_for_fod` / `network_rule_zero_for_non_fod` / `network_rule_zero_without_metric` | `NetworkAffinityRule`: FODs prefer faster-network workers; no-op for non-FOD or missing metric |
+| `disk_rule_prefers_fast_disk_for_heavy_build` / `disk_rule_zero_for_light_build` / `disk_rule_zero_without_history` | `DiskAffinityRule`: disk-heavy jobs prefer faster-disk workers; no-op below threshold or without history |
+| `resource_aware_prefers_fast_net_for_fod` | Composed `resource-aware` policy steers a FOD to the faster-network worker |
 | `closure_size_computed_at_most_once` / `history_not_computed_unless_read` | `ScoringCtx` lazy providers memoise and skip unread lookups |
 | `registry_selects_known_and_falls_back` | `policy_by_name` resolves known names, falls back to `resource-aware` |
 | `simple_policy_long_waiting_build_overcomes_fresh_cached` / `simple_policy_prefers_ready_over_costly` | Composed `simple` policy: anti-starvation and ready-over-costly ordering |
@@ -928,10 +950,10 @@ contribution, the lazy `ScoringCtx` providers, and the composed `default` /
 **File:** `backend/scheduler/src/history.rs`
 **Run:** `cargo test -p scheduler`
 
-Tests for the closure-size-bucketed prediction that feeds `ResourceFitRule`:
-log2-MiB bucketing, neighbour-bucket widening when a bucket is sparse, and
-aggregation of peak RAM, average CPU time and OOM rate from `derivation_metric`
-rows.
+Tests for the closure-size-bucketed prediction that feeds `ResourceFitRule`
+and `DiskAffinityRule`: log2-MiB bucketing, neighbour-bucket widening when a
+bucket is sparse, and aggregation of peak RAM, average CPU time, disk bytes and
+OOM rate from `derivation_metric` rows.
 
 | Test | What it checks |
 |------|---------------|
@@ -940,6 +962,7 @@ rows.
 | `bucket_bounds_widen_by_one_bucket_each_side` | Sparse buckets widen to neighbours for more samples |
 | `empty_rows_yield_default` | No history rows yields the default (zero-sample) prediction |
 | `summarize_aggregates_peak_cpu_and_oom` | Aggregates peak RAM, avg CPU time and OOM rate across rows |
+| `summarize_aggregates_disk_bytes` | Aggregates mean per-build disk bytes (read + write) across rows |
 
 ---
 
