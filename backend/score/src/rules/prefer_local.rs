@@ -44,6 +44,7 @@ mod tests {
             JobKindView::Build,
             "x86_64-linux",
             prefer_local_build,
+            false,
             LazyProviders { closure_size: &|| None, history: &|| HistoryPrediction::default() },
         )
     }

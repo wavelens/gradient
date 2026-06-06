@@ -41,6 +41,7 @@ pub struct ScoredJob<'a> {
     pub kind: JobKindView,
     pub architecture: &'a str,
     pub prefer_local_build: bool,
+    pub is_fixed_output: bool,
     providers: LazyProviders<'a>,
     closure_size: OnceCell<Option<i64>>,
     history: OnceCell<HistoryPrediction>,
@@ -54,6 +55,7 @@ impl<'a> ScoredJob<'a> {
         kind: JobKindView,
         architecture: &'a str,
         prefer_local_build: bool,
+        is_fixed_output: bool,
         providers: LazyProviders<'a>,
     ) -> Self {
         Self {
@@ -62,6 +64,7 @@ impl<'a> ScoredJob<'a> {
             kind,
             architecture,
             prefer_local_build,
+            is_fixed_output,
             providers,
             closure_size: OnceCell::new(),
             history: OnceCell::new(),
@@ -95,6 +98,7 @@ mod tests {
             OrganizationId::now_v7(),
             JobKindView::Build,
             "x86_64-linux",
+            false,
             false,
             LazyProviders {
                 closure_size: &|| Some(99),
