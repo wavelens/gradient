@@ -68,6 +68,11 @@ pub fn main() -> std::io::Result<()> {
 async fn run() -> std::io::Result<()> {
     let cli = Cli::parse();
     init_logging(&cli.logging);
+
+    if cli.storage.validate_state {
+        return validate_state_and_exit(cli.storage.state_file.as_deref());
+    }
+
     let state = init_state(cli).await;
 
     info!(
@@ -98,4 +103,30 @@ async fn run() -> std::io::Result<()> {
     web::serve_web(Arc::clone(&state)).await?;
 
     Ok(())
+}
+
+/// One-shot `--validate-state` action: validate the state file with no DB
+/// access and exit non-zero on error so a NixOS build (or CI) fails fast.
+fn validate_state_and_exit(state_file: Option<&str>) -> std::io::Result<()> {
+    let Some(path) = state_file else {
+        eprintln!("--validate-state requires --state-file");
+        std::process::exit(2);
+    };
+    match gradient_core::state::validate_state_file(path) {
+        Ok(errors) if errors.is_empty() => {
+            println!("State configuration '{path}' is valid");
+            Ok(())
+        }
+        Ok(errors) => {
+            eprintln!("State configuration '{path}' is invalid:");
+            for e in &errors {
+                eprintln!("  - {e}");
+            }
+            std::process::exit(1);
+        }
+        Err(e) => {
+            eprintln!("Failed to load state file '{path}': {e}");
+            std::process::exit(1);
+        }
+    }
 }

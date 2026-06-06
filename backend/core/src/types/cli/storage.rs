@@ -14,6 +14,12 @@ pub struct StorageArgs {
     pub base_path: String,
     #[arg(long, env = "GRADIENT_STATE_FILE")]
     pub state_file: Option<String>,
+    /// Validate `--state-file` (schema + cross-references, no database access)
+    /// and exit: zero when valid, non-zero on the first batch of errors.
+    /// Intended for build-time / CI checks; see the NixOS `validateState`
+    /// option. Deliberately has no env var so it never trips a live server.
+    #[arg(long)]
+    pub validate_state: bool,
     #[arg(long, env = "GRADIENT_DELETE_STATE", default_value = "true")]
     pub delete_state: bool,
     #[arg(long, env = "GRADIENT_KEEP_EVALUATIONS", default_value = "30")]
@@ -46,6 +52,7 @@ impl Default for StorageArgs {
             store_path: None,
             base_path: ".".into(),
             state_file: None,
+            validate_state: false,
             delete_state: true,
             keep_evaluations: 30,
             nar_ttl_hours: 336,

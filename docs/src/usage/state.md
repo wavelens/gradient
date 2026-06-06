@@ -4,6 +4,16 @@
 
 When `settings.deleteState = true` (default), entities that are removed from `state` are also deleted from the database. Set it to `false` to make them editable by users in the frontend instead.
 
+## Build-time validation
+
+`services.gradient.validateState` (default `true`) checks the generated state at **build time** by running the server binary's `--validate-state` over it. Schema and cross-reference errors — unknown organizations or users, reporter triggers pointing at an undeclared inbound integration, duplicate org ids, and so on — then fail the Nix build instead of the server on first start. No database is touched, so it is safe to run in CI. Set it to `false` to skip the check.
+
+To validate a state file by hand:
+
+```sh
+gradient-server --state-file ./gradient-state.json --validate-state
+```
+
 ## State-Managed Resources
 
 Users, organizations, and caches created by the NixOS module configuration carry `managed = true`. The API rejects mutations and deletions of these records with `403 Forbidden`. This allows declarative configuration to be the source of truth without Gradient's UI overwriting it.

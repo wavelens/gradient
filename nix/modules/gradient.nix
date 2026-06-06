@@ -17,6 +17,17 @@
     integrations = augmentedIntegrations;
   });
 
+  # GoBGP-style build-time check: run the server binary's `--validate-state`
+  # over the generated state file so config errors fail the Nix build instead
+  # of surfacing on first server start.
+  validatedStateJsonFile = if cfg.validateState then
+    pkgs.runCommand "gradient-state-validated.json" { } ''
+      ${lib.getExe cfg.packages.server} --state-file ${stateJsonFile} --validate-state
+      cp ${stateJsonFile} $out
+    ''
+  else
+    stateJsonFile;
+
   userPasswordFiles = lib.concatLists (lib.mapAttrsToList (_: user:
     lib.optional (user.password_file != null)
       "gradient_user_${user.username}_password:${user.password_file}"
@@ -55,6 +66,18 @@ in {
   options = {
     services.gradient = {
       enable = lib.mkEnableOption "Gradient";
+
+      validateState = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Validate the generated `state` configuration at build time by running
+          the server binary's `--validate-state` over it. Schema and
+          cross-reference errors (unknown organizations, reporter triggers
+          pointing at undeclared integrations, …) then fail the Nix build
+          instead of the server on first start. No database is touched.
+        '';
+      };
       reverseProxy = {
         nginx.enable = lib.mkEnableOption "Nginx configuration" // {
           default = !cfg.reverseProxy.caddy.enable;
@@ -619,7 +642,7 @@ in {
           "gradient_database_url:${cfg.databaseUrlFile}"
           "gradient_crypt_secret:${cfg.cryptSecretFile}"
           "gradient_jwt_secret:${cfg.jwtSecretFile}"
-          "gradient_state:${stateJsonFile}"
+          "gradient_state:${validatedStateJsonFile}"
         ] ++ lib.optional cfg.oidc.enable [
           "gradient_oidc_client_secret:${cfg.oidc.clientSecretFile}"
         ] ++ lib.optional cfg.email.enable [
