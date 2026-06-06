@@ -12,6 +12,7 @@ export interface Cache {
   active: boolean;
   priority: number;
   local_priority: number | null;
+  max_storage_gb: number;
   public_key?: string;
   public: boolean;
   created_by?: string;

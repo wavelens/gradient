@@ -62,6 +62,7 @@ export class CacheSettingsComponent implements OnInit {
     description: '',
     priority: 50,
     local_priority: null as number | null,
+    max_storage_gb: 0,
     public: false,
   };
 
@@ -80,6 +81,7 @@ export class CacheSettingsComponent implements OnInit {
           description: cache.description,
           priority: cache.priority,
           local_priority: cache.local_priority,
+          max_storage_gb: cache.max_storage_gb ?? 0,
           public: cache.public,
         };
         this.loading.set(false);
@@ -96,8 +98,13 @@ export class CacheSettingsComponent implements OnInit {
     return p === null || p === undefined || isNaN(Number(p)) || p < 0 || p > 255;
   }
 
+  get maxStorageInvalid(): boolean {
+    const v = this.formData.max_storage_gb;
+    return v === null || v === undefined || isNaN(Number(v)) || v < 0;
+  }
+
   saveSettings(): void {
-    if (this.priorityInvalid) return;
+    if (this.priorityInvalid || this.maxStorageInvalid) return;
     this.saving.set(true);
     this.saveError.set(null);
     this.saveSuccess.set(false);
@@ -111,6 +118,7 @@ export class CacheSettingsComponent implements OnInit {
       description: this.formData.description,
       priority: this.formData.priority,
       local_priority: this.formData.local_priority,
+      max_storage_gb: this.formData.max_storage_gb,
     }).subscribe({
       next: () => {
         visibilityCall.subscribe({
