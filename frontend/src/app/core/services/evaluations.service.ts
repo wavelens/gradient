@@ -60,6 +60,19 @@ export interface BuildItem {
   build_time_ms: number | null;
 }
 
+export interface BuildWithOutputs {
+  id: string;
+  evaluation: string;
+  status: string;
+  derivation_path: string;
+  architecture: string;
+  worker: string | null;
+  via: string | null;
+  output: Record<string, string>;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface PaginatedBuilds {
   builds: BuildItem[];
   total: number;
@@ -104,6 +117,10 @@ export class EvaluationsService {
     if (offset !== undefined) params.push(`offset=${offset}`);
     const query = params.length > 0 ? `?${params.join('&')}` : '';
     return this.api.get<PaginatedBuilds>(`evals/${evaluationId}/builds${query}`);
+  }
+
+  getBuild(buildId: string): Observable<BuildWithOutputs> {
+    return this.api.get<BuildWithOutputs>(`builds/${buildId}`);
   }
 
   getBuildLog(buildId: string): Observable<string> {

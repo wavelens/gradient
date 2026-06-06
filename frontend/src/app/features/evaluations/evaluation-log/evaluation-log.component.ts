@@ -28,7 +28,7 @@ import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { interval, Subscription } from 'rxjs';
 import { switchMap } from 'rxjs/operators';
 import { CdkVirtualScrollViewport, ScrollingModule } from '@angular/cdk/scrolling';
-import { EvaluationsService, BuildItem } from '@core/services/evaluations.service';
+import { EvaluationsService, BuildItem, BuildWithOutputs } from '@core/services/evaluations.service';
 import { OrganizationsService } from '@core/services/organizations.service';
 import { Evaluation, EvaluationMessage, EvaluationStatus, WaitingReason, TriggerType } from '@core/models';
 import { AuthService } from '@core/services/auth.service';
@@ -77,6 +77,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   evaluationId = '';
   private initialBuildId: string | null = null;
   private initialShowEval = false;
+  private fetchingInitialBuild = false;
 
   // Derived from backend totals - accurate regardless of how many builds are loaded.
   completedBuildsCount = computed(() => this.totalBuildsCount() - this.activeBuildsCount());
@@ -125,6 +126,11 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   searchHits = signal<LogSearchHit[]>([]);
   searchTotal = signal(0);
   currentHit = signal(-1);
+  searchLoading = signal(false);
+  private searchDebounceTimer?: ReturnType<typeof setTimeout>;
+  private searchSeq = 0;
+  private readonly MIN_SEARCH_LEN = 3;
+  private readonly SEARCH_DEBOUNCE_MS = 300;
   private chunkIndex: LogChunkIndex | null = null;
   private windowStart = 1;
   private windowText: string[] = [];
@@ -160,6 +166,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.stopDurationTimer();
     this.stopActiveStream();
     this.stopBuildRevealTimer();
+    if (this.searchDebounceTimer !== undefined) clearTimeout(this.searchDebounceTimer);
   }
 
   loadEvaluation(): void {
@@ -189,19 +196,40 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   }
 
   private readonly buildStatusOrder: Record<string, number> = {
-    Building: 0,
-    Queued: 1,
-    Failed: 2,
-    Aborted: 3,
-    DependencyFailed: 3,
-    Completed: 4,
-    Substituted: 4,
+    building: 0,
+    queued: 1,
+    failed: 2,
+    aborted: 3,
+    dependencyfailed: 3,
+    completed: 4,
+    substituted: 4,
   };
 
+  /// Maps every BuildStatus variant onto the canonical token used by the SCSS
+  /// status classes (status-failed, status-completed, …). The three failed
+  /// reasons collapse onto `failed` so the red dot/badge renders for all of them.
+  statusClass(status: string | null | undefined): string {
+    switch (status) {
+      case 'Completed': return 'completed';
+      case 'Substituted': return 'substituted';
+      case 'Building': return 'building';
+      case 'Queued':
+      case 'Created': return 'queued';
+      case 'FailedPermanent':
+      case 'FailedTransient':
+      case 'FailedTimeout': return 'failed';
+      case 'DependencyFailed': return 'dependencyfailed';
+      case 'Aborted': return 'aborted';
+      default: return (status ?? '').toLowerCase();
+    }
+  }
+
   private sortBuilds(builds: BuildItem[]): BuildItem[] {
-    return [...builds].sort((a, b) => {
-      const oa = this.buildStatusOrder[a.status] ?? 99;
-      const ob = this.buildStatusOrder[b.status] ?? 99;
+    const seen = new Set<string>();
+    const unique = builds.filter(b => (seen.has(b.id) ? false : (seen.add(b.id), true)));
+    return unique.sort((a, b) => {
+      const oa = this.buildStatusOrder[this.statusClass(a.status)] ?? 99;
+      const ob = this.buildStatusOrder[this.statusClass(b.status)] ?? 99;
       if (oa !== ob) return oa - ob;
       return this.buildDisplayName(a.name).localeCompare(this.buildDisplayName(b.name));
     });
@@ -311,13 +339,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
           }
         }
 
-        if (this.initialBuildId) {
-          const target = this.builds().find(b => b.id === this.initialBuildId);
-          if (target) {
-            this.initialBuildId = null;
-            this.selectBuild(target, true);
-          }
-        }
+        this.resolveInitialBuild();
 
         // Auto-fetch more pages until all active builds are in memory.
         // This ensures status transitions and log streaming work for every build.
@@ -354,19 +376,11 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
         }
         this.loadingMore = false;
 
-        // Resolve pending initialBuildId that may have been beyond the first page
-        if (this.initialBuildId) {
-          const target = this.builds().find(b => b.id === this.initialBuildId);
-          if (target) {
-            this.initialBuildId = null;
-            this.selectBuild(target, true);
-          }
-        }
+        // A build paged in here may be the one we deep-linked to.
+        this.resolveInitialBuild();
 
         // Continue fetching if there are still active builds not yet in memory
-        const stillNeedsMore = this.builds().length < result.active_count
-          || (this.initialBuildId !== null && this.builds().length < this.totalBuilds);
-        if (stillNeedsMore) {
+        if (this.builds().length < result.active_count) {
           this.doLoadMore();
         }
       },
@@ -415,6 +429,42 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       queryParams: { build: null, eval: 1 },
       queryParamsHandling: 'merge',
       replaceUrl: true,
+    });
+  }
+
+  /// Resolves a deep-linked `?build=<id>`. If the build is already loaded we
+  /// select it; otherwise we fetch that single build directly and inject it into
+  /// the sidebar so its log shows immediately, rather than paging through the
+  /// whole evaluation. `sortBuilds` dedups it once pagination catches up.
+  private resolveInitialBuild(): void {
+    const id = this.initialBuildId;
+    if (!id) return;
+    const target = this.builds().find(b => b.id === id);
+    if (target) {
+      this.initialBuildId = null;
+      this.selectBuild(target, true);
+      return;
+    }
+    if (this.fetchingInitialBuild) return;
+    this.fetchingInitialBuild = true;
+    this.evalService.getBuild(id).subscribe({
+      next: (b: BuildWithOutputs) => {
+        this.fetchingInitialBuild = false;
+        if (this.initialBuildId !== id) return;
+        const item: BuildItem = {
+          id: b.id,
+          name: b.derivation_path,
+          status: b.status,
+          has_artefacts: false,
+          updated_at: b.updated_at,
+          build_time_ms: null,
+        };
+        this.initialBuildId = null;
+        this.builds.update(cur => this.sortBuilds([item, ...cur]));
+        this.visibleBuilds.update(cur => this.sortBuilds([item, ...cur]));
+        this.selectBuild(item, true);
+      },
+      error: () => { this.fetchingInitialBuild = false; },
     });
   }
 
@@ -673,20 +723,49 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
   onSearchInput(event: Event): void {
     this.searchQuery.set((event.target as HTMLInputElement).value);
+    this.scheduleSearch();
+  }
+
+  /// Debounced auto-search: only fires once typing pauses and at least
+  /// MIN_SEARCH_LEN characters are present. Shorter queries reset results.
+  private scheduleSearch(): void {
+    if (this.searchDebounceTimer !== undefined) clearTimeout(this.searchDebounceTimer);
+    const q = this.searchQuery().trim();
+    if (q.length < this.MIN_SEARCH_LEN) {
+      this.searchSeq++;
+      this.searchLoading.set(false);
+      this.searchHits.set([]);
+      this.searchTotal.set(0);
+      this.currentHit.set(-1);
+      return;
+    }
+    this.searchLoading.set(true);
+    this.searchDebounceTimer = setTimeout(() => {
+      this.searchDebounceTimer = undefined;
+      this.runSearch();
+    }, this.SEARCH_DEBOUNCE_MS);
   }
 
   closeSearch(): void {
     this.searchOpen.set(false);
     this.highlightLine.set(null);
+    if (this.searchDebounceTimer !== undefined) clearTimeout(this.searchDebounceTimer);
+    this.searchSeq++;
+    this.searchLoading.set(false);
   }
 
   async runSearch(): Promise<void> {
     const buildId = this.selectedBuildId();
     const q = this.searchQuery().trim();
-    if (!buildId || q === '') return;
+    if (!buildId || q.length < this.MIN_SEARCH_LEN) {
+      this.searchLoading.set(false);
+      return;
+    }
+    const seq = ++this.searchSeq;
     this.searchHits.set([]);
     this.searchTotal.set(0);
     this.currentHit.set(-1);
+    this.searchLoading.set(true);
     try {
       const res = await fetch(
         `${environment.apiUrl}/builds/${buildId}/log/search?q=${encodeURIComponent(q)}`,
@@ -700,6 +779,11 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+        // A newer search superseded this one - abandon the stale stream.
+        if (seq !== this.searchSeq) {
+          await reader.cancel().catch(() => { /* ignore */ });
+          return;
+        }
         buffered += decoder.decode(value, { stream: true });
         const parts = buffered.split('\n');
         buffered = parts.pop() ?? '';
@@ -717,6 +801,8 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       if (hits.length > 0) this.gotoHit(0);
     } catch {
       // ignore
+    } finally {
+      if (seq === this.searchSeq) this.searchLoading.set(false);
     }
   }
 
@@ -742,7 +828,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
         return;
       }
       const next = this.pendingBuilds.shift()!;
-      this.visibleBuilds.update(vbs => [next, ...vbs]);
+      this.visibleBuilds.update(vbs => vbs.some(b => b.id === next.id) ? vbs : [next, ...vbs]);
     }, 10);
   }
 
@@ -914,6 +1000,23 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     if (!buildId) return;
     const total = this.chunkIndex.total_lines;
     const windowEnd = this.windowStart + this.windowText.length - 1;
+
+    // Fast scrollbar drag: the viewport jumped into a spacer region with no
+    // rendered lines. Burst-load a fresh window centred on the new position
+    // instead of crawling one page at a time from an edge.
+    if (this.windowText.length > 0) {
+      const loadedTopPx = this.topSpacerPx();
+      const loadedBottomPx = loadedTopPx + this.windowText.length * this.LINE_PX;
+      if (el.scrollTop + el.clientHeight < loadedTopPx || el.scrollTop > loadedBottomPx) {
+        const centerLine = Math.min(
+          total,
+          Math.max(1, Math.round((el.scrollTop + el.clientHeight / 2) / this.LINE_PX)),
+        );
+        const { start, end } = windowAround(total, centerLine, this.WINDOW_PAGE);
+        this.loadWindow(buildId, start, end, 'replace');
+        return;
+      }
+    }
 
     if (el.scrollTop < 200 && this.windowStart > 1) {
       const start = Math.max(1, this.windowStart - this.WINDOW_PAGE);
