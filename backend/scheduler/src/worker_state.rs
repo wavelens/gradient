@@ -73,6 +73,7 @@ pub struct WorkerShared {
     pub cpu_usage_pct: f32,
     pub ram_free_mb: u64,
     pub disk_speed_mbps: Option<f32>,
+    pub network_speed_mbps: Option<f32>,
     pub assigned_jobs: HashSet<String>,
     /// Whether this worker operates in open (no peer filter) or restricted mode.
     pub peer_auth: PeerAuth,
@@ -130,6 +131,7 @@ impl TypedWorker<Active> {
                 cpu_usage_pct: 0.0,
                 ram_free_mb: 0,
                 disk_speed_mbps: None,
+                network_speed_mbps: None,
                 assigned_jobs: HashSet::new(),
                 peer_auth: PeerAuth::from_peers(authorized_peers),
                 sent_candidates: HashSet::new(),

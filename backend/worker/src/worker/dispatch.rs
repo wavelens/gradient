@@ -234,7 +234,8 @@ fn on_heartbeat(
 
 /// Sample live host load off the dispatch thread (the CPU sample blocks for
 /// [`sysinfo::MINIMUM_CPU_UPDATE_INTERVAL`]) and send it to the scheduler.
-/// `disk_speed_mbps` is `None` until per-build cgroup io.stat sampling lands.
+/// `disk_speed_mbps` / `network_speed_mbps` come from passive EWMA
+/// accumulators and stay `None` until the first build / NAR transfer.
 fn send_live_metrics(writer: &ProtoWriter) {
     let writer = writer.clone();
     tokio::task::spawn_blocking(move || {
@@ -242,7 +243,8 @@ fn send_live_metrics(writer: &ProtoWriter) {
         if let Err(e) = writer.send(ClientMessage::WorkerMetrics {
             cpu_usage_pct: m.cpu_usage_pct,
             ram_free_mb: m.ram_free_mb,
-            disk_speed_mbps: None,
+            disk_speed_mbps: crate::metrics::throughput::DISK.current(),
+            network_speed_mbps: crate::metrics::throughput::NETWORK.current(),
         }) {
             debug!(error = %e, "heartbeat WorkerMetrics send failed");
         }

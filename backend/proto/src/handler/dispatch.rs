@@ -190,8 +190,9 @@ impl<'a> DispatchContext<'a> {
                 cpu_usage_pct,
                 ram_free_mb,
                 disk_speed_mbps,
+                network_speed_mbps,
             } => {
-                self.on_worker_metrics(cpu_usage_pct, ram_free_mb, disk_speed_mbps)
+                self.on_worker_metrics(cpu_usage_pct, ram_free_mb, disk_speed_mbps, network_speed_mbps)
                     .await;
                 true
             }
@@ -381,10 +382,11 @@ impl<'a> DispatchContext<'a> {
         cpu_usage_pct: f32,
         ram_free_mb: u64,
         disk_speed_mbps: Option<f32>,
+        network_speed_mbps: Option<f32>,
     ) {
-        debug!(peer_id = %self.peer_id, cpu_usage_pct, ram_free_mb, ?disk_speed_mbps, "WorkerMetrics");
+        debug!(peer_id = %self.peer_id, cpu_usage_pct, ram_free_mb, ?disk_speed_mbps, ?network_speed_mbps, "WorkerMetrics");
         self.scheduler
-            .update_worker_metrics(self.peer_id, cpu_usage_pct, ram_free_mb, disk_speed_mbps)
+            .update_worker_metrics(self.peer_id, cpu_usage_pct, ram_free_mb, disk_speed_mbps, network_speed_mbps)
             .await;
     }
 

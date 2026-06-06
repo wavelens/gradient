@@ -62,6 +62,7 @@ pub enum ClientMessage {
         cpu_usage_pct: f32,
         ram_free_mb: u64,
         disk_speed_mbps: Option<f32>,
+        network_speed_mbps: Option<f32>,
     },
 
     /// Request the full current job candidate list as a stream of

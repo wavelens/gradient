@@ -29,6 +29,7 @@ pub struct WorkerMetricsView {
     pub ram_free_mb: u64,
     pub cpu_usage_pct: f32,
     pub disk_speed_mbps: Option<f32>,
+    pub network_speed_mbps: Option<f32>,
 }
 
 pub struct LazyProviders<'a> {
