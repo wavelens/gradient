@@ -75,12 +75,24 @@ fn summarize(rows: &[MDerivationMetric]) -> score::HistoryPrediction {
         (cpu.iter().sum::<i64>() / cpu.len() as i64).max(0) as u64
     };
 
+    let disk: Vec<i64> = rows
+        .iter()
+        .map(|r| r.disk_read_bytes.unwrap_or(0) + r.disk_write_bytes.unwrap_or(0))
+        .filter(|&b| b > 0)
+        .collect();
+    let avg_disk_bytes = if disk.is_empty() {
+        0
+    } else {
+        (disk.iter().sum::<i64>() / disk.len() as i64).max(0) as u64
+    };
+
     let oom = rows.iter().filter(|r| r.oom_killed).count();
     let oom_rate = oom as f32 / samples as f32;
 
     score::HistoryPrediction {
         predicted_peak_ram_mb,
         avg_cpu_time_ms,
+        avg_disk_bytes,
         oom_rate,
         samples,
     }
@@ -116,6 +128,8 @@ mod tests {
             peak_ram_mb: peak,
             cpu_time_ms: cpu,
             oom_killed: oom,
+            disk_read_bytes: Some(10_000_000),
+            disk_write_bytes: Some(40_000_000),
             ..Default::default()
         }
     }
@@ -142,6 +156,14 @@ mod tests {
         assert_eq!(p.avg_cpu_time_ms, 2000);
         // 1 of 3 rows OOM-killed.
         assert!((p.oom_rate - (1.0 / 3.0)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn summarize_aggregates_disk_bytes() {
+        let rows = vec![metric(Some(100), Some(1000), false), metric(Some(200), Some(2000), false)];
+        let p = summarize(&rows);
+        // Mean of (read + write) bytes per row: 10M + 40M = 50M.
+        assert_eq!(p.avg_disk_bytes, 50_000_000);
     }
 
     #[test]
