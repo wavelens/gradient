@@ -10,6 +10,8 @@ pub struct CacheResponse {
     pub description: String,
     pub priority: i32,
     pub local_priority: Option<i32>,
+    #[serde(default)]
+    pub max_storage_gb: i32,
     pub active: bool,
     pub managed: bool,
     pub created_by: String,
@@ -22,6 +24,7 @@ pub struct MakeCacheRequest {
     pub display_name: String,
     pub description: String,
     pub priority: i32,
+    pub max_storage_gb: i32,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
@@ -30,6 +33,7 @@ pub struct PatchCacheRequest {
     pub display_name: Option<String>,
     pub description: Option<String>,
     pub priority: Option<i32>,
+    pub max_storage_gb: Option<i32>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
