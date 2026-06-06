@@ -11,6 +11,7 @@
 //! sampled each heartbeat and sent via `WorkerMetrics`.
 
 pub mod cgroup;
+pub mod throughput;
 
 use std::time::Instant;
 
