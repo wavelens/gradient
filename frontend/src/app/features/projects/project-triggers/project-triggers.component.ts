@@ -97,6 +97,15 @@ export class ProjectTriggersComponent implements OnInit {
       this.accessSvc.shouldDisableInput(this.access()),
   );
 
+  triggerAccess = computed(() => this.accessSvc.triggerAccess(this.access()));
+
+  triggerRowDisabled = computed(
+    () =>
+      this.firingId() !== null ||
+      this.deletingId() !== null ||
+      this.accessSvc.shouldDisableInput(this.triggerAccess()),
+  );
+
   loading = signal(true);
   saving = signal(false);
   deletingId = signal<string | null>(null);
