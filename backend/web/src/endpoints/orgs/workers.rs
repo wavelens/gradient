@@ -193,6 +193,16 @@ pub async fn post_org_worker(
     }))
 }
 
+/// A connected worker counts as live for `org` only when it authenticated for
+/// it: open-mode workers (`authorized_peers == None`) match any org, restricted
+/// workers only the orgs whose token they presented in the handshake. This
+/// keeps a worker authorized for one org from showing as connected on another.
+fn worker_live_for_org(info: &WorkerInfo, org: OrganizationId) -> bool {
+    info.authorized_peers
+        .as_ref()
+        .is_none_or(|peers| peers.contains(&org))
+}
+
 pub async fn get_org_workers(
     state: State<Arc<ServerState>>,
     Path(organization): Path<String>,
@@ -232,11 +242,7 @@ pub async fn get_org_workers(
             // some other org) without having a valid token for this org.
             let live = live_workers
                 .get(&reg.worker_id)
-                .filter(|w| {
-                    w.authorized_peers
-                        .as_ref()
-                        .is_none_or(|peers| peers.contains(&org.id))
-                })
+                .filter(|w| worker_live_for_org(w, org.id))
                 .map(|w| WorkerLiveInfo {
                     capabilities: w.capabilities.clone(),
                     // architectures/system_features are only non-empty for build-capable workers
@@ -383,4 +389,38 @@ pub async fn delete_org_worker(
     scheduler.request_reauth(&worker_id).await;
 
     Ok(ok_json(format!("worker '{}' unregistered", worker_id)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    fn worker(authorized: Option<Vec<OrganizationId>>) -> WorkerInfo {
+        WorkerInfo {
+            id: "w1".into(),
+            capabilities: GradientCapabilities::default(),
+            architectures: vec![],
+            system_features: vec![],
+            max_concurrent_builds: 1,
+            assigned_job_count: 0,
+            draining: false,
+            authorized_peers: authorized.map(|v| v.into_iter().collect::<HashSet<_>>()),
+        }
+    }
+
+    #[test]
+    fn restricted_worker_is_live_only_on_authorized_orgs() {
+        let org_a = OrganizationId::now_v7();
+        let org_b = OrganizationId::now_v7();
+        let w = worker(Some(vec![org_a]));
+        assert!(worker_live_for_org(&w, org_a));
+        assert!(!worker_live_for_org(&w, org_b));
+    }
+
+    #[test]
+    fn open_worker_is_live_on_any_org() {
+        let w = worker(None);
+        assert!(worker_live_for_org(&w, OrganizationId::now_v7()));
+    }
 }
