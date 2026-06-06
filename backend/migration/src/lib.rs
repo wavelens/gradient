@@ -127,6 +127,7 @@ mod m20260604_000001_add_derivation_scoring_columns;
 mod m20260604_000002_create_derivation_metric;
 mod m20260605_000000_index_hot_lookups;
 mod m20260605_000001_create_build_log_chunk;
+mod m20260606_000000_add_derivation_fixed_output;
 
 pub struct Migrator;
 
@@ -255,6 +256,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260604_000002_create_derivation_metric::Migration),
             Box::new(m20260605_000000_index_hot_lookups::Migration),
             Box::new(m20260605_000001_create_build_log_chunk::Migration),
+            Box::new(m20260606_000000_add_derivation_fixed_output::Migration),
         ]
     }
 }
