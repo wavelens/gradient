@@ -106,6 +106,7 @@ pub fn cache_with_id(id: CacheId, slug: &str, owner: UserId) -> cache::Model {
         created_by: owner,
         created_at: test_date(),
         managed: false,
+        max_storage_gb: 0,
     }
 }
 

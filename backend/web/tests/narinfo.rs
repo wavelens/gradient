@@ -88,6 +88,7 @@ async fn narinfo_served_from_db_inner() {
         created_by: UserId::new(org_id().into_inner()),
         created_at: test_date(),
         managed: false,
+        max_storage_gb: 0,
     };
 
     // The derivation output matching FIXTURE_HASH.
@@ -249,6 +250,7 @@ async fn narinfo_unsigned_inner() {
         created_by: UserId::new(org_id().into_inner()),
         created_at: test_date(),
         managed: false,
+        max_storage_gb: 0,
     };
 
     let drv_output_row = entity::derivation_output::Model {

@@ -37,6 +37,8 @@ pub struct MakeCacheRequest {
     pub public: Option<bool>,
     #[serde(default)]
     pub local_priority: Option<i32>,
+    #[serde(default)]
+    pub max_storage_gb: Option<i32>,
 }
 
 #[derive(Serialize)]
@@ -48,6 +50,7 @@ pub struct CacheResponse {
     pub active: bool,
     pub priority: i32,
     pub local_priority: Option<i32>,
+    pub max_storage_gb: i32,
     pub public_key: String,
     pub public: bool,
     pub created_by: UserId,
@@ -63,6 +66,16 @@ pub struct PatchCacheRequest {
     pub description: Option<String>,
     pub priority: Option<i32>,
     pub local_priority: Option<i32>,
+    pub max_storage_gb: Option<i32>,
+}
+
+fn validate_max_storage_gb(value: i32) -> WebResult<()> {
+    if value < 0 {
+        return Err(WebError::bad_request(
+            "max_storage_gb must be 0 (unlimited) or at least 1",
+        ));
+    }
+    Ok(())
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
@@ -140,6 +153,9 @@ pub async fn put(
         )));
     }
 
+    let max_storage_gb = body.max_storage_gb.unwrap_or(0);
+    validate_max_storage_gb(max_storage_gb)?;
+
     let existing_cache = ECache::find()
         .filter(CCache::Name.eq(body.name.clone()))
         .one(&state.web_db)
@@ -171,6 +187,7 @@ pub async fn put(
         created_by: Set(user.id),
         created_at: Set(gradient_core::types::now()),
         managed: Set(false),
+        max_storage_gb: Set(max_storage_gb),
     }
     .insert(&tx)
     .await
@@ -278,6 +295,7 @@ pub async fn get_cache(
         active: cache.active,
         priority: cache.priority,
         local_priority: cache.local_priority,
+        max_storage_gb: cache.max_storage_gb,
         public_key,
         public: cache.public,
         created_by: cache.created_by,
@@ -305,6 +323,8 @@ pub async fn patch_cache(
         },
     )
     .await?;
+    let cache_id = cache.id;
+    let prev_max_storage_gb = cache.max_storage_gb;
     let mut acache: ACache = cache.into();
 
     if let Some(name) = body.name {
@@ -345,10 +365,38 @@ pub async fn patch_cache(
         acache.local_priority = Set(Some(local_priority));
     }
 
+    let mut raised_limit = false;
+    if let Some(max_storage_gb) = body.max_storage_gb {
+        validate_max_storage_gb(max_storage_gb)?;
+        raised_limit = max_storage_gb == 0 || max_storage_gb > prev_max_storage_gb;
+        acache.max_storage_gb = Set(max_storage_gb);
+    }
+
     acache
         .update(&state.web_db)
         .await
         .map_err(|e| WebError::from_db_err(e, "Cache Name"))?;
+
+    if raised_limit {
+        let org_ids: Vec<OrganizationId> = EOrganizationCache::find()
+            .filter(COrganizationCache::Cache.eq(cache_id))
+            .all(&state.web_db)
+            .await?
+            .into_iter()
+            .map(|oc| oc.organization)
+            .collect();
+        for org in org_ids {
+            if let Err(e) = gradient_core::ci::unpark_storage_full_for_org(
+                &state.web_db,
+                org,
+                state.config.storage.max_storage_gb,
+            )
+            .await
+            {
+                tracing::warn!(error = %e, org_id = %org, "failed to unpark storage-full evals");
+            }
+        }
+    }
 
     Ok(ok_json("Cache updated".to_string()))
 }
@@ -501,4 +549,21 @@ pub async fn delete_cache_public(
     acache.update(&state.web_db).await?;
 
     Ok(ok_json("Cache is now private".to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_max_storage_gb;
+
+    #[test]
+    fn validate_max_storage_gb_accepts_zero_and_positive() {
+        assert!(validate_max_storage_gb(0).is_ok());
+        assert!(validate_max_storage_gb(1).is_ok());
+        assert!(validate_max_storage_gb(500).is_ok());
+    }
+
+    #[test]
+    fn validate_max_storage_gb_rejects_negative() {
+        assert!(validate_max_storage_gb(-1).is_err());
+    }
 }

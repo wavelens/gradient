@@ -79,6 +79,7 @@ pub async fn public_cache_with_narinfo() -> Arc<ServerState> {
         created_by: UserId::new(org_id().into_inner()),
         created_at: test_date(),
         managed: false,
+        max_storage_gb: 0,
     };
 
     let drv_output_row = entity::derivation_output::Model {
@@ -187,6 +188,7 @@ pub async fn public_cache_state() -> Arc<ServerState> {
         created_by: UserId::new(org_id().into_inner()),
         created_at: test_date(),
         managed: false,
+        max_storage_gb: 0,
     };
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -237,6 +239,7 @@ pub async fn public_cache_with_nar() -> Arc<ServerState> {
         created_by: UserId::new(org_id().into_inner()),
         created_at: test_date(),
         managed: false,
+        max_storage_gb: 0,
     };
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -306,6 +309,7 @@ fn cache_row_with_visibility(public: bool) -> entity::cache::Model {
         created_by: UserId::new(org_id().into_inner()),
         created_at: test_date(),
         managed: false,
+        max_storage_gb: 0,
     }
 }
 

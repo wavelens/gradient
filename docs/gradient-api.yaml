@@ -7756,6 +7756,12 @@ components:
             Alternate Priority returned in nix-cache-info when the client
             IP is in the server's local_ips list. Null or 0 disables the
             override.
+        max_storage_gb:
+          type: integer
+          format: int32
+          default: 0
+          minimum: 0
+          description: Max cache storage in GB. 0 (default) = unlimited; otherwise at least 1.
 
     PatchCacheRequest:
       type: object
@@ -7776,6 +7782,11 @@ components:
             Alternate Priority returned in nix-cache-info when the client
             IP is in the server's local_ips list. Null or 0 disables the
             override.
+        max_storage_gb:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Max cache storage in GB. 0 = unlimited; otherwise at least 1.
 
     Cache:
       type: object
@@ -7800,6 +7811,10 @@ components:
             Alternate Priority returned in nix-cache-info when the client
             IP is in the server's local_ips list. Null or 0 disables the
             override.
+        max_storage_gb:
+          type: integer
+          format: int32
+          description: Max cache storage in GB. 0 = unlimited; otherwise at least 1.
         active:
           type: boolean
           description: Whether the cache is publicly accessible

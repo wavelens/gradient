@@ -1151,6 +1151,7 @@ mod tests {
             created_by: UserId::new(uuid!("a0000000-0000-0000-0000-000000000004")),
             created_at: fixture_date(),
             managed,
+            max_storage_gb: 0,
         }
     }
 
