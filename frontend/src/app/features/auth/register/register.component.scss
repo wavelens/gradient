@@ -177,30 +177,9 @@
   }
 }
 
-.btn-primary {
+.w-full {
   width: 100%;
-  padding: $spacing-md;
-  border-radius: $border-radius-sm;
-  font-size: $font-size-md;
-  font-weight: 500;
-  cursor: pointer;
-  transition: $transition-fast;
-  display: flex;
-  align-items: center;
   justify-content: center;
-  gap: $spacing-sm;
-  background-color: $text-primary;
-  color: $color-primary;
-  border: none;
-
-  &:hover:not(:disabled) {
-    background-color: $text-secondary;
-  }
-
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
 }
 
 .auth-blocked {
