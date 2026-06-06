@@ -42,7 +42,7 @@ jobs:
       - name: Build docs
         run: |
           nix-shell \
-          -p "python3.withPackages (ps: [ ps.mkdocs ps.mkdocs-mermaid2-plugin ])" \
+          -p "python3.withPackages (ps: [ ps.mkdocs ps.mkdocs-mermaid2-plugin ps.pymdown-extensions ])" \
           --run "mkdocs build --strict --site-dir _site"
 
       - name: Upload artifact
