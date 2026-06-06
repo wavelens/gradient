@@ -72,6 +72,13 @@ pub struct StateUser {
 pub struct StateOrganization {
     pub name: String,
     pub display_name: String,
+    /// Explicit organization UUID. When set, a freshly created org is given
+    /// this id instead of a server-generated one, so a declarative deployment
+    /// can pin the value a worker references in its `peerFile`
+    /// (`<org_id>:<token>`). Applied on create only; the primary key is
+    /// immutable, so a value that conflicts with an existing org is rejected.
+    #[serde(default)]
+    pub id: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
     pub private_key_file: String,
@@ -392,12 +399,30 @@ impl StateConfiguration {
             }
         }
 
+        let mut org_ids_seen: std::collections::HashSet<String> = std::collections::HashSet::new();
         for org in self.organizations.values() {
             if !self.users.contains_key(&org.created_by) {
                 errors.push(ValidationError {
                     field: format!("organizations.{}.created_by", org.name),
                     message: format!("User '{}' does not exist", org.created_by),
                 });
+            }
+
+            if let Some(id) = &org.id {
+                match id.trim().parse::<uuid::Uuid>() {
+                    Ok(parsed) => {
+                        if !org_ids_seen.insert(parsed.to_string()) {
+                            errors.push(ValidationError {
+                                field: format!("organizations.{}.id", org.name),
+                                message: format!("Duplicate organization id '{}'", id),
+                            });
+                        }
+                    }
+                    Err(_) => errors.push(ValidationError {
+                        field: format!("organizations.{}.id", org.name),
+                        message: format!("Invalid UUID '{}'", id),
+                    }),
+                }
             }
 
             let declared_org_role_names: std::collections::HashSet<&str> = self
@@ -1229,6 +1254,94 @@ mod tests {
                 == "workers.550e8400-e29b-41d4-a716-446655440001.organizations"
                 && e.message.contains("at least one")),
             "expected at-least-one-org error, got: {:?}",
+            v.errors
+        );
+    }
+
+    #[test]
+    fn state_org_accepts_explicit_id() {
+        let json = r#"{
+            "organizations": {
+                "acme": {
+                    "name": "acme",
+                    "display_name": "ACME",
+                    "id": "018f6f3a-0000-7000-8000-000000000001",
+                    "private_key_file": "/dev/null",
+                    "public": false,
+                    "created_by": "alice"
+                }
+            }
+        }"#;
+        let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            cfg.organizations["acme"].id.as_deref(),
+            Some("018f6f3a-0000-7000-8000-000000000001")
+        );
+    }
+
+    #[test]
+    fn state_org_id_defaults_none() {
+        let json = r#"{
+            "organizations": {
+                "acme": {
+                    "name": "acme",
+                    "display_name": "ACME",
+                    "private_key_file": "/dev/null",
+                    "public": false,
+                    "created_by": "alice"
+                }
+            }
+        }"#;
+        let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
+        assert!(cfg.organizations["acme"].id.is_none());
+    }
+
+    #[test]
+    fn state_org_validator_rejects_malformed_id() {
+        let json = r#"{
+            "users": {
+                "alice": { "username": "alice", "name": "Alice", "email": "a@x.io", "password_file": "/dev/null" }
+            },
+            "organizations": {
+                "acme": {
+                    "name": "acme", "display_name": "ACME", "id": "not-a-uuid",
+                    "private_key_file": "/dev/null", "public": false, "created_by": "alice"
+                }
+            }
+        }"#;
+        let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
+        let v = cfg.validate();
+        assert!(!v.is_valid);
+        assert!(
+            v.errors.iter().any(|e| e.field == "organizations.acme.id"),
+            "expected invalid-id error, got: {:?}",
+            v.errors
+        );
+    }
+
+    #[test]
+    fn state_org_validator_rejects_duplicate_ids() {
+        let json = r#"{
+            "users": {
+                "alice": { "username": "alice", "name": "Alice", "email": "a@x.io", "password_file": "/dev/null" }
+            },
+            "organizations": {
+                "acme": {
+                    "name": "acme", "display_name": "ACME", "id": "018f6f3a-0000-7000-8000-000000000001",
+                    "private_key_file": "/dev/null", "public": false, "created_by": "alice"
+                },
+                "globex": {
+                    "name": "globex", "display_name": "Globex", "id": "018f6f3a-0000-7000-8000-000000000001",
+                    "private_key_file": "/dev/null", "public": false, "created_by": "alice"
+                }
+            }
+        }"#;
+        let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
+        let v = cfg.validate();
+        assert!(!v.is_valid);
+        assert!(
+            v.errors.iter().any(|e| e.message.contains("Duplicate organization id")),
+            "expected duplicate-id error, got: {:?}",
             v.errors
         );
     }

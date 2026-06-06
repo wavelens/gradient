@@ -3935,6 +3935,7 @@ paths:
                   organizations = {
                     myorg = {
                       name = "myorg";
+                      id = "018f6f3a-0000-7000-8000-000000000001";
                       private_key_file = null;
                       created_by = "operator";
                     };

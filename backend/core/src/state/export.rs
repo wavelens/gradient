@@ -114,6 +114,7 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
             StateOrganization {
                 name: o.name.clone(),
                 display_name: o.display_name.clone(),
+                id: Some(o.id.to_string()),
                 description: opt(&o.description),
                 private_key_file: String::new(),
                 public: o.public,
