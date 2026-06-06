@@ -271,11 +271,12 @@ While `WorkerCapabilities` carries the worker's *static* hardware profile, `Work
 WorkerMetrics {
     cpu_usage_pct: f32,                 // current CPU load, 0.0-100.0
     ram_free_mb: u64,                   // currently free RAM in MiB
-    disk_speed_mbps: Option<f32>,       // measured store disk throughput, if known
+    disk_speed_mbps: Option<f32>,       // measured build-dir disk throughput (MB/s), if known
+    network_speed_mbps: Option<f32>,    // measured worker<->server throughput (Mbps), if known
 }
 ```
 
-The server replaces the previous values immediately on each heartbeat; a worker that never reports metrics is scored against zeroed dynamic fields (its static caps still apply). The reference worker emits `WorkerMetrics` on its ~10 s heartbeat tick, sampling host load off the dispatch thread. `disk_speed_mbps` is currently always `None`; per-build cgroup `io.stat` sampling fills it in a later phase.
+The server replaces the previous values immediately on each heartbeat; a worker that never reports metrics is scored against zeroed dynamic fields (its static caps still apply). The reference worker emits `WorkerMetrics` on its ~10 s heartbeat tick, sampling host load off the dispatch thread. `disk_speed_mbps` and `network_speed_mbps` are passive EWMAs: disk from per-build cgroup `io.stat` over build wall-time, network from real NAR transfer bytes over time. Both stay `None` until the first build / NAR transfer.
 
 ### Ephemeral Workers
 
@@ -864,7 +865,7 @@ enum ClientMessage {
     ReauthRequest,                              // ask server to re-send AuthChallenge
     Reject { code: u16, reason: String },       // decline connection after InitAck
     WorkerCapabilities { architectures: Vec<String>, system_features: Vec<String>, max_concurrent_builds: u32, cpu_count: u32, ram_total_mb: u64, cpu_core_score: u32 },
-    WorkerMetrics { cpu_usage_pct: f32, ram_free_mb: u64, disk_speed_mbps: Option<f32> },
+    WorkerMetrics { cpu_usage_pct: f32, ram_free_mb: u64, disk_speed_mbps: Option<f32>, network_speed_mbps: Option<f32> },
     AssignJobResponse { job_id: Uuid, accepted: bool, reason: Option<String> },
 
     // Job dispatch
