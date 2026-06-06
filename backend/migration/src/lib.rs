@@ -128,6 +128,7 @@ mod m20260604_000002_create_derivation_metric;
 mod m20260605_000000_index_hot_lookups;
 mod m20260605_000001_create_build_log_chunk;
 mod m20260606_000000_add_derivation_fixed_output;
+mod m20260607_000000_add_max_storage_to_cache;
 
 pub struct Migrator;
 
@@ -257,6 +258,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260605_000000_index_hot_lookups::Migration),
             Box::new(m20260605_000001_create_build_log_chunk::Migration),
             Box::new(m20260606_000000_add_derivation_fixed_output::Migration),
+            Box::new(m20260607_000000_add_max_storage_to_cache::Migration),
         ]
     }
 }
