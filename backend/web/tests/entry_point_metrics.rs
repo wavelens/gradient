@@ -205,6 +205,7 @@ fn returns_point_when_eval_is_in_progress_but_build_is_completed() {
             .append_query_results([Vec::<entity::derivation_dependency::Model>::new()])
             .append_query_results([Vec::<entity::derivation_output::Model>::new()])
             .append_query_results([Vec::<entity::derivation_output::Model>::new()])
+            .append_query_results([Vec::<entity::derivation_output::Model>::new()])
             .into_connection();
 
         let server = TestServer::new(create_router(make_state(db)));
@@ -243,6 +244,7 @@ fn returns_point_when_eval_is_in_progress_but_build_is_substituted() {
             .append_query_results([vec![building_eval_row()]])
             .append_query_results([vec![substituted_build_row()]])
             .append_query_results([Vec::<entity::derivation_dependency::Model>::new()])
+            .append_query_results([Vec::<entity::derivation_output::Model>::new()])
             .append_query_results([Vec::<entity::derivation_output::Model>::new()])
             .append_query_results([Vec::<entity::derivation_output::Model>::new()])
             .into_connection();
