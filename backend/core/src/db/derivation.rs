@@ -50,6 +50,7 @@ pub struct BuildMeta {
     pub timeout_secs: Option<u64>,
     pub max_silent_secs: Option<u64>,
     pub prefer_local_build: bool,
+    pub is_fixed_output: bool,
     pub required_features: Vec<String>,
 }
 
@@ -91,10 +92,12 @@ impl Derivation {
             .get("preferLocalBuild")
             .map(|v| matches!(v.trim(), "1" | "true"))
             .unwrap_or(false);
+        let is_fixed_output = self.outputs.iter().any(|o| !o.hash.is_empty());
         BuildMeta {
             timeout_secs: secs("timeout"),
             max_silent_secs: secs("maxSilent"),
             prefer_local_build,
+            is_fixed_output,
             required_features: self.required_system_features(),
         }
     }
@@ -384,6 +387,14 @@ mod tests {
         assert_eq!(meta.max_silent_secs, None);
         assert!(!meta.prefer_local_build);
         assert_eq!(meta.required_features, vec!["kvm", "big-parallel"]);
+    }
+
+    #[test]
+    fn build_meta_detects_fixed_output() {
+        let fod = br#"Derive([("out","/nix/store/abc-src","sha256","1q2w3e")],[],[],"x86_64-linux","/nix/store/bash",[],[("name","src")])"#;
+        assert!(parse_drv(fod).unwrap().build_meta().is_fixed_output);
+        // EXAMPLE's output has empty hash -> not fixed-output.
+        assert!(!parse_drv(EXAMPLE).unwrap().build_meta().is_fixed_output);
     }
 
     #[test]
