@@ -20,7 +20,7 @@ Two wildcard tokens expand attribute names at a given level:
 
 ### `*` vs `#`
 
-```
+```text
 packages.x86_64-linux.*   # finds packages.*.*.*  - recurses past x86_64-linux into each package
 packages.x86_64-linux.#   # finds packages that are derivations directly under x86_64-linux, no deeper
 ```
@@ -31,7 +31,7 @@ In practice `*` is the right choice for almost all flakes. Use `#` when a flake 
 
 Prefix a pattern with `!` to remove matching paths from the set built by the preceding include patterns.
 
-```
+```text
 packages.*,!packages.x86_64-linux.broken
 ```
 

@@ -60,7 +60,7 @@ POSTs a JSON payload to a URL. Optional `Authorization: Bearer <token>` header.
 
 **Request headers:**
 
-```
+```http
 Content-Type: application/json
 X-Gradient-Event: build.completed
 Authorization: Bearer <token>   # only if token is set

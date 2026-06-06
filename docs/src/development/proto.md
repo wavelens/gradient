@@ -537,7 +537,7 @@ FetchResult {
 
 The worker assembles the archive command as:
 
-```
+```text
 nix flake archive [--override-input <name> <ref>]... --json <flake-ref>
 ```
 

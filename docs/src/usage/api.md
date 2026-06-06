@@ -12,7 +12,7 @@ The full OpenAPI 3.1 specification is in the repository at `docs/gradient-api.ya
 
 Endpoints under `/api/v1` (except `/auth/*`, `/health`, and `/config`) require a bearer token:
 
-```
+```http
 Authorization: Bearer <token>
 ```
 

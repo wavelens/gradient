@@ -59,7 +59,7 @@ Derivations, outputs, dependency edges, and builds are bulk-inserted in chunks o
 
 **4. Status transitions**
 
-```
+```text
 build:       Created → Queued → Building → Completed | Failed
                                          ↘ Substituted (already in store)
                                          ↘ Aborted | DependencyFailed
@@ -124,7 +124,7 @@ This makes "is the full closure of build B available in cache C" a single DB loo
 
 `GET /builds/{build}/graph` - BFS from the requested build, capped at 500 nodes. The graph is stored on derivations, so the BFS walks `derivation_dependency` and resolves each visited derivation back to a `build` row in the same evaluation for UI display:
 
-```
+```text
 root_drv = build.derivation
 visited_drvs = {root_drv}
 queue = [[root_drv]]

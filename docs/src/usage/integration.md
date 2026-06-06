@@ -101,7 +101,7 @@ From the Integrations page:
 
 All inbound webhook URLs have the form:
 
-```
+```text
 {serveUrl}/api/v1/hooks/{forge}/{organization}/{integration_name}
 ```
 

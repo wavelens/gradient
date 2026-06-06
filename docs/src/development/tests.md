@@ -18,7 +18,7 @@ that replace production dependencies (nix-daemon, filesystem, WebSocket) with
 in-memory implementations. The diagram below shows how production and test code
 relate:
 
-```
+```text
                      ┌─────────────────────────────────────────┐
                      │              proto crate                │
                      │                                         │
@@ -88,7 +88,7 @@ a production trait and substitutes the real dependency with an in-memory version
 It performs a BFS from the entry-point derivation through `inputDrvs` to build
 the full closure and populates fakes.
 
-```
+```text
   test/
   ├── output          # single line: /nix/store/<hash>-hello-2.12.3.drv
   └── store/          # 951 real ATerm .drv files
@@ -97,7 +97,7 @@ the full closure and populates fakes.
       └── ...
 ```
 
-```
+```text
          load_store("test/")
                │
                v
@@ -239,7 +239,7 @@ lifecycle. Tests exercise the state machine directly without any async runtime.
 
 ### Job lifecycle state machine
 
-```
+```text
                      add_pending()
                           │
                           v
@@ -263,7 +263,7 @@ lifecycle. Tests exercise the state machine directly without any async runtime.
 
 ### Peer-based filtering
 
-```
+```text
   ┌─────────────────────────────────────────────────┐
   │               JobTracker                        │
   │                                                 │
@@ -305,7 +305,7 @@ authorized peers, and assigned-job tracking.
 
 ### Worker lifecycle
 
-```
+```text
   register()                           unregister()
       │                                     │
       v                                     v
@@ -400,7 +400,7 @@ Tests for the `StoreFixture` itself, validating that real `.drv` files from
 
 ### Build-wave convergence
 
-```
+```text
   Wave 0 (nothing built):
     ready_to_build() → leaf nodes only (no dependencies)
        mark_built(leaves)
@@ -469,7 +469,7 @@ nix-daemon, filesystem, or WebSocket connection.
 
 ### Evaluation data flow (test configuration)
 
-```
+```text
   FakeDerivationResolver         FakeDrvReader
   ┌───────────────────────┐      ┌───────────────────────┐
   │ list_flake_derivations│      │ from_raw_drvs(        │
@@ -627,7 +627,7 @@ Tests for `RepositoryUrl` (stored in the database, used for display and git oper
 
 Tests for `parse_drv`, which parses the textual `Derive(…)` format produced by `nix derivation show`. The fixture derivation used by these tests is:
 
-```
+```text
 Derive(
   [("out","/nix/store/abc-hello","","")],
   [("/nix/store/xyz.drv",["out"])],
@@ -786,7 +786,7 @@ the two functions responsible for reading peer-to-token pairs from `--peers` /
 
 ### Token source precedence
 
-```
+```text
   peers_file set? ──yes──► read file contents  ──► parse lines
                   │
                   no
@@ -800,7 +800,7 @@ the two functions responsible for reading peer-to-token pairs from `--peers` /
 
 ### Line format
 
-```
+```text
   peer_id:token64    →  ("peer_id", "token64")  ✓
   *:token64          →  ("*", "token64")         ✓  (wildcard)
   # comment          →  skipped
@@ -844,7 +844,7 @@ credential kinds the server sends during a job: a UTF-8 signing key and raw SSH
 private key bytes. Both are wrapped in `SecureString`/`SecureBytes` to avoid
 accidental logging.
 
-```
+```text
   CredentialStore (Arc<Mutex<Inner>>)
   ┌───────────────────────────────────┐
   │ signing_key: Option<SecureString> │  ← UTF-8 Ed25519 secret key
@@ -878,7 +878,7 @@ Tests for `score_candidates()`, which annotates each `JobCandidate` with the
 number of its `required_paths` that are absent from the worker's local store.
 The scheduler uses this score to prefer jobs whose inputs are already cached.
 
-```
+```text
   score_candidates(candidates, store)
        │
        ├─ for each candidate:
@@ -1021,7 +1021,7 @@ methods for reporting job progress. Each test uses `MockProtoServer` and a
 client opens its connection (required to avoid deadlock on the single-thread
 tokio runtime).
 
-```
+```text
   JobUpdater::report_fetching()
        │
        └─► ProtoConnection::send(ClientMessage::JobUpdate {
@@ -1053,7 +1053,7 @@ Tests for `push_direct()` (chunk-streaming to server) and `upload_presigned()`
 
 ### `push_direct` flow
 
-```
+```text
   push_direct(job_id, store_path, conn)
        │
        ├─ NarByteStream::new(store_path) → async byte stream
@@ -1066,7 +1066,7 @@ Tests for `push_direct()` (chunk-streaming to server) and `upload_presigned()`
 
 ### `upload_presigned` flow
 
-```
+```text
   upload_presigned(job_id, store_path, url, conn)
        │
        ├─ stream NAR → HTTP PUT to presigned URL
@@ -1093,7 +1093,7 @@ required by `fingerprint_path`. No nix-daemon, filesystem, or network access.
 
 ### Hash conversion pipeline
 
-```
+```text
   sign_one_path()
        │
        ├─ query_path_info() → path_info.nar_hash  (SRI format: "sha256-<base64>")
@@ -1376,7 +1376,7 @@ call the pending job count is asserted directly on the scheduler.
 
 ### `dispatch_queued_evals` - DB call sequence
 
-```
+```text
   dispatch_queued_evals(scheduler)
        │
        ├─ 1. EEvaluation::find().filter(status=Queued).all()       Q
@@ -1394,7 +1394,7 @@ call the pending job count is asserted directly on the scheduler.
 
 ### `dispatch_ready_builds` - DB call sequence
 
-```
+```text
   dispatch_ready_builds(scheduler)
        │
        ├─ 1. EBuild::find().from_raw_sql(ready_builds_query).all() Q
@@ -1442,7 +1442,7 @@ staged query/exec results - no real Postgres required.
 
 SeaORM 1.x on Postgres has a subtle split between two result queues:
 
-```
+```text
   append_query_results  →  consumed by SELECT, UPDATE…RETURNING, find_by_id,
                            and insert_many().exec() (Postgres uses RETURNING)
 
@@ -1458,7 +1458,7 @@ with a valid `id: Uuid`.
 
 ### Data flow through `handle_eval_result`
 
-```
+```text
   Worker sends EvalResult
        │
        v
@@ -1485,7 +1485,7 @@ with a valid `id: Uuid`.
 
 ### Cascade flow through `handle_build_job_failed`
 
-```
+```text
   handle_build_job_failed(state, build_id, error)
        │
        ├─ EBuild::find_by_id()                              Q
@@ -1558,7 +1558,7 @@ Tests for `gradient_core::db::abort_evaluation`, which cascades `Aborted` to
 all active builds before aborting the evaluation itself.
 
 **DB call sequence:**
-```
+```text
   abort_evaluation(state, evaluation)
        │
        ├─ guard: if eval.status == Completed → return (no DB calls)
@@ -1604,7 +1604,7 @@ the spawned webhook tasks run on the `current_thread` runtime. Deliveries are
 captured by `RecordingWebhookClient` (returned alongside the state by
 `test_state_recorded`).
 
-```
+```text
   handle_build_job_completed()
          │
          ├─ update_build_status(Completed)
