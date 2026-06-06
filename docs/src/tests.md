@@ -601,6 +601,17 @@ Backend (`cargo test -p core --lib state::provisioning::trigger_helper_tests`):
   otherwise persist an id no webhook ever resolves to and the trigger would
   silently never fire.
 
+## Scheduler does not double-dispatch a build
+
+Backend (`cargo test -p scheduler --lib jobs::tests::add_pending_does_not_requeue_active_job`):
+- `add_pending_does_not_requeue_active_job` - once a build is assigned (moved to
+  `active`), re-adding the same job id must not put it back in `pending`. Two
+  concurrent `dispatch_ready_builds` passes can both clear the `contains_job`
+  filter before either enqueues; without the idempotency guard the same build is
+  dispatched to the worker twice, the duplicate is aborted by the nix daemon
+  ("build aborted by server"), and the spurious failure fails the whole
+  evaluation (observed flaking the `gradient-cache` NixOS VM test).
+
 ## Org members can view subscribed caches (#327)
 
 NixOS VM (`nix/tests/gradient/state`):
