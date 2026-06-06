@@ -216,6 +216,14 @@ impl JobTracker {
 
     pub fn add_pending(&mut self, job_id: String, job: PendingJob) -> JobCandidate {
         let candidate = job.as_candidate(&job_id);
+        // Idempotent under the tracker write lock: two concurrent
+        // `dispatch_ready_builds` passes can both clear the `contains_job`
+        // filter before either enqueues, so a job already pending or in-flight
+        // (active) must not be re-queued - otherwise the same build is
+        // dispatched to the worker twice and the duplicate fails the eval.
+        if self.pending.contains_key(&job_id) || self.active.contains_key(&job_id) {
+            return candidate;
+        }
         self.pending.insert(job_id, job);
         candidate
     }
@@ -582,6 +590,28 @@ mod tests {
         assert!(caps.can_build("x86_64-linux", &["kvm".into()]));
         // kvm is provided but big-parallel is not → must reject.
         assert!(!caps.can_build("x86_64-linux", &["kvm".into(), "big-parallel".into()],));
+    }
+
+    #[test]
+    fn add_pending_does_not_requeue_active_job() {
+        // Regression: two concurrent dispatch passes can both pass the
+        // `contains_job` filter before either enqueues. Once a job is assigned
+        // (active), re-adding the same id must not put it back in pending, or it
+        // gets dispatched to the worker a second time and the duplicate build is
+        // aborted by the daemon - failing the whole evaluation.
+        let mut tracker = JobTracker::new();
+        let peer = OrganizationId::now_v7();
+        tracker.add_pending("build:1".into(), build_job(peer, vec![]));
+        assert!(
+            tracker.assign_pending("worker", "build:1").is_some(),
+            "job should assign"
+        );
+        assert_eq!(tracker.pending_count(), 0);
+        assert_eq!(tracker.active_count(), 1);
+
+        tracker.add_pending("build:1".into(), build_job(peer, vec![]));
+        assert_eq!(tracker.pending_count(), 0, "active job must not be re-queued");
+        assert_eq!(tracker.active_count(), 1);
     }
 
     #[test]
