@@ -234,6 +234,8 @@ pub struct StateCache {
     pub priority: i32,
     #[serde(default)]
     pub local_priority: Option<i32>,
+    #[serde(default)]
+    pub max_storage_gb: i32,
     pub signing_key_file: String,
     #[serde(default)]
     pub organizations: Vec<String>,
