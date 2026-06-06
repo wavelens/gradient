@@ -38,6 +38,63 @@ pub async fn unpark_no_cache_for_org<C: ConnectionTrait>(
     unpark_for_org(db, organization, |r| matches!(r, WaitingReason::NoCache)).await
 }
 
+/// Flip evaluations parked with `WaitingReason::CacheStorageFull` for projects
+/// in `organization` back to `Queued`, but only when the org actually has
+/// storage headroom again. The guard prevents a churn of re-queue → re-park
+/// when nothing actionable changed (mirrors `unpark_no_workers_for_org`).
+pub async fn unpark_storage_full_for_org<C: ConnectionTrait>(
+    db: &C,
+    organization: OrganizationId,
+    instance_max_storage_gb: i32,
+) -> Result<Vec<MEvaluation>, sea_orm::DbErr> {
+    if crate::db::org_caches_all_full(db, organization, instance_max_storage_gb).await? {
+        return Ok(Vec::new());
+    }
+    unpark_for_org(db, organization, |r| {
+        matches!(r, WaitingReason::CacheStorageFull)
+    })
+    .await
+}
+
+/// Scan every org with a `CacheStorageFull`-parked evaluation and unpark those
+/// that now have headroom. Used by the background cleanup pass after NARs are
+/// freed, where there is no single triggering org.
+pub async fn unpark_storage_full_all<C: ConnectionTrait>(
+    db: &C,
+    instance_max_storage_gb: i32,
+) -> Result<Vec<MEvaluation>, sea_orm::DbErr> {
+    let parked = EEvaluation::find()
+        .filter(CEvaluation::Status.eq(EvaluationStatus::Waiting))
+        .all(db)
+        .await?;
+
+    let mut orgs: Vec<OrganizationId> = Vec::new();
+    for eval in &parked {
+        let is_storage = eval
+            .waiting_reason
+            .as_ref()
+            .and_then(WaitingReason::from_json)
+            .is_some_and(|r| matches!(r, WaitingReason::CacheStorageFull));
+        if !is_storage {
+            continue;
+        }
+        let Some(project_id) = eval.project else {
+            continue;
+        };
+        if let Some(project) = EProject::find_by_id(project_id).one(db).await?
+            && !orgs.contains(&project.organization)
+        {
+            orgs.push(project.organization);
+        }
+    }
+
+    let mut unparked = Vec::new();
+    for org in orgs {
+        unparked.extend(unpark_storage_full_for_org(db, org, instance_max_storage_gb).await?);
+    }
+    Ok(unparked)
+}
+
 /// Flip every evaluation parked with `WaitingReason::Workers { connected_workers: 0 }`
 /// for projects in `organization` back to `Queued`. The zero-workers shape
 /// is what `park_if_no_workers` writes when the org has no active
@@ -414,5 +471,41 @@ mod tests {
             .await
             .unwrap();
         assert!(out.is_empty());
+    }
+
+    #[tokio::test]
+    async fn unpark_storage_full_requeues_when_headroom_returns() {
+        let org = OrganizationId::now_v7();
+        let project = make_project(org);
+
+        let stranded = {
+            let mut e = waiting_eval(WaitingReason::CacheStorageFull);
+            e.project = Some(project.id);
+            e
+        };
+        let mut requeued = stranded.clone();
+        requeued.status = EvaluationStatus::Queued;
+        requeued.waiting_reason = None;
+
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            // Guard `org_caches_all_full`: no writable caches → not full.
+            .append_query_results([Vec::<entity::organization_cache::Model>::new()])
+            // unpark_for_org: org's projects
+            .append_query_results([vec![project.clone()]])
+            // unpark_for_org: Waiting evals across those projects
+            .append_query_results([vec![stranded.clone()]])
+            // Update the matching row → requeued
+            .append_query_results([vec![requeued.clone()]])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            .into_connection();
+
+        let out = unpark_storage_full_for_org(&db, org, 0).await.unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].id, stranded.id);
+        assert_eq!(out[0].status, EvaluationStatus::Queued);
+        assert!(out[0].waiting_reason.is_none());
     }
 }
