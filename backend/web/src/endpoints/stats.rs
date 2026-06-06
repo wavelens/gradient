@@ -4,13 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::authorization::MaybeUser;
+use crate::access::{CacheAccess, Caller, load_cache};
+use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult};
-use crate::helpers::{OptionExt, ok_json};
+use crate::helpers::ok_json;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use chrono::{NaiveDateTime, Timelike};
-use gradient_core::db::get_any_cache_by_name;
 use gradient_core::types::*;
 use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
 use serde::Serialize;
@@ -205,18 +205,17 @@ async fn aggregate_storage<C: sea_orm::ConnectionTrait>(
 pub async fn get_cache_stats(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path(cache): Path<String>,
 ) -> WebResult<Json<BaseResponse<CacheStatsResponse>>> {
-    let cache = get_any_cache_by_name(state.0.clone(), cache)
-        .await?
-        .or_not_found("Cache")?;
-
-    if !cache.public {
-        match &maybe_user {
-            Some(user) if cache.created_by == user.id => {}
-            _ => return Err(WebError::not_found("Cache")),
-        }
-    }
+    let cache = load_cache(
+        &state,
+        Caller::from_option(&maybe_user),
+        api_key.as_ref(),
+        cache,
+        CacheAccess::Readable,
+    )
+    .await?;
 
     // Total compressed bytes and package count for this cache.
     let total_row = state

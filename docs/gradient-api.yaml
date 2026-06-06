@@ -739,6 +739,9 @@ paths:
         Creates a new API key. The full key (prefixed with `GRAD`) is returned once -
         it cannot be retrieved again. Use it as `Authorization: Bearer GRAD<key>`.
         Pass `expires_in_days` to make the key auto-expire; omit for no expiry.
+        A cache-pinned key may only grant cache permissions the caller already
+        holds; members of an organization subscribed to the cache are treated as
+        read-only, so they can mint read-only cache keys.
       operationId: createUserKey
       requestBody:
         required: true
@@ -4530,7 +4533,11 @@ paths:
     get:
       tags: [caches]
       summary: Get cache statistics
-      description: Returns bandwidth and hit statistics for the cache.
+      description: >-
+        Returns bandwidth and hit statistics for the cache. Visible to anyone
+        for public caches, and to cache members or members of any organization
+        subscribed to a private cache (matching `GET /caches/{cache}`); other
+        callers receive `404`.
       operationId: getCacheStats
       responses:
         '200':

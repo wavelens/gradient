@@ -481,6 +481,25 @@ async fn is_cache_org_subscriber(
     Ok(member.is_some())
 }
 
+/// The caller's effective cache permission mask for minting cache-scoped API
+/// keys: a direct cache member's role mask, or read-only [`cache_view_mask`]
+/// for a member of a subscribed organization (mirroring `load_cache(Readable)`).
+/// `None` means the caller cannot see the cache.
+pub async fn effective_cache_mask(
+    state: &Arc<ServerState>,
+    user_id: UserId,
+    cache_id: CacheId,
+    api_key: Option<&ApiKeyContext>,
+) -> WebResult<Option<i64>> {
+    if let Some(mask) = cache_role_mask(state, user_id, cache_id).await? {
+        return Ok(Some(mask));
+    }
+    if is_cache_org_subscriber(state, user_id, cache_id, api_key).await? {
+        return Ok(Some(crate::permissions::cache_view_mask()));
+    }
+    Ok(None)
+}
+
 async fn cache_role_mask(
     state: &Arc<ServerState>,
     user_id: UserId,
@@ -1382,6 +1401,70 @@ mod tests {
             .await
             .expect_err("View role must lack WriteStore");
             assert!(matches!(err, WebError::Forbidden(..)));
+        });
+    }
+
+    fn org_cache_fixture() -> entity::organization_cache::Model {
+        entity::organization_cache::Model {
+            id: gradient_core::types::ids::OrganizationCacheId::new(uuid!(
+                "a0000000-0000-0000-0000-000000000040"
+            )),
+            organization: OrganizationId::new(uuid!("a0000000-0000-0000-0000-000000000001")),
+            cache: gradient_core::types::ids::CacheId::new(uuid!(
+                "a0000000-0000-0000-0000-000000000020"
+            )),
+            mode: entity::organization_cache::CacheSubscriptionMode::ReadOnly,
+        }
+    }
+
+    #[test]
+    fn effective_cache_mask_returns_role_for_member() {
+        run(async {
+            let user = user_fixture();
+            let db = MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([vec![cache_member_fixture()]])
+                .append_query_results([vec![cache_role_fixture()]])
+                .into_connection();
+            let state = make_state(db);
+            let mask = effective_cache_mask(&state, user.id, cache_fixture(false).id, None)
+                .await
+                .expect("query ok")
+                .expect("member has a mask");
+            assert_eq!(mask, crate::permissions::cache_admin_mask());
+        });
+    }
+
+    #[test]
+    fn effective_cache_mask_returns_view_for_org_subscriber() {
+        run(async {
+            let user = user_fixture();
+            let db = MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([Vec::<entity::cache_user::Model>::new()])
+                .append_query_results([vec![org_cache_fixture()]])
+                .append_query_results([vec![membership_fixture(BASE_ROLE_VIEW_ID)]])
+                .into_connection();
+            let state = make_state(db);
+            let mask = effective_cache_mask(&state, user.id, cache_fixture(false).id, None)
+                .await
+                .expect("query ok")
+                .expect("subscriber gets view-only mask");
+            assert_eq!(mask, crate::permissions::cache_view_mask());
+        });
+    }
+
+    #[test]
+    fn effective_cache_mask_none_for_outsider() {
+        run(async {
+            let user = user_fixture();
+            let db = MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([Vec::<entity::cache_user::Model>::new()])
+                .append_query_results([Vec::<entity::organization_cache::Model>::new()])
+                .into_connection();
+            let state = make_state(db);
+            let mask = effective_cache_mask(&state, user.id, cache_fixture(false).id, None)
+                .await
+                .expect("query ok");
+            assert!(mask.is_none(), "outsider must not get a cache mask");
         });
     }
 
