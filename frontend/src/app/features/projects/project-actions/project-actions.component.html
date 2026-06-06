@@ -90,14 +90,14 @@
               </div>
               <div class="action-actions">
                 <button
-                  *appWritable="access()"
+                  *appWritable="triggerAccess()"
                   pButton
                   label="Test"
                   icon="pi pi-play"
                   severity="secondary"
                   size="small"
                   [loading]="testingId() === action.id"
-                  [disabled]="rowDisabled()"
+                  [disabled]="triggerRowDisabled()"
                   (click)="testAction(action.id)"
                 ></button>
                 <button

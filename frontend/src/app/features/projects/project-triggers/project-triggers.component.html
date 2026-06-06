@@ -69,14 +69,14 @@
               </div>
               <div class="trigger-actions">
                 <button
-                  *appWritable="access()"
+                  *appWritable="triggerAccess()"
                   pButton
                   label="Fire Now"
                   icon="pi pi-play"
                   severity="secondary"
                   size="small"
                   [loading]="firingId() === trigger.id"
-                  [disabled]="rowDisabled()"
+                  [disabled]="triggerRowDisabled()"
                   (click)="fireNow(trigger.id)"
                 ></button>
                 <button
