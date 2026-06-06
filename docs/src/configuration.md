@@ -76,8 +76,8 @@ openssl rand -base64 48 > /run/secrets/gradient-crypt
 | `settings.localIps` | `10.0.0.0/8` | Comma-separated CIDR allowlist whose resolved client IPs receive each cache's `local_priority` value (`GRADIENT_LOCAL_IPS`). |
 | `settings.buildMaxAttempts` | `3` | Maximum number of build attempts before a transient failure is promoted to `FailedPermanent`. (`GRADIENT_BUILD_MAX_ATTEMPTS`) |
 | `settings.buildRetryBackoffSecs` | `30` | Base back-off in seconds before retrying a transient build failure; doubled after each prior attempt (exponential). (`GRADIENT_BUILD_RETRY_BACKOFF_SECS`) |
-| `settings.buildDefaultTimeoutSecs` | `3600` | Default wall-clock timeout (seconds) for builds whose `.drv` does not set a `timeout` attribute. `0` disables. (`GRADIENT_BUILD_DEFAULT_TIMEOUT_SECS`) |
-| `settings.buildDefaultMaxSilentSecs` | `1800` | Default silent-output timeout (seconds) for builds whose `.drv` does not set a `maxSilent` attribute. `0` disables. (`GRADIENT_BUILD_DEFAULT_MAX_SILENT_SECS`) |
+| `settings.buildDefaultTimeoutSecs` | `14400` | Default wall-clock timeout (seconds) for builds whose `.drv` does not set a `timeout` attribute. `0` disables. (`GRADIENT_BUILD_DEFAULT_TIMEOUT_SECS`) |
+| `settings.buildDefaultMaxSilentSecs` | `3600` | Default silent-output timeout (seconds) for builds whose `.drv` does not set a `maxSilent` attribute. `0` disables. (`GRADIENT_BUILD_DEFAULT_MAX_SILENT_SECS`) |
 | `settings.schedulerScoringPolicy` | `resource-aware` | Scheduler scoring policy ranking queued jobs against a requesting worker (`GRADIENT_SCHEDULER_SCORING_POLICY`). Values: `simple`, `resource-aware`. `simple` is the basic rule set, weighing path availability, NAR size, dependency count, wait-time anti-starvation, builtin de-prioritization and fetch-worker reservation. `resource-aware` adds RAM/OOM-fit, CPU affinity, preferLocalBuild affinity and per-org fair-share on top, and is the default. Unknown values fall back to `resource-aware`. See [scheduler scoring](development/scheduler-scoring.md). |
 
 ### Build failure states and retries

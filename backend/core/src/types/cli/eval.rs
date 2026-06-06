@@ -32,9 +32,9 @@ pub struct EvalArgs {
     pub build_max_attempts: u32,
     #[arg(long, env = "GRADIENT_BUILD_RETRY_BACKOFF_SECS", default_value = "30")]
     pub build_retry_backoff_secs: u64,
-    #[arg(long, env = "GRADIENT_BUILD_DEFAULT_TIMEOUT_SECS", default_value = "3600")]
+    #[arg(long, env = "GRADIENT_BUILD_DEFAULT_TIMEOUT_SECS", default_value = "14400")]
     pub build_default_timeout_secs: u64,
-    #[arg(long, env = "GRADIENT_BUILD_DEFAULT_MAX_SILENT_SECS", default_value = "1800")]
+    #[arg(long, env = "GRADIENT_BUILD_DEFAULT_MAX_SILENT_SECS", default_value = "3600")]
     pub build_default_max_silent_secs: u64,
     /// Name of the scheduler scoring policy (`simple`, `resource-aware`).
     /// Unknown names fall back to `resource-aware`.
@@ -52,8 +52,8 @@ impl Default for EvalArgs {
             max_evaluations_per_worker: 1,
             build_max_attempts: 3,
             build_retry_backoff_secs: 30,
-            build_default_timeout_secs: 3600,
-            build_default_max_silent_secs: 1800,
+            build_default_timeout_secs: 14400,
+            build_default_max_silent_secs: 3600,
             scheduler_scoring_policy: "resource-aware".into(),
         }
     }

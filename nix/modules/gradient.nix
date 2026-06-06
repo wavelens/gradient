@@ -412,13 +412,13 @@ in {
         buildDefaultTimeoutSecs = lib.mkOption {
           description = "Default wall-clock build timeout in seconds when the derivation sets no `timeout`. `0` disables.";
           type = lib.types.ints.unsigned;
-          default = 3600;
+          default = 14400;
         };
 
         buildDefaultMaxSilentSecs = lib.mkOption {
           description = "Default silent (no-output) build timeout in seconds when the derivation sets no `maxSilent`. `0` disables.";
           type = lib.types.ints.unsigned;
-          default = 1800;
+          default = 3600;
         };
 
         schedulerScoringPolicy = lib.mkOption {
