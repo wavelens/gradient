@@ -629,6 +629,15 @@ The apply order in `apply_state_to_database` now runs `apply_integrations`
 before `apply_projects` so trigger/action integration lookups resolve against
 rows already in the DB.
 
+## `--validate-state` parses without secret files
+
+Backend (`cargo test -p core --lib types::cli::secrets::tests`):
+- `validate_state_parses_without_secret_files` - `--state-file ... --validate-state`
+  parses with no `--crypt-secret-file`/`--jwt-secret-file`, so the secret-free Nix
+  build/CI check (`services.gradient.validateState`) runs without provisioning secrets.
+- `secret_files_parse_from_flags` - the live-server path still accepts both secret
+  flags; `init_state` rejects an empty value before startup.
+
 ## Scheduler does not double-dispatch a build
 
 Backend (`cargo test -p scheduler --lib jobs::tests::add_pending_does_not_requeue_active_job`):

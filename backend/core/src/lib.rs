@@ -37,6 +37,13 @@ use storage::{FileLogStorage, S3LogStorage};
 use types::*;
 
 pub async fn init_state(cli: Cli) -> Arc<ServerState> {
+    if cli.secrets.crypt_secret_file.is_empty() || cli.secrets.jwt_secret_file.is_empty() {
+        tracing::error!(
+            "--crypt-secret-file and --jwt-secret-file are required to run the server"
+        );
+        std::process::exit(1);
+    }
+
     tracing::info!(
         ip = %cli.server.ip,
         port = cli.server.port,
