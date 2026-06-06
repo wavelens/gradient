@@ -216,6 +216,7 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
                 active: c.active,
                 priority: c.priority,
                 local_priority: c.local_priority,
+                max_storage_gb: c.max_storage_gb,
                 signing_key_file: String::new(),
                 organizations,
                 upstreams: cache_upstreams,

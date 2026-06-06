@@ -934,6 +934,7 @@ impl<'a> StateApplicator<'a> {
                 cache_model.active = Set(state_cache.active);
                 cache_model.priority = Set(state_cache.priority);
                 cache_model.local_priority = Set(state_cache.local_priority);
+                cache_model.max_storage_gb = Set(state_cache.max_storage_gb);
                 cache_model.public_key = Set(public_key.clone());
                 cache_model.private_key = Set(encrypted_signing_key.clone());
                 cache_model.created_by = Set(created_by_id);
@@ -958,6 +959,7 @@ impl<'a> StateApplicator<'a> {
                     created_by: Set(created_by_id),
                     created_at: Set(now),
                     managed: Set(true),
+                    max_storage_gb: Set(state_cache.max_storage_gb),
                 };
                 cache_model.insert(self.db).await?;
                 tracing::info!(name = %state_cache.name, "Created managed cache");

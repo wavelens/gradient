@@ -17,6 +17,8 @@
 //!   forge writer on the repo, gated until a maintainer approves.
 //! - `NoCache` - the project's organisation has no active cache configured,
 //!   so the build outputs would have nowhere to land.
+//! - `CacheStorageFull` - every writable cache for the organisation is within
+//!   the headroom threshold of its (or the instance-wide) max-storage limit.
 
 use serde::{Deserialize, Serialize};
 
@@ -33,6 +35,10 @@ pub enum WaitingReason {
         pr_author: String,
     },
     NoCache,
+    /// Every writable cache for the org is within `STORAGE_HEADROOM_BYTES` of
+    /// its configured `max_storage_gb` (or the instance-wide limit), so build
+    /// outputs would have nowhere to land.
+    CacheStorageFull,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -118,6 +124,14 @@ mod tests {
         let r = WaitingReason::NoCache;
         let v = r.to_json();
         assert_eq!(v["kind"], "no_cache");
+        assert_eq!(WaitingReason::from_json(&v).unwrap(), r);
+    }
+
+    #[test]
+    fn cache_storage_full_round_trip() {
+        let r = WaitingReason::CacheStorageFull;
+        let v = r.to_json();
+        assert_eq!(v["kind"], "cache_storage_full");
         assert_eq!(WaitingReason::from_json(&v).unwrap(), r);
     }
 
