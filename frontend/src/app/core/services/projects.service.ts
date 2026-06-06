@@ -103,6 +103,7 @@ export interface ProjectMetricPoint {
   eval_time_ms: number;
   output_size_bytes: number | null;
   closure_size_bytes: number | null;
+  runtime_closure_size_bytes: number | null;
   dependencies_count: number;
 }
 
@@ -119,6 +120,7 @@ export interface EntryPointMetricPoint {
   build_time_ms: number | null;
   output_size_bytes: number | null;
   closure_size_bytes: number | null;
+  runtime_closure_size_bytes: number | null;
   dependencies_count: number;
 }
 

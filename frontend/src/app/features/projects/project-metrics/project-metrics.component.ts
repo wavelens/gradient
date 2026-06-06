@@ -28,6 +28,7 @@ const CHART_COLORS = {
   evalTime: '#6f42c1',
   outputSize: '#28a745',
   closureSize: '#fd7e14',
+  runtimeClosure: '#20c997',
   deps: '#e83e8c',
   background: '#21262d',
   border: '#2d333b',
@@ -159,7 +160,11 @@ export class ProjectMetricsComponent implements OnInit {
   closureSizeChart = computed<ChartOptions>(() => {
     const pts = this.metrics();
     const opts = this.baseChart(CHART_COLORS.closureSize);
-    opts.series = [{ name: 'Closure size', data: pts.map((p) => p.closure_size_bytes) }];
+    opts.colors = [CHART_COLORS.closureSize, CHART_COLORS.runtimeClosure];
+    opts.series = [
+      { name: 'Build closure', data: pts.map((p) => p.closure_size_bytes) },
+      { name: 'Runtime closure', data: pts.map((p) => p.runtime_closure_size_bytes) },
+    ];
     opts.yaxis = { ...opts.yaxis, labels: { style: { colors: CHART_COLORS.text }, formatter: (v: number) => this.formatBytes(v) } };
     opts.tooltip = { theme: 'dark', y: { formatter: (v: number) => this.formatBytes(v) } };
     return opts;

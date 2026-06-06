@@ -143,6 +143,14 @@ export class EvaluationsService {
     return this.api.get<ClosureGraph>(`evals/${evalId}/closure`);
   }
 
+  getBuildRuntimeClosure(buildId: string): Observable<ClosureGraph> {
+    return this.api.get<ClosureGraph>(`builds/${buildId}/runtime-closure`);
+  }
+
+  getEvalRuntimeClosure(evalId: string): Observable<ClosureGraph> {
+    return this.api.get<ClosureGraph>(`evals/${evalId}/runtime-closure`);
+  }
+
   getBuildDownloads(buildId: string): Observable<BuildProduct[]> {
     return this.api.get<BuildProduct[]>(`builds/${buildId}/downloads`);
   }

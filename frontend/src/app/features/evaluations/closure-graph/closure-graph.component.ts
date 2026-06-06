@@ -57,6 +57,8 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
   orgName = '';
   kind = '';
   id = '';
+  closureType = 'runtime';
+  typeLabel = signal('');
 
   private bounds = { minX: 0, minY: 0, maxX: 0, maxY: 0 };
   private isPanning = false;
@@ -68,6 +70,8 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
     this.orgName = this.route.snapshot.paramMap.get('org') || '';
     this.kind = this.route.snapshot.paramMap.get('kind') || 'build';
     this.id = this.route.snapshot.paramMap.get('id') || '';
+    this.closureType = this.route.snapshot.queryParamMap.get('type') === 'build' ? 'build' : 'runtime';
+    this.typeLabel.set(this.closureType === 'build' ? 'Build closure' : 'Runtime closure');
     this.load();
   }
 
@@ -77,9 +81,10 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
   }
 
   private load(): void {
-    const req = this.kind === 'eval'
-      ? this.evalService.getEvalClosure(this.id)
-      : this.evalService.getBuildClosure(this.id);
+    const isEval = this.kind === 'eval';
+    const req = this.closureType === 'build'
+      ? (isEval ? this.evalService.getEvalClosure(this.id) : this.evalService.getBuildClosure(this.id))
+      : (isEval ? this.evalService.getEvalRuntimeClosure(this.id) : this.evalService.getBuildRuntimeClosure(this.id));
     req.subscribe({
       next: (g) => {
         this.nodeCount.set(g.node_count);
