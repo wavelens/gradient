@@ -16,6 +16,7 @@ pub enum JobKindView {
 pub struct HistoryPrediction {
     pub predicted_peak_ram_mb: u64,
     pub avg_cpu_time_ms: u64,
+    pub avg_disk_bytes: u64,
     pub oom_rate: f32,
     pub samples: u32,
 }
