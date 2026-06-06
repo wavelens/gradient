@@ -319,6 +319,7 @@ mod tests {
             created_by: crate::types::ids::UserId::nil(),
             created_at: NaiveDateTime::default(),
             managed: false,
+            max_storage_gb: 0,
         }
     }
 
