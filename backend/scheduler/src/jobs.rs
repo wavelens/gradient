@@ -64,6 +64,9 @@ pub struct PendingBuildJob {
     /// `derivation.prefer_local_build`: this build should run on the dispatching
     /// peer's local workers rather than be offloaded.
     pub prefer_local_build: bool,
+    /// `derivation.is_fixed_output`: a fixed-output derivation fetches from the
+    /// network, so scoring prefers faster-network workers.
+    pub is_fixed_output: bool,
     /// Historical resource-usage prediction for this build's derivation,
     /// preloaded once per dispatch round and consumed by scoring rules.
     pub history: score::HistoryPrediction,
@@ -556,6 +559,7 @@ mod tests {
             dependency_count: 0,
             closure_size: None,
             prefer_local_build: false,
+            is_fixed_output: false,
             history: score::HistoryPrediction::default(),
             queued_at: gradient_core::types::now(),
         })

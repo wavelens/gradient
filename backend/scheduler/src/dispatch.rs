@@ -545,6 +545,7 @@ impl BuildDispatchMaps {
             dependency_count: self.dep_counts.get(&build.derivation).copied().unwrap_or(0),
             closure_size: self.closure_sizes.get(&build.derivation).copied().flatten(),
             prefer_local_build: derivation.prefer_local_build,
+            is_fixed_output: derivation.is_fixed_output,
             history: self
                 .histories
                 .get(&build.derivation)

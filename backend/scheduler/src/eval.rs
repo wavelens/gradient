@@ -69,6 +69,7 @@ impl DerivationInsertBatch {
                 architecture: Set(d.architecture.clone()),
                 pname: Set(d.pname.clone()),
                 prefer_local_build: Set(d.prefer_local_build),
+                is_fixed_output: Set(d.is_fixed_output),
                 allow_substitutes: Set(d.allow_substitutes),
                 created_at: Set(now),
                 ..Default::default()
