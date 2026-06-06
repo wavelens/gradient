@@ -647,12 +647,15 @@ impl<'a> StateApplicator<'a> {
             if let Some(triggers) = &state_project.triggers {
                 let inbound_integrations_by_name =
                     inbound_integrations_by_name(self.db, org_id).await?;
+                let outbound_integrations_by_name =
+                    outbound_integrations_by_name(self.db, org_id).await?;
 
                 apply_project_triggers(
                     self.db,
                     &project_row,
                     triggers,
                     &inbound_integrations_by_name,
+                    &outbound_integrations_by_name,
                 )
                 .await
                 .map_err(|e| {
@@ -1837,7 +1840,8 @@ async fn apply_project_triggers<C: ConnectionTrait>(
     db: &C,
     project: &MProject,
     desired: &[StateTrigger],
-    integrations_by_name: &HashMap<String, IntegrationId>,
+    inbound_by_name: &HashMap<String, IntegrationId>,
+    outbound_by_name: &HashMap<String, IntegrationId>,
 ) -> anyhow::Result<()> {
     if desired.is_empty() {
         anyhow::bail!("project '{}' must have at least one trigger", project.name);
@@ -1845,7 +1849,7 @@ async fn apply_project_triggers<C: ConnectionTrait>(
 
     let mut desired_by_key: HashMap<String, (TriggerConfig, bool)> = HashMap::new();
     for t in desired {
-        let cfg = build_trigger_config(t, integrations_by_name)?;
+        let cfg = build_trigger_config(t, inbound_by_name, outbound_by_name)?;
         let key = trigger_key(&cfg);
         desired_by_key.insert(key, (cfg, t.active));
     }
@@ -1901,7 +1905,8 @@ async fn apply_project_triggers<C: ConnectionTrait>(
 
 fn build_trigger_config(
     t: &StateTrigger,
-    integrations: &HashMap<String, IntegrationId>,
+    inbound: &HashMap<String, IntegrationId>,
+    outbound: &HashMap<String, IntegrationId>,
 ) -> anyhow::Result<TriggerConfig> {
     use crate::types::triggers::TriggerType as TT;
     let cfg = match t.trigger_type {
@@ -1925,9 +1930,16 @@ fn build_trigger_config(
                 .integration
                 .as_ref()
                 .context("reporter trigger requires `integration` name")?;
-            let id = *integrations
-                .get(name)
-                .with_context(|| format!("unknown integration: {name}"))?;
+            let id = match inbound.get(name) {
+                Some(id) => *id,
+                None if outbound.contains_key(name) => anyhow::bail!(
+                    "integration '{name}' is configured as `outbound`, but reporter triggers \
+                     require an `inbound` integration to receive forge webhooks. Declare an \
+                     `inbound` integration and reference outbound integrations via the project's \
+                     `outbound_integration` or a `forge_status_report` action."
+                ),
+                None => anyhow::bail!("unknown integration: {name}"),
+            };
             if t.trigger_type == TT::ReporterPush {
                 TriggerConfig::ReporterPush {
                     integration_id: id,
@@ -2280,7 +2292,7 @@ mod trigger_helper_tests {
     #[test]
     fn build_polling_trigger() {
         let t = polling_trigger(60);
-        let cfg = build_trigger_config(&t, &empty_integrations()).unwrap();
+        let cfg = build_trigger_config(&t, &empty_integrations(), &empty_integrations()).unwrap();
         assert_eq!(
             cfg,
             TriggerConfig::Polling {
@@ -2298,7 +2310,7 @@ mod trigger_helper_tests {
             config: serde_json::Value::Null,
             active: true,
         };
-        let cfg = build_trigger_config(&t, &empty_integrations()).unwrap();
+        let cfg = build_trigger_config(&t, &empty_integrations(), &empty_integrations()).unwrap();
         assert_eq!(
             cfg,
             TriggerConfig::Polling {
@@ -2311,7 +2323,7 @@ mod trigger_helper_tests {
     #[test]
     fn build_polling_rejects_too_small_interval() {
         let t = polling_trigger(5);
-        let err = build_trigger_config(&t, &empty_integrations()).unwrap_err();
+        let err = build_trigger_config(&t, &empty_integrations(), &empty_integrations()).unwrap_err();
         let full = format!("{err:#}");
         assert!(
             full.contains("interval_secs") || full.contains("validation"),
@@ -2327,7 +2339,7 @@ mod trigger_helper_tests {
             config: serde_json::json!({ "cron": "0 0 2 * * *" }),
             active: true,
         };
-        let cfg = build_trigger_config(&t, &empty_integrations()).unwrap();
+        let cfg = build_trigger_config(&t, &empty_integrations(), &empty_integrations()).unwrap();
         assert_eq!(
             cfg,
             TriggerConfig::Time {
@@ -2344,7 +2356,7 @@ mod trigger_helper_tests {
             config: serde_json::json!({}),
             active: true,
         };
-        let err = build_trigger_config(&t, &empty_integrations()).unwrap_err();
+        let err = build_trigger_config(&t, &empty_integrations(), &empty_integrations()).unwrap_err();
         assert!(err.to_string().contains("cron"));
     }
 
@@ -2356,7 +2368,7 @@ mod trigger_helper_tests {
             config: serde_json::json!({}),
             active: true,
         };
-        let err = build_trigger_config(&t, &empty_integrations()).unwrap_err();
+        let err = build_trigger_config(&t, &empty_integrations(), &empty_integrations()).unwrap_err();
         assert!(err.to_string().contains("integration"));
     }
 
@@ -2368,7 +2380,7 @@ mod trigger_helper_tests {
             config: serde_json::json!({}),
             active: true,
         };
-        let err = build_trigger_config(&t, &empty_integrations()).unwrap_err();
+        let err = build_trigger_config(&t, &empty_integrations(), &empty_integrations()).unwrap_err();
         let msg = err.to_string();
         assert!(
             msg.contains("github-app"),
@@ -2388,7 +2400,7 @@ mod trigger_helper_tests {
             config: serde_json::json!({ "branches": ["main"], "tags": [], "releases_only": false }),
             active: true,
         };
-        let cfg = build_trigger_config(&t, &integrations).unwrap();
+        let cfg = build_trigger_config(&t, &integrations, &empty_integrations()).unwrap();
         assert_eq!(
             cfg,
             TriggerConfig::ReporterPush {
@@ -2441,6 +2453,30 @@ mod trigger_helper_tests {
         });
         let t: StateTrigger = serde_json::from_value(json).unwrap();
         assert!(t.active);
+    }
+
+    #[test]
+    fn build_reporter_pr_rejects_outbound_integration_with_kind_aware_error() {
+        let mut outbound = HashMap::new();
+        outbound.insert("forgejo-status-reports".into(), IntegrationId::nil());
+
+        let t = StateTrigger {
+            trigger_type: TriggerType::ReporterPullRequest,
+            integration: Some("forgejo-status-reports".into()),
+            config: serde_json::json!({}),
+            active: true,
+        };
+
+        let err = build_trigger_config(&t, &empty_integrations(), &outbound).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("forgejo-status-reports"),
+            "error names the integration: {msg}"
+        );
+        assert!(
+            msg.contains("outbound") && msg.contains("inbound"),
+            "error explains the inbound/outbound kind mismatch: {msg}"
+        );
     }
 
     // TODO: integration test for apply_project_triggers full DB round-trip (T30 smoke)

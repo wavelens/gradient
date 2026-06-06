@@ -588,6 +588,19 @@ user intended for OIDC failed at startup with "missing field
 `web::authorization::oidc` with `User already exists with password
 authentication`.
 
+## Reporter trigger rejects outbound integration (#326)
+
+Backend (`cargo test -p core --lib state::provisioning::trigger_helper_tests`):
+- `build_reporter_pr_rejects_outbound_integration_with_kind_aware_error` -
+  a `reporter_pull_request` / `reporter_push` trigger referencing a name that
+  exists only as an `outbound` integration now fails with a kind-aware error
+  naming both `inbound` and `outbound`, instead of the misleading
+  `unknown integration` raised when the name genuinely doesn't exist. Reporter
+  triggers resolve against inbound integrations only (the webhook resolver
+  matches the inbound id), so pointing one at an outbound integration would
+  otherwise persist an id no webhook ever resolves to and the trigger would
+  silently never fire.
+
 ## Hashed API keys at rest
 
 Backend (`cargo test -p core --lib state::provisioning::api_key_hash_tests`):
