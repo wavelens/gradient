@@ -195,12 +195,17 @@ pub async fn get_evaluation_builds(
             leaders.insert(row.id, row);
         }
     }
+    // Multiple followers can share one leader; after substituting leaders for
+    // followers the same leader row would appear several times. Dedup by id so
+    // the sidebar never renders a build twice (issue #303).
+    let mut seen_ids: HashSet<BuildId> = HashSet::new();
     let builds: Vec<MBuild> = raw_builds
         .into_iter()
         .map(|b| match b.via.and_then(|id| leaders.get(&id)) {
             Some(leader) => leader.clone(),
             None => b,
         })
+        .filter(|b| seen_ids.insert(b.id))
         .collect();
 
     // Distinct derivations referenced by builds. Deduping cuts the IN-list down
