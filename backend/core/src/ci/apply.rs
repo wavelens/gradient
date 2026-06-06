@@ -10,7 +10,9 @@
 
 use super::abort::{AbortKind, abort_evaluation};
 use super::trigger::{TriggerError, trigger_evaluation};
-use crate::db::{org_has_eval_capable_worker_registration, org_has_writable_cache};
+use crate::db::{
+    org_caches_all_full, org_has_eval_capable_worker_registration, org_has_writable_cache,
+};
 use crate::types::triggers::{ConcurrencyPolicy, TriggerType};
 use crate::types::waiting_reason::WaitingReason;
 use crate::types::*;
@@ -72,6 +74,9 @@ pub struct ApplyInput {
     /// in `evaluation.source_comment` so the terminal-status reporter can
     /// react with thumbs-up / thumbs-down once the build resolves.
     pub source_comment: Option<serde_json::Value>,
+    /// Instance-wide `max_storage_gb` limit (`GRADIENT_MAX_STORAGE_GB`), used by
+    /// the storage-full gate. `0` disables the instance-wide limit.
+    pub instance_max_storage_gb: i32,
 }
 
 /// Identification of the pull request a maintainer must approve before the
@@ -176,6 +181,8 @@ pub async fn apply_trigger<C: ConnectionTrait>(
 
     let eval = park_if_pending_approval(db, eval, input.gate_approval.as_ref()).await?;
     let eval = park_if_no_cache(db, eval, project.organization).await?;
+    let eval =
+        park_if_storage_full(db, eval, project.organization, input.instance_max_storage_gb).await?;
     let eval = park_if_no_workers(db, eval, project.organization).await?;
     Ok(ApplyOutcome::Created {
         evaluation: eval,
@@ -229,6 +236,31 @@ pub async fn park_if_no_cache<C: ConnectionTrait>(
     let mut ae: AEvaluation = eval.into();
     ae.status = Set(EvaluationStatus::Waiting);
     ae.waiting_reason = Set(Some(WaitingReason::NoCache.to_json()));
+    ae.updated_at = Set(crate::types::now());
+    ae.update(db).await
+}
+
+/// Move a freshly-created `Queued` evaluation into `Waiting` with
+/// `WaitingReason::CacheStorageFull` when every writable cache for the org is
+/// within `STORAGE_HEADROOM_BYTES` of its configured `max_storage_gb` (or the
+/// instance-wide limit). Returns the evaluation unchanged when at least one
+/// writable cache still has headroom, or when the org has no writable cache at
+/// all (that case is owned by [`park_if_no_cache`]).
+pub async fn park_if_storage_full<C: ConnectionTrait>(
+    db: &C,
+    eval: MEvaluation,
+    organization: OrganizationId,
+    instance_max_storage_gb: i32,
+) -> Result<MEvaluation, sea_orm::DbErr> {
+    if eval.status != EvaluationStatus::Queued {
+        return Ok(eval);
+    }
+    if !org_caches_all_full(db, organization, instance_max_storage_gb).await? {
+        return Ok(eval);
+    }
+    let mut ae: AEvaluation = eval.into();
+    ae.status = Set(EvaluationStatus::Waiting);
+    ae.waiting_reason = Set(Some(WaitingReason::CacheStorageFull.to_json()));
     ae.updated_at = Set(crate::types::now());
     ae.update(db).await
 }
@@ -324,6 +356,25 @@ mod tests {
         }
     }
 
+    /// The storage gate only acts on `Queued` evaluations; a row already
+    /// parked (e.g. by the approval gate) is returned untouched without
+    /// issuing any cache queries.
+    #[tokio::test]
+    async fn storage_gate_ignores_non_queued_eval() {
+        let already_waiting = make_eval(
+            EvaluationId::now_v7(),
+            ProjectId::nil(),
+            CommitId::now_v7(),
+            EvaluationStatus::Waiting,
+        );
+        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        let out = park_if_storage_full(&db, already_waiting.clone(), OrganizationId::nil(), 0)
+            .await
+            .unwrap();
+        assert_eq!(out.status, EvaluationStatus::Waiting);
+        assert_eq!(out.id, already_waiting.id);
+    }
+
     fn make_commit(id: CommitId, hash: Vec<u8>) -> entity::commit::Model {
         entity::commit::Model {
             id,
@@ -351,6 +402,7 @@ mod tests {
             repository_override: None,
             wildcard_override: None,
             source_comment: None,
+            instance_max_storage_gb: 0,
         }
     }
 
@@ -369,6 +421,7 @@ mod tests {
             created_by: UserId::nil(),
             created_at: NaiveDateTime::default(),
             managed: false,
+            max_storage_gb: 0,
         }
     }
 
@@ -387,6 +440,13 @@ mod tests {
         let cache = cache_row(true);
         db.append_query_results([vec![org_cache_row(cache.id)]])
             .append_query_results([vec![cache]])
+    }
+
+    /// Append the single query `park_if_storage_full` issues for the "not
+    /// full" path: `org_writable_caches` finds no org_cache rows, so
+    /// `org_caches_all_full` short-circuits to `false`.
+    fn with_storage_not_full(db: MockDatabase) -> MockDatabase {
+        db.append_query_results([Vec::<entity::organization_cache::Model>::new()])
     }
 
     fn worker_registration_row(
@@ -490,7 +550,7 @@ mod tests {
                 last_insert_id: 0,
                 rows_affected: 1,
             }]);
-        let db = with_eval_worker(with_writable_cache(db)).into_connection();
+        let db = with_eval_worker(with_storage_not_full(with_writable_cache(db))).into_connection();
 
         let res = apply_trigger(
             &db,
@@ -609,7 +669,7 @@ mod tests {
                 last_insert_id: 0,
                 rows_affected: 1,
             }]);
-        let db = with_eval_worker(with_writable_cache(db)).into_connection();
+        let db = with_eval_worker(with_storage_not_full(with_writable_cache(db))).into_connection();
 
         let res = apply_trigger(
             &db,
@@ -705,7 +765,7 @@ mod tests {
                 last_insert_id: 0,
                 rows_affected: 1,
             }]);
-        let db = with_eval_worker(with_writable_cache(db)).into_connection();
+        let db = with_eval_worker(with_storage_not_full(with_writable_cache(db))).into_connection();
 
         let res = apply_trigger(
             &db,
@@ -797,7 +857,7 @@ mod tests {
                 last_insert_id: 0,
                 rows_affected: 1,
             }]);
-        let db = with_eval_worker(with_writable_cache(db)).into_connection();
+        let db = with_eval_worker(with_storage_not_full(with_writable_cache(db))).into_connection();
 
         let res = apply_trigger(
             &db,
@@ -888,6 +948,7 @@ mod tests {
             repository_override: None,
             wildcard_override: None,
             source_comment: None,
+            instance_max_storage_gb: 0,
         };
         let res = apply_trigger(&db, &project, applied).await.unwrap();
 
@@ -1047,7 +1108,9 @@ mod tests {
                 rows_affected: 1,
             }]);
         // park_if_no_cache: writable cache exists → returns unchanged.
-        let db = with_writable_cache(db)
+        let db = with_writable_cache(db);
+        // park_if_storage_full: no writable cache rows → not full.
+        let db = with_storage_not_full(db)
             // park_if_no_workers: no eval-capable registration → park.
             .append_query_results([Vec::<entity::worker_registration::Model>::new()])
             // Park: update eval read-back + exec, returns the parked row.

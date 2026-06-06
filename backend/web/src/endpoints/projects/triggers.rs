@@ -401,6 +401,7 @@ pub async fn fire_now(
         repository_override: None,
         wildcard_override: None,
         source_comment: None,
+        instance_max_storage_gb: state.config.storage.max_storage_gb,
     };
 
     let outcome = apply_trigger(&state.web_db, &proj, input)

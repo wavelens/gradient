@@ -221,6 +221,7 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
                 repository_override: None,
                 wildcard_override: None,
                 source_comment: None,
+                instance_max_storage_gb: state.config.storage.max_storage_gb,
             },
         )
         .await
