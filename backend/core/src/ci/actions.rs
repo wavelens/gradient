@@ -162,6 +162,10 @@ pub async fn dispatch_evaluation_created(
             "evaluation.queued",
             Some("Waiting for a writable cache subscription before this evaluation can run."),
         ),
+        (EvaluationStatus::Waiting, Some(WaitingReason::CacheStorageFull)) => (
+            "evaluation.queued",
+            Some("Waiting for cache storage to free up before this evaluation can run."),
+        ),
         (
             EvaluationStatus::Waiting,
             Some(WaitingReason::Workers {
