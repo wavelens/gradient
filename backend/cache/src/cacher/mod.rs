@@ -78,6 +78,14 @@ pub async fn cache_loop(state: Arc<ServerState>) {
         {
             error!(error = ?e, "NAR TTL GC failed");
         }
+        if let Err(e) = gradient_core::ci::unpark_storage_full_all(
+            &state.worker_db,
+            state.config.storage.max_storage_gb,
+        )
+        .await
+        {
+            error!(error = ?e, "Failed to unpark storage-full evaluations after cleanup");
+        }
         if let Err(e) = cleanup_stale_build_request_blobs(Arc::clone(&state)).await {
             error!(error = ?e, "Build-request blob GC failed");
         }
