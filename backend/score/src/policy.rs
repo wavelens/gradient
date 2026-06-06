@@ -92,6 +92,7 @@ mod tests {
             JobKindView::Build,
             arch,
             false,
+            false,
             LazyProviders { closure_size: &|| None, history: &|| HistoryPrediction::default() },
         )
     }

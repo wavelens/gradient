@@ -317,24 +317,27 @@ impl JobTracker {
 
         let score_of = |id: &str, job: &PendingJob| -> f64 {
             let s = worker_scores.and_then(|ws| ws.get(id));
-            let (kind_view, arch, closure_size, prefer_local_build, history) = match job {
-                PendingJob::Eval(e) => (
-                    JobKindView::Eval {
-                        fetch_flake: e.job.tasks.contains(&FlakeTask::FetchFlake),
-                    },
-                    "",
-                    None,
-                    false,
-                    score::HistoryPrediction::default(),
-                ),
-                PendingJob::Build(b) => (
-                    JobKindView::Build,
-                    b.architecture.as_str(),
-                    b.closure_size,
-                    b.prefer_local_build,
-                    b.history,
-                ),
-            };
+            let (kind_view, arch, closure_size, prefer_local_build, is_fixed_output, history) =
+                match job {
+                    PendingJob::Eval(e) => (
+                        JobKindView::Eval {
+                            fetch_flake: e.job.tasks.contains(&FlakeTask::FetchFlake),
+                        },
+                        "",
+                        None,
+                        false,
+                        false,
+                        score::HistoryPrediction::default(),
+                    ),
+                    PendingJob::Build(b) => (
+                        JobKindView::Build,
+                        b.architecture.as_str(),
+                        b.closure_size,
+                        b.prefer_local_build,
+                        b.is_fixed_output,
+                        b.history,
+                    ),
+                };
             let closure = move || closure_size;
             let history_provider = move || history;
             let scored = ScoredJob::new(
@@ -343,6 +346,7 @@ impl JobTracker {
                 kind_view,
                 arch,
                 prefer_local_build,
+                is_fixed_output,
                 LazyProviders { closure_size: &closure, history: &history_provider },
             );
             let ctx = JobContext {

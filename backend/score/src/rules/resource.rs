@@ -54,6 +54,7 @@ mod tests {
             JobKindView::Build,
             "x86_64-linux",
             false,
+            false,
             LazyProviders { closure_size: &|| None, history: provider },
         )
     }
