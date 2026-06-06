@@ -30,6 +30,8 @@ pub struct Model {
     pub created_by: UserId,
     pub created_at: NaiveDateTime,
     pub managed: bool,
+    #[sea_orm(default_value = "0")]
+    pub max_storage_gb: i32,
 }
 
 impl std::fmt::Debug for Model {
@@ -47,6 +49,8 @@ impl std::fmt::Debug for Model {
             .field("public", &self.public)
             .field("created_by", &self.created_by)
             .field("created_at", &self.created_at)
+            .field("managed", &self.managed)
+            .field("max_storage_gb", &self.max_storage_gb)
             .finish()
     }
 }
