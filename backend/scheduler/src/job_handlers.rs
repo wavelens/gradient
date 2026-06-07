@@ -660,6 +660,14 @@ impl Scheduler {
                 .await
                 .assign_job(peer_id, &a.job_id);
             if let Some(record) = a.dispatch_record.take() {
+                let _ = self.board_events.send(crate::BoardEvent::JobDispatched {
+                    organization: record.organization.into(),
+                    worker_id: peer_id.to_owned(),
+                    kind: record.kind,
+                    score: record.score,
+                    build_id: record.build_id.map(Into::into),
+                    evaluation_id: record.evaluation_id.into(),
+                });
                 let state = Arc::clone(&self.state);
                 let worker = peer_id.to_owned();
                 self.state.shutdown.spawn(async move {
