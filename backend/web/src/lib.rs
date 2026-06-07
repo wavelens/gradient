@@ -15,6 +15,7 @@ pub mod endpoints;
 pub mod error;
 pub mod helpers;
 pub mod metrics_scope;
+pub mod otlp;
 pub mod permissions;
 
 use axum::body::Body;
@@ -574,6 +575,7 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
     scheduler.start();
     gradient_core::db::retention::start_retention_loop(Arc::clone(&state));
     gradient_core::db::rollup::start_rollup_loop(Arc::clone(&state));
+    otlp::start_otlp(Arc::clone(&state), Arc::clone(&scheduler));
     proto::outbound::start_outbound_loop(Arc::clone(&scheduler));
 
     let proto_limiter = Arc::new(ProtoLimiter::new(state.config.proto.max_proto_connections));
