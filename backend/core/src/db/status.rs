@@ -87,6 +87,35 @@ async fn replace_log_chunk_index(
     Ok(())
 }
 
+pub const PHASE_SUBJECT_BUILD: i16 = 0;
+pub const PHASE_SUBJECT_EVALUATION: i16 = 1;
+
+/// Append-only record of a build/evaluation phase transition. Best-effort:
+/// failures are logged, never propagated, so instrumentation can't break a
+/// status transition.
+pub async fn record_phase_event(
+    db: &impl ConnectionTrait,
+    subject_kind: i16,
+    subject_id: uuid::Uuid,
+    phase: i16,
+    worker_id: Option<String>,
+    at: chrono::NaiveDateTime,
+) {
+    let ev = entity::phase_event::ActiveModel {
+        id: Set(entity::ids::PhaseEventId::now_v7()),
+        subject_kind: Set(subject_kind),
+        subject_id: Set(subject_id),
+        phase: Set(phase),
+        event: Set(0),
+        at: Set(at),
+        worker_id: Set(worker_id),
+        detail: Set(None),
+    };
+    if let Err(e) = entity::phase_event::Entity::insert(ev).exec(db).await {
+        warn!(error = %e, "failed to record phase_event");
+    }
+}
+
 pub async fn update_build_status(
     state: Arc<ServerState>,
     build: MBuild,
@@ -141,6 +170,20 @@ pub async fn update_build_status(
     }
     active_build.status = Set(status);
     active_build.updated_at = Set(now);
+    if status == BuildStatus::Building {
+        active_build.build_started_at = Set(Some(now));
+    }
+    if matches!(
+        status,
+        BuildStatus::Completed
+            | BuildStatus::Substituted
+            | BuildStatus::FailedPermanent
+            | BuildStatus::FailedTimeout
+            | BuildStatus::Aborted
+            | BuildStatus::DependencyFailed
+    ) {
+        active_build.build_finished_at = Set(Some(now));
+    }
 
     match active_build.update(&state.worker_db).await {
         Ok(updated_build) => {
@@ -148,6 +191,21 @@ pub async fn update_build_status(
             let action_build = updated_build.clone();
             state.shutdown.spawn(async move {
                 dispatch_build_event_for_status(&action_state, action_build, event_status).await;
+            });
+
+            let pe_state = Arc::clone(&state);
+            let pe_worker = updated_build.worker.clone();
+            let pe_id = updated_build.id.into_inner();
+            state.shutdown.spawn(async move {
+                record_phase_event(
+                    &pe_state.worker_db,
+                    PHASE_SUBJECT_BUILD,
+                    pe_id,
+                    i32::from(event_status) as i16,
+                    pe_worker,
+                    now,
+                )
+                .await;
             });
 
             // On terminal state, compress the build log into zstd chunks and
@@ -210,6 +268,20 @@ pub async fn update_evaluation_status(
         );
     }
 
+    let phase_col = match status {
+        EvaluationStatus::Fetching => Some(CEvaluation::FetchStartedAt),
+        EvaluationStatus::EvaluatingFlake => Some(CEvaluation::EvalFlakeStartedAt),
+        EvaluationStatus::EvaluatingDerivation => Some(CEvaluation::EvalDrvStartedAt),
+        EvaluationStatus::Building => Some(CEvaluation::BuildingStartedAt),
+        EvaluationStatus::Completed | EvaluationStatus::Failed | EvaluationStatus::Aborted => {
+            Some(CEvaluation::FinishedAt)
+        }
+        _ => None,
+    };
+    if let Some(col) = phase_col {
+        update = update.col_expr(col, sea_orm::sea_query::Expr::value(now));
+    }
+
     let update_result = update
         .filter(CEvaluation::Id.eq(evaluation.id))
         .filter(
@@ -255,6 +327,20 @@ pub async fn update_evaluation_status(
     let action_eval = updated_eval.clone();
     state.shutdown.spawn(async move {
         dispatch_evaluation_event_for_status(&action_state, action_eval, event_status).await;
+    });
+
+    let pe_state = Arc::clone(&state);
+    let pe_id = updated_eval.id.into_inner();
+    state.shutdown.spawn(async move {
+        record_phase_event(
+            &pe_state.worker_db,
+            PHASE_SUBJECT_EVALUATION,
+            pe_id,
+            i32::from(event_status) as i16,
+            None,
+            now,
+        )
+        .await;
     });
 
     updated_eval
