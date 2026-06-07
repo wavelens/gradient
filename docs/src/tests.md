@@ -3472,3 +3472,30 @@ Per-instance (`GRADIENT_MAX_STORAGE_GB`) and per-cache (`max_storage_gb`, GB,
   `validate_max_storage_gb_accepts_zero_and_positive` /
   `validate_max_storage_gb_rejects_negative` cover the API validator. Full
   create/patch/get round-trips of `max_storage_gb` run in CI integration tests.
+
+## Job Board & metrics rework (#343)
+
+Unit tests landed with the implementation:
+
+- **`entity::model_default_tests`** — default-row tests for the six new tables
+  (`phase_event`, `dispatched_job`, `worker_sample`, `worker_connection`,
+  `acknowledged_derivation`, `metric_rollup`) plus the new build/evaluation
+  phase-timestamp columns defaulting to `NULL`.
+- **`entity::ids`** — `new_metrics_ids_round_trip` covers the new id newtypes.
+- **`score::policy::tests::score_detailed_sums_to_total_and_names_rules`** —
+  the per-rule `ScoreBreakdown` sums to `score()` and names every rule.
+- **`core::types::cli::metrics::tests`** — pipeline config defaults.
+
+Integration coverage to run in CI (DB-backed `axum_test` / `MockDatabase`):
+
+- Phase-timestamp + `phase_event` writes on build/eval status transitions
+  (`update_build_status` / `update_evaluation_status`).
+- `dispatched_job` row written on assignment with a non-empty `score_breakdown`.
+- `worker_connection` open/close and `worker_sample` heartbeat rows.
+- Rollup aggregator fact→`metric_rollup` minute buckets + min→hour→day→week
+  cascade; retention pruning by age/granularity.
+- `GET /metrics/query` and `/board/*` scope masking (superuser vs member vs
+  anonymous); `/board/live` event masking; superuser-only acknowledged-derivations.
+
+Frontend specs (vitest, run in isolation): `board.service`, `board-live.service`
+reconnect, `metric-chart`, and the live-jobs scoring-breakdown drawer.
