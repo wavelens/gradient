@@ -29,11 +29,8 @@
 //! `mlock` can fail when the process's locked-memory limit (`RLIMIT_MEMLOCK`)
 //! is exhausted. We log a warning and continue rather than crashing - the
 //! secret is still zeroized on drop; only the swap-prevention guarantee is
-//! lost. On Linux you can raise the limit with:
-//! ```sh
-//! ulimit -l unlimited          # for the current shell
-//! systemd: LimitMEMLOCK=512K  # in the service unit
-//! ```
+//! lost. The bundled NixOS units set `LimitMEMLOCK` so this never fires; for
+//! other deployments raise it with `ulimit -l` or `LimitMEMLOCK=` in the unit.
 
 use std::fmt;
 
