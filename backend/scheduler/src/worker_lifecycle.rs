@@ -10,6 +10,8 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use anyhow::Result;
+use sea_orm::ActiveValue::Set;
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, QueryOrder};
 use tracing::{debug, info, warn};
 
 use gradient_core::types::ids::OrganizationId;
@@ -17,6 +19,37 @@ use gradient_core::types::proto::GradientCapabilities;
 
 use crate::Scheduler;
 use crate::build;
+
+/// Insert a `worker_sample` time-series row for a connected worker. Best-effort;
+/// skipped when the worker's owning org is unknown. Called from the heartbeat loop.
+pub(crate) async fn record_worker_sample(
+    db: &impl sea_orm::ConnectionTrait,
+    info: &crate::WorkerInfo,
+) {
+    let Some(org) = info.organization else {
+        return;
+    };
+    let sample = entity::worker_sample::ActiveModel {
+        id: Set(entity::ids::WorkerSampleId::now_v7()),
+        worker_id: Set(info.id.clone()),
+        organization: Set(org),
+        at: Set(gradient_core::types::now()),
+        cpu_usage_pct: Set(Some(info.cpu_usage_pct)),
+        ram_free_mb: Set(Some(info.ram_free_mb as i64)),
+        ram_total_mb: Set(Some(info.ram_total_mb as i64)),
+        disk_speed_mbps: Set(info.disk_speed_mbps),
+        network_speed_mbps: Set(info.network_speed_mbps),
+        assigned_jobs: Set(info.assigned_job_count as i32),
+        max_concurrent_builds: Set(info.max_concurrent_builds as i32),
+        state: Set(i16::from(info.draining)),
+        capabilities: Set(
+            serde_json::to_value(&info.capabilities).unwrap_or(serde_json::Value::Null)
+        ),
+    };
+    if let Err(e) = entity::worker_sample::Entity::insert(sample).exec(db).await {
+        warn!(error = %e, worker_id = %info.id, "failed to insert worker_sample");
+    }
+}
 
 impl Scheduler {
     pub async fn is_worker_connected(&self, peer_id: &str) -> bool {
@@ -32,13 +65,65 @@ impl Scheduler {
         Arc<tokio::sync::Notify>,
         tokio::sync::mpsc::UnboundedReceiver<(String, String)>,
     ) {
+        let caps_json = serde_json::to_value(&capabilities).unwrap_or(serde_json::Value::Null);
         let (notify, abort_rx) = self.worker_pool.write().await.register(
             peer_id.to_owned(),
             capabilities,
             authorized_peers,
         );
         info!(%peer_id, "worker registered");
+        self.record_worker_connection(peer_id, caps_json).await;
         (notify, abort_rx)
+    }
+
+    /// Resolve the worker's owning org from `worker_registration`, cache it on
+    /// the pool for sample attribution, and open a `worker_connection` row.
+    async fn record_worker_connection(&self, peer_id: &str, capabilities: serde_json::Value) {
+        let reg = entity::worker_registration::Entity::find()
+            .filter(entity::worker_registration::Column::WorkerId.eq(peer_id))
+            .order_by_asc(entity::worker_registration::Column::CreatedAt)
+            .one(&self.state.worker_db)
+            .await;
+        let Ok(Some(reg)) = reg else {
+            return;
+        };
+        self.worker_pool
+            .write()
+            .await
+            .set_worker_org(peer_id, reg.peer_id);
+        let conn = entity::worker_connection::ActiveModel {
+            id: Set(entity::ids::WorkerConnectionId::now_v7()),
+            worker_id: Set(peer_id.to_string()),
+            organization: Set(reg.peer_id),
+            display_name: Set(reg.display_name),
+            connected_at: Set(gradient_core::types::now()),
+            disconnected_at: Set(None),
+            capabilities: Set(capabilities),
+            reason: Set(None),
+        };
+        if let Err(e) = entity::worker_connection::Entity::insert(conn)
+            .exec(&self.state.worker_db)
+            .await
+        {
+            warn!(error = %e, %peer_id, "failed to insert worker_connection");
+        }
+    }
+
+    /// Stamp `disconnected_at` on the worker's latest open `worker_connection`.
+    async fn close_worker_connection(&self, peer_id: &str) {
+        let conn = entity::worker_connection::Entity::find()
+            .filter(entity::worker_connection::Column::WorkerId.eq(peer_id))
+            .filter(entity::worker_connection::Column::DisconnectedAt.is_null())
+            .order_by_desc(entity::worker_connection::Column::ConnectedAt)
+            .one(&self.state.worker_db)
+            .await;
+        if let Ok(Some(conn)) = conn {
+            let mut am = conn.into_active_model();
+            am.disconnected_at = Set(Some(gradient_core::types::now()));
+            if let Err(e) = am.update(&self.state.worker_db).await {
+                warn!(error = %e, %peer_id, "failed to close worker_connection");
+            }
+        }
     }
 
     pub async fn update_authorized_peers(
@@ -143,6 +228,7 @@ impl Scheduler {
     }
 
     pub async fn unregister_worker(&self, peer_id: &str) {
+        self.close_worker_connection(peer_id).await;
         let orphaned = self.worker_pool.write().await.unregister(peer_id);
         let tracker_orphaned = self.job_tracker.write().await.worker_disconnected(peer_id);
         let total = orphaned.len() + tracker_orphaned.len();
