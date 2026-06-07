@@ -123,20 +123,6 @@
   min-height: 0;
 }
 
-cdk-virtual-scroll-viewport.builds-list {
-  // CdkVirtualScrollViewport positions its content absolutely; it needs an
-  // explicit height (flex: 1 inside a flex column gives it one).
-  contain: strict;
-}
-
-// CDK injects `.cdk-virtual-scroll-content-wrapper` as `position: absolute`
-// with `width: auto`, so flex rows inside it would size to their natural
-// content width and overflow the 260 px sidebar. Pinning the wrapper to the
-// viewport width re-activates `text-overflow: ellipsis` on `.build-name`.
-:host ::ng-deep .builds-list .cdk-virtual-scroll-content-wrapper {
-  width: 100%;
-}
-
 .no-builds {
   padding: $spacing-md;
   font-size: $font-size-sm;
@@ -147,7 +133,7 @@ cdk-virtual-scroll-viewport.builds-list {
   display: flex;
   align-items: center;
   gap: $spacing-sm;
-  height: 36px; // must match cdk-virtual-scroll-viewport itemSize
+  height: 36px;
   box-sizing: border-box;
   padding: 0 $spacing-md 0 calc($spacing-md - 3px);
   cursor: pointer;
@@ -186,18 +172,30 @@ cdk-virtual-scroll-viewport.builds-list {
   &.status-aborted, &.status-dependencyfailed { background: $color-secondary; }
 }
 
-// Glyph status indicator (issue #32) - shape distinguishes status without color.
-.build-status-icon {
-  font-size: 14px;
-  flex-shrink: 0;
+// Status sections (issue #32): the labelled, sticky header names the status so
+// it no longer relies on the dot colour alone.
+.build-group-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  padding: $spacing-xs $spacing-md;
+  background: $color-primary;
+  border-bottom: 1px solid $color-border;
+  font-size: $font-size-xs;
+  font-weight: 600;
+  color: $text-secondary;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
   user-select: none;
 
-  &.status-queued                 { color: $color-warning; }
-  &.status-building               { color: $color-info; }
-  &.status-completed,
-  &.status-substituted            { color: $color-success; }
-  &.status-failed  { color: $color-danger; }
-  &.status-aborted, &.status-dependencyfailed { color: $color-secondary; }
+  .build-group-count {
+    margin-left: auto;
+    color: $text-light;
+    font-weight: 500;
+  }
 }
 
 .build-name {
@@ -533,10 +531,6 @@ cdk-virtual-scroll-viewport.builds-list {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   flex-shrink: 0;
-}
-
-.status-badge .status-icon {
-  font-size: 0.95rem;
 }
 
 .log-container-wrapper {

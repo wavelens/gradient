@@ -27,7 +27,6 @@ import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { Subscription } from 'rxjs';
 import { auditTime, switchMap } from 'rxjs/operators';
-import { CdkVirtualScrollViewport, ScrollingModule } from '@angular/cdk/scrolling';
 import { EvaluationsService, BuildItem, BuildWithOutputs } from '@core/services/evaluations.service';
 import { LiveService } from '@core/services/live.service';
 import { OrganizationsService } from '@core/services/organizations.service';
@@ -41,7 +40,7 @@ import { environment } from '@environments/environment';
 @Component({
   selector: 'app-evaluation-log',
   standalone: true,
-  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonModule, ScrollingModule],
+  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonModule],
   templateUrl: './evaluation-log.component.html',
   styleUrl: './evaluation-log.component.scss',
 })
@@ -56,7 +55,6 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private cdr = inject(ChangeDetectorRef);
 
   @ViewChild('logContainer') logContainerRef?: ElementRef<HTMLDivElement>;
-  @ViewChild('buildsViewport') buildsViewport?: CdkVirtualScrollViewport;
 
   loading = signal(true);
   evaluation = signal<Evaluation | null>(null);
@@ -201,12 +199,38 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private readonly buildStatusOrder: Record<string, number> = {
     building: 0,
     queued: 1,
-    failed: 2,
-    aborted: 3,
+    aborted: 2,
+    failed: 3,
     dependencyfailed: 3,
     completed: 4,
     substituted: 4,
   };
+
+  /// Sidebar sections, in display order. `Completed` absorbs `Substituted`,
+  /// `Failed` absorbs `DependencyFailed` - matching the dot colours.
+  private readonly buildGroups: { key: string; label: string; members: string[] }[] = [
+    { key: 'building', label: 'Building', members: ['building'] },
+    { key: 'queued', label: 'Queued', members: ['queued'] },
+    { key: 'aborted', label: 'Aborted', members: ['aborted'] },
+    { key: 'failed', label: 'Failed', members: ['failed', 'dependencyfailed'] },
+    { key: 'completed', label: 'Completed', members: ['completed', 'substituted'] },
+  ];
+
+  /// `visibleBuilds` bucketed into the status sections above (only non-empty
+  /// ones). Each entry keeps its index in `visibleBuilds` so keyboard
+  /// navigation still walks the flat, status-sorted order across sections.
+  groupedBuilds = computed(() => {
+    const indexByGroup = new Map<string, number>();
+    this.buildGroups.forEach((g, i) => g.members.forEach((m) => indexByGroup.set(m, i)));
+    const buckets: { build: BuildItem; index: number }[][] = this.buildGroups.map(() => []);
+    this.visibleBuilds().forEach((build, index) => {
+      const gi = indexByGroup.get(this.statusClass(build.status));
+      if (gi !== undefined) buckets[gi].push({ build, index });
+    });
+    return this.buildGroups
+      .map((g, i) => ({ key: g.key, label: g.label, builds: buckets[i] }))
+      .filter((g) => g.builds.length > 0);
+  });
 
   /// Maps every BuildStatus variant onto the canonical token used by the SCSS
   /// status classes (status-failed, status-completed, …). The three failed
@@ -224,21 +248,6 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       case 'DependencyFailed': return 'dependencyfailed';
       case 'Aborted': return 'aborted';
       default: return (status ?? '').toLowerCase();
-    }
-  }
-
-  /// Non-color status indicator (issue #32): a Material Symbols glyph so the
-  /// status is distinguishable without relying on the colored dot/badge alone.
-  statusIcon(status: string | null | undefined): string {
-    switch (this.statusClass(status)) {
-      case 'completed':
-      case 'substituted': return 'check_circle';
-      case 'building': return 'sync';
-      case 'queued': return 'schedule';
-      case 'failed': return 'cancel';
-      case 'dependencyfailed': return 'link_off';
-      case 'aborted': return 'block';
-      default: return 'help';
     }
   }
 
@@ -1018,13 +1027,10 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
   // ── Scroll management ───────────────────────────────────────────────────────
 
-  onBuildsViewportScroll(): void {
-    const vp = this.buildsViewport;
-    if (!vp) return;
-    const total = vp.getDataLength();
-    const end = vp.getRenderedRange().end;
-    // Pre-fetch next page when rendered range reaches within ~20 rows of the end
-    if (total > 0 && end >= total - 20) {
+  onBuildsViewportScroll(event: Event): void {
+    const el = event.target as HTMLElement;
+    // Pre-fetch the next page as the list nears the bottom.
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 240) {
       this.loadMoreBuilds();
     }
   }
@@ -1146,16 +1152,13 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     const list = this.visibleBuilds();
     if (index < 0 || index >= list.length) return;
     this.selectBuild(list[index], true);
-    // Ensure the target row is rendered (virtual scroll may have recycled it)
-    this.buildsViewport?.scrollToIndex(index);
     const targetId = list[index].id;
     setTimeout(() => {
       const el = document.querySelector<HTMLElement>(`.build-item[data-build-id="${targetId}"]`);
+      el?.scrollIntoView({ block: 'nearest' });
       el?.focus();
     }, 0);
   }
-
-  trackBuildById = (_: number, build: BuildItem): string => build.id;
 
   buildDisplayName(path: string): string {
     // /nix/store/hash-name-version.drv → name-version (strip hash prefix only)
