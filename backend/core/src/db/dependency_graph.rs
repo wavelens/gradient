@@ -35,11 +35,14 @@ pub async fn collect_transitive_dependents<C: ConnectionTrait>(
     let mut frontier: Vec<DerivationId> = vec![start];
 
     while !frontier.is_empty() {
-        let edges = EDerivationDependency::find()
-            .filter(CDerivationDependency::Dependency.is_in(frontier.clone()))
-            .all(db)
-            .await
-            .context("walk derivation_dependency reverse edges")?;
+        let edges = crate::db::fetch_in_chunks(&frontier, |chunk| async move {
+            EDerivationDependency::find()
+                .filter(CDerivationDependency::Dependency.is_in(chunk))
+                .all(db)
+                .await
+        })
+        .await
+        .context("walk derivation_dependency reverse edges")?;
         frontier.clear();
         for edge in edges {
             if visited.insert(edge.derivation) {

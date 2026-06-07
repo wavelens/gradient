@@ -55,15 +55,19 @@ pub async fn cache_used_bytes<C: ConnectionTrait>(
         return Ok(0);
     }
 
-    let sum: Option<i64> = ECP::find()
-        .filter(CCP::Id.is_in(path_ids))
-        .select_only()
-        .column_as(file_size_sum_bigint(), "total")
-        .into_tuple()
-        .one(db)
-        .await?
-        .flatten();
-    Ok(sum.unwrap_or(0))
+    let mut total: i64 = 0;
+    for chunk in path_ids.chunks(crate::db::IN_CHUNK_SIZE) {
+        let sum: Option<i64> = ECP::find()
+            .filter(CCP::Id.is_in(chunk.to_vec()))
+            .select_only()
+            .column_as(file_size_sum_bigint(), "total")
+            .into_tuple()
+            .one(db)
+            .await?
+            .flatten();
+        total += sum.unwrap_or(0);
+    }
+    Ok(total)
 }
 
 /// Sum of compressed NAR bytes stored across the whole instance.

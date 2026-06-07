@@ -31,13 +31,16 @@ pub async fn output_hashes_for_drvs<C: ConnectionTrait>(
     if drv_ids.is_empty() {
         return Ok(vec![]);
     }
-    Ok(EDerivationOutput::find()
-        .filter(CDerivationOutput::Derivation.is_in(drv_ids.to_vec()))
-        .all(db)
-        .await?
-        .into_iter()
-        .map(|o| o.hash)
-        .collect())
+    Ok(crate::db::fetch_in_chunks(drv_ids, |chunk| async move {
+        EDerivationOutput::find()
+            .filter(CDerivationOutput::Derivation.is_in(chunk))
+            .all(db)
+            .await
+    })
+    .await?
+    .into_iter()
+    .map(|o| o.hash)
+    .collect())
 }
 
 /// BFS over `cached_path.references` from `seed_hashes`; returns every reached
@@ -52,10 +55,13 @@ pub async fn runtime_closure_reachable<C: ConnectionTrait>(
     let mut frontier: Vec<String> = seed_hashes.to_vec();
 
     while !frontier.is_empty() {
-        let rows = ECachedPath::find()
-            .filter(CCachedPath::Hash.is_in(frontier.clone()))
-            .all(db)
-            .await?;
+        let rows = crate::db::fetch_in_chunks(&frontier, |chunk| async move {
+            ECachedPath::find()
+                .filter(CCachedPath::Hash.is_in(chunk))
+                .all(db)
+                .await
+        })
+        .await?;
         frontier.clear();
         for row in rows {
             for token in row.references.clone().unwrap_or_default().split_whitespace() {

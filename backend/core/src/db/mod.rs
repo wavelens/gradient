@@ -8,6 +8,7 @@ pub mod admin_tasks;
 pub mod cache_reach;
 pub mod cache_storage;
 pub mod cache_upstream;
+pub mod chunked;
 pub mod closure;
 pub mod connection;
 pub mod dependency_graph;
@@ -27,6 +28,7 @@ pub use self::cache_storage::{
     org_writable_caches,
 };
 pub use self::cache_upstream::{GradientProtoUpstream, gradient_proto_upstreams_for_org, upstream_urls_for_org};
+pub use self::chunked::{IN_CHUNK_SIZE, fetch_in_chunks, for_each_chunk};
 pub use self::closure::*;
 pub use self::connection::*;
 pub use self::dependency_graph::*;

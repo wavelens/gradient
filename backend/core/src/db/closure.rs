@@ -28,10 +28,13 @@ pub async fn transitive_closure_reachable<C: ConnectionTrait>(
     let mut frontier: Vec<DerivationId> = roots.to_vec();
 
     while !frontier.is_empty() {
-        let edges = EDerivationDependency::find()
-            .filter(CDerivationDependency::Derivation.is_in(frontier.clone()))
-            .all(db)
-            .await?;
+        let edges = crate::db::fetch_in_chunks(&frontier, |chunk| async move {
+            EDerivationDependency::find()
+                .filter(CDerivationDependency::Derivation.is_in(chunk))
+                .all(db)
+                .await
+        })
+        .await?;
         frontier.clear();
         for edge in edges {
             if visited.insert(edge.dependency) {
@@ -52,10 +55,13 @@ pub async fn output_sizes_by_drv<C: ConnectionTrait>(
     if drv_ids.is_empty() {
         return Ok(HashMap::new());
     }
-    let outputs = EDerivationOutput::find()
-        .filter(CDerivationOutput::Derivation.is_in(drv_ids.to_vec()))
-        .all(db)
-        .await?;
+    let outputs = crate::db::fetch_in_chunks(drv_ids, |chunk| async move {
+        EDerivationOutput::find()
+            .filter(CDerivationOutput::Derivation.is_in(chunk))
+            .all(db)
+            .await
+    })
+    .await?;
 
     let missing_hashes: Vec<String> = outputs
         .iter()
@@ -65,17 +71,17 @@ pub async fn output_sizes_by_drv<C: ConnectionTrait>(
         .into_iter()
         .collect();
 
-    let cached_size_by_hash: HashMap<String, i64> = if missing_hashes.is_empty() {
-        HashMap::new()
-    } else {
-        ECachedPath::find()
-            .filter(CCachedPath::Hash.is_in(missing_hashes))
-            .all(db)
-            .await?
-            .into_iter()
-            .filter_map(|cp| cp.nar_size.map(|n| (cp.hash, n)))
-            .collect()
-    };
+    let cached_size_by_hash: HashMap<String, i64> =
+        crate::db::fetch_in_chunks(&missing_hashes, |chunk| async move {
+            ECachedPath::find()
+                .filter(CCachedPath::Hash.is_in(chunk))
+                .all(db)
+                .await
+        })
+        .await?
+        .into_iter()
+        .filter_map(|cp| cp.nar_size.map(|n| (cp.hash, n)))
+        .collect();
 
     let mut by_drv: HashMap<DerivationId, i64> = HashMap::new();
     for o in outputs {
@@ -119,10 +125,13 @@ pub async fn transitive_closure_sizes<C: ConnectionTrait>(
     let mut reachable: HashSet<DerivationId> = roots.iter().copied().collect();
     let mut frontier: Vec<DerivationId> = roots.to_vec();
     while !frontier.is_empty() {
-        let edges = EDerivationDependency::find()
-            .filter(CDerivationDependency::Derivation.is_in(frontier.clone()))
-            .all(db)
-            .await?;
+        let edges = crate::db::fetch_in_chunks(&frontier, |chunk| async move {
+            EDerivationDependency::find()
+                .filter(CDerivationDependency::Derivation.is_in(chunk))
+                .all(db)
+                .await
+        })
+        .await?;
         frontier.clear();
         for edge in edges {
             adjacency.entry(edge.derivation).or_default().push(edge.dependency);

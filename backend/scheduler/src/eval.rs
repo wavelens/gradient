@@ -187,12 +187,18 @@ impl<'a> EvalResultProcessor<'a> {
         if hashes.is_empty() {
             return Ok(vec![]);
         }
-        EDerivation::find()
-            .filter(CDerivation::Organization.eq(self.organization_id))
-            .filter(CDerivation::Hash.is_in(hashes))
-            .all(&self.state.worker_db)
-            .await
-            .context("query existing derivations")
+
+        let db = &self.state.worker_db;
+        let org = self.organization_id;
+        gradient_core::db::fetch_in_chunks(&hashes, |chunk| async move {
+            EDerivation::find()
+                .filter(CDerivation::Organization.eq(org))
+                .filter(CDerivation::Hash.is_in(chunk))
+                .all(db)
+                .await
+        })
+        .await
+        .context("query existing derivations")
     }
 
     /// Insert `ABuild` rows for each newly-discovered derivation.
@@ -380,12 +386,16 @@ impl<'a> EvalResultProcessor<'a> {
         if drv_ids.is_empty() {
             return out;
         }
-        let prior = match EBuild::find()
-            .filter(CBuild::Derivation.is_in(drv_ids))
-            .filter(CBuild::Status.is_in([BuildStatus::Completed, BuildStatus::Substituted]))
-            .order_by_desc(CBuild::CreatedAt)
-            .all(&self.state.worker_db)
-            .await
+        let db = &self.state.worker_db;
+        let prior = match gradient_core::db::fetch_in_chunks(&drv_ids, |chunk| async move {
+            EBuild::find()
+                .filter(CBuild::Derivation.is_in(chunk))
+                .filter(CBuild::Status.is_in([BuildStatus::Completed, BuildStatus::Substituted]))
+                .order_by_desc(CBuild::CreatedAt)
+                .all(db)
+                .await
+        })
+        .await
         {
             Ok(v) => v,
             Err(e) => {
@@ -408,11 +418,15 @@ impl<'a> EvalResultProcessor<'a> {
             return Ok(std::collections::HashSet::new());
         }
 
-        let outputs = EDerivationOutput::find()
-            .filter(CDerivationOutput::Derivation.is_in(drv_ids.to_vec()))
-            .all(&self.state.worker_db)
-            .await
-            .context("compute_truly_substituted: load derivation_output")?;
+        let db = &self.state.worker_db;
+        let outputs = gradient_core::db::fetch_in_chunks(drv_ids, |chunk| async move {
+            EDerivationOutput::find()
+                .filter(CDerivationOutput::Derivation.is_in(chunk))
+                .all(db)
+                .await
+        })
+        .await
+        .context("compute_truly_substituted: load derivation_output")?;
 
         if outputs.is_empty() {
             return Ok(std::collections::HashSet::new());
@@ -425,9 +439,13 @@ impl<'a> EvalResultProcessor<'a> {
             .into_iter()
             .collect();
 
-        let fully_cached_hashes: std::collections::HashSet<String> = ECachedPath::find()
-            .filter(CCachedPath::Hash.is_in(hashes))
-            .all(&self.state.worker_db)
+        let fully_cached_hashes: std::collections::HashSet<String> =
+            gradient_core::db::fetch_in_chunks(&hashes, |chunk| async move {
+                ECachedPath::find()
+                    .filter(CCachedPath::Hash.is_in(chunk))
+                    .all(db)
+                    .await
+            })
             .await
             .context("compute_truly_substituted: load cached_path")?
             .into_iter()
@@ -691,10 +709,14 @@ async fn expand_substituted_closure(
 
     if !spawn_inputs.is_empty() {
         let drv_ids: Vec<DerivationId> = spawn_inputs.iter().map(|(_, d)| *d).collect();
-        let paths = match EDerivation::find()
-            .filter(CDerivation::Id.is_in(drv_ids))
-            .all(&state.worker_db)
-            .await
+        let db = &state.worker_db;
+        let paths = match gradient_core::db::fetch_in_chunks(&drv_ids, |chunk| async move {
+            EDerivation::find()
+                .filter(CDerivation::Id.is_in(chunk))
+                .all(db)
+                .await
+        })
+        .await
         {
             Ok(rows) => rows
                 .into_iter()
@@ -897,10 +919,15 @@ pub async fn flush_deferred_deps(
         .into_iter()
         .collect();
 
-    let drv_path_to_id: std::collections::HashMap<String, DerivationId> = EDerivation::find()
-        .filter(CDerivation::Organization.eq(organization_id))
-        .filter(CDerivation::Hash.is_in(all_hashes))
-        .all(&state.worker_db)
+    let db = &state.worker_db;
+    let drv_path_to_id: std::collections::HashMap<String, DerivationId> =
+        gradient_core::db::fetch_in_chunks(&all_hashes, |chunk| async move {
+            EDerivation::find()
+                .filter(CDerivation::Organization.eq(organization_id))
+                .filter(CDerivation::Hash.is_in(chunk))
+                .all(db)
+                .await
+        })
         .await
         .context("flush_deferred_deps: query derivations")?
         .into_iter()

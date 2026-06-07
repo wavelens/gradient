@@ -142,13 +142,20 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
         .into_iter()
         .collect();
 
-    let projects: std::collections::HashMap<_, _> = EProject::find()
-        .filter(CProject::Id.is_in(project_ids))
-        .all(&state.worker_db)
-        .await?
-        .into_iter()
-        .map(|p| (p.id, p))
-        .collect();
+    let db = &state.worker_db;
+    let projects: std::collections::HashMap<_, _> = gradient_core::db::fetch_in_chunks(
+        &project_ids,
+        |chunk| async move {
+            EProject::find()
+                .filter(CProject::Id.is_in(chunk))
+                .all(db)
+                .await
+        },
+    )
+    .await?
+    .into_iter()
+    .map(|p| (p.id, p))
+    .collect();
 
     for trig in triggers {
         let Some(project) = projects.get(&trig.project) else {
