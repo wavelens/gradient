@@ -164,6 +164,17 @@ export interface BoardHealth {
   latest_rollup_bucket: string | null;
 }
 
+export interface DurationsHeatmap {
+  times: string[];
+  bands: { band: string; counts: number[] }[];
+}
+
+export interface TopOrgBuildTime {
+  organization: string;
+  total_build_ms: number;
+  build_count: number;
+}
+
 @Injectable({ providedIn: 'root' })
 export class BoardService {
   private api = inject(ApiService);
@@ -208,6 +219,14 @@ export class BoardService {
 
   getHealth(): Observable<BoardHealth> {
     return this.api.get<BoardHealth>('board/health');
+  }
+
+  getDurationsHeatmap(windowHours = 24): Observable<DurationsHeatmap> {
+    return this.api.get<DurationsHeatmap>(`board/durations/heatmap?window_hours=${windowHours}`);
+  }
+
+  getTopOrgs(windowDays = 30): Observable<TopOrgBuildTime[]> {
+    return this.api.get<TopOrgBuildTime[]>(`board/expensive/top-orgs?window_days=${windowDays}`);
   }
 
   query(metric: string, granularity = 'hour', org?: string): Observable<MetricPoint[]> {

@@ -5807,6 +5807,32 @@ x-nix-cache-paths:
         '200':
           description: Fleet time-series
 
+  /board/durations/heatmap:
+    get:
+      tags: [board]
+      summary: Build-duration heatmap
+      description: 2D build-duration distribution (duration band × hour) computed on demand from builds, scoped to the caller's orgs.
+      operationId: getBoardDurationsHeatmap
+      parameters:
+        - { name: window_hours, in: query, required: false, schema: { type: integer, default: 24 } }
+      responses:
+        '200':
+          description: Duration heatmap
+
+  /board/expensive/top-orgs:
+    get:
+      tags: [board]
+      summary: Top organizations by build time (superuser)
+      description: Organizations ranked by cumulative completed-build time in a window. Superuser only.
+      operationId: getBoardTopOrgs
+      parameters:
+        - { name: window_days, in: query, required: false, schema: { type: integer, default: 30 } }
+      responses:
+        '200':
+          description: Top organizations
+        '403':
+          description: Superuser required
+
   /board/health:
     get:
       tags: [board]
