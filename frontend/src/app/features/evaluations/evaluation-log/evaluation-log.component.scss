@@ -186,6 +186,20 @@ cdk-virtual-scroll-viewport.builds-list {
   &.status-aborted, &.status-dependencyfailed { background: $color-secondary; }
 }
 
+// Glyph status indicator (issue #32) - shape distinguishes status without color.
+.build-status-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+  user-select: none;
+
+  &.status-queued                 { color: $color-warning; }
+  &.status-building               { color: $color-info; }
+  &.status-completed,
+  &.status-substituted            { color: $color-success; }
+  &.status-failed  { color: $color-danger; }
+  &.status-aborted, &.status-dependencyfailed { color: $color-secondary; }
+}
+
 .build-name {
   flex: 1;
   min-width: 0;
@@ -513,6 +527,18 @@ cdk-virtual-scroll-viewport.builds-list {
   flex: 1;
 }
 
+.log-line-count {
+  font-size: $font-size-xs;
+  color: $text-light;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.status-badge .status-icon {
+  font-size: 0.95rem;
+}
+
 .log-container-wrapper {
   position: relative;
   flex: 1;
@@ -750,6 +776,8 @@ cdk-virtual-scroll-viewport.builds-list {
 
 .log-spacer {
   width: 100%;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .log-line {
@@ -758,6 +786,11 @@ cdk-virtual-scroll-viewport.builds-list {
   font-family: $font-family-mono;
   font-size: $font-size-xs;
   line-height: 1.6;
+  // Exclude the row itself from selection so the line-number gutter and the
+  // flex/block layout don't inject blank lines into copied text; only the
+  // content span below opts back in.
+  user-select: none;
+  -webkit-user-select: none;
 
   &--hl {
     background: rgba(234, 179, 8, 0.18);
@@ -771,6 +804,7 @@ cdk-virtual-scroll-viewport.builds-list {
   text-align: right;
   color: $text-secondary;
   user-select: none;
+  -webkit-user-select: none;
   cursor: pointer;
   opacity: 0.55;
 
@@ -783,4 +817,6 @@ cdk-virtual-scroll-viewport.builds-list {
   color: $text-primary;
   white-space: pre-wrap;
   word-break: break-word;
+  user-select: text;
+  -webkit-user-select: text;
 }

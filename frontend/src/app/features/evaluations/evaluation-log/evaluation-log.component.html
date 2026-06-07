@@ -91,7 +91,7 @@
             role="option"
             [attr.aria-selected]="selectedBuildId() === build.id"
           >
-            <span class="build-dot status-{{ statusClass(build.status) }}"></span>
+            <span class="build-status-icon material-symbols-outlined status-{{ statusClass(build.status) }}" [attr.aria-label]="build.status" [title]="build.status">{{ statusIcon(build.status) }}</span>
             <span class="build-name">{{ buildDisplayName(build.name) }}</span>
             @if (getBuildElapsed(build)) {
               <span class="build-elapsed" [class.build-elapsed--running]="build.status === 'Building'">{{ getBuildElapsed(build) }}</span>
@@ -265,7 +265,13 @@
           <div class="log-container-wrapper">
             <div class="log-build-header">
               <code class="log-build-path">{{ selectedBuild()?.name }}</code>
-              <span class="status-badge status-{{ statusClass(selectedBuild()?.status) }}">{{ selectedBuild()?.status }}</span>
+              @if (logLineCount() > 0) {
+                <span class="log-line-count">{{ logLineCount() }} {{ logLineCount() === 1 ? 'line' : 'lines' }}</span>
+              }
+              <span class="status-badge status-{{ statusClass(selectedBuild()?.status) }}">
+                <span class="status-icon material-symbols-outlined">{{ statusIcon(selectedBuild()?.status) }}</span>
+                {{ selectedBuild()?.status }}
+              </span>
             </div>
             @if (chunkedMode() && searchOpen()) {
               <div class="log-search-bar">
@@ -300,7 +306,7 @@
                       [class.log-line--hl]="ln.n === highlightLine()"
                       [attr.data-line]="ln.n"
                     >
-                      <span class="log-gutter" (click)="copyLineLink(ln.n)" title="Copy link to line">{{ ln.n }}</span>
+                      <span class="log-gutter" (click)="selectLine(ln.n)" title="Link to line">{{ ln.n }}</span>
                       <pre class="log-line-content" [innerHTML]="ln.html"></pre>
                     </div>
                   }

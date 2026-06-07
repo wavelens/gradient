@@ -25,10 +25,11 @@ import {
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
-import { interval, Subscription } from 'rxjs';
-import { switchMap } from 'rxjs/operators';
+import { Subscription } from 'rxjs';
+import { auditTime, switchMap } from 'rxjs/operators';
 import { CdkVirtualScrollViewport, ScrollingModule } from '@angular/cdk/scrolling';
 import { EvaluationsService, BuildItem, BuildWithOutputs } from '@core/services/evaluations.service';
+import { LiveService } from '@core/services/live.service';
 import { OrganizationsService } from '@core/services/organizations.service';
 import { Evaluation, EvaluationMessage, EvaluationStatus, WaitingReason, TriggerType } from '@core/models';
 import { AuthService } from '@core/services/auth.service';
@@ -48,6 +49,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private evalService = inject(EvaluationsService);
+  private live = inject(LiveService);
   private orgsService = inject(OrganizationsService);
   protected authService = inject(AuthService);
   private sanitizer = inject(DomSanitizer);
@@ -63,6 +65,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   selectedBuildId = signal<string | null>(null);
   selectedSection = signal<'messages' | null>(null);
   logHtml = signal<SafeHtml>('');
+  logLineCount = signal(0);
   logLoading = signal(true);
   aborting = signal(false);
   autoScroll = signal(true);
@@ -99,7 +102,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   errorMessages = computed(() => this.messages().filter(m => m.level === 'Error'));
   warningMessages = computed(() => this.messages().filter(m => m.level === 'Warning'));
 
-  private pollSub?: Subscription;
+  private liveSub?: Subscription;
   private durationInterval?: ReturnType<typeof setInterval>;
   private activeStreamReader?: ReadableStreamDefaultReader<Uint8Array>;
   private streamingBuildId?: string;
@@ -162,7 +165,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     document.documentElement.style.overflow = '';
     document.body.style.overflow = '';
-    this.stopPolling();
+    this.stopLiveUpdates();
     this.stopDurationTimer();
     this.stopActiveStream();
     this.stopBuildRevealTimer();
@@ -178,7 +181,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
         this.loadBuilds();
         this.loadMessages();
         this.startDurationTimer(evaluation);
-        this.startPollingIfRunning(evaluation.status);
+        this.startLiveUpdates(evaluation.status);
       },
       error: () => this.loading.set(false),
     });
@@ -224,10 +227,36 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     }
   }
 
+  /// Non-color status indicator (issue #32): a Material Symbols glyph so the
+  /// status is distinguishable without relying on the colored dot/badge alone.
+  statusIcon(status: string | null | undefined): string {
+    switch (this.statusClass(status)) {
+      case 'completed':
+      case 'substituted': return 'check_circle';
+      case 'building': return 'sync';
+      case 'queued': return 'schedule';
+      case 'failed': return 'cancel';
+      case 'dependencyfailed': return 'link_off';
+      case 'aborted': return 'block';
+      default: return 'help';
+    }
+  }
+
   private sortBuilds(builds: BuildItem[]): BuildItem[] {
-    const seen = new Set<string>();
-    const unique = builds.filter(b => (seen.has(b.id) ? false : (seen.add(b.id), true)));
-    return unique.sort((a, b) => {
+    // Key by derivation path, not id: follower builds (via != null) are surfaced
+    // under the leader's id by the API, but a deep-linked follower keeps its own
+    // id, so the same logical build can arrive under two ids. The derivation path
+    // is the stable logical identity. Prefer the entry already selected so a
+    // deep-link survives, otherwise the first seen wins.
+    const byKey = new Map<string, BuildItem>();
+    const selectedId = this.selectedBuildId();
+    for (const b of builds) {
+      const key = b.name;
+      const existing = byKey.get(key);
+      if (!existing || b.id === selectedId) byKey.set(key, b);
+    }
+
+    return [...byKey.values()].sort((a, b) => {
       const oa = this.buildStatusOrder[this.statusClass(a.status)] ?? 99;
       const ob = this.buildStatusOrder[this.statusClass(b.status)] ?? 99;
       if (oa !== ob) return oa - ob;
@@ -390,18 +419,22 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     });
   }
 
-  startPollingIfRunning(status: EvaluationStatus): void {
-    this.stopPolling();
+  startLiveUpdates(status: EvaluationStatus): void {
+    this.stopLiveUpdates();
     if (!this.isRunningStatus(status)) return;
 
-    this.pollSub = interval(5000)
-      .pipe(switchMap(() => this.evalService.getEvaluation(this.evaluationId)))
+    this.liveSub = this.live
+      .connect(`/evals/${this.evaluationId}/live`)
+      .pipe(
+        auditTime(300),
+        switchMap(() => this.evalService.getEvaluation(this.evaluationId)),
+      )
       .subscribe({
         next: (evaluation) => {
           this.evaluation.set(evaluation);
           this.loadBuilds();
           if (!this.isRunningStatus(evaluation.status)) {
-            this.stopPolling();
+            this.stopLiveUpdates();
             this.updateDuration(evaluation);
             this.stopDurationTimer();
             this.loadBuilds(); // final update
@@ -411,9 +444,9 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       });
   }
 
-  stopPolling(): void {
-    this.pollSub?.unsubscribe();
-    this.pollSub = undefined;
+  stopLiveUpdates(): void {
+    this.liveSub?.unsubscribe();
+    this.liveSub = undefined;
   }
 
   // ── Build selection & log loading ──────────────────────────────────────────
@@ -477,6 +510,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.stopActiveStream();
     this.logLines = [];
     this.logHtml.set('');
+    this.logLineCount.set(0);
     this.selectedBuildId.set(build.id);
     this.autoScroll.set(true);
     this.showScrollBtn.set(false);
@@ -584,6 +618,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private resetChunkedState(): void {
     this.chunkedMode.set(false);
     this.chunkIndex = null;
+    this.logLineCount.set(0);
     this.windowText = [];
     this.windowStart = 1;
     this.windowLines.set([]);
@@ -614,6 +649,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
     this.chunkIndex = index;
     this.chunkedMode.set(true);
+    this.logLineCount.set(index.total_lines);
 
     const target = this.pendingDeepLink;
     this.pendingDeepLink = null;
@@ -699,10 +735,16 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     }, 0);
   }
 
-  copyLineLink(line: number): void {
+  selectLine(line: number): void {
+    this.highlightLine.set(line);
+    this.router.navigate([], {
+      relativeTo: this.route,
+      fragment: `L${line}`,
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+    });
     const url = `${window.location.origin}${window.location.pathname}${window.location.search}#L${line}`;
     navigator.clipboard?.writeText(url).catch(() => { /* ignore */ });
-    this.highlightLine.set(line);
   }
 
   // ── Ctrl+F search ───────────────────────────────────────────────────────────
@@ -970,6 +1012,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private renderLog(): void {
     const html = this.logLines.map(l => this.convertAnsiToHtml(l)).join('\n');
     this.logHtml.set(this.sanitizer.bypassSecurityTrustHtml(html));
+    this.logLineCount.set(this.logLines.length);
     this.cdr.detectChanges();
   }
 
@@ -1197,7 +1240,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   }
 
   navigateToEvaluation(id: string): void {
-    this.stopPolling();
+    this.stopLiveUpdates();
     this.stopDurationTimer();
     this.stopActiveStream();
     this.selectedBuildId.set(null);

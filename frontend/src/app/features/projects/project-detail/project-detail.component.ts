@@ -8,7 +8,9 @@ import { Component, OnInit, OnDestroy, computed, inject, signal } from '@angular
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { interval, Subscription } from 'rxjs';
+import { auditTime } from 'rxjs/operators';
 import { ButtonModule } from 'primeng/button';
+import { LiveService } from '@core/services/live.service';
 import { AuthService } from '@core/services/auth.service';
 import { OrganizationsService } from '@core/services/organizations.service';
 import { ProjectsService } from '@core/services/projects.service';
@@ -39,6 +41,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   private orgsService = inject(OrganizationsService);
   private projectsService = inject(ProjectsService);
   private accessService = inject(AccessService);
+  private live = inject(LiveService);
 
   access = injectProjectAccess();
   /// Access projection for trigger-style actions (Start / Restart / Abort).
@@ -56,7 +59,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   orgDisplayName = signal('');
   projectName = '';
 
-  private pollSubscription?: Subscription;
+  private liveSub?: Subscription;
   private tickSubscription?: Subscription;
 
   ngOnInit(): void {
@@ -67,12 +70,12 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
       error: () => {},
     });
     this.loadProjectData();
-    this.startPolling();
+    this.startLiveUpdates();
     this.tickSubscription = interval(1000).subscribe(() => this.tick.set(Date.now()));
   }
 
   ngOnDestroy(): void {
-    this.stopPolling();
+    this.stopLiveUpdates();
   }
 
   loadProjectData(showLoading = true): void {
@@ -167,15 +170,11 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
     });
   }
 
-  startPolling(): void {
-    this.pollSubscription = interval(3000).subscribe(() => {
-      const proj = this.project();
-      const hasRunningEvaluation = proj?.last_evaluations?.some(e => this.isRunningStatus(e.status)) ?? false;
-      const hasRunningBuild = this.entryPoints().some(ep => this.isBuildRunning(ep.build_status));
-      if (hasRunningEvaluation || hasRunningBuild || this.starting()) {
-        this.loadProjectData(false);
-      }
-    });
+  startLiveUpdates(): void {
+    this.liveSub = this.live
+      .connect(`/projects/${this.orgName}/${this.projectName}/live`)
+      .pipe(auditTime(500))
+      .subscribe(() => this.loadProjectData(false));
   }
 
   onProjectDataLoaded(): void {
@@ -187,8 +186,8 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
     }
   }
 
-  stopPolling(): void {
-    this.pollSubscription?.unsubscribe();
+  stopLiveUpdates(): void {
+    this.liveSub?.unsubscribe();
     this.tickSubscription?.unsubscribe();
   }
 
