@@ -287,6 +287,35 @@ export const routes: Routes = [
               ),
           },
           {
+            path: 'jobs/:id',
+            title: 'Dispatched Job',
+            loadComponent: () =>
+              import('./features/board/job-detail/job-detail.component').then(
+                (m) => m.BoardJobDetailComponent
+              ),
+          },
+          {
+            path: 'scheduler',
+            loadComponent: () =>
+              import('./features/board/scheduler/scheduler.component').then(
+                (m) => m.BoardSchedulerComponent
+              ),
+          },
+          {
+            path: 'throughput',
+            loadComponent: () =>
+              import('./features/board/throughput/throughput.component').then(
+                (m) => m.BoardThroughputComponent
+              ),
+          },
+          {
+            path: 'durations',
+            loadComponent: () =>
+              import('./features/board/durations/durations.component').then(
+                (m) => m.BoardDurationsComponent
+              ),
+          },
+          {
             path: 'workers',
             loadComponent: () =>
               import('./features/board/workers/workers.component').then(

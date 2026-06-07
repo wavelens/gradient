@@ -4,21 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnDestroy, OnInit, inject, signal, computed } from '@angular/core';
+import { Component, OnDestroy, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { Router, RouterModule } from '@angular/router';
 import { Subscription } from 'rxjs';
-import {
-  BoardService,
-  DispatchedJobSummary,
-  DispatchedJobDetail,
-} from '@core/services/board.service';
+import { BoardService, DispatchedJobSummary } from '@core/services/board.service';
 import { BoardLiveService } from '@core/services/board-live.service';
-import { MetricChartComponent } from '@shared/components/metric-chart/metric-chart.component';
 
 @Component({
   selector: 'app-board-live-jobs',
   standalone: true,
-  imports: [CommonModule, MetricChartComponent],
+  imports: [CommonModule, RouterModule],
   template: `
     <div class="banner">
       Showing {{ jobs().length }} dispatched job(s) you can see.
@@ -33,45 +29,18 @@ import { MetricChartComponent } from '@shared/components/metric-chart/metric-cha
       </thead>
       <tbody>
         @for (j of jobs(); track j.id) {
-          <tr (click)="open(j)" [class.selected]="selected()?.id === j.id">
+          <tr [class.live]="isLive(j)" (click)="inspect(j)">
             <td>{{ j.kind === 1 ? 'build' : 'eval' }}</td>
             <td class="mono">{{ j.worker_id }}</td>
             <td>{{ j.score | number: '1.1-1' }}</td>
             <td>{{ j.dispatched_at | date: 'HH:mm:ss' }}</td>
-            <td>›</td>
+            <td>{{ isLive(j) ? '' : '›' }}</td>
           </tr>
         } @empty {
           <tr><td colspan="5" class="muted">No visible dispatched jobs.</td></tr>
         }
       </tbody>
     </table>
-
-    @if (selected(); as detail) {
-      <div class="drawer">
-        <h3>Scoring breakdown <button (click)="selected.set(null)">✕</button></h3>
-        <div class="meta">
-          <span>worker <b class="mono">{{ detail.worker_id }}</b></span>
-          <span>total score <b>{{ detail.score | number: '1.2-2' }}</b></span>
-          <span>eval <b class="mono">{{ detail.evaluation_id }}</b></span>
-        </div>
-        <app-metric-chart
-          type="bar"
-          [horizontal]="true"
-          [height]="320"
-          [series]="breakdownSeries()"
-          [categories]="breakdownCategories()"
-          [colors]="['#17a2b8']"
-        ></app-metric-chart>
-        <details>
-          <summary>Job context</summary>
-          <pre>{{ detail.job_context | json }}</pre>
-        </details>
-        <details>
-          <summary>Worker context</summary>
-          <pre>{{ detail.worker_context | json }}</pre>
-        </details>
-      </div>
-    }
   `,
   styles: [
     `
@@ -80,33 +49,21 @@ import { MetricChartComponent } from '@shared/components/metric-chart/metric-cha
       table.jobs { width: 100%; border-collapse: collapse; background: #21262d; border: 1px solid #2d333b; border-radius: 8px; overflow: hidden; }
       th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #2d333b; color: #abb0b4; font-size: 0.85rem; }
       th { color: #fff; }
-      tbody tr { cursor: pointer; }
-      tbody tr:hover, tbody tr.selected { background: #2d333b; }
+      tbody tr:not(.live) { cursor: pointer; }
+      tbody tr:not(.live):hover { background: #2d333b; }
+      tbody tr.live { opacity: 0.7; font-style: italic; }
       .mono { font-family: monospace; }
-      .drawer { margin-top: 1.5rem; background: #21262d; border: 1px solid #2d333b; border-radius: 8px; padding: 1rem; }
-      .drawer h3 { color: #fff; display: flex; justify-content: space-between; margin: 0 0 0.75rem; }
-      .drawer h3 button { background: none; border: none; color: #abb0b4; cursor: pointer; font-size: 1rem; }
-      .meta { display: flex; gap: 1.5rem; color: #abb0b4; margin-bottom: 1rem; font-size: 0.85rem; }
-      .meta b { color: #fff; }
-      details { margin-top: 0.75rem; color: #abb0b4; }
-      pre { background: #0d1118; padding: 0.75rem; border-radius: 6px; overflow: auto; color: #abb0b4; font-size: 0.8rem; }
     `,
   ],
 })
 export class BoardLiveJobsComponent implements OnInit, OnDestroy {
   private board = inject(BoardService);
   private live = inject(BoardLiveService);
+  private router = inject(Router);
   private sub?: Subscription;
 
   jobs = signal<DispatchedJobSummary[]>([]);
   otherRunning = signal(0);
-  selected = signal<DispatchedJobDetail | null>(null);
-
-  breakdownSeries = computed(() => {
-    const rules = this.selected()?.score_breakdown?.rules ?? {};
-    return [{ name: 'contribution', data: Object.values(rules) }];
-  });
-  breakdownCategories = computed(() => Object.keys(this.selected()?.score_breakdown?.rules ?? {}));
 
   ngOnInit(): void {
     this.board.getDispatchedJobs().subscribe((r) => {
@@ -119,7 +76,7 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
           this.jobs.update((list) =>
             [
               {
-                id: `${ev.evaluation_id}:${ev.worker_id}:${Date.now()}`,
+                id: `live:${ev.evaluation_id}:${ev.worker_id}:${Date.now()}`,
                 kind: ev.kind ?? 0,
                 organization: ev.organization!,
                 worker_id: ev.worker_id ?? '',
@@ -141,11 +98,13 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
     this.sub?.unsubscribe();
   }
 
-  open(j: DispatchedJobSummary): void {
-    // Live-synthesized rows carry a composite id; only persisted rows have detail.
-    if (j.id.includes(':')) {
-      return;
+  isLive(j: DispatchedJobSummary): boolean {
+    return j.id.startsWith('live:');
+  }
+
+  inspect(j: DispatchedJobSummary): void {
+    if (!this.isLive(j)) {
+      this.router.navigate(['/board/jobs', j.id]);
     }
-    this.board.getJob(j.id).subscribe((d) => this.selected.set(d));
   }
 }

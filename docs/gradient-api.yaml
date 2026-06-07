@@ -5748,6 +5748,19 @@ x-nix-cache-paths:
         '404':
           description: Not found or out of scope
 
+  /board/scoring/summary:
+    get:
+      tags: [board]
+      summary: Aggregate scoring summary
+      description: Score histogram and mean per-rule contribution over recently dispatched jobs, masked to the caller's orgs.
+      operationId: getBoardScoringSummary
+      parameters:
+        - { name: window_hours, in: query, required: false, schema: { type: integer, default: 24 } }
+        - { name: limit, in: query, required: false, schema: { type: integer, default: 2000 } }
+      responses:
+        '200':
+          description: Scoring summary
+
   /board/workers:
     get:
       tags: [board]

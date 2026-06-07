@@ -72,6 +72,28 @@ export interface MetricMeta {
   dimensions: string[];
 }
 
+export interface ScoreBucket {
+  lo: number;
+  hi: number;
+  count: number;
+}
+
+export interface RuleContribution {
+  rule: string;
+  avg: number;
+  min: number;
+  max: number;
+}
+
+export interface ScoringSummary {
+  sample_size: number;
+  score_min: number;
+  score_max: number;
+  score_avg: number;
+  histogram: ScoreBucket[];
+  rules: RuleContribution[];
+}
+
 @Injectable({ providedIn: 'root' })
 export class BoardService {
   private api = inject(ApiService);
@@ -96,6 +118,10 @@ export class BoardService {
 
   getCatalog(): Observable<MetricMeta[]> {
     return this.api.get<MetricMeta[]>('metrics/catalog');
+  }
+
+  getScoringSummary(windowHours = 24): Observable<ScoringSummary> {
+    return this.api.get<ScoringSummary>(`board/scoring/summary?window_hours=${windowHours}`);
   }
 
   query(metric: string, granularity = 'hour', org?: string): Observable<MetricPoint[]> {
