@@ -3507,3 +3507,12 @@ generated SQL wraps `SUM(file_size)` in `CAST(... AS bigint)`. Postgres widens
 `SUM(int8)` to `NUMERIC`, which failed to decode into `Option<i64>` and surfaced
 as an Internal Server Error when manually triggering an evaluation for an org
 with a writable cache.
+
+## Multi-line evaluation warnings preserved (#351)
+
+`worker::nix::eval_worker::tests::parse_warnings_keeps_multiline_warning` and
+`parse_warnings_splits_distinct_and_drops_sqlite_busy` cover the captured-stderr
+parser: a `warning:` line plus its following lines (until the next
+`warning:`/`trace:`/`error:`/`note:` entry) are kept as one warning, so
+multi-line warnings are no longer truncated to their first line, while distinct
+warnings still split and the `SQLite database … is busy` line is still dropped.

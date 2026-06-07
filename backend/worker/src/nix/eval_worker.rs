@@ -297,17 +297,7 @@ where
     let mut reader = unsafe { std::fs::File::from_raw_fd(pipefd[0]) };
     let _ = reader.read_to_string(&mut captured);
 
-    let warnings: Vec<String> = captured
-        .lines()
-        .filter(|l| {
-            let lower = l.to_ascii_lowercase();
-            lower.contains("warning:")
-        })
-        .map(|l| l.trim().to_string())
-        .filter(|l| !l.contains("SQLite database") || !l.contains("is busy"))
-        .collect();
-
-    (result, warnings)
+    (result, parse_warnings(&captured))
 }
 
 #[cfg(not(unix))]
@@ -318,9 +308,59 @@ where
     (f(), vec![])
 }
 
+/// Groups captured Nix stderr into whole warnings: a `warning:` line plus every
+/// following line until the next log entry (`warning:`/`trace:`/`error:`/`note:`),
+/// so multi-line warnings keep all their lines instead of just the first.
+fn parse_warnings(captured: &str) -> Vec<String> {
+    fn is_boundary(line: &str) -> bool {
+        let t = line.trim_start().to_ascii_lowercase();
+        ["warning:", "trace:", "error:", "note:"].iter().any(|p| t.starts_with(p))
+    }
+
+    let lines: Vec<&str> = captured.lines().collect();
+    let mut warnings = Vec::new();
+    let mut i = 0;
+    while i < lines.len() {
+        if !lines[i].to_ascii_lowercase().contains("warning:") {
+            i += 1;
+            continue;
+        }
+
+        let mut block = vec![lines[i].trim_end()];
+        i += 1;
+        while i < lines.len() && !is_boundary(lines[i]) {
+            block.push(lines[i].trim_end());
+            i += 1;
+        }
+
+        let joined = block.join("\n").trim().to_string();
+        if !(joined.contains("SQLite database") && joined.contains("is busy")) {
+            warnings.push(joined);
+        }
+    }
+    warnings
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_warnings_keeps_multiline_warning() {
+        let captured = "warning: the following insecure packages:\n  - foo-1.2.3\nKnown issues:\n  - CVE-1234\ntrace: unrelated\n";
+        let w = parse_warnings(captured);
+        assert_eq!(w.len(), 1, "expected one grouped warning, got {w:?}");
+        assert!(w[0].contains("insecure packages"));
+        assert!(w[0].contains("foo-1.2.3"));
+        assert!(w[0].contains("CVE-1234"));
+        assert!(!w[0].contains("unrelated"));
+    }
+
+    #[test]
+    fn parse_warnings_splits_distinct_and_drops_sqlite_busy() {
+        let captured = "warning: first\nwarning: SQLite database is busy\nwarning: second\n";
+        assert_eq!(parse_warnings(captured), vec!["warning: first", "warning: second"]);
+    }
 
     #[test]
     fn eval_request_serde_roundtrip() {
