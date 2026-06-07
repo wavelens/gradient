@@ -363,6 +363,10 @@ pub struct BuildMetrics {
     pub disk_write_bytes: Option<u64>,
     pub oom_killed: bool,
     pub build_time_ms: Option<u64>,
+    /// Host network throughput peak (Mbps) observed during the build window.
+    /// Host-level, not cgroup-attributed (cgroup v2 has no per-build network);
+    /// accurate when the build is the host's sole network consumer.
+    pub peak_network_mbps: Option<f32>,
 }
 
 // ── Credential types ─────────────────────────────────────────────────────────

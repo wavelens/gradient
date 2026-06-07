@@ -23,6 +23,7 @@ pub struct Model {
     pub avg_cpu_pct: Option<f64>,
     pub disk_read_bytes: Option<i64>,
     pub disk_write_bytes: Option<i64>,
+    pub peak_network_mbps: Option<f64>,
     pub oom_killed: bool,
     pub build_time_ms: Option<i64>,
     pub worker_id: String,

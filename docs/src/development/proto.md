@@ -1008,10 +1008,11 @@ struct BuildMetrics {
     disk_write_bytes: Option<u64>,      // from cgroup io.stat wbytes
     oom_killed: bool,                   // cgroup memory.events oom_kill > 0
     build_time_ms: Option<u64>,         // wall-clock build duration; always set
+    peak_network_mbps: Option<f32>,     // host network peak during the build window (not cgroup-attributed)
 }
 ```
 
-The worker captures `BuildMetrics` best-effort from each build's cgroup (requires Nix's experimental `use-cgroups` feature) and attaches them to that build's `BuildOutput` update. `build_time_ms` is always reported; when the cgroup cannot be located or read, the cgroup-derived fields degrade to `None`. The server records one `derivation_metric` row per build from these metrics and persists the worker-measured `build_time_ms` onto the build. A multi-build job therefore yields one metrics record per build. `metrics` is `None` for external-cached builds and when capture is disabled; in that case no metric row is written and the wall-clock build-time fallback applies.
+The worker captures `BuildMetrics` best-effort from each build's cgroup (requires Nix's experimental `use-cgroups` feature) and attaches them to that build's `BuildOutput` update. `build_time_ms` is always reported; when the cgroup cannot be located or read, the cgroup-derived fields degrade to `None`. `peak_network_mbps` is sampled host-wide during the build window (cgroup v2 carries no per-build network counter), so it is exact only when the build is the host's sole network consumer. The server records one `derivation_metric` row per build from these metrics and persists the worker-measured `build_time_ms` onto the build. A multi-build job therefore yields one metrics record per build. `metrics` is `None` for external-cached builds and when capture is disabled; in that case no metric row is written and the wall-clock build-time fallback applies.
 
 **Mapping to database status:**
 

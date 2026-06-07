@@ -293,6 +293,7 @@ fn build_output_with_metrics_roundtrip() {
                 disk_write_bytes: Some(2048),
                 oom_killed: true,
                 build_time_ms: Some(120_000),
+                peak_network_mbps: Some(42.0),
             }),
             substituted: false,
         },

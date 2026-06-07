@@ -127,10 +127,12 @@ fn raw_to_build_metrics(
     raw: Option<BuildMetricsRaw>,
     build_time_ms: u64,
     cpu_count: u32,
+    peak_network_mbps: Option<f32>,
 ) -> BuildMetrics {
     let Some(raw) = raw else {
         return BuildMetrics {
             build_time_ms: Some(build_time_ms),
+            peak_network_mbps,
             ..Default::default()
         };
     };
@@ -151,6 +153,7 @@ fn raw_to_build_metrics(
         disk_write_bytes: Some(raw.disk_write_bytes),
         oom_killed: raw.oom_killed,
         build_time_ms: Some(build_time_ms),
+        peak_network_mbps,
     }
 }
 
@@ -205,10 +208,11 @@ fn capture_build_metrics(
     cgroup_root: &str,
     drv_path: &str,
     build_time_ms: u64,
+    peak_network_mbps: Option<f32>,
 ) -> BuildMetrics {
     let cpu_count = crate::metrics::host_static().cpu_count;
     if !enabled {
-        return raw_to_build_metrics(None, build_time_ms, cpu_count);
+        return raw_to_build_metrics(None, build_time_ms, cpu_count, peak_network_mbps);
     }
     let raw = locate_build_cgroup(Path::new(cgroup_root), drv_path)
         .and_then(|dir| read_build_cgroup(&dir));
@@ -222,7 +226,54 @@ fn capture_build_metrics(
             crate::metrics::throughput::DISK.observe(mb_per_s);
         }
     }
-    raw_to_build_metrics(raw, build_time_ms, cpu_count)
+    raw_to_build_metrics(raw, build_time_ms, cpu_count, peak_network_mbps)
+}
+
+/// Tracks the host's peak NAR network throughput (Mbps) over a build window.
+/// Host-level: cgroup v2 carries no per-build network accounting, so this is
+/// the closest honest signal and is exact only when the build is the sole
+/// network consumer.
+struct NetworkPeakSampler {
+    peak: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    handle: tokio::task::JoinHandle<()>,
+}
+
+impl NetworkPeakSampler {
+    fn start() -> Self {
+        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+        use std::sync::Arc;
+        let peak = Arc::new(AtomicU64::new(0));
+        let stop = Arc::new(AtomicBool::new(false));
+        let (p, s) = (peak.clone(), stop.clone());
+        let handle = tokio::spawn(async move {
+            while !s.load(Ordering::Relaxed) {
+                if let Some(v) = crate::metrics::throughput::NETWORK.current() {
+                    let bits = (v as f64).to_bits();
+                    let mut prev = p.load(Ordering::Relaxed);
+                    while f64::from_bits(prev) < v as f64 {
+                        match p.compare_exchange_weak(prev, bits, Ordering::Relaxed, Ordering::Relaxed)
+                        {
+                            Ok(_) => break,
+                            Err(cur) => prev = cur,
+                        }
+                    }
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            }
+        });
+        Self { peak, stop, handle }
+    }
+
+    async fn finish(self) -> Option<f32> {
+        use std::sync::atomic::Ordering;
+        self.stop.store(true, Ordering::Relaxed);
+        let _ = self.handle.await;
+        match self.peak.load(Ordering::Relaxed) {
+            0 => None,
+            b => Some(f64::from_bits(b) as f32),
+        }
+    }
 }
 
 // ── Type-state pipeline ───────────────────────────────────────────────────────
@@ -517,6 +568,7 @@ pub async fn build_derivation(
         log_fetch_from_store,
     );
 
+    let net_sampler = build_metrics.then(NetworkPeakSampler::start);
     let started = std::time::Instant::now();
     let realize_result: Result<(Vec<BuildOutput>, bool), BuildError> =
         match task.timeout_secs.map(std::time::Duration::from_secs) {
@@ -534,7 +586,12 @@ pub async fn build_derivation(
     // inline with its `BuildOutput`. On failure they are dropped with the
     // error; the scheduler records metrics only for completed builds.
     let build_time_ms = started.elapsed().as_millis() as u64;
-    let metrics = capture_build_metrics(build_metrics, cgroup_root, &task.drv_path, build_time_ms);
+    let peak_network_mbps = match net_sampler {
+        Some(s) => s.finish().await,
+        None => None,
+    };
+    let metrics =
+        capture_build_metrics(build_metrics, cgroup_root, &task.drv_path, build_time_ms, peak_network_mbps);
 
     let (outputs, substituted) = realize_result?;
     updater
@@ -1203,7 +1260,7 @@ mod tests {
 
     #[test]
     fn raw_to_metrics_always_sets_build_time() {
-        let m = raw_to_build_metrics(None, 5_000, 4);
+        let m = raw_to_build_metrics(None, 5_000, 4, None);
         assert_eq!(m.build_time_ms, Some(5_000));
         assert_eq!(m.peak_ram_mb, None);
         assert_eq!(m.cpu_time_ms, None);
@@ -1221,10 +1278,10 @@ mod tests {
             oom_killed: false,
         };
         // build_time_ms = 0 → avg_cpu_pct None (no divide-by-zero panic).
-        let m = raw_to_build_metrics(Some(raw), 0, 4);
+        let m = raw_to_build_metrics(Some(raw), 0, 4, None);
         assert_eq!(m.avg_cpu_pct, None);
         // cpu_count = 0 → avg_cpu_pct None.
-        let m = raw_to_build_metrics(Some(raw), 1_000, 0);
+        let m = raw_to_build_metrics(Some(raw), 1_000, 0, None);
         assert_eq!(m.avg_cpu_pct, None);
         assert_eq!(m.peak_ram_mb, Some(2));
         assert_eq!(m.cpu_time_ms, Some(1_000));
@@ -1242,9 +1299,10 @@ mod tests {
             oom_killed: false,
         };
         // 8000 cpu-ms over 4000 ms wall on 4 cores = 8000/(4000*4)*100 = 50%.
-        let m = raw_to_build_metrics(Some(raw), 4_000, 4);
+        let m = raw_to_build_metrics(Some(raw), 4_000, 4, Some(125.0));
         assert_eq!(m.cpu_time_ms, Some(8_000));
         assert_eq!(m.avg_cpu_pct, Some(50.0));
+        assert_eq!(m.peak_network_mbps, Some(125.0));
     }
 
     #[tokio::test]
