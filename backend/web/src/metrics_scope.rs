@@ -28,6 +28,7 @@ impl MetricsScope {
         if user.as_ref().is_some_and(|u| u.superuser) {
             return Ok(MetricsScope::All);
         }
+
         let mut orgs: Vec<String> = Vec::new();
         for row in db
             .query_all(Statement::from_string(
@@ -50,6 +51,7 @@ impl MetricsScope {
                 orgs.push(row.try_get::<Uuid>("", "id")?.to_string());
             }
         }
+
         orgs.sort();
         orgs.dedup();
         Ok(MetricsScope::Orgs(orgs))

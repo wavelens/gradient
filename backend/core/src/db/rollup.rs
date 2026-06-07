@@ -140,27 +140,33 @@ async fn run_rollup(state: &Arc<ServerState>) {
             warn!(metric = m.name, error = %e, "rollup build-count failed");
         }
     }
+
     for m in BUILD_DURATIONS {
         if let Err(e) = db.execute_unprepared(&build_duration_sql(m)).await {
             warn!(metric = m.name, error = %e, "rollup build-duration failed");
         }
     }
+
     for m in EVAL_COUNTS {
         if let Err(e) = db.execute_unprepared(&eval_count_sql(m)).await {
             warn!(metric = m.name, error = %e, "rollup eval-count failed");
         }
     }
+
     if let Err(e) = db.execute_unprepared(CACHE_TRAFFIC_SQL).await {
         warn!(error = %e, "rollup cache-traffic failed");
     }
+
     if let Err(e) = db.execute_unprepared(CACHE_STORAGE_SQL).await {
         warn!(error = %e, "rollup cache-storage failed");
     }
+
     for (target, source, unit, window) in CASCADES {
         if let Err(e) = db.execute_unprepared(&cascade_sql(*target, *source, unit, window)).await {
             warn!(target, error = %e, "rollup cascade failed");
         }
     }
+
     debug!("rollup pass complete");
 }
 

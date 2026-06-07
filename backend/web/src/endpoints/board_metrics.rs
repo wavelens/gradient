@@ -51,6 +51,7 @@ async fn infra_series(
            AND bucket_start >= (now() AT TIME ZONE 'UTC') - interval '{window_hours} hours' \
          GROUP BY bucket_start ORDER BY bucket_start"
     );
+
     let rows = db
         .query_all(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
@@ -58,6 +59,7 @@ async fn infra_series(
             [metric.into()],
         ))
         .await?;
+
     Ok(rows
         .into_iter()
         .map(|r| {
@@ -138,17 +140,21 @@ pub async fn get_board_network(
          FROM worker_sample \
          WHERE at >= (now() AT TIME ZONE 'UTC') - interval '1 hour'",
     );
+
     if let Some(list) = scope.org_in_list() {
         if list.is_empty() {
             return Ok(ok_json(BoardNetworkStats { nar_egress, workers: vec![], http: vec![] }));
         }
+
         sql.push_str(&format!(" AND organization IN ({list})"));
     }
+
     sql.push_str(" ORDER BY worker_id, at DESC");
     let rows = state
         .web_db
         .query_all(Statement::from_string(DatabaseBackend::Postgres, sql))
         .await?;
+
     let workers = rows
         .into_iter()
         .map(|r| WorkerNet {
@@ -189,17 +195,21 @@ pub async fn get_board_fleet(
          FROM worker_sample \
          WHERE at >= (now() AT TIME ZONE 'UTC') - interval '{window} hours'"
     );
+
     if let Some(list) = scope.org_in_list() {
         if list.is_empty() {
             return Ok(ok_json(vec![]));
         }
+
         sql.push_str(&format!(" AND organization IN ({list})"));
     }
+
     sql.push_str(" GROUP BY bucket ORDER BY bucket");
     let rows = state
         .web_db
         .query_all(Statement::from_string(DatabaseBackend::Postgres, sql))
         .await?;
+
     let out = rows
         .into_iter()
         .map(|r| {
@@ -214,6 +224,7 @@ pub async fn get_board_fleet(
             }
         })
         .collect();
+
     Ok(ok_json(out))
 }
 
@@ -245,12 +256,15 @@ pub async fn get_board_durations_heatmap(
         "b.build_time_ms IS NOT NULL".to_string(),
         format!("b.build_finished_at >= (now() AT TIME ZONE 'UTC') - interval '{window} hours'"),
     ];
+
     if let Some(list) = scope.org_in_list() {
         if list.is_empty() {
             return Ok(ok_json(DurationsHeatmap { times: vec![], bands: vec![] }));
         }
+
         clauses.push(format!("d.organization IN ({list})"));
     }
+
     let sql = format!(
         "SELECT date_trunc('hour', b.build_finished_at) AS t, \
                 width_bucket(b.build_time_ms, ARRAY[10000,30000,60000,180000,600000,1800000]) AS band, \
@@ -259,6 +273,7 @@ pub async fn get_board_durations_heatmap(
          WHERE {} GROUP BY t, band ORDER BY t",
         clauses.join(" AND ")
     );
+
     let rows = state
         .web_db
         .query_all(Statement::from_string(DatabaseBackend::Postgres, sql))
@@ -273,8 +288,10 @@ pub async fn get_board_durations_heatmap(
         if !times.contains(&t) {
             times.push(t);
         }
+
         cells.push((t, band, c));
     }
+
     let bands = DURATION_BANDS
         .iter()
         .enumerate()
@@ -289,9 +306,11 @@ pub async fn get_board_durations_heatmap(
                         .unwrap_or(0)
                 })
                 .collect();
+
             HeatmapBand { band: label, counts }
         })
         .collect();
+
     Ok(ok_json(DurationsHeatmap {
         times: times.into_iter().map(|t| t.and_utc().to_rfc3339()).collect(),
         bands,
@@ -329,6 +348,7 @@ pub async fn get_board_health(
         ))
         .await?
         .and_then(|r| r.try_get("", "m").ok().flatten());
+
     let rollup_lag_seconds = latest.map(|t| (now() - t).num_milliseconds() as f64 / 1000.0);
 
     Ok(ok_json(BoardHealth {
