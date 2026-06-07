@@ -403,6 +403,60 @@ in {
           default = 0;
         };
 
+        metricsRollupIntervalSecs = lib.mkOption {
+          description = "Interval in seconds between metric rollup-aggregator passes.";
+          type = lib.types.ints.positive;
+          default = 60;
+        };
+
+        metricsRetentionRawDays = lib.mkOption {
+          description = "Days to retain raw phase_event / worker_sample rows. 0 = keep forever.";
+          type = lib.types.ints.unsigned;
+          default = 14;
+        };
+
+        metricsRetentionRollupDays = lib.mkOption {
+          description = "Days to retain minute/hour metric_rollup buckets (day/week kept). 0 = keep forever.";
+          type = lib.types.ints.unsigned;
+          default = 400;
+        };
+
+        dispatchRetentionDays = lib.mkOption {
+          description = "Days to retain dispatched_job forensic rows. 0 = keep forever.";
+          type = lib.types.ints.unsigned;
+          default = 30;
+        };
+
+        workerSampleIntervalSecs = lib.mkOption {
+          description = "Interval in seconds between worker live-metric samples written to worker_sample.";
+          type = lib.types.ints.positive;
+          default = 15;
+        };
+
+        metricsLabelTopn = lib.mkOption {
+          description = "Per-dimension cardinality cap for rollup scope labels (top-N by activity).";
+          type = lib.types.ints.unsigned;
+          default = 20;
+        };
+
+        otlpEndpoint = lib.mkOption {
+          description = "OTLP collector endpoint for metric push export. Null disables OTLP.";
+          type = lib.types.nullOr lib.types.str;
+          default = null;
+        };
+
+        otlpPushIntervalSecs = lib.mkOption {
+          description = "Interval in seconds between OTLP metric push exports.";
+          type = lib.types.ints.positive;
+          default = 30;
+        };
+
+        dispatchRecordCandidates = lib.mkOption {
+          description = "Persist runner-up scoring candidates on each dispatched_job row.";
+          type = lib.types.bool;
+          default = false;
+        };
+
         buildMaxAttempts = lib.mkOption {
           description = "Maximum number of build attempts before a transient failure becomes permanent (must be ≥ 1).";
           type = lib.types.ints.positive;
@@ -691,6 +745,14 @@ in {
         GRADIENT_KEEP_EVALUATIONS = toString cfg.settings.keepEvaluations;
         GRADIENT_LOG_CHUNK_BYTES = toString cfg.settings.logChunkBytes;
         GRADIENT_MAX_STORAGE_GB = toString cfg.settings.maxStorageGb;
+        GRADIENT_METRICS_ROLLUP_INTERVAL = toString cfg.settings.metricsRollupIntervalSecs;
+        GRADIENT_METRICS_RETENTION_RAW_DAYS = toString cfg.settings.metricsRetentionRawDays;
+        GRADIENT_METRICS_RETENTION_ROLLUP_DAYS = toString cfg.settings.metricsRetentionRollupDays;
+        GRADIENT_DISPATCH_RETENTION_DAYS = toString cfg.settings.dispatchRetentionDays;
+        GRADIENT_WORKER_SAMPLE_INTERVAL = toString cfg.settings.workerSampleIntervalSecs;
+        GRADIENT_METRICS_LABEL_TOPN = toString cfg.settings.metricsLabelTopn;
+        GRADIENT_OTLP_PUSH_INTERVAL = toString cfg.settings.otlpPushIntervalSecs;
+        GRADIENT_DISPATCH_RECORD_CANDIDATES = lib.boolToString cfg.settings.dispatchRecordCandidates;
         GRADIENT_BUILD_MAX_ATTEMPTS = toString cfg.settings.buildMaxAttempts;
         GRADIENT_BUILD_RETRY_BACKOFF_SECS = toString cfg.settings.buildRetryBackoffSecs;
         GRADIENT_BUILD_DEFAULT_TIMEOUT_SECS = toString cfg.settings.buildDefaultTimeoutSecs;
@@ -760,6 +822,8 @@ in {
         GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE = "%d/gradient_github_app_webhook_secret";
       } // lib.optionalAttrs (cfg.metricsTokenFile != null) {
         GRADIENT_METRICS_TOKEN_FILE = "%d/gradient_metrics_token";
+      } // lib.optionalAttrs (cfg.settings.otlpEndpoint != null) {
+        GRADIENT_OTLP_ENDPOINT = cfg.settings.otlpEndpoint;
       };
     };
 

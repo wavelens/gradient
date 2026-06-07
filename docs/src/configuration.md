@@ -141,6 +141,22 @@ Generate a token with `openssl rand -base64 32`. Configure your Prometheus scrap
 
 The MVP exposes build/evaluation status counts, scheduler queue depth, connected workers, and cache totals. Per-org/cache labels and histograms are tracked as a follow-up.
 
+### Metrics pipeline & retention
+
+The Job Board records build/eval phase timings, dispatch decisions (with scoring breakdown), and worker statistics into dedicated tables. A background task prunes them so they stay bounded; all settings live under `services.gradient.settings`:
+
+| Option / env var | Default | Purpose |
+| --- | --- | --- |
+| `metricsRollupIntervalSecs` / `GRADIENT_METRICS_ROLLUP_INTERVAL` | 60 | Rollup-aggregator pass interval. |
+| `metricsRetentionRawDays` / `GRADIENT_METRICS_RETENTION_RAW_DAYS` | 14 | Retention for raw `phase_event` / `worker_sample` rows (0 = forever). |
+| `metricsRetentionRollupDays` / `GRADIENT_METRICS_RETENTION_ROLLUP_DAYS` | 400 | Retention for minute/hour rollups; day/week kept (0 = forever). |
+| `dispatchRetentionDays` / `GRADIENT_DISPATCH_RETENTION_DAYS` | 30 | Retention for `dispatched_job` forensic rows (0 = forever). |
+| `workerSampleIntervalSecs` / `GRADIENT_WORKER_SAMPLE_INTERVAL` | 15 | Worker live-metric sampling interval. |
+| `metricsLabelTopn` / `GRADIENT_METRICS_LABEL_TOPN` | 20 | Per-dimension cardinality cap for rollup labels. |
+| `otlpEndpoint` / `GRADIENT_OTLP_ENDPOINT` | null | OTLP collector endpoint for metric push (null disables). |
+| `otlpPushIntervalSecs` / `GRADIENT_OTLP_PUSH_INTERVAL` | 30 | OTLP push interval. |
+| `dispatchRecordCandidates` / `GRADIENT_DISPATCH_RECORD_CANDIDATES` | false | Persist runner-up scoring candidates per dispatch. |
+
 ## OIDC
 
 ```nix
