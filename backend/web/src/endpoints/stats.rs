@@ -99,56 +99,86 @@ fn build_record_nar_traffic_stmt(
     )
 }
 
-async fn aggregate_traffic<C: sea_orm::ConnectionTrait>(
+/// Granularity discriminant matching `metric_rollup.granularity`.
+fn gran_code(trunc_unit: &str) -> i16 {
+    match trunc_unit {
+        "hour" => 1,
+        "day" => 2,
+        "week" => 3,
+        _ => 0,
+    }
+}
+
+/// Zero-filled time-series of a cache rollup metric. `count` and `sum` carry
+/// the two values the cache-stats UI needs (requests/bytes or packages/bytes).
+async fn cache_series<C: sea_orm::ConnectionTrait>(
     db: &C,
     cache_id: CacheId,
+    metric: &str,
     trunc_unit: &str,
     back_interval: &str,
-) -> Result<Vec<CacheMetricPoint>, WebError> {
-    // Use generate_series so every bucket in the window is present, including the
-    // current one - this makes the traffic graph always run to "now" with zeros.
+) -> Result<Vec<(NaiveDateTime, i64, i64)>, WebError> {
+    // generate_series keeps every bucket present (zero-filled) up to "now"; the
+    // values come from the new metric_rollup aggregates rather than ad-hoc scans.
     let sql = format!(
         r#"SELECT gs.period,
-                  COALESCE(SUM(cm.bytes_sent), 0)::bigint AS bytes,
-                  COALESCE(SUM(cm.nar_count),  0)::bigint AS requests
+                  COALESCE(SUM(mr.count), 0)::bigint AS cnt,
+                  COALESCE(SUM(mr.sum), 0)::bigint    AS total
            FROM generate_series(
-               date_trunc('{trunc_unit}', NOW() AT TIME ZONE 'UTC') - INTERVAL '{back_interval}',
-               date_trunc('{trunc_unit}', NOW() AT TIME ZONE 'UTC'),
-               INTERVAL '1 {trunc_unit}'
+               date_trunc('{unit}', NOW() AT TIME ZONE 'UTC') - INTERVAL '{back}',
+               date_trunc('{unit}', NOW() AT TIME ZONE 'UTC'),
+               INTERVAL '1 {unit}'
            ) AS gs(period)
-           LEFT JOIN cache_metric cm
-               ON date_trunc('{trunc_unit}', cm.bucket_time) = gs.period
-              AND cm.cache = $1
+           LEFT JOIN metric_rollup mr
+               ON mr.bucket_start = gs.period
+              AND mr.metric = $1
+              AND mr.granularity = {gran}
+              AND (mr.scope->>'cache') = $2
            GROUP BY gs.period
            ORDER BY gs.period"#,
-        trunc_unit = trunc_unit,
-        back_interval = back_interval,
+        unit = trunc_unit,
+        back = back_interval,
+        gran = gran_code(trunc_unit),
     );
 
     let rows = db
         .query_all(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             &sql,
-            [sea_orm::Value::Uuid(Some(Box::new(cache_id.into_inner())))],
+            [
+                sea_orm::Value::String(Some(Box::new(metric.to_owned()))),
+                sea_orm::Value::String(Some(Box::new(cache_id.to_string()))),
+            ],
         ))
         .await
         .map_err(WebError::from)?;
 
-    let points = rows
+    Ok(rows
         .into_iter()
         .filter_map(|row| {
             let time: NaiveDateTime = row.try_get("", "period").ok()?;
-            let bytes: i64 = row.try_get("", "bytes").unwrap_or(0);
-            let requests: i64 = row.try_get("", "requests").unwrap_or(0);
-            Some(CacheMetricPoint {
-                time: time.to_string(),
-                bytes,
-                requests,
-            })
+            let cnt: i64 = row.try_get("", "cnt").unwrap_or(0);
+            let total: i64 = row.try_get("", "total").unwrap_or(0);
+            Some((time, cnt, total))
         })
-        .collect();
+        .collect())
+}
 
-    Ok(points)
+async fn aggregate_traffic<C: sea_orm::ConnectionTrait>(
+    db: &C,
+    cache_id: CacheId,
+    trunc_unit: &str,
+    back_interval: &str,
+) -> Result<Vec<CacheMetricPoint>, WebError> {
+    let series = cache_series(db, cache_id, "cache.bytes_sent", trunc_unit, back_interval).await?;
+    Ok(series
+        .into_iter()
+        .map(|(time, requests, bytes)| CacheMetricPoint {
+            time: time.to_string(),
+            bytes,
+            requests,
+        })
+        .collect())
 }
 
 async fn aggregate_storage<C: sea_orm::ConnectionTrait>(
@@ -157,49 +187,15 @@ async fn aggregate_storage<C: sea_orm::ConnectionTrait>(
     trunc_unit: &str,
     back_interval: &str,
 ) -> Result<Vec<StorageMetricPoint>, WebError> {
-    let sql = format!(
-        r#"SELECT gs.period,
-                  COALESCE(COUNT(cps.id),      0)::bigint AS packages,
-                  COALESCE(SUM(cp.file_size),  0)::bigint AS bytes
-           FROM generate_series(
-               date_trunc('{trunc_unit}', NOW() AT TIME ZONE 'UTC') - INTERVAL '{back_interval}',
-               date_trunc('{trunc_unit}', NOW() AT TIME ZONE 'UTC'),
-               INTERVAL '1 {trunc_unit}'
-           ) AS gs(period)
-           LEFT JOIN cached_path_signature cps
-               ON date_trunc('{trunc_unit}', cps.created_at) = gs.period
-              AND cps.cache = $1
-           LEFT JOIN cached_path cp ON cp.id = cps.cached_path
-           GROUP BY gs.period
-           ORDER BY gs.period"#,
-        trunc_unit = trunc_unit,
-        back_interval = back_interval,
-    );
-
-    let rows = db
-        .query_all(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            &sql,
-            [sea_orm::Value::Uuid(Some(Box::new(cache_id.into_inner())))],
-        ))
-        .await
-        .map_err(WebError::from)?;
-
-    let points = rows
+    let series = cache_series(db, cache_id, "cache.bytes_added", trunc_unit, back_interval).await?;
+    Ok(series
         .into_iter()
-        .filter_map(|row| {
-            let time: NaiveDateTime = row.try_get("", "period").ok()?;
-            let packages: i64 = row.try_get("", "packages").unwrap_or(0);
-            let bytes: i64 = row.try_get("", "bytes").unwrap_or(0);
-            Some(StorageMetricPoint {
-                time: time.to_string(),
-                packages,
-                bytes,
-            })
+        .map(|(time, packages, bytes)| StorageMetricPoint {
+            time: time.to_string(),
+            packages,
+            bytes,
         })
-        .collect();
-
-    Ok(points)
+        .collect())
 }
 
 pub async fn get_cache_stats(

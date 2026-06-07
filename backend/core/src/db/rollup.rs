@@ -83,6 +83,34 @@ const CASCADES: &[(i16, i16, &str, &str)] = &[
 
 const MINUTE_WINDOW: &str = "15 minutes";
 
+/// Cache traffic per minute per cache (scope `{cache}`): `count` = requests,
+/// `sum` = bytes served. Source is the already-minute-bucketed `cache_metric`.
+const CACHE_TRAFFIC_SQL: &str = "INSERT INTO metric_rollup \
+    (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
+    SELECT gen_random_uuid(), 'cache.bytes_sent', 0, cm.bucket_time, \
+           jsonb_build_object('cache', cm.cache::text), hashtextextended(cm.cache::text, 0), \
+           sum(cm.nar_count)::bigint, sum(cm.bytes_sent), \
+           min(cm.bytes_sent), max(cm.bytes_sent), sum(power(cm.bytes_sent, 2)), NULL \
+    FROM cache_metric cm \
+    WHERE cm.bucket_time >= (now() AT TIME ZONE 'UTC') - interval '15 minutes' \
+    GROUP BY cm.bucket_time, cm.cache \
+    ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
+    DO UPDATE SET count = EXCLUDED.count, sum = EXCLUDED.sum, \
+                  min = EXCLUDED.min, max = EXCLUDED.max, sum_sq = EXCLUDED.sum_sq";
+
+/// Cache storage added per minute per cache (scope `{cache}`): `count` =
+/// packages added, `sum` = compressed bytes added.
+const CACHE_STORAGE_SQL: &str = "INSERT INTO metric_rollup \
+    (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
+    SELECT gen_random_uuid(), 'cache.bytes_added', 0, date_trunc('minute', cps.created_at), \
+           jsonb_build_object('cache', cps.cache::text), hashtextextended(cps.cache::text, 0), \
+           count(*)::bigint, sum(coalesce(cp.file_size, 0)), 0, 0, 0, NULL \
+    FROM cached_path_signature cps JOIN cached_path cp ON cp.id = cps.cached_path \
+    WHERE cps.created_at >= (now() AT TIME ZONE 'UTC') - interval '15 minutes' \
+    GROUP BY date_trunc('minute', cps.created_at), cps.cache \
+    ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
+    DO UPDATE SET count = EXCLUDED.count, sum = EXCLUDED.sum";
+
 pub fn start_rollup_loop(state: Arc<ServerState>) {
     let shutdown = state.shutdown.clone();
     shutdown.spawn(async move { rollup_loop(state).await });
@@ -113,6 +141,12 @@ async fn run_rollup(state: &Arc<ServerState>) {
         if let Err(e) = db.execute_unprepared(&eval_count_sql(m)).await {
             warn!(metric = m.name, error = %e, "rollup eval-count failed");
         }
+    }
+    if let Err(e) = db.execute_unprepared(CACHE_TRAFFIC_SQL).await {
+        warn!(error = %e, "rollup cache-traffic failed");
+    }
+    if let Err(e) = db.execute_unprepared(CACHE_STORAGE_SQL).await {
+        warn!(error = %e, "rollup cache-storage failed");
     }
     for (target, source, unit, window) in CASCADES {
         if let Err(e) = db.execute_unprepared(&cascade_sql(*target, *source, unit, window)).await {
