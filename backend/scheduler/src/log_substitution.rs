@@ -255,21 +255,10 @@ mod tests {
             derivation,
             status,
             log_id,
-            build_time_ms: None,
-            worker: None,
-            via: None,
             external_cached,
-            attempt: 0,
-            timeout_secs: None,
-            max_silent_secs: None,
-            prefer_local_build: false,
             created_at: now,
             updated_at: now,
-            queued_at: None,
-            ready_at: None,
-            dispatched_at: None,
-            build_started_at: None,
-            build_finished_at: None,
+            ..Default::default()
         }
     }
 
@@ -372,11 +361,8 @@ mod tests {
                 display_name: "test-upstream".into(),
                 mode: entity::organization_cache::CacheSubscriptionMode::ReadOnly,
                 kind: entity::cache_upstream::CacheUpstreamKind::Http,
-                upstream_cache: None,
                 url: Some((*u).to_string()),
-                public_key: None,
-                remote_cache_name: None,
-                api_key: None,
+                ..Default::default()
             })
             .collect();
         builder

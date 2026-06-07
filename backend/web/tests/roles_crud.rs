@@ -50,9 +50,8 @@ fn admin_role_row() -> role::Model {
     role::Model {
         id: BASE_ROLE_ADMIN_ID,
         name: "Admin".into(),
-        organization: None,
         permission: admin_mask(),
-        managed: false,
+        ..Default::default()
     }
 }
 
@@ -60,9 +59,8 @@ fn view_role_row() -> role::Model {
     role::Model {
         id: BASE_ROLE_VIEW_ID,
         name: "View".into(),
-        organization: None,
         permission: view_mask(),
-        managed: false,
+        ..Default::default()
     }
 }
 
@@ -70,9 +68,8 @@ fn write_role_row() -> role::Model {
     role::Model {
         id: BASE_ROLE_WRITE_ID,
         name: "Write".into(),
-        organization: None,
         permission: write_mask(),
-        managed: false,
+        ..Default::default()
     }
 }
 
@@ -82,7 +79,7 @@ fn custom_role_row(id: RoleId, name: &str, permission: i64) -> role::Model {
         name: name.into(),
         organization: Some(org_id()),
         permission,
-        managed: false,
+        ..Default::default()
     }
 }
 

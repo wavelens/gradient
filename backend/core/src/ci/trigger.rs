@@ -348,7 +348,6 @@ pub async fn trigger_restart_builds<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::NaiveDateTime;
     use entity::evaluation;
     use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
     use uuid::Uuid;
@@ -360,18 +359,13 @@ mod tests {
             name: "test-project".into(),
             active: true,
             display_name: "Test Project".into(),
-            description: "".into(),
             repository: "https://github.com/test/repo".into(),
             wildcard: "*".into(),
-            last_evaluation: None,
-            last_check_at: NaiveDateTime::default(),
-            force_evaluation: false,
             created_by: UserId::nil(),
-            created_at: NaiveDateTime::default(),
-            managed: false,
             keep_evaluations: 10,
             concurrency: 3,
             sign_cache: true,
+            ..Default::default()
         }
     }
 
@@ -385,21 +379,7 @@ mod tests {
             commit: CommitId::nil(),
             wildcard: "*".into(),
             status,
-            previous: None,
-            next: None,
-            created_at: NaiveDateTime::default(),
-            updated_at: NaiveDateTime::default(),
-            flake_source: None,
-            check_run_ids: None,
-            waiting_reason: None,
-            trigger: None,
-            concurrent: false,
-            source_comment: None,
-            fetch_started_at: None,
-            eval_flake_started_at: None,
-            eval_drv_started_at: None,
-            building_started_at: None,
-            finished_at: None,
+            ..Default::default()
         }
     }
 
@@ -415,10 +395,8 @@ mod tests {
             // INSERT commit → returns commit row
             .append_query_results([vec![entity::commit::Model {
                 id: commit_id,
-                message: "".into(),
                 hash: vec![0u8; 20],
-                author: None,
-                author_name: "".into(),
+                ..Default::default()
             }]])
             // INSERT evaluation → returns evaluation row
             .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Queued)]])
@@ -457,10 +435,8 @@ mod tests {
             // insert commit
             .append_query_results([vec![entity::commit::Model {
                 id: commit_id,
-                message: "".into(),
                 hash: vec![0u8; 20],
-                author: None,
-                author_name: "".into(),
+                ..Default::default()
             }]])
             // insert evaluation (previous should be None despite stale pointer)
             .append_query_results([vec![make_eval(new_eval_id, EvaluationStatus::Queued)]])
@@ -565,10 +541,8 @@ mod tests {
             .append_query_results([Vec::<evaluation::Model>::new()])
             .append_query_results([vec![entity::commit::Model {
                 id: commit_id,
-                message: "".into(),
                 hash: vec![0u8; 20],
-                author: None,
-                author_name: "".into(),
+                ..Default::default()
             }]])
             .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Queued)]])
             .append_query_results([Vec::<entity::project_flake_input_override::Model>::new()])
@@ -595,10 +569,8 @@ mod tests {
             .append_query_results([Vec::<evaluation::Model>::new()])
             .append_query_results([vec![entity::commit::Model {
                 id: commit_id,
-                message: "".into(),
                 hash: vec![0u8; 20],
-                author: None,
-                author_name: "".into(),
+                ..Default::default()
             }]])
             .append_query_results([vec![{
                 let mut m = make_eval(eval_id, EvaluationStatus::Queued);
@@ -647,22 +619,7 @@ mod tests {
             evaluation: eval_id,
             derivation,
             status,
-            log_id: None,
-            build_time_ms: None,
-            worker: None,
-            via: None,
-            external_cached: false,
-            attempt: 0,
-            timeout_secs: None,
-            max_silent_secs: None,
-            prefer_local_build: false,
-            created_at: NaiveDateTime::default(),
-            updated_at: NaiveDateTime::default(),
-            queued_at: None,
-            ready_at: None,
-            dispatched_at: None,
-            build_started_at: None,
-            build_finished_at: None,
+            ..Default::default()
         }
     }
 

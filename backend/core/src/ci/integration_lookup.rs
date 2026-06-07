@@ -109,7 +109,6 @@ pub async fn ensure_github_app_integrations<C: ConnectionTrait>(
 #[cfg(test)]
 mod ensure_tests {
     use super::*;
-    use chrono::NaiveDateTime;
     use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
     use uuid::Uuid;
 
@@ -128,12 +127,8 @@ mod ensure_tests {
             display_name: GITHUB_APP_INTEGRATION_DISPLAY_NAME.into(),
             kind: i16::from(kind),
             forge_type: i16::from(ForgeType::GitHub),
-            secret: None,
-            endpoint_url: None,
-            access_token: None,
-            allowed_ips: None,
             created_by: user(),
-            created_at: NaiveDateTime::default(),
+            ..Default::default()
         }
     }
 

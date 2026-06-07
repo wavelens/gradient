@@ -51,26 +51,13 @@ fn test_date() -> NaiveDateTime {
 fn make_eval(id: EvaluationId, status: EvaluationStatus) -> MEvaluation {
     entity::evaluation::Model {
         id,
-        project: None,
         repository: "https://example.com/repo".into(),
         commit: CommitId::nil(),
         wildcard: "*".into(),
         status,
-        previous: None,
-        next: None,
         created_at: test_date(),
         updated_at: test_date(),
-        flake_source: None,
-        check_run_ids: None,
-        waiting_reason: None,
-        trigger: None,
-        concurrent: false,
-        source_comment: None,
-        fetch_started_at: None,
-        eval_flake_started_at: None,
-        eval_drv_started_at: None,
-        building_started_at: None,
-        finished_at: None,
+        ..Default::default()
     }
 }
 
@@ -85,22 +72,9 @@ fn make_build(
         evaluation: eval_id,
         derivation: drv_id,
         status,
-        log_id: None,
-        build_time_ms: None,
-        worker: None,
-        via: None,
-        external_cached: false,
-        attempt: 0,
-        timeout_secs: None,
-        max_silent_secs: None,
-        prefer_local_build: false,
         created_at: test_date(),
         updated_at: test_date(),
-        queued_at: None,
-        ready_at: None,
-        dispatched_at: None,
-        build_started_at: None,
-        build_finished_at: None,
+        ..Default::default()
     }
 }
 
@@ -136,11 +110,8 @@ fn make_drv_output(
         name: name.to_string(),
         hash,
         package: name.to_string(),
-        ca: None,
-        nar_size: None,
-        is_cached: false,
-        cached_path: None,
         created_at: test_date(),
+        ..Default::default()
     }
 }
 
@@ -163,10 +134,8 @@ fn make_fully_cached_path(id: CachedPathId, store_path: &str) -> entity::cached_
         file_size: Some(1),
         nar_size: Some(1),
         nar_hash: Some("sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73".into()),
-        references: None,
-        ca: None,
-        deriver: None,
         created_at: test_date(),
+        ..Default::default()
     }
 }
 
@@ -277,21 +246,9 @@ fn make_eval_with_project(
         commit: CommitId::nil(),
         wildcard: "*".into(),
         status,
-        previous: None,
-        next: None,
         created_at: test_date(),
         updated_at: test_date(),
-        flake_source: None,
-        check_run_ids: None,
-        waiting_reason: None,
-        trigger: None,
-        concurrent: false,
-        source_comment: None,
-        fetch_started_at: None,
-        eval_flake_started_at: None,
-        eval_drv_started_at: None,
-        building_started_at: None,
-        finished_at: None,
+        ..Default::default()
     }
 }
 
@@ -303,18 +260,15 @@ fn make_project(id: ProjectId, org_id: OrganizationId) -> entity::project::Model
         name: "test-project".into(),
         active: true,
         display_name: "Test Project".into(),
-        description: "".into(),
         repository: "https://example.com/repo".into(),
         wildcard: "*".into(),
-        last_evaluation: None,
         last_check_at: test_date(),
-        force_evaluation: false,
         created_by: UserId::nil(),
         created_at: test_date(),
-        managed: false,
         keep_evaluations: 30,
         concurrency: 3,
         sign_cache: true,
+        ..Default::default()
     }
 }
 
@@ -1351,9 +1305,9 @@ async fn build_output_with_metrics_records_one_metric_row() {
         avg_cpu_pct: Some(50.0),
         disk_read_bytes: Some(1024),
         disk_write_bytes: Some(2048),
-        oom_killed: false,
         build_time_ms: Some(120_000),
         peak_network_mbps: Some(85.0),
+        ..Default::default()
     });
 
     // Queries (ordered): find build, find derivation, find derivation_output,
@@ -2313,7 +2267,7 @@ async fn eval_result_creates_entry_points_for_project() {
             build: build_id,
             eval: "packages.x86_64-linux.hello".into(),
             created_at: test_date(),
-            repo_check_id: None,
+            ..Default::default()
         }]])
         // 8. find project (for GC)
         .append_query_results([vec![make_project(project_id, org_id)]])
@@ -2585,7 +2539,7 @@ async fn eval_result_all_substituted_with_project_completes() {
             build: build_id,
             eval: "packages.x86_64-linux.hello".into(),
             created_at: test_date(),
-            repo_check_id: None,
+            ..Default::default()
         }]])
         // 8. find project (for GC)
         .append_query_results([vec![make_project(project_id, org_id)]])

@@ -83,10 +83,7 @@ fn live_session(id: SessionId) -> entity::session::Model {
         created_at: now,
         expires_at: now + Duration::hours(1),
         last_used_at: now,
-        revoked_at: None,
-        user_agent: None,
-        ip: None,
-        remember_me: false,
+        ..Default::default()
     }
 }
 
@@ -107,18 +104,15 @@ fn project_row() -> entity::project::Model {
         name: "test-project".into(),
         active: true,
         display_name: "Test Project".into(),
-        description: "".into(),
         repository: "https://github.com/test/repo".into(),
         wildcard: "*".into(),
-        last_evaluation: None,
         last_check_at: test_date(),
-        force_evaluation: false,
         created_by: user_id(),
         created_at: test_date(),
-        managed: false,
         keep_evaluations: 10,
         concurrency: 3,
         sign_cache: true,
+        ..Default::default()
     }
 }
 
@@ -137,22 +131,19 @@ fn polling_trigger_row() -> entity::project_trigger::Model {
     entity::project_trigger::Model {
         id: trigger_id(),
         project: project_id(),
-        trigger_type: 0, // Polling
         config: serde_json::json!({"interval_secs": 60}),
         active: true,
-        last_fired_at: None,
         created_at: test_date(),
         updated_at: test_date(),
+        ..Default::default()
     }
 }
 
 fn commit_row() -> entity::commit::Model {
     entity::commit::Model {
         id: commit_id(),
-        message: String::new(),
         hash: vec![0xab; 20],
-        author: None,
-        author_name: String::new(),
+        ..Default::default()
     }
 }
 

@@ -78,17 +78,14 @@ async fn narinfo_served_from_db_inner() {
         id: cache_id(),
         name: "test-cache".into(),
         display_name: "Test Cache".into(),
-        description: String::new(),
         active: true,
         priority: 30,
-        local_priority: None,
         public_key: "test-pub-key".into(),
         private_key: "test-priv-key".into(),
         public: true,
         created_by: UserId::new(org_id().into_inner()),
         created_at: test_date(),
-        managed: false,
-        max_storage_gb: 0,
+        ..Default::default()
     };
 
     // The derivation output matching FIXTURE_HASH.
@@ -98,11 +95,11 @@ async fn narinfo_served_from_db_inner() {
         name: "out".into(),
         hash: FIXTURE_HASH.into(),
         package: "hello".into(),
-        ca: None,
         nar_size: Some(67890),
         is_cached: true,
         cached_path: Some(cached_path_id()),
         created_at: test_date(),
+        ..Default::default()
     };
 
     // The parent derivation, owned by org_id().
@@ -138,9 +135,9 @@ async fn narinfo_served_from_db_inner() {
         // Valid nix32 SHA-256 (of the empty string, as a stable test vector).
         nar_hash: Some("sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73".into()),
         references: Some(String::new()),
-        ca: None,
         deriver: Some(format!("/nix/store/{}-hello.drv", FIXTURE_HASH)),
         created_at: test_date(),
+        ..Default::default()
     };
 
     // Signature row for this cache.
@@ -150,9 +147,8 @@ async fn narinfo_served_from_db_inner() {
         cache: cache_id(),
         // 64 raw bytes - any non-empty Ed25519-shaped buffer works.
         signature: Some(vec![0x42; 64]),
-        last_fetched_at: None,
-        fetch_count: 0,
         created_at: test_date(),
+        ..Default::default()
     };
 
     // Query order driven by CacheContext::load + get_nar_by_hash:
@@ -240,17 +236,14 @@ async fn narinfo_unsigned_inner() {
         id: cache_id(),
         name: "test-cache".into(),
         display_name: "Test Cache".into(),
-        description: String::new(),
         active: true,
         priority: 30,
-        local_priority: None,
         public_key: "test-pub-key".into(),
         private_key: "test-priv-key".into(),
         public: true,
         created_by: UserId::new(org_id().into_inner()),
         created_at: test_date(),
-        managed: false,
-        max_storage_gb: 0,
+        ..Default::default()
     };
 
     let drv_output_row = entity::derivation_output::Model {
@@ -259,11 +252,11 @@ async fn narinfo_unsigned_inner() {
         name: "out".into(),
         hash: FIXTURE_HASH.into(),
         package: "hello".into(),
-        ca: None,
         nar_size: Some(67890),
         is_cached: true,
         cached_path: Some(cached_path_id()),
         created_at: test_date(),
+        ..Default::default()
     };
 
     let deriv_row = entity::derivation::Model {
@@ -295,19 +288,17 @@ async fn narinfo_unsigned_inner() {
         nar_size: Some(67890),
         nar_hash: Some("sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73".into()),
         references: Some(String::new()),
-        ca: None,
         deriver: Some(format!("/nix/store/{}-hello.drv", FIXTURE_HASH)),
         created_at: test_date(),
+        ..Default::default()
     };
 
     let unsigned_sig_row = entity::cached_path_signature::Model {
         id: cached_path_sig_id(),
         cached_path: cached_path_id(),
         cache: cache_id(),
-        signature: None,
-        last_fetched_at: None,
-        fetch_count: 0,
         created_at: test_date(),
+        ..Default::default()
     };
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)

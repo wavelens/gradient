@@ -100,11 +100,9 @@ mod tests {
             file_hash: Some("sha256:dummy".into()),
             file_size: Some(nar_size / 2),
             nar_size: Some(nar_size),
-            nar_hash: None,
             references: (!references.is_empty()).then(|| references.to_string()),
-            ca: None,
-            deriver: None,
             created_at: now(),
+            ..Default::default()
         }
     }
 

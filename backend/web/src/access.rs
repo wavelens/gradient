@@ -580,15 +580,13 @@ mod tests {
             id: OrganizationId::new(uuid!("a0000000-0000-0000-0000-000000000001")),
             name: "test-org".into(),
             display_name: "Test".into(),
-            description: String::new(),
             public_key: "ssh".into(),
             private_key: "enc".into(),
             public,
-            hide_build_requests: false,
             created_by: UserId::new(uuid!("a0000000-0000-0000-0000-000000000004")),
             created_at: fixture_date(),
             managed,
-            github_installation_id: None,
+            ..Default::default()
         }
     }
 
@@ -598,19 +596,17 @@ mod tests {
             organization: OrganizationId::new(uuid!("a0000000-0000-0000-0000-000000000001")),
             name: "test-project".into(),
             display_name: "Test".into(),
-            description: String::new(),
             repository: "git@example.com:test/test.git".into(),
             wildcard: "*".into(),
             active: true,
-            last_evaluation: None,
             last_check_at: fixture_date(),
-            force_evaluation: false,
             created_by: UserId::new(uuid!("a0000000-0000-0000-0000-000000000004")),
             created_at: fixture_date(),
             managed,
             keep_evaluations: 30,
             concurrency: 3,
             sign_cache: true,
+            ..Default::default()
         }
     }
 
@@ -627,9 +623,8 @@ mod tests {
         entity::role::Model {
             id,
             name: "fixture".into(),
-            organization: None,
             permission,
-            managed: false,
+            ..Default::default()
         }
     }
 
@@ -648,7 +643,6 @@ mod tests {
     fn user_fixture() -> MUser {
         entity::user::Model {
             id: UserId::new(uuid!("a0000000-0000-0000-0000-000000000004")),
-
             username: "tester".into(),
             name: "Tester".into(),
             email: "t@example.com".into(),
@@ -656,12 +650,7 @@ mod tests {
             last_login_at: fixture_date(),
             created_at: fixture_date(),
             email_verified: true,
-            email_verification_token: None,
-            email_verification_token_expires: None,
-            managed: false,
-            superuser: false,
-            oidc_issuer: None,
-            oidc_subject: None,
+            ..Default::default()
         }
     }
 
@@ -1141,17 +1130,14 @@ mod tests {
             )),
             name: "test-cache".into(),
             display_name: "Test".into(),
-            description: String::new(),
             active: true,
             priority: 30,
-            local_priority: None,
             public_key: "k".into(),
             private_key: "p".into(),
-            public: false,
             created_by: UserId::new(uuid!("a0000000-0000-0000-0000-000000000004")),
             created_at: fixture_date(),
             managed,
-            max_storage_gb: 0,
+            ..Default::default()
         }
     }
 
@@ -1186,9 +1172,9 @@ mod tests {
         entity::cache_role::Model {
             id: gradient_core::types::consts::BASE_CACHE_ROLE_ADMIN_ID,
             name: "Admin".into(),
-            cache: None,
             permission: crate::permissions::cache_admin_mask(),
             managed: true,
+            ..Default::default()
         }
     }
 
@@ -1295,9 +1281,9 @@ mod tests {
         entity::cache_role::Model {
             id: BASE_CACHE_ROLE_VIEW_ID,
             name: "View".into(),
-            cache: None,
             permission: crate::permissions::cache_view_mask(),
             managed: true,
+            ..Default::default()
         }
     }
 

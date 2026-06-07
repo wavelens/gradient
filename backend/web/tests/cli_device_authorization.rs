@@ -77,10 +77,7 @@ fn live_session(id: SessionId) -> session::Model {
         created_at: now,
         expires_at: now + Duration::hours(1),
         last_used_at: now,
-        revoked_at: None,
-        user_agent: None,
-        ip: None,
-        remember_me: false,
+        ..Default::default()
     }
 }
 
@@ -126,14 +123,9 @@ fn pending_row(device_code: &str, user_code: &str) -> cli_device_authorization::
         ),
         device_code_hash: hash_device_code(device_code),
         user_code: user_code.to_string(),
-        user_id: None,
-        token: None,
-        denied_at: None,
-        authorized_at: None,
         created_at: now,
         expires_at: now + Duration::minutes(10),
-        user_agent: None,
-        ip: None,
+        ..Default::default()
     }
 }
 

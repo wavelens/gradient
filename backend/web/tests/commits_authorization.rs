@@ -84,10 +84,7 @@ fn live_session(id: SessionId) -> entity::session::Model {
         created_at: now,
         expires_at: now + Duration::hours(1),
         last_used_at: now,
-        revoked_at: None,
-        user_agent: None,
-        ip: None,
-        remember_me: false,
+        ..Default::default()
     }
 }
 
@@ -108,18 +105,15 @@ fn project_row() -> entity::project::Model {
         name: "test-project".into(),
         active: true,
         display_name: "Test Project".into(),
-        description: "".into(),
         repository: "https://github.com/test/repo".into(),
         wildcard: "*".into(),
-        last_evaluation: None,
         last_check_at: test_date(),
-        force_evaluation: false,
         created_by: user_id(),
         created_at: test_date(),
-        managed: false,
         keep_evaluations: 10,
         concurrency: 3,
         sign_cache: true,
+        ..Default::default()
     }
 }
 
@@ -128,8 +122,8 @@ fn commit_row() -> entity::commit::Model {
         id: commit_id(),
         message: "feat: something".into(),
         hash: vec![0xab; 20],
-        author: None,
         author_name: "Tester".into(),
+        ..Default::default()
     }
 }
 

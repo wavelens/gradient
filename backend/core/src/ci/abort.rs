@@ -80,26 +80,10 @@ mod tests {
     fn make_eval(status: EvaluationStatus) -> entity::evaluation::Model {
         entity::evaluation::Model {
             id: EvaluationId::now_v7(),
-            project: None,
-            repository: "".into(),
             commit: CommitId::nil(),
             wildcard: "*".into(),
             status,
-            previous: None,
-            next: None,
-            created_at: chrono::NaiveDateTime::default(),
-            updated_at: chrono::NaiveDateTime::default(),
-            flake_source: None,
-            check_run_ids: None,
-            waiting_reason: None,
-            trigger: None,
-            concurrent: false,
-            source_comment: None,
-            fetch_started_at: None,
-            eval_flake_started_at: None,
-            eval_drv_started_at: None,
-            building_started_at: None,
-            finished_at: None,
+            ..Default::default()
         }
     }
 
@@ -109,22 +93,7 @@ mod tests {
             evaluation: eval_id,
             derivation: DerivationId::nil(),
             status,
-            log_id: None,
-            build_time_ms: None,
-            worker: None,
-            via: None,
-            external_cached: false,
-            attempt: 0,
-            timeout_secs: None,
-            max_silent_secs: None,
-            prefer_local_build: false,
-            created_at: chrono::NaiveDateTime::default(),
-            updated_at: chrono::NaiveDateTime::default(),
-            queued_at: None,
-            ready_at: None,
-            dispatched_at: None,
-            build_started_at: None,
-            build_finished_at: None,
+            ..Default::default()
         }
     }
 

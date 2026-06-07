@@ -36,7 +36,6 @@ pub async fn org_has_eval_capable_worker_registration<C: ConnectionTrait>(
 mod tests {
     use super::*;
     use crate::types::ids::{UserId, WorkerRegistrationId};
-    use chrono::NaiveDateTime;
     use sea_orm::{DatabaseBackend, MockDatabase};
 
     fn registration_row(active: bool, enable_eval: bool) -> entity::worker_registration::Model {
@@ -44,16 +43,12 @@ mod tests {
             id: WorkerRegistrationId::now_v7(),
             peer_id: OrganizationId::nil(),
             worker_id: "00000000-0000-4000-8000-000000000001".into(),
-            token_hash: String::new(),
-            managed: false,
-            url: None,
             active,
             enable_fetch: true,
             enable_eval,
             enable_build: true,
-            display_name: String::new(),
             created_by: Some(UserId::nil()),
-            created_at: NaiveDateTime::default(),
+            ..Default::default()
         }
     }
 

@@ -40,7 +40,6 @@ fn cache_row(local_priority: Option<i32>) -> entity::cache::Model {
         id: cache_id(),
         name: "test-cache".into(),
         display_name: "Test Cache".into(),
-        description: String::new(),
         active: true,
         priority: 40,
         local_priority,
@@ -49,8 +48,7 @@ fn cache_row(local_priority: Option<i32>) -> entity::cache::Model {
         public: true,
         created_by: user_id(),
         created_at: test_date(),
-        managed: false,
-        max_storage_gb: 0,
+        ..Default::default()
     }
 }
 

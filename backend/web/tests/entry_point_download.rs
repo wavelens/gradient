@@ -64,15 +64,12 @@ fn public_org_row() -> entity::organization::Model {
         id: org_id(),
         name: "test-org".into(),
         display_name: "Test Org".into(),
-        description: String::new(),
         public_key: "pub".into(),
         private_key: "priv".into(),
         public: true,
-        hide_build_requests: false,
         created_by: user_id(),
         created_at: test_date(),
-        managed: false,
-        github_installation_id: None,
+        ..Default::default()
     }
 }
 
@@ -83,18 +80,16 @@ fn project_row(last_evaluation: Option<EvaluationId>) -> entity::project::Model 
         name: "test-project".into(),
         active: true,
         display_name: "Test Project".into(),
-        description: String::new(),
         repository: "https://example.com/repo".into(),
         wildcard: "*".into(),
         last_evaluation,
         last_check_at: test_date(),
-        force_evaluation: false,
         created_by: user_id(),
         created_at: test_date(),
-        managed: false,
         keep_evaluations: 10,
         concurrency: 3,
         sign_cache: true,
+        ..Default::default()
     }
 }
 
@@ -106,24 +101,12 @@ fn newest_eval_row() -> entity::evaluation::Model {
         commit: newest_commit_id(),
         wildcard: "*".into(),
         status: EvaluationStatus::Completed,
-        previous: None,
-        next: None,
         // Older `created_at` than any retriggered run would have - the bug
         // scenario from #185: ordering by `created_at` would pick a different
         // (older-commit) evaluation, but `last_evaluation` must win.
         created_at: test_date(),
         updated_at: test_date(),
-        flake_source: None,
-        check_run_ids: None,
-        waiting_reason: None,
-        trigger: None,
-        concurrent: false,
-        source_comment: None,
-        fetch_started_at: None,
-        eval_flake_started_at: None,
-        eval_drv_started_at: None,
-        building_started_at: None,
-        finished_at: None,
+        ..Default::default()
     }
 }
 
@@ -135,7 +118,7 @@ fn entry_point_row() -> entity::entry_point::Model {
         build: build_id(),
         eval: "packages.x86_64-linux.hello".into(),
         created_at: test_date(),
-        repo_check_id: None,
+        ..Default::default()
     }
 }
 
@@ -145,22 +128,11 @@ fn completed_build_row() -> entity::build::Model {
         evaluation: newest_eval_id(),
         derivation: derivation_id(),
         status: BuildStatus::Completed,
-        log_id: None,
         build_time_ms: Some(1_000),
         worker: Some("worker-1".into()),
-        via: None,
-        external_cached: false,
-        attempt: 0,
-        timeout_secs: None,
-        max_silent_secs: None,
-        prefer_local_build: false,
         created_at: test_date(),
         updated_at: test_date(),
-        queued_at: None,
-        ready_at: None,
-        dispatched_at: None,
-        build_started_at: None,
-        build_finished_at: None,
+        ..Default::default()
     }
 }
 

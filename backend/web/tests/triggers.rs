@@ -41,18 +41,15 @@ fn project_row() -> entity::project::Model {
         name: "test-project".into(),
         active: true,
         display_name: "Test Project".into(),
-        description: "".into(),
         repository: "https://github.com/test/repo".into(),
         wildcard: "*".into(),
-        last_evaluation: None,
         last_check_at: test_date(),
-        force_evaluation: false,
         created_by: user_id(),
         created_at: test_date(),
-        managed: false,
         keep_evaluations: 10,
         concurrency: 3,
         sign_cache: true,
+        ..Default::default()
     }
 }
 
@@ -71,9 +68,8 @@ fn admin_role_row() -> entity::role::Model {
     entity::role::Model {
         id: gradient_core::types::consts::BASE_ROLE_ADMIN_ID,
         name: "Admin".into(),
-        organization: None,
         permission: gradient_core::permissions::admin_mask(),
-        managed: false,
+        ..Default::default()
     }
 }
 
@@ -81,12 +77,11 @@ fn polling_trigger_row() -> project_trigger::Model {
     project_trigger::Model {
         id: trigger_id(),
         project: project_id(),
-        trigger_type: 0, // Polling
         config: serde_json::json!({"interval_secs": 60}),
         active: true,
-        last_fired_at: None,
         created_at: test_date(),
         updated_at: test_date(),
+        ..Default::default()
     }
 }
 
@@ -100,14 +95,10 @@ fn github_inbound_integration_row() -> integration::Model {
         organization: org_id(),
         name: "github".into(),
         display_name: "GitHub".into(),
-        kind: 0,       // Inbound
         forge_type: 3, // GitHub
-        secret: None,
-        endpoint_url: None,
-        access_token: None,
-        allowed_ips: None,
         created_by: user_id(),
         created_at: test_date(),
+        ..Default::default()
     }
 }
 
@@ -123,9 +114,9 @@ fn reporter_push_trigger_row() -> project_trigger::Model {
             "releases_only": false,
         }),
         active: true,
-        last_fired_at: None,
         created_at: test_date(),
         updated_at: test_date(),
+        ..Default::default()
     }
 }
 
@@ -546,29 +537,25 @@ fn create_project_seeds_default_polling_trigger() {
             name: "new-project".into(),
             active: true,
             display_name: "New Project".into(),
-            description: "".into(),
             repository: "https://github.com/test/repo".into(),
             wildcard: "*".into(),
-            last_evaluation: None,
             last_check_at: test_date(),
-            force_evaluation: false,
             created_by: user_id(),
             created_at: test_date(),
-            managed: false,
             keep_evaluations: 30,
             concurrency: 3,
             sign_cache: true,
+            ..Default::default()
         };
 
         let seeded_trigger = project_trigger::Model {
             id: trigger_id(),
             project: project_id(),
-            trigger_type: 0, // Polling
             config: serde_json::json!({"interval_secs": 300}),
             active: true,
-            last_fired_at: None,
             created_at: test_date(),
             updated_at: test_date(),
+            ..Default::default()
         };
 
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
@@ -621,29 +608,25 @@ fn create_project_with_all_concurrency_returns_id() {
             name: "new-project".into(),
             active: true,
             display_name: "New Project".into(),
-            description: "".into(),
             repository: "https://github.com/test/repo".into(),
             wildcard: "*".into(),
-            last_evaluation: None,
             last_check_at: test_date(),
-            force_evaluation: false,
             created_by: user_id(),
             created_at: test_date(),
-            managed: false,
             keep_evaluations: 30,
             concurrency: 2, // All
             sign_cache: true,
+            ..Default::default()
         };
 
         let seeded_trigger = entity::project_trigger::Model {
             id: trigger_id(),
             project: project_id(),
-            trigger_type: 0,
             config: serde_json::json!({"interval_secs": 300}),
             active: true,
-            last_fired_at: None,
             created_at: test_date(),
             updated_at: test_date(),
+            ..Default::default()
         };
 
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
@@ -691,29 +674,24 @@ fn create_project_with_hard_abort_concurrency_returns_id() {
             name: "new-project".into(),
             active: true,
             display_name: "New Project".into(),
-            description: "".into(),
             repository: "https://github.com/test/repo".into(),
             wildcard: "*".into(),
-            last_evaluation: None,
             last_check_at: test_date(),
-            force_evaluation: false,
             created_by: user_id(),
             created_at: test_date(),
-            managed: false,
             keep_evaluations: 30,
-            concurrency: 0, // HardAbort
             sign_cache: true,
+            ..Default::default()
         };
 
         let seeded_trigger = entity::project_trigger::Model {
             id: trigger_id(),
             project: project_id(),
-            trigger_type: 0,
             config: serde_json::json!({"interval_secs": 300}),
             active: true,
-            last_fired_at: None,
             created_at: test_date(),
             updated_at: test_date(),
+            ..Default::default()
         };
 
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
