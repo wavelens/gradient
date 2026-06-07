@@ -381,6 +381,9 @@ async fn fetch_only_completion_enqueues_cached_eval_followup() {
     };
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
+        // register_worker resolves the worker's owning org from worker_registration;
+        // an empty result means "no registration row" and skips the connection record.
+        .append_query_results([Vec::<entity::worker_registration::Model>::new()])
         .append_query_results([vec![archived_eval]])
         .into_connection();
     let scheduler = Arc::new(Scheduler::new(test_state(db)));
