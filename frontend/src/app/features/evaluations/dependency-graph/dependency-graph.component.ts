@@ -18,8 +18,10 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
-import { interval, Subscription } from 'rxjs';
+import { Subscription } from 'rxjs';
+import { auditTime } from 'rxjs/operators';
 import { EvaluationsService, BuildGraph } from '@core/services/evaluations.service';
+import { LiveService } from '@core/services/live.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { ButtonModule } from 'primeng/button';
 
@@ -55,6 +57,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private evalService = inject(EvaluationsService);
+  private live = inject(LiveService);
   private zone = inject(NgZone);
   private cdr = inject(ChangeDetectorRef);
 
@@ -101,7 +104,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
   private panStart = { x: 0, y: 0, tx: 0, ty: 0 };
   private didDrag = false;
 
-  private pollSub?: Subscription;
+  private liveSub?: Subscription;
   private timerInterval?: ReturnType<typeof setInterval>;
 
   ngOnInit(): void {
@@ -115,7 +118,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     document.documentElement.style.overflow = '';
     document.body.style.overflow = '';
-    this.pollSub?.unsubscribe();
+    this.liveSub?.unsubscribe();
     if (this.timerInterval) clearInterval(this.timerInterval);
   }
 
@@ -138,7 +141,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
         setTimeout(() => {
           this.createSvgElements();
           this.centerViewport();
-          this.startPolling();
+          this.startLiveUpdates();
           this.startTimer();
         }, 0);
       },
@@ -524,34 +527,37 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
     this.centerViewport();
   }
 
-  // ── Live polling ──────────────────────────────────────────────────────────
+  // ── Live updates ──────────────────────────────────────────────────────────
 
-  private startPolling(): void {
-    this.pollSub = interval(5000).subscribe(() => {
-      const hasActive = this.layoutNodes.some(
-        (n) => n.status === 'Building' || n.status === 'Queued' || n.status === 'Created'
-      );
-      if (!hasActive) { this.pollSub?.unsubscribe(); return; }
+  private startLiveUpdates(): void {
+    this.liveSub = this.live
+      .connect(`/builds/${this.buildId}/live`)
+      .pipe(auditTime(300))
+      .subscribe(() => {
+        const hasActive = this.layoutNodes.some(
+          (n) => n.status === 'Building' || n.status === 'Queued' || n.status === 'Created'
+        );
+        if (!hasActive) { this.liveSub?.unsubscribe(); return; }
 
-      this.evalService.getBuildGraph(this.buildId).subscribe({
-        next: (graph) => {
-          let changed = false;
-          for (const updated of graph.nodes) {
-            const existing = this.nodeMap.get(updated.id);
-            if (existing && existing.status !== updated.status) {
-              existing.status = updated.status;
-              existing.updated_at = updated.updated_at;
-              changed = true;
+        this.evalService.getBuildGraph(this.buildId).subscribe({
+          next: (graph) => {
+            let changed = false;
+            for (const updated of graph.nodes) {
+              const existing = this.nodeMap.get(updated.id);
+              if (existing && existing.status !== updated.status) {
+                existing.status = updated.status;
+                existing.updated_at = updated.updated_at;
+                changed = true;
+              }
             }
-          }
-          if (changed) {
-            const root = graph.nodes.find((n) => n.id === graph.root);
-            this.zone.run(() => this.rootStatus.set(root?.status ?? ''));
-            this.updateSvgPositions();
-          }
-        },
+            if (changed) {
+              const root = graph.nodes.find((n) => n.id === graph.root);
+              this.zone.run(() => this.rootStatus.set(root?.status ?? ''));
+              this.updateSvgPositions();
+            }
+          },
+        });
       });
-    });
   }
 
   // ── Live timer ────────────────────────────────────────────────────────────

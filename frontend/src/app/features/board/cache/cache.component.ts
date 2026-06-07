@@ -4,9 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, inject, signal, computed } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { Subscription } from 'rxjs';
+import { auditTime } from 'rxjs/operators';
 import { BoardService, BoardCacheStats } from '@core/services/board.service';
+import { LiveService } from '@core/services/live.service';
 import { MetricChartComponent } from '@shared/components/metric-chart/metric-chart.component';
 
 const GIB = 1024 ** 3;
@@ -58,8 +61,10 @@ const GIB = 1024 ** 3;
     `,
   ],
 })
-export class BoardCacheComponent implements OnInit {
+export class BoardCacheComponent implements OnInit, OnDestroy {
   private board = inject(BoardService);
+  private live = inject(LiveService);
+  private liveSub?: Subscription;
   stats = signal<BoardCacheStats | null>(null);
 
   trafficCats = computed(() => (this.stats()?.traffic ?? []).map((p) => p.bucket_start.slice(11, 16)));
@@ -79,6 +84,18 @@ export class BoardCacheComponent implements OnInit {
   }
 
   ngOnInit(): void {
+    this.load();
+    this.liveSub = this.live
+      .connect('/board/cache/live')
+      .pipe(auditTime(2000))
+      .subscribe(() => this.load());
+  }
+
+  ngOnDestroy(): void {
+    this.liveSub?.unsubscribe();
+  }
+
+  private load(): void {
     this.board.getCache(24).subscribe((s) => this.stats.set(s));
   }
 }
