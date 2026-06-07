@@ -86,12 +86,12 @@ export class ProjectsService {
   }
 
   getProjectMetrics(organization: string, project: string): Observable<ProjectMetricsResponse> {
-    return this.api.get<ProjectMetricsResponse>(`projects/${organization}/${project}/metrics`);
+    return this.api.get<ProjectMetricsResponse>(`metrics/projects/${organization}/${project}/evaluations`);
   }
 
   getEntryPointMetrics(organization: string, project: string, eval_attr: string): Observable<EntryPointMetricsResponse> {
     return this.api.get<EntryPointMetricsResponse>(
-      `projects/${organization}/${project}/entry-point-metrics?eval=${encodeURIComponent(eval_attr)}`
+      `metrics/projects/${organization}/${project}/entry-point?eval=${encodeURIComponent(eval_attr)}`
     );
   }
 }

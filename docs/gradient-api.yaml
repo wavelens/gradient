@@ -5684,6 +5684,33 @@ x-nix-cache-paths:
         '404':
           description: Unknown metric or org out of scope
 
+  /metrics/projects/{organization}/{project}/evaluations:
+    get:
+      tags: [board]
+      summary: Per-evaluation project metrics
+      description: Per-evaluation series (build time, eval time, output/closure sizes, dependencies) for the project's recent completed evaluations.
+      operationId: getProjectEvaluationMetrics
+      parameters:
+        - { name: organization, in: path, required: true, schema: { type: string } }
+        - { name: project, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Per-evaluation metric points
+
+  /metrics/projects/{organization}/{project}/entry-point:
+    get:
+      tags: [board]
+      summary: Per-evaluation entry-point metrics
+      description: Per-evaluation build metrics for a single entry point identified by its `eval` attribute path.
+      operationId: getEntryPointEvaluationMetrics
+      parameters:
+        - { name: organization, in: path, required: true, schema: { type: string } }
+        - { name: project, in: path, required: true, schema: { type: string } }
+        - { name: eval, in: query, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Per-evaluation entry-point metric points
+
   /board/jobs/dispatched:
     get:
       tags: [board]
