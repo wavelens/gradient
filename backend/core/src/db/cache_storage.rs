@@ -12,10 +12,18 @@
 use crate::types::ids::{CacheId, OrganizationId};
 use entity::cache::Model as MCache;
 use entity::organization_cache::CacheSubscriptionMode;
+use sea_orm::sea_query::{Alias, SimpleExpr};
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QuerySelect};
 
 /// Park threshold: a cache with less than this much free headroom is "full".
 pub const STORAGE_HEADROOM_BYTES: i64 = 10 * 1024 * 1024;
+
+/// `SUM(file_size)` cast back to `BIGINT`: Postgres widens `SUM(int8)` to
+/// `NUMERIC`, which would otherwise fail to decode into `Option<i64>`.
+fn file_size_sum_bigint() -> SimpleExpr {
+    use entity::cached_path::Column as CCP;
+    CCP::FileSize.sum().cast_as(Alias::new("bigint"))
+}
 
 const BYTES_PER_GB: i64 = 1024 * 1024 * 1024;
 
@@ -50,7 +58,7 @@ pub async fn cache_used_bytes<C: ConnectionTrait>(
     let sum: Option<i64> = ECP::find()
         .filter(CCP::Id.is_in(path_ids))
         .select_only()
-        .column_as(CCP::FileSize.sum(), "total")
+        .column_as(file_size_sum_bigint(), "total")
         .into_tuple()
         .one(db)
         .await?
@@ -60,10 +68,10 @@ pub async fn cache_used_bytes<C: ConnectionTrait>(
 
 /// Sum of compressed NAR bytes stored across the whole instance.
 pub async fn instance_used_bytes<C: ConnectionTrait>(db: &C) -> Result<i64, sea_orm::DbErr> {
-    use entity::cached_path::{Column as CCP, Entity as ECP};
+    use entity::cached_path::Entity as ECP;
     let sum: Option<i64> = ECP::find()
         .select_only()
-        .column_as(CCP::FileSize.sum(), "total")
+        .column_as(file_size_sum_bigint(), "total")
         .into_tuple()
         .one(db)
         .await?
@@ -146,6 +154,19 @@ pub async fn org_caches_all_full<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn file_size_sum_casts_to_bigint() {
+        use entity::cached_path::Entity as ECP;
+        use sea_orm::{DatabaseBackend, EntityTrait, QuerySelect, QueryTrait};
+        let sql = ECP::find()
+            .select_only()
+            .column_as(file_size_sum_bigint(), "total")
+            .build(DatabaseBackend::Postgres)
+            .to_string();
+        assert!(sql.to_uppercase().contains("CAST"), "missing cast: {sql}");
+        assert!(sql.to_lowercase().contains("bigint"), "missing bigint: {sql}");
+    }
 
     #[test]
     fn zero_limit_is_unlimited() {
