@@ -264,6 +264,45 @@ export const routes: Routes = [
           import('./features/dashboard/dashboard.component').then((m) => m.DashboardComponent),
       },
 
+      // Job Board
+      {
+        path: 'board',
+        title: 'Job Board',
+        loadComponent: () =>
+          import('./features/board/board-layout.component').then((m) => m.BoardLayoutComponent),
+        children: [
+          { path: '', pathMatch: 'full', redirectTo: 'overview' },
+          {
+            path: 'overview',
+            loadComponent: () =>
+              import('./features/board/overview/overview.component').then(
+                (m) => m.BoardOverviewComponent
+              ),
+          },
+          {
+            path: 'live',
+            loadComponent: () =>
+              import('./features/board/live-jobs/live-jobs.component').then(
+                (m) => m.BoardLiveJobsComponent
+              ),
+          },
+          {
+            path: 'workers',
+            loadComponent: () =>
+              import('./features/board/workers/workers.component').then(
+                (m) => m.BoardWorkersComponent
+              ),
+          },
+          {
+            path: 'expensive',
+            loadComponent: () =>
+              import('./features/board/expensive-jobs/expensive-jobs.component').then(
+                (m) => m.BoardExpensiveJobsComponent
+              ),
+          },
+        ],
+      },
+
       // Organizations
       {
         path: 'organization/:org/settings',
