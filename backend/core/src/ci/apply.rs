@@ -300,7 +300,6 @@ pub async fn park_if_no_workers<C: ConnectionTrait>(
 mod tests {
     use super::*;
     use crate::types::ids::{CacheId, OrganizationCacheId, UserId, WorkerRegistrationId};
-    use chrono::NaiveDateTime;
     use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
     use uuid::Uuid;
 
@@ -315,18 +314,14 @@ mod tests {
             name: "test-project".into(),
             active: true,
             display_name: "Test".into(),
-            description: "".into(),
             repository: "https://example/r".into(),
             wildcard: "*".into(),
             last_evaluation: last,
-            last_check_at: NaiveDateTime::default(),
-            force_evaluation: false,
             created_by: UserId::nil(),
-            created_at: NaiveDateTime::default(),
-            managed: false,
             keep_evaluations: 10,
             concurrency,
             sign_cache: true,
+            ..Default::default()
         }
     }
 
@@ -339,25 +334,10 @@ mod tests {
         entity::evaluation::Model {
             id,
             project: Some(project),
-            repository: "".into(),
             commit,
             wildcard: "*".into(),
             status,
-            previous: None,
-            next: None,
-            created_at: NaiveDateTime::default(),
-            updated_at: NaiveDateTime::default(),
-            flake_source: None,
-            check_run_ids: None,
-            waiting_reason: None,
-            trigger: None,
-            concurrent: false,
-            source_comment: None,
-            fetch_started_at: None,
-            eval_flake_started_at: None,
-            eval_drv_started_at: None,
-            building_started_at: None,
-            finished_at: None,
+            ..Default::default()
         }
     }
 
@@ -383,10 +363,8 @@ mod tests {
     fn make_commit(id: CommitId, hash: Vec<u8>) -> entity::commit::Model {
         entity::commit::Model {
             id,
-            message: "".into(),
             hash,
-            author: None,
-            author_name: "".into(),
+            ..Default::default()
         }
     }
 
@@ -416,17 +394,10 @@ mod tests {
             id: CacheId::now_v7(),
             name: "cache".into(),
             display_name: "Cache".into(),
-            description: String::new(),
             active,
             priority: 10,
-            local_priority: None,
-            public_key: String::new(),
-            private_key: String::new(),
-            public: false,
             created_by: UserId::nil(),
-            created_at: NaiveDateTime::default(),
-            managed: false,
-            max_storage_gb: 0,
+            ..Default::default()
         }
     }
 
@@ -462,16 +433,12 @@ mod tests {
             id: WorkerRegistrationId::now_v7(),
             peer_id: OrganizationId::nil(),
             worker_id: "00000000-0000-4000-8000-000000000001".into(),
-            token_hash: String::new(),
-            managed: false,
-            url: None,
             active,
             enable_fetch: true,
             enable_eval,
             enable_build: true,
-            display_name: String::new(),
             created_by: Some(UserId::nil()),
-            created_at: NaiveDateTime::default(),
+            ..Default::default()
         }
     }
 
@@ -798,22 +765,7 @@ mod tests {
             evaluation: running_eval_id,
             derivation: DerivationId::nil(),
             status: entity::build::BuildStatus::Building,
-            log_id: None,
-            build_time_ms: None,
-            worker: None,
-            via: None,
-            external_cached: false,
-            attempt: 0,
-            timeout_secs: None,
-            max_silent_secs: None,
-            prefer_local_build: false,
-            created_at: chrono::NaiveDateTime::default(),
-            updated_at: chrono::NaiveDateTime::default(),
-            queued_at: None,
-            ready_at: None,
-            dispatched_at: None,
-            build_started_at: None,
-            build_finished_at: None,
+            ..Default::default()
         };
         let new_eval_id = EvaluationId::now_v7();
         let new_commit_id = CommitId::now_v7();

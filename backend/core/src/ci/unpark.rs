@@ -276,32 +276,17 @@ pub async fn find_approval_gated_eval(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::NaiveDateTime;
     use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 
     fn waiting_eval(reason: WaitingReason) -> MEvaluation {
         entity::evaluation::Model {
             id: EvaluationId::now_v7(),
             project: Some(ProjectId::now_v7()),
-            repository: String::new(),
             commit: CommitId::now_v7(),
             wildcard: "*".into(),
             status: EvaluationStatus::Waiting,
-            previous: None,
-            next: None,
-            created_at: NaiveDateTime::default(),
-            updated_at: NaiveDateTime::default(),
-            flake_source: None,
-            check_run_ids: None,
             waiting_reason: Some(reason.to_json()),
-            trigger: None,
-            concurrent: false,
-            source_comment: None,
-            fetch_started_at: None,
-            eval_flake_started_at: None,
-            eval_drv_started_at: None,
-            building_started_at: None,
-            finished_at: None,
+            ..Default::default()
         }
     }
 
@@ -383,19 +368,12 @@ mod tests {
             organization: org,
             name: "p".into(),
             active: true,
-            display_name: String::new(),
-            description: String::new(),
-            repository: String::new(),
             wildcard: "*".into(),
-            last_evaluation: None,
-            last_check_at: NaiveDateTime::default(),
-            force_evaluation: false,
             created_by: crate::types::ids::UserId::nil(),
-            created_at: NaiveDateTime::default(),
-            managed: false,
             keep_evaluations: 10,
             concurrency: 3,
             sign_cache: true,
+            ..Default::default()
         }
     }
 
@@ -404,16 +382,12 @@ mod tests {
             id: crate::types::ids::WorkerRegistrationId::now_v7(),
             peer_id: OrganizationId::nil(),
             worker_id: "00000000-0000-4000-8000-000000000001".into(),
-            token_hash: String::new(),
-            managed: false,
-            url: None,
             active: true,
             enable_fetch: true,
             enable_eval: true,
             enable_build: true,
-            display_name: String::new(),
             created_by: Some(crate::types::ids::UserId::nil()),
-            created_at: NaiveDateTime::default(),
+            ..Default::default()
         }
     }
 

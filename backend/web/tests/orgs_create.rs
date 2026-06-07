@@ -38,15 +38,9 @@ fn org_row(name: &str) -> organization::Model {
         id: OrganizationId::now_v7(),
         name: name.to_string(),
         display_name: format!("{} display", name),
-        description: String::new(),
-        public_key: String::new(),
-        private_key: String::new(),
-        public: false,
-        hide_build_requests: false,
         created_by: user_id(),
         created_at: test_date(),
-        managed: false,
-        github_installation_id: None,
+        ..Default::default()
     }
 }
 

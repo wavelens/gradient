@@ -122,11 +122,8 @@ mod tests {
             display_name: "test".into(),
             mode: CacheSubscriptionMode::ReadOnly,
             kind,
-            upstream_cache: None,
             url: url.map(str::to_owned),
-            public_key: None,
-            remote_cache_name: None,
-            api_key: None,
+            ..Default::default()
         }
     }
 

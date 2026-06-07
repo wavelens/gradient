@@ -69,17 +69,14 @@ pub async fn public_cache_with_narinfo() -> Arc<ServerState> {
         id: cache_id(),
         name: FIXTURE_CACHE_NAME.into(),
         display_name: "Test Cache".into(),
-        description: String::new(),
         active: true,
         priority: 30,
-        local_priority: None,
         public_key: "test-pub-key".into(),
         private_key: "test-priv-key".into(),
         public: true,
         created_by: UserId::new(org_id().into_inner()),
         created_at: test_date(),
-        managed: false,
-        max_storage_gb: 0,
+        ..Default::default()
     };
 
     let drv_output_row = entity::derivation_output::Model {
@@ -88,11 +85,11 @@ pub async fn public_cache_with_narinfo() -> Arc<ServerState> {
         name: "out".into(),
         hash: FIXTURE_PATH_HASH.into(),
         package: "hello".into(),
-        ca: None,
         nar_size: Some(67890),
         is_cached: true,
         cached_path: Some(cached_path_id()),
         created_at: test_date(),
+        ..Default::default()
     };
 
     let deriv_row = entity::derivation::Model {
@@ -124,9 +121,9 @@ pub async fn public_cache_with_narinfo() -> Arc<ServerState> {
         nar_size: Some(67890),
         nar_hash: Some("sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73".into()),
         references: Some(String::new()),
-        ca: None,
         deriver: Some(format!("/nix/store/{}-hello.drv", FIXTURE_PATH_HASH)),
         created_at: test_date(),
+        ..Default::default()
     };
 
     let cached_path_sig_row = entity::cached_path_signature::Model {
@@ -135,8 +132,7 @@ pub async fn public_cache_with_narinfo() -> Arc<ServerState> {
         cache: cache_id(),
         signature: Some(vec![0x42; 64]),
         created_at: test_date(),
-        last_fetched_at: None,
-        fetch_count: 0,
+        ..Default::default()
     };
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -178,17 +174,14 @@ pub async fn public_cache_state() -> Arc<ServerState> {
         id: cache_id(),
         name: FIXTURE_CACHE_NAME.into(),
         display_name: "Test Cache".into(),
-        description: String::new(),
         active: true,
         priority: 30,
-        local_priority: None,
         public_key: "test-pub-key".into(),
         private_key: "test-priv-key".into(),
         public: true,
         created_by: UserId::new(org_id().into_inner()),
         created_at: test_date(),
-        managed: false,
-        max_storage_gb: 0,
+        ..Default::default()
     };
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -229,17 +222,14 @@ pub async fn public_cache_with_nar() -> Arc<ServerState> {
         id: cache_id(),
         name: FIXTURE_CACHE_NAME.into(),
         display_name: "Test Cache".into(),
-        description: String::new(),
         active: true,
         priority: 30,
-        local_priority: None,
         public_key: "test-pub-key".into(),
         private_key: "test-priv-key".into(),
         public: true,
         created_by: UserId::new(org_id().into_inner()),
         created_at: test_date(),
-        managed: false,
-        max_storage_gb: 0,
+        ..Default::default()
     };
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -299,17 +289,14 @@ fn cache_row_with_visibility(public: bool) -> entity::cache::Model {
         id: cache_id(),
         name: FIXTURE_CACHE_NAME.into(),
         display_name: "Test Cache".into(),
-        description: String::new(),
         active: true,
         priority: 30,
-        local_priority: None,
         public_key: "test-pub-key".into(),
         private_key: "test-priv-key".into(),
         public,
         created_by: UserId::new(org_id().into_inner()),
         created_at: test_date(),
-        managed: false,
-        max_storage_gb: 0,
+        ..Default::default()
     }
 }
 
@@ -331,7 +318,7 @@ fn cache_derivation_row() -> entity::cache_derivation::Model {
         cache: cache_id(),
         derivation: deriv_id(),
         cached_at: test_date(),
-        last_fetched_at: None,
+        ..Default::default()
     }
 }
 
@@ -341,22 +328,9 @@ fn build_row(status: entity::build::BuildStatus) -> entity::build::Model {
         evaluation: eval_id(),
         derivation: deriv_id(),
         status,
-        log_id: None,
-        build_time_ms: None,
-        worker: None,
-        via: None,
-        external_cached: false,
-        attempt: 0,
-        timeout_secs: None,
-        max_silent_secs: None,
-        prefer_local_build: false,
         created_at: test_date(),
         updated_at: test_date(),
-        queued_at: None,
-        ready_at: None,
-        dispatched_at: None,
-        build_started_at: None,
-        build_finished_at: None,
+        ..Default::default()
     }
 }
 
@@ -536,9 +510,9 @@ fn cached_path_row_fixture() -> entity::cached_path::Model {
         nar_size: Some(67890),
         nar_hash: Some("sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73".into()),
         references: Some(String::new()),
-        ca: None,
         deriver: Some(format!("/nix/store/{}-hello.drv", FIXTURE_PATH_HASH)),
         created_at: test_date(),
+        ..Default::default()
     }
 }
 

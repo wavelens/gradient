@@ -1145,22 +1145,7 @@ mod waiting_reason_tests {
             evaluation: eval_id,
             derivation: drv_id,
             status: BuildStatus::Queued,
-            log_id: None,
-            build_time_ms: None,
-            worker: None,
-            via: None,
-            external_cached: false,
-            attempt: 0,
-            timeout_secs: None,
-            max_silent_secs: None,
-            prefer_local_build: false,
-            created_at: chrono::NaiveDateTime::default(),
-            updated_at: chrono::NaiveDateTime::default(),
-            queued_at: None,
-            ready_at: None,
-            dispatched_at: None,
-            build_started_at: None,
-            build_finished_at: None,
+            ..Default::default()
         }
     }
 

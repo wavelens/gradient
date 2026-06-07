@@ -27,9 +27,8 @@ fn write_role_row() -> role::Model {
     role::Model {
         id: BASE_ROLE_WRITE_ID,
         name: "write".into(),
-        organization: None,
         permission: gradient_core::permissions::write_mask() as PermissionMask,
-        managed: false,
+        ..Default::default()
     }
 }
 
@@ -68,10 +67,10 @@ fn live_upload_session(
         organization: org_id(),
         manifest: json!([]),
         missing: serde_json::to_value(missing).unwrap(),
-        total_size: 0,
         created_at: now,
         expires_at,
         dispatched_at: if dispatched { Some(now) } else { None },
+        ..Default::default()
     }
 }
 

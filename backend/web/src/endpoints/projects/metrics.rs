@@ -266,11 +266,11 @@ mod tests {
             name: "out".into(),
             hash: hash.into(),
             package: "foo".into(),
-            ca: None,
             nar_size,
             is_cached: cached.is_some(),
             cached_path: cached,
             created_at: now(),
+            ..Default::default()
         }
     }
 
@@ -283,11 +283,8 @@ mod tests {
             file_hash: Some("sha256:dummy".into()),
             file_size: Some(nar_size / 2),
             nar_size: Some(nar_size),
-            nar_hash: None,
-            references: None,
-            ca: None,
-            deriver: None,
             created_at: now(),
+            ..Default::default()
         }
     }
 

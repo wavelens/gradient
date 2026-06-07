@@ -26,18 +26,15 @@ fn project_row() -> entity::project::Model {
         name: "test-project".into(),
         active: true,
         display_name: "Test Project".into(),
-        description: "".into(),
         repository: "https://github.com/test/repo".into(),
         wildcard: "*".into(),
-        last_evaluation: None,
         last_check_at: test_date(),
-        force_evaluation: false,
         created_by: user_id(),
         created_at: test_date(),
-        managed: false,
         keep_evaluations: 10,
         concurrency: 3,
         sign_cache: true,
+        ..Default::default()
     }
 }
 
@@ -63,9 +60,8 @@ fn admin_role_row() -> entity::role::Model {
     entity::role::Model {
         id: gradient_core::types::consts::BASE_ROLE_ADMIN_ID,
         name: "Admin".into(),
-        organization: None,
         permission: gradient_core::permissions::admin_mask(),
-        managed: false,
+        ..Default::default()
     }
 }
 
@@ -192,9 +188,9 @@ fn create_with_null_url_keep_url_mode() {
             id: override_id(),
             project: project_id(),
             input_name: "utils".into(),
-            url: None,
             created_at: test_date(),
             updated_at: test_date(),
+            ..Default::default()
         };
 
         let db = with_project_edit(with_auth(
@@ -479,9 +475,9 @@ fn list_sorted_by_input_name() {
             ),
             project: project_id(),
             input_name: "alpha".into(),
-            url: None,
             created_at: test_date(),
             updated_at: test_date(),
+            ..Default::default()
         };
         let zebra = project_flake_input_override::Model {
             id: FlakeInputOverrideId::new(
@@ -489,9 +485,9 @@ fn list_sorted_by_input_name() {
             ),
             project: project_id(),
             input_name: "zebra".into(),
-            url: None,
             created_at: test_date(),
             updated_at: test_date(),
+            ..Default::default()
         };
 
         // MockDatabase returns rows in insertion order; handler sorts by input_name ASC,

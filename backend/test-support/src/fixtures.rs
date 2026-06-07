@@ -43,15 +43,11 @@ pub fn org() -> organization::Model {
         id: org_id(),
         name: "test-org".into(),
         display_name: "Test Organization".into(),
-        description: "".into(),
         public_key: "ssh-ed25519 AAAA test".into(),
         private_key: "encrypted".into(),
-        public: false,
-        hide_build_requests: false,
         created_by: user_id(),
         created_at: test_date(),
-        managed: false,
-        github_installation_id: None,
+        ..Default::default()
     }
 }
 
@@ -65,12 +61,7 @@ pub fn user() -> user::Model {
         last_login_at: test_date(),
         created_at: test_date(),
         email_verified: true,
-        email_verification_token: None,
-        email_verification_token_expires: None,
-        managed: false,
-        superuser: false,
-        oidc_issuer: None,
-        oidc_subject: None,
+        ..Default::default()
     }
 }
 
@@ -79,15 +70,11 @@ pub fn org_with_id(id: OrganizationId, slug: &str) -> organization::Model {
         id,
         name: slug.into(),
         display_name: slug.into(),
-        description: String::new(),
         public_key: "ssh-ed25519 AAAA test".into(),
         private_key: "encrypted".into(),
-        public: false,
-        hide_build_requests: false,
         created_by: user_id(),
         created_at: test_date(),
-        managed: false,
-        github_installation_id: None,
+        ..Default::default()
     }
 }
 
@@ -96,17 +83,13 @@ pub fn cache_with_id(id: CacheId, slug: &str, owner: UserId) -> cache::Model {
         id,
         name: slug.into(),
         display_name: slug.into(),
-        description: String::new(),
         active: true,
         priority: 30,
-        local_priority: None,
         public_key: "ssh-ed25519 AAAA test".into(),
         private_key: "encrypted".into(),
-        public: false,
         created_by: owner,
         created_at: test_date(),
-        managed: false,
-        max_storage_gb: 0,
+        ..Default::default()
     }
 }
 
@@ -136,10 +119,7 @@ pub fn internal_upstream(
         mode: CacheSubscriptionMode::ReadOnly,
         kind: cache_upstream::CacheUpstreamKind::Internal,
         upstream_cache: Some(upstream),
-        url: None,
-        public_key: None,
-        remote_cache_name: None,
-        api_key: None,
+        ..Default::default()
     }
 }
 
@@ -155,11 +135,9 @@ pub fn external_upstream(
         display_name: "external".into(),
         mode: CacheSubscriptionMode::ReadOnly,
         kind: cache_upstream::CacheUpstreamKind::Http,
-        upstream_cache: None,
         url: Some(url.into()),
         public_key: Some(public_key.into()),
-        remote_cache_name: None,
-        api_key: None,
+        ..Default::default()
     }
 }
 
@@ -172,21 +150,9 @@ pub fn eval_at(id: EvaluationId, offset_secs: i64) -> evaluation::Model {
         commit: commit_id(),
         wildcard: "*".into(),
         status: evaluation::EvaluationStatus::Completed,
-        previous: None,
-        next: None,
         created_at,
         updated_at: created_at,
-        flake_source: None,
-        check_run_ids: None,
-        waiting_reason: None,
-        trigger: None,
-        concurrent: false,
-        source_comment: None,
-        fetch_started_at: None,
-        eval_flake_started_at: None,
-        eval_drv_started_at: None,
-        building_started_at: None,
-        finished_at: None,
+        ..Default::default()
     }
 }
 

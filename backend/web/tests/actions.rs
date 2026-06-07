@@ -38,18 +38,15 @@ fn project_row() -> project::Model {
         name: "test-project".into(),
         active: true,
         display_name: "Test Project".into(),
-        description: String::new(),
         repository: "https://github.com/test/repo".into(),
         wildcard: "*".into(),
-        last_evaluation: None,
         last_check_at: test_date(),
-        force_evaluation: false,
         created_by: user_id(),
         created_at: test_date(),
-        managed: false,
         keep_evaluations: 10,
         concurrency: 3,
         sign_cache: true,
+        ..Default::default()
     }
 }
 
@@ -68,9 +65,8 @@ fn admin_role_row() -> entity::role::Model {
     entity::role::Model {
         id: gradient_core::types::consts::BASE_ROLE_ADMIN_ID,
         name: "Admin".into(),
-        organization: None,
         permission: gradient_core::permissions::admin_mask(),
-        managed: false,
+        ..Default::default()
     }
 }
 
@@ -79,17 +75,16 @@ fn send_mail_action_row() -> project_action::Model {
         id: action_id(),
         project: project_id(),
         name: "ops-mail".into(),
-        action_type: 0,
         config: json!({
             "type": "send_mail",
             "recipients": ["ops@example.com"],
         }),
         events: json!(["build.completed"]),
         active: true,
-        last_fired_at: None,
         created_by: user_id(),
         created_at: test_date(),
         updated_at: test_date(),
+        ..Default::default()
     }
 }
 
@@ -106,10 +101,10 @@ fn web_request_action_row() -> project_action::Model {
         }),
         events: json!(["build.completed"]),
         active: true,
-        last_fired_at: None,
         created_by: user_id(),
         created_at: test_date(),
         updated_at: test_date(),
+        ..Default::default()
     }
 }
 
@@ -546,10 +541,10 @@ fn delivery_row() -> project_action_delivery::Model {
         request_body: r#"{"event":"build.completed"}"#.into(),
         response_status: Some(200),
         response_body: Some(r#"{"ok":true}"#.into()),
-        error_message: None,
         success: true,
         duration_ms: 42,
         delivered_at: test_date(),
+        ..Default::default()
     }
 }
 

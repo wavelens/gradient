@@ -152,15 +152,11 @@ fn org_row(name: &str) -> entity::organization::Model {
         id: org_id(),
         name: name.to_string(),
         display_name: "Test Org".into(),
-        description: String::new(),
         public_key: "ssh-ed25519 AAAA test".into(),
         private_key: "encrypted".into(),
-        public: false,
-        hide_build_requests: false,
         created_by: user_id(),
         created_at: fixture_date(),
-        managed: false,
-        github_installation_id: None,
+        ..Default::default()
     }
 }
 
@@ -176,14 +172,10 @@ fn integration_row(secret_ciphertext: &str) -> entity::integration::Model {
         organization: org_id(),
         name: "my-hook".into(),
         display_name: "my-hook".into(),
-        kind: 0,       // Inbound
-        forge_type: 0, // Gitea
         secret: Some(secret_ciphertext.to_string()),
-        endpoint_url: None,
-        access_token: None,
-        allowed_ips: None,
         created_by: user_id(),
         created_at: fixture_date(),
+        ..Default::default()
     }
 }
 
@@ -193,14 +185,10 @@ fn github_integration_row() -> entity::integration::Model {
         organization: org_id(),
         name: "github-app".into(),
         display_name: "GitHub App".into(),
-        kind: 0,       // Inbound
         forge_type: 3, // GitHub
-        secret: None,
-        endpoint_url: None,
-        access_token: None,
-        allowed_ips: None,
         created_by: user_id(),
         created_at: fixture_date(),
+        ..Default::default()
     }
 }
 
@@ -225,18 +213,15 @@ fn project_row_with(
         name: name.into(),
         active: true,
         display_name: "Test Project".into(),
-        description: String::new(),
         repository: repository.into(),
         wildcard: "*".into(),
-        last_evaluation: None,
         last_check_at: fixture_date(),
-        force_evaluation: false,
         created_by: user_id(),
         created_at: fixture_date(),
-        managed: false,
         keep_evaluations: 10,
         concurrency: 3,
         sign_cache: true,
+        ..Default::default()
     }
 }
 
@@ -257,31 +242,17 @@ fn eval_row(status: EvaluationStatus) -> entity::evaluation::Model {
         commit: commit_id(),
         wildcard: "*".into(),
         status,
-        previous: None,
-        next: None,
         created_at: fixture_date(),
         updated_at: fixture_date(),
-        flake_source: None,
-        check_run_ids: None,
-        waiting_reason: None,
-        trigger: None,
-        concurrent: false,
-        source_comment: None,
-        fetch_started_at: None,
-        eval_flake_started_at: None,
-        eval_drv_started_at: None,
-        building_started_at: None,
-        finished_at: None,
+        ..Default::default()
     }
 }
 
 fn commit_row() -> entity::commit::Model {
     entity::commit::Model {
         id: commit_id(),
-        message: String::new(),
         hash: vec![0u8; 20],
-        author: None,
-        author_name: String::new(),
+        ..Default::default()
     }
 }
 
@@ -290,17 +261,11 @@ fn cache_row() -> entity::cache::Model {
         id: CacheId::now_v7(),
         name: "test-cache".into(),
         display_name: "Test Cache".into(),
-        description: String::new(),
         active: true,
         priority: 10,
-        local_priority: None,
-        public_key: String::new(),
-        private_key: String::new(),
-        public: false,
         created_by: UserId::nil(),
         created_at: fixture_date(),
-        managed: false,
-        max_storage_gb: 0,
+        ..Default::default()
     }
 }
 
@@ -318,16 +283,13 @@ fn worker_registration_row() -> entity::worker_registration::Model {
         id: gradient_core::types::ids::WorkerRegistrationId::now_v7(),
         peer_id: org_id(),
         worker_id: "00000000-0000-4000-8000-000000000001".into(),
-        token_hash: String::new(),
-        managed: false,
-        url: None,
         active: true,
         enable_fetch: true,
         enable_eval: true,
         enable_build: true,
-        display_name: String::new(),
         created_by: Some(gradient_core::types::ids::UserId::nil()),
         created_at: fixture_date(),
+        ..Default::default()
     }
 }
 
@@ -339,9 +301,9 @@ fn trigger_row(cfg: TriggerConfig) -> entity::project_trigger::Model {
         trigger_type: i16::from(cfg.trigger_type()),
         config: cfg.to_db_json(),
         active: true,
-        last_fired_at: None,
         created_at: fixture_date(),
         updated_at: fixture_date(),
+        ..Default::default()
     }
 }
 

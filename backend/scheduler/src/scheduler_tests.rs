@@ -358,26 +358,14 @@ async fn fetch_only_completion_enqueues_cached_eval_followup() {
 
     let archived_eval = entity::evaluation::Model {
         id: eval_id,
-        project: None,
         repository: "https://example.com/repo".into(),
         commit: CommitId::nil(),
         wildcard: "*".into(),
         status: EvaluationStatus::Building,
-        previous: None,
-        next: None,
         created_at: gradient_core::types::now(),
         updated_at: gradient_core::types::now(),
         flake_source: Some(source_path.into()),
-        check_run_ids: None,
-        waiting_reason: None,
-        trigger: None,
-        concurrent: false,
-        source_comment: None,
-        fetch_started_at: None,
-        eval_flake_started_at: None,
-        eval_drv_started_at: None,
-        building_started_at: None,
-        finished_at: None,
+        ..Default::default()
     };
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)

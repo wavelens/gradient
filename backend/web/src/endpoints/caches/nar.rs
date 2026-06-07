@@ -186,9 +186,8 @@ mod tests {
             nar_size: Some(2048),
             nar_hash: Some(format!("sha256:{FILE_HASH_NIX32}")),
             references: Some(String::new()),
-            ca: None,
-            deriver: None,
             created_at: gradient_core::types::now(),
+            ..Default::default()
         }
     }
 

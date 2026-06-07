@@ -62,10 +62,7 @@ fn live_session(id: SessionId) -> session::Model {
         created_at: now,
         expires_at: now + chrono::Duration::hours(1),
         last_used_at: now,
-        revoked_at: None,
-        user_agent: None,
-        ip: None,
-        remember_me: false,
+        ..Default::default()
     }
 }
 
@@ -107,9 +104,8 @@ fn admin_role_row() -> role::Model {
     role::Model {
         id: gradient_core::types::consts::BASE_ROLE_ADMIN_ID,
         name: "Admin".into(),
-        organization: None,
         permission: admin_mask(),
-        managed: false,
+        ..Default::default()
     }
 }
 
@@ -120,18 +116,15 @@ fn project_with(sign_cache: bool) -> project::Model {
         name: "test-project".into(),
         active: true,
         display_name: "Test Project".into(),
-        description: "".into(),
         repository: "https://github.com/test/repo".into(),
         wildcard: "*".into(),
-        last_evaluation: None,
         last_check_at: test_date(),
-        force_evaluation: false,
         created_by: user_id(),
         created_at: test_date(),
-        managed: false,
         keep_evaluations: 30,
         concurrency: 1,
         sign_cache,
+        ..Default::default()
     }
 }
 
@@ -223,12 +216,11 @@ fn create_project_accepts_sign_cache_false() {
         let seeded_trigger = project_trigger::Model {
             id: ProjectTriggerId::now_v7(),
             project: project_id(),
-            trigger_type: 0,
             config: serde_json::json!({"interval_secs": 300}),
             active: true,
-            last_fired_at: None,
             created_at: test_date(),
             updated_at: test_date(),
+            ..Default::default()
         };
 
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)

@@ -28,9 +28,8 @@ fn write_role_row() -> role::Model {
     role::Model {
         id: BASE_ROLE_WRITE_ID,
         name: "write".into(),
-        organization: None,
         permission: gradient_core::permissions::write_mask() as PermissionMask,
-        managed: false,
+        ..Default::default()
     }
 }
 
@@ -237,7 +236,7 @@ fn happy_path_returns_session_and_missing() {
             total_size: 300,
             created_at: now_ts,
             expires_at: now_ts + chrono::Duration::hours(1),
-            dispatched_at: None,
+            ..Default::default()
         };
 
         // After auth+org access, the handler runs:

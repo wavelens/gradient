@@ -82,15 +82,11 @@ fn private_org(id: OrganizationId, slug: &str) -> entity::organization::Model {
         id,
         name: slug.into(),
         display_name: slug.into(),
-        description: String::new(),
         public_key: "pub".into(),
         private_key: "priv".into(),
-        public: false,
-        hide_build_requests: false,
         created_by: user_id(),
         created_at: test_date(),
-        managed: false,
-        github_installation_id: None,
+        ..Default::default()
     }
 }
 
@@ -100,19 +96,16 @@ fn project_row(id: ProjectId, org: OrganizationId) -> entity::project::Model {
         organization: org,
         name: "proj".into(),
         display_name: "Proj".into(),
-        description: String::new(),
         repository: "https://example.com/repo".into(),
         wildcard: "*".into(),
         active: true,
-        last_evaluation: None,
         last_check_at: test_date(),
-        force_evaluation: false,
         created_by: user_id(),
         created_at: test_date(),
-        managed: false,
         keep_evaluations: 10,
         concurrency: 3,
         sign_cache: true,
+        ..Default::default()
     }
 }
 
@@ -124,21 +117,9 @@ fn evaluation_row(id: EvaluationId, project: ProjectId) -> entity::evaluation::M
         commit: CommitId::now_v7(),
         wildcard: "*".into(),
         status: EvaluationStatus::Completed,
-        previous: None,
-        next: None,
         created_at: test_date(),
         updated_at: test_date(),
-        flake_source: None,
-        check_run_ids: None,
-        waiting_reason: None,
-        trigger: None,
-        concurrent: false,
-        source_comment: None,
-        fetch_started_at: None,
-        eval_flake_started_at: None,
-        eval_drv_started_at: None,
-        building_started_at: None,
-        finished_at: None,
+        ..Default::default()
     }
 }
 
@@ -148,22 +129,10 @@ fn follower_build_row() -> entity::build::Model {
         evaluation: follower_eval_id(),
         derivation: follower_drv_id(),
         status: BuildStatus::Queued,
-        log_id: None,
-        build_time_ms: None,
-        worker: None,
         via: Some(leader_build_id()),
-        external_cached: false,
-        attempt: 0,
-        timeout_secs: None,
-        max_silent_secs: None,
-        prefer_local_build: false,
         created_at: test_date(),
         updated_at: test_date(),
-        queued_at: None,
-        ready_at: None,
-        dispatched_at: None,
-        build_started_at: None,
-        build_finished_at: None,
+        ..Default::default()
     }
 }
 
@@ -173,22 +142,10 @@ fn leader_build_row() -> entity::build::Model {
         evaluation: leader_eval_id(),
         derivation: leader_drv_id(),
         status: BuildStatus::Building,
-        log_id: None,
-        build_time_ms: None,
         worker: Some("worker-1".into()),
-        via: None,
-        external_cached: false,
-        attempt: 0,
-        timeout_secs: None,
-        max_silent_secs: None,
-        prefer_local_build: false,
         created_at: test_date(),
         updated_at: test_date() + chrono::Duration::seconds(30),
-        queued_at: None,
-        ready_at: None,
-        dispatched_at: None,
-        build_started_at: None,
-        build_finished_at: None,
+        ..Default::default()
     }
 }
 

@@ -26,17 +26,13 @@ fn cache_row() -> cache::Model {
         id: cache_id(),
         name: "test-cache".into(),
         display_name: "Test Cache".into(),
-        description: String::new(),
         active: true,
         priority: 30,
-        local_priority: None,
         public_key: "pk".into(),
         private_key: "sk".into(),
-        public: false,
         created_by: user_id(),
         created_at: test_date(),
-        managed: false,
-        max_storage_gb: 0,
+        ..Default::default()
     }
 }
 
@@ -53,9 +49,9 @@ fn admin_role_row() -> cache_role::Model {
     cache_role::Model {
         id: BASE_CACHE_ROLE_ADMIN_ID,
         name: "Admin".into(),
-        cache: None,
         permission: cache_admin_mask(),
         managed: true,
+        ..Default::default()
     }
 }
 
@@ -63,9 +59,9 @@ fn view_role_row() -> cache_role::Model {
     cache_role::Model {
         id: BASE_CACHE_ROLE_VIEW_ID,
         name: "View".into(),
-        cache: None,
         permission: cache_view_mask(),
         managed: true,
+        ..Default::default()
     }
 }
 
@@ -75,7 +71,7 @@ fn custom_role_row(id: RoleId, name: &str, permission: i64) -> cache_role::Model
         name: name.into(),
         cache: Some(cache_id()),
         permission,
-        managed: false,
+        ..Default::default()
     }
 }
 

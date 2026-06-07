@@ -171,11 +171,9 @@ mod tests {
             name: "out".into(),
             hash: hash.into(),
             package: "foo".into(),
-            ca: None,
             nar_size,
-            is_cached: false,
-            cached_path: None,
             created_at: now(),
+            ..Default::default()
         }
     }
 

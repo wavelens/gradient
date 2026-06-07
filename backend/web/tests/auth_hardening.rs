@@ -100,9 +100,7 @@ fn revoked_session() -> session::Model {
         expires_at: now + chrono::Duration::hours(1),
         last_used_at: now,
         revoked_at: Some(now),
-        user_agent: None,
-        ip: None,
-        remember_me: false,
+        ..Default::default()
     }
 }
 
@@ -114,10 +112,7 @@ fn live_session(id: SessionId) -> session::Model {
         created_at: now,
         expires_at: now + chrono::Duration::hours(1),
         last_used_at: now,
-        revoked_at: None,
-        user_agent: None,
-        ip: None,
-        remember_me: false,
+        ..Default::default()
     }
 }
 
@@ -186,13 +181,9 @@ fn revoked_api_key_is_rejected() {
             key: hash_api_key(raw),
             last_used_at: now,
             created_at: now,
-            managed: false,
-            expires_at: None,
             revoked_at: Some(now),
             permission: gradient_core::permissions::admin_mask(),
-            organization: None,
-            cache: None,
-            allowed_ips: None,
+            ..Default::default()
         };
 
         let s = server_with(|db| db.append_query_results([vec![key]]));
@@ -218,13 +209,9 @@ fn expired_api_key_is_rejected() {
             key: hash_api_key(raw),
             last_used_at: now,
             created_at: now,
-            managed: false,
             expires_at: Some(now - chrono::Duration::seconds(1)),
-            revoked_at: None,
             permission: gradient_core::permissions::admin_mask(),
-            organization: None,
-            cache: None,
-            allowed_ips: None,
+            ..Default::default()
         };
 
         let s = server_with(|db| db.append_query_results([vec![key]]));
@@ -307,13 +294,8 @@ fn api_key_with_only_view_cannot_trigger_evaluation() {
             key: hash_api_key(&raw),
             last_used_at: now,
             created_at: now,
-            managed: false,
-            expires_at: None,
-            revoked_at: None,
             permission: mask_from(&[Permission::ViewOrg]),
-            organization: None,
-            cache: None,
-            allowed_ips: None,
+            ..Default::default()
         };
         let admin_membership = entity::organization_user::Model {
             id: entity::ids::OrganizationUserId::now_v7(),
@@ -324,9 +306,8 @@ fn api_key_with_only_view_cannot_trigger_evaluation() {
         let admin_role = entity::role::Model {
             id: gradient_core::types::consts::BASE_ROLE_ADMIN_ID,
             name: "Admin".into(),
-            organization: None,
             permission: gradient_core::permissions::admin_mask(),
-            managed: false,
+            ..Default::default()
         };
 
         let s = server_with(|db| {
@@ -343,25 +324,22 @@ fn api_key_with_only_view_cannot_trigger_evaluation() {
                     organization: org_id(),
                     name: "test-project".into(),
                     display_name: "Test".into(),
-                    description: String::new(),
                     repository: "git@example.com:test/test.git".into(),
                     wildcard: "*".into(),
                     active: true,
-                    last_evaluation: None,
                     last_check_at: chrono::NaiveDate::from_ymd_opt(2026, 1, 1)
                         .unwrap()
                         .and_hms_opt(0, 0, 0)
                         .unwrap(),
-                    force_evaluation: false,
                     created_by: user_id(),
                     created_at: chrono::NaiveDate::from_ymd_opt(2026, 1, 1)
                         .unwrap()
                         .and_hms_opt(0, 0, 0)
                         .unwrap(),
-                    managed: false,
                     keep_evaluations: 30,
                     concurrency: 3,
                     sign_cache: true,
+                    ..Default::default()
                 }]])
                 .append_query_results([vec![admin_membership]])
                 .append_query_results([vec![admin_role]])
@@ -393,13 +371,9 @@ fn api_key_pinned_to_other_org_is_invisible() {
             key: hash_api_key(&raw),
             last_used_at: now,
             created_at: now,
-            managed: false,
-            expires_at: None,
-            revoked_at: None,
             permission: mask_from(Permission::ALL),
             organization: Some(pinned_elsewhere),
-            cache: None,
-            allowed_ips: None,
+            ..Default::default()
         };
 
         let s = server_with(|db| {
@@ -434,13 +408,8 @@ fn api_key_cannot_create_api_keys() {
             key: hash_api_key(&raw),
             last_used_at: now,
             created_at: now,
-            managed: false,
-            expires_at: None,
-            revoked_at: None,
             permission: gradient_core::permissions::admin_mask(),
-            organization: None,
-            cache: None,
-            allowed_ips: None,
+            ..Default::default()
         };
 
         let s = server_with(|db| {

@@ -73,10 +73,7 @@ pub fn live_session(id: SessionId) -> session::Model {
         created_at: now,
         expires_at: now + Duration::hours(1),
         last_used_at: now,
-        revoked_at: None,
-        user_agent: None,
-        ip: None,
-        remember_me: false,
+        ..Default::default()
     }
 }
 

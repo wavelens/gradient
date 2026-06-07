@@ -592,10 +592,7 @@ mod tests {
             file_size: Some(1),
             nar_size: Some(1),
             nar_hash: Some("sha256:zombie".into()),
-            references: None,
-            ca: None,
-            deriver: None,
-            created_at: chrono::NaiveDateTime::default(),
+            ..Default::default()
         };
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![hash_row(live)]])

@@ -50,21 +50,9 @@ fn make_eval_queued(
         commit: commit_id,
         wildcard: "*".into(),
         status: EvaluationStatus::Queued,
-        previous: None,
-        next: None,
         created_at: test_date(),
         updated_at: test_date(),
-        flake_source: None,
-        check_run_ids: None,
-        waiting_reason: None,
-        trigger: None,
-        concurrent: false,
-        source_comment: None,
-        fetch_started_at: None,
-        eval_flake_started_at: None,
-        eval_drv_started_at: None,
-        building_started_at: None,
-        finished_at: None,
+        ..Default::default()
     }
 }
 
@@ -73,8 +61,8 @@ fn make_commit(id: CommitId) -> entity::commit::Model {
         id,
         message: "test commit".into(),
         hash: vec![0xde, 0xad, 0xbe, 0xef],
-        author: None,
         author_name: "Test Author".into(),
+        ..Default::default()
     }
 }
 
@@ -85,18 +73,15 @@ fn make_project(id: ProjectId, org_id: OrganizationId) -> entity::project::Model
         name: "test-project".into(),
         active: true,
         display_name: "Test Project".into(),
-        description: "".into(),
         repository: "https://example.com/repo".into(),
         wildcard: "*".into(),
-        last_evaluation: None,
         last_check_at: test_date(),
-        force_evaluation: false,
         created_by: UserId::nil(),
         created_at: test_date(),
-        managed: false,
         keep_evaluations: 30,
         concurrency: 3,
         sign_cache: true,
+        ..Default::default()
     }
 }
 
@@ -106,22 +91,9 @@ fn make_build_queued(id: BuildId, eval_id: EvaluationId, drv_id: DerivationId) -
         evaluation: eval_id,
         derivation: drv_id,
         status: BuildStatus::Queued,
-        log_id: None,
-        build_time_ms: None,
-        worker: None,
-        via: None,
-        external_cached: false,
-        attempt: 0,
-        timeout_secs: None,
-        max_silent_secs: None,
-        prefer_local_build: false,
         created_at: test_date(),
         updated_at: test_date(),
-        queued_at: None,
-        ready_at: None,
-        dispatched_at: None,
-        build_started_at: None,
-        build_finished_at: None,
+        ..Default::default()
     }
 }
 
@@ -370,12 +342,12 @@ fn make_polling_trigger(
     entity::project_trigger::Model {
         id,
         project: project_id,
-        trigger_type: 0, // Polling
         config: serde_json::json!({ "interval_secs": interval_secs }),
         active: true,
         last_fired_at,
         created_at: test_date(),
         updated_at: test_date(),
+        ..Default::default()
     }
 }
 

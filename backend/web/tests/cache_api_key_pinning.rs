@@ -44,17 +44,14 @@ fn cache_row() -> cache::Model {
         id: cache_id(),
         name: "test-cache".into(),
         display_name: "Test Cache".into(),
-        description: String::new(),
         active: true,
         priority: 30,
-        local_priority: None,
         public_key: "pk".into(),
         private_key: "sk".into(),
         public: true,
         created_by: user_id(),
         created_at: test_date(),
-        managed: false,
-        max_storage_gb: 0,
+        ..Default::default()
     }
 }
 
@@ -74,13 +71,9 @@ fn pinned_api_key(raw: &str, pin: CacheId, permission: i64) -> api::Model {
         key: hash_api_key(raw),
         last_used_at: now,
         created_at: now,
-        managed: false,
-        expires_at: None,
-        revoked_at: None,
         permission,
-        organization: None,
         cache: Some(pin),
-        allowed_ips: None,
+        ..Default::default()
     }
 }
 
@@ -107,9 +100,9 @@ fn view_cache_role() -> cache_role::Model {
     cache_role::Model {
         id: BASE_CACHE_ROLE_VIEW_ID,
         name: "View".into(),
-        cache: None,
         permission: cache_view_mask(),
         managed: true,
+        ..Default::default()
     }
 }
 

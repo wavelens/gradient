@@ -39,16 +39,10 @@ fn cache_row(name: &str) -> cache::Model {
         name: name.to_string(),
         active: true,
         display_name: format!("{} display", name),
-        description: String::new(),
         priority: 30,
-        local_priority: None,
-        public_key: String::new(),
-        private_key: String::new(),
-        public: false,
         created_by: user_id(),
         created_at: test_date(),
-        managed: false,
-        max_storage_gb: 0,
+        ..Default::default()
     }
 }
 
@@ -68,13 +62,11 @@ fn cache_upstream_row(cache_id: CacheId) -> cache_upstream::Model {
         display_name: "cache.nixos.org".to_string(),
         mode: entity::organization_cache::CacheSubscriptionMode::ReadOnly,
         kind: cache_upstream::CacheUpstreamKind::Http,
-        upstream_cache: None,
         url: Some("https://cache.nixos.org".to_string()),
         public_key: Some(
             "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=".to_string(),
         ),
-        remote_cache_name: None,
-        api_key: None,
+        ..Default::default()
     }
 }
 

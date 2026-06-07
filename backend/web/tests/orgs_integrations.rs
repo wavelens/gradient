@@ -46,15 +46,11 @@ fn gitea_inbound_row() -> integration::Model {
         organization: org_id(),
         name: "my-gitea-hook".into(),
         display_name: "My Gitea".into(),
-        kind: 0,       // Inbound
-        forge_type: 0, // Gitea
         // Sensitive fields populated to verify they're NOT echoed back.
         secret: Some("encrypted-blob".into()),
-        endpoint_url: None,
-        access_token: None,
-        allowed_ips: None,
         created_by: user_id(),
         created_at: test_date(),
+        ..Default::default()
     }
 }
 
@@ -64,14 +60,10 @@ fn github_inbound_row() -> integration::Model {
         organization: org_id(),
         name: "github".into(),
         display_name: "GitHub".into(),
-        kind: 0,
         forge_type: 3,
-        secret: None,
-        endpoint_url: None,
-        access_token: None,
-        allowed_ips: None,
         created_by: user_id(),
         created_at: test_date(),
+        ..Default::default()
     }
 }
 
@@ -82,13 +74,11 @@ fn gitea_outbound_row() -> integration::Model {
         name: "my-gitea-reporter".into(),
         display_name: "My Gitea CI".into(),
         kind: 1,
-        forge_type: 0,
-        secret: None,
         endpoint_url: Some("https://gitea.example.com".into()),
         access_token: Some("encrypted-token".into()),
-        allowed_ips: None,
         created_by: user_id(),
         created_at: test_date(),
+        ..Default::default()
     }
 }
 

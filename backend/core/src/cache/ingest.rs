@@ -219,10 +219,8 @@ mod tests {
             file_size: Some(5),
             nar_size: Some(5),
             nar_hash: Some("sha256:def".to_string()),
-            references: None,
-            ca: None,
-            deriver: None,
             created_at: now(),
+            ..Default::default()
         }
     }
 
