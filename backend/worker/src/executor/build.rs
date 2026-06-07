@@ -1314,15 +1314,29 @@ mod tests {
     fn newest_build_cgroup_ignores_entries_older_than_since() {
         // Stale `<uid>` files (from finished builds) must not be picked: their
         // cgroups are already gone. Only an entry written at/after the build
-        // started counts.
+        // started counts. Explicit mtimes keep this independent of filesystem
+        // timestamp granularity.
+        use std::fs::FileTimes;
+        use std::time::Duration;
+        let set_mtime = |path: &Path, t: std::time::SystemTime| {
+            std::fs::File::options()
+                .write(true)
+                .open(path)
+                .unwrap()
+                .set_times(FileTimes::new().set_modified(t))
+                .unwrap();
+        };
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("30001"), "/sys/fs/cgroup/nix-build-uid-30001\n").unwrap();
-        // Everything currently in the dir predates `since`.
         let since = std::time::SystemTime::now();
+
+        let stale = dir.path().join("30001");
+        std::fs::write(&stale, "/sys/fs/cgroup/nix-build-uid-30001\n").unwrap();
+        set_mtime(&stale, since - Duration::from_secs(60));
         assert!(newest_build_cgroup(dir.path(), since).is_none());
 
-        // A file written after `since` is this build's cgroup.
-        std::fs::write(dir.path().join("30002"), "/sys/fs/cgroup/nix-build-uid-30002\n").unwrap();
+        let fresh = dir.path().join("30002");
+        std::fs::write(&fresh, "/sys/fs/cgroup/nix-build-uid-30002\n").unwrap();
+        set_mtime(&fresh, since + Duration::from_secs(60));
         assert_eq!(
             newest_build_cgroup(dir.path(), since),
             Some(PathBuf::from("/sys/fs/cgroup/nix-build-uid-30002")),
