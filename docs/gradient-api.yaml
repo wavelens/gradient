@@ -5801,6 +5801,21 @@ x-nix-cache-paths:
         '403':
           description: Superuser required
 
+  /orgs/{organization}/workers/{worker_id}/stats:
+    get:
+      tags: [board]
+      summary: Per-worker statistics
+      description: Live-metric sample time-series (CPU, RAM, disk, network, load), connect/disconnect history, and total dispatched-job count for one worker. Org members only.
+      operationId: getOrgWorkerStats
+      parameters:
+        - { name: organization, in: path, required: true, schema: { type: string } }
+        - { name: worker_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Worker statistics
+        '404':
+          description: Organization or worker not found
+
 components:
 
   securitySchemes:

@@ -126,6 +126,15 @@
               <span class="badge" [class.badge-connected]="worker.live" [class.badge-offline]="!worker.live">
                 {{ worker.live ? 'Connected' : 'Offline' }}
               </span>
+              <a
+                pButton
+                label="Metrics"
+                icon="pi pi-chart-line"
+                severity="secondary"
+                size="small"
+                class="worker-action-btn"
+                [routerLink]="['/organization', orgName, 'workers', worker.worker_id, 'metrics']"
+              ></a>
               <button
                 *appWritable="access()"
                 pButton

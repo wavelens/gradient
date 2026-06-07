@@ -19,7 +19,10 @@ use gradient_core::types::{BaseResponse, MUser, ServerState};
 use rand::RngExt as _;
 use scheduler::{Scheduler, WorkerInfo};
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
+    QuerySelect,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -269,6 +272,98 @@ pub async fn get_org_workers(
         .collect();
 
     Ok(ok_json(entries))
+}
+
+#[derive(Serialize)]
+pub struct WorkerSamplePoint {
+    pub at: NaiveDateTime,
+    pub cpu_usage_pct: Option<f32>,
+    pub ram_free_mb: Option<i64>,
+    pub ram_total_mb: Option<i64>,
+    pub disk_speed_mbps: Option<f32>,
+    pub network_speed_mbps: Option<f32>,
+    pub assigned_jobs: i32,
+    pub max_concurrent_builds: i32,
+    pub state: i16,
+}
+
+#[derive(Serialize)]
+pub struct WorkerConnectionEntry {
+    pub connected_at: NaiveDateTime,
+    pub disconnected_at: Option<NaiveDateTime>,
+}
+
+#[derive(Serialize)]
+pub struct WorkerStatsResponse {
+    pub samples: Vec<WorkerSamplePoint>,
+    pub connections: Vec<WorkerConnectionEntry>,
+    pub jobs_dispatched: u64,
+}
+
+/// Full statistics for one worker: the live-metric sample time-series, the
+/// connect/disconnect history, and the total dispatched-job count. Scoped to
+/// members of the worker's owning org.
+pub async fn get_org_worker_stats(
+    state: State<Arc<ServerState>>,
+    Path((organization, worker_id)): Path<(String, String)>,
+    Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
+) -> WebResult<Json<BaseResponse<WorkerStatsResponse>>> {
+    let org = load_org(
+        &state,
+        Caller::User(&user),
+        api_key.as_ref(),
+        organization,
+        OrgAccess::Member { reject_managed: false },
+    )
+    .await?;
+
+    let samples = entity::worker_sample::Entity::find()
+        .filter(entity::worker_sample::Column::WorkerId.eq(&worker_id))
+        .filter(entity::worker_sample::Column::Organization.eq(org.id))
+        .order_by_asc(entity::worker_sample::Column::At)
+        .limit(2000)
+        .all(&state.web_db)
+        .await?
+        .into_iter()
+        .map(|s| WorkerSamplePoint {
+            at: s.at,
+            cpu_usage_pct: s.cpu_usage_pct,
+            ram_free_mb: s.ram_free_mb,
+            ram_total_mb: s.ram_total_mb,
+            disk_speed_mbps: s.disk_speed_mbps,
+            network_speed_mbps: s.network_speed_mbps,
+            assigned_jobs: s.assigned_jobs,
+            max_concurrent_builds: s.max_concurrent_builds,
+            state: s.state,
+        })
+        .collect();
+
+    let connections = entity::worker_connection::Entity::find()
+        .filter(entity::worker_connection::Column::WorkerId.eq(&worker_id))
+        .filter(entity::worker_connection::Column::Organization.eq(org.id))
+        .order_by_desc(entity::worker_connection::Column::ConnectedAt)
+        .limit(100)
+        .all(&state.web_db)
+        .await?
+        .into_iter()
+        .map(|c| WorkerConnectionEntry {
+            connected_at: c.connected_at,
+            disconnected_at: c.disconnected_at,
+        })
+        .collect();
+
+    let jobs_dispatched = entity::dispatched_job::Entity::find()
+        .filter(entity::dispatched_job::Column::WorkerId.eq(&worker_id))
+        .filter(entity::dispatched_job::Column::Organization.eq(org.id))
+        .count(&state.web_db)
+        .await?;
+
+    Ok(ok_json(WorkerStatsResponse {
+        samples,
+        connections,
+        jobs_dispatched,
+    }))
 }
 
 pub async fn patch_org_worker(
