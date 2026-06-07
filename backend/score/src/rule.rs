@@ -30,4 +30,8 @@ pub struct WorkerContext<'a> {
 
 pub trait ScoreRule: Send + Sync + std::fmt::Debug {
     fn score(&self, job: &JobContext<'_>, worker: &WorkerContext<'_>) -> f64;
+    fn name(&self) -> &'static str {
+        let full = std::any::type_name::<Self>();
+        full.rsplit("::").next().unwrap_or(full)
+    }
 }
