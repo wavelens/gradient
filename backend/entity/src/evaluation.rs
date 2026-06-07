@@ -92,6 +92,11 @@ pub struct Model {
     pub trigger: Option<ProjectTriggerId>,
     pub concurrent: bool,
     pub source_comment: Option<serde_json::Value>,
+    pub fetch_started_at: Option<NaiveDateTime>,
+    pub eval_flake_started_at: Option<NaiveDateTime>,
+    pub eval_drv_started_at: Option<NaiveDateTime>,
+    pub building_started_at: Option<NaiveDateTime>,
+    pub finished_at: Option<NaiveDateTime>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
