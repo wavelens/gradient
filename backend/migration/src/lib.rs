@@ -129,6 +129,14 @@ mod m20260605_000000_index_hot_lookups;
 mod m20260605_000001_create_build_log_chunk;
 mod m20260606_000000_add_derivation_fixed_output;
 mod m20260607_000000_add_max_storage_to_cache;
+mod m20260607_000001_create_table_phase_event;
+mod m20260607_000002_create_table_dispatched_job;
+mod m20260607_000003_create_table_worker_sample;
+mod m20260607_000004_create_table_worker_connection;
+mod m20260607_000005_create_table_acknowledged_derivation;
+mod m20260607_000006_create_table_metric_rollup;
+mod m20260607_000007_add_phase_timing_to_build;
+mod m20260607_000008_add_phase_timing_to_evaluation;
 
 pub struct Migrator;
 
@@ -259,6 +267,14 @@ impl MigratorTrait for Migrator {
             Box::new(m20260605_000001_create_build_log_chunk::Migration),
             Box::new(m20260606_000000_add_derivation_fixed_output::Migration),
             Box::new(m20260607_000000_add_max_storage_to_cache::Migration),
+            Box::new(m20260607_000001_create_table_phase_event::Migration),
+            Box::new(m20260607_000002_create_table_dispatched_job::Migration),
+            Box::new(m20260607_000003_create_table_worker_sample::Migration),
+            Box::new(m20260607_000004_create_table_worker_connection::Migration),
+            Box::new(m20260607_000005_create_table_acknowledged_derivation::Migration),
+            Box::new(m20260607_000006_create_table_metric_rollup::Migration),
+            Box::new(m20260607_000007_add_phase_timing_to_build::Migration),
+            Box::new(m20260607_000008_add_phase_timing_to_evaluation::Migration),
         ]
     }
 }

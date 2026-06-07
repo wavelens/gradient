@@ -124,6 +124,12 @@ id_newtype!(UploadSessionId);
 id_newtype!(AuditLogId);
 id_newtype!(WorkerRegistrationId);
 id_newtype!(CliDeviceAuthorizationId);
+id_newtype!(AcknowledgedDerivationId);
+id_newtype!(DispatchedJobId);
+id_newtype!(MetricRollupId);
+id_newtype!(PhaseEventId);
+id_newtype!(WorkerConnectionId);
+id_newtype!(WorkerSampleId);
 
 #[cfg(test)]
 mod tests {
@@ -190,5 +196,16 @@ mod tests {
         let u = Uuid::now_v7();
         let user: UserId = u.into();
         let _org: OrganizationId = user.into_inner().into();
+    }
+
+    #[test]
+    fn new_metrics_ids_round_trip() {
+        let u = Uuid::now_v7();
+        assert_eq!(Uuid::from(PhaseEventId::from(u)), u);
+        assert_eq!(Uuid::from(DispatchedJobId::from(u)), u);
+        assert_eq!(Uuid::from(WorkerSampleId::from(u)), u);
+        assert_eq!(Uuid::from(WorkerConnectionId::from(u)), u);
+        assert_eq!(Uuid::from(AcknowledgedDerivationId::from(u)), u);
+        assert_eq!(Uuid::from(MetricRollupId::from(u)), u);
     }
 }

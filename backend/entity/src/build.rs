@@ -132,6 +132,10 @@ pub struct Model {
     pub prefer_local_build: bool,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
+    pub ready_at: Option<NaiveDateTime>,
+    pub dispatched_at: Option<NaiveDateTime>,
+    pub build_started_at: Option<NaiveDateTime>,
+    pub build_finished_at: Option<NaiveDateTime>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

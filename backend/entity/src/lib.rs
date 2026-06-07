@@ -50,6 +50,13 @@ pub mod upload_session;
 pub mod user;
 pub mod worker_registration;
 
+pub mod acknowledged_derivation;
+pub mod dispatched_job;
+pub mod metric_rollup;
+pub mod phase_event;
+pub mod worker_connection;
+pub mod worker_sample;
+
 #[cfg(test)]
 mod model_default_tests {
     use super::*;
@@ -90,5 +97,75 @@ mod model_default_tests {
     fn organization_cache_default_uses_read_write_mode() {
         let m = organization_cache::Model::default();
         assert_eq!(m.mode, organization_cache::CacheSubscriptionMode::ReadWrite);
+    }
+
+    #[test]
+    fn phase_event_default_is_empty() {
+        let m = phase_event::Model::default();
+        assert_eq!(Uuid::from(m.id), Uuid::nil());
+        assert_eq!(m.subject_kind, 0);
+        assert!(m.worker_id.is_none());
+        assert!(m.detail.is_none());
+    }
+
+    #[test]
+    fn dispatched_job_default_has_empty_jsonb_and_zero_score() {
+        let m = dispatched_job::Model::default();
+        assert_eq!(Uuid::from(m.id), Uuid::nil());
+        assert_eq!(m.score, 0.0);
+        assert!(m.build_id.is_none());
+        assert!(m.finished_at.is_none());
+    }
+
+    #[test]
+    fn worker_sample_default_has_zero_counts() {
+        let m = worker_sample::Model::default();
+        assert_eq!(m.assigned_jobs, 0);
+        assert_eq!(m.state, 0);
+        assert!(m.cpu_usage_pct.is_none());
+    }
+
+    #[test]
+    fn worker_connection_default_is_open() {
+        let m = worker_connection::Model::default();
+        assert!(m.disconnected_at.is_none());
+        assert!(m.reason.is_none());
+    }
+
+    #[test]
+    fn acknowledged_derivation_default_blank() {
+        let m = acknowledged_derivation::Model::default();
+        assert!(m.derivation.is_none());
+        assert!(m.pname.is_none());
+        assert_eq!(m.note, "");
+    }
+
+    #[test]
+    fn metric_rollup_default_zeroed() {
+        let m = metric_rollup::Model::default();
+        assert_eq!(m.metric, "");
+        assert_eq!(m.granularity, 0);
+        assert_eq!(m.count, 0);
+        assert_eq!(m.sum, 0.0);
+        assert!(m.histogram.is_none());
+    }
+
+    #[test]
+    fn build_default_has_null_phase_timestamps() {
+        let m = build::Model::default();
+        assert!(m.ready_at.is_none());
+        assert!(m.dispatched_at.is_none());
+        assert!(m.build_started_at.is_none());
+        assert!(m.build_finished_at.is_none());
+    }
+
+    #[test]
+    fn evaluation_default_has_null_phase_timestamps() {
+        let m = evaluation::Model::default();
+        assert!(m.fetch_started_at.is_none());
+        assert!(m.eval_flake_started_at.is_none());
+        assert!(m.eval_drv_started_at.is_none());
+        assert!(m.building_started_at.is_none());
+        assert!(m.finished_at.is_none());
     }
 }
