@@ -236,7 +236,7 @@ in {
       buildMetrics = lib.mkOption {
         description = ''
           Capture per-build resource metrics (peak RAM, CPU time, disk I/O)
-          from each build's cgroup. Requires Nix's experimental
+          from each build's cgroup. Will enable Nix's experimental
           <literal>use-cgroups</literal> feature on the daemon. Wall-clock
           build time is always reported; cgroup-derived fields degrade to
           null when the cgroup cannot be located or read.
@@ -439,7 +439,7 @@ in {
         "nix-command"
         "flakes"
         "ca-derivations"
-      ];
+      ] ++ lib.optional cfg.settings.buildMetrics "use-cgroups";
     };
 
     services = {
