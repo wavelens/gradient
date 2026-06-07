@@ -14,6 +14,7 @@ pub(crate) mod client_ip;
 pub mod endpoints;
 pub mod error;
 pub mod helpers;
+pub mod metrics_scope;
 pub mod permissions;
 
 use axum::body::Body;
@@ -501,6 +502,10 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         .route("/caches/{cache}/nars/{hash}", get(caches::nars_show))
         .route("/metrics/catalog", get(metrics_query::get_metrics_catalog))
         .route("/metrics/query", get(metrics_query::get_metrics_query))
+        .route("/board/jobs/dispatched", get(board::get_dispatched_jobs))
+        .route("/board/jobs/expensive", get(board::get_expensive_jobs))
+        .route("/board/jobs/{id}", get(board::get_dispatched_job))
+        .route("/board/workers", get(board::get_board_workers))
         .route_layer(middleware::from_fn_with_state(
             Arc::clone(&state),
             authorization::authorize_optional,
