@@ -276,6 +276,7 @@ impl<'a> BuildStateHandler<'a> {
             avg_cpu_pct: Set(metrics.avg_cpu_pct.map(|v| v as f64)),
             disk_read_bytes: Set(metrics.disk_read_bytes.map(|v| v as i64)),
             disk_write_bytes: Set(metrics.disk_write_bytes.map(|v| v as i64)),
+            peak_network_mbps: Set(metrics.peak_network_mbps.map(|v| v as f64)),
             oom_killed: Set(metrics.oom_killed),
             build_time_ms: Set(metrics.build_time_ms.map(|v| v as i64)),
             worker_id: Set(build.worker.clone().unwrap_or_default()),

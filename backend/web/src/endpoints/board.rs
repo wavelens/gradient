@@ -413,6 +413,85 @@ pub async fn get_top_orgs_by_buildtime(
     Ok(ok_json(out))
 }
 
+#[derive(Deserialize)]
+pub struct ResourceParams {
+    pub metric: String,
+    pub window_days: Option<i64>,
+    pub exclude_acknowledged: Option<bool>,
+}
+
+#[derive(Serialize)]
+pub struct ExpensiveResource {
+    pub derivation: Uuid,
+    pub organization: Uuid,
+    pub name: String,
+    pub value: f64,
+    pub unit: &'static str,
+    pub worker: String,
+}
+
+/// Top derivations by a captured per-build resource (peak RAM, CPU time, total
+/// disk bytes, or host network peak), read from `derivation_metric`. Org-scoped.
+pub async fn get_expensive_by_resource(
+    State(state): State<Arc<ServerState>>,
+    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Query(params): Query<ResourceParams>,
+) -> WebResult<Json<BaseResponse<Vec<ExpensiveResource>>>> {
+    let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
+    let (value_expr, unit, not_null): (&str, &'static str, &str) = match params.metric.as_str() {
+        "ram" => ("dm.peak_ram_mb::double precision", "MB", "dm.peak_ram_mb IS NOT NULL"),
+        "cpu" => ("dm.cpu_time_ms::double precision", "ms", "dm.cpu_time_ms IS NOT NULL"),
+        "disk" => (
+            "(coalesce(dm.disk_read_bytes,0) + coalesce(dm.disk_write_bytes,0))::double precision",
+            "bytes",
+            "(dm.disk_read_bytes IS NOT NULL OR dm.disk_write_bytes IS NOT NULL)",
+        ),
+        "network" => ("dm.peak_network_mbps", "Mbps", "dm.peak_network_mbps IS NOT NULL"),
+        _ => return Err(WebError::not_found("Metric")),
+    };
+
+    let mut clauses = vec![not_null.to_string()];
+    if let Some(list) = scope.org_in_list() {
+        if list.is_empty() {
+            return Ok(ok_json(vec![]));
+        }
+        clauses.push(format!("d.organization IN ({list})"));
+    }
+    let window = params.window_days.unwrap_or(30).max(1);
+    clauses.push(format!(
+        "dm.created_at >= (now() AT TIME ZONE 'UTC') - interval '{window} days'"
+    ));
+    if params.exclude_acknowledged.unwrap_or(true) {
+        clauses.push(
+            "NOT EXISTS (SELECT 1 FROM acknowledged_derivation a \
+             WHERE a.derivation = d.id OR (a.pname IS NOT NULL AND a.pname = d.pname))"
+                .to_string(),
+        );
+    }
+    let sql = format!(
+        "SELECT dm.derivation, d.organization, d.name, {value_expr} AS value, dm.worker_id \
+         FROM derivation_metric dm JOIN derivation d ON d.id = dm.derivation \
+         WHERE {} ORDER BY value DESC LIMIT 20",
+        clauses.join(" AND ")
+    );
+    let rows = state
+        .web_db
+        .query_all(Statement::from_string(DatabaseBackend::Postgres, sql))
+        .await?;
+    let out = rows
+        .into_iter()
+        .map(|r| ExpensiveResource {
+            derivation: r.try_get("", "derivation").unwrap_or_default(),
+            organization: r.try_get("", "organization").unwrap_or_default(),
+            name: r.try_get("", "name").unwrap_or_default(),
+            value: r.try_get("", "value").unwrap_or(0.0),
+            unit,
+            worker: r.try_get("", "worker_id").unwrap_or_default(),
+        })
+        .collect();
+    Ok(ok_json(out))
+}
+
 pub async fn board_live_ws(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,

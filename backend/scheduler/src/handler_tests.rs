@@ -1353,6 +1353,7 @@ async fn build_output_with_metrics_records_one_metric_row() {
         disk_write_bytes: Some(2048),
         oom_killed: false,
         build_time_ms: Some(120_000),
+        peak_network_mbps: Some(85.0),
     });
 
     // Queries (ordered): find build, find derivation, find derivation_output,

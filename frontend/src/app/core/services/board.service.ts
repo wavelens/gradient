@@ -175,6 +175,15 @@ export interface TopOrgBuildTime {
   build_count: number;
 }
 
+export interface ExpensiveResource {
+  derivation: string;
+  organization: string;
+  name: string;
+  value: number;
+  unit: string;
+  worker: string;
+}
+
 @Injectable({ providedIn: 'root' })
 export class BoardService {
   private api = inject(ApiService);
@@ -227,6 +236,16 @@ export class BoardService {
 
   getTopOrgs(windowDays = 30): Observable<TopOrgBuildTime[]> {
     return this.api.get<TopOrgBuildTime[]>(`board/expensive/top-orgs?window_days=${windowDays}`);
+  }
+
+  getExpensiveByResource(
+    metric: 'ram' | 'cpu' | 'disk' | 'network',
+    windowDays = 30,
+    excludeAcknowledged = true
+  ): Observable<ExpensiveResource[]> {
+    return this.api.get<ExpensiveResource[]>(
+      `board/jobs/expensive-by-resource?metric=${metric}&window_days=${windowDays}&exclude_acknowledged=${excludeAcknowledged}`
+    );
   }
 
   query(metric: string, granularity = 'hour', org?: string): Observable<MetricPoint[]> {

@@ -530,6 +530,10 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         )
         .route("/board/jobs/dispatched", get(board::get_dispatched_jobs))
         .route("/board/jobs/expensive", get(board::get_expensive_jobs))
+        .route(
+            "/board/jobs/expensive-by-resource",
+            get(board::get_expensive_by_resource),
+        )
         .route("/board/jobs/{id}", get(board::get_dispatched_job))
         .route("/board/scoring/summary", get(board::get_scoring_summary))
         .route("/board/cache", get(board_metrics::get_board_cache))

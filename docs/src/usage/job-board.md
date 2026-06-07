@@ -20,7 +20,7 @@ breakdown, connected workers, throughput, and the most expensive builds.
 - **Workers** — fleet over time (connected vs draining), capability trend, load-by-capability radar, per-worker slot utilisation, and the live worker table.
 - **Cache** — cache totals, traffic, and storage-growth series (`GET /api/v1/board/cache`).
 - **Network & API** — NAR egress, per-worker network/disk speeds, and a per-route HTTP latency/throughput table (`GET /api/v1/board/network`).
-- **Expensive Jobs** — the longest builds in a window, with an option to exclude acknowledged (muted) derivations.
+- **Expensive Jobs** — tabbed rankings of the costliest builds in a window: longest wall-clock, **peak RAM**, **CPU time**, **disk I/O** (all per-build via cgroup v2), and **network** (host-level peak during the build window — cgroup v2 has no per-build network), plus top-orgs-by-build-time for superusers. Acknowledged (muted) derivations can be excluded.
 - **System Health** (superuser) — process/runtime snapshot, rollup-pipeline lag, and HTTP route stats (`GET /api/v1/board/health`).
 
 Per-worker deep metrics (CPU/RAM/disk/network time-series, connection history) live under **Organization → Workers → Metrics** (`GET /api/v1/orgs/{org}/workers/{worker_id}/metrics`).
@@ -40,6 +40,7 @@ The board reads from dedicated tables populated as the scheduler runs:
 - `dispatched_job` — one row per dispatch with the winning score, per-rule breakdown, and job/worker context (the scoring-debug substrate).
 - `phase_event` + per-phase timestamp columns on `build`/`evaluation` — accurate phase timing. The build lifecycle is `created_at → queued_at → ready_at → dispatched_at → build_started_at → build_finished_at`, where `queued_at→ready_at` is **dependency wait** (`deps.wait_ms`) and `ready_at→dispatched_at` is **queue wait excluding dependency wait** (`dispatch.wait_ms`).
 - `worker_connection` / `worker_sample` — worker sessions and a periodic live-metric time-series.
+- `derivation_metric` — per-build resource usage captured by the worker from the build's cgroup (peak RAM, CPU time, disk read/write, OOM) plus a host network peak; powers the Expensive Jobs resource tabs. Requires cgroup metrics enabled on the worker.
 - `metric_rollup` — time-bucketed aggregates (minute → hour → day → week) produced by a background aggregator, queried via `GET /api/v1/metrics/query` (catalog at `GET /api/v1/metrics/catalog`).
 
 Retention and aggregation intervals are configurable — see [Configuration](../configuration.md#metrics-pipeline--retention).

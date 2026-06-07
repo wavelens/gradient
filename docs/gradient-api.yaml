@@ -5734,6 +5734,22 @@ x-nix-cache-paths:
         '200':
           description: Top builds by build time
 
+  /board/jobs/expensive-by-resource:
+    get:
+      tags: [board]
+      summary: Most expensive builds by resource
+      description: Top derivations by a captured per-build resource (peak RAM, CPU time, total disk bytes, or host network peak) from `derivation_metric`. Org-scoped.
+      operationId: getBoardExpensiveByResource
+      parameters:
+        - { name: metric, in: query, required: true, schema: { type: string, enum: [ram, cpu, disk, network] } }
+        - { name: window_days, in: query, schema: { type: integer } }
+        - { name: exclude_acknowledged, in: query, schema: { type: boolean } }
+      responses:
+        '200':
+          description: Top builds by resource
+        '404':
+          description: Unknown metric
+
   /board/jobs/{id}:
     get:
       tags: [board]

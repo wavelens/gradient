@@ -138,6 +138,7 @@ mod m20260607_000006_create_table_metric_rollup;
 mod m20260607_000007_add_phase_timing_to_build;
 mod m20260607_000008_add_phase_timing_to_evaluation;
 mod m20260607_000009_add_queued_at_to_build;
+mod m20260607_000010_add_network_to_derivation_metric;
 
 pub struct Migrator;
 
@@ -277,6 +278,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260607_000007_add_phase_timing_to_build::Migration),
             Box::new(m20260607_000008_add_phase_timing_to_evaluation::Migration),
             Box::new(m20260607_000009_add_queued_at_to_build::Migration),
+            Box::new(m20260607_000010_add_network_to_derivation_metric::Migration),
         ]
     }
 }
