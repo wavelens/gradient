@@ -27,7 +27,7 @@ use gradient_core::db::{DrvOutputSpec, parse_drv};
 use gradient_core::executer::path_utils::{nix_store_path, strip_nix_store_prefix};
 use gradient_core::hydra::parse_hydra_product_line;
 use gradient_core::sources::get_hash_from_path;
-use harmonia_protocol::daemon_wire::types2::{BuildMode, BuildResultInner};
+use harmonia_protocol::daemon_wire::types2::{BuildMode, BuildResultInner, Microseconds};
 use harmonia_protocol::log::{Field, LogMessage, ResultType, Verbosity};
 use harmonia_protocol::types::ClientOptions;
 use harmonia_store_content_address::{ContentAddress, ContentAddressMethod};
@@ -47,8 +47,8 @@ use crate::nix::store::{LocalNixStore, strip_store_prefix};
 use crate::proto::job::JobUpdater;
 
 const BYTES_PER_MB: u64 = 1_048_576;
-/// Bounded depth for the best-effort cgroup search under the cgroup root.
-const CGROUP_SEARCH_DEPTH: usize = 4;
+/// Cadence for sampling a live build cgroup's `memory.peak` / `io.stat`.
+const CGROUP_SAMPLE_MS: u64 = 200;
 
 // ── Failure classification ────────────────────────────────────────────────────
 
@@ -157,68 +157,64 @@ fn raw_to_build_metrics(
     }
 }
 
-/// Best-effort search for the cgroup directory of a daemon-forked build.
+/// Locate a running build's cgroup via nix's `<state-dir>/cgroups/` map.
 ///
-/// Nix's experimental `use-cgroups` feature places each build in its own
-/// cgroup whose leaf name embeds the derivation hash. Mapping a build to its
-/// cgroup is environment-specific, so this walks at most a few levels under
-/// `root` and returns the first directory whose name contains the drv hash.
-/// Returns `None` when nothing matches.
-fn locate_build_cgroup(root: &Path, drv_path: &str) -> Option<PathBuf> {
-    let hash = drv_hash(drv_path)?;
-    find_dir_containing(root, &hash, CGROUP_SEARCH_DEPTH)
-}
-
-/// Extract the store-path hash from a `.drv` path (`/nix/store/<hash>-name.drv`).
-fn drv_hash(drv_path: &str) -> Option<String> {
-    let base = drv_path.rsplit('/').next().unwrap_or(drv_path);
-    let hash = base.split('-').next()?;
-    (!hash.is_empty()).then(|| hash.to_owned())
-}
-
-/// Bounded breadth-first walk returning the first directory whose name contains
-/// `needle`. Never follows symlinks; never recurses past `max_depth`.
-fn find_dir_containing(root: &Path, needle: &str, max_depth: usize) -> Option<PathBuf> {
-    let mut frontier = vec![(root.to_path_buf(), 0usize)];
-    while let Some((dir, depth)) = frontier.pop() {
-        let Ok(entries) = std::fs::read_dir(&dir) else {
+/// Nix can't be asked which build user / cgroup it assigned, but on each build
+/// it writes the build's absolute cgroup path to `<state-dir>/cgroups/<uid>`.
+/// Those files persist after the build (pointing at a since-destroyed cgroup),
+/// so we only consider entries modified at/after `since` (the build's start)
+/// and return the newest. Returns `None` when nothing is newer than `since`
+/// (idle, daemon not using cgroups, or concurrent starts we won't guess at).
+fn newest_build_cgroup(state_dir: &Path, since: std::time::SystemTime) -> Option<PathBuf> {
+    let mut newest: Option<(std::time::SystemTime, PathBuf)> = None;
+    for entry in std::fs::read_dir(state_dir).ok()?.flatten() {
+        let Ok(mtime) = entry.metadata().and_then(|m| m.modified()) else {
             continue;
         };
-        for entry in entries.flatten() {
-            if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                continue;
-            }
-            let path = entry.path();
-            if entry.file_name().to_string_lossy().contains(needle) {
-                return Some(path);
-            }
-            if depth + 1 < max_depth {
-                frontier.push((path, depth + 1));
+        if mtime < since {
+            continue;
+        }
+        if newest.as_ref().is_none_or(|(t, _)| mtime > *t)
+            && let Ok(contents) = std::fs::read_to_string(entry.path())
+        {
+            let path = PathBuf::from(contents.trim());
+            if !path.as_os_str().is_empty() {
+                newest = Some((mtime, path));
             }
         }
     }
-    None
+    newest.map(|(_, p)| p)
 }
 
-/// Capture per-build resource metrics. Always reports `build_time_ms`; cgroup
-/// fields degrade to `None` when metrics are disabled or the cgroup cannot be
-/// located/read.
-fn capture_build_metrics(
-    enabled: bool,
-    cgroup_root: &str,
-    drv_path: &str,
+/// Total CPU microseconds from the daemon's `BuildResult` (cgroup-derived,
+/// captured by nix before it tears the cgroup down). `None` only when the
+/// daemon reported neither user nor system time.
+fn daemon_cpu_usec(user: Option<Microseconds>, system: Option<Microseconds>) -> Option<u64> {
+    let us = |m: Microseconds| m.0.max(0) as u64;
+    match (user, system) {
+        (None, None) => None,
+        (u, s) => Some(u.map(us).unwrap_or(0) + s.map(us).unwrap_or(0)),
+    }
+}
+
+/// Assemble per-build metrics from the live-sampled cgroup snapshot (peak RAM /
+/// disk, captured before teardown) and the daemon-reported CPU time. Always
+/// reports `build_time_ms`; cgroup fields stay `None` when no cgroup was
+/// sampled (metrics disabled, idle map, or ambiguous concurrent starts).
+fn assemble_build_metrics(
+    sampled: Option<BuildMetricsRaw>,
+    cpu_usec: Option<u64>,
     build_time_ms: u64,
     peak_network_mbps: Option<f32>,
 ) -> BuildMetrics {
     let cpu_count = crate::metrics::host_static().cpu_count;
-    if !enabled {
-        return raw_to_build_metrics(None, build_time_ms, cpu_count, peak_network_mbps);
-    }
-    let raw = locate_build_cgroup(Path::new(cgroup_root), drv_path)
-        .and_then(|dir| read_build_cgroup(&dir));
-    if raw.is_none() {
-        debug!(drv = %drv_path, "build cgroup not found; reporting wall-clock time only");
-    }
+    let raw = match (sampled, cpu_usec) {
+        (None, None) => None,
+        (s, cpu) => Some(BuildMetricsRaw {
+            cpu_usage_usec: cpu,
+            ..s.unwrap_or_default()
+        }),
+    };
     if let Some(r) = raw.as_ref() {
         let bytes = r.disk_read_bytes + r.disk_write_bytes;
         if build_time_ms > 0 && bytes > 0 {
@@ -273,6 +269,74 @@ impl NetworkPeakSampler {
             0 => None,
             b => Some(f64::from_bits(b) as f32),
         }
+    }
+}
+
+/// Samples a daemon build's cgroup `memory.peak` / `io.stat` *while it runs*,
+/// because nix destroys the cgroup as soon as the build finishes. It locates
+/// the cgroup via [`newest_build_cgroup`] (entries written after `start` was
+/// called), locks onto it, and keeps the last good reading - the high-water
+/// `memory.peak` and cumulative `io.stat` just before teardown.
+struct CgroupSampler {
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    handle: tokio::task::JoinHandle<Option<BuildMetricsRaw>>,
+}
+
+impl CgroupSampler {
+    fn start(state_dir: String, cgroup_root: String) -> Self {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let stop = Arc::new(AtomicBool::new(false));
+        let since = std::time::SystemTime::now();
+        let s = stop.clone();
+        let handle = tokio::spawn(async move {
+            let dir = Path::new(&state_dir);
+            let mut cgroup: Option<PathBuf> = None;
+            let mut last: Option<BuildMetricsRaw> = None;
+            let mut logged = false;
+            while !s.load(Ordering::Relaxed) {
+                if cgroup.is_none() {
+                    // Trust only paths under the configured cgroup root.
+                    cgroup = newest_build_cgroup(dir, since)
+                        .filter(|p| p.starts_with(&cgroup_root));
+                }
+                if let Some(dir) = cgroup.as_ref() {
+                    match read_build_cgroup(dir) {
+                        Some(cur) => {
+                            if !logged {
+                                debug!(cgroup = %dir.display(), "sampling build cgroup for metrics");
+                                logged = true;
+                            }
+                            last = Some(merge_cgroup_sample(last, cur));
+                        }
+                        None => break, // cgroup torn down; keep the last good sample
+                    }
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(CGROUP_SAMPLE_MS)).await;
+            }
+            last
+        });
+        Self { stop, handle }
+    }
+
+    async fn finish(self) -> Option<BuildMetricsRaw> {
+        use std::sync::atomic::Ordering;
+        self.stop.store(true, Ordering::Relaxed);
+        self.handle.await.ok().flatten()
+    }
+}
+
+/// Fold a fresh cgroup reading into the running snapshot: `memory.peak` is a
+/// kernel high-water mark so take the max; `io.stat` is cumulative so the latest
+/// read is the total; OOM is sticky.
+fn merge_cgroup_sample(prev: Option<BuildMetricsRaw>, cur: BuildMetricsRaw) -> BuildMetricsRaw {
+    let prev = prev.unwrap_or_default();
+    BuildMetricsRaw {
+        peak_ram_bytes: prev.peak_ram_bytes.max(cur.peak_ram_bytes),
+        cpu_usage_usec: None,
+        disk_read_bytes: cur.disk_read_bytes,
+        disk_write_bytes: cur.disk_write_bytes,
+        oom_killed: prev.oom_killed || cur.oom_killed,
     }
 }
 
@@ -332,7 +396,7 @@ impl ParsedDerivation {
         abort: &mut watch::Receiver<bool>,
         log_limits: crate::executor::log_limit::LogRateLimits,
         log_fetch_from_store: bool,
-    ) -> Result<(Vec<BuildOutput>, bool), BuildError> {
+    ) -> Result<(Vec<BuildOutput>, bool, Option<u64>), BuildError> {
         let mut guard = store.scoped().await.map_err(BuildError::transient)?;
 
         debug!(
@@ -407,6 +471,9 @@ impl ParsedDerivation {
             }
         };
 
+        // CPU time the daemon read from the build cgroup before destroying it.
+        let cpu_usec = daemon_cpu_usec(result.cpu_user, result.cpu_system);
+
         match result.inner {
             BuildResultInner::Success(s) => {
                 info!(drv = %drv_path, "build succeeded");
@@ -447,7 +514,7 @@ impl ParsedDerivation {
                         products,
                     });
                 }
-                Ok((outputs, substituted))
+                Ok((outputs, substituted, cpu_usec))
             }
 
             BuildResultInner::Failure(f) => {
@@ -546,6 +613,7 @@ pub async fn build_derivation(
     abort: &mut watch::Receiver<bool>,
     build_metrics: bool,
     cgroup_root: &str,
+    cgroup_state_dir: &str,
     log_limits: crate::executor::log_limit::LogRateLimits,
     log_fetch_from_store: bool,
 ) -> Result<Vec<BuildOutput>, BuildError> {
@@ -569,8 +637,10 @@ pub async fn build_derivation(
     );
 
     let net_sampler = build_metrics.then(NetworkPeakSampler::start);
+    let cgroup_sampler = build_metrics
+        .then(|| CgroupSampler::start(cgroup_state_dir.to_string(), cgroup_root.to_string()));
     let started = std::time::Instant::now();
-    let realize_result: Result<(Vec<BuildOutput>, bool), BuildError> =
+    let realize_result: Result<(Vec<BuildOutput>, bool, Option<u64>), BuildError> =
         match task.timeout_secs.map(std::time::Duration::from_secs) {
             Some(d) => match tokio::time::timeout(d, realize).await {
                 Ok(r) => r,
@@ -582,18 +652,23 @@ pub async fn build_derivation(
             None => realize.await,
         };
 
-    // Capture metrics (incl. wall-clock time) for this build and ship them
-    // inline with its `BuildOutput`. On failure they are dropped with the
-    // error; the scheduler records metrics only for completed builds.
+    // Assemble metrics (wall-clock + sampled peak RAM/disk + daemon CPU) and
+    // ship them inline with the `BuildOutput`. On failure they are dropped with
+    // the error; the scheduler records metrics only for completed builds.
     let build_time_ms = started.elapsed().as_millis() as u64;
     let peak_network_mbps = match net_sampler {
         Some(s) => s.finish().await,
         None => None,
     };
+    let cgroup_raw = match cgroup_sampler {
+        Some(s) => s.finish().await,
+        None => None,
+    };
+    let cpu_usec = realize_result.as_ref().ok().and_then(|(_, _, c)| *c);
     let metrics =
-        capture_build_metrics(build_metrics, cgroup_root, &task.drv_path, build_time_ms, peak_network_mbps);
+        assemble_build_metrics(cgroup_raw, cpu_usec, build_time_ms, peak_network_mbps);
 
-    let (outputs, substituted) = realize_result?;
+    let (outputs, substituted, _) = realize_result?;
     updater
         .report_build_output(task.build_id.clone(), outputs.clone(), Some(metrics), substituted)
         .map_err(BuildError::transient)?;
@@ -1236,26 +1311,41 @@ mod tests {
     }
 
     #[test]
-    fn locate_build_cgroup_none_for_empty_root() {
+    fn newest_build_cgroup_ignores_entries_older_than_since() {
+        // Stale `<uid>` files (from finished builds) must not be picked: their
+        // cgroups are already gone. Only an entry written at/after the build
+        // started counts.
         let dir = tempfile::tempdir().unwrap();
-        let found = locate_build_cgroup(
-            dir.path(),
-            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo.drv",
+        std::fs::write(dir.path().join("30001"), "/sys/fs/cgroup/nix-build-uid-30001\n").unwrap();
+        // Everything currently in the dir predates `since`.
+        let since = std::time::SystemTime::now();
+        assert!(newest_build_cgroup(dir.path(), since).is_none());
+
+        // A file written after `since` is this build's cgroup.
+        std::fs::write(dir.path().join("30002"), "/sys/fs/cgroup/nix-build-uid-30002\n").unwrap();
+        assert_eq!(
+            newest_build_cgroup(dir.path(), since),
+            Some(PathBuf::from("/sys/fs/cgroup/nix-build-uid-30002")),
         );
-        assert!(found.is_none());
     }
 
     #[test]
-    fn locate_build_cgroup_finds_dir_with_hash() {
+    fn newest_build_cgroup_none_for_missing_dir() {
         let dir = tempfile::tempdir().unwrap();
-        let hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-        let nested = dir.path().join("system.slice").join(format!("nix-{hash}-foo.scope"));
-        std::fs::create_dir_all(&nested).unwrap();
-        let found = locate_build_cgroup(
-            dir.path(),
-            &format!("/nix/store/{hash}-foo.drv"),
+        let missing = dir.path().join("cgroups");
+        assert!(newest_build_cgroup(&missing, std::time::SystemTime::UNIX_EPOCH).is_none());
+    }
+
+    #[test]
+    fn daemon_cpu_usec_sums_present_fields() {
+        assert_eq!(daemon_cpu_usec(None, None), None);
+        assert_eq!(daemon_cpu_usec(Some(Microseconds(700)), None), Some(700));
+        assert_eq!(
+            daemon_cpu_usec(Some(Microseconds(700)), Some(Microseconds(300))),
+            Some(1000),
         );
-        assert_eq!(found, Some(nested));
+        // Negative (unset/garbage) clamps to zero rather than underflowing.
+        assert_eq!(daemon_cpu_usec(Some(Microseconds(-1)), Some(Microseconds(5))), Some(5));
     }
 
     #[test]

@@ -235,11 +235,13 @@ in {
 
       buildMetrics = lib.mkOption {
         description = ''
-          Capture per-build resource metrics (peak RAM, CPU time, disk I/O)
-          from each build's cgroup. Will enable Nix's experimental
-          <literal>cgroups</literal> feature on the daemon. Wall-clock
-          build time is always reported; cgroup-derived fields degrade to
-          null when the cgroup cannot be located or read.
+          Capture per-build resource metrics (peak RAM, CPU time, disk I/O).
+          Enables Nix's experimental <literal>cgroups</literal> feature and
+          <literal>use-cgroups</literal> on the daemon. CPU time comes from the
+          daemon build result; peak RAM and disk I/O are sampled live from the
+          build's cgroup (located via <literal>buildCgroupStateDir</literal>) -
+          reliable at build concurrency 1, best-effort under concurrency.
+          Wall-clock build time is always reported.
         '';
         type = lib.types.bool;
         default = true;
@@ -252,6 +254,17 @@ in {
         '';
         type = lib.types.str;
         default = "/sys/fs/cgroup";
+      };
+
+      buildCgroupStateDir = lib.mkOption {
+        description = ''
+          Nix's <literal>&lt;nix-state-dir&gt;/cgroups</literal> directory, where
+          the daemon records each build's cgroup path (`<uid>` files). The worker
+          reads the newest entry to locate a running build's cgroup for metrics.
+          Granted read access via <literal>ReadOnlyPaths</literal>.
+        '';
+        type = lib.types.str;
+        default = "/nix/var/nix/cgroups";
       };
 
       logBurstBytesPerMin = lib.mkOption {
@@ -365,6 +378,11 @@ in {
           ProtectProc = "invisible";
           ProtectSystem = "strict";
           ReadWritePaths = lib.optionals (cfg.settings.gcrootsDir != "") [ cfg.settings.gcrootsDir ];
+          # Build metrics read the daemon's cgroup-path map and the cgroup-v2
+          # stat files. ProtectSystem=strict already leaves /sys and /nix
+          # readable; this makes the cgroup map explicitly available (the dir may
+          # not exist until the first cgroup build, hence the `-` prefix).
+          ReadOnlyPaths = lib.optionals cfg.settings.buildMetrics [ "-${cfg.settings.buildCgroupStateDir}" ];
           Restart = "on-failure";
           RestartSec = 10;
           KillMode = "mixed";
@@ -407,6 +425,7 @@ in {
           GRADIENT_WORKER_GCROOTS_DIR                 = cfg.settings.gcrootsDir;
           GRADIENT_WORKER_BUILD_METRICS               = lib.boolToString cfg.settings.buildMetrics;
           GRADIENT_WORKER_BUILD_CGROUP_ROOT           = cfg.settings.buildCgroupRoot;
+          GRADIENT_WORKER_BUILD_CGROUP_STATE_DIR      = cfg.settings.buildCgroupStateDir;
           GRADIENT_LOG_BURST_BYTES_PER_MIN            = toString cfg.settings.logBurstBytesPerMin;
           GRADIENT_LOG_SUSTAINED_BYTES_PER_HOUR       = toString cfg.settings.logSustainedBytesPerHour;
           GRADIENT_LOG_FETCH_FROM_STORE               = lib.boolToString cfg.settings.logFetchFromStore;
