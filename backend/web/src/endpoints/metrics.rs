@@ -70,11 +70,13 @@ pub(crate) fn render(obs: &Observations) -> String {
         &["version"],
     )
     .expect("metric");
+
     info.with_label_values(&[&obs.version]).set(1);
     registry.register(Box::new(info)).expect("register info");
 
     let uptime =
         Gauge::new("gradient_uptime_seconds", "Seconds since process start.").expect("metric");
+
     uptime.set(obs.uptime_seconds);
     registry
         .register(Box::new(uptime))
@@ -86,18 +88,21 @@ pub(crate) fn render(obs: &Observations) -> String {
         "Total builds that have reached a terminal status, by status.",
         &obs.builds_total,
     );
+
     register_labelled_gauge(
         &registry,
         "gradient_builds_in_state",
         "Current count of non-terminal builds, by status.",
         &obs.builds_in_state,
     );
+
     register_labelled_counter(
         &registry,
         "gradient_evaluations_total",
         "Total evaluations that have reached a terminal status, by status.",
         &obs.evaluations_total,
     );
+
     register_labelled_gauge(
         &registry,
         "gradient_evaluations_in_state",
@@ -107,6 +112,7 @@ pub(crate) fn render(obs: &Observations) -> String {
 
     let workers =
         IntGauge::new("gradient_workers_connected", "Connected workers.").expect("metric");
+
     workers.set(obs.workers_connected);
     registry
         .register(Box::new(workers))
@@ -114,6 +120,7 @@ pub(crate) fn render(obs: &Observations) -> String {
 
     let pending =
         IntGauge::new("gradient_jobs_pending", "Pending jobs in scheduler.").expect("metric");
+
     pending.set(obs.jobs_pending);
     registry
         .register(Box::new(pending))
@@ -121,6 +128,7 @@ pub(crate) fn render(obs: &Observations) -> String {
 
     let active =
         IntGauge::new("gradient_jobs_active", "Active jobs in scheduler.").expect("metric");
+
     active.set(obs.jobs_active);
     registry
         .register(Box::new(active))
@@ -131,6 +139,7 @@ pub(crate) fn render(obs: &Observations) -> String {
         "Total compressed bytes of all cached NARs.",
     )
     .expect("metric");
+
     bytes.set(obs.cache_bytes);
     registry.register(Box::new(bytes)).expect("register bytes");
 
@@ -139,6 +148,7 @@ pub(crate) fn render(obs: &Observations) -> String {
         "Total uncompressed NAR bytes of all cached packages.",
     )
     .expect("metric");
+
     nar_bytes.set(obs.cache_nar_bytes);
     registry
         .register(Box::new(nar_bytes))
@@ -149,6 +159,7 @@ pub(crate) fn render(obs: &Observations) -> String {
         "Total packages (signed build outputs) in caches.",
     )
     .expect("metric");
+
     pkgs.set(obs.cache_packages);
     registry
         .register(Box::new(pkgs))
@@ -159,6 +170,7 @@ pub(crate) fn render(obs: &Observations) -> String {
         "Total compressed bytes served from the NAR cache since first traffic record.",
     )
     .expect("metric");
+
     bytes_sent.inc_by(obs.cache_nar_bytes_sent_total.max(0) as u64);
     registry
         .register(Box::new(bytes_sent))
@@ -169,6 +181,7 @@ pub(crate) fn render(obs: &Observations) -> String {
         "Total NAR requests served since first traffic record.",
     )
     .expect("metric");
+
     reqs.inc_by(obs.cache_nar_requests_total.max(0) as u64);
     registry.register(Box::new(reqs)).expect("register reqs");
 
@@ -184,6 +197,7 @@ pub(crate) fn render(obs: &Observations) -> String {
     TextEncoder::new()
         .encode(&registry.gather(), &mut buf)
         .expect("encode");
+
     String::from_utf8(buf).expect("utf-8")
 }
 
@@ -208,9 +222,11 @@ static HTTP_METRICS: LazyLock<HttpMetrics> = LazyLock::new(|| {
         &["method", "route"],
     )
     .expect("metric");
+
     registry
         .register(Box::new(duration.clone()))
         .expect("register http duration");
+
     let requests = IntCounterVec::new(
         Opts::new(
             "gradient_http_requests_total",
@@ -219,9 +235,11 @@ static HTTP_METRICS: LazyLock<HttpMetrics> = LazyLock::new(|| {
         &["method", "route", "status"],
     )
     .expect("metric");
+
     registry
         .register(Box::new(requests.clone()))
         .expect("register http requests");
+
     HttpMetrics { registry, duration, requests }
 });
 
@@ -254,6 +272,7 @@ pub(crate) fn http_snapshot() -> Vec<HttpRouteStat> {
                 .map(|l| l.value().to_owned())
                 .unwrap_or_default()
         };
+
         match mf.name() {
             "gradient_http_request_duration_seconds" => {
                 for m in mf.get_metric() {
@@ -278,6 +297,7 @@ pub(crate) fn http_snapshot() -> Vec<HttpRouteStat> {
             _ => {}
         }
     }
+
     let mut out: Vec<HttpRouteStat> = dur
         .into_iter()
         .map(|((method, route), (count, sum))| {
@@ -291,6 +311,7 @@ pub(crate) fn http_snapshot() -> Vec<HttpRouteStat> {
             }
         })
         .collect();
+
     out.sort_by_key(|s| std::cmp::Reverse(s.count));
     out
 }
@@ -321,6 +342,7 @@ pub(crate) fn process_snapshot() -> ProcessStat {
             } else {
                 m.get_gauge().get_value()
             };
+
             match mf.name() {
                 "process_resident_memory_bytes" => s.resident_memory_bytes = val,
                 "process_virtual_memory_bytes" => s.virtual_memory_bytes = val,
@@ -344,6 +366,7 @@ pub async fn track_http_metrics(request: axum::extract::Request, next: Next) -> 
         .get::<MatchedPath>()
         .map(|m| m.as_str().to_owned())
         .unwrap_or_else(|| "unmatched".to_owned());
+
     let start = std::time::Instant::now();
     let response = next.run(request).await;
     let status = response.status().as_u16().to_string();
@@ -351,10 +374,12 @@ pub async fn track_http_metrics(request: axum::extract::Request, next: Next) -> 
         .duration
         .with_label_values(&[&method, &route])
         .observe(start.elapsed().as_secs_f64());
+
     HTTP_METRICS
         .requests
         .with_label_values(&[&method, &route, &status])
         .inc();
+
     response
 }
 
@@ -369,6 +394,7 @@ fn register_labelled_counter(
         cv.with_label_values(&[label])
             .inc_by((*value).max(0) as u64);
     }
+
     registry.register(Box::new(cv)).expect("register");
 }
 
@@ -377,6 +403,7 @@ fn register_labelled_gauge(registry: &Registry, name: &str, help: &str, values: 
     for (label, value) in values {
         gv.with_label_values(&[label]).set(*value);
     }
+
     registry.register(Box::new(gv)).expect("register");
 }
 

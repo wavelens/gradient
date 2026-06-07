@@ -77,6 +77,7 @@ pub async fn get_dispatched_jobs(
             other_running += 1;
         }
     }
+
     Ok(ok_json(DispatchedJobsResponse { jobs, other_running }))
 }
 
@@ -109,9 +110,11 @@ pub async fn get_dispatched_job(
         .one(&state.web_db)
         .await?
         .ok_or_else(|| WebError::not_found("Job"))?;
+
     if !scope.allows(&Uuid::from(j.organization)) {
         return Err(WebError::not_found("Job"));
     }
+
     Ok(ok_json(DispatchedJobDetail {
         id: j.id.into(),
         kind: j.kind,
@@ -162,6 +165,7 @@ pub async fn get_board_workers(
                 .organization
                 .map(|o| scope.allows(&Uuid::from(o)))
                 .unwrap_or_else(|| scope.is_all());
+
             BoardWorker {
                 id: accessible.then(|| w.id.clone()),
                 organization: accessible.then(|| w.organization.map(Into::into)).flatten(),
@@ -178,6 +182,7 @@ pub async fn get_board_workers(
             }
         })
         .collect();
+
     Ok(ok_json(out))
 }
 
@@ -206,16 +211,20 @@ pub async fn get_expensive_jobs(
         "b.build_time_ms IS NOT NULL".to_string(),
         "b.status = 3".to_string(),
     ];
+
     if let Some(list) = scope.org_in_list() {
         if list.is_empty() {
             return Ok(ok_json(vec![]));
         }
+
         clauses.push(format!("d.organization IN ({list})"));
     }
+
     let window = params.window_days.unwrap_or(30).max(1);
     clauses.push(format!(
         "b.created_at >= (now() AT TIME ZONE 'UTC') - interval '{window} days'"
     ));
+
     if params.exclude_acknowledged.unwrap_or(true) {
         clauses.push(
             "NOT EXISTS (SELECT 1 FROM acknowledged_derivation a \
@@ -223,16 +232,19 @@ pub async fn get_expensive_jobs(
                 .to_string(),
         );
     }
+
     let sql = format!(
         "SELECT b.id, d.organization, d.name, b.build_time_ms, b.worker \
          FROM build b JOIN derivation d ON d.id = b.derivation \
          WHERE {} ORDER BY b.build_time_ms DESC LIMIT 20",
         clauses.join(" AND ")
     );
+
     let rows = state
         .web_db
         .query_all(Statement::from_string(DatabaseBackend::Postgres, sql))
         .await?;
+
     let out = rows
         .into_iter()
         .map(|r| ExpensiveBuild {
@@ -243,6 +255,7 @@ pub async fn get_expensive_jobs(
             worker: r.try_get("", "worker").ok(),
         })
         .collect();
+
     Ok(ok_json(out))
 }
 
@@ -292,17 +305,21 @@ pub async fn get_scoring_summary(
     let mut clauses = vec![format!(
         "dispatched_at >= (now() AT TIME ZONE 'UTC') - interval '{window} hours'"
     )];
+
     if let Some(list) = scope.org_in_list() {
         if list.is_empty() {
             return Ok(ok_json(ScoringSummary::default()));
         }
+
         clauses.push(format!("organization IN ({list})"));
     }
+
     let sql = format!(
         "SELECT score, score_breakdown FROM dispatched_job WHERE {} \
          ORDER BY dispatched_at DESC LIMIT {limit}",
         clauses.join(" AND ")
     );
+
     let rows = state
         .web_db
         .query_all(Statement::from_string(DatabaseBackend::Postgres, sql))
@@ -311,6 +328,7 @@ pub async fn get_scoring_summary(
     let mut scores: Vec<f64> = Vec::with_capacity(rows.len());
     let mut rule_acc: std::collections::BTreeMap<String, (f64, i64, f64, f64)> =
         std::collections::BTreeMap::new();
+
     for r in &rows {
         scores.push(r.try_get::<f64>("", "score").unwrap_or(0.0));
         if let Ok(bd) = r.try_get::<serde_json::Value>("", "score_breakdown")
@@ -344,6 +362,7 @@ pub async fn get_scoring_summary(
         let idx = (((s - lo) / span) * BINS as f64).floor() as usize;
         counts[idx.min(BINS - 1)] += 1;
     }
+
     let histogram = counts
         .into_iter()
         .enumerate()
@@ -363,6 +382,7 @@ pub async fn get_scoring_summary(
             max,
         })
         .collect();
+
     rules.sort_by(|a, b| b.avg.abs().partial_cmp(&a.avg.abs()).unwrap_or(std::cmp::Ordering::Equal));
 
     Ok(ok_json(ScoringSummary {
@@ -398,10 +418,12 @@ pub async fn get_top_orgs_by_buildtime(
            AND b.build_finished_at >= (now() AT TIME ZONE 'UTC') - interval '{window} days' \
          GROUP BY d.organization ORDER BY total DESC LIMIT 15"
     );
+
     let rows = state
         .web_db
         .query_all(Statement::from_string(DatabaseBackend::Postgres, sql))
         .await?;
+
     let out = rows
         .into_iter()
         .map(|r| TopOrgBuildTime {
@@ -410,6 +432,7 @@ pub async fn get_top_orgs_by_buildtime(
             build_count: r.try_get("", "cnt").unwrap_or(0),
         })
         .collect();
+
     Ok(ok_json(out))
 }
 
@@ -455,12 +478,15 @@ pub async fn get_expensive_by_resource(
         if list.is_empty() {
             return Ok(ok_json(vec![]));
         }
+
         clauses.push(format!("d.organization IN ({list})"));
     }
+
     let window = params.window_days.unwrap_or(30).max(1);
     clauses.push(format!(
         "dm.created_at >= (now() AT TIME ZONE 'UTC') - interval '{window} days'"
     ));
+
     if params.exclude_acknowledged.unwrap_or(true) {
         clauses.push(
             "NOT EXISTS (SELECT 1 FROM acknowledged_derivation a \
@@ -468,16 +494,19 @@ pub async fn get_expensive_by_resource(
                 .to_string(),
         );
     }
+
     let sql = format!(
         "SELECT dm.derivation, d.organization, d.name, {value_expr} AS value, dm.worker_id \
          FROM derivation_metric dm JOIN derivation d ON d.id = dm.derivation \
          WHERE {} ORDER BY value DESC LIMIT 20",
         clauses.join(" AND ")
     );
+
     let rows = state
         .web_db
         .query_all(Statement::from_string(DatabaseBackend::Postgres, sql))
         .await?;
+
     let out = rows
         .into_iter()
         .map(|r| ExpensiveResource {
@@ -489,6 +518,7 @@ pub async fn get_expensive_by_resource(
             worker: r.try_get("", "worker_id").unwrap_or_default(),
         })
         .collect();
+
     Ok(ok_json(out))
 }
 
@@ -501,6 +531,7 @@ pub async fn board_live_ws(
     let scope = MetricsScope::resolve(&state.web_db, &maybe_user)
         .await
         .unwrap_or(MetricsScope::Orgs(vec![]));
+
     let rx = scheduler.board_events.subscribe();
     ws.on_upgrade(move |socket| board_live_loop(socket, rx, scope))
 }
@@ -536,6 +567,7 @@ fn mask_event(ev: &BoardEvent, scope: &MetricsScope) -> Option<String> {
         BoardEvent::WorkerConnected { organization, .. } => scope.allows(organization),
         BoardEvent::WorkerDisconnected { .. } => scope.is_all(),
     };
+
     visible.then(|| serde_json::to_string(ev).ok()).flatten()
 }
 
@@ -557,6 +589,7 @@ pub async fn list_acknowledged(
         .order_by_desc(entity::acknowledged_derivation::Column::CreatedAt)
         .all(&state.web_db)
         .await?;
+
     let out = rows
         .into_iter()
         .map(|a| AcknowledgedDerivationDto {
@@ -567,6 +600,7 @@ pub async fn list_acknowledged(
             created_at: a.created_at.and_utc().to_rfc3339(),
         })
         .collect();
+
     Ok(ok_json(out))
 }
 
@@ -592,9 +626,11 @@ pub async fn create_acknowledged(
         created_by: Set(user.id),
         created_at: Set(gradient_core::types::now()),
     };
+
     entity::acknowledged_derivation::Entity::insert(am)
         .exec(&state.web_db)
         .await?;
+
     Ok(ok_json(id.into()))
 }
 
@@ -607,5 +643,6 @@ pub async fn delete_acknowledged(
     entity::acknowledged_derivation::Entity::delete_by_id(AcknowledgedDerivationId::from(id))
         .exec(&state.web_db)
         .await?;
+
     Ok(ok_json(true))
 }

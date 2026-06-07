@@ -87,6 +87,7 @@ pub async fn get_metrics_query(
     if !CATALOG.iter().any(|m| m.key == params.metric) {
         return Err(WebError::not_found("Metric"));
     }
+
     let gran = granularity_code(params.granularity.as_deref());
     let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
 
@@ -99,12 +100,14 @@ pub async fn get_metrics_query(
             if !orgs.contains(&o) {
                 return Err(WebError::not_found("Metric"));
             }
+
             Some(vec![o])
         }
         (MetricsScope::Orgs(orgs), None) => {
             if orgs.is_empty() {
                 return Ok(ok_json(vec![]));
             }
+
             Some(orgs.clone())
         }
     };
@@ -114,6 +117,7 @@ pub async fn get_metrics_query(
                 min(min) AS mn, max(max) AS mx \
          FROM metric_rollup WHERE metric = $1 AND granularity = $2",
     );
+
     let mut values: Vec<Value> = vec![Value::from(params.metric.clone()), Value::from(gran)];
     if let Some(orgs) = &org_filter {
         // DB-sourced UUID strings, safe to inline as a quoted IN list.
@@ -122,16 +126,20 @@ pub async fn get_metrics_query(
             .map(|o| format!("'{o}'"))
             .collect::<Vec<_>>()
             .join(",");
+
         sql.push_str(&format!(" AND (scope->>'org') IN ({list})"));
     }
+
     if let Some(from) = parse_ts(params.from.as_deref()) {
         values.push(Value::from(from));
         sql.push_str(&format!(" AND bucket_start >= ${}", values.len()));
     }
+
     if let Some(to) = parse_ts(params.to.as_deref()) {
         values.push(Value::from(to));
         sql.push_str(&format!(" AND bucket_start <= ${}", values.len()));
     }
+
     sql.push_str(" GROUP BY bucket_start ORDER BY bucket_start");
 
     let rows = state
@@ -159,6 +167,7 @@ pub async fn get_metrics_query(
             }
         })
         .collect();
+
     Ok(ok_json(points))
 }
 
@@ -167,5 +176,6 @@ fn parse_ts(s: Option<&str>) -> Option<chrono::NaiveDateTime> {
     if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(s) {
         return Some(dt.naive_utc());
     }
+
     chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S").ok()
 }
