@@ -511,6 +511,14 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         .route("/caches/{cache}/nars/{hash}", get(caches::nars_show))
         .route("/metrics/catalog", get(metrics_query::get_metrics_catalog))
         .route("/metrics/query", get(metrics_query::get_metrics_query))
+        .route(
+            "/metrics/projects/{organization}/{project}/evaluations",
+            get(projects::get_project_metrics),
+        )
+        .route(
+            "/metrics/projects/{organization}/{project}/entry-point",
+            get(projects::get_entry_point_metrics),
+        )
         .route("/board/jobs/dispatched", get(board::get_dispatched_jobs))
         .route("/board/jobs/expensive", get(board::get_expensive_jobs))
         .route("/board/jobs/{id}", get(board::get_dispatched_job))
