@@ -170,6 +170,9 @@ pub async fn update_build_status(
     }
     active_build.status = Set(status);
     active_build.updated_at = Set(now);
+    if status == BuildStatus::Queued && build.queued_at.is_none() {
+        active_build.queued_at = Set(Some(now));
+    }
     if status == BuildStatus::Building {
         active_build.build_started_at = Set(Some(now));
     }

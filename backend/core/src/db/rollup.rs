@@ -55,10 +55,18 @@ const BUILD_DURATIONS: &[BuildDuration] = &[
         end_col: "build_finished_at",
         filter: "b.status = 3",
     },
+    // Queue wait excluding dependency wait: ready (deps satisfied) → dispatched.
     BuildDuration {
         name: "dispatch.wait_ms",
         start_col: "ready_at",
         end_col: "dispatched_at",
+        filter: "TRUE",
+    },
+    // Dependency wait: entered the queue → all dependencies satisfied.
+    BuildDuration {
+        name: "deps.wait_ms",
+        start_col: "queued_at",
+        end_col: "ready_at",
         filter: "TRUE",
     },
 ];
