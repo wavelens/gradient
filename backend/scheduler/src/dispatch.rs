@@ -63,6 +63,10 @@ async fn worker_sample_loop(scheduler: Arc<Scheduler>) {
         for info in &workers {
             super::worker_lifecycle::record_worker_sample(&scheduler.state.worker_db, info).await;
         }
+        let (workers, pending, active) = scheduler.metrics_snapshot().await;
+        let _ = scheduler
+            .board_events
+            .send(crate::BoardEvent::QueueDepth { workers, pending, active });
     }
 }
 

@@ -13,11 +13,13 @@ use crate::authorization::MaybeUser;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::metrics_scope::MetricsScope;
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
+use axum::response::Response;
 use axum::{Extension, Json};
 use gradient_core::types::ids::DispatchedJobId;
 use gradient_core::types::*;
-use scheduler::Scheduler;
+use scheduler::{BoardEvent, Scheduler};
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, QueryFilter, QueryOrder,
     QuerySelect, Statement,
@@ -242,4 +244,51 @@ pub async fn get_expensive_jobs(
         })
         .collect();
     Ok(ok_json(out))
+}
+
+pub async fn board_live_ws(
+    State(state): State<Arc<ServerState>>,
+    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Extension(scheduler): Extension<Arc<Scheduler>>,
+    ws: WebSocketUpgrade,
+) -> Response {
+    let scope = MetricsScope::resolve(&state.web_db, &maybe_user)
+        .await
+        .unwrap_or(MetricsScope::Orgs(vec![]));
+    let rx = scheduler.board_events.subscribe();
+    ws.on_upgrade(move |socket| board_live_loop(socket, rx, scope))
+}
+
+async fn board_live_loop(
+    mut socket: WebSocket,
+    mut rx: tokio::sync::broadcast::Receiver<BoardEvent>,
+    scope: MetricsScope,
+) {
+    loop {
+        match rx.recv().await {
+            Ok(ev) => {
+                if let Some(text) = mask_event(&ev, &scope)
+                    && socket.send(Message::Text(text.into())).await.is_err()
+                {
+                    break;
+                }
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+        }
+    }
+}
+
+/// Forward only events the caller may see: queue depth to everyone, per-org
+/// events to members of that org (or superusers), worker disconnects to
+/// superusers. Out-of-scope detail is dropped (the REST view supplies the
+/// "other running" aggregate count).
+fn mask_event(ev: &BoardEvent, scope: &MetricsScope) -> Option<String> {
+    let visible = match ev {
+        BoardEvent::QueueDepth { .. } => true,
+        BoardEvent::JobDispatched { organization, .. } => scope.allows(organization),
+        BoardEvent::WorkerConnected { organization, .. } => scope.allows(organization),
+        BoardEvent::WorkerDisconnected { .. } => scope.is_all(),
+    };
+    visible.then(|| serde_json::to_string(ev).ok()).flatten()
 }

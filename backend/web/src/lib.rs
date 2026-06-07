@@ -506,6 +506,7 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         .route("/board/jobs/expensive", get(board::get_expensive_jobs))
         .route("/board/jobs/{id}", get(board::get_dispatched_job))
         .route("/board/workers", get(board::get_board_workers))
+        .route("/board/live", get(board::board_live_ws))
         .route_layer(middleware::from_fn_with_state(
             Arc::clone(&state),
             authorization::authorize_optional,

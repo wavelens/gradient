@@ -12,6 +12,7 @@
 //! - [`worker_lifecycle`] - connect / disconnect / capability updates
 //! - [`job_handlers`] - queue, assignment, status, completion, log, abort
 
+pub mod board_events;
 pub mod build;
 pub mod dispatch;
 pub mod eval;
@@ -39,6 +40,7 @@ use worker_pool::WorkerPool;
 /// processing and flushed once all derivation rows are in the DB.
 type DeferredDeps = Arc<RwLock<HashMap<EvaluationId, Vec<(String, Vec<String>)>>>>;
 
+pub use board_events::BoardEvent;
 pub use worker_pool::WorkerInfo;
 
 #[cfg(test)]
@@ -71,6 +73,8 @@ pub struct Scheduler {
     /// Scoring policy used when selecting which pending job to assign to a
     /// requesting worker.  Shared via `Arc` so it can be read lock-free.
     pub(crate) policy: Arc<dyn score::ScoringPolicy>,
+    /// Broadcast of live Job Board events to WebSocket subscribers.
+    pub board_events: tokio::sync::broadcast::Sender<BoardEvent>,
 }
 
 impl std::fmt::Debug for Scheduler {
@@ -89,6 +93,7 @@ impl Scheduler {
             job_notify: Arc::new(tokio::sync::Notify::new()),
             deferred_deps: Arc::new(RwLock::new(HashMap::new())),
             policy,
+            board_events: tokio::sync::broadcast::channel(256).0,
         }
     }
 

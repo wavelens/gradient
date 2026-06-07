@@ -107,6 +107,10 @@ impl Scheduler {
         {
             warn!(error = %e, %peer_id, "failed to insert worker_connection");
         }
+        let _ = self.board_events.send(crate::BoardEvent::WorkerConnected {
+            organization: reg.peer_id.into(),
+            worker_id: peer_id.to_owned(),
+        });
     }
 
     /// Stamp `disconnected_at` on the worker's latest open `worker_connection`.
@@ -235,6 +239,9 @@ impl Scheduler {
         if total > 0 {
             info!(%peer_id, orphaned_jobs = total, "worker disconnected; jobs re-queued");
         }
+        let _ = self
+            .board_events
+            .send(crate::BoardEvent::WorkerDisconnected { worker_id: peer_id.to_owned() });
         // A worker leaving may strand evaluations whose remaining builds
         // only it could service.
         if let Err(e) = self.reconcile_waiting_state().await {
