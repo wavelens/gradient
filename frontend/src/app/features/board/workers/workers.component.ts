@@ -6,7 +6,7 @@
 
 import { Component, OnInit, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { BoardService, BoardWorker } from '@core/services/board.service';
+import { BoardService, BoardWorker, BoardFleetPoint } from '@core/services/board.service';
 import { MetricChartComponent } from '@shared/components/metric-chart/metric-chart.component';
 
 @Component({
@@ -15,13 +15,39 @@ import { MetricChartComponent } from '@shared/components/metric-chart/metric-cha
   imports: [CommonModule, MetricChartComponent],
   template: `
     <app-metric-chart
-      title="Workers by capability"
-      type="bar"
-      [height]="220"
-      [series]="capabilitySeries()"
-      [categories]="['eval', 'fetch', 'build']"
-      [colors]="['#6f42c1']"
+      title="Fleet over time (connected vs draining)"
+      type="area"
+      [series]="fleetSeries()"
+      [categories]="fleetCats()"
+      [colors]="['#28a745', '#fd7e14']"
     ></app-metric-chart>
+
+    <app-metric-chart
+      title="Capability over time"
+      type="line"
+      [series]="capOverTime()"
+      [categories]="fleetCats()"
+      [colors]="['#17a2b8', '#6f42c1', '#e83e8c']"
+    ></app-metric-chart>
+
+    <div class="row">
+      <app-metric-chart
+        title="Load by capability (busy %)"
+        type="radar"
+        [height]="300"
+        [series]="loadRadar()"
+        [categories]="['eval', 'fetch', 'build']"
+        [colors]="['#17a2b8']"
+      ></app-metric-chart>
+      <app-metric-chart
+        title="Slot utilisation per worker (%)"
+        type="bar"
+        [height]="300"
+        [series]="utilSeries()"
+        [categories]="workerCats()"
+        [colors]="['#6f42c1']"
+      ></app-metric-chart>
+    </div>
 
     <table class="workers">
       <thead>
@@ -46,7 +72,9 @@ import { MetricChartComponent } from '@shared/components/metric-chart/metric-cha
   `,
   styles: [
     `
-      table.workers { width: 100%; border-collapse: collapse; margin-top: 1.5rem; background: #21262d; border: 1px solid #2d333b; border-radius: 8px; overflow: hidden; }
+      app-metric-chart { display: block; margin-bottom: 1rem; }
+      .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 1rem; }
+      table.workers { width: 100%; border-collapse: collapse; margin-top: 1rem; background: #21262d; border: 1px solid #2d333b; border-radius: 8px; overflow: hidden; }
       th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #2d333b; color: #abb0b4; font-size: 0.85rem; }
       th { color: #fff; }
       .mono { font-family: monospace; }
@@ -57,22 +85,48 @@ import { MetricChartComponent } from '@shared/components/metric-chart/metric-cha
 export class BoardWorkersComponent implements OnInit {
   private board = inject(BoardService);
   workers = signal<BoardWorker[]>([]);
+  fleet = signal<BoardFleetPoint[]>([]);
 
-  capabilitySeries = computed(() => {
+  fleetCats = computed(() => this.fleet().map((p) => p.bucket_start.slice(11, 16)));
+  fleetSeries = computed(() => [
+    { name: 'connected', data: this.fleet().map((p) => p.connected) },
+    { name: 'draining', data: this.fleet().map((p) => p.draining) },
+  ]);
+  capOverTime = computed(() => [
+    { name: 'eval', data: this.fleet().map((p) => p.eval) },
+    { name: 'fetch', data: this.fleet().map((p) => p.fetch) },
+    { name: 'build', data: this.fleet().map((p) => p.build) },
+  ]);
+
+  loadRadar = computed(() => {
     const w = this.workers();
-    return [
-      {
-        name: 'workers',
-        data: [
-          w.filter((x) => x.eval).length,
-          w.filter((x) => x.fetch).length,
-          w.filter((x) => x.build).length,
-        ],
-      },
-    ];
+    const busy = (pred: (x: BoardWorker) => boolean) => {
+      const sel = w.filter(pred);
+      const max = sel.reduce((a, x) => a + x.max_concurrent_builds, 0);
+      const used = sel.reduce((a, x) => a + x.assigned_jobs, 0);
+      return max > 0 ? Math.round((used / max) * 100) : 0;
+    };
+    return [{ name: 'busy %', data: [busy((x) => x.eval), busy((x) => x.fetch), busy((x) => x.build)] }];
   });
+
+  workerCats = computed(() =>
+    this.workers().filter((w) => w.id !== null).map((w) => (w.id ?? '').slice(0, 12))
+  );
+  utilSeries = computed(() => [
+    {
+      name: 'utilisation',
+      data: this.workers()
+        .filter((w) => w.id !== null)
+        .map((w) =>
+          w.max_concurrent_builds > 0
+            ? Math.round((w.assigned_jobs / w.max_concurrent_builds) * 100)
+            : 0
+        ),
+    },
+  ]);
 
   ngOnInit(): void {
     this.board.getWorkers().subscribe((w) => this.workers.set(w));
+    this.board.getFleet(24).subscribe((f) => this.fleet.set(f));
   }
 }

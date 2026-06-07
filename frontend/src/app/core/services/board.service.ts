@@ -94,6 +94,76 @@ export interface ScoringSummary {
   rules: RuleContribution[];
 }
 
+export interface SeriesPoint {
+  bucket_start: string;
+  count: number;
+  sum: number;
+}
+
+export interface BoardCacheStats {
+  totals: {
+    bytes: number;
+    nar_bytes: number;
+    packages: number;
+    bytes_sent_total: number;
+    requests_total: number;
+  };
+  traffic: SeriesPoint[];
+  storage: SeriesPoint[];
+}
+
+export interface HttpRouteStat {
+  method: string;
+  route: string;
+  count: number;
+  avg_ms: number;
+  errors: number;
+}
+
+export interface WorkerNet {
+  worker_id: string | null;
+  network_speed_mbps: number | null;
+  disk_speed_mbps: number | null;
+}
+
+export interface BoardNetworkStats {
+  nar_egress: SeriesPoint[];
+  workers: WorkerNet[];
+  http: HttpRouteStat[];
+}
+
+export interface BoardFleetPoint {
+  bucket_start: string;
+  connected: number;
+  draining: number;
+  eval: number;
+  fetch: number;
+  build: number;
+}
+
+export interface ProcessStat {
+  resident_memory_bytes: number;
+  virtual_memory_bytes: number;
+  open_fds: number;
+  max_fds: number;
+  cpu_seconds_total: number;
+  threads: number;
+}
+
+export interface BoardHealth {
+  version: string;
+  uptime_seconds: number;
+  workers_connected: number;
+  jobs_pending: number;
+  jobs_active: number;
+  cache_bytes: number;
+  cache_packages: number;
+  process: ProcessStat;
+  http: HttpRouteStat[];
+  rollup_lag_seconds: number | null;
+  latest_rollup_bucket: string | null;
+}
+
 @Injectable({ providedIn: 'root' })
 export class BoardService {
   private api = inject(ApiService);
@@ -122,6 +192,22 @@ export class BoardService {
 
   getScoringSummary(windowHours = 24): Observable<ScoringSummary> {
     return this.api.get<ScoringSummary>(`board/scoring/summary?window_hours=${windowHours}`);
+  }
+
+  getCache(windowHours = 24): Observable<BoardCacheStats> {
+    return this.api.get<BoardCacheStats>(`board/cache?window_hours=${windowHours}`);
+  }
+
+  getNetwork(windowHours = 24): Observable<BoardNetworkStats> {
+    return this.api.get<BoardNetworkStats>(`board/network?window_hours=${windowHours}`);
+  }
+
+  getFleet(windowHours = 24): Observable<BoardFleetPoint[]> {
+    return this.api.get<BoardFleetPoint[]>(`board/fleet?window_hours=${windowHours}`);
+  }
+
+  getHealth(): Observable<BoardHealth> {
+    return this.api.get<BoardHealth>('board/health');
   }
 
   query(metric: string, granularity = 'hour', org?: string): Observable<MetricPoint[]> {

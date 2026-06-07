@@ -21,11 +21,11 @@ import { MetricChartComponent } from '@shared/components/metric-chart/metric-cha
     </div>
 
     <app-metric-chart
-      title="Dispatch wait (ms, hourly avg vs max)"
+      title="Wait breakdown (ms, hourly avg): queue (excl. deps) vs dependency"
       type="line"
       [series]="waitSeries()"
       [categories]="waitCategories()"
-      [colors]="['#17a2b8', '#dc3545']"
+      [colors]="['#17a2b8', '#fd7e14']"
     ></app-metric-chart>
 
     <app-metric-chart
@@ -80,13 +80,17 @@ export class BoardSchedulerComponent implements OnInit {
   private board = inject(BoardService);
 
   private wait = signal<MetricPoint[]>([]);
+  private deps = signal<MetricPoint[]>([]);
   summary = signal<ScoringSummary | null>(null);
 
   waitCategories = computed(() => this.wait().map((p) => p.bucket_start.slice(11, 16)));
-  waitSeries = computed(() => [
-    { name: 'avg', data: this.wait().map((p) => Math.round(p.avg)) },
-    { name: 'max', data: this.wait().map((p) => Math.round(p.max)) },
-  ]);
+  waitSeries = computed(() => {
+    const depMap = new Map(this.deps().map((p) => [p.bucket_start, Math.round(p.avg)]));
+    return [
+      { name: 'queue wait (excl. deps)', data: this.wait().map((p) => Math.round(p.avg)) },
+      { name: 'dependency wait', data: this.wait().map((p) => depMap.get(p.bucket_start) ?? 0) },
+    ];
+  });
 
   histogramCategories = computed(() =>
     (this.summary()?.histogram ?? []).map((b) => b.lo.toFixed(1))
@@ -103,6 +107,7 @@ export class BoardSchedulerComponent implements OnInit {
 
   ngOnInit(): void {
     this.board.query('dispatch.wait_ms', 'hour').subscribe((p) => this.wait.set(p));
+    this.board.query('deps.wait_ms', 'hour').subscribe((p) => this.deps.set(p));
     this.board.getScoringSummary(24).subscribe((s) => this.summary.set(s));
   }
 }

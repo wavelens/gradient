@@ -5771,6 +5771,54 @@ x-nix-cache-paths:
         '200':
           description: Connected workers
 
+  /board/cache:
+    get:
+      tags: [board]
+      summary: Cache statistics
+      description: Cache totals plus hourly traffic and storage-growth series, aggregated across caches (anonymized infra view).
+      operationId: getBoardCache
+      parameters:
+        - { name: window_hours, in: query, required: false, schema: { type: integer, default: 24 } }
+      responses:
+        '200':
+          description: Cache statistics
+
+  /board/network:
+    get:
+      tags: [board]
+      summary: Network & API statistics
+      description: NAR egress series, per-worker latest network/disk speeds (org-scoped), and per-route HTTP latency/throughput (superuser-only).
+      operationId: getBoardNetwork
+      parameters:
+        - { name: window_hours, in: query, required: false, schema: { type: integer, default: 24 } }
+      responses:
+        '200':
+          description: Network statistics
+
+  /board/fleet:
+    get:
+      tags: [board]
+      summary: Worker fleet time-series
+      description: Hourly connected / draining / by-capability worker counts derived from worker samples, scoped to the caller's orgs.
+      operationId: getBoardFleet
+      parameters:
+        - { name: window_hours, in: query, required: false, schema: { type: integer, default: 24 } }
+      responses:
+        '200':
+          description: Fleet time-series
+
+  /board/health:
+    get:
+      tags: [board]
+      summary: System health (superuser)
+      description: Process/runtime snapshot, pipeline rollup lag, and HTTP route stats. Superuser only.
+      operationId: getBoardHealth
+      responses:
+        '200':
+          description: System health
+        '403':
+          description: Superuser required
+
   /board/live:
     get:
       tags: [board]
