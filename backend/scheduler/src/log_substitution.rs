@@ -265,6 +265,10 @@ mod tests {
             prefer_local_build: false,
             created_at: now,
             updated_at: now,
+            ready_at: None,
+            dispatched_at: None,
+            build_started_at: None,
+            build_finished_at: None,
         }
     }
 

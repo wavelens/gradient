@@ -182,6 +182,11 @@ pub fn eval_at(id: EvaluationId, offset_secs: i64) -> evaluation::Model {
         trigger: None,
         concurrent: false,
         source_comment: None,
+        fetch_started_at: None,
+        eval_flake_started_at: None,
+        eval_drv_started_at: None,
+        building_started_at: None,
+        finished_at: None,
     }
 }
 

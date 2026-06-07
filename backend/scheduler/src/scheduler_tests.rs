@@ -373,6 +373,11 @@ async fn fetch_only_completion_enqueues_cached_eval_followup() {
         trigger: None,
         concurrent: false,
         source_comment: None,
+        fetch_started_at: None,
+        eval_flake_started_at: None,
+        eval_drv_started_at: None,
+        building_started_at: None,
+        finished_at: None,
     };
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)

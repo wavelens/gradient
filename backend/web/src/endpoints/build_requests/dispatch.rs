@@ -163,6 +163,11 @@ pub async fn post_dispatch(
         trigger: Set(None),
         concurrent: Set(false),
         source_comment: Set(None),
+        fetch_started_at: Set(None),
+        eval_flake_started_at: Set(None),
+        eval_drv_started_at: Set(None),
+        building_started_at: Set(None),
+        finished_at: Set(None),
     }
     .insert(&tx)
     .await?;

@@ -353,6 +353,11 @@ mod tests {
             trigger: None,
             concurrent: false,
             source_comment: None,
+            fetch_started_at: None,
+            eval_flake_started_at: None,
+            eval_drv_started_at: None,
+            building_started_at: None,
+            finished_at: None,
         }
     }
 
@@ -804,6 +809,10 @@ mod tests {
             prefer_local_build: false,
             created_at: chrono::NaiveDateTime::default(),
             updated_at: chrono::NaiveDateTime::default(),
+            ready_at: None,
+            dispatched_at: None,
+            build_started_at: None,
+            build_finished_at: None,
         };
         let new_eval_id = EvaluationId::now_v7();
         let new_commit_id = CommitId::now_v7();

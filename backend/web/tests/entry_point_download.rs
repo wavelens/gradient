@@ -119,6 +119,11 @@ fn newest_eval_row() -> entity::evaluation::Model {
         trigger: None,
         concurrent: false,
         source_comment: None,
+        fetch_started_at: None,
+        eval_flake_started_at: None,
+        eval_drv_started_at: None,
+        building_started_at: None,
+        finished_at: None,
     }
 }
 
@@ -151,6 +156,10 @@ fn completed_build_row() -> entity::build::Model {
         prefer_local_build: false,
         created_at: test_date(),
         updated_at: test_date(),
+        ready_at: None,
+        dispatched_at: None,
+        build_started_at: None,
+        build_finished_at: None,
     }
 }
 
