@@ -65,6 +65,7 @@ async fn worker_sample_loop(scheduler: Arc<Scheduler>) {
         }
         let (workers, pending, active) = scheduler.metrics_snapshot().await;
         let _ = scheduler
+            .state
             .board_events
             .send(crate::BoardEvent::QueueDepth { workers, pending, active });
     }

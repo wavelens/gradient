@@ -545,6 +545,13 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         )
         .route("/board/workers", get(board::get_board_workers))
         .route("/board/live", get(board::board_live_ws))
+        .route("/board/cache/live", get(live::cache_live_ws))
+        .route(
+            "/projects/{organization}/{project}/live",
+            get(live::project_live_ws),
+        )
+        .route("/evals/{evaluation}/live", get(live::evaluation_live_ws))
+        .route("/builds/{build}/live", get(live::build_live_ws))
         .route_layer(middleware::from_fn_with_state(
             Arc::clone(&state),
             authorization::authorize_optional,

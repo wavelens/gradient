@@ -233,5 +233,6 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
         started_at: chrono::Utc::now(),
         pending_org_memberships,
         oidc_group_roles,
+        board_events: tokio::sync::broadcast::channel(256).0,
     })
 }

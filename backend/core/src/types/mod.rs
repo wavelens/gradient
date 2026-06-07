@@ -5,6 +5,7 @@
  */
 
 pub mod actions;
+pub mod board_events;
 pub mod build_output_metadata;
 pub mod cached_path_info;
 pub mod cli;
@@ -25,6 +26,7 @@ mod io;
 mod nix_cache;
 
 pub use self::actions::{ActionConfig, ActionType};
+pub use self::board_events::BoardEvent;
 pub use self::build_output_metadata::BuildOutputMetadata;
 pub use self::cached_path_info::CachedPathInfo;
 pub use self::cli::{
@@ -144,6 +146,9 @@ pub struct ServerState {
     /// (`StateRole.oidc_group`). Applied additively on every OIDC login. Empty
     /// when no state file is configured.
     pub oidc_group_roles: Arc<crate::state::OidcGroupRoles>,
+    /// Broadcast of live events (queue depth, worker/job dispatch, evaluation/
+    /// build status, cache changes) to WebSocket subscribers.
+    pub board_events: tokio::sync::broadcast::Sender<BoardEvent>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

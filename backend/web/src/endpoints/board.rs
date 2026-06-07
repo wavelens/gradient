@@ -525,14 +525,13 @@ pub async fn get_expensive_by_resource(
 pub async fn board_live_ws(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
-    Extension(scheduler): Extension<Arc<Scheduler>>,
     ws: WebSocketUpgrade,
 ) -> Response {
     let scope = MetricsScope::resolve(&state.web_db, &maybe_user)
         .await
         .unwrap_or(MetricsScope::Orgs(vec![]));
 
-    let rx = scheduler.board_events.subscribe();
+    let rx = state.board_events.subscribe();
     ws.on_upgrade(move |socket| board_live_loop(socket, rx, scope))
 }
 
@@ -566,6 +565,10 @@ fn mask_event(ev: &BoardEvent, scope: &MetricsScope) -> Option<String> {
         BoardEvent::JobDispatched { organization, .. } => scope.allows(organization),
         BoardEvent::WorkerConnected { organization, .. } => scope.allows(organization),
         BoardEvent::WorkerDisconnected { .. } => scope.is_all(),
+        // Resource-scoped events are served by the per-resource /live channels.
+        BoardEvent::EvaluationStatusChanged { .. }
+        | BoardEvent::BuildStatusChanged { .. }
+        | BoardEvent::CacheChanged => false,
     };
 
     visible.then(|| serde_json::to_string(ev).ok()).flatten()

@@ -190,6 +190,20 @@ pub async fn update_build_status(
 
     match active_build.update(&state.worker_db).await {
         Ok(updated_build) => {
+            let _ = state
+                .board_events
+                .send(crate::types::BoardEvent::BuildStatusChanged {
+                    evaluation_id: updated_build.evaluation.into_inner(),
+                    build_id: updated_build.id.into_inner(),
+                    status: i32::from(event_status) as i16,
+                });
+            if matches!(
+                updated_build.status,
+                BuildStatus::Completed | BuildStatus::Substituted
+            ) {
+                let _ = state.board_events.send(crate::types::BoardEvent::CacheChanged);
+            }
+
             let action_state = Arc::clone(&state);
             let action_build = updated_build.clone();
             state.shutdown.spawn(async move {
@@ -324,6 +338,14 @@ pub async fn update_evaluation_status(
             e.status = status;
             e.updated_at = now;
             e
+        });
+
+    let _ = state
+        .board_events
+        .send(crate::types::BoardEvent::EvaluationStatusChanged {
+            project: updated_eval.project.map(|p| p.into_inner()),
+            evaluation_id: updated_eval.id.into_inner(),
+            status: i32::from(event_status) as i16,
         });
 
     let action_state = Arc::clone(&state);
@@ -1095,6 +1117,7 @@ mod reelect_leader_tests {
             started_at: chrono::Utc::now(),
             pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
             oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
+            board_events: tokio::sync::broadcast::channel(256).0,
         })
     }
 

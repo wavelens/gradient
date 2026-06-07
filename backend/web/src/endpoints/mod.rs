@@ -15,6 +15,7 @@ pub mod caches;
 pub mod commits;
 pub mod evals;
 pub mod forge_hooks;
+pub mod live;
 pub mod metrics;
 pub mod metrics_query;
 pub mod orgs;

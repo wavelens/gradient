@@ -249,6 +249,10 @@ pub async fn gc_orphan_derivations(state: Arc<ServerState>, grace_hours: i64) ->
         warn!(error = %e, "GC: failed to delete cached_path rows for orphan hashes");
     }
 
+    if !to_delete.is_empty() {
+        let _ = state.board_events.send(crate::types::BoardEvent::CacheChanged);
+    }
+
     for drv_id in drv_ids {
         if let Some(d) = EDerivation::find_by_id(drv_id)
             .one(&state.worker_db)
