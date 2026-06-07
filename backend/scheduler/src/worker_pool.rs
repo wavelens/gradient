@@ -348,12 +348,19 @@ pub struct WorkerInfo {
     /// authorized for all peers; this should not happen in normal operation
     /// because workers must register with at least one org.
     pub authorized_peers: Option<HashSet<OrganizationId>>,
-    /// Owning organization resolved from `worker_registration`, if known.
+    /// Internal sampling fields (skipped in API output — surfaced via the
+    /// access-controlled Job Board APIs, not the existing workers endpoint).
+    #[serde(skip)]
     pub organization: Option<OrganizationId>,
+    #[serde(skip)]
     pub cpu_usage_pct: f32,
+    #[serde(skip)]
     pub ram_free_mb: u64,
+    #[serde(skip)]
     pub ram_total_mb: u64,
+    #[serde(skip)]
     pub disk_speed_mbps: Option<f32>,
+    #[serde(skip)]
     pub network_speed_mbps: Option<f32>,
 }
 

@@ -406,6 +406,12 @@ mod tests {
             assigned_job_count: 0,
             draining: false,
             authorized_peers: authorized.map(|v| v.into_iter().collect::<HashSet<_>>()),
+            organization: None,
+            cpu_usage_pct: 0.0,
+            ram_free_mb: 0,
+            ram_total_mb: 0,
+            disk_speed_mbps: None,
+            network_speed_mbps: None,
         }
     }
 
