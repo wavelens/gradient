@@ -10,19 +10,19 @@
 //! their identity and live metrics.
 
 use crate::authorization::MaybeUser;
-use crate::error::{WebError, WebResult};
+use crate::error::{WebError, WebResult, require_superuser};
 use crate::helpers::ok_json;
 use crate::metrics_scope::MetricsScope;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
 use axum::response::Response;
 use axum::{Extension, Json};
-use gradient_core::types::ids::DispatchedJobId;
+use gradient_core::types::ids::{AcknowledgedDerivationId, DispatchedJobId};
 use gradient_core::types::*;
 use scheduler::{BoardEvent, Scheduler};
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, QueryFilter, QueryOrder,
-    QuerySelect, Statement,
+    QuerySelect, Set, Statement,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -291,4 +291,75 @@ fn mask_event(ev: &BoardEvent, scope: &MetricsScope) -> Option<String> {
         BoardEvent::WorkerDisconnected { .. } => scope.is_all(),
     };
     visible.then(|| serde_json::to_string(ev).ok()).flatten()
+}
+
+#[derive(Serialize)]
+pub struct AcknowledgedDerivationDto {
+    pub id: Uuid,
+    pub derivation: Option<Uuid>,
+    pub pname: Option<String>,
+    pub note: String,
+    pub created_at: String,
+}
+
+pub async fn list_acknowledged(
+    State(state): State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+) -> WebResult<Json<BaseResponse<Vec<AcknowledgedDerivationDto>>>> {
+    require_superuser(&user)?;
+    let rows = entity::acknowledged_derivation::Entity::find()
+        .order_by_desc(entity::acknowledged_derivation::Column::CreatedAt)
+        .all(&state.web_db)
+        .await?;
+    let out = rows
+        .into_iter()
+        .map(|a| AcknowledgedDerivationDto {
+            id: a.id.into(),
+            derivation: a.derivation.map(Into::into),
+            pname: a.pname,
+            note: a.note,
+            created_at: a.created_at.and_utc().to_rfc3339(),
+        })
+        .collect();
+    Ok(ok_json(out))
+}
+
+#[derive(Deserialize)]
+pub struct CreateAcknowledged {
+    pub derivation: Option<Uuid>,
+    pub pname: Option<String>,
+    pub note: String,
+}
+
+pub async fn create_acknowledged(
+    State(state): State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Json(body): Json<CreateAcknowledged>,
+) -> WebResult<Json<BaseResponse<Uuid>>> {
+    require_superuser(&user)?;
+    let id = AcknowledgedDerivationId::now_v7();
+    let am = entity::acknowledged_derivation::ActiveModel {
+        id: Set(id),
+        derivation: Set(body.derivation.map(Into::into)),
+        pname: Set(body.pname),
+        note: Set(body.note),
+        created_by: Set(user.id),
+        created_at: Set(gradient_core::types::now()),
+    };
+    entity::acknowledged_derivation::Entity::insert(am)
+        .exec(&state.web_db)
+        .await?;
+    Ok(ok_json(id.into()))
+}
+
+pub async fn delete_acknowledged(
+    State(state): State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path(id): Path<Uuid>,
+) -> WebResult<Json<BaseResponse<bool>>> {
+    require_superuser(&user)?;
+    entity::acknowledged_derivation::Entity::delete_by_id(AcknowledgedDerivationId::from(id))
+        .exec(&state.web_db)
+        .await?;
+    Ok(ok_json(true))
 }
