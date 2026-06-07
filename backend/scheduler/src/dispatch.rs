@@ -50,7 +50,13 @@ pub fn start_dispatch_loops(scheduler: Arc<Scheduler>) {
 /// Periodically snapshot every connected worker's live metrics into
 /// `worker_sample` for the Job Board's worker statistics.
 async fn worker_sample_loop(scheduler: Arc<Scheduler>) {
-    let mut interval = tokio::time::interval(Duration::from_secs(15));
+    let secs = scheduler
+        .state
+        .config
+        .metrics_args
+        .worker_sample_interval_secs
+        .max(1);
+    let mut interval = tokio::time::interval(Duration::from_secs(secs));
     loop {
         interval.tick().await;
         let workers = scheduler.worker_pool.read().await.all_workers();

@@ -16,6 +16,7 @@ pub mod drv_output_spec;
 pub mod gc;
 pub mod org_cache;
 pub mod org_workers;
+pub mod retention;
 pub mod runtime_closure;
 pub mod status;
 

@@ -14,8 +14,8 @@
 
 use super::Cli;
 use super::cli::{
-    DatabaseArgs, EvalArgs, LimitsArgs, LoggingArgs, ProtoArgs, RegistrationArgs, SecretsArgs,
-    ServerArgs, StorageArgs,
+    DatabaseArgs, EvalArgs, LimitsArgs, LoggingArgs, MetricsArgs, ProtoArgs, RegistrationArgs,
+    SecretsArgs, ServerArgs, StorageArgs,
 };
 use ipnet::IpNet;
 
@@ -201,6 +201,9 @@ pub struct RuntimeConfig {
     pub s3: Option<S3Config>,
     pub github_app: Option<GitHubAppConfig>,
     pub metrics: Option<MetricsConfig>,
+    /// Always-present metrics pipeline settings (rollup interval, retention,
+    /// OTLP, sampling). Distinct from `metrics`, which gates the scrape token.
+    pub metrics_args: MetricsArgs,
     pub network: NetworkConfig,
 }
 
@@ -223,6 +226,7 @@ impl RuntimeConfig {
             s3: cli.s3_config(),
             github_app: cli.github_app_config(),
             metrics: cli.metrics_config(),
+            metrics_args: cli.metrics.clone(),
             network: cli.network_config()?,
         })
     }
