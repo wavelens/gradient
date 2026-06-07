@@ -3499,3 +3499,11 @@ Integration coverage to run in CI (DB-backed `axum_test` / `MockDatabase`):
 
 Frontend specs (vitest, run in isolation): `board.service`, `board-live.service`
 reconnect, `metric-chart`, and the live-jobs scoring-breakdown drawer.
+
+## Storage gate SUM decodes as BIGINT (#350)
+
+`core::db::cache_storage::tests::file_size_sum_casts_to_bigint` asserts the
+generated SQL wraps `SUM(file_size)` in `CAST(... AS bigint)`. Postgres widens
+`SUM(int8)` to `NUMERIC`, which failed to decode into `Option<i64>` and surfaced
+as an Internal Server Error when manually triggering an evaluation for an org
+with a writable cache.
