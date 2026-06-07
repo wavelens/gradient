@@ -155,21 +155,11 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
   }
 
   canInspect(j: DispatchedJobSummary): boolean {
-    if (!this.isLive(j)) return true;
-
-    return !!(j.organization && (j.build_id || j.evaluation_id));
+    return !this.isLive(j);
   }
 
   inspect(j: DispatchedJobSummary): void {
-    if (!this.isLive(j)) {
-      this.router.navigate(['/board/jobs', j.id]);
-      return;
-    }
-
-    if (j.organization && j.build_id) {
-      this.router.navigate(['/organization', j.organization, 'artefacts', j.build_id]);
-    } else if (j.organization && j.evaluation_id) {
-      this.router.navigate(['/organization', j.organization, 'log', j.evaluation_id]);
-    }
+    if (this.isLive(j)) return;
+    this.router.navigate(['/board/jobs', j.id]);
   }
 }
