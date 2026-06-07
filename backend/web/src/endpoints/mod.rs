@@ -14,6 +14,7 @@ pub mod commits;
 pub mod evals;
 pub mod forge_hooks;
 pub mod metrics;
+pub mod metrics_query;
 pub mod orgs;
 pub mod projects;
 pub mod stats;

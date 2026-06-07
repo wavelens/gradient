@@ -499,6 +499,8 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             get(caches::nars_available),
         )
         .route("/caches/{cache}/nars/{hash}", get(caches::nars_show))
+        .route("/metrics/catalog", get(metrics_query::get_metrics_catalog))
+        .route("/metrics/query", get(metrics_query::get_metrics_query))
         .route_layer(middleware::from_fn_with_state(
             Arc::clone(&state),
             authorization::authorize_optional,
