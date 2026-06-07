@@ -23,11 +23,11 @@ import { MetricChartComponent } from '@shared/components/metric-chart/metric-cha
     ></app-metric-chart>
 
     <app-metric-chart
-      title="Dispatch wait (s, hourly avg)"
+      title="Wait (s, hourly avg): queue (excl. deps) vs dependency"
       type="area"
       [series]="waitSeries()"
       [categories]="waitCategories()"
-      [colors]="['#6f42c1']"
+      [colors]="['#6f42c1', '#fd7e14']"
     ></app-metric-chart>
   `,
   styles: [`app-metric-chart { display: block; margin-bottom: 1rem; }`],
@@ -37,6 +37,7 @@ export class BoardDurationsComponent implements OnInit {
 
   private build = signal<MetricPoint[]>([]);
   private wait = signal<MetricPoint[]>([]);
+  private deps = signal<MetricPoint[]>([]);
 
   buildCategories = computed(() => this.build().map((p) => p.bucket_start.slice(11, 16)));
   buildSeries = computed(() => [
@@ -45,12 +46,17 @@ export class BoardDurationsComponent implements OnInit {
   ]);
 
   waitCategories = computed(() => this.wait().map((p) => p.bucket_start.slice(11, 16)));
-  waitSeries = computed(() => [
-    { name: 'avg', data: this.wait().map((p) => +(p.avg / 1000).toFixed(2)) },
-  ]);
+  waitSeries = computed(() => {
+    const depMap = new Map(this.deps().map((p) => [p.bucket_start, +(p.avg / 1000).toFixed(2)]));
+    return [
+      { name: 'queue wait (excl. deps)', data: this.wait().map((p) => +(p.avg / 1000).toFixed(2)) },
+      { name: 'dependency wait', data: this.wait().map((p) => depMap.get(p.bucket_start) ?? 0) },
+    ];
+  });
 
   ngOnInit(): void {
     this.board.query('builds.duration_ms', 'hour').subscribe((p) => this.build.set(p));
     this.board.query('dispatch.wait_ms', 'hour').subscribe((p) => this.wait.set(p));
+    this.board.query('deps.wait_ms', 'hour').subscribe((p) => this.deps.set(p));
   }
 }

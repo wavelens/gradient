@@ -22,7 +22,10 @@ import { RouterModule } from '@angular/router';
         <a routerLink="throughput" routerLinkActive="active">Throughput</a>
         <a routerLink="durations" routerLinkActive="active">Durations</a>
         <a routerLink="workers" routerLinkActive="active">Workers</a>
+        <a routerLink="cache" routerLinkActive="active">Cache</a>
+        <a routerLink="network" routerLinkActive="active">Network &amp; API</a>
         <a routerLink="expensive" routerLinkActive="active">Expensive Jobs</a>
+        <a routerLink="health" routerLinkActive="active">System Health</a>
       </nav>
       <router-outlet></router-outlet>
     </div>

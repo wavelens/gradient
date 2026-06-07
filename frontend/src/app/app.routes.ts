@@ -323,6 +323,25 @@ export const routes: Routes = [
               ),
           },
           {
+            path: 'cache',
+            loadComponent: () =>
+              import('./features/board/cache/cache.component').then((m) => m.BoardCacheComponent),
+          },
+          {
+            path: 'network',
+            loadComponent: () =>
+              import('./features/board/network/network.component').then(
+                (m) => m.BoardNetworkComponent
+              ),
+          },
+          {
+            path: 'health',
+            loadComponent: () =>
+              import('./features/board/health/health.component').then(
+                (m) => m.BoardHealthComponent
+              ),
+          },
+          {
             path: 'expensive',
             loadComponent: () =>
               import('./features/board/expensive-jobs/expensive-jobs.component').then(
