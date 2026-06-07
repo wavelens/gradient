@@ -38,6 +38,6 @@ pub use self::settings::{
 pub use self::ssh::{get_organization_ssh, post_organization_ssh};
 pub use self::workers::{
     OrgWorkerEntry, PatchWorkerRequest, RegisterWorkerRequest, RegisterWorkerResponse,
-    WorkerLiveInfo, delete_org_worker, get_org_worker_stats, get_org_workers, patch_org_worker,
+    WorkerLiveInfo, delete_org_worker, get_org_worker_metrics, get_org_workers, patch_org_worker,
     post_org_worker,
 };

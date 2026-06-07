@@ -26,7 +26,7 @@ export interface WorkerConnectionEntry {
   disconnected_at: string | null;
 }
 
-export interface WorkerStatsResponse {
+export interface WorkerMetricsResponse {
   samples: WorkerSamplePoint[];
   connections: WorkerConnectionEntry[];
   jobs_dispatched: number;
@@ -40,8 +40,8 @@ export class WorkersService {
     return this.api.get<Worker[]>(`orgs/${org}/workers`);
   }
 
-  getWorkerStats(org: string, workerId: string): Observable<WorkerStatsResponse> {
-    return this.api.get<WorkerStatsResponse>(`orgs/${org}/workers/${workerId}/stats`);
+  getWorkerMetrics(org: string, workerId: string): Observable<WorkerMetricsResponse> {
+    return this.api.get<WorkerMetricsResponse>(`orgs/${org}/workers/${workerId}/metrics`);
   }
 
   registerWorker(

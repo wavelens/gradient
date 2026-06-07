@@ -85,7 +85,7 @@ export class WorkerMetricsComponent implements OnInit {
   ngOnInit(): void {
     this.org = this.route.snapshot.paramMap.get('org') ?? '';
     this.workerId = this.route.snapshot.paramMap.get('workerId') ?? '';
-    this.workers.getWorkerStats(this.org, this.workerId).subscribe((stats) => {
+    this.workers.getWorkerMetrics(this.org, this.workerId).subscribe((stats) => {
       this.samples.set(stats.samples);
       this.connections.set(stats.connections);
       this.jobsDispatched.set(stats.jobs_dispatched);

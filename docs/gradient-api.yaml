@@ -5801,12 +5801,12 @@ x-nix-cache-paths:
         '403':
           description: Superuser required
 
-  /orgs/{organization}/workers/{worker_id}/stats:
+  /orgs/{organization}/workers/{worker_id}/metrics:
     get:
       tags: [board]
-      summary: Per-worker statistics
+      summary: Per-worker metrics
       description: Live-metric sample time-series (CPU, RAM, disk, network, load), connect/disconnect history, and total dispatched-job count for one worker. Org members only.
-      operationId: getOrgWorkerStats
+      operationId: getOrgWorkerMetrics
       parameters:
         - { name: organization, in: path, required: true, schema: { type: string } }
         - { name: worker_id, in: path, required: true, schema: { type: string } }
