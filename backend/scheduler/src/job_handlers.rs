@@ -13,7 +13,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use entity::build::BuildStatus;
 use sea_orm::EntityTrait;
-use sea_orm::{ActiveModelTrait, IntoActiveModel, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, IntoActiveModel, QueryFilter, Set};
 use tracing::{debug, error, info, warn};
 
 use gradient_core::executer::strip_nix_store_prefix;
@@ -25,7 +25,9 @@ use gradient_core::types::proto::{
 use gradient_core::types::*;
 
 use crate::Scheduler;
-use crate::jobs::{Assignment, PendingBuildJob, PendingEvalJob, PendingJob, WorkerCaps};
+use crate::jobs::{
+    Assignment, DispatchRecord, PendingBuildJob, PendingEvalJob, PendingJob, WorkerCaps,
+};
 use crate::worker_pool::WorkerInfo;
 use crate::{build, dispatch, eval};
 
@@ -647,17 +649,70 @@ impl Scheduler {
         kind: &JobKind,
     ) -> Option<Assignment> {
         let policy = Arc::clone(&self.policy);
-        let assignment = self
+        let mut assignment = self
             .job_tracker
             .write()
             .await
             .take_best_of_kind(peer_id, authorized, caps, kind, &*policy);
-        if let Some(ref a) = assignment {
+        if let Some(a) = assignment.as_mut() {
             self.worker_pool
                 .write()
                 .await
                 .assign_job(peer_id, &a.job_id);
+            if let Some(record) = a.dispatch_record.take() {
+                let state = Arc::clone(&self.state);
+                let worker = peer_id.to_owned();
+                self.state.shutdown.spawn(async move {
+                    persist_dispatched_job(&state, &worker, record).await;
+                });
+            }
         }
         assignment
+    }
+}
+
+/// Persist a `dispatched_job` row and stamp `build.dispatched_at`. Best-effort:
+/// failures are logged so instrumentation can't break dispatch.
+async fn persist_dispatched_job(state: &Arc<ServerState>, worker_id: &str, rec: DispatchRecord) {
+    let now = now();
+    let row = entity::dispatched_job::ActiveModel {
+        id: Set(entity::ids::DispatchedJobId::now_v7()),
+        kind: Set(rec.kind),
+        build_id: Set(rec.build_id),
+        evaluation_id: Set(rec.evaluation_id),
+        organization: Set(rec.organization),
+        project: Set(rec.project),
+        derivation: Set(rec.derivation),
+        worker_id: Set(worker_id.to_owned()),
+        score: Set(rec.score),
+        queued_at: Set(rec.queued_at),
+        ready_at: Set(None),
+        dispatched_at: Set(now),
+        finished_at: Set(None),
+        outcome: Set(None),
+        score_breakdown: Set(rec.score_breakdown),
+        worker_context: Set(rec.worker_context),
+        job_context: Set(rec.job_context),
+        candidates: Set(None),
+        created_at: Set(now),
+    };
+    if let Err(e) = entity::dispatched_job::Entity::insert(row)
+        .exec(&state.worker_db)
+        .await
+    {
+        warn!(error = %e, "failed to insert dispatched_job");
+    }
+    if let Some(build_id) = rec.build_id
+        && let Err(e) = entity::build::Entity::update_many()
+            .col_expr(
+                entity::build::Column::DispatchedAt,
+                sea_orm::sea_query::Expr::value(now),
+            )
+            .filter(entity::build::Column::Id.eq(build_id))
+            .filter(entity::build::Column::DispatchedAt.is_null())
+            .exec(&state.worker_db)
+            .await
+    {
+        warn!(error = %e, %build_id, "failed to stamp build dispatched_at");
     }
 }

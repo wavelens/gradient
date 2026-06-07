@@ -8,7 +8,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use gradient_core::types::ids::{BuildId, CommitId, EvaluationId, OrganizationId, ProjectId};
+use gradient_core::types::ids::{
+    BuildId, CommitId, DerivationId, EvaluationId, OrganizationId, ProjectId,
+};
 use gradient_core::types::proto::{
     BuildJob, CandidateScore, FlakeJob, FlakeSource, FlakeTask, Job, JobCandidate, JobKind,
     RequiredPath,
@@ -171,6 +173,24 @@ pub struct Assignment {
     pub job: Job,
     /// Organization UUID that owns this job - used for credential lookup.
     pub peer_id: OrganizationId,
+    /// Scoring/context snapshot for the winning job, persisted best-effort by
+    /// the caller into `dispatched_job`. `None` outside the scored path.
+    pub dispatch_record: Option<DispatchRecord>,
+}
+
+/// Owned snapshot of a dispatch decision for the `dispatched_job` table.
+pub struct DispatchRecord {
+    pub kind: i16,
+    pub build_id: Option<BuildId>,
+    pub evaluation_id: EvaluationId,
+    pub organization: OrganizationId,
+    pub project: Option<ProjectId>,
+    pub derivation: Option<DerivationId>,
+    pub score: f64,
+    pub queued_at: chrono::NaiveDateTime,
+    pub score_breakdown: serde_json::Value,
+    pub worker_context: serde_json::Value,
+    pub job_context: serde_json::Value,
 }
 
 /// Returns true when the worker can execute `job`: a flake job that fetches
@@ -380,7 +400,86 @@ impl JobTracker {
                     .then_with(|| id_b.cmp(id_a))
             })
             .map(|(id, _)| id.clone())?;
-        self.assign_pending(peer_id, &job_id)
+
+        // Recompute the winner's score with the per-rule breakdown, captured for
+        // the dispatched_job row. Owned snapshots so the borrow ends before the
+        // mutable assign_pending below.
+        let dispatch_record = self.pending.get(&job_id).map(|job| {
+            let s = worker_scores.and_then(|ws| ws.get(job_id.as_str()));
+            let (kind_view, arch, closure_size, prefer_local_build, is_fixed_output, history) =
+                match job {
+                    PendingJob::Eval(e) => (
+                        JobKindView::Eval {
+                            fetch_flake: e.job.tasks.contains(&FlakeTask::FetchFlake),
+                        },
+                        "",
+                        None,
+                        false,
+                        false,
+                        score::HistoryPrediction::default(),
+                    ),
+                    PendingJob::Build(b) => (
+                        JobKindView::Build,
+                        b.architecture.as_str(),
+                        b.closure_size,
+                        b.prefer_local_build,
+                        b.is_fixed_output,
+                        b.history,
+                    ),
+                };
+            let closure = move || closure_size;
+            let history_provider = move || history;
+            let scored = ScoredJob::new(
+                job_id.as_str(),
+                job.peer_id(),
+                kind_view,
+                arch,
+                prefer_local_build,
+                is_fixed_output,
+                LazyProviders { closure_size: &closure, history: &history_provider },
+            );
+            let ctx = JobContext {
+                job: &scored,
+                missing_count: s.map(|s| s.missing_count),
+                missing_nar_size: s.map(|s| s.missing_nar_size),
+                dependency_count: job.dependency_count(),
+                queued_at: job.queued_at(),
+                org_share: org_share(job.peer_id()),
+            };
+            let breakdown = policy.score_detailed(&ctx, worker_ctx);
+            let (kind_disc, build_id, project) = match job {
+                PendingJob::Build(b) => (1i16, Some(b.build_id), None),
+                PendingJob::Eval(e) => (0i16, None, e.project_id),
+            };
+            DispatchRecord {
+                kind: kind_disc,
+                build_id,
+                evaluation_id: job.evaluation_id(),
+                organization: job.peer_id(),
+                project,
+                derivation: None,
+                score: breakdown.total,
+                queued_at: job.queued_at(),
+                score_breakdown: serde_json::to_value(&breakdown)
+                    .unwrap_or(serde_json::Value::Null),
+                worker_context: serde_json::json!({
+                    "architectures": worker_ctx.architectures,
+                    "system_features": worker_ctx.system_features,
+                    "fetch": worker_ctx.fetch,
+                }),
+                job_context: serde_json::json!({
+                    "missing_count": ctx.missing_count,
+                    "missing_nar_size": ctx.missing_nar_size,
+                    "dependency_count": ctx.dependency_count,
+                    "org_share": ctx.org_share,
+                    "architecture": arch,
+                }),
+            }
+        });
+
+        let mut assignment = self.assign_pending(peer_id, &job_id)?;
+        assignment.dispatch_record = dispatch_record;
+        Some(assignment)
     }
 
     fn assign_pending(&mut self, peer_id: &str, job_id: &str) -> Option<Assignment> {
@@ -392,6 +491,7 @@ impl JobTracker {
             job_id: job_id.to_owned(),
             job: job.clone().into_job(),
             peer_id: job.peer_id(),
+            dispatch_record: None,
         };
         self.active
             .insert(job_id.to_owned(), (peer_id.to_owned(), job));
