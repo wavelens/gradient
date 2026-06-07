@@ -108,7 +108,6 @@
       id = mkOption {
         type = types.nullOr types.str;
         default = null;
-        example = "018f6f3a-0000-7000-8000-000000000001";
         description = ''
           Explicit organization UUID. When set, a freshly created
           organization is given this id instead of a server-generated one,
@@ -119,6 +118,12 @@
 
           Generate one with `uuidgen`.
         '';
+      };
+
+      description = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        description = "Description of the organization";
       };
 
       private_key_file = mkOption {
