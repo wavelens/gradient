@@ -3516,3 +3516,14 @@ parser: a `warning:` line plus its following lines (until the next
 `warning:`/`trace:`/`error:`/`note:` entry) are kept as one warning, so
 multi-line warnings are no longer truncated to their first line, while distinct
 warnings still split and the `SQLite database … is busy` line is still dropped.
+
+## Declarative state apply - gradient-api NixOS test (#347)
+
+`nix/tests/gradient/api` declares a full `services.gradient.state` (users with a
+superuser, organization with members, a state-managed role, a project with
+non-default fields and polling+time triggers, a cache with members/role/upstream,
+an API key, a worker registration, and inbound+outbound integrations) and
+Phase 8d of `test.py` asserts each resource was provisioned by the startup state
+actor. It also checks the API key's bearer token authorizes while its
+`viewOrg`-only mask rejects a settings mutation, and (for #349) that
+`LimitMEMLOCK` is raised and no `mlock failed` warning appears in the journal.
