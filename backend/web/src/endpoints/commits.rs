@@ -41,10 +41,11 @@ pub async fn get_commit(
 
     let project_ids: Vec<ProjectId> = evaluations.iter().filter_map(|e| e.project).collect();
     if !project_ids.is_empty() {
-        let projects = EProject::find()
-            .filter(CProject::Id.is_in(project_ids))
-            .all(&state.web_db)
-            .await?;
+        let db = &state.web_db;
+        let projects = gradient_core::db::fetch_in_chunks(&project_ids, |chunk| async move {
+            EProject::find().filter(CProject::Id.is_in(chunk)).all(db).await
+        })
+        .await?;
         org_ids.extend(projects.into_iter().map(|p| p.organization));
     }
 

@@ -88,17 +88,15 @@ pub async fn get_project_metrics(
             .map(|ep| ep.build)
             .collect();
 
-        let ep_drv_ids: Vec<DerivationId> = if ep_build_ids.is_empty() {
-            vec![]
-        } else {
-            EBuild::find()
-                .filter(CBuild::Id.is_in(ep_build_ids))
-                .all(&state.web_db)
-                .await?
-                .into_iter()
-                .map(|b| b.derivation)
-                .collect()
-        };
+        let db = &state.web_db;
+        let ep_drv_ids: Vec<DerivationId> =
+            gradient_core::db::fetch_in_chunks(&ep_build_ids, |chunk| async move {
+                EBuild::find().filter(CBuild::Id.is_in(chunk)).all(db).await
+            })
+            .await?
+            .into_iter()
+            .map(|b| b.derivation)
+            .collect();
 
         let entry_point_count = ep_drv_ids.len() as i64;
         let closure = derivation_closure_reachable(&state.web_db, ep_drv_ids.clone()).await?;

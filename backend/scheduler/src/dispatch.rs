@@ -287,21 +287,24 @@ impl BuildDispatchMaps {
             .into_iter()
             .collect();
 
-        let derivations: HashMap<DerivationId, MDerivation> = EDerivation::find()
-            .filter(CDerivation::Id.is_in(drv_ids.clone()))
-            .all(&state.worker_db)
-            .await?
-            .into_iter()
-            .map(|d| (d.id, d))
-            .collect();
+        let db = &state.worker_db;
+        let derivations: HashMap<DerivationId, MDerivation> = gradient_core::db::fetch_in_chunks(
+            &drv_ids,
+            |chunk| async move { EDerivation::find().filter(CDerivation::Id.is_in(chunk)).all(db).await },
+        )
+        .await?
+        .into_iter()
+        .map(|d| (d.id, d))
+        .collect();
 
-        let evaluations: HashMap<EvaluationId, MEvaluation> = EEvaluation::find()
-            .filter(CEvaluation::Id.is_in(eval_ids))
-            .all(&state.worker_db)
-            .await?
-            .into_iter()
-            .map(|e| (e.id, e))
-            .collect();
+        let evaluations: HashMap<EvaluationId, MEvaluation> = gradient_core::db::fetch_in_chunks(
+            &eval_ids,
+            |chunk| async move { EEvaluation::find().filter(CEvaluation::Id.is_in(chunk)).all(db).await },
+        )
+        .await?
+        .into_iter()
+        .map(|e| (e.id, e))
+        .collect();
 
         // peer_id resolution: every evaluation must belong to a project.
         let project_ids: Vec<ProjectId> = evaluations
@@ -310,24 +313,24 @@ impl BuildDispatchMaps {
             .collect::<std::collections::HashSet<_>>()
             .into_iter()
             .collect();
-        let projects: HashMap<ProjectId, OrganizationId> = if project_ids.is_empty() {
-            HashMap::new()
-        } else {
-            EProject::find()
-                .filter(CProject::Id.is_in(project_ids))
-                .all(&state.worker_db)
-                .await?
-                .into_iter()
-                .map(|p| (p.id, p.organization))
-                .collect()
-        };
+        let projects: HashMap<ProjectId, OrganizationId> = gradient_core::db::fetch_in_chunks(
+            &project_ids,
+            |chunk| async move { EProject::find().filter(CProject::Id.is_in(chunk)).all(db).await },
+        )
+        .await?
+        .into_iter()
+        .map(|p| (p.id, p.organization))
+        .collect();
 
         // Required features: per-derivation list of feature names.
-        let feature_edges = EDerivationFeature::find()
-            .filter(CDerivationFeature::Derivation.is_in(drv_ids.clone()))
-            .all(&state.worker_db)
-            .await
-            .unwrap_or_default();
+        let feature_edges = gradient_core::db::fetch_in_chunks(&drv_ids, |chunk| async move {
+            EDerivationFeature::find()
+                .filter(CDerivationFeature::Derivation.is_in(chunk))
+                .all(db)
+                .await
+        })
+        .await
+        .unwrap_or_default();
         let mut features_by_drv: HashMap<DerivationId, Vec<FeatureId>> = HashMap::new();
         for e in &feature_edges {
             features_by_drv
@@ -339,24 +342,30 @@ impl BuildDispatchMaps {
             HashMap::new()
         } else {
             let feature_ids: Vec<FeatureId> = feature_edges.iter().map(|e| e.feature).collect();
-            EFeature::find()
-                .filter(CFeature::Id.is_in(feature_ids))
-                .filter(CFeature::Kind.eq(entity::feature::FeatureKind::Feature))
-                .all(&state.worker_db)
-                .await
-                .unwrap_or_default()
-                .into_iter()
-                .map(|f| (f.id, f.name))
-                .collect()
+            gradient_core::db::fetch_in_chunks(&feature_ids, |chunk| async move {
+                EFeature::find()
+                    .filter(CFeature::Id.is_in(chunk))
+                    .filter(CFeature::Kind.eq(entity::feature::FeatureKind::Feature))
+                    .all(db)
+                    .await
+            })
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|f| (f.id, f.name))
+            .collect()
         };
 
         // Direct dependency edges per derivation. Used both for the scoring
         // policy's `dep_counts` and to build `direct_inputs` below.
-        let dep_edges = EDerivationDependency::find()
-            .filter(CDerivationDependency::Derivation.is_in(drv_ids.clone()))
-            .all(&state.worker_db)
-            .await
-            .unwrap_or_default();
+        let dep_edges = gradient_core::db::fetch_in_chunks(&drv_ids, |chunk| async move {
+            EDerivationDependency::find()
+                .filter(CDerivationDependency::Derivation.is_in(chunk))
+                .all(db)
+                .await
+        })
+        .await
+        .unwrap_or_default();
 
         let mut deps_by_drv: HashMap<DerivationId, Vec<DerivationId>> = HashMap::new();
         for e in &dep_edges {
@@ -384,11 +393,14 @@ impl BuildDispatchMaps {
             if dep_drv_ids.is_empty() {
                 HashMap::new()
             } else {
-                let outs = EDerivationOutput::find()
-                    .filter(CDerivationOutput::Derivation.is_in(dep_drv_ids))
-                    .all(&state.worker_db)
-                    .await
-                    .unwrap_or_default();
+                let outs = gradient_core::db::fetch_in_chunks(&dep_drv_ids, |chunk| async move {
+                    EDerivationOutput::find()
+                        .filter(CDerivationOutput::Derivation.is_in(chunk))
+                        .all(db)
+                        .await
+                })
+                .await
+                .unwrap_or_default();
                 let mut map: HashMap<DerivationId, Vec<MDerivationOutput>> = HashMap::new();
                 for o in outs {
                     map.entry(o.derivation).or_default().push(o);
@@ -403,16 +415,17 @@ impl BuildDispatchMaps {
             .into_iter()
             .collect();
 
-        let cache_info_by_hash: HashMap<String, CacheInfo> = if output_hashes.is_empty() {
-            HashMap::new()
-        } else {
-            ECachedPath::find()
-                .filter(CCachedPath::Hash.is_in(output_hashes))
-                .all(&state.worker_db)
-                .await
-                .unwrap_or_default()
-                .into_iter()
-                .filter_map(|cp| {
+        let cache_info_by_hash: HashMap<String, CacheInfo> =
+            gradient_core::db::fetch_in_chunks(&output_hashes, |chunk| async move {
+                ECachedPath::find()
+                    .filter(CCachedPath::Hash.is_in(chunk))
+                    .all(db)
+                    .await
+            })
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|cp| {
                     let nar_size = cp.nar_size? as u64;
                     let file_size = cp.file_size.unwrap_or(0) as u64;
                     Some((
@@ -422,9 +435,8 @@ impl BuildDispatchMaps {
                             nar_size,
                         },
                     ))
-                })
-                .collect()
-        };
+            })
+            .collect();
 
         let mut direct_inputs: HashMap<DerivationId, Vec<RequiredPath>> = HashMap::new();
         for (drv_id, dep_drvs) in &deps_by_drv {
@@ -648,12 +660,16 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
 
     // Stamp ready_at the first time a build becomes dispatchable (deps satisfied).
     let ready_ids: Vec<_> = new_builds.iter().map(|b| b.id).collect();
-    if let Err(e) = EBuild::update_many()
-        .col_expr(CBuild::ReadyAt, sea_orm::sea_query::Expr::value(now()))
-        .filter(CBuild::Id.is_in(ready_ids))
-        .filter(CBuild::ReadyAt.is_null())
-        .exec(&state.worker_db)
-        .await
+    let db = &state.worker_db;
+    if let Err(e) = gradient_core::db::for_each_chunk(&ready_ids, |chunk| async move {
+        EBuild::update_many()
+            .col_expr(CBuild::ReadyAt, sea_orm::sea_query::Expr::value(now()))
+            .filter(CBuild::Id.is_in(chunk))
+            .filter(CBuild::ReadyAt.is_null())
+            .exec(db)
+            .await
+    })
+    .await
     {
         error!(error = %e, "failed to stamp build ready_at");
     }

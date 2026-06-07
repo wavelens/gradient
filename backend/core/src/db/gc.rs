@@ -195,11 +195,15 @@ pub async fn gc_orphan_derivations(state: Arc<ServerState>, grace_hours: i64) ->
 
     info!(count = drv_ids.len(), "Running orphan derivation GC");
 
-    let orphan_outputs = EDerivationOutput::find()
-        .filter(CDerivationOutput::Derivation.is_in(drv_ids.clone()))
-        .all(&state.worker_db)
-        .await
-        .context("GC: failed to query orphan derivation outputs")?;
+    let db = &state.worker_db;
+    let orphan_outputs = crate::db::fetch_in_chunks(&drv_ids, |chunk| async move {
+        EDerivationOutput::find()
+            .filter(CDerivationOutput::Derivation.is_in(chunk))
+            .all(db)
+            .await
+    })
+    .await
+    .context("GC: failed to query orphan derivation outputs")?;
 
     let orphan_hashes: HashSet<String> = orphan_outputs.iter().map(|o| o.hash.clone()).collect();
 
@@ -207,17 +211,19 @@ pub async fn gc_orphan_derivations(state: Arc<ServerState>, grace_hours: i64) ->
         HashSet::new()
     } else {
         let drv_id_set: HashSet<DerivationId> = drv_ids.iter().copied().collect();
-        EDerivationOutput::find()
-            .filter(
-                CDerivationOutput::Hash.is_in(orphan_hashes.iter().cloned().collect::<Vec<_>>()),
-            )
-            .all(&state.worker_db)
-            .await
-            .context("GC: failed to query non-orphan references for orphan output hashes")?
-            .into_iter()
-            .filter(|o| !drv_id_set.contains(&o.derivation))
-            .map(|o| o.hash)
-            .collect()
+        let orphan_hash_vec: Vec<String> = orphan_hashes.iter().cloned().collect();
+        crate::db::fetch_in_chunks(&orphan_hash_vec, |chunk| async move {
+            EDerivationOutput::find()
+                .filter(CDerivationOutput::Hash.is_in(chunk))
+                .all(db)
+                .await
+        })
+        .await
+        .context("GC: failed to query non-orphan references for orphan output hashes")?
+        .into_iter()
+        .filter(|o| !drv_id_set.contains(&o.derivation))
+        .map(|o| o.hash)
+        .collect()
     };
 
     let to_delete: Vec<String> = orphan_hashes
@@ -232,10 +238,13 @@ pub async fn gc_orphan_derivations(state: Arc<ServerState>, grace_hours: i64) ->
     }
 
     if !to_delete.is_empty()
-        && let Err(e) = ECachedPath::delete_many()
-            .filter(CCachedPath::Hash.is_in(to_delete.clone()))
-            .exec(&state.worker_db)
-            .await
+        && let Err(e) = crate::db::for_each_chunk(&to_delete, |chunk| async move {
+            ECachedPath::delete_many()
+                .filter(CCachedPath::Hash.is_in(chunk))
+                .exec(db)
+                .await
+        })
+        .await
     {
         warn!(error = %e, "GC: failed to delete cached_path rows for orphan hashes");
     }

@@ -49,31 +49,33 @@ pub(super) async fn evaluations_to_summaries(
 
     let eval_ids: Vec<EvaluationId> = evaluations.iter().map(|e| e.id).collect();
 
+    let db = &state.web_db;
     let trigger_ids: Vec<ProjectTriggerId> = evaluations.iter().filter_map(|e| e.trigger).collect();
-    let triggers: HashMap<ProjectTriggerId, TriggerType> = if trigger_ids.is_empty() {
-        HashMap::new()
-    } else {
-        EProjectTrigger::find()
-            .filter(CProjectTrigger::Id.is_in(trigger_ids))
-            .all(&state.web_db)
-            .await?
-            .into_iter()
-            .filter_map(|t| {
-                TriggerType::try_from(t.trigger_type)
-                    .ok()
-                    .map(|tt| (t.id, tt))
-            })
-            .collect()
-    };
+    let triggers: HashMap<ProjectTriggerId, TriggerType> =
+        gradient_core::db::fetch_in_chunks(&trigger_ids, |chunk| async move {
+            EProjectTrigger::find()
+                .filter(CProjectTrigger::Id.is_in(chunk))
+                .all(db)
+                .await
+        })
+        .await?
+        .into_iter()
+        .filter_map(|t| {
+            TriggerType::try_from(t.trigger_type)
+                .ok()
+                .map(|tt| (t.id, tt))
+        })
+        .collect();
 
     let prev_ids: Vec<EvaluationId> = evaluations.iter().filter_map(|e| e.previous).collect();
     let mut combined_eval_ids: Vec<EvaluationId> = eval_ids.clone();
     combined_eval_ids.extend(prev_ids.iter().copied());
     let commit_ids: Vec<CommitId> = evaluations.iter().map(|e| e.commit).collect();
 
-    let commits: HashMap<CommitId, String> = ECommit::find()
-        .filter(CCommit::Id.is_in(commit_ids))
-        .all(&state.web_db)
+    let commits: HashMap<CommitId, String> =
+        gradient_core::db::fetch_in_chunks(&commit_ids, |chunk| async move {
+            ECommit::find().filter(CCommit::Id.is_in(chunk)).all(db).await
+        })
         .await?
         .into_iter()
         .map(|c| (c.id, vec_to_hex(&c.hash)))
@@ -81,34 +83,37 @@ pub(super) async fn evaluations_to_summaries(
 
     let mut total_per_eval: HashMap<EvaluationId, i64> = HashMap::new();
     let mut failed_per_eval: HashMap<EvaluationId, i64> = HashMap::new();
-    for build in EBuild::find()
-        .filter(CBuild::Evaluation.is_in(eval_ids.clone()))
-        .all(&state.web_db)
-        .await?
-    {
+    let eval_builds = gradient_core::db::fetch_in_chunks(&eval_ids, |chunk| async move {
+        EBuild::find()
+            .filter(CBuild::Evaluation.is_in(chunk))
+            .all(db)
+            .await
+    })
+    .await?;
+    for build in eval_builds {
         *total_per_eval.entry(build.evaluation).or_insert(0) += 1;
         if matches!(build.status, BuildStatus::FailedPermanent | BuildStatus::FailedTimeout) {
             *failed_per_eval.entry(build.evaluation).or_insert(0) += 1;
         }
     }
 
-    let entry_points = EEntryPoint::find()
-        .filter(CEntryPoint::Evaluation.is_in(combined_eval_ids))
-        .all(&state.web_db)
-        .await?;
+    let entry_points = gradient_core::db::fetch_in_chunks(&combined_eval_ids, |chunk| async move {
+        EEntryPoint::find()
+            .filter(CEntryPoint::Evaluation.is_in(chunk))
+            .all(db)
+            .await
+    })
+    .await?;
 
     let ep_build_ids: Vec<BuildId> = entry_points.iter().map(|ep| ep.build).collect();
-    let ep_build_status: HashMap<BuildId, BuildStatus> = if ep_build_ids.is_empty() {
-        HashMap::new()
-    } else {
-        EBuild::find()
-            .filter(CBuild::Id.is_in(ep_build_ids))
-            .all(&state.web_db)
-            .await?
-            .into_iter()
-            .map(|b| (b.id, b.status))
-            .collect()
-    };
+    let ep_build_status: HashMap<BuildId, BuildStatus> =
+        gradient_core::db::fetch_in_chunks(&ep_build_ids, |chunk| async move {
+            EBuild::find().filter(CBuild::Id.is_in(chunk)).all(db).await
+        })
+        .await?
+        .into_iter()
+        .map(|b| (b.id, b.status))
+        .collect();
 
     let mut eps_per_eval: HashMap<EvaluationId, Vec<BuildId>> = HashMap::new();
     for ep in &entry_points {
@@ -434,27 +439,26 @@ struct EntryPointRelatedData {
 
 impl EntryPointRelatedData {
     async fn load(state: &Arc<ServerState>, entry_points: &[MEntryPoint]) -> WebResult<Self> {
+        let db = &state.web_db;
         let build_ids: Vec<BuildId> = entry_points.iter().map(|ep| ep.build).collect();
-        let builds: HashMap<BuildId, MBuild> = EBuild::find()
-            .filter(CBuild::Id.is_in(build_ids))
-            .all(&state.web_db)
+        let builds: HashMap<BuildId, MBuild> =
+            gradient_core::db::fetch_in_chunks(&build_ids, |chunk| async move {
+                EBuild::find().filter(CBuild::Id.is_in(chunk)).all(db).await
+            })
             .await?
             .into_iter()
             .map(|b| (b.id, b))
             .collect();
 
         let drv_ids: Vec<DerivationId> = builds.values().map(|b| b.derivation).collect();
-        let derivations: HashMap<DerivationId, MDerivation> = if drv_ids.is_empty() {
-            HashMap::new()
-        } else {
-            EDerivation::find()
-                .filter(CDerivation::Id.is_in(drv_ids.clone()))
-                .all(&state.web_db)
-                .await?
-                .into_iter()
-                .map(|d| (d.id, d))
-                .collect()
-        };
+        let derivations: HashMap<DerivationId, MDerivation> =
+            gradient_core::db::fetch_in_chunks(&drv_ids, |chunk| async move {
+                EDerivation::find().filter(CDerivation::Id.is_in(chunk)).all(db).await
+            })
+            .await?
+            .into_iter()
+            .map(|d| (d.id, d))
+            .collect();
 
         let completed_drv_ids: Vec<DerivationId> = builds
             .values()
@@ -467,18 +471,24 @@ impl EntryPointRelatedData {
         let has_products: HashMap<DerivationId, bool> = if completed_drv_ids.is_empty() {
             HashMap::new()
         } else {
-            let outputs = EDerivationOutput::find()
-                .filter(CDerivationOutput::Derivation.is_in(completed_drv_ids))
-                .all(&state.web_db)
-                .await?;
+            let outputs = gradient_core::db::fetch_in_chunks(&completed_drv_ids, |chunk| async move {
+                EDerivationOutput::find()
+                    .filter(CDerivationOutput::Derivation.is_in(chunk))
+                    .all(db)
+                    .await
+            })
+            .await?;
             let output_ids: Vec<DerivationOutputId> = outputs.iter().map(|o| o.id).collect();
             let mut m: HashMap<DerivationId, bool> = HashMap::new();
             if !output_ids.is_empty() {
-                for bp in EBuildProduct::find()
-                    .filter(CBuildProduct::DerivationOutput.is_in(output_ids))
-                    .all(&state.web_db)
-                    .await?
-                {
+                let products = gradient_core::db::fetch_in_chunks(&output_ids, |chunk| async move {
+                    EBuildProduct::find()
+                        .filter(CBuildProduct::DerivationOutput.is_in(chunk))
+                        .all(db)
+                        .await
+                })
+                .await?;
+                for bp in products {
                     // Map back from output → derivation.
                     if let Some(output) = outputs.iter().find(|o| o.id == bp.derivation_output) {
                         m.insert(output.derivation, true);
@@ -555,10 +565,14 @@ async fn serve_hydra_artifact(
         return Ok(None);
     }
 
-    let rows = match EBuildProduct::find()
-        .filter(CBuildProduct::DerivationOutput.is_in(output_ids))
-        .all(&state.web_db)
-        .await
+    let db = &state.web_db;
+    let rows = match gradient_core::db::fetch_in_chunks(&output_ids, |chunk| async move {
+        EBuildProduct::find()
+            .filter(CBuildProduct::DerivationOutput.is_in(chunk))
+            .all(db)
+            .await
+    })
+    .await
     {
         Ok(r) => r,
         Err(e) => {

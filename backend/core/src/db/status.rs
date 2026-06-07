@@ -516,9 +516,13 @@ pub(crate) async fn reelect_leader(
     }
 
     let follower_drv_ids: Vec<DerivationId> = all_followers.iter().map(|f| f.derivation).collect();
-    let drv_org: std::collections::HashMap<DerivationId, OrganizationId> = EDerivation::find()
-        .filter(CDerivation::Id.is_in(follower_drv_ids))
-        .all(&state.worker_db)
+    let drv_org: std::collections::HashMap<DerivationId, OrganizationId> =
+        crate::db::fetch_in_chunks(&follower_drv_ids, |chunk| async move {
+            EDerivation::find()
+                .filter(CDerivation::Id.is_in(chunk))
+                .all(&state.worker_db)
+                .await
+        })
         .await?
         .into_iter()
         .map(|d| (d.id, d.organization))
@@ -554,25 +558,27 @@ pub(crate) async fn reelect_leader(
         active.update(&state.worker_db).await?;
 
         let same_org_remaining_ids: Vec<BuildId> = same_org.iter().skip(1).map(|f| f.id).collect();
-        if !same_org_remaining_ids.is_empty() {
+        crate::db::for_each_chunk(&same_org_remaining_ids, |chunk| async move {
             EBuild::update_many()
                 .col_expr(CBuild::Via, sea_orm::sea_query::Expr::value(new_leader.id))
-                .filter(CBuild::Id.is_in(same_org_remaining_ids))
+                .filter(CBuild::Id.is_in(chunk))
                 .exec(&state.worker_db)
-                .await?;
-        }
+                .await
+        })
+        .await?;
 
         let cross_org_ids: Vec<BuildId> = cross_org.iter().map(|f| f.id).collect();
-        if !cross_org_ids.is_empty() {
+        crate::db::for_each_chunk(&cross_org_ids, |chunk| async move {
             EBuild::update_many()
                 .col_expr(
                     CBuild::Via,
                     sea_orm::sea_query::Expr::value(Option::<BuildId>::None),
                 )
-                .filter(CBuild::Id.is_in(cross_org_ids))
+                .filter(CBuild::Id.is_in(chunk))
                 .exec(&state.worker_db)
-                .await?;
-        }
+                .await
+        })
+        .await?;
 
         debug!(
             old_leader = %leader.id,
@@ -585,14 +591,17 @@ pub(crate) async fn reelect_leader(
 
     let cross_org_ids: Vec<BuildId> = cross_org.iter().map(|f| f.id).collect();
     if !cross_org_ids.is_empty() {
-        EBuild::update_many()
-            .col_expr(
-                CBuild::Via,
-                sea_orm::sea_query::Expr::value(Option::<BuildId>::None),
-            )
-            .filter(CBuild::Id.is_in(cross_org_ids))
-            .exec(&state.worker_db)
-            .await?;
+        crate::db::for_each_chunk(&cross_org_ids, |chunk| async move {
+            EBuild::update_many()
+                .col_expr(
+                    CBuild::Via,
+                    sea_orm::sea_query::Expr::value(Option::<BuildId>::None),
+                )
+                .filter(CBuild::Id.is_in(chunk))
+                .exec(&state.worker_db)
+                .await
+        })
+        .await?;
         debug!(
             old_leader = %leader.id,
             orphaned = cross_org.len(),
@@ -621,15 +630,18 @@ pub async fn find_active_leaders<C: ConnectionTrait>(
     }
 
     // ── Same-org pass ────────────────────────────────────────────────────
-    let same_org_rows = EBuild::find()
-        .filter(CBuild::Derivation.is_in(drv_ids.to_vec()))
-        .filter(CBuild::Status.is_in(vec![
-            BuildStatus::Created,
-            BuildStatus::Queued,
-            BuildStatus::Building,
-        ]))
-        .all(db)
-        .await?;
+    let same_org_rows = crate::db::fetch_in_chunks(drv_ids, |chunk| async move {
+        EBuild::find()
+            .filter(CBuild::Derivation.is_in(chunk))
+            .filter(CBuild::Status.is_in(vec![
+                BuildStatus::Created,
+                BuildStatus::Queued,
+                BuildStatus::Building,
+            ]))
+            .all(db)
+            .await
+    })
+    .await?;
 
     let mut out: HashMap<DerivationId, BuildId> = HashMap::new();
     for b in same_org_rows {
@@ -655,10 +667,13 @@ pub async fn find_active_leaders<C: ConnectionTrait>(
     // ── Cross-org pass ───────────────────────────────────────────────────
     use entity::derivation::{Column as CDerivation, Entity as EDerivation};
 
-    let inserting_drv_rows = EDerivation::find()
-        .filter(CDerivation::Id.is_in(unmatched.clone()))
-        .all(db)
-        .await?;
+    let inserting_drv_rows = crate::db::fetch_in_chunks(&unmatched, |chunk| async move {
+        EDerivation::find()
+            .filter(CDerivation::Id.is_in(chunk))
+            .all(db)
+            .await
+    })
+    .await?;
     let mut path_to_drv: HashMap<String, DerivationId> = HashMap::new();
     let mut drv_hashes: Vec<String> = Vec::new();
     for d in &inserting_drv_rows {
@@ -676,11 +691,18 @@ pub async fn find_active_leaders<C: ConnectionTrait>(
         return Ok(out);
     }
 
-    let candidate_drvs = EDerivation::find()
-        .filter(CDerivation::Hash.is_in(drv_hashes))
-        .filter(CDerivation::Organization.is_in(reachable.into_iter().collect::<Vec<_>>()))
-        .all(db)
-        .await?;
+    let reachable_orgs: Vec<_> = reachable.into_iter().collect();
+    let candidate_drvs = crate::db::fetch_in_chunks(&drv_hashes, |chunk| {
+        let reachable_orgs = reachable_orgs.clone();
+        async move {
+            EDerivation::find()
+                .filter(CDerivation::Hash.is_in(chunk))
+                .filter(CDerivation::Organization.is_in(reachable_orgs))
+                .all(db)
+                .await
+        }
+    })
+    .await?;
     if candidate_drvs.is_empty() {
         return Ok(out);
     }
@@ -690,17 +712,20 @@ pub async fn find_active_leaders<C: ConnectionTrait>(
         .map(|d| (d.id, d.drv_path()))
         .collect();
 
-    let candidate_builds = EBuild::find()
-        .filter(CBuild::Derivation.is_in(candidate_drv_ids))
-        .filter(CBuild::Status.is_in(vec![
-            BuildStatus::Created,
-            BuildStatus::Queued,
-            BuildStatus::Building,
-        ]))
-        .filter(CBuild::Via.is_null())
-        .filter(CBuild::ExternalCached.eq(false))
-        .all(db)
-        .await?;
+    let candidate_builds = crate::db::fetch_in_chunks(&candidate_drv_ids, |chunk| async move {
+        EBuild::find()
+            .filter(CBuild::Derivation.is_in(chunk))
+            .filter(CBuild::Status.is_in(vec![
+                BuildStatus::Created,
+                BuildStatus::Queued,
+                BuildStatus::Building,
+            ]))
+            .filter(CBuild::Via.is_null())
+            .filter(CBuild::ExternalCached.eq(false))
+            .all(db)
+            .await
+    })
+    .await?;
 
     fn status_rank(s: BuildStatus) -> u8 {
         match s {
@@ -1246,6 +1271,43 @@ mod find_active_leaders_tests {
             .build()
             .unwrap()
             .block_on(fut)
+    }
+
+    #[test]
+    fn chunks_large_id_lists_under_postgres_param_cap() {
+        run(async {
+            // Postgres rejects any statement binding more than 65535 params. A
+            // large monorepo restart funnels tens of thousands of derivation ids
+            // through `find_active_leaders`; without chunking the `is_in`
+            // overflows and `/evaluate` 500s ("too many arguments for query").
+            const PG_MAX_PARAMS: usize = 65_535;
+            let drv_ids: Vec<DerivationId> = (1..=70_000u128)
+                .map(|i| DerivationId::new(Uuid::from_u128(i)))
+                .collect();
+
+            // Same-org pass and cross-org derivation lookup both return nothing,
+            // so `drv_hashes` is empty and the function returns early. Empty
+            // result sets satisfy every chunked query regardless of model type.
+            let mut db = MockDatabase::new(DatabaseBackend::Postgres);
+            for _ in 0..64 {
+                db = db.append_query_results([Vec::<MBuild>::new()]);
+            }
+            let db = db.into_connection();
+
+            let got = find_active_leaders(&db, org(1), &drv_ids).await.unwrap();
+            assert!(got.is_empty());
+
+            for txn in db.into_transaction_log() {
+                for stmt in txn.statements() {
+                    let n = stmt.values.as_ref().map(|v| v.0.len()).unwrap_or(0);
+                    assert!(
+                        n <= PG_MAX_PARAMS,
+                        "statement bound {n} params over the {PG_MAX_PARAMS} cap: {}",
+                        stmt.sql
+                    );
+                }
+            }
+        });
     }
 
     #[test]

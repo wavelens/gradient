@@ -142,11 +142,14 @@ async fn unpark_for_org<C: ConnectionTrait, F: Fn(&WaitingReason) -> bool>(
         return Ok(Vec::new());
     }
 
-    let parked = EEvaluation::find()
-        .filter(CEvaluation::Project.is_in(project_ids))
-        .filter(CEvaluation::Status.eq(EvaluationStatus::Waiting))
-        .all(db)
-        .await?;
+    let parked = crate::db::fetch_in_chunks(&project_ids, |chunk| async move {
+        EEvaluation::find()
+            .filter(CEvaluation::Project.is_in(chunk))
+            .filter(CEvaluation::Status.eq(EvaluationStatus::Waiting))
+            .all(db)
+            .await
+    })
+    .await?;
 
     let candidates: Vec<MEvaluation> = parked
         .into_iter()

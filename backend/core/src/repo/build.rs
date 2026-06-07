@@ -104,11 +104,15 @@ impl<'db> BuildRepo<'db> {
         let dependent_derivation_ids: Vec<DerivationId> =
             dep_derivations.into_iter().map(|d| d.derivation).collect();
 
-        let builds = EBuild::find()
-            .filter(CBuild::Evaluation.eq(evaluation_id))
-            .filter(CBuild::Derivation.is_in(dependent_derivation_ids))
-            .all(self.db)
-            .await?;
+        let db = self.db;
+        let builds = crate::db::fetch_in_chunks(&dependent_derivation_ids, |chunk| async move {
+            EBuild::find()
+                .filter(CBuild::Evaluation.eq(evaluation_id))
+                .filter(CBuild::Derivation.is_in(chunk))
+                .all(db)
+                .await
+        })
+        .await?;
         Ok(builds)
     }
 
