@@ -117,6 +117,7 @@ fn make_build_queued(id: BuildId, eval_id: EvaluationId, drv_id: DerivationId) -
         prefer_local_build: false,
         created_at: test_date(),
         updated_at: test_date(),
+        queued_at: None,
         ready_at: None,
         dispatched_at: None,
         build_started_at: None,

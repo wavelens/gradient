@@ -156,6 +156,7 @@ fn completed_build_row() -> entity::build::Model {
         prefer_local_build: false,
         created_at: test_date(),
         updated_at: test_date(),
+        queued_at: None,
         ready_at: None,
         dispatched_at: None,
         build_started_at: None,

@@ -658,6 +658,7 @@ mod tests {
             prefer_local_build: false,
             created_at: NaiveDateTime::default(),
             updated_at: NaiveDateTime::default(),
+            queued_at: None,
             ready_at: None,
             dispatched_at: None,
             build_started_at: None,
