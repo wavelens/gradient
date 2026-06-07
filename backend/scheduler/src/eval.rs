@@ -288,6 +288,10 @@ impl<'a> EvalResultProcessor<'a> {
                 prefer_local_build: Set(d.prefer_local_build),
                 created_at: Set(now),
                 updated_at: Set(now),
+                ready_at: Set(None),
+                dispatched_at: Set(None),
+                build_started_at: Set(None),
+                build_finished_at: Set(None),
             });
         }
 
@@ -666,6 +670,10 @@ async fn expand_substituted_closure(
             prefer_local_build: Set(false),
             created_at: Set(now),
             updated_at: Set(now),
+            ready_at: Set(None),
+            dispatched_at: Set(None),
+            build_started_at: Set(None),
+            build_finished_at: Set(None),
         });
     }
 

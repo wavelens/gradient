@@ -142,6 +142,11 @@ fn eval_row(project: ProjectId, commit: CommitId) -> entity::evaluation::Model {
         trigger: None,
         concurrent: false,
         source_comment: None,
+        fetch_started_at: None,
+        eval_flake_started_at: None,
+        eval_drv_started_at: None,
+        building_started_at: None,
+        finished_at: None,
     }
 }
 
