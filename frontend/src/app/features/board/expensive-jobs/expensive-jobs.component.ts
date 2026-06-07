@@ -6,6 +6,7 @@
 
 import { Component, OnInit, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { TooltipModule } from 'primeng/tooltip';
 import {
   BoardService,
   ExpensiveBuild,
@@ -19,7 +20,7 @@ type Tab = 'time' | 'ram' | 'cpu' | 'disk' | 'network';
 @Component({
   selector: 'app-board-expensive-jobs',
   standalone: true,
-  imports: [CommonModule, MetricChartComponent],
+  imports: [CommonModule, TooltipModule, MetricChartComponent],
   template: `
     <nav class="tabs">
       @for (t of tabs; track t.key) {
@@ -35,7 +36,12 @@ type Tab = 'time' | 'ram' | 'cpu' | 'disk' | 'network';
           <option value="90">90</option>
         </select>
       </label>
-      <label><input type="checkbox" [checked]="excludeAck()" (change)="toggleAck($event)" /> Exclude acknowledged</label>
+      <label
+        [pTooltip]="ackHelp"
+        tooltipPosition="top"
+      ><input type="checkbox" [checked]="excludeAck()" (change)="toggleAck($event)" /> Exclude acknowledged
+        <span class="material-symbols-outlined help">help</span>
+      </label>
     </div>
 
     @if (tab() === 'time') {
@@ -83,6 +89,8 @@ type Tab = 'time' | 'ram' | 'cpu' | 'disk' | 'network';
       .tabs button { background: #21262d; color: #abb0b4; border: 1px solid #2d333b; border-radius: 6px; padding: 0.35rem 0.8rem; cursor: pointer; }
       .tabs button.active { color: #fff; border-color: #17a2b8; }
       .controls { display: flex; gap: 1.5rem; margin-bottom: 1rem; color: #abb0b4; align-items: center; }
+      .controls label { display: inline-flex; align-items: center; gap: 0.35rem; cursor: pointer; }
+      .help { font-size: 1rem; color: #818181; cursor: help; }
       select { background: #21262d; color: #fff; border: 1px solid #2d333b; border-radius: 4px; padding: 0.25rem; }
       .note { color: #818181; font-size: 0.8rem; margin: 0 0 0.75rem; }
       table.expensive { width: 100%; border-collapse: collapse; background: #21262d; border: 1px solid #2d333b; border-radius: 8px; overflow: hidden; }
@@ -102,6 +110,9 @@ export class BoardExpensiveJobsComponent implements OnInit {
   topOrgs = signal<TopOrgBuildTime[]>([]);
   excludeAck = signal(true);
   tab = signal<Tab>('time');
+  ackHelp =
+    'Acknowledged jobs are ones a maintainer has already reviewed and marked as seen. ' +
+    'When checked, those are hidden so the list shows only expensive builds nobody has triaged yet.';
   private windowDays = 30;
 
   tabs: { key: Tab; label: string }[] = [
