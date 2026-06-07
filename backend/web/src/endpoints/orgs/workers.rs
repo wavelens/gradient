@@ -294,21 +294,21 @@ pub struct WorkerConnectionEntry {
 }
 
 #[derive(Serialize)]
-pub struct WorkerStatsResponse {
+pub struct WorkerMetricsResponse {
     pub samples: Vec<WorkerSamplePoint>,
     pub connections: Vec<WorkerConnectionEntry>,
     pub jobs_dispatched: u64,
 }
 
-/// Full statistics for one worker: the live-metric sample time-series, the
+/// Full metrics for one worker: the live-metric sample time-series, the
 /// connect/disconnect history, and the total dispatched-job count. Scoped to
 /// members of the worker's owning org.
-pub async fn get_org_worker_stats(
+pub async fn get_org_worker_metrics(
     state: State<Arc<ServerState>>,
     Path((organization, worker_id)): Path<(String, String)>,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-) -> WebResult<Json<BaseResponse<WorkerStatsResponse>>> {
+) -> WebResult<Json<BaseResponse<WorkerMetricsResponse>>> {
     let org = load_org(
         &state,
         Caller::User(&user),
@@ -359,7 +359,7 @@ pub async fn get_org_worker_stats(
         .count(&state.web_db)
         .await?;
 
-    Ok(ok_json(WorkerStatsResponse {
+    Ok(ok_json(WorkerMetricsResponse {
         samples,
         connections,
         jobs_dispatched,

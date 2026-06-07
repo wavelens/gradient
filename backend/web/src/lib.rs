@@ -254,8 +254,8 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             patch(orgs::patch_org_worker).delete(orgs::delete_org_worker),
         )
         .route(
-            "/orgs/{organization}/workers/{worker_id}/stats",
-            get(orgs::get_org_worker_stats),
+            "/orgs/{organization}/workers/{worker_id}/metrics",
+            get(orgs::get_org_worker_metrics),
         )
         .route(
             "/orgs/{organization}/integrations",
