@@ -375,6 +375,44 @@ pub async fn get_scoring_summary(
     }))
 }
 
+#[derive(Serialize)]
+pub struct TopOrgBuildTime {
+    pub organization: Uuid,
+    pub total_build_ms: i64,
+    pub build_count: i64,
+}
+
+/// Top organizations by cumulative build time in a window (superuser-only),
+/// for the Expensive Jobs page.
+pub async fn get_top_orgs_by_buildtime(
+    State(state): State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Query(params): Query<ExpensiveParams>,
+) -> WebResult<Json<BaseResponse<Vec<TopOrgBuildTime>>>> {
+    require_superuser(&user)?;
+    let window = params.window_days.unwrap_or(30).max(1);
+    let sql = format!(
+        "SELECT d.organization, sum(b.build_time_ms)::bigint AS total, count(*)::bigint AS cnt \
+         FROM build b JOIN derivation d ON d.id = b.derivation \
+         WHERE b.status = 3 AND b.build_time_ms IS NOT NULL \
+           AND b.build_finished_at >= (now() AT TIME ZONE 'UTC') - interval '{window} days' \
+         GROUP BY d.organization ORDER BY total DESC LIMIT 15"
+    );
+    let rows = state
+        .web_db
+        .query_all(Statement::from_string(DatabaseBackend::Postgres, sql))
+        .await?;
+    let out = rows
+        .into_iter()
+        .map(|r| TopOrgBuildTime {
+            organization: r.try_get("", "organization").unwrap_or_default(),
+            total_build_ms: r.try_get("", "total").unwrap_or(0),
+            build_count: r.try_get("", "cnt").unwrap_or(0),
+        })
+        .collect();
+    Ok(ok_json(out))
+}
+
 pub async fn board_live_ws(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,

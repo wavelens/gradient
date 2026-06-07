@@ -6,7 +6,7 @@
 
 import { Component, OnInit, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { BoardService, MetricPoint } from '@core/services/board.service';
+import { BoardService, MetricPoint, DurationsHeatmap } from '@core/services/board.service';
 import { MetricChartComponent } from '@shared/components/metric-chart/metric-chart.component';
 
 @Component({
@@ -14,6 +14,14 @@ import { MetricChartComponent } from '@shared/components/metric-chart/metric-cha
   standalone: true,
   imports: [CommonModule, MetricChartComponent],
   template: `
+    <app-metric-chart
+      title="Build duration distribution (count by band × hour)"
+      type="heatmap"
+      [height]="300"
+      [series]="heatmapSeries()"
+      [colors]="['#17a2b8']"
+    ></app-metric-chart>
+
     <app-metric-chart
       title="Build duration (s, hourly avg vs max)"
       type="area"
@@ -38,6 +46,17 @@ export class BoardDurationsComponent implements OnInit {
   private build = signal<MetricPoint[]>([]);
   private wait = signal<MetricPoint[]>([]);
   private deps = signal<MetricPoint[]>([]);
+  private heatmap = signal<DurationsHeatmap | null>(null);
+
+  heatmapSeries = computed(() => {
+    const h = this.heatmap();
+    if (!h) return [];
+    const times = h.times.map((t) => t.slice(11, 16));
+    return h.bands.map((b) => ({
+      name: b.band,
+      data: b.counts.map((c, i) => ({ x: times[i] ?? '', y: c })),
+    }));
+  });
 
   buildCategories = computed(() => this.build().map((p) => p.bucket_start.slice(11, 16)));
   buildSeries = computed(() => [
@@ -58,5 +77,6 @@ export class BoardDurationsComponent implements OnInit {
     this.board.query('builds.duration_ms', 'hour').subscribe((p) => this.build.set(p));
     this.board.query('dispatch.wait_ms', 'hour').subscribe((p) => this.wait.set(p));
     this.board.query('deps.wait_ms', 'hour').subscribe((p) => this.deps.set(p));
+    this.board.getDurationsHeatmap(24).subscribe((h) => this.heatmap.set(h));
   }
 }

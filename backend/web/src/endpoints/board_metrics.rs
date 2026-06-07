@@ -217,6 +217,87 @@ pub async fn get_board_fleet(
     Ok(ok_json(out))
 }
 
+const DURATION_BANDS: &[&str] = &["<10s", "10-30s", "30-60s", "1-3m", "3-10m", "10-30m", ">30m"];
+
+#[derive(Serialize)]
+pub struct HeatmapBand {
+    pub band: &'static str,
+    pub counts: Vec<i64>,
+}
+
+#[derive(Serialize)]
+pub struct DurationsHeatmap {
+    pub times: Vec<String>,
+    pub bands: Vec<HeatmapBand>,
+}
+
+/// 2D build-duration distribution (duration band × hour) for the Durations page,
+/// computed on demand from `build`. Org-scoped.
+pub async fn get_board_durations_heatmap(
+    State(state): State<Arc<ServerState>>,
+    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Query(params): Query<WindowParams>,
+) -> WebResult<Json<BaseResponse<DurationsHeatmap>>> {
+    let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
+    let window = window_clause(&params);
+    let mut clauses = vec![
+        "b.status = 3".to_string(),
+        "b.build_time_ms IS NOT NULL".to_string(),
+        format!("b.build_finished_at >= (now() AT TIME ZONE 'UTC') - interval '{window} hours'"),
+    ];
+    if let Some(list) = scope.org_in_list() {
+        if list.is_empty() {
+            return Ok(ok_json(DurationsHeatmap { times: vec![], bands: vec![] }));
+        }
+        clauses.push(format!("d.organization IN ({list})"));
+    }
+    let sql = format!(
+        "SELECT date_trunc('hour', b.build_finished_at) AS t, \
+                width_bucket(b.build_time_ms, ARRAY[10000,30000,60000,180000,600000,1800000]) AS band, \
+                count(*)::bigint AS c \
+         FROM build b JOIN derivation d ON d.id = b.derivation \
+         WHERE {} GROUP BY t, band ORDER BY t",
+        clauses.join(" AND ")
+    );
+    let rows = state
+        .web_db
+        .query_all(Statement::from_string(DatabaseBackend::Postgres, sql))
+        .await?;
+
+    let mut times: Vec<chrono::NaiveDateTime> = Vec::new();
+    let mut cells: Vec<(chrono::NaiveDateTime, usize, i64)> = Vec::new();
+    for r in &rows {
+        let t: chrono::NaiveDateTime = r.try_get("", "t").unwrap_or_default();
+        let band = (r.try_get::<i32>("", "band").unwrap_or(0) as usize).min(DURATION_BANDS.len() - 1);
+        let c: i64 = r.try_get("", "c").unwrap_or(0);
+        if !times.contains(&t) {
+            times.push(t);
+        }
+        cells.push((t, band, c));
+    }
+    let bands = DURATION_BANDS
+        .iter()
+        .enumerate()
+        .map(|(bi, label)| {
+            let counts = times
+                .iter()
+                .map(|t| {
+                    cells
+                        .iter()
+                        .find(|(ct, cb, _)| ct == t && *cb == bi)
+                        .map(|(_, _, c)| *c)
+                        .unwrap_or(0)
+                })
+                .collect();
+            HeatmapBand { band: label, counts }
+        })
+        .collect();
+    Ok(ok_json(DurationsHeatmap {
+        times: times.into_iter().map(|t| t.and_utc().to_rfc3339()).collect(),
+        bands,
+    }))
+}
+
 #[derive(Serialize)]
 pub struct BoardHealth {
     pub version: String,

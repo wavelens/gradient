@@ -4,14 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnInit, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { BoardService, ExpensiveBuild } from '@core/services/board.service';
+import { BoardService, ExpensiveBuild, TopOrgBuildTime } from '@core/services/board.service';
+import { MetricChartComponent } from '@shared/components/metric-chart/metric-chart.component';
 
 @Component({
   selector: 'app-board-expensive-jobs',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, MetricChartComponent],
   template: `
     <div class="controls">
       <label>Window (days)
@@ -41,6 +42,18 @@ import { BoardService, ExpensiveBuild } from '@core/services/board.service';
         }
       </tbody>
     </table>
+
+    @if (topOrgs().length) {
+      <h2>Top organizations by build time (superuser)</h2>
+      <app-metric-chart
+        type="bar"
+        [horizontal]="true"
+        [height]="320"
+        [series]="topOrgSeries()"
+        [categories]="topOrgCategories()"
+        [colors]="['#fd7e14']"
+      ></app-metric-chart>
+    }
   `,
   styles: [
     `
@@ -51,14 +64,22 @@ import { BoardService, ExpensiveBuild } from '@core/services/board.service';
       th { color: #fff; }
       .mono { font-family: monospace; }
       .muted { color: #818181; }
+      h2 { color: #fff; font-size: 1.05rem; margin: 1.5rem 0 0.75rem; }
+      app-metric-chart { display: block; }
     `,
   ],
 })
 export class BoardExpensiveJobsComponent implements OnInit {
   private board = inject(BoardService);
   builds = signal<ExpensiveBuild[]>([]);
+  topOrgs = signal<TopOrgBuildTime[]>([]);
   excludeAck = signal(true);
   private windowDays = 30;
+
+  topOrgCategories = computed(() => this.topOrgs().map((o) => o.organization.slice(0, 8)));
+  topOrgSeries = computed(() => [
+    { name: 'build hours', data: this.topOrgs().map((o) => +(o.total_build_ms / 3_600_000).toFixed(2)) },
+  ]);
 
   ngOnInit(): void {
     this.load();
@@ -66,6 +87,10 @@ export class BoardExpensiveJobsComponent implements OnInit {
 
   private load(): void {
     this.board.getExpensive(this.windowDays, this.excludeAck()).subscribe((b) => this.builds.set(b));
+    this.board.getTopOrgs(this.windowDays).subscribe({
+      next: (o) => this.topOrgs.set(o),
+      error: () => this.topOrgs.set([]),
+    });
   }
 
   setWindow(e: Event): void {

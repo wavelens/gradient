@@ -210,6 +210,10 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         )
         .route("/board/health", get(board_metrics::get_board_health))
         .route(
+            "/board/expensive/top-orgs",
+            get(board::get_top_orgs_by_buildtime),
+        )
+        .route(
             "/orgs/{organization}",
             patch(orgs::patch_organization).delete(orgs::delete_organization),
         )
@@ -531,6 +535,10 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         .route("/board/cache", get(board_metrics::get_board_cache))
         .route("/board/network", get(board_metrics::get_board_network))
         .route("/board/fleet", get(board_metrics::get_board_fleet))
+        .route(
+            "/board/durations/heatmap",
+            get(board_metrics::get_board_durations_heatmap),
+        )
         .route("/board/workers", get(board::get_board_workers))
         .route("/board/live", get(board::board_live_ws))
         .route_layer(middleware::from_fn_with_state(
