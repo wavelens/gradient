@@ -11,9 +11,9 @@
 //! mounted when a metrics token is configured (`MetricsConfig::token`);
 //! when absent, callers fall through to the global 404 handler.
 
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
-use axum::extract::State;
+use axum::extract::{MatchedPath, State};
 use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
 use axum::http::{HeaderMap, StatusCode};
 use axum::middleware::Next;
@@ -21,7 +21,8 @@ use axum::response::{IntoResponse, Response};
 use chrono::Utc;
 use gradient_core::types::ServerState;
 use prometheus::{
-    Encoder, Gauge, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Opts, Registry, TextEncoder,
+    Encoder, Gauge, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec,
+    Opts, Registry, TextEncoder,
 };
 use scheduler::Scheduler;
 use sea_orm::{DatabaseBackend, FromQueryResult, Statement};
@@ -171,11 +172,86 @@ pub(crate) fn render(obs: &Observations) -> String {
     reqs.inc_by(obs.cache_nar_requests_total.max(0) as u64);
     registry.register(Box::new(reqs)).expect("register reqs");
 
+    // Process/runtime metrics (RSS, open fds, CPU) on Linux via the prometheus
+    // process collector. No-op on other platforms.
+    #[cfg(target_os = "linux")]
+    {
+        let pc = prometheus::process_collector::ProcessCollector::for_self();
+        let _ = registry.register(Box::new(pc));
+    }
+
     let mut buf = Vec::new();
     TextEncoder::new()
         .encode(&registry.gather(), &mut buf)
         .expect("encode");
     String::from_utf8(buf).expect("utf-8")
+}
+
+/// Persistent per-route HTTP metrics, accumulated across requests by
+/// [`track_http_metrics`] and merged into the scrape output (#212).
+struct HttpMetrics {
+    registry: Registry,
+    duration: HistogramVec,
+    requests: IntCounterVec,
+}
+
+static HTTP_METRICS: LazyLock<HttpMetrics> = LazyLock::new(|| {
+    let registry = Registry::new();
+    let duration = HistogramVec::new(
+        HistogramOpts::new(
+            "gradient_http_request_duration_seconds",
+            "HTTP request duration in seconds by route.",
+        )
+        .buckets(vec![
+            0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
+        ]),
+        &["method", "route"],
+    )
+    .expect("metric");
+    registry
+        .register(Box::new(duration.clone()))
+        .expect("register http duration");
+    let requests = IntCounterVec::new(
+        Opts::new(
+            "gradient_http_requests_total",
+            "HTTP requests by route, method, and status.",
+        ),
+        &["method", "route", "status"],
+    )
+    .expect("metric");
+    registry
+        .register(Box::new(requests.clone()))
+        .expect("register http requests");
+    HttpMetrics { registry, duration, requests }
+});
+
+fn gather_http() -> String {
+    let mut buf = Vec::new();
+    let _ = TextEncoder::new().encode(&HTTP_METRICS.registry.gather(), &mut buf);
+    String::from_utf8(buf).unwrap_or_default()
+}
+
+/// Middleware recording each request's duration and status keyed by the matched
+/// route template (so dynamic segments don't explode label cardinality).
+pub async fn track_http_metrics(request: axum::extract::Request, next: Next) -> Response {
+    let method = request.method().as_str().to_owned();
+    let route = request
+        .extensions()
+        .get::<MatchedPath>()
+        .map(|m| m.as_str().to_owned())
+        .unwrap_or_else(|| "unmatched".to_owned());
+    let start = std::time::Instant::now();
+    let response = next.run(request).await;
+    let status = response.status().as_u16().to_string();
+    HTTP_METRICS
+        .duration
+        .with_label_values(&[&method, &route])
+        .observe(start.elapsed().as_secs_f64());
+    HTTP_METRICS
+        .requests
+        .with_label_values(&[&method, &route, &status])
+        .inc();
+    response
 }
 
 fn register_labelled_counter(
@@ -396,7 +472,7 @@ pub async fn get_metrics(
 ) -> Response {
     match collect(&state, &scheduler).await {
         Ok(obs) => {
-            let body = render(&obs);
+            let body = format!("{}{}", render(&obs), gather_http());
             (
                 StatusCode::OK,
                 [(CONTENT_TYPE, PROMETHEUS_CONTENT_TYPE)],
