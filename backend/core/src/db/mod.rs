@@ -17,6 +17,7 @@ pub mod gc;
 pub mod org_cache;
 pub mod org_workers;
 pub mod retention;
+pub mod rollup;
 pub mod runtime_closure;
 pub mod status;
 

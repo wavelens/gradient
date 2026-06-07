@@ -557,6 +557,7 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
     let scheduler = Arc::new(Scheduler::new(Arc::clone(&state)));
     scheduler.start();
     gradient_core::db::retention::start_retention_loop(Arc::clone(&state));
+    gradient_core::db::rollup::start_rollup_loop(Arc::clone(&state));
     proto::outbound::start_outbound_loop(Arc::clone(&scheduler));
 
     let proto_limiter = Arc::new(ProtoLimiter::new(state.config.proto.max_proto_connections));
