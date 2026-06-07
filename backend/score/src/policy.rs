@@ -16,6 +16,16 @@ use crate::rules::{
 pub trait ScoringPolicy: Send + Sync + std::fmt::Debug {
     fn name(&self) -> &str;
     fn score(&self, job: &JobContext<'_>, worker: &WorkerContext<'_>) -> f64;
+    fn score_detailed(
+        &self,
+        job: &JobContext<'_>,
+        worker: &WorkerContext<'_>,
+    ) -> crate::ScoreBreakdown {
+        crate::ScoreBreakdown {
+            rules: std::collections::BTreeMap::new(),
+            total: self.score(job, worker),
+        }
+    }
     fn uses_history(&self) -> bool {
         false
     }
@@ -41,6 +51,21 @@ impl ScoringPolicy for RulePolicy {
 
     fn score(&self, job: &JobContext<'_>, worker: &WorkerContext<'_>) -> f64 {
         self.rules.iter().map(|r| r.score(job, worker)).sum()
+    }
+
+    fn score_detailed(
+        &self,
+        job: &JobContext<'_>,
+        worker: &WorkerContext<'_>,
+    ) -> crate::ScoreBreakdown {
+        let mut rules = std::collections::BTreeMap::new();
+        let mut total = 0.0;
+        for r in &self.rules {
+            let s = r.score(job, worker);
+            total += s;
+            rules.insert(r.name().to_string(), s);
+        }
+        crate::ScoreBreakdown { rules, total }
     }
 
     fn uses_history(&self) -> bool {
@@ -219,5 +244,32 @@ mod tests {
         };
 
         assert!(policy.score(&c_ready, &w) > policy.score(&c_costly, &w));
+    }
+
+    #[test]
+    fn score_detailed_sums_to_total_and_names_rules() {
+        let policy = policy_by_name("simple");
+        let archs = vec!["x86_64-linux".to_string()];
+        let feats: Vec<String> = vec![];
+        let w = worker_ctx(&archs, &feats);
+        let j = scored_job("x86_64-linux");
+        let c = JobContext {
+            job: &j,
+            missing_count: Some(0),
+            missing_nar_size: Some(0),
+            dependency_count: 2,
+            queued_at: now(),
+            org_share: None,
+        };
+
+        let breakdown = policy.score_detailed(&c, &w);
+        let total = policy.score(&c, &w);
+
+        assert!((breakdown.total - total).abs() < 1e-9, "total must match score()");
+        assert_eq!(breakdown.rules.len(), 6, "simple policy has 6 rules");
+        assert!(breakdown.rules.contains_key("MissingPathsRule"));
+        assert!(breakdown.rules.contains_key("WaitTimeRule"));
+        let sum: f64 = breakdown.rules.values().sum();
+        assert!((sum - total).abs() < 1e-9, "rule contributions must sum to total");
     }
 }

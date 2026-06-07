@@ -4,11 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+pub mod breakdown;
 pub mod context;
 pub mod policy;
 pub mod rule;
 pub mod rules;
 
+pub use breakdown::ScoreBreakdown;
 pub use context::{HistoryPrediction, JobKindView, LazyProviders, ScoredJob, WorkerMetricsView};
 pub use policy::{policy_by_name, RulePolicy, ScoringPolicy};
 pub use rule::{JobContext, ScoreRule, WorkerContext};
