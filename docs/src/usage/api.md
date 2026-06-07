@@ -299,6 +299,23 @@ Set `GRADIENT_WORKER_PEERS_FILE` (or the NixOS `peersFile` option) to this path.
 |---|---|---|
 | `GET` | `/commits/{id}` | Get commit |
 
+### Live updates (WebSocket)
+
+These endpoints upgrade to a WebSocket and push JSON events when the relevant
+resource changes, so the frontend refetches on change instead of polling. Each
+channel only forwards events for its resource (authorized at connect).
+
+| Path | Events |
+|---|---|
+| `/board/live` | `queue_depth`, `job_dispatched`, `worker_connected`, `worker_disconnected` (scope-masked) |
+| `/projects/{org}/{project}/live` | `evaluation_status_changed`, `build_status_changed` for the project |
+| `/evals/{evaluation}/live` | `evaluation_status_changed`, `build_status_changed` for the evaluation |
+| `/builds/{build}/live` | `build_status_changed` for the build's evaluation (its dependency graph) |
+| `/board/cache/live` | `cache_changed` (content-free ping; refetch `/board/cache`) |
+
+Frames are JSON with a `type` field, e.g.
+`{"type":"build_status_changed","evaluation_id":"…","build_id":"…","status":2}`.
+
 ### Nix Binary Cache (root, no `/api/v1` prefix)
 
 Private caches require HTTP Basic Auth (any username, JWT or API key as password - returns `401` without credentials).
