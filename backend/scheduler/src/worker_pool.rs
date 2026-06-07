@@ -73,6 +73,9 @@ impl std::fmt::Debug for WorkerSlot {
 #[derive(Debug, Default)]
 pub struct WorkerPool {
     workers: HashMap<String, WorkerSlot>,
+    /// Owning organization per worker, resolved from `worker_registration` at
+    /// connect time. Used to attribute worker_sample / worker_connection rows.
+    worker_orgs: HashMap<String, OrganizationId>,
 }
 
 impl WorkerPool {
@@ -100,6 +103,11 @@ impl WorkerPool {
         );
         self.workers.insert(id, WorkerSlot::Active(worker));
         (notify, abort_rx)
+    }
+
+    /// Record the owning organization for a connected worker.
+    pub fn set_worker_org(&mut self, id: &str, org: OrganizationId) {
+        self.worker_orgs.insert(id.to_owned(), org);
     }
 
     /// Signal a connected worker that its registrations have changed and it
@@ -206,6 +214,7 @@ impl WorkerPool {
     }
 
     pub fn unregister(&mut self, id: &str) -> Vec<String> {
+        self.worker_orgs.remove(id);
         self.workers
             .remove(id)
             .map(|slot| slot.shared().assigned_jobs.iter().cloned().collect())
@@ -294,22 +303,30 @@ impl WorkerPool {
         self.workers.len()
     }
 
+    fn info_for(&self, id: &str, slot: &WorkerSlot) -> WorkerInfo {
+        let s = slot.shared();
+        WorkerInfo {
+            id: id.to_owned(),
+            capabilities: s.capabilities.clone(),
+            architectures: s.architectures.clone(),
+            system_features: s.system_features.clone(),
+            max_concurrent_builds: s.max_concurrent_builds,
+            assigned_job_count: s.assigned_jobs.len(),
+            draining: slot.is_draining(),
+            authorized_peers: s.peer_auth.as_filter().cloned(),
+            organization: self.worker_orgs.get(id).copied(),
+            cpu_usage_pct: s.cpu_usage_pct,
+            ram_free_mb: s.ram_free_mb,
+            ram_total_mb: s.ram_total_mb,
+            disk_speed_mbps: s.disk_speed_mbps,
+            network_speed_mbps: s.network_speed_mbps,
+        }
+    }
+
     pub fn all_workers(&self) -> Vec<WorkerInfo> {
         self.workers
             .iter()
-            .map(|(id, slot)| {
-                let s = slot.shared();
-                WorkerInfo {
-                    id: id.clone(),
-                    capabilities: s.capabilities.clone(),
-                    architectures: s.architectures.clone(),
-                    system_features: s.system_features.clone(),
-                    max_concurrent_builds: s.max_concurrent_builds,
-                    assigned_job_count: s.assigned_jobs.len(),
-                    draining: slot.is_draining(),
-                    authorized_peers: s.peer_auth.as_filter().cloned(),
-                }
-            })
+            .map(|(id, slot)| self.info_for(id, slot))
             .collect()
     }
 }
@@ -331,6 +348,13 @@ pub struct WorkerInfo {
     /// authorized for all peers; this should not happen in normal operation
     /// because workers must register with at least one org.
     pub authorized_peers: Option<HashSet<OrganizationId>>,
+    /// Owning organization resolved from `worker_registration`, if known.
+    pub organization: Option<OrganizationId>,
+    pub cpu_usage_pct: f32,
+    pub ram_free_mb: u64,
+    pub ram_total_mb: u64,
+    pub disk_speed_mbps: Option<f32>,
+    pub network_speed_mbps: Option<f32>,
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

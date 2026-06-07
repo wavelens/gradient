@@ -40,9 +40,24 @@ pub fn start_dispatch_loops(scheduler: Arc<Scheduler>) {
     let s1 = Arc::clone(&scheduler);
     let s2 = Arc::clone(&scheduler);
     let s3 = Arc::clone(&scheduler);
+    let s4 = Arc::clone(&scheduler);
     shutdown.spawn(async move { super::trigger_dispatch::trigger_dispatch_loop(s3).await });
     shutdown.spawn(async move { eval_dispatch_loop(s1).await });
     shutdown.spawn(async move { build_dispatch_loop(s2).await });
+    shutdown.spawn(async move { worker_sample_loop(s4).await });
+}
+
+/// Periodically snapshot every connected worker's live metrics into
+/// `worker_sample` for the Job Board's worker statistics.
+async fn worker_sample_loop(scheduler: Arc<Scheduler>) {
+    let mut interval = tokio::time::interval(Duration::from_secs(15));
+    loop {
+        interval.tick().await;
+        let workers = scheduler.worker_pool.read().await.all_workers();
+        for info in &workers {
+            super::worker_lifecycle::record_worker_sample(&scheduler.state.worker_db, info).await;
+        }
+    }
 }
 
 // ── Eval dispatch ─────────────────────────────────────────────────────────────
@@ -619,6 +634,18 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
     };
     if new_builds.is_empty() {
         return Ok(());
+    }
+
+    // Stamp ready_at the first time a build becomes dispatchable (deps satisfied).
+    let ready_ids: Vec<_> = new_builds.iter().map(|b| b.id).collect();
+    if let Err(e) = EBuild::update_many()
+        .col_expr(CBuild::ReadyAt, sea_orm::sea_query::Expr::value(now()))
+        .filter(CBuild::Id.is_in(ready_ids))
+        .filter(CBuild::ReadyAt.is_null())
+        .exec(&state.worker_db)
+        .await
+    {
+        error!(error = %e, "failed to stamp build ready_at");
     }
 
     let maps =
