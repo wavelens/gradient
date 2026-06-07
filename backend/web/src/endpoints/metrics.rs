@@ -231,6 +231,110 @@ fn gather_http() -> String {
     String::from_utf8(buf).unwrap_or_default()
 }
 
+#[derive(serde::Serialize)]
+pub struct HttpRouteStat {
+    pub method: String,
+    pub route: String,
+    pub count: u64,
+    pub avg_ms: f64,
+    pub errors: u64,
+}
+
+/// Per-route HTTP latency/throughput, snapshotted from the persistent histogram
+/// for the System Health / Network board pages (cumulative since process start).
+pub(crate) fn http_snapshot() -> Vec<HttpRouteStat> {
+    use std::collections::HashMap;
+    let mut dur: HashMap<(String, String), (u64, f64)> = HashMap::new();
+    let mut req: HashMap<(String, String), (u64, u64)> = HashMap::new();
+    for mf in HTTP_METRICS.registry.gather() {
+        let label = |m: &prometheus::proto::Metric, key: &str| {
+            m.get_label()
+                .iter()
+                .find(|l| l.name() == key)
+                .map(|l| l.value().to_owned())
+                .unwrap_or_default()
+        };
+        match mf.name() {
+            "gradient_http_request_duration_seconds" => {
+                for m in mf.get_metric() {
+                    let h = m.get_histogram();
+                    dur.insert(
+                        (label(m, "method"), label(m, "route")),
+                        (h.get_sample_count(), h.get_sample_sum()),
+                    );
+                }
+            }
+            "gradient_http_requests_total" => {
+                for m in mf.get_metric() {
+                    let status = label(m, "status");
+                    let v = m.get_counter().get_value() as u64;
+                    let e = req.entry((label(m, "method"), label(m, "route"))).or_insert((0, 0));
+                    e.0 += v;
+                    if status.starts_with('4') || status.starts_with('5') {
+                        e.1 += v;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut out: Vec<HttpRouteStat> = dur
+        .into_iter()
+        .map(|((method, route), (count, sum))| {
+            let (total, errors) = req.get(&(method.clone(), route.clone())).copied().unwrap_or((count, 0));
+            HttpRouteStat {
+                method,
+                route,
+                count: total.max(count),
+                avg_ms: if count > 0 { sum / count as f64 * 1000.0 } else { 0.0 },
+                errors,
+            }
+        })
+        .collect();
+    out.sort_by_key(|s| std::cmp::Reverse(s.count));
+    out
+}
+
+#[derive(serde::Serialize, Default)]
+pub struct ProcessStat {
+    pub resident_memory_bytes: f64,
+    pub virtual_memory_bytes: f64,
+    pub open_fds: f64,
+    pub max_fds: f64,
+    pub cpu_seconds_total: f64,
+    pub threads: f64,
+}
+
+/// Process/runtime snapshot (RSS, fds, CPU, threads) for the System Health page.
+/// Empty off Linux, where the prometheus process collector is a no-op.
+pub(crate) fn process_snapshot() -> ProcessStat {
+    let mut s = ProcessStat::default();
+    #[cfg(target_os = "linux")]
+    {
+        let registry = Registry::new();
+        let pc = prometheus::process_collector::ProcessCollector::for_self();
+        let _ = registry.register(Box::new(pc));
+        for mf in registry.gather() {
+            let Some(m) = mf.get_metric().first() else { continue };
+            let val = if mf.name() == "process_cpu_seconds_total" {
+                m.get_counter().get_value()
+            } else {
+                m.get_gauge().get_value()
+            };
+            match mf.name() {
+                "process_resident_memory_bytes" => s.resident_memory_bytes = val,
+                "process_virtual_memory_bytes" => s.virtual_memory_bytes = val,
+                "process_open_fds" => s.open_fds = val,
+                "process_max_fds" => s.max_fds = val,
+                "process_cpu_seconds_total" => s.cpu_seconds_total = val,
+                "process_threads" => s.threads = val,
+                _ => {}
+            }
+        }
+    }
+    s
+}
+
 /// Middleware recording each request's duration and status keyed by the matched
 /// route template (so dynamic segments don't explode label cardinality).
 pub async fn track_http_metrics(request: axum::extract::Request, next: Next) -> Response {

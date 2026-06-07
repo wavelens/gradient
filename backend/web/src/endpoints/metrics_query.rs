@@ -43,6 +43,7 @@ const CATALOG: &[MetricMeta] = &[
     MetricMeta { key: "evals.failed", kind: "counter", unit: "evals", dimensions: &["org"] },
     MetricMeta { key: "builds.duration_ms", kind: "histogram", unit: "ms", dimensions: &["org"] },
     MetricMeta { key: "dispatch.wait_ms", kind: "histogram", unit: "ms", dimensions: &["org"] },
+    MetricMeta { key: "deps.wait_ms", kind: "histogram", unit: "ms", dimensions: &["org"] },
 ];
 
 pub async fn get_metrics_catalog() -> WebResult<Json<BaseResponse<Vec<&'static MetricMeta>>>> {

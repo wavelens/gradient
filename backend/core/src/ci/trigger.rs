@@ -306,6 +306,7 @@ pub async fn trigger_restart_builds<C: ConnectionTrait>(
             prefer_local_build: Set(prev_build.prefer_local_build),
             created_at: Set(now),
             updated_at: Set(now),
+            queued_at: Set((new_status == BuildStatus::Queued).then_some(now)),
             ready_at: Set(None),
             dispatched_at: Set(None),
             build_started_at: Set(None),

@@ -208,6 +208,7 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             "/board/acknowledged-derivations/{id}",
             delete(board::delete_acknowledged),
         )
+        .route("/board/health", get(board_metrics::get_board_health))
         .route(
             "/orgs/{organization}",
             patch(orgs::patch_organization).delete(orgs::delete_organization),
@@ -527,6 +528,9 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         .route("/board/jobs/expensive", get(board::get_expensive_jobs))
         .route("/board/jobs/{id}", get(board::get_dispatched_job))
         .route("/board/scoring/summary", get(board::get_scoring_summary))
+        .route("/board/cache", get(board_metrics::get_board_cache))
+        .route("/board/network", get(board_metrics::get_board_network))
+        .route("/board/fleet", get(board_metrics::get_board_fleet))
         .route("/board/workers", get(board::get_board_workers))
         .route("/board/live", get(board::board_live_ws))
         .route_layer(middleware::from_fn_with_state(
