@@ -99,6 +99,8 @@ servers:
 tags:
   - name: general
     description: Health check and server configuration
+  - name: board
+    description: Job Board - metric queries, live dispatched jobs, workers, scoring, and expensive builds
   - name: auth
     description: Authentication - login, register, OAuth/OIDC
   - name: user
@@ -5650,6 +5652,127 @@ x-nix-cache-paths:
     | `GET /cache/{cache}/ls/{hash}` | JSON tree listing of the NAR (nix-serve `.ls` v1 schema). Rate-limited at 60 req/min. |
     | `GET /cache/{cache}/serve/{hash}/{path}` | Extract a single file (bytes, Content-Type sniffed) or directory (tar.zst) from a NAR. Rate-limited at 60 req/min. |
     | `GET /cache/{cache}/log/{drv}` | Build log for `<drv>.drv`, from either locally-built or upstream-substituted builds (substituter compat - `nix log`). Rate-limited at ~300 req/min. |
+
+  /metrics/catalog:
+    get:
+      tags: [board]
+      summary: Metric catalog
+      description: Lists the queryable metrics with their kind, unit, and dimensions.
+      operationId: getMetricsCatalog
+      responses:
+        '200':
+          description: Catalog of available metrics
+
+  /metrics/query:
+    get:
+      tags: [board]
+      summary: Query a metric time-series
+      description: |-
+        Returns time-bucketed points for a metric from `metric_rollup`, masked to
+        the caller's scope (superuser = all orgs, member = own + public orgs,
+        anonymous = public orgs). Unknown metrics or out-of-scope orgs return 404.
+      operationId: getMetricsQuery
+      parameters:
+        - { name: metric, in: query, required: true, schema: { type: string } }
+        - { name: granularity, in: query, schema: { type: string, enum: [minute, hour, day, week] } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: org, in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Time-series points
+        '404':
+          description: Unknown metric or org out of scope
+
+  /board/jobs/dispatched:
+    get:
+      tags: [board]
+      summary: Live dispatched jobs
+      description: In-flight dispatched jobs visible to the caller; out-of-scope jobs collapse to an aggregate `other_running` count.
+      operationId: getBoardDispatchedJobs
+      responses:
+        '200':
+          description: Dispatched jobs plus other_running count
+
+  /board/jobs/expensive:
+    get:
+      tags: [board]
+      summary: Most expensive builds
+      description: Top builds by wall-clock build time, optionally excluding acknowledged (muted) derivations.
+      operationId: getBoardExpensiveJobs
+      parameters:
+        - { name: window_days, in: query, schema: { type: integer } }
+        - { name: exclude_acknowledged, in: query, schema: { type: boolean } }
+      responses:
+        '200':
+          description: Top builds by build time
+
+  /board/jobs/{id}:
+    get:
+      tags: [board]
+      summary: Dispatched job detail
+      description: Full dispatch record incl. per-rule scoring breakdown and job/worker contexts. Runner-up candidates are superuser-only.
+      operationId: getBoardJob
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Job detail
+        '404':
+          description: Not found or out of scope
+
+  /board/workers:
+    get:
+      tags: [board]
+      summary: Connected workers
+      description: Connected workers with capability and live load; foreign-org worker identity and metrics are masked for non-superusers.
+      operationId: getBoardWorkers
+      responses:
+        '200':
+          description: Connected workers
+
+  /board/live:
+    get:
+      tags: [board]
+      summary: Live board events (WebSocket)
+      description: WebSocket stream of dispatch / worker / queue-depth events, filtered to the caller's scope.
+      operationId: getBoardLive
+      responses:
+        '101':
+          description: Switching Protocols (WebSocket upgrade)
+
+  /board/acknowledged-derivations:
+    get:
+      tags: [board]
+      summary: List acknowledged (muted) derivations
+      operationId: listAcknowledgedDerivations
+      responses:
+        '200':
+          description: Acknowledged derivations
+        '403':
+          description: Superuser required
+    put:
+      tags: [board]
+      summary: Acknowledge (mute) a slow derivation
+      operationId: createAcknowledgedDerivation
+      responses:
+        '200':
+          description: Created acknowledgement id
+        '403':
+          description: Superuser required
+
+  /board/acknowledged-derivations/{id}:
+    delete:
+      tags: [board]
+      summary: Remove an acknowledged derivation
+      operationId: deleteAcknowledgedDerivation
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Deleted
+        '403':
+          description: Superuser required
 
 components:
 

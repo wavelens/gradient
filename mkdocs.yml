@@ -17,6 +17,7 @@ nav:
   - Configuration: configuration.md
   - Usage:
     - Overview: usage/overview.md
+    - Job Board: usage/job-board.md
     - CLI: usage/cli.md
     - API: usage/api.md
     - State: usage/state.md
