@@ -246,6 +246,135 @@ pub async fn get_expensive_jobs(
     Ok(ok_json(out))
 }
 
+#[derive(Deserialize)]
+pub struct ScoringParams {
+    pub window_hours: Option<i64>,
+    pub limit: Option<u64>,
+}
+
+#[derive(Serialize)]
+pub struct ScoreBucket {
+    pub lo: f64,
+    pub hi: f64,
+    pub count: i64,
+}
+
+#[derive(Serialize)]
+pub struct RuleContribution {
+    pub rule: String,
+    pub avg: f64,
+    pub min: f64,
+    pub max: f64,
+}
+
+#[derive(Serialize, Default)]
+pub struct ScoringSummary {
+    pub sample_size: i64,
+    pub score_min: f64,
+    pub score_max: f64,
+    pub score_avg: f64,
+    pub histogram: Vec<ScoreBucket>,
+    pub rules: Vec<RuleContribution>,
+}
+
+/// Aggregate scoring view over recently dispatched jobs: a score histogram plus
+/// the mean per-rule contribution, so operators can see how the policy scored
+/// real dispatches without opening every job. Scope-masked to the caller's orgs.
+pub async fn get_scoring_summary(
+    State(state): State<Arc<ServerState>>,
+    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Query(params): Query<ScoringParams>,
+) -> WebResult<Json<BaseResponse<ScoringSummary>>> {
+    let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
+    let window = params.window_hours.unwrap_or(24).max(1);
+    let limit = params.limit.unwrap_or(2000).min(10_000);
+
+    let mut clauses = vec![format!(
+        "dispatched_at >= (now() AT TIME ZONE 'UTC') - interval '{window} hours'"
+    )];
+    if let Some(list) = scope.org_in_list() {
+        if list.is_empty() {
+            return Ok(ok_json(ScoringSummary::default()));
+        }
+        clauses.push(format!("organization IN ({list})"));
+    }
+    let sql = format!(
+        "SELECT score, score_breakdown FROM dispatched_job WHERE {} \
+         ORDER BY dispatched_at DESC LIMIT {limit}",
+        clauses.join(" AND ")
+    );
+    let rows = state
+        .web_db
+        .query_all(Statement::from_string(DatabaseBackend::Postgres, sql))
+        .await?;
+
+    let mut scores: Vec<f64> = Vec::with_capacity(rows.len());
+    let mut rule_acc: std::collections::BTreeMap<String, (f64, i64, f64, f64)> =
+        std::collections::BTreeMap::new();
+    for r in &rows {
+        scores.push(r.try_get::<f64>("", "score").unwrap_or(0.0));
+        if let Ok(bd) = r.try_get::<serde_json::Value>("", "score_breakdown")
+            && let Some(obj) = bd.get("rules").and_then(|v| v.as_object())
+        {
+            for (rule, val) in obj {
+                if let Some(v) = val.as_f64() {
+                    let e = rule_acc.entry(rule.clone()).or_insert((0.0, 0, f64::MAX, f64::MIN));
+                    e.0 += v;
+                    e.1 += 1;
+                    e.2 = e.2.min(v);
+                    e.3 = e.3.max(v);
+                }
+            }
+        }
+    }
+
+    if scores.is_empty() {
+        return Ok(ok_json(ScoringSummary::default()));
+    }
+
+    let n = scores.len() as f64;
+    let lo = scores.iter().cloned().fold(f64::MAX, f64::min);
+    let hi = scores.iter().cloned().fold(f64::MIN, f64::max);
+    let avg = scores.iter().sum::<f64>() / n;
+
+    const BINS: usize = 12;
+    let span = (hi - lo).max(f64::EPSILON);
+    let mut counts = vec![0i64; BINS];
+    for s in &scores {
+        let idx = (((s - lo) / span) * BINS as f64).floor() as usize;
+        counts[idx.min(BINS - 1)] += 1;
+    }
+    let histogram = counts
+        .into_iter()
+        .enumerate()
+        .map(|(i, count)| ScoreBucket {
+            lo: lo + span * (i as f64) / BINS as f64,
+            hi: lo + span * (i as f64 + 1.0) / BINS as f64,
+            count,
+        })
+        .collect();
+
+    let mut rules: Vec<RuleContribution> = rule_acc
+        .into_iter()
+        .map(|(rule, (sum, count, min, max))| RuleContribution {
+            rule,
+            avg: if count > 0 { sum / count as f64 } else { 0.0 },
+            min,
+            max,
+        })
+        .collect();
+    rules.sort_by(|a, b| b.avg.abs().partial_cmp(&a.avg.abs()).unwrap_or(std::cmp::Ordering::Equal));
+
+    Ok(ok_json(ScoringSummary {
+        sample_size: scores.len() as i64,
+        score_min: lo,
+        score_max: hi,
+        score_avg: avg,
+        histogram,
+        rules,
+    }))
+}
+
 pub async fn board_live_ws(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
