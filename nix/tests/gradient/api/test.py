@@ -490,7 +490,8 @@ org = api("GET", "orgs/stateorg", token=sa_token)
 assert org["display_name"] == "State Org" and org["description"] == "Provisioned by state", org
 
 # Membership + custom role applied (statemember holds the state-managed role).
-members = {m["id"]: m["role"] for m in api("GET", "orgs/stateorg/users", token=sa_token)}
+# The org-users list returns the role name in the `name` field.
+members = {m["id"]: m["name"] for m in api("GET", "orgs/stateorg/users", token=sa_token)}
 assert members.get("stateadmin") == "Admin", members
 assert members.get("statemember") == "releaser", members
 releaser = next(r for r in api("GET", "orgs/stateorg/roles", token=sa_token)["roles"]
