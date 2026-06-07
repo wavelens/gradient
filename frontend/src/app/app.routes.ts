@@ -333,6 +333,15 @@ export const routes: Routes = [
             (m) => m.WorkersComponent
           ),
       },
+      {
+        path: 'organization/:org/workers/:workerId/metrics',
+        title: 'Worker Statistics',
+        resolve: { organizationAccess: organizationAccessResolver },
+        loadComponent: () =>
+          import('./features/organizations/workers/worker-metrics/worker-metrics.component').then(
+            (m) => m.WorkerMetricsComponent
+          ),
+      },
 
       // Integrations
       {

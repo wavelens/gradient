@@ -9,12 +9,39 @@ import { Observable } from 'rxjs';
 import { ApiService } from './api.service';
 import { Worker, WorkerRegistration } from '@core/models';
 
+export interface WorkerSamplePoint {
+  at: string;
+  cpu_usage_pct: number | null;
+  ram_free_mb: number | null;
+  ram_total_mb: number | null;
+  disk_speed_mbps: number | null;
+  network_speed_mbps: number | null;
+  assigned_jobs: number;
+  max_concurrent_builds: number;
+  state: number;
+}
+
+export interface WorkerConnectionEntry {
+  connected_at: string;
+  disconnected_at: string | null;
+}
+
+export interface WorkerStatsResponse {
+  samples: WorkerSamplePoint[];
+  connections: WorkerConnectionEntry[];
+  jobs_dispatched: number;
+}
+
 @Injectable({ providedIn: 'root' })
 export class WorkersService {
   private api = inject(ApiService);
 
   getWorkers(org: string): Observable<Worker[]> {
     return this.api.get<Worker[]>(`orgs/${org}/workers`);
+  }
+
+  getWorkerStats(org: string, workerId: string): Observable<WorkerStatsResponse> {
+    return this.api.get<WorkerStatsResponse>(`orgs/${org}/workers/${workerId}/stats`);
   }
 
   registerWorker(
