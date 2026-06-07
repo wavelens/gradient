@@ -440,15 +440,19 @@ Tests for the `StoreFixture` itself, validating that real `.drv` files from
 **Run:** `cargo test -p worker executor::build`
 
 Tests for best-effort per-build resource capture. The worker records wall-clock
-`build_time_ms` for every build and, when `--build-metrics` is enabled, reads
-the build's cgroup-v2 files (memory.peak, cpu.stat, io.stat, memory.events).
-Mapping a daemon-forked build to its cgroup is environment-dependent and
-degrades to `None` when the cgroup cannot be located or read.
+`build_time_ms` for every build. When `--build-metrics` is enabled, CPU time
+comes from the daemon's build result (`cpu_user + cpu_system`, read from the
+cgroup by nix before it tears the cgroup down), while peak RAM and disk I/O are
+sampled live from the build's cgroup — located via nix's
+`<state-dir>/cgroups/<uid>` map (newest entry written after the build started,
+since nix destroys the cgroup at build end). Stale map entries and idle/ambiguous
+cases degrade to `None`.
 
 | Test | What it checks |
 |------|---------------|
-| `locate_build_cgroup_none_for_empty_root` | Returns `None` for a root with no matching dir (temp dir) |
-| `locate_build_cgroup_finds_dir_with_hash` | Bounded walk finds a nested cgroup dir whose name embeds the drv hash |
+| `newest_build_cgroup_ignores_entries_older_than_since` | Stale `<uid>` files (finished builds) are skipped; only an entry written at/after the build start is returned |
+| `newest_build_cgroup_none_for_missing_dir` | Returns `None` when the cgroups map dir does not exist |
+| `daemon_cpu_usec_sums_present_fields` | Sums `cpu_user`/`cpu_system`, `None` when both absent, clamps negatives to zero |
 | `raw_to_metrics_always_sets_build_time` | `None` raw still yields `build_time_ms`; cgroup fields `None`, `oom_killed` false |
 | `raw_to_metrics_handles_zero_divisors` | `build_time_ms=0` / `cpu_count=0` → `avg_cpu_pct: None` (no divide-by-zero); other fields still converted |
 | `raw_to_metrics_computes_avg_cpu_pct` | `avg_cpu_pct = cpu_time_ms / (build_time_ms * cpu_count) * 100`; `peak_network_mbps` threaded through from the host-window sampler |

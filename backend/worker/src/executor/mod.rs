@@ -162,6 +162,7 @@ pub struct JobExecutor {
     pub(crate) binpath_ssh: String,
     pub(crate) build_metrics: bool,
     pub(crate) build_cgroup_root: String,
+    pub(crate) build_cgroup_state_dir: String,
     pub(crate) log_limits: crate::executor::log_limit::LogRateLimits,
     pub(crate) log_fetch_from_store: bool,
 }
@@ -176,6 +177,7 @@ impl JobExecutor {
         binpath_ssh: String,
         build_metrics: bool,
         build_cgroup_root: String,
+        build_cgroup_state_dir: String,
         log_limits: crate::executor::log_limit::LogRateLimits,
         log_fetch_from_store: bool,
     ) -> Self {
@@ -187,6 +189,7 @@ impl JobExecutor {
             binpath_ssh,
             build_metrics,
             build_cgroup_root,
+            build_cgroup_state_dir,
             log_limits,
             log_fetch_from_store,
         }
@@ -383,6 +386,7 @@ impl JobExecutor {
                 &mut abort,
                 self.build_metrics,
                 &self.build_cgroup_root,
+                &self.build_cgroup_state_dir,
                 self.log_limits,
                 self.log_fetch_from_store,
             )
