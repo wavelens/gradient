@@ -505,13 +505,15 @@ pub(super) async fn delete_nar_from_cache(
         .map(|o| o.derivation)
         .collect();
 
-    if !derivation_ids.is_empty() {
+    let txn = &tx;
+    gradient_core::db::for_each_chunk(&derivation_ids, |chunk| async move {
         ECacheDerivation::delete_many()
             .filter(CCacheDerivation::Cache.eq(cache_id))
-            .filter(CCacheDerivation::Derivation.is_in(derivation_ids))
-            .exec(&tx)
-            .await?;
-    }
+            .filter(CCacheDerivation::Derivation.is_in(chunk))
+            .exec(txn)
+            .await
+    })
+    .await?;
 
     let remaining = ECachedPathSignature::find()
         .filter(CCachedPathSignature::CachedPath.eq(cached_path.id))
@@ -532,6 +534,10 @@ pub(super) async fn delete_nar_from_cache(
     }
 
     tx.commit().await?;
+
+    let _ = state
+        .board_events
+        .send(gradient_core::types::BoardEvent::CacheChanged);
 
     if !ref_counted_others {
         let state_bg = Arc::clone(state);

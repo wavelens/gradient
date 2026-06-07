@@ -38,6 +38,7 @@ pub fn test_state(db: DatabaseConnection) -> Arc<ServerState> {
         started_at: chrono::Utc::now(),
         pending_org_memberships: Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: Arc::new(std::collections::HashMap::new()),
+        board_events: tokio::sync::broadcast::channel(256).0,
     })
 }
 
@@ -64,5 +65,6 @@ pub fn test_state_with_log_storage(
         started_at: chrono::Utc::now(),
         pending_org_memberships: Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: Arc::new(std::collections::HashMap::new()),
+        board_events: tokio::sync::broadcast::channel(256).0,
     })
 }

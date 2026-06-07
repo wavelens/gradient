@@ -163,6 +163,7 @@ pub async fn public_cache_with_narinfo() -> Arc<ServerState> {
         started_at: chrono::Utc::now(),
         pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
+        board_events: tokio::sync::broadcast::channel(256).0,
     })
 }
 
@@ -207,6 +208,7 @@ pub async fn public_cache_state() -> Arc<ServerState> {
         started_at: chrono::Utc::now(),
         pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
+        board_events: tokio::sync::broadcast::channel(256).0,
     })
 }
 
@@ -256,6 +258,7 @@ pub async fn public_cache_with_nar() -> Arc<ServerState> {
         started_at: chrono::Utc::now(),
         pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
+        board_events: tokio::sync::broadcast::channel(256).0,
     });
 
     let compressed = synthetic_nar_zst().await;
@@ -356,6 +359,7 @@ fn make_state(
         started_at: chrono::Utc::now(),
         pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
+        board_events: tokio::sync::broadcast::channel(256).0,
     })
 }
 
@@ -428,6 +432,7 @@ pub async fn private_cache_state() -> Arc<ServerState> {
         started_at: chrono::Utc::now(),
         pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
+        board_events: tokio::sync::broadcast::channel(256).0,
     })
 }
 
@@ -485,6 +490,7 @@ pub async fn private_cache_with_nar() -> Arc<ServerState> {
         started_at: chrono::Utc::now(),
         pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
+        board_events: tokio::sync::broadcast::channel(256).0,
     });
 
     let compressed = synthetic_nar_zst().await;

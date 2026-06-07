@@ -162,6 +162,7 @@ fn server_with_email(
         started_at: chrono::Utc::now(),
         pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
+        board_events: tokio::sync::broadcast::channel(256).0,
     });
     TestServer::new(create_router(state))
 }
