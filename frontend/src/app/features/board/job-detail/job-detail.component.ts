@@ -7,7 +7,10 @@
 import { Component, OnInit, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
+import { DialogModule } from 'primeng/dialog';
+import { ButtonModule } from 'primeng/button';
 import { BoardService, DispatchedJobDetail } from '@core/services/board.service';
+import { EvaluationsService, BuildWithOutputs } from '@core/services/evaluations.service';
 
 interface RuleRow {
   name: string;
@@ -19,7 +22,7 @@ interface RuleRow {
 @Component({
   selector: 'app-board-job-detail',
   standalone: true,
-  imports: [CommonModule, RouterModule],
+  imports: [CommonModule, RouterModule, DialogModule, ButtonModule],
   template: `
     <a routerLink="/board/live" class="back">← Live Jobs</a>
 
@@ -39,7 +42,7 @@ interface RuleRow {
         <div><span class="label">Worker</span><span class="mono">{{ j.worker_id }}</span></div>
         <div><span class="label">Evaluation</span><span class="mono">{{ j.evaluation_id }}</span></div>
         @if (j.build_id) {
-          <div><span class="label">Build</span><span class="mono">{{ j.build_id }}</span></div>
+          <div><span class="label">Build</span><button type="button" class="mono link" (click)="openBuild(j.build_id)">{{ j.build_id }}</button></div>
         }
       </section>
 
@@ -47,7 +50,7 @@ interface RuleRow {
         <div class="step"><span class="label">Queued</span><span>{{ j.queued_at | date: 'medium' }}</span></div>
         <div class="step"><span class="label">Wait</span><span class="hl">{{ waitLabel() }}</span></div>
         <div class="step"><span class="label">Dispatched</span><span>{{ j.dispatched_at | date: 'medium' }}</span></div>
-        <div class="step"><span class="label">Finished</span><span>{{ j.finished_at ? (j.finished_at | date: 'medium') : 'running' }}</span></div>
+        <div class="step"><span class="label">Current State</span><span class="hl">{{ currentState() }}</span></div>
       </section>
 
       <h2>Score breakdown</h2>
@@ -84,6 +87,46 @@ interface RuleRow {
     } @else {
       <p class="muted">Loading job…</p>
     }
+
+    <p-dialog
+      header="Build info"
+      [visible]="buildDialog()"
+      (visibleChange)="buildDialog.set($event)"
+      [modal]="true"
+      [style]="{ width: '640px' }"
+      [draggable]="false"
+      [resizable]="false"
+    >
+      @if (buildLoading()) {
+        <p class="muted">Loading build…</p>
+      } @else if (buildError()) {
+        <p class="muted">{{ buildError() }}</p>
+      } @else if (build(); as b) {
+        <div class="build-grid">
+          <div><span class="label">Build ID</span><span class="mono">{{ b.id }}</span></div>
+          <div><span class="label">Status</span><span class="mono">{{ b.status }}</span></div>
+          <div><span class="label">Architecture</span><span class="mono">{{ b.architecture }}</span></div>
+          <div><span class="label">Worker</span><span class="mono">{{ b.worker ?? '—' }}</span></div>
+          @if (b.via) {
+            <div><span class="label">Via</span><span class="mono">{{ b.via }}</span></div>
+          }
+          <div class="span2"><span class="label">Derivation</span><span class="mono">{{ b.derivation_path }}</span></div>
+          <div><span class="label">Created</span><span>{{ b.created_at | date: 'medium' }}</span></div>
+          <div><span class="label">Updated</span><span>{{ b.updated_at | date: 'medium' }}</span></div>
+          @if (outputs(b).length) {
+            <div class="span2">
+              <span class="label">Outputs</span>
+              @for (o of outputs(b); track o.name) {
+                <div class="mono out">{{ o.name }}: {{ o.path }}</div>
+              }
+            </div>
+          }
+        </div>
+      }
+      <ng-template pTemplate="footer">
+        <button pButton label="Close" severity="secondary" (click)="buildDialog.set(false)"></button>
+      </ng-template>
+    </p-dialog>
   `,
   styles: [
     `
@@ -102,6 +145,11 @@ interface RuleRow {
       .step { background: #21262d; border: 1px solid #2d333b; border-radius: 8px; padding: 0.75rem; color: #abb0b4; font-size: 0.85rem; }
       .step .hl { color: #17a2b8; font-weight: 600; }
       .mono { font-family: monospace; color: #d6dade; font-size: 0.85rem; }
+      .link { background: none; border: none; padding: 0; cursor: pointer; text-align: left; color: #17a2b8; text-decoration: underline; }
+      .link:hover { color: #4cc2d4; }
+      .build-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+      .build-grid .span2 { grid-column: 1 / -1; }
+      .build-grid .out { word-break: break-all; margin-top: 0.25rem; }
       table.rules { width: 100%; border-collapse: collapse; background: #21262d; border: 1px solid #2d333b; border-radius: 8px; overflow: hidden; }
       th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #2d333b; font-size: 0.85rem; color: #abb0b4; }
       th { color: #fff; }
@@ -119,8 +167,22 @@ interface RuleRow {
 export class BoardJobDetailComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private board = inject(BoardService);
+  private evaluations = inject(EvaluationsService);
 
   job = signal<DispatchedJobDetail | null>(null);
+  build = signal<BuildWithOutputs | null>(null);
+  buildDialog = signal(false);
+  buildLoading = signal(false);
+  buildError = signal<string | null>(null);
+
+  currentState = computed(() => {
+    const j = this.job();
+    if (!j) return '—';
+    const b = this.build();
+    if (b && b.id === j.build_id) return b.status;
+
+    return j.finished_at ? 'finished' : 'running';
+  });
 
   rules = computed<RuleRow[]>(() => {
     const rules = this.job()?.score_breakdown?.rules ?? {};
@@ -147,7 +209,38 @@ export class BoardJobDetailComponent implements OnInit {
   ngOnInit(): void {
     const id = this.route.snapshot.paramMap.get('id');
     if (id) {
-      this.board.getJob(id).subscribe((d) => this.job.set(d));
+      this.board.getJob(id).subscribe((d) => {
+        this.job.set(d);
+        if (d.build_id) {
+          this.loadBuild(d.build_id);
+        }
+      });
     }
+  }
+
+  openBuild(buildId: string): void {
+    this.buildDialog.set(true);
+    if (this.build()?.id !== buildId) {
+      this.loadBuild(buildId);
+    }
+  }
+
+  outputs(b: BuildWithOutputs): { name: string; path: string }[] {
+    return Object.entries(b.output ?? {}).map(([name, path]) => ({ name, path }));
+  }
+
+  private loadBuild(buildId: string): void {
+    this.buildLoading.set(true);
+    this.buildError.set(null);
+    this.evaluations.getBuild(buildId).subscribe({
+      next: (b) => {
+        this.build.set(b);
+        this.buildLoading.set(false);
+      },
+      error: () => {
+        this.buildError.set('Failed to load build.');
+        this.buildLoading.set(false);
+      },
+    });
   }
 }

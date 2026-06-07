@@ -6,10 +6,12 @@
 
 import { Component, OnInit, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { BoardService, BoardNetworkStats } from '@core/services/board.service';
+import { BoardService, BoardNetworkStats, HttpRouteStat } from '@core/services/board.service';
 import { MetricChartComponent } from '@shared/components/metric-chart/metric-chart.component';
 
 const GIB = 1024 ** 3;
+
+type HttpSortKey = keyof Pick<HttpRouteStat, 'method' | 'route' | 'count' | 'avg_ms' | 'errors'>;
 
 @Component({
   selector: 'app-board-network',
@@ -42,9 +44,17 @@ const GIB = 1024 ** 3;
 
     <h2>HTTP routes @if (!stats()?.http?.length) {<span class="muted">(superuser-only)</span>}</h2>
     <table class="http">
-      <thead><tr><th>Method</th><th>Route</th><th class="num">Requests</th><th class="num">Avg ms</th><th class="num">Errors</th></tr></thead>
+      <thead>
+        <tr>
+          <th class="sortable" (click)="sortBy('method')">Method{{ sortIndicator('method') }}</th>
+          <th class="sortable" (click)="sortBy('route')">Route{{ sortIndicator('route') }}</th>
+          <th class="sortable num" (click)="sortBy('count')">Requests{{ sortIndicator('count') }}</th>
+          <th class="sortable num" (click)="sortBy('avg_ms')">Avg ms{{ sortIndicator('avg_ms') }}</th>
+          <th class="sortable num" (click)="sortBy('errors')">Errors{{ sortIndicator('errors') }}</th>
+        </tr>
+      </thead>
       <tbody>
-        @for (r of stats()?.http ?? []; track r.method + r.route) {
+        @for (r of sortedHttp(); track r.method + r.route) {
           <tr>
             <td>{{ r.method }}</td>
             <td class="mono">{{ r.route }}</td>
@@ -65,6 +75,8 @@ const GIB = 1024 ** 3;
       table.http { width: 100%; border-collapse: collapse; background: #21262d; border: 1px solid #2d333b; border-radius: 8px; overflow: hidden; }
       th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #2d333b; color: #abb0b4; font-size: 0.85rem; }
       th { color: #fff; }
+      th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+      th.sortable:hover { color: #17a2b8; }
       .mono { font-family: monospace; }
       .num { text-align: right; font-variant-numeric: tabular-nums; }
       .num.bad { color: #dc3545; }
@@ -75,6 +87,34 @@ const GIB = 1024 ** 3;
 export class BoardNetworkComponent implements OnInit {
   private board = inject(BoardService);
   stats = signal<BoardNetworkStats | null>(null);
+  sortKey = signal<HttpSortKey>('count');
+  sortAsc = signal(false);
+
+  sortedHttp = computed(() => {
+    const rows = [...(this.stats()?.http ?? [])];
+    const key = this.sortKey();
+    const dir = this.sortAsc() ? 1 : -1;
+    return rows.sort((a, b) => {
+      const av = a[key];
+      const bv = b[key];
+      const cmp = typeof av === 'string' ? av.localeCompare(bv as string) : (av as number) - (bv as number);
+      return cmp * dir;
+    });
+  });
+
+  sortBy(key: HttpSortKey): void {
+    if (this.sortKey() === key) {
+      this.sortAsc.update((v) => !v);
+    } else {
+      this.sortKey.set(key);
+      this.sortAsc.set(true);
+    }
+  }
+
+  sortIndicator(key: HttpSortKey): string {
+    if (this.sortKey() !== key) return '';
+    return this.sortAsc() ? ' ▲' : ' ▼';
+  }
 
   egressCats = computed(() => (this.stats()?.nar_egress ?? []).map((p) => p.bucket_start.slice(11, 16)));
   egressSeries = computed(() => [
