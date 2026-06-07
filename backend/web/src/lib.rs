@@ -581,6 +581,7 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
     // Default tier covers everything left under /api/v1 (the bulk authenticated
     // surface) plus the proto WS upgrade.
     let api = api.route_layer(GovernorLayer::new(rl_per_ms(200, 150)));
+    let api = api.route_layer(axum::middleware::from_fn(metrics::track_http_metrics));
     let api = api.layer(DefaultBodyLimit::max(state.config.limits.max_request_size));
 
     let mut app = Router::new()
