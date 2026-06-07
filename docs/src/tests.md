@@ -3527,3 +3527,28 @@ Phase 8d of `test.py` asserts each resource was provisioned by the startup state
 actor. It also checks the API key's bearer token authorizes while its
 `viewOrg`-only mask rejects a settings mutation, and (for #349) that
 `LimitMEMLOCK` is raised and no `mlock failed` warning appears in the journal.
+
+## Chunked `IN` queries under the Postgres param cap (#345)
+
+`core::db::chunked::tests` cover `fetch_in_chunks`: a list at or below `IN_CHUNK_SIZE`
+runs a single query, a larger list splits into `ceil(n / IN_CHUNK_SIZE)` chunks each
+within the cap while preserving every id, and an empty list runs no query.
+`core::db::status::find_active_leaders_tests::chunks_large_id_lists_under_postgres_param_cap`
+drives `find_active_leaders` with 70000 derivation ids and asserts no executed
+statement binds more than 65535 parameters (regression for the `/evaluate` 500
+"too many arguments for query").
+
+## Per-resource live WebSocket filtering (#345)
+
+`web::endpoints::live::tests` cover the channel predicates: the evaluation channel
+forwards only events for its `evaluation_id`, the project channel learns evaluation
+ids from `evaluation_status_changed` events and then forwards their
+`build_status_changed` events (ignoring other projects), and `cache_changed`
+serializes to the `{"type":"cache_changed"}` ping.
+
+## Frontend live service (#345)
+
+`frontend .../core/services/live.service.spec.ts` stubs `WebSocket` and asserts
+`LiveService.connect(path)` builds the correct `ws(s)://…${apiUrl}${path}` URL,
+emits parsed JSON frames, ignores malformed frames, and closes the socket on
+unsubscribe.

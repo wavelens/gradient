@@ -5799,6 +5799,77 @@ x-nix-cache-paths:
         '200':
           description: Cache statistics
 
+  /board/live:
+    get:
+      tags: [board]
+      summary: Job Board live events (WebSocket)
+      description: |-
+        Upgrades to a WebSocket streaming JSON board events (`queue_depth`,
+        `job_dispatched`, `worker_connected`, `worker_disconnected`). Per-org
+        events are masked to the caller's scope.
+      operationId: boardLive
+      responses:
+        '101':
+          description: Switching Protocols - WebSocket upgrade successful
+
+  /board/cache/live:
+    get:
+      tags: [board]
+      summary: Cache change pings (WebSocket)
+      description: |-
+        Upgrades to a WebSocket emitting a content-free `{"type":"cache_changed"}`
+        ping whenever cache contents or stats change. Subscribers refetch their
+        own scope-filtered `GET /board/cache` view.
+      operationId: boardCacheLive
+      responses:
+        '101':
+          description: Switching Protocols - WebSocket upgrade successful
+
+  /projects/{organization}/{project}/live:
+    get:
+      tags: [projects]
+      summary: Project live updates (WebSocket)
+      description: |-
+        Upgrades to a WebSocket emitting `evaluation_status_changed` and
+        `build_status_changed` events for this project, so the project page
+        refetches on change instead of polling. Requires read access.
+      operationId: projectLive
+      parameters:
+        - { name: organization, in: path, required: true, schema: { type: string } }
+        - { name: project, in: path, required: true, schema: { type: string } }
+      responses:
+        '101':
+          description: Switching Protocols - WebSocket upgrade successful
+
+  /evals/{evaluation}/live:
+    get:
+      tags: [evals]
+      summary: Evaluation live updates (WebSocket)
+      description: |-
+        Upgrades to a WebSocket emitting `evaluation_status_changed` and
+        `build_status_changed` events for this evaluation. Requires read access.
+      operationId: evaluationLive
+      parameters:
+        - { name: evaluation, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '101':
+          description: Switching Protocols - WebSocket upgrade successful
+
+  /builds/{build}/live:
+    get:
+      tags: [builds]
+      summary: Build live updates (WebSocket)
+      description: |-
+        Upgrades to a WebSocket emitting `build_status_changed` events for every
+        build in this build's evaluation (covers its dependency graph). Requires
+        read access.
+      operationId: buildLive
+      parameters:
+        - { name: build, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '101':
+          description: Switching Protocols - WebSocket upgrade successful
+
   /board/network:
     get:
       tags: [board]
