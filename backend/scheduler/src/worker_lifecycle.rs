@@ -256,6 +256,12 @@ impl Scheduler {
         build::reconcile_waiting_state(&self.state, &caps, eval_capable).await
     }
 
+    /// Snapshot of every connected worker for the Job Board (includes the
+    /// internal sampling fields; the API layer masks them per caller scope).
+    pub async fn board_workers(&self) -> Vec<crate::WorkerInfo> {
+        self.worker_pool.read().await.all_workers()
+    }
+
     pub async fn mark_worker_draining(&self, peer_id: &str) {
         self.worker_pool.write().await.mark_draining(peer_id);
         info!(%peer_id, "worker marked draining");

@@ -14,6 +14,7 @@
 use crate::authorization::MaybeUser;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
+use crate::metrics_scope::MetricsScope;
 use axum::extract::{Query, State};
 use axum::{Extension, Json};
 use gradient_core::types::*;
@@ -46,45 +47,6 @@ const CATALOG: &[MetricMeta] = &[
 
 pub async fn get_metrics_catalog() -> WebResult<Json<BaseResponse<Vec<&'static MetricMeta>>>> {
     Ok(ok_json(CATALOG.iter().collect()))
-}
-
-enum MetricsScope {
-    All,
-    Orgs(Vec<String>),
-}
-
-async fn resolve_scope(
-    db: &impl ConnectionTrait,
-    user: &Option<MUser>,
-) -> Result<MetricsScope, WebError> {
-    if user.as_ref().is_some_and(|u| u.superuser) {
-        return Ok(MetricsScope::All);
-    }
-    let mut orgs: Vec<String> = Vec::new();
-    for row in db
-        .query_all(Statement::from_string(
-            DatabaseBackend::Postgres,
-            "SELECT id FROM organization WHERE public = true".to_owned(),
-        ))
-        .await?
-    {
-        orgs.push(row.try_get::<Uuid>("", "id")?.to_string());
-    }
-    if let Some(u) = user {
-        for row in db
-            .query_all(Statement::from_sql_and_values(
-                DatabaseBackend::Postgres,
-                "SELECT organization AS id FROM organization_user WHERE \"user\" = $1",
-                [Value::from(Uuid::from(u.id))],
-            ))
-            .await?
-        {
-            orgs.push(row.try_get::<Uuid>("", "id")?.to_string());
-        }
-    }
-    orgs.sort();
-    orgs.dedup();
-    Ok(MetricsScope::Orgs(orgs))
 }
 
 #[derive(Deserialize)]
@@ -125,7 +87,7 @@ pub async fn get_metrics_query(
         return Err(WebError::not_found("Metric"));
     }
     let gran = granularity_code(params.granularity.as_deref());
-    let scope = resolve_scope(&state.web_db, &maybe_user).await?;
+    let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
 
     // org filter: an explicit org must be inside the caller's scope.
     let org_filter: Option<Vec<String>> = match (&scope, params.org) {
