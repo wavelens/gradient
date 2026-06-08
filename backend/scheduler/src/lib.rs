@@ -19,6 +19,7 @@ pub mod history;
 pub mod jobs;
 pub mod log_substitution;
 pub mod peer_auth;
+pub mod views;
 pub mod worker_pool;
 pub mod worker_state;
 

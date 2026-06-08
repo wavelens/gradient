@@ -102,6 +102,8 @@ pub struct WorkerCaps {
     pub fetch: bool,
     pub architectures: Vec<String>,
     pub system_features: Vec<String>,
+    /// Full set of advertised gradient capabilities, surfaced on the dispatch view.
+    pub capabilities: gradient_core::types::proto::GradientCapabilities,
     /// Live resource view of the worker, fed into resource-aware scoring rules.
     pub metrics: Option<score::WorkerMetricsView>,
 }
@@ -458,10 +460,6 @@ impl JobTracker {
         // mutable assign_pending below.
         let dispatch_record = self.pending.get(&job_id).map(|job| {
             let s = worker_scores.and_then(|ws| ws.get(job_id.as_str()));
-            let arch = match job {
-                PendingJob::Build(b) => b.architecture.as_str(),
-                PendingJob::Eval(_) => "",
-            };
             let closure_size = match job {
                 PendingJob::Build(b) => b.closure_size,
                 PendingJob::Eval(_) => None,
@@ -514,18 +512,13 @@ impl JobTracker {
                 queued_at: job.queued_at(),
                 score_breakdown: serde_json::to_value(&breakdown)
                     .unwrap_or(serde_json::Value::Null),
-                worker_context: serde_json::json!({
-                    "architectures": worker_ctx.architectures,
-                    "system_features": worker_ctx.system_features,
-                    "fetch": worker_ctx.fetch,
-                }),
-                job_context: serde_json::json!({
-                    "missing_count": ctx.missing_count,
-                    "missing_nar_size": ctx.missing_nar_size,
-                    "dependency_count": ctx.dependency_count,
-                    "org_work_share": ctx.org_work_share,
-                    "architecture": arch,
-                }),
+                worker_context: serde_json::to_value(crate::views::WorkerContextView::new(
+                    worker_ctx,
+                    caps.map(|c| c.capabilities.clone()).unwrap_or_default(),
+                ))
+                .unwrap_or(serde_json::Value::Null),
+                job_context: serde_json::to_value(crate::views::JobContextView::new(&ctx, job))
+                    .unwrap_or(serde_json::Value::Null),
             }
         });
 

@@ -631,6 +631,7 @@ impl Scheduler {
                     fetch: g.fetch,
                     architectures,
                     system_features,
+                    capabilities: g,
                     metrics,
                 })
             }
