@@ -12,8 +12,8 @@ pub mod rules;
 
 pub use breakdown::ScoreBreakdown;
 pub use context::{
-    BuildContextLazy, EvalContext, HistoryPrediction, InstanceContext, JobKindContext,
-    LazyProviders, ScoredJob, Windowed, WorkerMetricsView,
+    BuildContext, BuildContextLazy, DerivationRef, EvalContext, HistoryPrediction, InstanceContext,
+    JobKindContext, LazyProviders, ScoredJob, Windowed, WorkerMetricsView,
 };
 pub use policy::{policy_by_name, RulePolicy, ScoringPolicy};
 pub use rule::{JobContext, ScoreRule, WorkerContext};
