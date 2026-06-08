@@ -44,15 +44,21 @@ import { RouterModule } from '@angular/router';
       }
       .board-nav {
         display: flex;
-        gap: 1.25rem;
+        gap: 0.25rem;
         margin-bottom: 1.5rem;
         border-bottom: 1px solid #2d333b;
       }
       .board-nav a {
         color: #abb0b4;
-        padding: 0.5rem 0;
+        padding: 0.5rem 0.75rem;
         text-decoration: none;
         border-bottom: 2px solid transparent;
+        border-radius: 6px 6px 0 0;
+        transition: color 0.15s, background 0.15s;
+      }
+      .board-nav a:hover {
+        color: #fff;
+        background: #21262d;
       }
       .board-nav a.active {
         color: #fff;
