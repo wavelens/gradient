@@ -74,6 +74,29 @@ async fn test_enqueue_and_get_candidates() {
     assert_eq!(candidates.len(), 2);
 }
 
+/// Regression (#359): an enqueue that happens while a session is NOT parked on
+/// the notification must still be observed on its next check. The `watch`
+/// generation is level-triggered, unlike the old `Notify::notify_waiters()`
+/// which dropped any wakeup fired while no task was awaiting — starving deep
+/// build chains of `JobOffer`s under load.
+#[tokio::test]
+async fn job_notify_bump_is_not_lost_when_not_awaiting() {
+    let scheduler = test_scheduler();
+    let peer = OrganizationId::now_v7();
+
+    let mut rx = scheduler.job_notify();
+    assert!(!rx.has_changed().unwrap(), "fresh receiver starts un-bumped");
+
+    scheduler.enqueue_eval_job("j1".into(), eval_job(peer)).await;
+    assert!(rx.has_changed().unwrap(), "missed-while-busy enqueue must still be observed");
+
+    rx.changed().await.unwrap();
+    assert!(!rx.has_changed().unwrap(), "consuming the change resets the flag");
+
+    scheduler.enqueue_eval_job("j2".into(), eval_job(peer)).await;
+    assert!(rx.has_changed().unwrap(), "a later enqueue re-arms the receiver");
+}
+
 #[tokio::test]
 async fn test_candidates_filtered_by_authorized_peers() {
     let scheduler = test_scheduler();

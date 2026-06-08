@@ -59,9 +59,11 @@ pub struct Scheduler {
     pub state: Arc<ServerState>,
     pub(crate) worker_pool: Arc<RwLock<WorkerPool>>,
     pub(crate) job_tracker: Arc<RwLock<JobTracker>>,
-    /// Signalled when new jobs are enqueued so handler dispatch loops can push
-    /// `JobOffer` messages to connected workers.
-    pub(crate) job_notify: Arc<tokio::sync::Notify>,
+    /// Bumped when new jobs are enqueued so handler dispatch loops can push
+    /// `JobOffer` messages to connected workers. A `watch` generation counter
+    /// (not `Notify`) so a bump fired while a session is busy is still observed
+    /// on its next loop iteration instead of being a lost edge-triggered wakeup.
+    pub(crate) job_notify: Arc<tokio::sync::watch::Sender<u64>>,
     /// Per-evaluation deferred dependency edges.
     ///
     /// The worker's BFS walks roots→leaves, so batch N may contain a
@@ -93,7 +95,7 @@ impl Scheduler {
             state,
             worker_pool: Arc::new(RwLock::new(WorkerPool::new())),
             job_tracker: Arc::new(RwLock::new(JobTracker::new())),
-            job_notify: Arc::new(tokio::sync::Notify::new()),
+            job_notify: Arc::new(tokio::sync::watch::channel(0u64).0),
             deferred_deps: Arc::new(RwLock::new(HashMap::new())),
             policy,
             instance: Arc::new(arc_swap::ArcSwap::from_pointee(score::InstanceContext::default())),

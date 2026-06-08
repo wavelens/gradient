@@ -791,6 +791,15 @@ Backend (`cargo test -p scheduler --tests scheduler_tests::record_eval_message`)
   into `evaluation_message`. Build compile failures and user-initiated aborts
   deliberately do not flow through this path.
 
+## Scheduler job-notify is level-triggered (#359)
+
+Backend (`cargo test -p scheduler --tests scheduler_tests::job_notify_bump_is_not_lost_when_not_awaiting`):
+- An `enqueue_*_job` that bumps `Scheduler::job_notify` while no session is
+  awaiting `changed()` is still observed on the next check (`has_changed()` is
+  `true`). Guards against the regression where an edge-triggered
+  `Notify::notify_waiters()` dropped wakeups fired during NAR/job traffic,
+  starving deep build chains of `JobOffer`s and timing out the cache VM test.
+
 ## Cache GC - orphan files keep predicate
 
 `cleanup_orphaned_cache_files` (`backend/cache/src/cacher/cleanup.rs`) is the

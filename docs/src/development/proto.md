@@ -306,6 +306,8 @@ The server treats `Draining` as "do not assign new jobs to this worker". The wor
 
 Job dispatch uses **eager push + pull-based claiming**. The server pushes **new** job candidates to eligible workers as they become available. Workers keep all received candidates in memory, score them against the local Nix store, and send back only **new or changed** scores. The server also keeps all scores in memory per worker. Both sides maintain a persistent view of the candidate/score state, enabling efficient delta-based communication and seamless recovery after server restarts.
 
+The "new candidates available" signal is a level-triggered `watch` generation counter (`Scheduler::job_notify`) bumped on every enqueue, so a bump fired while a session is busy serving NAR/job traffic is still observed on its next loop iteration — an edge-triggered `Notify` would drop it and starve deep build chains of `JobOffer`s.
+
 Jobs are scoped to the worker's authorized peers - a worker only receives candidates from peers (orgs, caches) it has successfully authenticated against.
 
 ### Dispatch Flow
