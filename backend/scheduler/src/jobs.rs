@@ -224,6 +224,16 @@ pub struct WorkerJobScore {
     pub missing_nar_size: u64,
 }
 
+#[derive(Debug, Clone)]
+pub struct PendingJobInfo {
+    pub kind: i16,
+    pub evaluation_id: EvaluationId,
+    pub build_id: Option<BuildId>,
+    pub organization: OrganizationId,
+    pub queued_at: chrono::NaiveDateTime,
+    pub dependency_count: u32,
+}
+
 #[derive(Debug, Default)]
 pub struct JobTracker {
     pending: HashMap<String, PendingJob>,
@@ -574,6 +584,26 @@ impl JobTracker {
 
     pub fn pending_count(&self) -> usize {
         self.pending.len()
+    }
+
+    pub fn pending_snapshot(&self) -> Vec<PendingJobInfo> {
+        self.pending
+            .values()
+            .map(|job| {
+                let (kind, build_id) = match job {
+                    PendingJob::Build(b) => (1i16, Some(b.build_id)),
+                    PendingJob::Eval(_) => (0i16, None),
+                };
+                PendingJobInfo {
+                    kind,
+                    evaluation_id: job.evaluation_id(),
+                    build_id,
+                    organization: job.peer_id(),
+                    queued_at: job.queued_at(),
+                    dependency_count: job.dependency_count(),
+                }
+            })
+            .collect()
     }
 
     pub fn active_count(&self) -> usize {
@@ -1178,6 +1208,18 @@ mod tests {
     fn remove_job_unknown_id_is_noop() {
         let mut tracker = JobTracker::new();
         tracker.remove_job("does-not-exist");
+    }
+
+    #[test]
+    fn pending_snapshot_reports_kind_and_org() {
+        let mut tracker = JobTracker::new();
+        let org = OrganizationId::now_v7();
+        tracker.add_pending("eval:1".into(), eval_job(org));
+        let snap = tracker.pending_snapshot();
+        assert_eq!(snap.len(), 1);
+        assert_eq!(snap[0].kind, 0);
+        assert_eq!(snap[0].organization, org);
+        assert!(snap[0].build_id.is_none());
     }
 
     #[test]
