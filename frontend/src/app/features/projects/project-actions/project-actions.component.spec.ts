@@ -98,7 +98,8 @@ describe('ProjectActionsComponent', () => {
     expect(deleteBtn).not.toBeNull();
     expect(deleteBtn!.disabled).toBe(true);
     expect(testBtn).not.toBeNull();
-    expect(testBtn!.disabled).toBe(true);
+    // Test is a trigger action, not a config edit - exempt from the managed flag (AccessService.triggerAccess).
+    expect(testBtn!.disabled).toBe(false);
   });
 
   it('renders action name and event chips', () => {
