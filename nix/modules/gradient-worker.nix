@@ -244,7 +244,7 @@ in {
           Wall-clock build time is always reported.
         '';
         type = lib.types.bool;
-        default = true;
+        default = false;
       };
 
       buildCgroupRoot = lib.mkOption {

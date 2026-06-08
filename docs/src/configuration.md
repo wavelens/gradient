@@ -259,6 +259,7 @@ services.gradient.worker = {
     build = true;
     sign  = true;
   };
+  settings.buildMetrics = true; # opt in to per-build resource metrics for smarter scheduling (enables Nix's cgroups experimental feature)
 };
 ```
 
@@ -301,6 +302,7 @@ services.gradient.worker = {
     maxConcurrentBuilds      = 8;
     evalWorkers              = 2;
     maxConcurrentEvaluations = 2;
+    buildMetrics             = true; # opt in to per-build resource metrics for smarter scheduling (enables Nix's cgroups experimental feature)
   };
 };
 ```
@@ -344,7 +346,7 @@ The token must be the 48-byte random secret returned by the registration API (ge
 | `settings.maxNixdaemonConnections` | `32` | Worker's local nix-daemon connection pool size. Each in-flight NAR import holds one connection; size for `maxConcurrentBuilds * 8` plus headroom |
 | `settings.maxProtoConnections` | `16` | Max simultaneous WebSocket connections (for discoverable mode) |
 | `settings.gcrootsDir` | `/nix/var/nix/gcroots/gradient` | Directory for worker-held indirect GC roots. One symlink per active build (drv + outputs) pins inputs and just-built outputs through the daemon so a concurrent `nix-collect-garbage` cannot race the build. Empty string disables |
-| `settings.buildMetrics` | `true` | Capture per-build resource metrics (`GRADIENT_WORKER_BUILD_METRICS`). Enables Nix's `cgroups` feature + `use-cgroups` on the daemon. CPU time comes from the daemon build result; peak RAM and disk I/O are sampled live from the build's cgroup (located via `buildCgroupStateDir`) — reliable at build concurrency 1, best-effort under concurrency. Wall-clock build time is always reported |
+| `settings.buildMetrics` | `false` | Capture per-build resource metrics (`GRADIENT_WORKER_BUILD_METRICS`) that feed the resource-aware scheduler's RAM/CPU/disk predictions for smarter job placement. Off by default because it turns on Nix's experimental `cgroups` feature + `use-cgroups` on the daemon. CPU time comes from the daemon build result; peak RAM and disk I/O are sampled live from the build's cgroup (located via `buildCgroupStateDir`) — reliable at build concurrency 1, best-effort under concurrency. Wall-clock build time is always reported |
 | `settings.buildCgroupRoot` | `/sys/fs/cgroup` | Cgroup-v2 mount root; sampled cgroup paths must live under it (`GRADIENT_WORKER_BUILD_CGROUP_ROOT`) |
 | `settings.buildCgroupStateDir` | `/nix/var/nix/cgroups` | Nix's `<state-dir>/cgroups` map of build-user UID → cgroup path; the worker reads the newest entry to locate a running build's cgroup (`GRADIENT_WORKER_BUILD_CGROUP_STATE_DIR`). Granted read access via `ReadOnlyPaths` |
 | `settings.logBurstBytesPerMin` | `8388608` (8 MiB) | Burst token bucket: max build-log bytes forwarded to the server per build in any 1-minute window. On trip the worker appends a truncation marker and stops forwarding that build's log (the build still runs). (`GRADIENT_LOG_BURST_BYTES_PER_MIN`) |
