@@ -108,12 +108,14 @@ impl ScoreRule for BuiltinDeprioritizeRule {
 
 #[derive(Debug)]
 pub struct DependencyCountRule {
-    pub dep_bonus_per_dep: f64,
+    pub cap: f64,
+    pub k: f64,
+    pub fallback_avg: f64,
 }
 
 impl Default for DependencyCountRule {
     fn default() -> Self {
-        Self { dep_bonus_per_dep: 0.5 }
+        Self { cap: 50.0, k: 2.0, fallback_avg: 10.0 }
     }
 }
 
@@ -122,13 +124,19 @@ impl ScoreRule for DependencyCountRule {
         &self,
         job: &JobContext<'_>,
         _worker: &WorkerContext<'_>,
-        _instance: &InstanceContext,
+        instance: &InstanceContext,
     ) -> f64 {
-        if job.job.build().is_some() {
-            job.dependency_count as f64 * self.dep_bonus_per_dep
-        } else {
-            0.0
+        if job.job.build().is_none() {
+            return 0.0;
         }
+
+        let base = if instance.dependency_cnt.w1h > 0.0 {
+            self.k * instance.dependency_cnt.w1h
+        } else {
+            self.k * self.fallback_avg
+        };
+
+        self.cap * (job.dependency_count as f64 / base).clamp(0.0, 1.0)
     }
 }
 
@@ -295,24 +303,54 @@ mod tests {
         let archs = vec!["x86_64-linux".to_string()];
         let w = worker(&archs, false);
         let now = gradient_core::types::now();
+        // w1h=10 → base=20; dep=1 → 2.5, dep=15 → 37.5 (both below saturation)
+        let inst = crate::context::InstanceContext {
+            dependency_cnt: crate::context::Windowed { w1h: 10.0, ..Default::default() },
+            ..Default::default()
+        };
 
         let c_few = JobContext { job: &job, missing_count: None, missing_nar_size: None, dependency_count: 1, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0 };
-        let c_many = JobContext { job: &job, missing_count: None, missing_nar_size: None, dependency_count: 20, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0 };
+        let c_many = JobContext { job: &job, missing_count: None, missing_nar_size: None, dependency_count: 15, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0 };
 
-        assert!(rule.score(&c_many, &w, &InstanceContext::default()) > rule.score(&c_few, &w, &InstanceContext::default()));
-        assert!(rule.score(&c_few, &w, &InstanceContext::default()) > 0.0);
+        assert!(rule.score(&c_many, &w, &inst) > rule.score(&c_few, &w, &inst));
+        assert!(rule.score(&c_few, &w, &inst) > 0.0);
     }
 
     #[test]
     fn dependency_count_zero_deps_zero_score() {
         let rule = DependencyCountRule::default();
+        let build = build_job("x86_64-linux");
+        let eval = eval_job(false);
+        let archs = vec!["x86_64-linux".to_string()];
+        let w = worker(&archs, false);
+        let now = gradient_core::types::now();
+        let inst = crate::context::InstanceContext {
+            dependency_cnt: crate::context::Windowed { w1h: 10.0, ..Default::default() },
+            ..Default::default()
+        };
+
+        let ctx_zero = JobContext { job: &build, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0 };
+        let ctx_eval = JobContext { job: &eval, missing_count: None, missing_nar_size: None, dependency_count: 5, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0 };
+
+        assert_eq!(rule.score(&ctx_zero, &w, &inst), 0.0);
+        assert_eq!(rule.score(&ctx_eval, &w, &inst), 0.0);
+    }
+
+    #[test]
+    fn dependency_count_capped_at_50() {
+        let rule = DependencyCountRule::default();
         let job = build_job("x86_64-linux");
         let archs = vec!["x86_64-linux".to_string()];
         let w = worker(&archs, false);
         let now = gradient_core::types::now();
+        let inst = crate::context::InstanceContext {
+            dependency_cnt: crate::context::Windowed { w1h: 10.0, ..Default::default() },
+            ..Default::default()
+        };
 
-        let ctx = JobContext { job: &job, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0 };
-        assert_eq!(rule.score(&ctx, &w, &InstanceContext::default()), 0.0);
+        let ctx_huge = JobContext { job: &job, missing_count: None, missing_nar_size: None, dependency_count: 100_000, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0 };
+
+        assert!(rule.score(&ctx_huge, &w, &inst) <= 50.0);
     }
 
     #[test]
