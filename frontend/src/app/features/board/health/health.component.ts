@@ -6,14 +6,16 @@
 
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { RouterModule } from '@angular/router';
 import { BoardService, BoardHealth } from '@core/services/board.service';
+import { AdminService, AdminTask } from '@core/services/admin.service';
 
 const MIB = 1024 ** 2;
 
 @Component({
   selector: 'app-board-health',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, RouterModule],
   template: `
     @if (health(); as h) {
       <div class="kpis">
@@ -40,20 +42,29 @@ const MIB = 1024 ** 2;
         <div class="cell"><span class="label">Packages</span><span>{{ h.cache_packages }}</span></div>
       </div>
 
-      <h2>HTTP routes</h2>
+      <h2>Admin</h2>
+      <div class="admin-actions">
+        <a class="btn" [class.disabled]="githubConfigured()" routerLink="/admin/github-app"
+           [attr.aria-disabled]="githubConfigured()">
+          {{ githubConfigured() ? 'GitHub App configured' : 'Set up GitHub App' }}
+        </a>
+        <button class="btn" (click)="runDeepGc()" [disabled]="gcBusy()">Run Deep GC</button>
+        @if (gcNotice(); as n) { <span class="notice">{{ n }}</span> }
+      </div>
+
       <table class="http">
-        <thead><tr><th>Method</th><th>Route</th><th class="num">Requests</th><th class="num">Avg ms</th><th class="num">Errors</th></tr></thead>
+        <thead><tr><th>Task</th><th>Status</th><th>Created</th><th>Finished</th><th>Error</th></tr></thead>
         <tbody>
-          @for (r of h.http; track r.method + r.route) {
+          @for (t of tasks(); track t.id) {
             <tr>
-              <td>{{ r.method }}</td>
-              <td class="mono">{{ r.route }}</td>
-              <td class="num">{{ r.count }}</td>
-              <td class="num">{{ r.avg_ms | number: '1.1-1' }}</td>
-              <td class="num" [class.bad]="r.errors > 0">{{ r.errors }}</td>
+              <td>{{ t.kind }}</td>
+              <td>{{ t.status }}</td>
+              <td>{{ t.created_at | date: 'short' }}</td>
+              <td>{{ t.finished_at ? (t.finished_at | date: 'short') : '—' }}</td>
+              <td [class.bad]="!!t.error">{{ t.error ?? '' }}</td>
             </tr>
           } @empty {
-            <tr><td colspan="5" class="muted">No HTTP route data yet.</td></tr>
+            <tr><td colspan="5" class="muted">No admin tasks yet.</td></tr>
           }
         </tbody>
       </table>
@@ -78,12 +89,22 @@ const MIB = 1024 ** 2;
       .mono { font-family: monospace; }
       .num { text-align: right; font-variant-numeric: tabular-nums; }
       .muted { color: #818181; }
+      .admin-actions { display: flex; align-items: center; gap: 0.75rem; margin: 0 0 1rem; }
+      .btn { background: #2d333b; color: #fff; border: 1px solid #444c56; border-radius: 6px; padding: 0.4rem 0.8rem; cursor: pointer; text-decoration: none; font-size: 0.85rem; }
+      .btn[disabled], .btn.disabled { opacity: 0.5; pointer-events: none; }
+      .notice { color: #e3b341; font-size: 0.8rem; }
     `,
   ],
 })
 export class BoardHealthComponent implements OnInit {
   private board = inject(BoardService);
+  private admin = inject(AdminService);
+
   health = signal<BoardHealth | null>(null);
+  tasks = signal<AdminTask[]>([]);
+  githubConfigured = signal(false);
+  gcBusy = signal(false);
+  gcNotice = signal<string | null>(null);
 
   mib(bytes: number): string {
     return (bytes / MIB).toFixed(0);
@@ -95,7 +116,22 @@ export class BoardHealthComponent implements OnInit {
     return h > 0 ? `${h}h ${m}m` : `${m}m`;
   }
 
+  private loadTasks(): void {
+    this.admin.listTasks().subscribe((t) => this.tasks.set(t));
+  }
+
+  runDeepGc(): void {
+    this.gcBusy.set(true);
+    this.gcNotice.set(null);
+    this.admin.startDeepGc().subscribe({
+      next: () => { this.gcBusy.set(false); this.loadTasks(); },
+      error: (e) => { this.gcBusy.set(false); this.gcNotice.set(e?.message ?? 'Deep GC failed to start'); },
+    });
+  }
+
   ngOnInit(): void {
     this.board.getHealth().subscribe((h) => this.health.set(h));
+    this.loadTasks();
+    this.admin.githubAppConfigured().subscribe((v) => this.githubConfigured.set(v));
   }
 }
