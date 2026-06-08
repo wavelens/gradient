@@ -9,13 +9,14 @@ use crate::rule::{JobContext, ScoreRule, WorkerContext};
 
 #[derive(Debug)]
 pub struct MissingPathsRule {
-    pub scored_bonus: f64,
-    pub path_penalty: f64,
+    pub cap: f64,
+    pub k: f64,
+    pub fallback_avg: f64,
 }
 
 impl Default for MissingPathsRule {
     fn default() -> Self {
-        Self { scored_bonus: 200.0, path_penalty: 10.0 }
+        Self { cap: 200.0, k: 2.0, fallback_avg: 20.0 }
     }
 }
 
@@ -24,11 +25,19 @@ impl ScoreRule for MissingPathsRule {
         &self,
         job: &JobContext<'_>,
         _worker: &WorkerContext<'_>,
-        _instance: &InstanceContext,
+        instance: &InstanceContext,
     ) -> f64 {
         match job.missing_count {
             None => 0.0,
-            Some(n) => self.scored_bonus - (n as f64) * self.path_penalty,
+            Some(n) => {
+                let base = if instance.missing_paths.w1h > 0.0 {
+                    self.k * instance.missing_paths.w1h
+                } else {
+                    self.k * self.fallback_avg
+                };
+
+                self.cap * (1.0 - (n as f64 / base).clamp(0.0, 1.0))
+            }
         }
     }
 }
@@ -209,11 +218,17 @@ mod tests {
         let archs = vec!["x86_64-linux".to_string()];
         let w = worker(&archs, false);
         let now = gradient_core::types::now();
+        let inst = crate::context::InstanceContext {
+            missing_paths: crate::context::Windowed { w1h: 10.0, ..Default::default() },
+            ..Default::default()
+        };
 
         let scored = JobContext { job: &job, missing_count: Some(0), missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0 };
         let unscored = JobContext { job: &job, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0 };
 
-        assert!(rule.score(&scored, &w, &InstanceContext::default()) > rule.score(&unscored, &w, &InstanceContext::default()));
+        assert!((rule.score(&scored, &w, &inst) - 200.0).abs() < 1e-9);
+        assert_eq!(rule.score(&unscored, &w, &inst), 0.0);
+        assert!(rule.score(&scored, &w, &inst) > rule.score(&unscored, &w, &inst));
     }
 
     #[test]
@@ -223,11 +238,17 @@ mod tests {
         let archs = vec!["x86_64-linux".to_string()];
         let w = worker(&archs, false);
         let now = gradient_core::types::now();
+        let inst = crate::context::InstanceContext {
+            missing_paths: crate::context::Windowed { w1h: 10.0, ..Default::default() },
+            ..Default::default()
+        };
 
         let c1 = JobContext { job: &job, missing_count: Some(2), missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0 };
         let c2 = JobContext { job: &job, missing_count: Some(10), missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0 };
 
-        assert!(rule.score(&c1, &w, &InstanceContext::default()) > rule.score(&c2, &w, &InstanceContext::default()));
+        assert!(rule.score(&c1, &w, &inst) > rule.score(&c2, &w, &inst));
+        assert!(rule.score(&c1, &w, &inst) >= 0.0);
+        assert!(rule.score(&c2, &w, &inst) >= 0.0);
     }
 
     #[test]
