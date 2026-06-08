@@ -31,6 +31,7 @@ pub struct Model {
     pub score_breakdown: Json,
     pub worker_context: Json,
     pub job_context: Json,
+    pub instance_context: Option<Json>,
     pub candidates: Option<Json>,
     pub created_at: NaiveDateTime,
 }
