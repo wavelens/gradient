@@ -5764,7 +5764,7 @@ paths:
     get:
       tags: [board]
       summary: Dispatched job detail
-      description: Full dispatch record incl. per-rule scoring breakdown and job/worker contexts. Runner-up candidates are superuser-only.
+      description: Full dispatch record incl. per-rule scoring breakdown, job/worker/instance contexts. Runner-up candidates are superuser-only.
       operationId: getBoardJob
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
