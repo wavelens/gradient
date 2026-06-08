@@ -10,6 +10,7 @@ use crate::rule::{JobContext, ScoreRule, WorkerContext};
 #[derive(Debug)]
 pub struct ResourceFitRule {
     pub ram_overshoot_penalty: f64,
+    pub max_overshoot: f64,
     pub cpu_affinity_bonus: f64,
     pub cpu_heavy_threshold_ms: u64,
     pub cpu_bonus_cap: f64,
@@ -17,7 +18,7 @@ pub struct ResourceFitRule {
 
 impl Default for ResourceFitRule {
     fn default() -> Self {
-        Self { ram_overshoot_penalty: 400.0, cpu_affinity_bonus: 50.0, cpu_heavy_threshold_ms: 60_000, cpu_bonus_cap: 2.0 }
+        Self { ram_overshoot_penalty: 400.0, max_overshoot: 2.0, cpu_affinity_bonus: 50.0, cpu_heavy_threshold_ms: 60_000, cpu_bonus_cap: 2.0 }
     }
 }
 
@@ -37,8 +38,8 @@ impl ScoreRule for ResourceFitRule {
 
         let mut s = 0.0;
         if m.ram_free_mb > 0 && h.predicted_peak_ram_mb > m.ram_free_mb {
-            let overshoot = (h.predicted_peak_ram_mb - m.ram_free_mb) as f64 / m.ram_free_mb as f64;
-            // overshoot scaled by per-job oom history and instance-wide oom trend
+            let overshoot = ((h.predicted_peak_ram_mb - m.ram_free_mb) as f64 / m.ram_free_mb as f64).min(self.max_overshoot);
+            // bounded so WaitTime can overcome it; scaled by per-job and instance-wide oom trend
             s -= self.ram_overshoot_penalty * overshoot * (1.0 + h.oom_rate as f64) * (1.0 + instance.oom_rate.w1h);
         }
 
@@ -53,7 +54,7 @@ impl ScoreRule for ResourceFitRule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::context::{HistoryPrediction, LazyProviders, ScoredJob, WorkerMetricsView};
+    use crate::context::{HistoryPrediction, LazyProviders, ScoredJob, Windowed, WorkerMetricsView};
     use gradient_core::types::ids::OrganizationId;
 
     fn job_with_history(h: HistoryPrediction) -> ScoredJob<'static> {
@@ -90,6 +91,18 @@ mod tests {
         let s_large = rule.score(&ctx(&large), &w, &InstanceContext::default());
         assert!(s_small < 0.0);
         assert!(s_large < s_small, "larger overshoot must be more negative: {s_large} vs {s_small}");
+    }
+
+    #[test]
+    fn ram_overshoot_penalty_is_bounded() {
+        let rule = ResourceFitRule::default();
+        let w = worker_with(WorkerMetricsView { ram_free_mb: 100, ..Default::default() });
+        let job = job_with_history(HistoryPrediction { predicted_peak_ram_mb: 1_000_000, oom_rate: 1.0, samples: 5, ..Default::default() });
+        let inst = InstanceContext { oom_rate: Windowed { w1h: 1.0, ..Default::default() }, ..Default::default() };
+
+        let s = rule.score(&ctx(&job), &w, &inst);
+        assert!(s >= -(rule.ram_overshoot_penalty * rule.max_overshoot * 4.0) - 0.001, "penalty must be bounded by clamp, got {s}");
+        assert!(s > -4000.0, "penalty must stay below WaitTimeRule cap so wait can overcome it, got {s}");
     }
 
     #[test]
