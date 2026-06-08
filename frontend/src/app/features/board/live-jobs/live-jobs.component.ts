@@ -9,7 +9,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterModule } from '@angular/router';
 import { Subscription } from 'rxjs';
-import { BoardService, DispatchedJobSummary } from '@core/services/board.service';
+import { BoardService, DispatchedJobSummary, PendingJobSummary } from '@core/services/board.service';
 import { BoardLiveService } from '@core/services/board-live.service';
 
 type KindFilter = 'all' | 'eval' | 'build';
@@ -20,54 +20,83 @@ type StatusFilter = 'all' | 'pending' | 'dispatched';
   standalone: true,
   imports: [CommonModule, FormsModule, RouterModule],
   template: `
-    <div class="banner">
-      Showing {{ filteredJobs().length }} of {{ jobs().length }} dispatched job(s) you can see.
-      @if (otherRunning() > 0) {
-        <span class="muted">+ {{ otherRunning() }} other running (hidden).</span>
-      }
+    <div class="view-toggle">
+      <button [class.active]="view() === 'dispatched'" (click)="setView('dispatched')">Dispatched</button>
+      <button [class.active]="view() === 'pending'" (click)="setView('pending')">Pending</button>
     </div>
 
-    <div class="filters">
-      <label>Type
-        <select [ngModel]="kindFilter()" (ngModelChange)="kindFilter.set($event)">
-          <option value="all">all</option>
-          <option value="eval">eval</option>
-          <option value="build">build</option>
-        </select>
-      </label>
-      <label>Status
-        <select [ngModel]="statusFilter()" (ngModelChange)="statusFilter.set($event)">
-          <option value="all">all</option>
-          <option value="pending">pending (live)</option>
-          <option value="dispatched">dispatched</option>
-        </select>
-      </label>
-      <label>Score min
-        <input type="number" step="0.1" [ngModel]="scoreMin()" (ngModelChange)="scoreMin.set($event)" placeholder="—" />
-      </label>
-      <label>Score max
-        <input type="number" step="0.1" [ngModel]="scoreMax()" (ngModelChange)="scoreMax.set($event)" placeholder="—" />
-      </label>
-    </div>
-
-    <table class="jobs">
-      <thead>
-        <tr><th>Kind</th><th>Worker</th><th>Score</th><th>Dispatched</th><th></th></tr>
-      </thead>
-      <tbody>
-        @for (j of filteredJobs(); track j.id) {
-          <tr [class.live]="isLive(j)" [class.clickable]="canInspect(j)" (click)="inspect(j)">
-            <td>{{ j.kind === 1 ? 'build' : 'eval' }}</td>
-            <td class="mono">{{ j.worker_id }}</td>
-            <td>{{ j.score | number: '1.1-1' }}</td>
-            <td>{{ j.dispatched_at | date: 'HH:mm:ss' }}</td>
-            <td>{{ canInspect(j) ? '›' : '' }}</td>
-          </tr>
-        } @empty {
-          <tr><td colspan="5" class="muted">No matching dispatched jobs.</td></tr>
+    @if (view() === 'dispatched') {
+      <div class="banner">
+        Showing {{ filteredJobs().length }} of {{ jobs().length }} dispatched job(s) you can see.
+        @if (otherRunning() > 0) {
+          <span class="muted">+ {{ otherRunning() }} other running (hidden).</span>
         }
-      </tbody>
-    </table>
+      </div>
+
+      <div class="filters">
+        <label>Type
+          <select [ngModel]="kindFilter()" (ngModelChange)="kindFilter.set($event)">
+            <option value="all">all</option>
+            <option value="eval">eval</option>
+            <option value="build">build</option>
+          </select>
+        </label>
+        <label>Status
+          <select [ngModel]="statusFilter()" (ngModelChange)="statusFilter.set($event)">
+            <option value="all">all</option>
+            <option value="pending">pending (live)</option>
+            <option value="dispatched">dispatched</option>
+          </select>
+        </label>
+        <label>Score min
+          <input type="number" step="0.1" [ngModel]="scoreMin()" (ngModelChange)="scoreMin.set($event)" placeholder="—" />
+        </label>
+        <label>Score max
+          <input type="number" step="0.1" [ngModel]="scoreMax()" (ngModelChange)="scoreMax.set($event)" placeholder="—" />
+        </label>
+      </div>
+
+      <table class="jobs">
+        <thead>
+          <tr><th>Kind</th><th>Worker</th><th>Score</th><th>Dispatched</th><th></th></tr>
+        </thead>
+        <tbody>
+          @for (j of filteredJobs(); track j.id) {
+            <tr [class.live]="isLive(j)" [class.clickable]="canInspect(j)" (click)="inspect(j)">
+              <td>{{ j.kind === 1 ? 'build' : 'eval' }}</td>
+              <td class="mono">{{ j.worker_id }}</td>
+              <td>{{ j.score | number: '1.1-1' }}</td>
+              <td>{{ j.dispatched_at | date: 'HH:mm:ss' }}</td>
+              <td>{{ canInspect(j) ? '›' : '' }}</td>
+            </tr>
+          } @empty {
+            <tr><td colspan="5" class="muted">No matching dispatched jobs.</td></tr>
+          }
+        </tbody>
+      </table>
+    }
+
+    @if (view() === 'pending') {
+      <div class="banner">
+        {{ pendingJobs().length }} pending job(s) you can see.
+        @if (otherPending() > 0) { <span class="muted">+ {{ otherPending() }} hidden.</span> }
+      </div>
+      <table class="jobs">
+        <thead><tr><th>Kind</th><th>Evaluation</th><th>Deps</th><th>Queued</th></tr></thead>
+        <tbody>
+          @for (p of pendingJobs(); track p.evaluation_id + (p.build_id ?? '')) {
+            <tr class="clickable" [routerLink]="['/board/jobs', p.evaluation_id]">
+              <td>{{ p.kind === 1 ? 'build' : 'eval' }}</td>
+              <td class="mono">{{ p.evaluation_id.slice(0, 8) }}</td>
+              <td>{{ p.dependency_count }}</td>
+              <td>{{ p.queued_at | date: 'HH:mm:ss' }}</td>
+            </tr>
+          } @empty {
+            <tr><td colspan="4" class="muted">No pending jobs.</td></tr>
+          }
+        </tbody>
+      </table>
+    }
   `,
   styles: [
     `
@@ -83,6 +112,9 @@ type StatusFilter = 'all' | 'pending' | 'dispatched';
       tbody tr.clickable:hover { background: #2d333b; }
       tbody tr.live { opacity: 0.7; font-style: italic; }
       .mono { font-family: monospace; }
+      .view-toggle { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+      .view-toggle button { background: #21262d; color: #abb0b4; border: 1px solid #2d333b; border-radius: 6px; padding: 0.3rem 0.8rem; cursor: pointer; }
+      .view-toggle button.active { background: #2d333b; color: #fff; }
     `,
   ],
 })
@@ -94,6 +126,10 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
 
   jobs = signal<DispatchedJobSummary[]>([]);
   otherRunning = signal(0);
+
+  view = signal<'dispatched' | 'pending'>('dispatched');
+  pendingJobs = signal<PendingJobSummary[]>([]);
+  otherPending = signal(0);
 
   kindFilter = signal<KindFilter>('all');
   statusFilter = signal<StatusFilter>('all');
@@ -148,6 +184,18 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.sub?.unsubscribe();
+  }
+
+  setView(v: 'dispatched' | 'pending'): void {
+    this.view.set(v);
+    if (v === 'pending') this.loadPending();
+  }
+
+  private loadPending(): void {
+    this.board.getPendingJobs().subscribe((r) => {
+      this.pendingJobs.set(r.jobs);
+      this.otherPending.set(r.other_pending);
+    });
   }
 
   isLive(j: DispatchedJobSummary): boolean {
