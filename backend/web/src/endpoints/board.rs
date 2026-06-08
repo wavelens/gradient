@@ -141,6 +141,7 @@ pub struct DispatchedJobDetail {
     pub score_breakdown: serde_json::Value,
     pub worker_context: serde_json::Value,
     pub job_context: serde_json::Value,
+    pub instance_context: serde_json::Value,
     /// Runner-up candidates, superuser-only.
     pub candidates: Option<serde_json::Value>,
 }
@@ -174,6 +175,7 @@ pub async fn get_dispatched_job(
         score_breakdown: j.score_breakdown,
         worker_context: j.worker_context,
         job_context: j.job_context,
+        instance_context: j.instance_context.unwrap_or(serde_json::Value::Null),
         candidates: if scope.is_all() { j.candidates } else { None },
     }))
 }
