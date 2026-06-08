@@ -40,7 +40,7 @@ impl Scheduler {
             .write()
             .await
             .add_pending(job_id, PendingJob::Eval(job));
-        self.job_notify.notify_waiters();
+        self.job_notify.send_modify(|g| *g = g.wrapping_add(1));
         candidate
     }
 
@@ -50,14 +50,15 @@ impl Scheduler {
             .write()
             .await
             .add_pending(job_id, PendingJob::Build(job));
-        self.job_notify.notify_waiters();
+        self.job_notify.send_modify(|g| *g = g.wrapping_add(1));
         candidate
     }
 
-    /// Returns a handle that handler dispatch loops can `await` on to be woken
-    /// when new jobs are enqueued in the scheduler.
-    pub fn job_notify(&self) -> Arc<tokio::sync::Notify> {
-        Arc::clone(&self.job_notify)
+    /// Returns a `watch` receiver handler dispatch loops `await` (via
+    /// `changed()`) to learn that new jobs were enqueued. Level-triggered: a
+    /// bump fired while the session is busy is seen on its next `changed()`.
+    pub fn job_notify(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.job_notify.subscribe()
     }
 
     /// Returns ALL pending job candidates visible to the given worker.

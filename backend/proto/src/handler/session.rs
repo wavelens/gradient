@@ -44,7 +44,7 @@ pub(super) struct Registered {
     pub peer_id: String,
     pub reauth_notify: Arc<tokio::sync::Notify>,
     pub abort_rx: tokio::sync::mpsc::UnboundedReceiver<(String, String)>,
-    pub job_notify: Arc<tokio::sync::Notify>,
+    pub job_notify: tokio::sync::watch::Receiver<u64>,
 }
 
 // ── Protocol session ──────────────────────────────────────────────────────────
@@ -258,7 +258,7 @@ impl ProtoSession<Registered> {
                     peer_id,
                     reauth_notify,
                     mut abort_rx,
-                    job_notify,
+                    mut job_notify,
                 },
         } = self;
 
@@ -279,7 +279,8 @@ impl ProtoSession<Registered> {
                     if !on_reauth_notify(&writer, &state, &peer_id).await { break; }
                     continue;
                 }
-                _ = job_notify.notified() => {
+                res = job_notify.changed() => {
+                    if res.is_err() { break; }
                     if !on_job_notify(&writer, &scheduler, &peer_id).await { break; }
                     continue;
                 }

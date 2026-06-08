@@ -177,7 +177,7 @@ impl Scheduler {
             "aborted jobs for revoked org(s) on worker"
         );
         // Notify other workers that these jobs are available again.
-        self.job_notify.notify_waiters();
+        self.job_notify.send_modify(|g| *g = g.wrapping_add(1));
     }
 
     /// Signal a connected worker that its registrations have changed,
