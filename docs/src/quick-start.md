@@ -66,6 +66,7 @@ echo "*:$(cat /run/secrets/gradient-worker-token)" > /run/secrets/gradient-worke
     serverUrl = "ws://127.0.0.1:3000/proto";
     workerId  = "<uuid from uuidgen>"; # if not provided, a random UUID will be generated and saved in /var/lib/gradient/worker-id
     peersFile = "/run/secrets/gradient-worker-peers";
+    settings.buildMetrics = true; # opt in to per-build resource metrics for smarter scheduling (enables Nix's cgroups experimental feature)
   };
 }
 ```

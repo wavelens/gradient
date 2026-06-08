@@ -178,7 +178,7 @@ pub struct WorkerConfig {
     /// Capture per-build resource metrics (peak RAM, CPU time, disk I/O) from
     /// the build's cgroup. Requires Nix's experimental `use-cgroups` feature on
     /// the daemon. Wall-clock build time is always reported regardless.
-    #[arg(long, env = "GRADIENT_WORKER_BUILD_METRICS", default_value = "true")]
+    #[arg(long, env = "GRADIENT_WORKER_BUILD_METRICS", default_value = "false")]
     pub build_metrics: bool,
 
     /// Cgroup-v2 mount root searched for per-build cgroups when
