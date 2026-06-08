@@ -235,6 +235,7 @@ in {
           enable = true;
           serverUrl = "ws://server/proto";
           peersFile = "/etc/gradient/secrets/worker_peers";
+          settings.buildMetrics = true;
           capabilities = {
             eval  = true;
             build = true;
