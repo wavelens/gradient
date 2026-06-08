@@ -142,13 +142,14 @@ impl ScoreRule for DependencyCountRule {
 
 #[derive(Debug)]
 pub struct WaitTimeRule {
-    pub bonus_per_second: f64,
-    pub max_wait_secs: f64,
+    pub gain: f64,
+    pub fallback_avg_secs: f64,
+    pub cap: f64,
 }
 
 impl Default for WaitTimeRule {
     fn default() -> Self {
-        Self { bonus_per_second: 0.1, max_wait_secs: 3600.0 }
+        Self { gain: 60.0, fallback_avg_secs: 60.0, cap: 4000.0 }
     }
 }
 
@@ -157,11 +158,17 @@ impl ScoreRule for WaitTimeRule {
         &self,
         job: &JobContext<'_>,
         _worker: &WorkerContext<'_>,
-        _instance: &InstanceContext,
+        instance: &InstanceContext,
     ) -> f64 {
         let now = gradient_core::types::now();
-        let waited = (now - job.queued_at).num_seconds().max(0) as f64;
-        waited.min(self.max_wait_secs) * self.bonus_per_second
+        let waited = (now - job.ready_at).num_seconds().max(0) as f64;
+        let avg = if instance.wait_secs.w1h > 0.0 {
+            instance.wait_secs.w1h
+        } else {
+            self.fallback_avg_secs
+        };
+
+        (self.gain * (waited / avg)).min(self.cap)
     }
 }
 
@@ -370,9 +377,9 @@ mod tests {
         let ancient = rule.score(&ctx_ancient, &w, &InstanceContext::default());
 
         assert!(fresh < mid, "older should score higher: {fresh} vs {mid}");
-        let cap = rule.max_wait_secs * rule.bonus_per_second;
-        assert!(ancient <= cap + 0.01, "ancient must be capped at {cap}, got {ancient}");
-        assert!(ancient >= cap - 0.01, "ancient should reach cap, got {ancient}");
+        assert!(mid < ancient, "even older should score higher: {mid} vs {ancient}");
+        assert!(ancient <= rule.cap + 1.0, "ancient must be capped at {}, got {ancient}", rule.cap);
+        assert!(ancient > 1140.0, "ancient must clear the soft-cap budget for anti-starvation, got {ancient}");
     }
 
     #[test]
