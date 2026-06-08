@@ -44,7 +44,7 @@ pub struct InstanceContext {
     pub idle_workers: u32,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct HistoryPrediction {
     pub predicted_peak_ram_mb: u64,
     pub avg_cpu_time_ms: u64,
@@ -62,6 +62,52 @@ pub struct WorkerMetricsView {
     pub cpu_usage_pct: f32,
     pub disk_speed_mbps: Option<f32>,
     pub network_speed_mbps: Option<f32>,
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct DerivationRef {
+    pub build_id: String,
+    pub drv_path: String,
+    pub pname: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct BuildContext {
+    pub architecture: String,
+    pub dependency_count: u32,
+    pub prefer_local_build: bool,
+    pub is_fixed_output: bool,
+    pub pname: Option<String>,
+    pub closure_size: Option<i64>,
+    pub history: HistoryPrediction,
+    pub derivations: Vec<DerivationRef>,
+}
+
+impl BuildContext {
+    pub fn aggregate(items: &[BuildContext]) -> BuildContext {
+        if items.len() == 1 {
+            return items[0].clone();
+        }
+        let first = &items[0];
+        let mut out = first.clone();
+        out.dependency_count = items.iter().map(|i| i.dependency_count).sum();
+        out.closure_size = Some(items.iter().filter_map(|i| i.closure_size).sum());
+        out.prefer_local_build = items.iter().any(|i| i.prefer_local_build);
+        out.is_fixed_output = items.iter().any(|i| i.is_fixed_output);
+        out.pname = if items.iter().all(|i| i.pname == first.pname) {
+            first.pname.clone()
+        } else {
+            None
+        };
+        out.history.predicted_peak_ram_mb =
+            items.iter().map(|i| i.history.predicted_peak_ram_mb).max().unwrap_or(0);
+        out.history.oom_rate = items.iter().map(|i| i.history.oom_rate).fold(0.0, f32::max);
+        out.history.avg_cpu_time_ms = items.iter().map(|i| i.history.avg_cpu_time_ms).sum();
+        out.history.avg_disk_bytes = items.iter().map(|i| i.history.avg_disk_bytes).sum();
+        out.history.samples = items.iter().map(|i| i.history.samples).min().unwrap_or(0);
+        out.derivations = items.iter().flat_map(|i| i.derivations.clone()).collect();
+        out
+    }
 }
 
 pub struct LazyProviders<'a> {
@@ -240,5 +286,40 @@ mod tests {
         assert_eq!(ic.wait_secs.w1h, 0.0);
         assert_eq!(ic.active_builds, 0);
         assert_eq!(ic.total_workers, 0);
+    }
+
+    #[test]
+    fn aggregate_len1_is_identity_and_multi_reduces() {
+        let a = BuildContext {
+            architecture: "x86_64-linux".into(),
+            dependency_count: 2,
+            prefer_local_build: false,
+            is_fixed_output: false,
+            pname: Some("curl".into()),
+            closure_size: Some(100),
+            history: HistoryPrediction {
+                predicted_peak_ram_mb: 500,
+                avg_cpu_time_ms: 1000,
+                avg_disk_bytes: 10,
+                oom_rate: 0.1,
+                samples: 5,
+            },
+            derivations: vec![],
+        };
+        assert_eq!(BuildContext::aggregate(std::slice::from_ref(&a)), a);
+
+        let mut b = a.clone();
+        b.history.predicted_peak_ram_mb = 900;
+        b.history.avg_cpu_time_ms = 4000;
+        b.history.samples = 2;
+        b.pname = Some("git".into());
+        b.prefer_local_build = true;
+        let agg = BuildContext::aggregate(&[a.clone(), b]);
+        assert_eq!(agg.history.predicted_peak_ram_mb, 900);
+        assert_eq!(agg.history.avg_cpu_time_ms, 5000);
+        assert_eq!(agg.history.samples, 2);
+        assert_eq!(agg.dependency_count, 4);
+        assert!(agg.prefer_local_build);
+        assert_eq!(agg.pname, None);
     }
 }
