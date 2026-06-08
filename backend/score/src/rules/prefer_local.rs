@@ -32,10 +32,10 @@ impl ScoreRule for PreferLocalBuildRule {
         }
 
         let knee = 2.0 * instance.missing_paths.w1h;
-        let k = if knee > 0.0 { self.local_bonus / knee } else { self.miss_penalty };
+        let slope = if knee > 0.0 { self.local_bonus / knee } else { self.miss_penalty };
         match job.missing_count {
             Some(0) => self.local_bonus,
-            Some(n) => (self.local_bonus - n as f64 * k).max(0.0),
+            Some(n) => (self.local_bonus - n as f64 * slope).max(0.0),
             None => 0.0,
         }
     }

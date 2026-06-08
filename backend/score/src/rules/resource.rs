@@ -38,14 +38,11 @@ impl ScoreRule for ResourceFitRule {
         let mut s = 0.0;
         if m.ram_free_mb > 0 && h.predicted_peak_ram_mb > m.ram_free_mb {
             let overshoot = (h.predicted_peak_ram_mb - m.ram_free_mb) as f64 / m.ram_free_mb as f64;
+            // overshoot scaled by per-job oom history and instance-wide oom trend
             s -= self.ram_overshoot_penalty * overshoot * (1.0 + h.oom_rate as f64) * (1.0 + instance.oom_rate.w1h);
         }
 
-        let cpu_threshold = if instance.cpu_time_ms.w1h > 0.0 {
-            instance.cpu_time_ms.w1h
-        } else {
-            self.cpu_heavy_threshold_ms as f64
-        };
+        let cpu_threshold = instance.cpu_time_ms.w1h_or(self.cpu_heavy_threshold_ms as f64);
         if (h.avg_cpu_time_ms as f64) > cpu_threshold {
             s += self.cpu_affinity_bonus * ((m.cpu_core_score as f64 / 1000.0).min(self.cpu_bonus_cap));
         }

@@ -13,6 +13,16 @@ pub struct Windowed {
     pub w24h: f64,
 }
 
+impl Windowed {
+    pub fn w1h_or(self, fallback: f64) -> f64 {
+        if self.w1h > 0.0 { self.w1h } else { fallback }
+    }
+
+    pub fn w24h_or(self, fallback: f64) -> f64 {
+        if self.w24h > 0.0 { self.w24h } else { fallback }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct InstanceContext {
     pub wait_secs: Windowed,
@@ -214,6 +224,14 @@ mod tests {
         let w = Windowed { w5m: 1.0, w1h: 2.0, w24h: 3.0 };
         assert_eq!(Windowed::default(), Windowed { w5m: 0.0, w1h: 0.0, w24h: 0.0 });
         assert_eq!(w.w1h, 2.0);
+    }
+
+    #[test]
+    fn windowed_or_uses_value_when_positive_else_fallback() {
+        assert_eq!(Windowed { w1h: 5.0, ..Default::default() }.w1h_or(9.0), 5.0);
+        assert_eq!(Windowed::default().w1h_or(9.0), 9.0);
+        assert_eq!(Windowed { w24h: 7.0, ..Default::default() }.w24h_or(9.0), 7.0);
+        assert_eq!(Windowed::default().w24h_or(9.0), 9.0);
     }
 
     #[test]
