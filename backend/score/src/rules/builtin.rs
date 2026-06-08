@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::context::{InstanceContext, JobKindView};
+use crate::context::{InstanceContext, JobKindContext};
 use crate::rule::{JobContext, ScoreRule, WorkerContext};
 
 #[derive(Debug)]
@@ -79,11 +79,13 @@ impl ScoreRule for BuiltinDeprioritizeRule {
         _worker: &WorkerContext<'_>,
         _instance: &InstanceContext,
     ) -> f64 {
-        if job.job.kind == JobKindView::Build && job.job.architecture == "builtin" {
-            -self.penalty
-        } else {
-            0.0
+        if let Some(b) = job.job.build()
+            && b.architecture == "builtin"
+        {
+            return -self.penalty;
         }
+
+        0.0
     }
 }
 
@@ -105,7 +107,7 @@ impl ScoreRule for DependencyCountRule {
         _worker: &WorkerContext<'_>,
         _instance: &InstanceContext,
     ) -> f64 {
-        if job.job.kind == JobKindView::Build {
+        if job.job.build().is_some() {
             job.dependency_count as f64 * self.dep_bonus_per_dep
         } else {
             0.0
@@ -156,8 +158,8 @@ impl ScoreRule for ReserveFetchWorkersRule {
         worker: &WorkerContext<'_>,
         _instance: &InstanceContext,
     ) -> f64 {
-        match job.job.kind {
-            JobKindView::Eval { fetch_flake } if worker.fetch && !fetch_flake => -self.penalty,
+        match job.job.kind() {
+            JobKindContext::Eval(e) if worker.fetch && !e.fetch_flake => -self.penalty,
             _ => 0.0,
         }
     }
@@ -169,19 +171,23 @@ mod tests {
     use crate::context::{HistoryPrediction, LazyProviders, ScoredJob};
     use gradient_core::types::ids::OrganizationId;
 
-    fn test_job(kind: JobKindView, arch: &'static str) -> ScoredJob<'static> {
-        ScoredJob::new(
+    fn build_job(arch: &'static str) -> ScoredJob<'static> {
+        ScoredJob::new_build(
             "test",
             OrganizationId::now_v7(),
-            kind,
             arch,
             false,
             false,
+            None,
             LazyProviders {
                 closure_size: &|| None,
                 history: &|| HistoryPrediction::default(),
             },
         )
+    }
+
+    fn eval_job(fetch_flake: bool) -> ScoredJob<'static> {
+        ScoredJob::new_eval("test", OrganizationId::now_v7(), fetch_flake)
     }
 
     fn worker<'a>(archs: &'a [String], fetch: bool) -> WorkerContext<'a> {
@@ -191,7 +197,7 @@ mod tests {
     #[test]
     fn missing_paths_scored_zero_wins_over_unscored() {
         let rule = MissingPathsRule::default();
-        let job = test_job(JobKindView::Build, "x86_64-linux");
+        let job = build_job("x86_64-linux");
         let archs = vec!["x86_64-linux".to_string()];
         let w = worker(&archs, false);
         let now = gradient_core::types::now();
@@ -205,7 +211,7 @@ mod tests {
     #[test]
     fn missing_paths_fewer_missing_wins() {
         let rule = MissingPathsRule::default();
-        let job = test_job(JobKindView::Build, "x86_64-linux");
+        let job = build_job("x86_64-linux");
         let archs = vec!["x86_64-linux".to_string()];
         let w = worker(&archs, false);
         let now = gradient_core::types::now();
@@ -219,7 +225,7 @@ mod tests {
     #[test]
     fn missing_nar_size_smaller_wins() {
         let rule = MissingNarSizeRule::default();
-        let job = test_job(JobKindView::Build, "x86_64-linux");
+        let job = build_job("x86_64-linux");
         let archs = vec!["x86_64-linux".to_string()];
         let w = worker(&archs, false);
         let now = gradient_core::types::now();
@@ -233,8 +239,8 @@ mod tests {
     #[test]
     fn builtin_deprioritize_penalises_builtin() {
         let rule = BuiltinDeprioritizeRule::default();
-        let real = test_job(JobKindView::Build, "x86_64-linux");
-        let builtin = test_job(JobKindView::Build, "builtin");
+        let real = build_job("x86_64-linux");
+        let builtin = build_job("builtin");
         let archs = vec!["x86_64-linux".to_string()];
         let w = worker(&archs, false);
         let now = gradient_core::types::now();
@@ -248,7 +254,7 @@ mod tests {
     #[test]
     fn dependency_count_more_deps_wins() {
         let rule = DependencyCountRule::default();
-        let job = test_job(JobKindView::Build, "x86_64-linux");
+        let job = build_job("x86_64-linux");
         let archs = vec!["x86_64-linux".to_string()];
         let w = worker(&archs, false);
         let now = gradient_core::types::now();
@@ -263,7 +269,7 @@ mod tests {
     #[test]
     fn dependency_count_zero_deps_zero_score() {
         let rule = DependencyCountRule::default();
-        let job = test_job(JobKindView::Build, "x86_64-linux");
+        let job = build_job("x86_64-linux");
         let archs = vec!["x86_64-linux".to_string()];
         let w = worker(&archs, false);
         let now = gradient_core::types::now();
@@ -275,7 +281,7 @@ mod tests {
     #[test]
     fn wait_time_longer_wait_scores_higher_but_capped() {
         let rule = WaitTimeRule::default();
-        let job = test_job(JobKindView::Build, "x86_64-linux");
+        let job = build_job("x86_64-linux");
         let archs = vec!["x86_64-linux".to_string()];
         let w = worker(&archs, false);
         let now = gradient_core::types::now();
@@ -297,9 +303,9 @@ mod tests {
     #[test]
     fn reserve_rule_penalizes_fetch_worker_for_cached_eval_only() {
         let rule = ReserveFetchWorkersRule::default();
-        let cached_eval = test_job(JobKindView::Eval { fetch_flake: false }, "x86_64-linux");
-        let fetch_eval = test_job(JobKindView::Eval { fetch_flake: true }, "x86_64-linux");
-        let build = test_job(JobKindView::Build, "x86_64-linux");
+        let cached_eval = eval_job(false);
+        let fetch_eval = eval_job(true);
+        let build = build_job("x86_64-linux");
 
         let archs: Vec<String> = vec![];
         let fetch_w = worker(&archs, true);

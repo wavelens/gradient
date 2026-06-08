@@ -26,9 +26,11 @@ impl ScoreRule for PreferLocalBuildRule {
         _worker: &WorkerContext<'_>,
         _instance: &InstanceContext,
     ) -> f64 {
-        if !job.job.prefer_local_build {
+        let Some(b) = job.job.build() else { return 0.0 };
+        if !b.prefer_local_build {
             return 0.0;
         }
+
         match job.missing_count {
             Some(0) => self.local_bonus,
             Some(n) => (self.local_bonus - n as f64 * self.miss_penalty).max(0.0),
@@ -40,17 +42,17 @@ impl ScoreRule for PreferLocalBuildRule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::context::{HistoryPrediction, JobKindView, LazyProviders, ScoredJob};
+    use crate::context::{HistoryPrediction, LazyProviders, ScoredJob};
     use gradient_core::types::ids::OrganizationId;
 
     fn job(prefer_local_build: bool) -> ScoredJob<'static> {
-        ScoredJob::new(
+        ScoredJob::new_build(
             "test",
             OrganizationId::now_v7(),
-            JobKindView::Build,
             "x86_64-linux",
             prefer_local_build,
             false,
+            None,
             LazyProviders { closure_size: &|| None, history: &|| HistoryPrediction::default() },
         )
     }

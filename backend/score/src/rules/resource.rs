@@ -29,7 +29,8 @@ impl ScoreRule for ResourceFitRule {
         _instance: &InstanceContext,
     ) -> f64 {
         let Some(m) = worker.metrics else { return 0.0 };
-        let h = job.job.history();
+        let Some(b) = job.job.build() else { return 0.0 };
+        let h = b.history();
         if h.samples == 0 {
             return 0.0;
         }
@@ -49,18 +50,18 @@ impl ScoreRule for ResourceFitRule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::context::{HistoryPrediction, JobKindView, LazyProviders, ScoredJob, WorkerMetricsView};
+    use crate::context::{HistoryPrediction, LazyProviders, ScoredJob, WorkerMetricsView};
     use gradient_core::types::ids::OrganizationId;
 
     fn job_with_history(h: HistoryPrediction) -> ScoredJob<'static> {
         let provider: &'static dyn Fn() -> HistoryPrediction = Box::leak(Box::new(move || h));
-        ScoredJob::new(
+        ScoredJob::new_build(
             "test",
             OrganizationId::now_v7(),
-            JobKindView::Build,
             "x86_64-linux",
             false,
             false,
+            None,
             LazyProviders { closure_size: &|| None, history: provider },
         )
     }
