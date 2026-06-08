@@ -105,6 +105,25 @@
   font-variant-numeric: tabular-nums;
 }
 
+.sidebar-search {
+  padding: 0 $spacing-md $spacing-sm;
+
+  input {
+    width: 100%;
+    box-sizing: border-box;
+    background: $color-primary;
+    border: 1px solid $color-border;
+    border-radius: $border-radius-sm;
+    color: $text-primary;
+    font-size: $font-size-xs;
+    padding: 6px 8px;
+    outline: none;
+
+    &:focus { border-color: $color-info; }
+    &::placeholder { color: $text-light; }
+  }
+}
+
 // Builds list
 .builds-list-header {
   padding: $spacing-xs $spacing-md;
@@ -775,14 +794,13 @@
 }
 
 .log-line {
-  display: flex;
-  align-items: flex-start;
+  position: relative;
+  padding-left: 68px;
   font-family: $font-family-mono;
   font-size: $font-size-xs;
   line-height: 1.6;
-  // Exclude the row itself from selection so the line-number gutter and the
-  // flex/block layout don't inject blank lines into copied text; only the
-  // content span below opts back in.
+  // Row is a plain block (not flex) so the content stays genuinely inline —
+  // a flex item would be blockified and re-introduce blank lines on copy.
   user-select: none;
   -webkit-user-select: none;
 
@@ -792,7 +810,8 @@
 }
 
 .log-gutter {
-  flex: 0 0 auto;
+  position: absolute;
+  left: 0;
   width: 56px;
   padding-right: 12px;
   text-align: right;
@@ -806,8 +825,7 @@
 }
 
 .log-line-content {
-  margin: 0;
-  flex: 1 1 auto;
+  display: inline;
   color: $text-primary;
   white-space: pre-wrap;
   word-break: break-word;
