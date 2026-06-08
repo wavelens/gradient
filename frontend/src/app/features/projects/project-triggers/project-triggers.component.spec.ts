@@ -125,6 +125,7 @@ describe('ProjectTriggersComponent - access gating', () => {
     expect(deleteBtn).not.toBeNull();
     expect(deleteBtn!.disabled).toBe(true);
     expect(fireBtn).not.toBeNull();
-    expect(fireBtn!.disabled).toBe(true);
+    // Fire Now is a trigger action, not a config edit - exempt from the managed flag (AccessService.triggerAccess).
+    expect(fireBtn!.disabled).toBe(false);
   });
 });
