@@ -26,7 +26,7 @@ impl ScoreRule for NetworkAffinityRule {
         &self,
         job: &JobContext<'_>,
         worker: &WorkerContext<'_>,
-        _instance: &InstanceContext,
+        instance: &InstanceContext,
     ) -> f64 {
         let Some(b) = job.job.build() else { return 0.0 };
         if !b.is_fixed_output {
@@ -36,7 +36,13 @@ impl ScoreRule for NetworkAffinityRule {
         let Some(net) = worker.metrics.and_then(|m| m.network_speed_mbps) else {
             return 0.0;
         };
-        self.bonus * (net as f64 / self.reference_mbps).min(1.0)
+
+        let reference = if instance.network_mbps.w24h > 0.0 {
+            instance.network_mbps.w24h
+        } else {
+            self.reference_mbps
+        };
+        self.bonus * (net as f64 / reference).min(1.0)
     }
 }
 
@@ -60,11 +66,16 @@ impl ScoreRule for DiskAffinityRule {
         &self,
         job: &JobContext<'_>,
         worker: &WorkerContext<'_>,
-        _instance: &InstanceContext,
+        instance: &InstanceContext,
     ) -> f64 {
         let Some(b) = job.job.build() else { return 0.0 };
         let h = b.history();
-        if h.samples == 0 || h.avg_disk_bytes < self.heavy_threshold_bytes {
+        let heavy_threshold = if instance.disk_bytes.w24h > 0.0 {
+            instance.disk_bytes.w24h
+        } else {
+            self.heavy_threshold_bytes as f64
+        };
+        if h.samples == 0 || (h.avg_disk_bytes as f64) < heavy_threshold {
             return 0.0;
         }
 
@@ -152,5 +163,18 @@ mod tests {
         let j = job(false, HistoryPrediction { avg_disk_bytes: 999 * 1_048_576, samples: 0, ..Default::default() });
         let fast = worker_with(WorkerMetricsView { disk_speed_mbps: Some(500.0), ..Default::default() });
         assert_eq!(rule.score(&ctx(&j), &fast, &InstanceContext::default()), 0.0);
+    }
+
+    #[test]
+    fn disk_heavy_uses_instance_threshold() {
+        let rule = DiskAffinityRule::default();
+        let j = job(false, HistoryPrediction { avg_disk_bytes: 50 * 1_048_576, samples: 5, ..Default::default() });
+        let fast = worker_with(WorkerMetricsView { disk_speed_mbps: Some(500.0), ..Default::default() });
+
+        assert_eq!(rule.score(&ctx(&j), &fast, &InstanceContext::default()), 0.0);
+
+        let mut inst = InstanceContext::default();
+        inst.disk_bytes.w24h = (10 * 1_048_576) as f64;
+        assert!(rule.score(&ctx(&j), &fast, &inst) > 0.0);
     }
 }

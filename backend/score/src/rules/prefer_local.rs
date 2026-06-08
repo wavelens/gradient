@@ -24,16 +24,18 @@ impl ScoreRule for PreferLocalBuildRule {
         &self,
         job: &JobContext<'_>,
         _worker: &WorkerContext<'_>,
-        _instance: &InstanceContext,
+        instance: &InstanceContext,
     ) -> f64 {
         let Some(b) = job.job.build() else { return 0.0 };
         if !b.prefer_local_build {
             return 0.0;
         }
 
+        let knee = 2.0 * instance.missing_paths.w1h;
+        let k = if knee > 0.0 { self.local_bonus / knee } else { self.miss_penalty };
         match job.missing_count {
             Some(0) => self.local_bonus,
-            Some(n) => (self.local_bonus - n as f64 * self.miss_penalty).max(0.0),
+            Some(n) => (self.local_bonus - n as f64 * k).max(0.0),
             None => 0.0,
         }
     }
@@ -97,5 +99,19 @@ mod tests {
         assert_eq!(rule.score(&ctx(&j, Some(0)), &worker(), &InstanceContext::default()), 0.0);
         assert_eq!(rule.score(&ctx(&j, Some(5)), &worker(), &InstanceContext::default()), 0.0);
         assert_eq!(rule.score(&ctx(&j, None), &worker(), &InstanceContext::default()), 0.0);
+    }
+
+    #[test]
+    fn knee_tracks_instance_missing_paths() {
+        let rule = PreferLocalBuildRule::default();
+        let j = job(true);
+        let mut inst = InstanceContext::default();
+        inst.missing_paths.w1h = 5.0;
+
+        assert_eq!(rule.score(&ctx(&j, Some(10)), &worker(), &inst), 0.0);
+
+        let at_half = rule.score(&ctx(&j, Some(5)), &worker(), &inst);
+        assert!(at_half > 0.0);
+        assert!(at_half < rule.local_bonus);
     }
 }
