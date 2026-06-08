@@ -653,7 +653,14 @@ impl Scheduler {
             .job_tracker
             .write()
             .await
-            .take_best_of_kind(peer_id, authorized, caps, kind, &*policy);
+            .take_best_of_kind(
+                peer_id,
+                authorized,
+                caps,
+                kind,
+                &*policy,
+                &score::InstanceContext::default(),
+            );
         if let Some(a) = assignment.as_mut() {
             self.worker_pool
                 .write()

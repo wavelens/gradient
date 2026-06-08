@@ -48,6 +48,7 @@ pub struct InstanceContext {
 pub struct HistoryPrediction {
     pub predicted_peak_ram_mb: u64,
     pub avg_cpu_time_ms: u64,
+    pub build_time_ms: u64,
     pub avg_disk_bytes: u64,
     pub oom_rate: f32,
     pub samples: u32,
@@ -103,6 +104,7 @@ impl BuildContext {
             items.iter().map(|i| i.history.predicted_peak_ram_mb).max().unwrap_or(0);
         out.history.oom_rate = items.iter().map(|i| i.history.oom_rate).fold(0.0, f32::max);
         out.history.avg_cpu_time_ms = items.iter().map(|i| i.history.avg_cpu_time_ms).sum();
+        out.history.build_time_ms = items.iter().map(|i| i.history.build_time_ms).max().unwrap_or(0);
         out.history.avg_disk_bytes = items.iter().map(|i| i.history.avg_disk_bytes).sum();
         out.history.samples = items.iter().map(|i| i.history.samples).min().unwrap_or(0);
         out.derivations = items.iter().flat_map(|i| i.derivations.clone()).collect();
@@ -300,6 +302,7 @@ mod tests {
             history: HistoryPrediction {
                 predicted_peak_ram_mb: 500,
                 avg_cpu_time_ms: 1000,
+                build_time_ms: 0,
                 avg_disk_bytes: 10,
                 oom_rate: 0.1,
                 samples: 5,
