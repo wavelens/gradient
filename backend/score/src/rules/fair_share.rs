@@ -38,19 +38,19 @@ impl ScoreRule for FairShareRule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::context::{HistoryPrediction, JobKindView, LazyProviders, ScoredJob};
+    use crate::context::{HistoryPrediction, LazyProviders, ScoredJob};
     use crate::rules::builtin::WaitTimeRule;
     use gradient_core::types::ids::OrganizationId;
     use gradient_core::types::now;
 
     fn build_job() -> ScoredJob<'static> {
-        ScoredJob::new(
+        ScoredJob::new_build(
             "j",
             OrganizationId::now_v7(),
-            JobKindView::Build,
             "x86_64-linux",
             false,
             false,
+            None,
             LazyProviders { closure_size: &|| None, history: &|| HistoryPrediction::default() },
         )
     }

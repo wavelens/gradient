@@ -34,12 +34,6 @@ pub struct InstanceContext {
     pub idle_workers: u32,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum JobKindView {
-    Eval { fetch_flake: bool },
-    Build,
-}
-
 #[derive(Clone, Copy, Debug, Default)]
 pub struct HistoryPrediction {
     pub predicted_peak_ram_mb: u64,
@@ -65,43 +59,23 @@ pub struct LazyProviders<'a> {
     pub history: &'a dyn Fn() -> HistoryPrediction,
 }
 
-pub struct ScoredJob<'a> {
-    pub job_id: &'a str,
-    pub peer_id: gradient_core::types::ids::OrganizationId,
-    pub kind: JobKindView,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EvalContext {
+    pub fetch_flake: bool,
+}
+
+pub struct BuildContextLazy<'a> {
     pub architecture: &'a str,
     pub prefer_local_build: bool,
     pub is_fixed_output: bool,
+    pub pname: Option<&'a str>,
     providers: LazyProviders<'a>,
     closure_size: OnceCell<Option<i64>>,
     history: OnceCell<HistoryPrediction>,
     history_touched: Cell<bool>,
 }
 
-impl<'a> ScoredJob<'a> {
-    pub fn new(
-        job_id: &'a str,
-        peer_id: gradient_core::types::ids::OrganizationId,
-        kind: JobKindView,
-        architecture: &'a str,
-        prefer_local_build: bool,
-        is_fixed_output: bool,
-        providers: LazyProviders<'a>,
-    ) -> Self {
-        Self {
-            job_id,
-            peer_id,
-            kind,
-            architecture,
-            prefer_local_build,
-            is_fixed_output,
-            providers,
-            closure_size: OnceCell::new(),
-            history: OnceCell::new(),
-            history_touched: Cell::new(false),
-        }
-    }
-
+impl BuildContextLazy<'_> {
     pub fn closure_size(&self) -> Option<i64> {
         *self.closure_size.get_or_init(|| (self.providers.closure_size)())
     }
@@ -117,19 +91,77 @@ impl<'a> ScoredJob<'a> {
     }
 }
 
+pub enum JobKindContext<'a> {
+    Eval(EvalContext),
+    Build(BuildContextLazy<'a>),
+}
+
+pub struct ScoredJob<'a> {
+    pub job_id: &'a str,
+    pub peer_id: gradient_core::types::ids::OrganizationId,
+    kind: JobKindContext<'a>,
+}
+
+impl<'a> ScoredJob<'a> {
+    pub fn new_eval(
+        job_id: &'a str,
+        peer_id: gradient_core::types::ids::OrganizationId,
+        fetch_flake: bool,
+    ) -> Self {
+        Self { job_id, peer_id, kind: JobKindContext::Eval(EvalContext { fetch_flake }) }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_build(
+        job_id: &'a str,
+        peer_id: gradient_core::types::ids::OrganizationId,
+        architecture: &'a str,
+        prefer_local_build: bool,
+        is_fixed_output: bool,
+        pname: Option<&'a str>,
+        providers: LazyProviders<'a>,
+    ) -> Self {
+        Self {
+            job_id,
+            peer_id,
+            kind: JobKindContext::Build(BuildContextLazy {
+                architecture,
+                prefer_local_build,
+                is_fixed_output,
+                pname,
+                providers,
+                closure_size: OnceCell::new(),
+                history: OnceCell::new(),
+                history_touched: Cell::new(false),
+            }),
+        }
+    }
+
+    pub fn kind(&self) -> &JobKindContext<'a> {
+        &self.kind
+    }
+
+    pub fn build(&self) -> Option<&BuildContextLazy<'_>> {
+        match &self.kind {
+            JobKindContext::Build(b) => Some(b),
+            _ => None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use gradient_core::types::ids::OrganizationId;
 
     fn make_job() -> ScoredJob<'static> {
-        ScoredJob::new(
+        ScoredJob::new_build(
             "test-job",
             OrganizationId::now_v7(),
-            JobKindView::Build,
             "x86_64-linux",
             false,
             false,
+            None,
             LazyProviders {
                 closure_size: &|| Some(99),
                 history: &|| HistoryPrediction::default(),
@@ -137,23 +169,44 @@ mod tests {
         )
     }
 
+    fn build_ctx<'a>(job: &'a ScoredJob<'a>) -> &'a BuildContextLazy<'a> {
+        match job.kind() {
+            JobKindContext::Build(b) => b,
+            _ => panic!("expected build"),
+        }
+    }
+
     #[test]
     fn closure_size_computed_at_most_once() {
         let job = make_job();
-        let a = job.closure_size();
-        let b = job.closure_size();
+        let b = build_ctx(&job);
+        let a = b.closure_size();
+        let c = b.closure_size();
         assert_eq!(a, Some(99));
-        assert_eq!(a, b);
+        assert_eq!(a, c);
     }
 
     #[test]
     fn history_not_computed_unless_read() {
         let job = make_job();
-        assert!(!job.history_was_touched());
-        let _ = job.closure_size();
-        assert!(!job.history_was_touched(), "closure_size must not touch history");
-        let _ = job.history();
-        assert!(job.history_was_touched());
+        let b = build_ctx(&job);
+        assert!(!b.history_was_touched());
+        let _ = b.closure_size();
+        assert!(!b.history_was_touched(), "closure_size must not touch history");
+        let _ = b.history();
+        assert!(b.history_was_touched());
+    }
+
+    #[test]
+    fn scored_job_exposes_build_kind_context() {
+        let job = make_job();
+        match job.kind() {
+            JobKindContext::Build(b) => {
+                assert_eq!(b.architecture, "x86_64-linux");
+                assert!(!b.prefer_local_build);
+            }
+            _ => panic!("expected build"),
+        }
     }
 
     #[test]

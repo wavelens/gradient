@@ -28,9 +28,11 @@ impl ScoreRule for NetworkAffinityRule {
         worker: &WorkerContext<'_>,
         _instance: &InstanceContext,
     ) -> f64 {
-        if !job.job.is_fixed_output {
+        let Some(b) = job.job.build() else { return 0.0 };
+        if !b.is_fixed_output {
             return 0.0;
         }
+
         let Some(net) = worker.metrics.and_then(|m| m.network_speed_mbps) else {
             return 0.0;
         };
@@ -60,10 +62,12 @@ impl ScoreRule for DiskAffinityRule {
         worker: &WorkerContext<'_>,
         _instance: &InstanceContext,
     ) -> f64 {
-        let h = job.job.history();
+        let Some(b) = job.job.build() else { return 0.0 };
+        let h = b.history();
         if h.samples == 0 || h.avg_disk_bytes < self.heavy_threshold_bytes {
             return 0.0;
         }
+
         let Some(disk) = worker.metrics.and_then(|m| m.disk_speed_mbps) else {
             return 0.0;
         };
@@ -74,18 +78,18 @@ impl ScoreRule for DiskAffinityRule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::context::{HistoryPrediction, JobKindView, LazyProviders, ScoredJob, WorkerMetricsView};
+    use crate::context::{HistoryPrediction, LazyProviders, ScoredJob, WorkerMetricsView};
     use gradient_core::types::ids::OrganizationId;
 
     fn job(is_fixed_output: bool, h: HistoryPrediction) -> ScoredJob<'static> {
         let provider: &'static dyn Fn() -> HistoryPrediction = Box::leak(Box::new(move || h));
-        ScoredJob::new(
+        ScoredJob::new_build(
             "t",
             OrganizationId::now_v7(),
-            JobKindView::Build,
             "x86_64-linux",
             false,
             is_fixed_output,
+            None,
             LazyProviders { closure_size: &|| None, history: provider },
         )
     }

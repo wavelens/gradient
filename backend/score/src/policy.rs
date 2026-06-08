@@ -123,18 +123,18 @@ pub fn policy_by_name(name: &str) -> std::sync::Arc<dyn ScoringPolicy> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::context::{HistoryPrediction, JobKindView, LazyProviders, ScoredJob};
+    use crate::context::{HistoryPrediction, LazyProviders, ScoredJob};
     use gradient_core::types::ids::OrganizationId;
     use gradient_core::types::now;
 
     fn scored_job(arch: &str) -> ScoredJob<'_> {
-        ScoredJob::new(
+        ScoredJob::new_build(
             "job",
             OrganizationId::now_v7(),
-            JobKindView::Build,
             arch,
             false,
             false,
+            None,
             LazyProviders { closure_size: &|| None, history: &|| HistoryPrediction::default() },
         )
     }
@@ -196,13 +196,13 @@ mod tests {
         let policy = policy_by_name("resource-aware");
         let archs = vec!["x86_64-linux".to_string()];
         let feats: Vec<String> = vec![];
-        let j = ScoredJob::new(
+        let j = ScoredJob::new_build(
             "j",
             OrganizationId::now_v7(),
-            JobKindView::Build,
             "x86_64-linux",
             false,
             true,
+            None,
             LazyProviders { closure_size: &|| None, history: &|| HistoryPrediction::default() },
         );
         let c = JobContext {

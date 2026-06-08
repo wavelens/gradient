@@ -16,7 +16,7 @@ use gradient_core::types::proto::{
     RequiredPath,
 };
 
-use score::{JobContext, JobKindView, LazyProviders, ScoredJob, ScoringPolicy, WorkerContext};
+use score::{JobContext, LazyProviders, ScoredJob, ScoringPolicy, WorkerContext};
 
 #[derive(Debug, Clone)]
 pub struct PendingEvalJob {
@@ -347,38 +347,32 @@ impl JobTracker {
 
         let score_of = |id: &str, job: &PendingJob| -> f64 {
             let s = worker_scores.and_then(|ws| ws.get(id));
-            let (kind_view, arch, closure_size, prefer_local_build, is_fixed_output, history) =
-                match job {
-                    PendingJob::Eval(e) => (
-                        JobKindView::Eval {
-                            fetch_flake: e.job.tasks.contains(&FlakeTask::FetchFlake),
-                        },
-                        "",
-                        None,
-                        false,
-                        false,
-                        score::HistoryPrediction::default(),
-                    ),
-                    PendingJob::Build(b) => (
-                        JobKindView::Build,
-                        b.architecture.as_str(),
-                        b.closure_size,
-                        b.prefer_local_build,
-                        b.is_fixed_output,
-                        b.history,
-                    ),
-                };
+            let closure_size = match job {
+                PendingJob::Build(b) => b.closure_size,
+                PendingJob::Eval(_) => None,
+            };
+            let history = match job {
+                PendingJob::Build(b) => b.history,
+                PendingJob::Eval(_) => score::HistoryPrediction::default(),
+            };
             let closure = move || closure_size;
             let history_provider = move || history;
-            let scored = ScoredJob::new(
-                id,
-                job.peer_id(),
-                kind_view,
-                arch,
-                prefer_local_build,
-                is_fixed_output,
-                LazyProviders { closure_size: &closure, history: &history_provider },
-            );
+            let scored = match job {
+                PendingJob::Eval(e) => ScoredJob::new_eval(
+                    id,
+                    job.peer_id(),
+                    e.job.tasks.contains(&FlakeTask::FetchFlake),
+                ),
+                PendingJob::Build(b) => ScoredJob::new_build(
+                    id,
+                    job.peer_id(),
+                    b.architecture.as_str(),
+                    b.prefer_local_build,
+                    b.is_fixed_output,
+                    None,
+                    LazyProviders { closure_size: &closure, history: &history_provider },
+                ),
+            };
             let ctx = JobContext {
                 job: &scored,
                 missing_count: s.map(|s| s.missing_count),
@@ -416,38 +410,36 @@ impl JobTracker {
         // mutable assign_pending below.
         let dispatch_record = self.pending.get(&job_id).map(|job| {
             let s = worker_scores.and_then(|ws| ws.get(job_id.as_str()));
-            let (kind_view, arch, closure_size, prefer_local_build, is_fixed_output, history) =
-                match job {
-                    PendingJob::Eval(e) => (
-                        JobKindView::Eval {
-                            fetch_flake: e.job.tasks.contains(&FlakeTask::FetchFlake),
-                        },
-                        "",
-                        None,
-                        false,
-                        false,
-                        score::HistoryPrediction::default(),
-                    ),
-                    PendingJob::Build(b) => (
-                        JobKindView::Build,
-                        b.architecture.as_str(),
-                        b.closure_size,
-                        b.prefer_local_build,
-                        b.is_fixed_output,
-                        b.history,
-                    ),
-                };
+            let arch = match job {
+                PendingJob::Build(b) => b.architecture.as_str(),
+                PendingJob::Eval(_) => "",
+            };
+            let closure_size = match job {
+                PendingJob::Build(b) => b.closure_size,
+                PendingJob::Eval(_) => None,
+            };
+            let history = match job {
+                PendingJob::Build(b) => b.history,
+                PendingJob::Eval(_) => score::HistoryPrediction::default(),
+            };
             let closure = move || closure_size;
             let history_provider = move || history;
-            let scored = ScoredJob::new(
-                job_id.as_str(),
-                job.peer_id(),
-                kind_view,
-                arch,
-                prefer_local_build,
-                is_fixed_output,
-                LazyProviders { closure_size: &closure, history: &history_provider },
-            );
+            let scored = match job {
+                PendingJob::Eval(e) => ScoredJob::new_eval(
+                    job_id.as_str(),
+                    job.peer_id(),
+                    e.job.tasks.contains(&FlakeTask::FetchFlake),
+                ),
+                PendingJob::Build(b) => ScoredJob::new_build(
+                    job_id.as_str(),
+                    job.peer_id(),
+                    b.architecture.as_str(),
+                    b.prefer_local_build,
+                    b.is_fixed_output,
+                    None,
+                    LazyProviders { closure_size: &closure, history: &history_provider },
+                ),
+            };
             let ctx = JobContext {
                 job: &scored,
                 missing_count: s.map(|s| s.missing_count),
