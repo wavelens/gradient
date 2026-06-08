@@ -47,6 +47,51 @@ pub struct DispatchedJobsResponse {
     pub other_running: u64,
 }
 
+#[derive(Serialize)]
+pub struct PendingJobSummary {
+    pub kind: i16,
+    pub organization: Uuid,
+    pub evaluation_id: Uuid,
+    pub build_id: Option<Uuid>,
+    pub queued_at: String,
+    pub dependency_count: u32,
+}
+
+#[derive(Serialize)]
+pub struct PendingJobsResponse {
+    pub jobs: Vec<PendingJobSummary>,
+    /// Pending jobs owned by orgs the caller can't see, shown only as a count.
+    pub other_pending: u64,
+}
+
+pub async fn get_pending_jobs(
+    State(state): State<Arc<ServerState>>,
+    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Extension(scheduler): Extension<Arc<Scheduler>>,
+) -> WebResult<Json<BaseResponse<PendingJobsResponse>>> {
+    let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
+    let snapshot = scheduler.pending_jobs_snapshot().await;
+
+    let mut jobs = Vec::new();
+    let mut other_pending = 0u64;
+    for j in snapshot {
+        if scope.allows(&Uuid::from(j.organization)) {
+            jobs.push(PendingJobSummary {
+                kind: j.kind,
+                organization: j.organization.into(),
+                evaluation_id: j.evaluation_id.into(),
+                build_id: j.build_id.map(Into::into),
+                queued_at: j.queued_at.and_utc().to_rfc3339(),
+                dependency_count: j.dependency_count,
+            });
+        } else {
+            other_pending += 1;
+        }
+    }
+
+    Ok(ok_json(PendingJobsResponse { jobs, other_pending }))
+}
+
 pub async fn get_dispatched_jobs(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,

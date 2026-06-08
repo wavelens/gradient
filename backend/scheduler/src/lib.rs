@@ -40,6 +40,7 @@ use worker_pool::WorkerPool;
 type DeferredDeps = Arc<RwLock<HashMap<EvaluationId, Vec<(String, Vec<String>)>>>>;
 
 pub use gradient_core::types::BoardEvent;
+pub use jobs::PendingJobInfo;
 pub use worker_pool::WorkerInfo;
 
 #[cfg(test)]
@@ -118,5 +119,9 @@ impl Scheduler {
         let workers = self.worker_pool.read().await.worker_count();
         let tracker = self.job_tracker.read().await;
         (workers, tracker.pending_count(), tracker.active_count())
+    }
+
+    pub async fn pending_jobs_snapshot(&self) -> Vec<jobs::PendingJobInfo> {
+        self.job_tracker.read().await.pending_snapshot()
     }
 }

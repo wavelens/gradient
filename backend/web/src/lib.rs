@@ -529,6 +529,7 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             get(projects::get_entry_point_metrics),
         )
         .route("/board/jobs/dispatched", get(board::get_dispatched_jobs))
+        .route("/board/jobs/pending", get(board::get_pending_jobs))
         .route("/board/jobs/expensive", get(board::get_expensive_jobs))
         .route(
             "/board/jobs/expensive-by-resource",
