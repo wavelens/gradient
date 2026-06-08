@@ -20,6 +20,7 @@ entity        = { workspace = true }
 score         = { workspace = true }
 
 anyhow     = { workspace = true }
+arc-swap   = { workspace = true }
 chrono     = { workspace = true }
 cron       = "0.12"
 futures    = { workspace = true }

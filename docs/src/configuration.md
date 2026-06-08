@@ -156,6 +156,7 @@ The Job Board records build/eval phase timings, dispatch decisions (with scoring
 | `otlpEndpoint` / `GRADIENT_OTLP_ENDPOINT` | null | OTLP collector endpoint for metric push (null disables). |
 | `otlpPushIntervalSecs` / `GRADIENT_OTLP_PUSH_INTERVAL` | 30 | OTLP push interval. |
 | `dispatchRecordCandidates` / `GRADIENT_DISPATCH_RECORD_CANDIDATES` | false | Persist runner-up scoring candidates per dispatch. |
+| `instanceMetricsIntervalSecs` / `GRADIENT_INSTANCE_METRICS_INTERVAL` | 30 | InstanceContext window recomputation interval. |
 
 ## OIDC
 

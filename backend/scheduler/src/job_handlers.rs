@@ -650,18 +650,12 @@ impl Scheduler {
         kind: &JobKind,
     ) -> Option<Assignment> {
         let policy = Arc::clone(&self.policy);
+        let instance = self.instance.load_full();
         let mut assignment = self
             .job_tracker
             .write()
             .await
-            .take_best_of_kind(
-                peer_id,
-                authorized,
-                caps,
-                kind,
-                &*policy,
-                &score::InstanceContext::default(),
-            );
+            .take_best_of_kind(peer_id, authorized, caps, kind, &*policy, &instance);
         if let Some(a) = assignment.as_mut() {
             self.worker_pool
                 .write()
