@@ -38,12 +38,79 @@ export interface PendingJobsResponse {
   other_pending: number;
 }
 
+export interface GradientCapabilities {
+  core: boolean; federate: boolean; fetch: boolean; eval: boolean; build: boolean; cache: boolean;
+}
+
+export interface Windowed { w5m: number; w1h: number; w24h: number; }
+
+export interface WorkerContextView {
+  architectures: string[];
+  system_features: string[];
+  fetch: boolean;
+  capabilities: GradientCapabilities;
+  cpu_count: number;
+  cpu_core_score: number;
+  ram_total_mb: number;
+  ram_free_mb: number;
+  cpu_usage_pct: number;
+  disk_speed_mbps: number | null;
+  network_speed_mbps: number | null;
+}
+
+export interface DerivationRef { build_id: string; drv_path: string; pname: string | null; }
+
+export interface JobHistoryView {
+  peak_ram_mb: number; avg_cpu_time_ms: number; build_time_ms: number;
+  avg_disk_bytes: number; oom_rate: number; samples: number;
+}
+
+export interface JobContextView {
+  kind: 'Build' | 'Eval';
+  architecture: string;
+  missing_count: number | null;
+  missing_nar_size: number | null;
+  org_work_share: number | null;
+  rescore_count: number;
+  queued_at: string;
+  ready_at: string;
+  dependency_count?: number;
+  pname?: string | null;
+  closure_size?: number | null;
+  prefer_local_build?: boolean;
+  is_fixed_output?: boolean;
+  history?: JobHistoryView;
+  derivations?: DerivationRef[];
+  fetch_flake?: boolean;
+}
+
+export interface InstanceContextView {
+  wait_secs: Windowed;
+  build_time_ms: Windowed;
+  peak_ram_mb: Windowed;
+  cpu_time_ms: Windowed;
+  avg_cpu_pct: Windowed;
+  disk_bytes: Windowed;
+  network_mbps: Windowed;
+  oom_rate: Windowed;
+  closure_size: Windowed;
+  nar_size_mb: Windowed;
+  missing_paths: Windowed;
+  dependency_cnt: Windowed;
+  completed: Windowed;
+  active_builds: number;
+  pending_builds: number;
+  total_workers: number;
+  idle_workers: number;
+}
+
 export interface DispatchedJobDetail extends DispatchedJobSummary {
   queued_at: string;
   finished_at: string | null;
   score_breakdown: { rules: Record<string, number>; total: number };
-  worker_context: Record<string, unknown>;
-  job_context: Record<string, unknown>;
+  worker_context: WorkerContextView;
+  job_context: JobContextView;
+  instance_context: InstanceContextView | null;
   candidates: unknown | null;
 }
 
