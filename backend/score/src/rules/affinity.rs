@@ -37,11 +37,7 @@ impl ScoreRule for NetworkAffinityRule {
             return 0.0;
         };
 
-        let reference = if instance.network_mbps.w24h > 0.0 {
-            instance.network_mbps.w24h
-        } else {
-            self.reference_mbps
-        };
+        let reference = instance.network_mbps.w24h_or(self.reference_mbps);
         self.bonus * (net as f64 / reference).min(1.0)
     }
 }
@@ -70,11 +66,7 @@ impl ScoreRule for DiskAffinityRule {
     ) -> f64 {
         let Some(b) = job.job.build() else { return 0.0 };
         let h = b.history();
-        let heavy_threshold = if instance.disk_bytes.w24h > 0.0 {
-            instance.disk_bytes.w24h
-        } else {
-            self.heavy_threshold_bytes as f64
-        };
+        let heavy_threshold = instance.disk_bytes.w24h_or(self.heavy_threshold_bytes as f64);
         if h.samples == 0 || (h.avg_disk_bytes as f64) < heavy_threshold {
             return 0.0;
         }

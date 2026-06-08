@@ -30,11 +30,7 @@ impl ScoreRule for MissingPathsRule {
         match job.missing_count {
             None => 0.0,
             Some(n) => {
-                let base = if instance.missing_paths.w1h > 0.0 {
-                    self.k * instance.missing_paths.w1h
-                } else {
-                    self.k * self.fallback_avg
-                };
+                let base = self.k * instance.missing_paths.w1h_or(self.fallback_avg);
 
                 self.cap * (1.0 - (n as f64 / base).clamp(0.0, 1.0))
             }
@@ -66,11 +62,7 @@ impl ScoreRule for MissingNarSizeRule {
             Some(0) => self.cap,
             Some(b) => {
                 let mb = b as f64 / 1_048_576.0;
-                let baseline = if instance.nar_size_mb.w1h > 0.0 {
-                    self.k * instance.nar_size_mb.w1h
-                } else {
-                    self.k * 1024.0
-                };
+                let baseline = self.k * instance.nar_size_mb.w1h_or(1024.0);
 
                 self.cap * (1.0 - (mb / baseline).clamp(0.0, 1.0))
             }
@@ -130,11 +122,7 @@ impl ScoreRule for DependencyCountRule {
             return 0.0;
         }
 
-        let base = if instance.dependency_cnt.w1h > 0.0 {
-            self.k * instance.dependency_cnt.w1h
-        } else {
-            self.k * self.fallback_avg
-        };
+        let base = self.k * instance.dependency_cnt.w1h_or(self.fallback_avg);
 
         self.cap * (job.dependency_count as f64 / base).clamp(0.0, 1.0)
     }
@@ -162,11 +150,7 @@ impl ScoreRule for WaitTimeRule {
     ) -> f64 {
         let now = gradient_core::types::now();
         let waited = (now - job.ready_at).num_seconds().max(0) as f64;
-        let avg = if instance.wait_secs.w1h > 0.0 {
-            instance.wait_secs.w1h
-        } else {
-            self.fallback_avg_secs
-        };
+        let avg = instance.wait_secs.w1h_or(self.fallback_avg_secs);
 
         (self.gain * (waited / avg)).min(self.cap)
     }
