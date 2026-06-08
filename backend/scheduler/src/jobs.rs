@@ -229,6 +229,7 @@ pub struct DispatchRecord {
     pub score_breakdown: serde_json::Value,
     pub worker_context: serde_json::Value,
     pub job_context: serde_json::Value,
+    pub instance_context: serde_json::Value,
 }
 
 /// Returns true when the worker can execute `job`: a flake job that fetches
@@ -520,6 +521,8 @@ impl JobTracker {
                 ))
                 .unwrap_or(serde_json::Value::Null),
                 job_context: serde_json::to_value(crate::views::JobContextView::new(&ctx, job))
+                    .unwrap_or(serde_json::Value::Null),
+                instance_context: serde_json::to_value(instance)
                     .unwrap_or(serde_json::Value::Null),
             }
         });

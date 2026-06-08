@@ -703,6 +703,7 @@ async fn persist_dispatched_job(state: &Arc<ServerState>, worker_id: &str, rec: 
         score_breakdown: Set(rec.score_breakdown),
         worker_context: Set(rec.worker_context),
         job_context: Set(rec.job_context),
+        instance_context: Set(Some(rec.instance_context.clone())),
         candidates: Set(None),
         created_at: Set(now),
     };
