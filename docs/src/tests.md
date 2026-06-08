@@ -3606,3 +3606,39 @@ Backend (`cargo test -p scheduler --tests instance`):
   in-memory `InstanceCounts` (active/pending builds, total/idle workers) are
   copied through. The FILTER-window and jsonb-extraction SQL is validated in CI
   against Postgres, not by the mock.
+
+## Scheduler - instance-relative scoring rework (#359)
+
+Soft rules return a bounded `[0,cap]` bonus with instance-relative thresholds;
+disqualifiers may go negative; `take_best_of_kind` refuses a negative total.
+
+Backend (`cargo test -p score`):
+- `missing_nar_size_bounded_bonus` (`score::rules::builtin`) - `None` scores 0,
+  a fully-cached job hits the 500 cap, and a huge NAR stays `>= 0` and below the
+  cached bonus.
+- `dependency_count_capped_at_50` (`score::rules::builtin`) - 100k dependencies
+  saturate at the 50 cap.
+- `wait_time_longer_wait_scores_higher_but_capped` (`score::rules::builtin`) -
+  wait measured from `ready_at` grows monotonically and saturates at the rule
+  cap, clearing the anti-starvation budget.
+- `rescore_wait_blocks_build_until_threshold_but_never_eval`
+  (`score::rules::builtin`) - an unscored build scores `-1000` at
+  `rescore_count` 0, drops to 0 at 4, is 0 once `missing_nar_size` is known, and
+  is always 0 for eval jobs.
+- `fair_share_breaks_tie_at_equal_wait` (`score::rules::fair_share`) - at equal
+  wait the quieter org's job outscores the busier org's, fair-share + wait
+  combined.
+- `aggregate_len1_is_identity_and_multi_reduces` (`score::context`) -
+  `BuildContext::aggregate` is identity for one item; multi-item folds
+  dependency/closure sums, OR of prefer-local/fixed-output, max/min/mean history
+  fields and concatenated derivations.
+
+Backend (`cargo test -p scheduler`):
+- `bump_rescore_increments_pending_only` (`scheduler::jobs`) -
+  `bump_rescore_counts` raises pending jobs' `rescore_count` but leaves an
+  assigned (active) job at 0.
+
+Frontend (`frontend/.../board/job-detail/job-detail.component.spec.ts`) -
+structured context panels: renders worker `cpu_count`, a derivations row
+(`pname`/`drv_path`), the job-context kind + history `peak_ram_mb`, and the
+instance-context windowed table with scalar counts.

@@ -5771,6 +5771,9 @@ paths:
       responses:
         '200':
           description: Job detail
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DispatchedJobDetail' }
         '404':
           description: Not found or out of scope
 
@@ -9107,3 +9110,132 @@ components:
           type: string
           description: Username of the member to remove.
           example: alice
+
+    # ── Job Board scoring contexts ────────────────────────────────────────────
+
+    Windowed:
+      type: object
+      description: A metric averaged over the 5-minute, 1-hour and 24-hour windows.
+      properties:
+        w5m: { type: number }
+        w1h: { type: number }
+        w24h: { type: number }
+
+    WorkerContext:
+      type: object
+      description: Worker capabilities and live load at dispatch time.
+      properties:
+        architectures: { type: array, items: { type: string } }
+        system_features: { type: array, items: { type: string } }
+        fetch: { type: boolean }
+        capabilities:
+          type: object
+          properties:
+            core: { type: boolean }
+            federate: { type: boolean }
+            fetch: { type: boolean }
+            eval: { type: boolean }
+            build: { type: boolean }
+            cache: { type: boolean }
+        cpu_count: { type: integer }
+        cpu_core_score: { type: integer }
+        ram_total_mb: { type: integer }
+        ram_free_mb: { type: integer }
+        cpu_usage_pct: { type: number }
+        disk_speed_mbps: { type: number, nullable: true }
+        network_speed_mbps: { type: number, nullable: true }
+
+    JobContext:
+      type: object
+      description: |
+        Per-job scoring inputs. `kind` selects which optional properties are
+        present: the `dependency_count`/`pname`/`closure_size`/`prefer_local_build`/
+        `is_fixed_output`/`history`/`derivations` block is build-only, while
+        `fetch_flake` is eval-only.
+      properties:
+        kind: { type: string, enum: [Build, Eval] }
+        architecture: { type: string }
+        missing_count: { type: integer, nullable: true }
+        missing_nar_size: { type: integer, nullable: true }
+        org_work_share: { type: number, nullable: true }
+        rescore_count: { type: integer }
+        queued_at: { type: string }
+        ready_at: { type: string }
+        dependency_count: { type: integer, description: Build-only. }
+        pname: { type: string, nullable: true, description: Build-only. }
+        closure_size: { type: integer, nullable: true, description: Build-only. }
+        prefer_local_build: { type: boolean, description: Build-only. }
+        is_fixed_output: { type: boolean, description: Build-only. }
+        history:
+          type: object
+          description: Build-only history prediction from prior builds of this derivation.
+          properties:
+            peak_ram_mb: { type: integer }
+            avg_cpu_time_ms: { type: integer }
+            build_time_ms: { type: integer }
+            avg_disk_bytes: { type: integer }
+            oom_rate: { type: number }
+            samples: { type: integer }
+        derivations:
+          type: array
+          description: Build-only list of derivations in this job.
+          items:
+            type: object
+            properties:
+              build_id: { type: string }
+              drv_path: { type: string }
+              pname: { type: string, nullable: true }
+        fetch_flake: { type: boolean, description: Eval-only. }
+
+    InstanceContext:
+      type: object
+      nullable: true
+      description: |
+        Instance-wide windowed averages and live counts at dispatch time,
+        recomputed every `GRADIENT_INSTANCE_METRICS_INTERVAL` seconds. `null`
+        for jobs dispatched before the first snapshot.
+      properties:
+        wait_secs: { $ref: '#/components/schemas/Windowed' }
+        build_time_ms: { $ref: '#/components/schemas/Windowed' }
+        peak_ram_mb: { $ref: '#/components/schemas/Windowed' }
+        cpu_time_ms: { $ref: '#/components/schemas/Windowed' }
+        avg_cpu_pct: { $ref: '#/components/schemas/Windowed' }
+        disk_bytes: { $ref: '#/components/schemas/Windowed' }
+        network_mbps: { $ref: '#/components/schemas/Windowed' }
+        oom_rate: { $ref: '#/components/schemas/Windowed' }
+        closure_size: { $ref: '#/components/schemas/Windowed' }
+        nar_size_mb: { $ref: '#/components/schemas/Windowed' }
+        missing_paths: { $ref: '#/components/schemas/Windowed' }
+        dependency_cnt: { $ref: '#/components/schemas/Windowed' }
+        completed: { $ref: '#/components/schemas/Windowed' }
+        active_builds: { type: integer }
+        pending_builds: { type: integer }
+        total_workers: { type: integer }
+        idle_workers: { type: integer }
+
+    DispatchedJobDetail:
+      type: object
+      description: Full dispatch record with per-rule scoring breakdown and the three scoring contexts.
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: integer }
+        organization: { type: string, format: uuid }
+        worker_id: { type: string }
+        score: { type: number }
+        queued_at: { type: string, format: date-time }
+        dispatched_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time, nullable: true }
+        build_id: { type: string, format: uuid, nullable: true }
+        evaluation_id: { type: string, format: uuid }
+        score_breakdown:
+          type: object
+          additionalProperties: true
+          description: Per-rule score contributions.
+        worker_context: { $ref: '#/components/schemas/WorkerContext' }
+        job_context: { $ref: '#/components/schemas/JobContext' }
+        instance_context: { $ref: '#/components/schemas/InstanceContext' }
+        candidates:
+          type: array
+          nullable: true
+          description: Runner-up candidates, superuser-only.
+          items: { type: object, additionalProperties: true }
