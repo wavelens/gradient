@@ -225,6 +225,7 @@ pub struct DispatchRecord {
     pub derivation: Option<DerivationId>,
     pub score: f64,
     pub queued_at: chrono::NaiveDateTime,
+    pub ready_at: chrono::NaiveDateTime,
     pub score_breakdown: serde_json::Value,
     pub worker_context: serde_json::Value,
     pub job_context: serde_json::Value,
@@ -510,6 +511,7 @@ impl JobTracker {
                 derivation: None,
                 score: breakdown.total,
                 queued_at: job.queued_at(),
+                ready_at: ctx.ready_at,
                 score_breakdown: serde_json::to_value(&breakdown)
                     .unwrap_or(serde_json::Value::Null),
                 worker_context: serde_json::to_value(crate::views::WorkerContextView::new(

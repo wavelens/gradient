@@ -696,7 +696,7 @@ async fn persist_dispatched_job(state: &Arc<ServerState>, worker_id: &str, rec: 
         worker_id: Set(worker_id.to_owned()),
         score: Set(rec.score),
         queued_at: Set(rec.queued_at),
-        ready_at: Set(None),
+        ready_at: Set(Some(rec.ready_at)),
         dispatched_at: Set(now),
         finished_at: Set(None),
         outcome: Set(None),
