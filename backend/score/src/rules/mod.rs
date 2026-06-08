@@ -13,7 +13,7 @@ pub mod resource;
 pub use affinity::{DiskAffinityRule, NetworkAffinityRule};
 pub use builtin::{
     BuiltinDeprioritizeRule, DependencyCountRule, MissingNarSizeRule, MissingPathsRule,
-    ReserveFetchWorkersRule, WaitTimeRule,
+    ReserveFetchWorkersRule, RescoreWaitRule, WaitTimeRule,
 };
 pub use fair_share::FairShareRule;
 pub use prefer_local::PreferLocalBuildRule;
