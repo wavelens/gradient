@@ -168,7 +168,9 @@ mod tests {
             missing_nar_size: Some(0),
             dependency_count: 0,
             queued_at: now(),
-            org_share: None,
+            ready_at: now(),
+            org_work_share: None,
+            rescore_count: 0,
         };
 
         let j_old = scored_job("x86_64-linux");
@@ -178,7 +180,9 @@ mod tests {
             missing_nar_size: None,
             dependency_count: 0,
             queued_at: now() - chrono::Duration::seconds(3600),
-            org_share: None,
+            ready_at: now() - chrono::Duration::seconds(3600),
+            org_work_share: None,
+            rescore_count: 0,
         };
 
         let s_old = policy.score(&c_old, &w, &InstanceContext::default());
@@ -211,7 +215,9 @@ mod tests {
             missing_nar_size: Some(0),
             dependency_count: 0,
             queued_at: now(),
-            org_share: None,
+            ready_at: now(),
+            org_work_share: None,
+            rescore_count: 0,
         };
         let fast = WorkerContext {
             architectures: &archs,
@@ -246,7 +252,9 @@ mod tests {
             missing_nar_size: Some(0),
             dependency_count: 0,
             queued_at: n,
-            org_share: None,
+            ready_at: n,
+            org_work_share: None,
+            rescore_count: 0,
         };
 
         let j_costly = scored_job("builtin");
@@ -256,7 +264,9 @@ mod tests {
             missing_nar_size: Some(50_000_000),
             dependency_count: 0,
             queued_at: n,
-            org_share: None,
+            ready_at: n,
+            org_work_share: None,
+            rescore_count: 0,
         };
 
         assert!(
@@ -278,7 +288,9 @@ mod tests {
             missing_nar_size: Some(0),
             dependency_count: 2,
             queued_at: now(),
-            org_share: None,
+            ready_at: now(),
+            org_work_share: None,
+            rescore_count: 0,
         };
 
         let breakdown = policy.score_detailed(&c, &w, &InstanceContext::default());

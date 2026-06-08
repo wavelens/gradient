@@ -28,7 +28,7 @@ impl ScoreRule for FairShareRule {
         _worker: &WorkerContext<'_>,
         _instance: &InstanceContext,
     ) -> f64 {
-        match job.org_share {
+        match job.org_work_share {
             Some(share) => -self.weight * share as f64,
             None => 0.0,
         }
@@ -55,14 +55,16 @@ mod tests {
         )
     }
 
-    fn ctx<'a>(job: &'a ScoredJob<'a>, org_share: Option<f32>) -> JobContext<'a> {
+    fn ctx<'a>(job: &'a ScoredJob<'a>, org_work_share: Option<f32>) -> JobContext<'a> {
         JobContext {
             job,
             missing_count: None,
             missing_nar_size: None,
             dependency_count: 0,
             queued_at: now(),
-            org_share,
+            ready_at: now(),
+            org_work_share,
+            rescore_count: 0,
         }
     }
 
