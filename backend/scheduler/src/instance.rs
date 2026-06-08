@@ -69,9 +69,8 @@ struct DispatchRow {
     dep_24h: f64,
 }
 
-/// Compute a fresh windowed snapshot from `derivation_metric` + `dispatched_job`
-/// over the last 5m/1h/24h. Returns the default snapshot on query error so a
-/// transient DB hiccup never crashes the recompute loop.
+/// Compute a fresh windowed snapshot from `derivation_metric` + `dispatched_job`.
+/// Each query degrades independently — errors are logged and that query's windows zero; counts always survive.
 pub async fn compute_instance_context(
     db: &impl ConnectionTrait,
     counts: InstanceCounts,
@@ -122,11 +121,10 @@ pub async fn compute_instance_context(
     .one(db)
     .await
     {
-        Ok(Some(r)) => r,
-        Ok(None) => MetricRow::default(),
+        Ok(row) => row.unwrap_or_default(),
         Err(e) => {
-            error!(error = %e, "compute_instance_context: derivation_metric query failed");
-            return score::InstanceContext::default();
+            error!(error = %e, "instance metrics: derivation_metric query failed");
+            MetricRow::default()
         }
     };
 
@@ -156,11 +154,10 @@ pub async fn compute_instance_context(
     .one(db)
     .await
     {
-        Ok(Some(r)) => r,
-        Ok(None) => DispatchRow::default(),
+        Ok(row) => row.unwrap_or_default(),
         Err(e) => {
-            error!(error = %e, "compute_instance_context: dispatched_job query failed");
-            return score::InstanceContext::default();
+            error!(error = %e, "instance metrics: dispatched_job query failed");
+            DispatchRow::default()
         }
     };
 
