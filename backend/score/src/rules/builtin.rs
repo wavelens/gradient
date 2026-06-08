@@ -188,12 +188,20 @@ impl ScoreRule for ReserveFetchWorkersRule {
         &self,
         job: &JobContext<'_>,
         worker: &WorkerContext<'_>,
-        _instance: &InstanceContext,
+        instance: &InstanceContext,
     ) -> f64 {
-        match job.job.kind() {
-            JobKindContext::Eval(e) if worker.fetch && !e.fetch_flake => -self.penalty,
-            _ => 0.0,
+        let cached_eval = matches!(job.job.kind(), JobKindContext::Eval(e) if !e.fetch_flake);
+        if !(worker.fetch && cached_eval) {
+            return 0.0;
         }
+
+        let spare = if instance.total_workers > 0 {
+            instance.idle_workers as f64 / instance.total_workers as f64
+        } else {
+            0.0
+        };
+
+        -self.penalty * (1.0 - spare).clamp(0.0, 1.0)
     }
 }
 
@@ -394,11 +402,15 @@ mod tests {
         let eval_w = worker(&archs, false);
         let now = gradient_core::types::now();
 
+        let inst_full = crate::context::InstanceContext { total_workers: 4, idle_workers: 0, ..Default::default() };
+        let inst_idle = crate::context::InstanceContext { total_workers: 4, idle_workers: 4, ..Default::default() };
+
         let ctx_cached = JobContext { job: &cached_eval, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0 };
         let ctx_fetch = JobContext { job: &fetch_eval, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0 };
         let ctx_build = JobContext { job: &build, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0 };
 
-        assert!(rule.score(&ctx_cached, &fetch_w, &InstanceContext::default()) < 0.0, "fetch worker penalized for cached eval");
+        assert!((rule.score(&ctx_cached, &fetch_w, &inst_full) - (-300.0)).abs() < 1e-9, "full penalty when no idle workers");
+        assert_eq!(rule.score(&ctx_cached, &fetch_w, &inst_idle), 0.0, "fully relaxed when all workers idle");
         assert_eq!(rule.score(&ctx_cached, &eval_w, &InstanceContext::default()), 0.0, "eval-only worker not penalized");
         assert_eq!(rule.score(&ctx_fetch, &fetch_w, &InstanceContext::default()), 0.0, "fetch-only eval not penalized");
         assert_eq!(rule.score(&ctx_build, &fetch_w, &InstanceContext::default()), 0.0, "build job not penalized");
