@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::context::InstanceContext;
 use crate::rule::{JobContext, ScoreRule, WorkerContext};
 
 #[derive(Debug)]
@@ -19,7 +20,12 @@ impl Default for PreferLocalBuildRule {
 }
 
 impl ScoreRule for PreferLocalBuildRule {
-    fn score(&self, job: &JobContext<'_>, _worker: &WorkerContext<'_>) -> f64 {
+    fn score(
+        &self,
+        job: &JobContext<'_>,
+        _worker: &WorkerContext<'_>,
+        _instance: &InstanceContext,
+    ) -> f64 {
         if !job.job.prefer_local_build {
             return 0.0;
         }
@@ -61,15 +67,15 @@ mod tests {
     fn local_worker_with_full_cache_gets_full_bonus() {
         let rule = PreferLocalBuildRule::default();
         let j = job(true);
-        assert_eq!(rule.score(&ctx(&j, Some(0)), &worker()), rule.local_bonus);
+        assert_eq!(rule.score(&ctx(&j, Some(0)), &worker(), &InstanceContext::default()), rule.local_bonus);
     }
 
     #[test]
     fn more_missing_paths_lowers_bonus_floored_at_zero() {
         let rule = PreferLocalBuildRule::default();
         let j = job(true);
-        let few = rule.score(&ctx(&j, Some(2)), &worker());
-        let many = rule.score(&ctx(&j, Some(100)), &worker());
+        let few = rule.score(&ctx(&j, Some(2)), &worker(), &InstanceContext::default());
+        let many = rule.score(&ctx(&j, Some(100)), &worker(), &InstanceContext::default());
         assert!(few < rule.local_bonus);
         assert!(many < few);
         assert_eq!(many, 0.0, "deeply-missing closure floors at 0");
@@ -79,15 +85,15 @@ mod tests {
     fn unknown_missing_count_is_zero() {
         let rule = PreferLocalBuildRule::default();
         let j = job(true);
-        assert_eq!(rule.score(&ctx(&j, None), &worker()), 0.0);
+        assert_eq!(rule.score(&ctx(&j, None), &worker(), &InstanceContext::default()), 0.0);
     }
 
     #[test]
     fn not_prefer_local_is_zero_regardless_of_missing_count() {
         let rule = PreferLocalBuildRule::default();
         let j = job(false);
-        assert_eq!(rule.score(&ctx(&j, Some(0)), &worker()), 0.0);
-        assert_eq!(rule.score(&ctx(&j, Some(5)), &worker()), 0.0);
-        assert_eq!(rule.score(&ctx(&j, None), &worker()), 0.0);
+        assert_eq!(rule.score(&ctx(&j, Some(0)), &worker(), &InstanceContext::default()), 0.0);
+        assert_eq!(rule.score(&ctx(&j, Some(5)), &worker(), &InstanceContext::default()), 0.0);
+        assert_eq!(rule.score(&ctx(&j, None), &worker(), &InstanceContext::default()), 0.0);
     }
 }

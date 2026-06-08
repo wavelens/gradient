@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::context::InstanceContext;
 use crate::rule::{JobContext, ScoreRule, WorkerContext};
 
 /// Penalizes a job proportional to its owning org's share of currently-active
@@ -21,7 +22,12 @@ impl Default for FairShareRule {
 }
 
 impl ScoreRule for FairShareRule {
-    fn score(&self, job: &JobContext<'_>, _worker: &WorkerContext<'_>) -> f64 {
+    fn score(
+        &self,
+        job: &JobContext<'_>,
+        _worker: &WorkerContext<'_>,
+        _instance: &InstanceContext,
+    ) -> f64 {
         match job.org_share {
             Some(share) => -self.weight * share as f64,
             None => 0.0,
@@ -69,8 +75,8 @@ mod tests {
         let rule = FairShareRule::default();
         let job = build_job();
         let w = worker();
-        let busy = rule.score(&ctx(&job, Some(0.99)), &w);
-        let quiet = rule.score(&ctx(&job, Some(0.01)), &w);
+        let busy = rule.score(&ctx(&job, Some(0.99)), &w, &InstanceContext::default());
+        let quiet = rule.score(&ctx(&job, Some(0.01)), &w, &InstanceContext::default());
         assert!(busy < quiet, "busy org must score lower: {busy} vs {quiet}");
     }
 
@@ -79,8 +85,8 @@ mod tests {
         let rule = FairShareRule::default();
         let job = build_job();
         let w = worker();
-        assert_eq!(rule.score(&ctx(&job, Some(0.0)), &w), 0.0);
-        assert_eq!(rule.score(&ctx(&job, None), &w), 0.0);
+        assert_eq!(rule.score(&ctx(&job, Some(0.0)), &w, &InstanceContext::default()), 0.0);
+        assert_eq!(rule.score(&ctx(&job, None), &w, &InstanceContext::default()), 0.0);
     }
 
     // #111: a quiet org (share ~0) must overcome a busy org (share ~1) even when
@@ -99,8 +105,8 @@ mod tests {
             ..ctx(&job, Some(1.0))
         };
 
-        let quiet_total = fair.score(&quiet, &w) + wait.score(&quiet, &w);
-        let busy_total = fair.score(&busy, &w) + wait.score(&busy, &w);
+        let quiet_total = fair.score(&quiet, &w, &InstanceContext::default()) + wait.score(&quiet, &w, &InstanceContext::default());
+        let busy_total = fair.score(&busy, &w, &InstanceContext::default()) + wait.score(&busy, &w, &InstanceContext::default());
         assert!(
             quiet_total > busy_total,
             "quiet org must win despite busy org's wait bonus: quiet={quiet_total} busy={busy_total}"

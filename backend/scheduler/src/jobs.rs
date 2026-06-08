@@ -387,7 +387,7 @@ impl JobTracker {
                 queued_at: job.queued_at(),
                 org_share: org_share(job.peer_id()),
             };
-            policy.score(&ctx, worker_ctx)
+            policy.score(&ctx, worker_ctx, &score::InstanceContext::default())
         };
 
         let job_id = self
@@ -456,7 +456,7 @@ impl JobTracker {
                 queued_at: job.queued_at(),
                 org_share: org_share(job.peer_id()),
             };
-            let breakdown = policy.score_detailed(&ctx, worker_ctx);
+            let breakdown = policy.score_detailed(&ctx, worker_ctx, &score::InstanceContext::default());
             let (kind_disc, build_id, project) = match job {
                 PendingJob::Build(b) => (1i16, Some(b.build_id), None),
                 PendingJob::Eval(e) => (0i16, None, e.project_id),

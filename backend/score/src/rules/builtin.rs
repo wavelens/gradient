@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::context::JobKindView;
+use crate::context::{InstanceContext, JobKindView};
 use crate::rule::{JobContext, ScoreRule, WorkerContext};
 
 #[derive(Debug)]
@@ -20,7 +20,12 @@ impl Default for MissingPathsRule {
 }
 
 impl ScoreRule for MissingPathsRule {
-    fn score(&self, job: &JobContext<'_>, _worker: &WorkerContext<'_>) -> f64 {
+    fn score(
+        &self,
+        job: &JobContext<'_>,
+        _worker: &WorkerContext<'_>,
+        _instance: &InstanceContext,
+    ) -> f64 {
         match job.missing_count {
             None => 0.0,
             Some(n) => self.scored_bonus - (n as f64) * self.path_penalty,
@@ -40,7 +45,12 @@ impl Default for MissingNarSizeRule {
 }
 
 impl ScoreRule for MissingNarSizeRule {
-    fn score(&self, job: &JobContext<'_>, _worker: &WorkerContext<'_>) -> f64 {
+    fn score(
+        &self,
+        job: &JobContext<'_>,
+        _worker: &WorkerContext<'_>,
+        _instance: &InstanceContext,
+    ) -> f64 {
         match job.missing_nar_size {
             None => 0.0,
             Some(bytes) => {
@@ -63,7 +73,12 @@ impl Default for BuiltinDeprioritizeRule {
 }
 
 impl ScoreRule for BuiltinDeprioritizeRule {
-    fn score(&self, job: &JobContext<'_>, _worker: &WorkerContext<'_>) -> f64 {
+    fn score(
+        &self,
+        job: &JobContext<'_>,
+        _worker: &WorkerContext<'_>,
+        _instance: &InstanceContext,
+    ) -> f64 {
         if job.job.kind == JobKindView::Build && job.job.architecture == "builtin" {
             -self.penalty
         } else {
@@ -84,7 +99,12 @@ impl Default for DependencyCountRule {
 }
 
 impl ScoreRule for DependencyCountRule {
-    fn score(&self, job: &JobContext<'_>, _worker: &WorkerContext<'_>) -> f64 {
+    fn score(
+        &self,
+        job: &JobContext<'_>,
+        _worker: &WorkerContext<'_>,
+        _instance: &InstanceContext,
+    ) -> f64 {
         if job.job.kind == JobKindView::Build {
             job.dependency_count as f64 * self.dep_bonus_per_dep
         } else {
@@ -106,7 +126,12 @@ impl Default for WaitTimeRule {
 }
 
 impl ScoreRule for WaitTimeRule {
-    fn score(&self, job: &JobContext<'_>, _worker: &WorkerContext<'_>) -> f64 {
+    fn score(
+        &self,
+        job: &JobContext<'_>,
+        _worker: &WorkerContext<'_>,
+        _instance: &InstanceContext,
+    ) -> f64 {
         let now = gradient_core::types::now();
         let waited = (now - job.queued_at).num_seconds().max(0) as f64;
         waited.min(self.max_wait_secs) * self.bonus_per_second
@@ -125,7 +150,12 @@ impl Default for ReserveFetchWorkersRule {
 }
 
 impl ScoreRule for ReserveFetchWorkersRule {
-    fn score(&self, job: &JobContext<'_>, worker: &WorkerContext<'_>) -> f64 {
+    fn score(
+        &self,
+        job: &JobContext<'_>,
+        worker: &WorkerContext<'_>,
+        _instance: &InstanceContext,
+    ) -> f64 {
         match job.job.kind {
             JobKindView::Eval { fetch_flake } if worker.fetch && !fetch_flake => -self.penalty,
             _ => 0.0,
@@ -169,7 +199,7 @@ mod tests {
         let scored = JobContext { job: &job, missing_count: Some(0), missing_nar_size: None, dependency_count: 0, queued_at: now, org_share: None };
         let unscored = JobContext { job: &job, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now, org_share: None };
 
-        assert!(rule.score(&scored, &w) > rule.score(&unscored, &w));
+        assert!(rule.score(&scored, &w, &InstanceContext::default()) > rule.score(&unscored, &w, &InstanceContext::default()));
     }
 
     #[test]
@@ -183,7 +213,7 @@ mod tests {
         let c1 = JobContext { job: &job, missing_count: Some(2), missing_nar_size: None, dependency_count: 0, queued_at: now, org_share: None };
         let c2 = JobContext { job: &job, missing_count: Some(10), missing_nar_size: None, dependency_count: 0, queued_at: now, org_share: None };
 
-        assert!(rule.score(&c1, &w) > rule.score(&c2, &w));
+        assert!(rule.score(&c1, &w, &InstanceContext::default()) > rule.score(&c2, &w, &InstanceContext::default()));
     }
 
     #[test]
@@ -197,7 +227,7 @@ mod tests {
         let c1 = JobContext { job: &job, missing_count: None, missing_nar_size: Some(1_048_576), dependency_count: 0, queued_at: now, org_share: None };
         let c2 = JobContext { job: &job, missing_count: None, missing_nar_size: Some(100_000_000), dependency_count: 0, queued_at: now, org_share: None };
 
-        assert!(rule.score(&c1, &w) > rule.score(&c2, &w));
+        assert!(rule.score(&c1, &w, &InstanceContext::default()) > rule.score(&c2, &w, &InstanceContext::default()));
     }
 
     #[test]
@@ -212,7 +242,7 @@ mod tests {
         let c_real = JobContext { job: &real, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now, org_share: None };
         let c_builtin = JobContext { job: &builtin, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now, org_share: None };
 
-        assert!(rule.score(&c_real, &w) > rule.score(&c_builtin, &w));
+        assert!(rule.score(&c_real, &w, &InstanceContext::default()) > rule.score(&c_builtin, &w, &InstanceContext::default()));
     }
 
     #[test]
@@ -226,8 +256,8 @@ mod tests {
         let c_few = JobContext { job: &job, missing_count: None, missing_nar_size: None, dependency_count: 1, queued_at: now, org_share: None };
         let c_many = JobContext { job: &job, missing_count: None, missing_nar_size: None, dependency_count: 20, queued_at: now, org_share: None };
 
-        assert!(rule.score(&c_many, &w) > rule.score(&c_few, &w));
-        assert!(rule.score(&c_few, &w) > 0.0);
+        assert!(rule.score(&c_many, &w, &InstanceContext::default()) > rule.score(&c_few, &w, &InstanceContext::default()));
+        assert!(rule.score(&c_few, &w, &InstanceContext::default()) > 0.0);
     }
 
     #[test]
@@ -239,7 +269,7 @@ mod tests {
         let now = gradient_core::types::now();
 
         let ctx = JobContext { job: &job, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now, org_share: None };
-        assert_eq!(rule.score(&ctx, &w), 0.0);
+        assert_eq!(rule.score(&ctx, &w, &InstanceContext::default()), 0.0);
     }
 
     #[test]
@@ -254,9 +284,9 @@ mod tests {
         let ctx_mid = JobContext { job: &job, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now - chrono::Duration::seconds(60), org_share: None };
         let ctx_ancient = JobContext { job: &job, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now - chrono::Duration::seconds(10_000), org_share: None };
 
-        let fresh = rule.score(&ctx_fresh, &w);
-        let mid = rule.score(&ctx_mid, &w);
-        let ancient = rule.score(&ctx_ancient, &w);
+        let fresh = rule.score(&ctx_fresh, &w, &InstanceContext::default());
+        let mid = rule.score(&ctx_mid, &w, &InstanceContext::default());
+        let ancient = rule.score(&ctx_ancient, &w, &InstanceContext::default());
 
         assert!(fresh < mid, "older should score higher: {fresh} vs {mid}");
         let cap = rule.max_wait_secs * rule.bonus_per_second;
@@ -280,9 +310,9 @@ mod tests {
         let ctx_fetch = JobContext { job: &fetch_eval, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now, org_share: None };
         let ctx_build = JobContext { job: &build, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now, org_share: None };
 
-        assert!(rule.score(&ctx_cached, &fetch_w) < 0.0, "fetch worker penalized for cached eval");
-        assert_eq!(rule.score(&ctx_cached, &eval_w), 0.0, "eval-only worker not penalized");
-        assert_eq!(rule.score(&ctx_fetch, &fetch_w), 0.0, "fetch-only eval not penalized");
-        assert_eq!(rule.score(&ctx_build, &fetch_w), 0.0, "build job not penalized");
+        assert!(rule.score(&ctx_cached, &fetch_w, &InstanceContext::default()) < 0.0, "fetch worker penalized for cached eval");
+        assert_eq!(rule.score(&ctx_cached, &eval_w, &InstanceContext::default()), 0.0, "eval-only worker not penalized");
+        assert_eq!(rule.score(&ctx_fetch, &fetch_w, &InstanceContext::default()), 0.0, "fetch-only eval not penalized");
+        assert_eq!(rule.score(&ctx_build, &fetch_w, &InstanceContext::default()), 0.0, "build job not penalized");
     }
 }
