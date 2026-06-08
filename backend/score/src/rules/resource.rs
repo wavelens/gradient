@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::context::InstanceContext;
 use crate::rule::{JobContext, ScoreRule, WorkerContext};
 
 #[derive(Debug)]
@@ -21,7 +22,12 @@ impl Default for ResourceFitRule {
 }
 
 impl ScoreRule for ResourceFitRule {
-    fn score(&self, job: &JobContext<'_>, worker: &WorkerContext<'_>) -> f64 {
+    fn score(
+        &self,
+        job: &JobContext<'_>,
+        worker: &WorkerContext<'_>,
+        _instance: &InstanceContext,
+    ) -> f64 {
         let Some(m) = worker.metrics else { return 0.0 };
         let h = job.job.history();
         if h.samples == 0 {
@@ -76,8 +82,8 @@ mod tests {
         let small = job_with_history(HistoryPrediction { predicted_peak_ram_mb: 1500, samples: 5, ..Default::default() });
         let large = job_with_history(HistoryPrediction { predicted_peak_ram_mb: 3000, samples: 5, ..Default::default() });
 
-        let s_small = rule.score(&ctx(&small), &w);
-        let s_large = rule.score(&ctx(&large), &w);
+        let s_small = rule.score(&ctx(&small), &w, &InstanceContext::default());
+        let s_large = rule.score(&ctx(&large), &w, &InstanceContext::default());
         assert!(s_small < 0.0);
         assert!(s_large < s_small, "larger overshoot must be more negative: {s_large} vs {s_small}");
     }
@@ -90,7 +96,7 @@ mod tests {
         let low = job_with_history(HistoryPrediction { predicted_peak_ram_mb: 2000, oom_rate: 0.0, samples: 5, ..Default::default() });
         let high = job_with_history(HistoryPrediction { predicted_peak_ram_mb: 2000, oom_rate: 0.5, samples: 5, ..Default::default() });
 
-        assert!(rule.score(&ctx(&high), &w) < rule.score(&ctx(&low), &w));
+        assert!(rule.score(&ctx(&high), &w, &InstanceContext::default()) < rule.score(&ctx(&low), &w, &InstanceContext::default()));
     }
 
     #[test]
@@ -101,8 +107,8 @@ mod tests {
         let strong = worker_with(WorkerMetricsView { cpu_core_score: 1500, ..Default::default() });
         let monster = worker_with(WorkerMetricsView { cpu_core_score: 100_000, ..Default::default() });
 
-        let s_strong = rule.score(&ctx(&heavy), &strong);
-        let s_monster = rule.score(&ctx(&heavy), &monster);
+        let s_strong = rule.score(&ctx(&heavy), &strong, &InstanceContext::default());
+        let s_monster = rule.score(&ctx(&heavy), &monster, &InstanceContext::default());
         assert!(s_strong > 0.0);
         let cap = rule.cpu_affinity_bonus * rule.cpu_bonus_cap;
         assert!((s_monster - cap).abs() < 0.001, "cpu bonus must cap at {cap}, got {s_monster}");
@@ -113,7 +119,7 @@ mod tests {
         let rule = ResourceFitRule::default();
         let w = worker_with(WorkerMetricsView { ram_free_mb: 100, ..Default::default() });
         let job = job_with_history(HistoryPrediction { predicted_peak_ram_mb: 9000, avg_cpu_time_ms: 999_999, samples: 0, ..Default::default() });
-        assert_eq!(rule.score(&ctx(&job), &w), 0.0);
+        assert_eq!(rule.score(&ctx(&job), &w, &InstanceContext::default()), 0.0);
     }
 
     #[test]
@@ -121,6 +127,6 @@ mod tests {
         let rule = ResourceFitRule::default();
         let w = WorkerContext { architectures: &[], system_features: &[], fetch: false, metrics: None };
         let job = job_with_history(HistoryPrediction { predicted_peak_ram_mb: 9000, samples: 5, ..Default::default() });
-        assert_eq!(rule.score(&ctx(&job), &w), 0.0);
+        assert_eq!(rule.score(&ctx(&job), &w, &InstanceContext::default()), 0.0);
     }
 }

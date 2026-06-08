@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::context::{ScoredJob, WorkerMetricsView};
+use crate::context::{InstanceContext, ScoredJob, WorkerMetricsView};
 
 /// Everything the policy knows about the candidate job at scoring time.
 #[derive(Clone, Copy)]
@@ -29,7 +29,12 @@ pub struct WorkerContext<'a> {
 }
 
 pub trait ScoreRule: Send + Sync + std::fmt::Debug {
-    fn score(&self, job: &JobContext<'_>, worker: &WorkerContext<'_>) -> f64;
+    fn score(
+        &self,
+        job: &JobContext<'_>,
+        worker: &WorkerContext<'_>,
+        instance: &InstanceContext,
+    ) -> f64;
     fn name(&self) -> &'static str {
         let full = std::any::type_name::<Self>();
         full.rsplit("::").next().unwrap_or(full)

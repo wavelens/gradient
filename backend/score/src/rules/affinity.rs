@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::context::InstanceContext;
 use crate::rule::{JobContext, ScoreRule, WorkerContext};
 
 /// Fixed-output derivations fetch from the network, so prefer faster-network
@@ -21,7 +22,12 @@ impl Default for NetworkAffinityRule {
 }
 
 impl ScoreRule for NetworkAffinityRule {
-    fn score(&self, job: &JobContext<'_>, worker: &WorkerContext<'_>) -> f64 {
+    fn score(
+        &self,
+        job: &JobContext<'_>,
+        worker: &WorkerContext<'_>,
+        _instance: &InstanceContext,
+    ) -> f64 {
         if !job.job.is_fixed_output {
             return 0.0;
         }
@@ -48,7 +54,12 @@ impl Default for DiskAffinityRule {
 }
 
 impl ScoreRule for DiskAffinityRule {
-    fn score(&self, job: &JobContext<'_>, worker: &WorkerContext<'_>) -> f64 {
+    fn score(
+        &self,
+        job: &JobContext<'_>,
+        worker: &WorkerContext<'_>,
+        _instance: &InstanceContext,
+    ) -> f64 {
         let h = job.job.history();
         if h.samples == 0 || h.avg_disk_bytes < self.heavy_threshold_bytes {
             return 0.0;
@@ -93,7 +104,7 @@ mod tests {
         let j = job(true, HistoryPrediction::default());
         let fast = worker_with(WorkerMetricsView { network_speed_mbps: Some(100.0), ..Default::default() });
         let slow = worker_with(WorkerMetricsView { network_speed_mbps: Some(10.0), ..Default::default() });
-        assert!(rule.score(&ctx(&j), &fast) > rule.score(&ctx(&j), &slow));
+        assert!(rule.score(&ctx(&j), &fast, &InstanceContext::default()) > rule.score(&ctx(&j), &slow, &InstanceContext::default()));
     }
 
     #[test]
@@ -101,7 +112,7 @@ mod tests {
         let rule = NetworkAffinityRule::default();
         let j = job(false, HistoryPrediction::default());
         let fast = worker_with(WorkerMetricsView { network_speed_mbps: Some(100.0), ..Default::default() });
-        assert_eq!(rule.score(&ctx(&j), &fast), 0.0);
+        assert_eq!(rule.score(&ctx(&j), &fast, &InstanceContext::default()), 0.0);
     }
 
     #[test]
@@ -109,7 +120,7 @@ mod tests {
         let rule = NetworkAffinityRule::default();
         let j = job(true, HistoryPrediction::default());
         let w = worker_with(WorkerMetricsView { network_speed_mbps: None, ..Default::default() });
-        assert_eq!(rule.score(&ctx(&j), &w), 0.0);
+        assert_eq!(rule.score(&ctx(&j), &w, &InstanceContext::default()), 0.0);
     }
 
     #[test]
@@ -119,7 +130,7 @@ mod tests {
         let j = job(false, heavy);
         let fast = worker_with(WorkerMetricsView { disk_speed_mbps: Some(500.0), ..Default::default() });
         let slow = worker_with(WorkerMetricsView { disk_speed_mbps: Some(50.0), ..Default::default() });
-        assert!(rule.score(&ctx(&j), &fast) > rule.score(&ctx(&j), &slow));
+        assert!(rule.score(&ctx(&j), &fast, &InstanceContext::default()) > rule.score(&ctx(&j), &slow, &InstanceContext::default()));
     }
 
     #[test]
@@ -128,7 +139,7 @@ mod tests {
         let light = HistoryPrediction { avg_disk_bytes: 1_048_576, samples: 5, ..Default::default() };
         let j = job(false, light);
         let fast = worker_with(WorkerMetricsView { disk_speed_mbps: Some(500.0), ..Default::default() });
-        assert_eq!(rule.score(&ctx(&j), &fast), 0.0);
+        assert_eq!(rule.score(&ctx(&j), &fast, &InstanceContext::default()), 0.0);
     }
 
     #[test]
@@ -136,6 +147,6 @@ mod tests {
         let rule = DiskAffinityRule::default();
         let j = job(false, HistoryPrediction { avg_disk_bytes: 999 * 1_048_576, samples: 0, ..Default::default() });
         let fast = worker_with(WorkerMetricsView { disk_speed_mbps: Some(500.0), ..Default::default() });
-        assert_eq!(rule.score(&ctx(&j), &fast), 0.0);
+        assert_eq!(rule.score(&ctx(&j), &fast, &InstanceContext::default()), 0.0);
     }
 }

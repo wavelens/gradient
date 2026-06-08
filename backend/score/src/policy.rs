@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::context::InstanceContext;
 use crate::rule::{JobContext, ScoreRule, WorkerContext};
 use crate::rules::builtin::{
     BuiltinDeprioritizeRule, DependencyCountRule, MissingNarSizeRule, MissingPathsRule,
@@ -15,15 +16,21 @@ use crate::rules::{
 
 pub trait ScoringPolicy: Send + Sync + std::fmt::Debug {
     fn name(&self) -> &str;
-    fn score(&self, job: &JobContext<'_>, worker: &WorkerContext<'_>) -> f64;
+    fn score(
+        &self,
+        job: &JobContext<'_>,
+        worker: &WorkerContext<'_>,
+        instance: &InstanceContext,
+    ) -> f64;
     fn score_detailed(
         &self,
         job: &JobContext<'_>,
         worker: &WorkerContext<'_>,
+        instance: &InstanceContext,
     ) -> crate::ScoreBreakdown {
         crate::ScoreBreakdown {
             rules: std::collections::BTreeMap::new(),
-            total: self.score(job, worker),
+            total: self.score(job, worker, instance),
         }
     }
     fn uses_history(&self) -> bool {
@@ -49,19 +56,25 @@ impl ScoringPolicy for RulePolicy {
         self.name
     }
 
-    fn score(&self, job: &JobContext<'_>, worker: &WorkerContext<'_>) -> f64 {
-        self.rules.iter().map(|r| r.score(job, worker)).sum()
+    fn score(
+        &self,
+        job: &JobContext<'_>,
+        worker: &WorkerContext<'_>,
+        instance: &InstanceContext,
+    ) -> f64 {
+        self.rules.iter().map(|r| r.score(job, worker, instance)).sum()
     }
 
     fn score_detailed(
         &self,
         job: &JobContext<'_>,
         worker: &WorkerContext<'_>,
+        instance: &InstanceContext,
     ) -> crate::ScoreBreakdown {
         let mut rules = std::collections::BTreeMap::new();
         let mut total = 0.0;
         for r in &self.rules {
-            let s = r.score(job, worker);
+            let s = r.score(job, worker, instance);
             total += s;
             rules.insert(r.name().to_string(), s);
         }
@@ -168,8 +181,8 @@ mod tests {
             org_share: None,
         };
 
-        let s_old = policy.score(&c_old, &w);
-        let s_fresh = policy.score(&c_fresh, &w);
+        let s_old = policy.score(&c_old, &w, &InstanceContext::default());
+        let s_fresh = policy.score(&c_fresh, &w, &InstanceContext::default());
         assert!(
             s_old > s_fresh,
             "1-hour-old build must beat fresh fully-cached candidate \
@@ -212,7 +225,10 @@ mod tests {
             fetch: false,
             metrics: Some(WorkerMetricsView { network_speed_mbps: Some(5.0), ..Default::default() }),
         };
-        assert!(policy.score(&c, &fast) > policy.score(&c, &slow));
+        assert!(
+            policy.score(&c, &fast, &InstanceContext::default())
+                > policy.score(&c, &slow, &InstanceContext::default())
+        );
     }
 
     #[test]
@@ -243,7 +259,10 @@ mod tests {
             org_share: None,
         };
 
-        assert!(policy.score(&c_ready, &w) > policy.score(&c_costly, &w));
+        assert!(
+            policy.score(&c_ready, &w, &InstanceContext::default())
+                > policy.score(&c_costly, &w, &InstanceContext::default())
+        );
     }
 
     #[test]
@@ -262,8 +281,8 @@ mod tests {
             org_share: None,
         };
 
-        let breakdown = policy.score_detailed(&c, &w);
-        let total = policy.score(&c, &w);
+        let breakdown = policy.score_detailed(&c, &w, &InstanceContext::default());
+        let total = policy.score(&c, &w, &InstanceContext::default());
 
         assert!((breakdown.total - total).abs() < 1e-9, "total must match score()");
         assert_eq!(breakdown.rules.len(), 6, "simple policy has 6 rules");
