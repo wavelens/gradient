@@ -3385,6 +3385,23 @@ prediction per candidate derivation outside the scoring lock; `take_best_of_kind
 feeds each build's prediction to the lazy `history` provider. On build completion,
 `BuildStateHandler::record_metrics` inserts a `derivation_metric` row from the
 worker's `BuildMetrics` and adopts the worker-measured `build_time_ms`.
+`summarize` also averages the rows' `build_time_ms` into
+`HistoryPrediction.build_time_ms` (same null-filter/mean as `avg_cpu_time_ms`),
+which `take_best_of_kind` uses to work-weight each org's active-build share.
+
+### Negative-total dispatch gate (`scheduler::jobs`)
+
+`take_best_of_kind` now refuses to dispatch the best candidate when its total
+score is `< 0` (e.g. a build still awaiting candidate scores, which the
+`RescoreWaitRule` drives to `-1000`); the worker idles that round instead.
+
+- `dispatch_skips_all_negative` — an unscored build (no `missing_nar_size`,
+  `rescore_count` 0) totals negative, so the gate returns `None` and leaves it
+  pending.
+- `dispatch_picks_non_negative` — a fully-cached build (`missing_nar_size` 0)
+  earns the `MissingNarSizeRule` bonus and is dispatched.
+- `unscored_build_is_gated_until_scored` — the same build is gated until the
+  worker reports zero missing paths, then assigns.
 
 ## Log compression, chunking, limiting & store-fetch (#246)
 

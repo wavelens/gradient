@@ -69,11 +69,10 @@ fn summarize(rows: &[MDerivationMetric]) -> score::HistoryPrediction {
     let predicted_peak_ram_mb = percentile_or_max(&mut peaks, 0.95).max(0) as u64;
 
     let cpu: Vec<i64> = rows.iter().filter_map(|r| r.cpu_time_ms).collect();
-    let avg_cpu_time_ms = if cpu.is_empty() {
-        0
-    } else {
-        (cpu.iter().sum::<i64>() / cpu.len() as i64).max(0) as u64
-    };
+    let avg_cpu_time_ms = mean_nonnull(&cpu);
+
+    let durations: Vec<i64> = rows.iter().filter_map(|r| r.build_time_ms).collect();
+    let build_time_ms = mean_nonnull(&durations);
 
     let disk: Vec<i64> = rows
         .iter()
@@ -92,10 +91,20 @@ fn summarize(rows: &[MDerivationMetric]) -> score::HistoryPrediction {
     score::HistoryPrediction {
         predicted_peak_ram_mb,
         avg_cpu_time_ms,
+        build_time_ms,
         avg_disk_bytes,
         oom_rate,
         samples,
     }
+}
+
+/// Integer mean of already-collected non-null values, clamped to 0. Empty → 0.
+fn mean_nonnull(vals: &[i64]) -> u64 {
+    if vals.is_empty() {
+        return 0;
+    }
+
+    (vals.iter().sum::<i64>() / vals.len() as i64).max(0) as u64
 }
 
 /// p95 of the values, falling back to the max when the sample is too small for

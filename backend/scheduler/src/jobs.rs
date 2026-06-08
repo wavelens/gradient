@@ -347,6 +347,7 @@ impl JobTracker {
         caps: Option<&WorkerCaps>,
         kind: &JobKind,
         policy: &dyn ScoringPolicy,
+        instance: &score::InstanceContext,
     ) -> Option<Assignment> {
         let worker_scores = self.scores.get(peer_id);
 
@@ -366,18 +367,22 @@ impl JobTracker {
         };
         let worker_ctx = worker_ctx.as_ref().unwrap_or(&fallback_ctx);
 
-        let mut org_active_builds: HashMap<OrganizationId, u32> = HashMap::new();
-        let mut total_active_builds: u32 = 0;
+        let mut org_work: HashMap<OrganizationId, f64> = HashMap::new();
+        let mut total_work: f64 = 0.0;
         for (_, job) in self.active.values() {
-            if matches!(job, PendingJob::Build(_)) {
-                *org_active_builds.entry(job.peer_id()).or_default() += 1;
-                total_active_builds += 1;
+            if let PendingJob::Build(b) = job {
+                let w = if b.history.build_time_ms > 0 {
+                    b.history.build_time_ms as f64
+                } else {
+                    // no per-build history: weight by instance avg, half for prefer-local (cheaper) builds
+                    (if b.prefer_local_build { 0.5 } else { 1.0 }) * instance.build_time_ms.w1h
+                };
+                *org_work.entry(b.peer_id).or_default() += w;
+                total_work += w;
             }
         }
-        let org_share = |peer: OrganizationId| -> Option<f32> {
-            (total_active_builds > 0).then(|| {
-                org_active_builds.get(&peer).copied().unwrap_or(0) as f32 / total_active_builds as f32
-            })
+        let org_work_share = |peer: OrganizationId| -> Option<f32> {
+            (total_work > 0.0).then(|| (org_work.get(&peer).copied().unwrap_or(0.0) / total_work) as f32)
         };
 
         let score_of = |id: &str, job: &PendingJob| -> f64 {
@@ -415,13 +420,13 @@ impl JobTracker {
                 dependency_count: job.dependency_count(),
                 queued_at: job.queued_at(),
                 ready_at: job.ready_at(),
-                org_work_share: org_share(job.peer_id()),
+                org_work_share: org_work_share(job.peer_id()),
                 rescore_count: job.rescore_count(),
             };
-            policy.score(&ctx, worker_ctx, &score::InstanceContext::default())
+            policy.score(&ctx, worker_ctx, instance)
         };
 
-        let job_id = self
+        let best = self
             .pending
             .iter()
             .filter(|(_, j)| {
@@ -433,14 +438,20 @@ impl JobTracker {
                     )
                     && job_eligible_for_caps(j, caps)
             })
-            .max_by(|(id_a, job_a), (id_b, job_b)| {
-                score_of(id_a, job_a)
-                    .partial_cmp(&score_of(id_b, job_b))
+            .map(|(id, job)| (id, score_of(id, job)))
+            .max_by(|(id_a, sa), (id_b, sb)| {
+                sa.partial_cmp(sb)
                     .unwrap_or(std::cmp::Ordering::Equal)
                     // Tie-break by job_id for determinism.
                     .then_with(|| id_b.cmp(id_a))
-            })
-            .map(|(id, _)| id.clone())?;
+            });
+
+        // A negative best total means dispatching now is worse than idling this
+        // round (e.g. a build still awaiting candidate scores); the worker waits.
+        let job_id = match best {
+            Some((id, s)) if s >= 0.0 => id.clone(),
+            _ => return None,
+        };
 
         // Recompute the winner's score with the per-rule breakdown, captured for
         // the dispatched_job row. Owned snapshots so the borrow ends before the
@@ -484,10 +495,10 @@ impl JobTracker {
                 dependency_count: job.dependency_count(),
                 queued_at: job.queued_at(),
                 ready_at: job.ready_at(),
-                org_work_share: org_share(job.peer_id()),
+                org_work_share: org_work_share(job.peer_id()),
                 rescore_count: job.rescore_count(),
             };
-            let breakdown = policy.score_detailed(&ctx, worker_ctx, &score::InstanceContext::default());
+            let breakdown = policy.score_detailed(&ctx, worker_ctx, instance);
             let (kind_disc, build_id, project) = match job {
                 PendingJob::Build(b) => (1i16, Some(b.build_id), None),
                 PendingJob::Eval(e) => (0i16, None, e.project_id),
@@ -551,6 +562,10 @@ impl JobTracker {
 
     pub fn active_job(&self, job_id: &str) -> Option<&PendingJob> {
         self.active.get(job_id).map(|(_, j)| j)
+    }
+
+    pub fn pending_job(&self, job_id: &str) -> Option<&PendingJob> {
+        self.pending.get(job_id)
     }
 
     /// Move all active jobs assigned to `worker_id` that belong to any of
@@ -882,9 +897,10 @@ mod tests {
             ..Default::default()
         };
         let p = score::policy_by_name("simple");
+        let inst = score::InstanceContext::default();
         assert!(
             tracker
-                .take_best_of_kind("w1", None, Some(&no_fetch), &JobKind::Flake, &*p)
+                .take_best_of_kind("w1", None, Some(&no_fetch), &JobKind::Flake, &*p, &inst)
                 .is_none(),
             "worker without fetch must not receive a fetch flake job"
         );
@@ -898,7 +914,7 @@ mod tests {
         };
         assert!(
             tracker
-                .take_best_of_kind("w2", None, Some(&with_fetch), &JobKind::Flake, &*p)
+                .take_best_of_kind("w2", None, Some(&with_fetch), &JobKind::Flake, &*p, &inst)
                 .is_some(),
             "fetch-capable worker must receive the fetch flake job"
         );
@@ -919,9 +935,10 @@ mod tests {
             ..Default::default()
         };
         let p = score::policy_by_name("simple");
+        let inst = score::InstanceContext::default();
         assert!(
             tracker
-                .take_best_of_kind("w1", None, Some(&no_fetch), &JobKind::Flake, &*p)
+                .take_best_of_kind("w1", None, Some(&no_fetch), &JobKind::Flake, &*p, &inst)
                 .is_some(),
             "cached eval job must run on a worker without fetch"
         );
@@ -943,8 +960,9 @@ mod tests {
         };
         // Worker requesting Build → arm-only build is filtered out → no assignment.
         let p = score::policy_by_name("simple");
+        let inst = score::InstanceContext::default();
         let assignment =
-            tracker.take_best_of_kind("w1", None, Some(&x86_caps), &JobKind::Build, &*p);
+            tracker.take_best_of_kind("w1", None, Some(&x86_caps), &JobKind::Build, &*p, &inst);
         assert!(assignment.is_none());
         assert_eq!(tracker.pending_count(), 1);
     }
@@ -969,17 +987,25 @@ mod tests {
             system_features: vec!["kvm".into()],
             ..Default::default()
         };
+        // Cached score so the build clears the negative-total dispatch gate.
+        for w in ["w1", "w2"] {
+            tracker.record_scores(
+                w,
+                vec![CandidateScore { job_id: "kvm".into(), missing_count: 0, missing_nar_size: 0 }],
+            );
+        }
         let p = score::policy_by_name("simple");
+        let inst = score::InstanceContext::default();
         // Worker without kvm - no assignment.
         assert!(
             tracker
-                .take_best_of_kind("w1", None, Some(&no_kvm), &JobKind::Build, &*p)
+                .take_best_of_kind("w1", None, Some(&no_kvm), &JobKind::Build, &*p, &inst)
                 .is_none()
         );
         // Worker with kvm - assigned.
         assert!(
             tracker
-                .take_best_of_kind("w2", None, Some(&with_kvm), &JobKind::Build, &*p)
+                .take_best_of_kind("w2", None, Some(&with_kvm), &JobKind::Build, &*p, &inst)
                 .is_some()
         );
     }
@@ -1009,7 +1035,8 @@ mod tests {
             }],
         );
         let p = score::policy_by_name("simple");
-        let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &*p);
+        let inst = score::InstanceContext::default();
+        let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst);
         assert!(assignment.is_some());
         assert_eq!(assignment.unwrap().job_id, "j1");
         assert_eq!(tracker.pending_count(), 0);
@@ -1025,20 +1052,38 @@ mod tests {
         let org_a = OrganizationId::now_v7();
         let org_b = OrganizationId::now_v7();
         let p = score::policy_by_name("resource-aware");
+        // Non-zero typical build time so active builds carry work-weight even
+        // without per-build history, making org_work_share well-defined.
+        let inst = score::InstanceContext {
+            build_time_ms: score::Windowed { w1h: 60_000.0, ..Default::default() },
+            ..Default::default()
+        };
 
-        // Seed several active builds for org A.
+        // Seed several active builds for org A. Each is fully cached on its
+        // worker so it clears the negative-total dispatch gate.
         for i in 0..5 {
-            tracker.add_pending(format!("a_active_{i}"), build_job(org_a, vec![]));
-            tracker.take_best_of_kind("wa", None, None, &JobKind::Build, &*p);
+            let id = format!("a_active_{i}");
+            tracker.add_pending(id.clone(), build_job(org_a, vec![]));
+            tracker.record_scores(
+                "wa",
+                vec![CandidateScore { job_id: id, missing_count: 0, missing_nar_size: 0 }],
+            );
+            tracker.take_best_of_kind("wa", None, None, &JobKind::Build, &*p, &inst);
         }
         assert_eq!(tracker.active_count(), 5);
 
-        // One pending build each for A and B.
+        // One pending build each for A and B, both cached on the requesting worker.
         tracker.add_pending("a_pending".into(), build_job(org_a, vec![]));
         tracker.add_pending("b_pending".into(), build_job(org_b, vec![]));
+        for id in ["a_pending", "b_pending"] {
+            tracker.record_scores(
+                "wb",
+                vec![CandidateScore { job_id: id.into(), missing_count: 0, missing_nar_size: 0 }],
+            );
+        }
 
         let assignment = tracker
-            .take_best_of_kind("wb", None, None, &JobKind::Build, &*p)
+            .take_best_of_kind("wb", None, None, &JobKind::Build, &*p, &inst)
             .expect("a build must be assigned");
         assert_eq!(
             assignment.job_id, "b_pending",
@@ -1047,25 +1092,69 @@ mod tests {
     }
 
     #[test]
-    fn test_request_without_scores_still_assigns() {
+    fn unscored_build_is_gated_until_scored() {
         let mut tracker = JobTracker::new();
         let peer = OrganizationId::now_v7();
         tracker.add_pending(
             "j1".into(),
             build_job(
                 peer,
-                vec![RequiredPath {
-                    path: "/nix/store/foo".into(),
-                    cache_info: None,
-                }],
+                vec![RequiredPath { path: "/nix/store/foo".into(), cache_info: None }],
             ),
         );
 
-        // No scores recorded - take_best_of_kind still assigns (unscored = MAX).
         let p = score::policy_by_name("simple");
-        let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &*p);
-        assert!(assignment.is_some());
+        let inst = score::InstanceContext::default();
+
+        // No scores yet: the build's total is negative (RescoreWaitRule), so the
+        // negative-total gate idles the worker and leaves the job pending.
+        assert!(tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst).is_none());
+        assert_eq!(tracker.pending_count(), 1);
+
+        // Once the worker reports it is fully cached, the build clears the gate.
+        tracker.record_scores(
+            "w1",
+            vec![CandidateScore { job_id: "j1".into(), missing_count: 0, missing_nar_size: 0 }],
+        );
+        let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst);
         assert_eq!(assignment.unwrap().job_id, "j1");
+        assert_eq!(tracker.pending_count(), 0);
+        assert_eq!(tracker.active_count(), 1);
+    }
+
+    #[test]
+    fn dispatch_skips_all_negative() {
+        // The only eligible build is unscored (missing_nar_size None, rescore 0),
+        // so RescoreWaitRule drives its total to -1000 with nothing to offset it.
+        // The negative-total gate must idle the worker, leaving the job pending.
+        let mut tracker = JobTracker::new();
+        let peer = OrganizationId::now_v7();
+        tracker.add_pending("j1".into(), build_job(peer, vec![]));
+
+        let p = score::policy_by_name("simple");
+        let inst = score::InstanceContext::default();
+        assert!(tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst).is_none());
+        assert_eq!(tracker.pending_count(), 1);
+        assert_eq!(tracker.active_count(), 0);
+    }
+
+    #[test]
+    fn dispatch_picks_non_negative() {
+        // A fully-cached build (missing_nar_size Some(0)) earns the MissingNarSize
+        // bonus and avoids the rescore penalty, so its total is >= 0 and it is
+        // dispatched.
+        let mut tracker = JobTracker::new();
+        let peer = OrganizationId::now_v7();
+        tracker.add_pending("j1".into(), build_job(peer, vec![]));
+        tracker.record_scores(
+            "w1",
+            vec![CandidateScore { job_id: "j1".into(), missing_count: 0, missing_nar_size: 0 }],
+        );
+
+        let p = score::policy_by_name("simple");
+        let inst = score::InstanceContext::default();
+        let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst);
+        assert_eq!(assignment.expect("non-negative build must dispatch").job_id, "j1");
         assert_eq!(tracker.pending_count(), 0);
         assert_eq!(tracker.active_count(), 1);
     }
@@ -1078,7 +1167,8 @@ mod tests {
 
         // Assign it.
         let p = score::policy_by_name("simple");
-        let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Flake, &*p);
+        let inst = score::InstanceContext::default();
+        let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Flake, &*p, &inst);
         assert!(assignment.is_some());
         assert_eq!(tracker.pending_count(), 0);
         assert_eq!(tracker.active_count(), 1);
@@ -1106,6 +1196,7 @@ mod tests {
             None,
             &JobKind::Flake,
             &*score::policy_by_name("simple"),
+            &score::InstanceContext::default(),
         );
         tracker.take_best_of_kind(
             "w1",
@@ -1113,6 +1204,7 @@ mod tests {
             None,
             &JobKind::Flake,
             &*score::policy_by_name("simple"),
+            &score::InstanceContext::default(),
         );
         assert_eq!(tracker.active_count(), 2);
         assert_eq!(tracker.pending_count(), 0);
@@ -1142,7 +1234,8 @@ mod tests {
         tracker.add_pending("j2".into(), eval_job(peer));
 
         let p = score::policy_by_name("simple");
-        let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Flake, &*p);
+        let inst = score::InstanceContext::default();
+        let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Flake, &*p, &inst);
         assert!(assignment.is_some());
         assert_eq!(assignment.unwrap().job_id, "j2");
     }
@@ -1163,6 +1256,7 @@ mod tests {
             None,
             &JobKind::Flake,
             &*score::policy_by_name("simple"),
+            &score::InstanceContext::default(),
         );
         tracker.take_best_of_kind(
             "w1",
@@ -1170,6 +1264,7 @@ mod tests {
             None,
             &JobKind::Flake,
             &*score::policy_by_name("simple"),
+            &score::InstanceContext::default(),
         );
         tracker.take_best_of_kind(
             "w1",
@@ -1177,6 +1272,7 @@ mod tests {
             None,
             &JobKind::Flake,
             &*score::policy_by_name("simple"),
+            &score::InstanceContext::default(),
         );
         assert_eq!(tracker.active_jobs().count(), 3);
 
@@ -1202,6 +1298,7 @@ mod tests {
             None,
             &JobKind::Flake,
             &*score::policy_by_name("simple"),
+            &score::InstanceContext::default(),
         );
 
         let aborted = tracker.drain_peer_jobs_on_worker("w1", &HashSet::new());
@@ -1223,6 +1320,7 @@ mod tests {
             None,
             &JobKind::Flake,
             &*score::policy_by_name("simple"),
+            &score::InstanceContext::default(),
         );
         // Now in active, not pending - should still be "contained".
         assert!(tracker.contains_job("j1"));
@@ -1249,6 +1347,7 @@ mod tests {
             None,
             &JobKind::Flake,
             &*score::policy_by_name("simple"),
+            &score::InstanceContext::default(),
         );
         assert!(tracker.contains_job("j1"));
         tracker.remove_job("j1");

@@ -334,9 +334,16 @@ async fn record_eval_message_inserts_for_active_build_job() {
             },
         )
         .await;
-    // Move to assigned so active_job() finds it.
+    // Move to assigned so active_job() finds it. A zero-missing score clears the
+    // negative-total dispatch gate.
     scheduler
         .register_worker("w1", GradientCapabilities::default(), HashSet::new())
+        .await;
+    scheduler
+        .record_scores(
+            "w1",
+            vec![CandidateScore { job_id: "jbuild".into(), missing_count: 0, missing_nar_size: 0 }],
+        )
         .await;
     scheduler.request_job("w1", JobKind::Build).await;
 
@@ -403,20 +410,20 @@ async fn fetch_only_completion_enqueues_cached_eval_followup() {
 
     assert_eq!(scheduler.pending_job_count().await, 1);
 
-    // The follow-up reuses the `eval:{id}` id and carries a cached source.
-    let assignment = scheduler
-        .request_job("w1", JobKind::Flake)
-        .await
-        .expect("cached eval follow-up should be assignable");
-    assert_eq!(assignment.job_id, job_id);
-    match assignment.job {
-        gradient_core::types::proto::Job::Flake(j) => match j.source {
-            gradient_core::types::proto::FlakeSource::Cached { store_path } => {
-                assert_eq!(store_path, source_path)
-            }
-            other => panic!("expected Cached source, got {other:?}"),
-        },
-        other => panic!("expected a Flake job, got {other:?}"),
+    // The follow-up reuses the `eval:{id}` id and carries a cached source. (We
+    // inspect the pending tracker rather than dispatching, since under the new
+    // negative-total gate a fetch-capable worker is reserved off cached-eval
+    // work by ReserveFetchWorkersRule when spare capacity is unknown.)
+    let tracker = scheduler.job_tracker.read().await;
+    let follow = match tracker.pending_job(&job_id).expect("follow-up must be pending") {
+        crate::jobs::PendingJob::Eval(e) => e,
+        other => panic!("expected an eval follow-up, got {other:?}"),
+    };
+    match &follow.job.source {
+        gradient_core::types::proto::FlakeSource::Cached { store_path } => {
+            assert_eq!(store_path, source_path)
+        }
+        other => panic!("expected Cached source, got {other:?}"),
     }
 }
 
