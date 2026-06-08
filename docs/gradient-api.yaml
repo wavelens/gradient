@@ -5623,35 +5623,35 @@ paths:
   # These endpoints live outside /api/v1. The server URL for these is the root,
   # e.g. https://gradient.example.com (no /api/v1 prefix).
 
-x-nix-cache-paths:
-  description: |-
-    The following Nix binary cache endpoints are served at the root of the server
-    (not under `/api/v1`). They implement the Nix binary cache protocol and are
-    used by `nix-store --realise`, `nixos-rebuild`, and other Nix clients.
-    Private caches require HTTP Basic Auth (any username, JWT or API key as password).
+  x-nix-cache-paths:
+    description: |-
+      The following Nix binary cache endpoints are served at the root of the server
+      (not under `/api/v1`). They implement the Nix binary cache protocol and are
+      used by `nix-store --realise`, `nixos-rebuild`, and other Nix clients.
+      Private caches require HTTP Basic Auth (any username, JWT or API key as password).
 
-    ### Substituter surface
+      ### Substituter surface
 
-    | Endpoint | Description |
-    |---|---|
-    | `GET /cache/{cache}/nix-cache-info` | Cache metadata for Nix. Add `?json` for JSON response (`NixCacheInfo`). |
-    | `GET /cache/{cache}/gradient-cache-info` | Gradient-specific cache metadata. Add `?json` for JSON response (`GradientCacheInfo`). Responds with `Access-Control-Allow-Origin: *` for browser probes. |
-    | `GET /cache/{cache}/{hash}.narinfo` | Path info for a store path. Add `?json` for JSON response (`NixPathInfo`). |
-    | `GET /cache/{cache}/nar/{hash}.nar.zst` | Compressed NAR archive |
+      | Endpoint | Description |
+      |---|---|
+      | `GET /cache/{cache}/nix-cache-info` | Cache metadata for Nix. Add `?json` for JSON response (`NixCacheInfo`). |
+      | `GET /cache/{cache}/gradient-cache-info` | Gradient-specific cache metadata. Add `?json` for JSON response (`GradientCacheInfo`). Responds with `Access-Control-Allow-Origin: *` for browser probes. |
+      | `GET /cache/{cache}/{hash}.narinfo` | Path info for a store path. Add `?json` for JSON response (`NixPathInfo`). |
+      | `GET /cache/{cache}/nar/{hash}.nar.zst` | Compressed NAR archive |
 
-    ### Gradient Proto surface
+      ### Gradient Proto surface
 
-    | Endpoint | Description |
-    |---|---|
-    | `GET /cache/{cache}/proto` | WebSocket upgrade carrying rkyv-encoded binary frames (same wire format as `/proto`). Read-only, cache-scoped. PUBLIC caches allow anonymous connections (governed by `GRADIENT_PROTO_ALLOW_ANONYMOUS_CACHE`, default `true`); PRIVATE caches require `Authorization: GRAD<key>`. Anonymous sessions are subject to per-IP connection and rate caps (`GRADIENT_PROTO_ANON_MAX_CONNECTIONS_PER_IP`, `GRADIENT_PROTO_ANON_RATE_PER_SECOND`, `GRADIENT_PROTO_ANON_RATE_BURST`). Only `CacheQuery` (Normal/Pull modes) and `NarRequest` messages are accepted; Push, job RPCs, and worker registration are rejected. |
+      | Endpoint | Description |
+      |---|---|
+      | `GET /cache/{cache}/proto` | WebSocket upgrade carrying rkyv-encoded binary frames (same wire format as `/proto`). Read-only, cache-scoped. PUBLIC caches allow anonymous connections (governed by `GRADIENT_PROTO_ALLOW_ANONYMOUS_CACHE`, default `true`); PRIVATE caches require `Authorization: GRAD<key>`. Anonymous sessions are subject to per-IP connection and rate caps (`GRADIENT_PROTO_ANON_MAX_CONNECTIONS_PER_IP`, `GRADIENT_PROTO_ANON_RATE_PER_SECOND`, `GRADIENT_PROTO_ANON_RATE_BURST`). Only `CacheQuery` (Normal/Pull modes) and `NarRequest` messages are accepted; Push, job RPCs, and worker registration are rejected. |
 
-    ### Inspection surface
+      ### Inspection surface
 
-    | Endpoint | Description |
-    |---|---|
-    | `GET /cache/{cache}/ls/{hash}` | JSON tree listing of the NAR (nix-serve `.ls` v1 schema). Rate-limited at 60 req/min. |
-    | `GET /cache/{cache}/serve/{hash}/{path}` | Extract a single file (bytes, Content-Type sniffed) or directory (tar.zst) from a NAR. Rate-limited at 60 req/min. |
-    | `GET /cache/{cache}/log/{drv}` | Build log for `<drv>.drv`, from either locally-built or upstream-substituted builds (substituter compat - `nix log`). Rate-limited at ~300 req/min. |
+      | Endpoint | Description |
+      |---|---|
+      | `GET /cache/{cache}/ls/{hash}` | JSON tree listing of the NAR (nix-serve `.ls` v1 schema). Rate-limited at 60 req/min. |
+      | `GET /cache/{cache}/serve/{hash}/{path}` | Extract a single file (bytes, Content-Type sniffed) or directory (tar.zst) from a NAR. Rate-limited at 60 req/min. |
+      | `GET /cache/{cache}/log/{drv}` | Build log for `<drv>.drv`, from either locally-built or upstream-substituted builds (substituter compat - `nix log`). Rate-limited at ~300 req/min. |
 
   /metrics/catalog:
     get:
@@ -5720,6 +5720,16 @@ x-nix-cache-paths:
       responses:
         '200':
           description: Dispatched jobs plus other_running count
+
+  /board/jobs/pending:
+    get:
+      tags: [board]
+      summary: Pending (undispatched) jobs
+      description: Queued jobs not yet dispatched to a worker, visible to the caller; out-of-scope jobs collapse to an aggregate `other_pending` count.
+      operationId: getBoardPendingJobs
+      responses:
+        '200':
+          description: Pending jobs plus other_pending count
 
   /board/jobs/expensive:
     get:
@@ -5931,16 +5941,6 @@ x-nix-cache-paths:
           description: System health
         '403':
           description: Superuser required
-
-  /board/live:
-    get:
-      tags: [board]
-      summary: Live board events (WebSocket)
-      description: WebSocket stream of dispatch / worker / queue-depth events, filtered to the caller's scope.
-      operationId: getBoardLive
-      responses:
-        '101':
-          description: Switching Protocols (WebSocket upgrade)
 
   /board/acknowledged-derivations:
     get:
