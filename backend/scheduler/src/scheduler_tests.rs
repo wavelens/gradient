@@ -48,6 +48,8 @@ fn eval_job(peer: OrganizationId) -> PendingEvalJob {
         },
         required_paths: vec![],
         queued_at: gradient_core::types::now(),
+        ready_at: gradient_core::types::now(),
+        rescore_count: 0,
     }
 }
 
@@ -326,6 +328,9 @@ async fn record_eval_message_inserts_for_active_build_job() {
                 is_fixed_output: false,
                 history: score::HistoryPrediction::default(),
                 queued_at: gradient_core::types::now(),
+                ready_at: gradient_core::types::now(),
+                rescore_count: 0,
+                pname: None,
             },
         )
         .await;
@@ -446,6 +451,8 @@ async fn cancel_evaluation_jobs_drops_eval_and_build_jobs() {
                 },
                 required_paths: vec![],
                 queued_at: gradient_core::types::now(),
+                ready_at: gradient_core::types::now(),
+                rescore_count: 0,
             },
         )
         .await;
@@ -479,6 +486,9 @@ async fn cancel_evaluation_jobs_drops_eval_and_build_jobs() {
                     is_fixed_output: false,
                     history: score::HistoryPrediction::default(),
                     queued_at: gradient_core::types::now(),
+                    ready_at: gradient_core::types::now(),
+                    rescore_count: 0,
+                    pname: None,
                 },
             )
             .await;

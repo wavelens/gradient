@@ -32,6 +32,12 @@ pub struct PendingEvalJob {
     /// `evaluation.updated_at` at the time this job was dispatched.
     /// Used by the scoring policy to prefer evaluations that have waited longer.
     pub queued_at: chrono::NaiveDateTime,
+    /// When the job became dispatchable. Evals have no dependencies, so this
+    /// equals `queued_at`.
+    pub ready_at: chrono::NaiveDateTime,
+    /// Number of dispatch ticks this job has waited while pending. Bumped once
+    /// per dispatch loop and fed into the scoring policy's rescore-wait rule.
+    pub rescore_count: u32,
 }
 
 impl PendingEvalJob {
@@ -75,6 +81,14 @@ pub struct PendingBuildJob {
     /// `build.updated_at` at the time this job was dispatched to the tracker.
     /// Used by the scoring policy to prefer builds that have waited longer.
     pub queued_at: chrono::NaiveDateTime,
+    /// When the build became dispatchable (all dependencies satisfied). A build
+    /// is enqueued only once ready, so this is "now" at enqueue time.
+    pub ready_at: chrono::NaiveDateTime,
+    /// Number of dispatch ticks this job has waited while pending. Bumped once
+    /// per dispatch loop and fed into the scoring policy's rescore-wait rule.
+    pub rescore_count: u32,
+    /// `derivation.pname`, surfaced for the serialized dispatch view.
+    pub pname: Option<String>,
 }
 
 /// A connected worker's capabilities, used to gate which jobs are eligible
@@ -164,6 +178,27 @@ impl PendingJob {
         match self {
             PendingJob::Build(j) => j.queued_at,
             PendingJob::Eval(j) => j.queued_at,
+        }
+    }
+
+    pub fn ready_at(&self) -> chrono::NaiveDateTime {
+        match self {
+            PendingJob::Build(j) => j.ready_at,
+            PendingJob::Eval(j) => j.ready_at,
+        }
+    }
+
+    pub fn rescore_count(&self) -> u32 {
+        match self {
+            PendingJob::Build(j) => j.rescore_count,
+            PendingJob::Eval(j) => j.rescore_count,
+        }
+    }
+
+    pub fn set_rescore_count(&mut self, n: u32) {
+        match self {
+            PendingJob::Build(j) => j.rescore_count = n,
+            PendingJob::Eval(j) => j.rescore_count = n,
         }
     }
 }
@@ -379,9 +414,9 @@ impl JobTracker {
                 missing_nar_size: s.map(|s| s.missing_nar_size),
                 dependency_count: job.dependency_count(),
                 queued_at: job.queued_at(),
-                ready_at: job.queued_at(),
+                ready_at: job.ready_at(),
                 org_work_share: org_share(job.peer_id()),
-                rescore_count: 0,
+                rescore_count: job.rescore_count(),
             };
             policy.score(&ctx, worker_ctx, &score::InstanceContext::default())
         };
@@ -448,9 +483,9 @@ impl JobTracker {
                 missing_nar_size: s.map(|s| s.missing_nar_size),
                 dependency_count: job.dependency_count(),
                 queued_at: job.queued_at(),
-                ready_at: job.queued_at(),
+                ready_at: job.ready_at(),
                 org_work_share: org_share(job.peer_id()),
-                rescore_count: 0,
+                rescore_count: job.rescore_count(),
             };
             let breakdown = policy.score_detailed(&ctx, worker_ctx, &score::InstanceContext::default());
             let (kind_disc, build_id, project) = match job {
@@ -605,6 +640,19 @@ impl JobTracker {
     pub fn active_count(&self) -> usize {
         self.active.len()
     }
+
+    /// Increment every pending job's `rescore_count`. Called once per build
+    /// dispatch tick so long-waiting jobs accrue a rescore-wait bonus.
+    pub fn bump_rescore_counts(&mut self) {
+        for j in self.pending.values_mut() {
+            j.set_rescore_count(j.rescore_count() + 1);
+        }
+    }
+
+    #[cfg(test)]
+    pub fn rescore_count_of(&self, job_id: &str) -> u32 {
+        self.pending.get(job_id).map(|j| j.rescore_count()).unwrap_or(0)
+    }
 }
 
 #[cfg(test)]
@@ -631,6 +679,8 @@ mod tests {
             },
             required_paths: vec![],
             queued_at: gradient_core::types::now(),
+            ready_at: gradient_core::types::now(),
+            rescore_count: 0,
         })
     }
 
@@ -657,6 +707,8 @@ mod tests {
             },
             required_paths: vec![],
             queued_at: gradient_core::types::now(),
+            ready_at: gradient_core::types::now(),
+            rescore_count: 0,
         })
     }
 
@@ -692,6 +744,9 @@ mod tests {
             is_fixed_output: false,
             history: score::HistoryPrediction::default(),
             queued_at: gradient_core::types::now(),
+            ready_at: gradient_core::types::now(),
+            rescore_count: 0,
+            pname: None,
         })
     }
 
@@ -1238,6 +1293,21 @@ mod tests {
         assert_eq!(follow.repository, original.repository);
         assert_eq!(follow.required_paths.len(), 1);
         assert!(follow.required_paths.iter().any(|p| p.path == "/nix/store/abc-source"));
+    }
+
+    #[test]
+    fn bump_rescore_increments_pending_only() {
+        let mut tracker = JobTracker::new();
+        let peer = OrganizationId::now_v7();
+        tracker.add_pending("build:1".into(), build_job(peer, vec![]));
+
+        tracker.bump_rescore_counts();
+        tracker.bump_rescore_counts();
+        assert_eq!(tracker.rescore_count_of("build:1"), 2);
+
+        tracker.assign_pending("worker", "build:1");
+        tracker.bump_rescore_counts();
+        assert_eq!(tracker.rescore_count_of("build:1"), 0, "active job not bumped");
     }
 
     #[test]
