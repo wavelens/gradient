@@ -11,6 +11,6 @@ pub mod rule;
 pub mod rules;
 
 pub use breakdown::ScoreBreakdown;
-pub use context::{HistoryPrediction, JobKindView, LazyProviders, ScoredJob, WorkerMetricsView};
+pub use context::{HistoryPrediction, InstanceContext, JobKindView, LazyProviders, ScoredJob, Windowed, WorkerMetricsView};
 pub use policy::{policy_by_name, RulePolicy, ScoringPolicy};
 pub use rule::{JobContext, ScoreRule, WorkerContext};

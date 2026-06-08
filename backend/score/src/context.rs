@@ -6,6 +6,34 @@
 
 use std::cell::{Cell, OnceCell};
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Windowed {
+    pub w5m: f64,
+    pub w1h: f64,
+    pub w24h: f64,
+}
+
+#[derive(Clone, Copy, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct InstanceContext {
+    pub wait_secs: Windowed,
+    pub build_time_ms: Windowed,
+    pub peak_ram_mb: Windowed,
+    pub cpu_time_ms: Windowed,
+    pub avg_cpu_pct: Windowed,
+    pub disk_bytes: Windowed,
+    pub network_mbps: Windowed,
+    pub oom_rate: Windowed,
+    pub closure_size: Windowed,
+    pub nar_size_mb: Windowed,
+    pub missing_paths: Windowed,
+    pub dependency_cnt: Windowed,
+    pub completed: Windowed,
+    pub active_builds: u32,
+    pub pending_builds: u32,
+    pub total_workers: u32,
+    pub idle_workers: u32,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum JobKindView {
     Eval { fetch_flake: bool },
@@ -126,5 +154,20 @@ mod tests {
         assert!(!job.history_was_touched(), "closure_size must not touch history");
         let _ = job.history();
         assert!(job.history_was_touched());
+    }
+
+    #[test]
+    fn windowed_default_is_zero_and_avg_picks_window() {
+        let w = Windowed { w5m: 1.0, w1h: 2.0, w24h: 3.0 };
+        assert_eq!(Windowed::default(), Windowed { w5m: 0.0, w1h: 0.0, w24h: 0.0 });
+        assert_eq!(w.w1h, 2.0);
+    }
+
+    #[test]
+    fn instance_context_default_is_zeroed() {
+        let ic = InstanceContext::default();
+        assert_eq!(ic.wait_secs.w1h, 0.0);
+        assert_eq!(ic.active_builds, 0);
+        assert_eq!(ic.total_workers, 0);
     }
 }
