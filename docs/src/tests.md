@@ -3552,3 +3552,24 @@ serializes to the `{"type":"cache_changed"}` ping.
 `LiveService.connect(path)` builds the correct `ws(s)://…${apiUrl}${path}` URL,
 emits parsed JSON frames, ignores malformed frames, and closes the socket on
 unsubscribe.
+
+## Frontend issues batch (#341)
+
+Frontend (`pnpm --dir frontend exec ng test --include='<glob>' --watch=false`):
+- `evaluation-log/build-search.spec.ts` - `matchesBuildSearch` is a case-insensitive
+  substring match; empty/whitespace query matches all.
+- `evaluation-log/evaluation-log.component.spec.ts` - `renderLog` updates
+  `logLineCount` (live count on building builds); the sidebar search filters
+  `groupedBuilds` by name while preserving the `visibleBuilds` index used for
+  keyboard navigation.
+- `core/services/admin.service.spec.ts` - `startDeepGc`/`listTasks` hit the
+  `admin/maintenance/deep-gc` and `admin/tasks` endpoints; `githubAppConfigured`
+  resolves true/false from the credentials probe.
+- `board/health/health.component.spec.ts` - the HTTP-routes table is gone, the
+  admin tasks table renders, and the GitHub link reflects the configured state.
+- `board/live-jobs/live-jobs.component.spec.ts` - the view toggle loads and
+  renders the pending-jobs list.
+
+Backend (`cargo test -p scheduler --tests jobs`):
+- `pending_snapshot_reports_kind_and_org` - `JobTracker::pending_snapshot` reports
+  each pending job's kind, org, and build-id, backing `GET /board/jobs/pending`.
