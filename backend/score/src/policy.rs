@@ -8,7 +8,7 @@ use crate::context::InstanceContext;
 use crate::rule::{JobContext, ScoreRule, WorkerContext};
 use crate::rules::builtin::{
     BuiltinDeprioritizeRule, DependencyCountRule, MissingNarSizeRule, MissingPathsRule,
-    ReserveFetchWorkersRule, WaitTimeRule,
+    ReserveFetchWorkersRule, RescoreWaitRule, WaitTimeRule,
 };
 use crate::rules::{
     DiskAffinityRule, FairShareRule, NetworkAffinityRule, PreferLocalBuildRule, ResourceFitRule,
@@ -90,6 +90,7 @@ pub fn simple_rules() -> Vec<Box<dyn ScoreRule>> {
     vec![
         Box::new(MissingPathsRule::default()),
         Box::new(MissingNarSizeRule::default()),
+        Box::new(RescoreWaitRule::default()),
         Box::new(DependencyCountRule::default()),
         Box::new(WaitTimeRule::default()),
         Box::new(BuiltinDeprioritizeRule::default()),
@@ -297,7 +298,7 @@ mod tests {
         let total = policy.score(&c, &w, &InstanceContext::default());
 
         assert!((breakdown.total - total).abs() < 1e-9, "total must match score()");
-        assert_eq!(breakdown.rules.len(), 6, "simple policy has 6 rules");
+        assert_eq!(breakdown.rules.len(), 7, "simple policy has 7 rules");
         assert!(breakdown.rules.contains_key("MissingPathsRule"));
         assert!(breakdown.rules.contains_key("WaitTimeRule"));
         let sum: f64 = breakdown.rules.values().sum();

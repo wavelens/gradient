@@ -205,6 +205,37 @@ impl ScoreRule for ReserveFetchWorkersRule {
     }
 }
 
+#[derive(Debug)]
+pub struct RescoreWaitRule {
+    pub penalty: f64,
+    pub max_rounds: u32,
+}
+
+impl Default for RescoreWaitRule {
+    fn default() -> Self {
+        Self { penalty: 1000.0, max_rounds: 4 }
+    }
+}
+
+impl ScoreRule for RescoreWaitRule {
+    fn score(
+        &self,
+        job: &JobContext<'_>,
+        _worker: &WorkerContext<'_>,
+        _instance: &InstanceContext,
+    ) -> f64 {
+        if job.job.build().is_none() {
+            return 0.0;
+        }
+
+        if job.missing_nar_size.is_none() && job.rescore_count < self.max_rounds {
+            -self.penalty
+        } else {
+            0.0
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -388,6 +419,27 @@ mod tests {
         assert!(mid < ancient, "even older should score higher: {mid} vs {ancient}");
         assert!(ancient <= rule.cap + 1.0, "ancient must be capped at {}, got {ancient}", rule.cap);
         assert!(ancient > 1140.0, "ancient must clear the soft-cap budget for anti-starvation, got {ancient}");
+    }
+
+    #[test]
+    fn rescore_wait_blocks_build_until_threshold_but_never_eval() {
+        let rule = RescoreWaitRule::default();
+        let archs: Vec<String> = vec![];
+        let w = worker(&archs, false);
+        let inst = crate::context::InstanceContext::default();
+        let n = gradient_core::types::now();
+        let build = build_job("x86_64-linux");
+        let eval = eval_job(false);
+
+        let c_build_none_0 = JobContext { job: &build, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: n, ready_at: n, org_work_share: None, rescore_count: 0 };
+        let c_build_none_4 = JobContext { job: &build, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: n, ready_at: n, org_work_share: None, rescore_count: 4 };
+        let c_build_some_0 = JobContext { job: &build, missing_count: None, missing_nar_size: Some(10), dependency_count: 0, queued_at: n, ready_at: n, org_work_share: None, rescore_count: 0 };
+        let c_eval_none_0 = JobContext { job: &eval, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: n, ready_at: n, org_work_share: None, rescore_count: 0 };
+
+        assert_eq!(rule.score(&c_build_none_0, &w, &inst), -1000.0);
+        assert_eq!(rule.score(&c_build_none_4, &w, &inst), 0.0);
+        assert_eq!(rule.score(&c_build_some_0, &w, &inst), 0.0);
+        assert_eq!(rule.score(&c_eval_none_0, &w, &inst), 0.0);
     }
 
     #[test]
