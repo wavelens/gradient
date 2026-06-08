@@ -26,7 +26,7 @@ impl ScoreRule for ResourceFitRule {
         &self,
         job: &JobContext<'_>,
         worker: &WorkerContext<'_>,
-        _instance: &InstanceContext,
+        instance: &InstanceContext,
     ) -> f64 {
         let Some(m) = worker.metrics else { return 0.0 };
         let Some(b) = job.job.build() else { return 0.0 };
@@ -38,9 +38,15 @@ impl ScoreRule for ResourceFitRule {
         let mut s = 0.0;
         if m.ram_free_mb > 0 && h.predicted_peak_ram_mb > m.ram_free_mb {
             let overshoot = (h.predicted_peak_ram_mb - m.ram_free_mb) as f64 / m.ram_free_mb as f64;
-            s -= self.ram_overshoot_penalty * overshoot * (1.0 + h.oom_rate as f64);
+            s -= self.ram_overshoot_penalty * overshoot * (1.0 + h.oom_rate as f64) * (1.0 + instance.oom_rate.w1h);
         }
-        if h.avg_cpu_time_ms > self.cpu_heavy_threshold_ms {
+
+        let cpu_threshold = if instance.cpu_time_ms.w1h > 0.0 {
+            instance.cpu_time_ms.w1h
+        } else {
+            self.cpu_heavy_threshold_ms as f64
+        };
+        if (h.avg_cpu_time_ms as f64) > cpu_threshold {
             s += self.cpu_affinity_bonus * ((m.cpu_core_score as f64 / 1000.0).min(self.cpu_bonus_cap));
         }
         s
@@ -129,5 +135,32 @@ mod tests {
         let w = WorkerContext { architectures: &[], system_features: &[], fetch: false, metrics: None };
         let job = job_with_history(HistoryPrediction { predicted_peak_ram_mb: 9000, samples: 5, ..Default::default() });
         assert_eq!(rule.score(&ctx(&job), &w, &InstanceContext::default()), 0.0);
+    }
+
+    #[test]
+    fn cpu_bonus_triggers_below_fixed_threshold_when_instance_avg_low() {
+        let rule = ResourceFitRule::default();
+        let strong = worker_with(WorkerMetricsView { cpu_core_score: 1500, ..Default::default() });
+        let job = job_with_history(HistoryPrediction { avg_cpu_time_ms: 30_000, samples: 5, ..Default::default() });
+
+        assert_eq!(rule.score(&ctx(&job), &strong, &InstanceContext::default()), 0.0);
+
+        let mut inst = InstanceContext::default();
+        inst.cpu_time_ms.w1h = 10_000.0;
+        assert!(rule.score(&ctx(&job), &strong, &inst) > 0.0);
+    }
+
+    #[test]
+    fn ram_overshoot_more_negative_with_high_instance_oom() {
+        let rule = ResourceFitRule::default();
+        let w = worker_with(WorkerMetricsView { ram_free_mb: 1000, ..Default::default() });
+        let job = job_with_history(HistoryPrediction { predicted_peak_ram_mb: 2000, samples: 5, ..Default::default() });
+
+        let mut low = InstanceContext::default();
+        low.oom_rate.w1h = 0.0;
+        let mut high = InstanceContext::default();
+        high.oom_rate.w1h = 1.0;
+
+        assert!(rule.score(&ctx(&job), &w, &low) > rule.score(&ctx(&job), &w, &high));
     }
 }

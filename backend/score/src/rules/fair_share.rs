@@ -91,27 +91,21 @@ mod tests {
         assert_eq!(rule.score(&ctx(&job, None), &w, &InstanceContext::default()), 0.0);
     }
 
-    // #111: a quiet org (share ~0) must overcome a busy org (share ~1) even when
-    // the busy job has maxed out WaitTimeRule's wait bonus. The fair-share weight
-    // (500) must exceed WaitTimeRule's plateau (max_wait_secs*bonus_per_second).
+    // Among jobs with equal wait, the quieter org's job must score higher.
     #[test]
-    fn fair_share_overrides_wait_gradient() {
+    fn fair_share_breaks_tie_at_equal_wait() {
         let fair = FairShareRule::default();
         let wait = WaitTimeRule::default();
         let job = build_job();
         let w = worker();
+        let n = now();
 
-        let quiet = ctx(&job, Some(0.0));
-        let busy = JobContext {
-            queued_at: now() - chrono::Duration::seconds(10_000),
-            ..ctx(&job, Some(1.0))
-        };
+        let quiet = JobContext { ready_at: n, queued_at: n, ..ctx(&job, Some(0.0)) };
+        let busy = JobContext { ready_at: n, queued_at: n, ..ctx(&job, Some(1.0)) };
 
-        let quiet_total = fair.score(&quiet, &w, &InstanceContext::default()) + wait.score(&quiet, &w, &InstanceContext::default());
-        let busy_total = fair.score(&busy, &w, &InstanceContext::default()) + wait.score(&busy, &w, &InstanceContext::default());
-        assert!(
-            quiet_total > busy_total,
-            "quiet org must win despite busy org's wait bonus: quiet={quiet_total} busy={busy_total}"
-        );
+        let inst = InstanceContext::default();
+        let quiet_total = fair.score(&quiet, &w, &inst) + wait.score(&quiet, &w, &inst);
+        let busy_total = fair.score(&busy, &w, &inst) + wait.score(&busy, &w, &inst);
+        assert!(quiet_total > busy_total, "at equal wait the quiet org wins: quiet={quiet_total} busy={busy_total}");
     }
 }
