@@ -16,6 +16,7 @@ pub mod build;
 pub mod dispatch;
 pub mod eval;
 pub mod history;
+pub mod instance;
 pub mod jobs;
 pub mod log_substitution;
 pub mod peer_auth;
@@ -74,6 +75,9 @@ pub struct Scheduler {
     /// Scoring policy used when selecting which pending job to assign to a
     /// requesting worker.  Shared via `Arc` so it can be read lock-free.
     pub(crate) policy: Arc<dyn score::ScoringPolicy>,
+    /// Windowed instance metrics snapshot, recomputed periodically by
+    /// `instance_metrics_loop` and read lock-free during scoring.
+    pub(crate) instance: Arc<arc_swap::ArcSwap<score::InstanceContext>>,
 }
 
 impl std::fmt::Debug for Scheduler {
@@ -92,6 +96,7 @@ impl Scheduler {
             job_notify: Arc::new(tokio::sync::Notify::new()),
             deferred_deps: Arc::new(RwLock::new(HashMap::new())),
             policy,
+            instance: Arc::new(arc_swap::ArcSwap::from_pointee(score::InstanceContext::default())),
         }
     }
 

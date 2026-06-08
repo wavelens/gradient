@@ -71,6 +71,9 @@ zstd  = { version = "0.13" }
 # Bytes / buffers
 bytes = { version = "1.11", default-features = false, features = ["std"] }
 
+# Concurrency
+arc-swap = "1"
+
 # CLI / logging / observability
 clap               = { version = "4.6", default-features = false, features = ["std", "derive", "env", "help", "usage", "error-context"] }
 sentry             = { version = "0.48", default-features = false, features = ["backtrace", "contexts", "debug-images", "panic", "reqwest", "rustls"] }

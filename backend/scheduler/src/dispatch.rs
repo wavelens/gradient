@@ -41,10 +41,43 @@ pub fn start_dispatch_loops(scheduler: Arc<Scheduler>) {
     let s2 = Arc::clone(&scheduler);
     let s3 = Arc::clone(&scheduler);
     let s4 = Arc::clone(&scheduler);
+    let s5 = Arc::clone(&scheduler);
     shutdown.spawn(async move { super::trigger_dispatch::trigger_dispatch_loop(s3).await });
     shutdown.spawn(async move { eval_dispatch_loop(s1).await });
     shutdown.spawn(async move { build_dispatch_loop(s2).await });
     shutdown.spawn(async move { worker_sample_loop(s4).await });
+    shutdown.spawn(async move { instance_metrics_loop(s5).await });
+}
+
+/// Periodically recompute the windowed [`score::InstanceContext`] snapshot
+/// consumed by resource-aware scoring and publish it lock-free.
+async fn instance_metrics_loop(scheduler: Arc<Scheduler>) {
+    let secs = scheduler
+        .state
+        .config
+        .metrics_args
+        .instance_metrics_interval_secs
+        .max(1);
+    let mut interval = tokio::time::interval(Duration::from_secs(secs));
+    loop {
+        interval.tick().await;
+        let (active_builds, pending_builds) =
+            scheduler.job_tracker.read().await.instance_counts();
+        let (total_workers, idle_workers) = scheduler.worker_pool.read().await.worker_counts();
+        let counts = crate::instance::InstanceCounts {
+            active_builds,
+            pending_builds,
+            total_workers,
+            idle_workers,
+        };
+        let ctx = crate::instance::compute_instance_context(
+            &scheduler.state.worker_db,
+            counts,
+            gradient_core::types::now(),
+        )
+        .await;
+        scheduler.instance.store(Arc::new(ctx));
+    }
 }
 
 /// Periodically snapshot every connected worker's live metrics into

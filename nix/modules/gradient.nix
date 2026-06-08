@@ -457,6 +457,12 @@ in {
           default = false;
         };
 
+        instanceMetricsIntervalSecs = lib.mkOption {
+          description = "Interval in seconds between InstanceContext window recomputations.";
+          type = lib.types.ints.positive;
+          default = 30;
+        };
+
         buildMaxAttempts = lib.mkOption {
           description = "Maximum number of build attempts before a transient failure becomes permanent (must be ≥ 1).";
           type = lib.types.ints.positive;
@@ -756,6 +762,7 @@ in {
         GRADIENT_METRICS_LABEL_TOPN = toString cfg.settings.metricsLabelTopn;
         GRADIENT_OTLP_PUSH_INTERVAL = toString cfg.settings.otlpPushIntervalSecs;
         GRADIENT_DISPATCH_RECORD_CANDIDATES = lib.boolToString cfg.settings.dispatchRecordCandidates;
+        GRADIENT_INSTANCE_METRICS_INTERVAL = toString cfg.settings.instanceMetricsIntervalSecs;
         GRADIENT_BUILD_MAX_ATTEMPTS = toString cfg.settings.buildMaxAttempts;
         GRADIENT_BUILD_RETRY_BACKOFF_SECS = toString cfg.settings.buildRetryBackoffSecs;
         GRADIENT_BUILD_DEFAULT_TIMEOUT_SECS = toString cfg.settings.buildDefaultTimeoutSecs;

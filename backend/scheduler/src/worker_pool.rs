@@ -303,6 +303,18 @@ impl WorkerPool {
         self.workers.len()
     }
 
+    /// `(total_workers, idle_workers)` — connected workers and those with no
+    /// assigned jobs, fed into the windowed instance snapshot.
+    pub fn worker_counts(&self) -> (u32, u32) {
+        let total = self.workers.len() as u32;
+        let idle = self
+            .workers
+            .values()
+            .filter(|slot| slot.shared().assigned_jobs.is_empty())
+            .count() as u32;
+        (total, idle)
+    }
+
     fn info_for(&self, id: &str, slot: &WorkerSlot) -> WorkerInfo {
         let s = slot.shared();
         WorkerInfo {

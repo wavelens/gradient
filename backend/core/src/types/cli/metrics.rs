@@ -49,6 +49,10 @@ pub struct MetricsArgs {
     /// Persist runner-up scoring candidates on each `dispatched_job` row.
     #[arg(long, env = "GRADIENT_DISPATCH_RECORD_CANDIDATES", default_value_t = false)]
     pub dispatch_record_candidates: bool,
+
+    /// Interval in seconds between InstanceContext window recomputations.
+    #[arg(long, env = "GRADIENT_INSTANCE_METRICS_INTERVAL", default_value_t = 30)]
+    pub instance_metrics_interval_secs: u64,
 }
 
 impl Default for MetricsArgs {
@@ -64,6 +68,7 @@ impl Default for MetricsArgs {
             otlp_endpoint: None,
             otlp_push_interval_secs: 30,
             dispatch_record_candidates: false,
+            instance_metrics_interval_secs: 30,
         }
     }
 }
@@ -82,5 +87,6 @@ mod tests {
         assert_eq!(args.worker_sample_interval_secs, 15);
         assert!(args.otlp_endpoint.is_none());
         assert!(!args.dispatch_record_candidates);
+        assert_eq!(args.instance_metrics_interval_secs, 30);
     }
 }

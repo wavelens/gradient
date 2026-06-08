@@ -649,6 +649,22 @@ impl JobTracker {
         self.active.len()
     }
 
+    /// `(active_builds, pending_builds)` — build jobs in flight and waiting,
+    /// fed into the windowed instance snapshot.
+    pub fn instance_counts(&self) -> (u32, u32) {
+        let active = self
+            .active
+            .values()
+            .filter(|(_, j)| matches!(j, PendingJob::Build(_)))
+            .count() as u32;
+        let pending = self
+            .pending
+            .values()
+            .filter(|j| matches!(j, PendingJob::Build(_)))
+            .count() as u32;
+        (active, pending)
+    }
+
     /// Increment every pending job's `rescore_count`. Called once per build
     /// dispatch tick so long-waiting jobs accrue a rescore-wait bonus.
     pub fn bump_rescore_counts(&mut self) {

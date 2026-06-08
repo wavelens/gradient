@@ -3590,3 +3590,19 @@ Frontend (`pnpm --dir frontend exec ng test --include='<glob>' --watch=false`):
 Backend (`cargo test -p scheduler --tests jobs`):
 - `pending_snapshot_reports_kind_and_org` - `JobTracker::pending_snapshot` reports
   each pending job's kind, org, and build-id, backing `GET /board/jobs/pending`.
+
+## Scheduler - windowed instance context (#359)
+
+`instance_metrics_loop` recomputes a `score::InstanceContext` snapshot every
+`GRADIENT_INSTANCE_METRICS_INTERVAL` seconds (default 30) from
+`derivation_metric` + `dispatched_job` over 5m/1h/24h windows and publishes it
+lock-free via `arc_swap::ArcSwap`; `try_assign` feeds the live snapshot into
+`take_best_of_kind` instead of `InstanceContext::default()`.
+
+Backend (`cargo test -p scheduler --tests instance`):
+- `maps_columns_and_counts_into_snapshot` (`scheduler::instance`) - a
+  `MockDatabase` replays raw column maps for the two windowed statements;
+  asserts each column lands in the right `Windowed`/count field and that the
+  in-memory `InstanceCounts` (active/pending builds, total/idle workers) are
+  copied through. The FILTER-window and jsonb-extraction SQL is validated in CI
+  against Postgres, not by the mock.
