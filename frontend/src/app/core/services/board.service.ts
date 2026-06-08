@@ -24,6 +24,20 @@ export interface DispatchedJobsResponse {
   other_running: number;
 }
 
+export interface PendingJobSummary {
+  kind: number;
+  organization: string;
+  evaluation_id: string;
+  build_id: string | null;
+  queued_at: string;
+  dependency_count: number;
+}
+
+export interface PendingJobsResponse {
+  jobs: PendingJobSummary[];
+  other_pending: number;
+}
+
 export interface DispatchedJobDetail extends DispatchedJobSummary {
   queued_at: string;
   finished_at: string | null;
@@ -190,6 +204,10 @@ export class BoardService {
 
   getDispatchedJobs(): Observable<DispatchedJobsResponse> {
     return this.api.get<DispatchedJobsResponse>('board/jobs/dispatched');
+  }
+
+  getPendingJobs(): Observable<PendingJobsResponse> {
+    return this.api.get<PendingJobsResponse>('board/jobs/pending');
   }
 
   getJob(id: string): Observable<DispatchedJobDetail> {
