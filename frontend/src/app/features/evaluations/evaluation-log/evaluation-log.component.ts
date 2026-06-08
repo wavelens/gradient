@@ -22,6 +22,7 @@ import {
   parseLineFragment,
   windowAround,
 } from './log-window';
+import { matchesBuildSearch } from './build-search';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
@@ -124,6 +125,8 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   highlightLine = signal<number | null>(null);
   searchOpen = signal(false);
   searchQuery = signal('');
+  sidebarSearchQuery = signal('');
+  private sidebarFocused = false;
   searchHits = signal<LogSearchHit[]>([]);
   searchTotal = signal(0);
   currentHit = signal(-1);
@@ -224,6 +227,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.buildGroups.forEach((g, i) => g.members.forEach((m) => indexByGroup.set(m, i)));
     const buckets: { build: BuildItem; index: number }[][] = this.buildGroups.map(() => []);
     this.visibleBuilds().forEach((build, index) => {
+      if (!matchesBuildSearch(build.name, this.sidebarSearchQuery())) return;
       const gi = indexByGroup.get(this.statusClass(build.status));
       if (gi !== undefined) buckets[gi].push({ build, index });
     });
@@ -457,6 +461,8 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.liveSub?.unsubscribe();
     this.liveSub = undefined;
   }
+
+  setSidebarFocus(v: boolean): void { this.sidebarFocused = v; }
 
   // ── Build selection & log loading ──────────────────────────────────────────
 
@@ -760,13 +766,23 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
   @HostListener('document:keydown', ['$event'])
   onKeydown(event: KeyboardEvent): void {
+    const isFind = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f';
+    if (isFind && this.sidebarFocused) {
+      event.preventDefault();
+      setTimeout(() => { (document.querySelector('.sidebar-search input') as HTMLInputElement | null)?.focus(); }, 0);
+      return;
+    }
+
+    if (event.key === 'Escape' && this.sidebarSearchQuery()) {
+      this.sidebarSearchQuery.set('');
+      return;
+    }
+
     if (!this.chunkedMode() || !this.selectedBuildId()) return;
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') {
+    if (isFind) {
       event.preventDefault();
       this.searchOpen.set(true);
-      setTimeout(() => {
-        (document.querySelector('.log-search-input') as HTMLInputElement | null)?.focus();
-      }, 0);
+      setTimeout(() => { (document.querySelector('.log-search-input') as HTMLInputElement | null)?.focus(); }, 0);
     } else if (event.key === 'Escape' && this.searchOpen()) {
       this.closeSearch();
     }

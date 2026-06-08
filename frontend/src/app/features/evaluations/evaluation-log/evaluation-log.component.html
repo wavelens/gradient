@@ -17,7 +17,7 @@
   <div class="eval-layout">
 
     <!-- ── Sidebar ──────────────────────────────────────────────── -->
-    <aside class="builds-sidebar">
+    <aside class="builds-sidebar" (focusin)="setSidebarFocus(true)" (focusout)="setSidebarFocus(false)">
 
       <div class="sidebar-breadcrumb">
         <a [routerLink]="['/organization', orgName]" class="breadcrumb-link">{{ orgDisplayName() || orgName }}</a>
@@ -64,6 +64,16 @@
       </div>
 
       <div class="builds-list-header">Builds</div>
+
+      <div class="sidebar-search">
+        <input
+          type="text"
+          placeholder="Search builds… (Ctrl+F)"
+          [value]="sidebarSearchQuery()"
+          (input)="sidebarSearchQuery.set($any($event.target).value)"
+          (keydown.escape)="sidebarSearchQuery.set('')"
+        />
+      </div>
 
       @if (visibleBuilds().length === 0) {
         <div class="no-builds">No builds yet</div>
@@ -119,6 +129,9 @@
                 </div>
               }
             </div>
+          }
+          @empty {
+            <div class="no-builds">No matching builds</div>
           }
         </div>
       }
@@ -309,7 +322,7 @@
                       [attr.data-line]="ln.n"
                     >
                       <span class="log-gutter" (click)="selectLine(ln.n)" title="Link to line">{{ ln.n }}</span>
-                      <pre class="log-line-content" [innerHTML]="ln.html"></pre>
+                      <span class="log-line-content" [innerHTML]="ln.html"></span>
                     </div>
                   }
                 </div>
