@@ -379,7 +379,9 @@ impl JobTracker {
                 missing_nar_size: s.map(|s| s.missing_nar_size),
                 dependency_count: job.dependency_count(),
                 queued_at: job.queued_at(),
-                org_share: org_share(job.peer_id()),
+                ready_at: job.queued_at(),
+                org_work_share: org_share(job.peer_id()),
+                rescore_count: 0,
             };
             policy.score(&ctx, worker_ctx, &score::InstanceContext::default())
         };
@@ -446,7 +448,9 @@ impl JobTracker {
                 missing_nar_size: s.map(|s| s.missing_nar_size),
                 dependency_count: job.dependency_count(),
                 queued_at: job.queued_at(),
-                org_share: org_share(job.peer_id()),
+                ready_at: job.queued_at(),
+                org_work_share: org_share(job.peer_id()),
+                rescore_count: 0,
             };
             let breakdown = policy.score_detailed(&ctx, worker_ctx, &score::InstanceContext::default());
             let (kind_disc, build_id, project) = match job {
@@ -473,7 +477,7 @@ impl JobTracker {
                     "missing_count": ctx.missing_count,
                     "missing_nar_size": ctx.missing_nar_size,
                     "dependency_count": ctx.dependency_count,
-                    "org_share": ctx.org_share,
+                    "org_work_share": ctx.org_work_share,
                     "architecture": arch,
                 }),
             }

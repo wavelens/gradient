@@ -67,7 +67,7 @@ mod tests {
     }
 
     fn ctx<'a>(job: &'a ScoredJob<'a>) -> JobContext<'a> {
-        JobContext { job, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: gradient_core::types::now(), org_share: None }
+        JobContext { job, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: gradient_core::types::now(), ready_at: gradient_core::types::now(), org_work_share: None, rescore_count: 0 }
     }
 
     fn worker_with(metrics: WorkerMetricsView) -> WorkerContext<'static> {

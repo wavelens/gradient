@@ -14,9 +14,11 @@ pub struct JobContext<'a> {
     pub missing_nar_size: Option<u64>,
     pub dependency_count: u32,
     pub queued_at: chrono::NaiveDateTime,
-    /// Owning org's fraction of currently-active builds (0.0..=1.0), computed by
+    pub ready_at: chrono::NaiveDateTime,
+    /// Owning org's work share of currently-active builds (0.0..=1.0), computed by
     /// the scheduler at request time. `None` when no builds are active.
-    pub org_share: Option<f32>,
+    pub org_work_share: Option<f32>,
+    pub rescore_count: u32,
 }
 
 /// Build-relevant capabilities of the requesting worker.
