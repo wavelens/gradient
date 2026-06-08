@@ -170,6 +170,8 @@ fn make_eval_job(eval_id: EvaluationId, org_id: OrganizationId) -> PendingEvalJo
         },
         required_paths: vec![],
         queued_at: gradient_core::types::now(),
+        ready_at: gradient_core::types::now(),
+        rescore_count: 0,
     }
 }
 
@@ -201,6 +203,9 @@ fn make_build_job(
         is_fixed_output: false,
         history: score::HistoryPrediction::default(),
         queued_at: gradient_core::types::now(),
+        ready_at: gradient_core::types::now(),
+        rescore_count: 0,
+        pname: None,
     }
 }
 
@@ -2223,6 +2228,8 @@ async fn eval_result_creates_entry_points_for_project() {
         },
         required_paths: vec![],
         queued_at: gradient_core::types::now(),
+        ready_at: gradient_core::types::now(),
+        rescore_count: 0,
     };
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -2494,6 +2501,8 @@ async fn eval_result_all_substituted_with_project_completes() {
         },
         required_paths: vec![],
         queued_at: gradient_core::types::now(),
+        ready_at: gradient_core::types::now(),
+        rescore_count: 0,
     };
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)

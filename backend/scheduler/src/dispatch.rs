@@ -180,6 +180,8 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
             job: flake_job,
             required_paths: vec![],
             queued_at: eval.updated_at,
+            ready_at: eval.updated_at,
+            rescore_count: 0,
         };
 
         scheduler.enqueue_eval_job(job_id.clone(), pending).await;
@@ -203,6 +205,7 @@ async fn build_dispatch_loop(scheduler: Arc<Scheduler>) {
             }
             _ = interval.tick() => {}
         }
+        scheduler.job_tracker.write().await.bump_rescore_counts();
         if let Err(e) = requeue_transient_failures(&scheduler).await {
             error!(error = %e, "requeue_transient_failures error");
         }
@@ -590,6 +593,9 @@ impl BuildDispatchMaps {
                 .copied()
                 .unwrap_or_default(),
             queued_at: build.updated_at,
+            ready_at: now(),
+            rescore_count: 0,
+            pname: derivation.pname.clone(),
         };
 
         Some((job_id, pending))
