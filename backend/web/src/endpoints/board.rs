@@ -131,6 +131,7 @@ pub struct DispatchedJobDetail {
     pub id: Uuid,
     pub kind: i16,
     pub organization: Uuid,
+    pub organization_name: String,
     pub worker_id: String,
     pub score: f64,
     pub queued_at: String,
@@ -161,10 +162,17 @@ pub async fn get_dispatched_job(
         return Err(WebError::not_found("Job"));
     }
 
+    let organization_name = entity::organization::Entity::find_by_id(j.organization)
+        .one(&state.web_db)
+        .await?
+        .map(|o| o.name)
+        .unwrap_or_default();
+
     Ok(ok_json(DispatchedJobDetail {
         id: j.id.into(),
         kind: j.kind,
         organization: j.organization.into(),
+        organization_name,
         worker_id: j.worker_id,
         score: j.score,
         queued_at: j.queued_at.and_utc().to_rfc3339(),

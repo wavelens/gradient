@@ -17,7 +17,6 @@ use crate::jobs::PendingJob;
 pub struct WorkerContextView {
     pub architectures: Vec<String>,
     pub system_features: Vec<String>,
-    pub fetch: bool,
     pub capabilities: GradientCapabilities,
     pub cpu_count: u32,
     pub cpu_core_score: u32,
@@ -34,7 +33,6 @@ impl WorkerContextView {
         Self {
             architectures: w.architectures.to_vec(),
             system_features: w.system_features.to_vec(),
-            fetch: w.fetch,
             capabilities,
             cpu_count: m.cpu_count,
             cpu_core_score: m.cpu_core_score,

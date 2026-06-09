@@ -9127,7 +9127,6 @@ components:
       properties:
         architectures: { type: array, items: { type: string } }
         system_features: { type: array, items: { type: string } }
-        fetch: { type: boolean }
         capabilities:
           type: object
           properties:
@@ -9220,6 +9219,7 @@ components:
         id: { type: string, format: uuid }
         kind: { type: integer }
         organization: { type: string, format: uuid }
+        organization_name: { type: string }
         worker_id: { type: string }
         score: { type: number }
         queued_at: { type: string, format: date-time }
