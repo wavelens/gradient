@@ -13,6 +13,7 @@ pub mod github_app_manifest;
 pub mod http_validation;
 pub mod integration_lookup;
 pub mod manifest_state;
+pub mod reactor;
 pub mod reporter;
 pub mod reporting;
 pub mod trigger;
@@ -26,6 +27,7 @@ pub use self::apply::{
 pub use self::github_app::*;
 pub use self::http_validation::{WebhookUrlError, validate_webhook_url};
 pub use self::integration_lookup::*;
+pub use self::reactor::CiStatusReactor;
 pub use self::reporter::*;
 pub use self::reporting::*;
 pub use self::trigger::*;

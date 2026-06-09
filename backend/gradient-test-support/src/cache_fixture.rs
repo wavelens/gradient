@@ -164,6 +164,7 @@ pub async fn public_cache_with_narinfo() -> Arc<ServerState> {
         pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         board_events: tokio::sync::broadcast::channel(256).0,
+        reactor: std::sync::Arc::new(gradient_core::db::NoReactor),
     })
 }
 
@@ -209,6 +210,7 @@ pub async fn public_cache_state() -> Arc<ServerState> {
         pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         board_events: tokio::sync::broadcast::channel(256).0,
+        reactor: std::sync::Arc::new(gradient_core::db::NoReactor),
     })
 }
 
@@ -259,6 +261,7 @@ pub async fn public_cache_with_nar() -> Arc<ServerState> {
         pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         board_events: tokio::sync::broadcast::channel(256).0,
+        reactor: std::sync::Arc::new(gradient_core::db::NoReactor),
     });
 
     let compressed = synthetic_nar_zst().await;
@@ -360,6 +363,7 @@ fn make_state(
         pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         board_events: tokio::sync::broadcast::channel(256).0,
+        reactor: std::sync::Arc::new(gradient_core::db::NoReactor),
     })
 }
 
@@ -433,6 +437,7 @@ pub async fn private_cache_state() -> Arc<ServerState> {
         pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         board_events: tokio::sync::broadcast::channel(256).0,
+        reactor: std::sync::Arc::new(gradient_core::db::NoReactor),
     })
 }
 
@@ -491,6 +496,7 @@ pub async fn private_cache_with_nar() -> Arc<ServerState> {
         pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         board_events: tokio::sync::broadcast::channel(256).0,
+        reactor: std::sync::Arc::new(gradient_core::db::NoReactor),
     });
 
     let compressed = synthetic_nar_zst().await;

@@ -39,6 +39,7 @@ pub fn test_state(db: DatabaseConnection) -> Arc<ServerState> {
         pending_org_memberships: Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: Arc::new(std::collections::HashMap::new()),
         board_events: tokio::sync::broadcast::channel(256).0,
+        reactor: std::sync::Arc::new(gradient_core::db::NoReactor),
     })
 }
 
@@ -66,5 +67,6 @@ pub fn test_state_with_log_storage(
         pending_org_memberships: Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: Arc::new(std::collections::HashMap::new()),
         board_events: tokio::sync::broadcast::channel(256).0,
+        reactor: std::sync::Arc::new(gradient_core::db::NoReactor),
     })
 }

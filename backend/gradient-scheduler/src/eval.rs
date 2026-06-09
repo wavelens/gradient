@@ -347,7 +347,6 @@ impl<'a> EvalResultProcessor<'a> {
     /// build events without an `entry_point`, so dispatching before
     /// `entry_point` rows exist would silently drop every check.
     pub(crate) async fn dispatch_substituted_events(&self) -> Result<(), sea_orm::DbErr> {
-        use gradient_core::db::status::dispatch_build_event_for_status;
         use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
         let substituted = gradient_entity::build::Entity::find()
@@ -357,7 +356,10 @@ impl<'a> EvalResultProcessor<'a> {
             .await?;
 
         for build in substituted {
-            dispatch_build_event_for_status(self.state, build, BuildStatus::Substituted).await;
+            self.state
+                .reactor
+                .on_build_terminal(self.state, build, BuildStatus::Substituted)
+                .await;
         }
         Ok(())
     }
