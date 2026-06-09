@@ -62,8 +62,9 @@ impl Scheduler {
     }
 
     /// Wake `build_dispatch_loop` now instead of waiting for its 5s tick. Called
-    /// when a job completes so the dependents it just unblocked are enqueued and
-    /// offered immediately, collapsing per-level latency on serial chains.
+    /// when a job completes and leaves its worker idle, so the dependents it just
+    /// unblocked are enqueued and offered immediately — collapsing per-level
+    /// latency on serial chains without kicking while the worker is still busy.
     pub(crate) fn kick_dispatch(&self) {
         self.dispatch_kick.notify_one();
     }
@@ -370,7 +371,7 @@ impl Scheduler {
     // ── Job completion ────────────────────────────────────────────────────────
 
     pub async fn handle_job_completed(&self, peer_id: &str, job_id: &str) -> Result<()> {
-        self.worker_pool.write().await.release_job(peer_id, job_id);
+        let worker_idle = self.worker_pool.write().await.release_job(peer_id, job_id);
         let job = self.job_tracker.write().await.remove_active(job_id);
         match job {
             Some(PendingJob::Eval(j)) => {
@@ -417,12 +418,18 @@ impl Scheduler {
                     error!(error = %e, evaluation_id = %j.evaluation_id, "flush_deferred_deps failed");
                 }
                 let r = eval::handle_eval_job_completed(&self.state, j.evaluation_id).await;
-                self.kick_dispatch();
+                if worker_idle {
+                    self.kick_dispatch();
+                }
+
                 r
             }
             Some(PendingJob::Build(j)) => {
                 let r = build::handle_build_job_completed(&self.state, j.build_id).await;
-                self.kick_dispatch();
+                if worker_idle {
+                    self.kick_dispatch();
+                }
+
                 r
             }
             None => {

@@ -293,9 +293,18 @@ impl WorkerPool {
         }
     }
 
-    pub fn release_job(&mut self, worker_id: &str, job_id: &str) {
-        if let Some(slot) = self.workers.get_mut(worker_id) {
-            slot.shared_mut().assigned_jobs.remove(job_id);
+    /// Remove a finished job from the worker's in-flight set. Returns `true` if
+    /// the worker now has no assigned jobs (went idle) — the caller kicks the
+    /// dispatch loop only then, since feeding a still-busy worker can wait for
+    /// the next tick.
+    pub fn release_job(&mut self, worker_id: &str, job_id: &str) -> bool {
+        match self.workers.get_mut(worker_id) {
+            Some(slot) => {
+                let shared = slot.shared_mut();
+                shared.assigned_jobs.remove(job_id);
+                shared.assigned_jobs.is_empty()
+            }
+            None => false,
         }
     }
 
@@ -587,10 +596,12 @@ mod tests {
         pool.assign_job("w1", "j2");
         assert_eq!(pool.all_workers()[0].assigned_job_count, 2);
 
-        pool.release_job("w1", "j1");
+        // Releasing one of two jobs leaves the worker busy → not idle.
+        assert!(!pool.release_job("w1", "j1"));
         assert_eq!(pool.all_workers()[0].assigned_job_count, 1);
 
-        pool.release_job("w1", "j2");
+        // Releasing the last job makes the worker idle → dispatch may kick.
+        assert!(pool.release_job("w1", "j2"));
         assert_eq!(pool.all_workers()[0].assigned_job_count, 0);
     }
 
