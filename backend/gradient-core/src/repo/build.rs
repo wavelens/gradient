@@ -1,0 +1,131 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+//! Pure database operations for the `build` table.
+//!
+//! [`BuildRepo`] takes only a `&DatabaseConnection`.
+//! Side effects (webhooks, log finalization) stay in the service layer.
+
+use anyhow::Result;
+
+use gradient_entity::build::BuildStatus;
+use sea_orm::DatabaseConnection;
+use sea_orm::{
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
+};
+use std::collections::HashSet;
+use std::time::Duration;
+
+use crate::types::*;
+
+pub struct BuildRepo<'db> {
+    db: &'db DatabaseConnection,
+}
+
+impl<'db> BuildRepo<'db> {
+    pub fn new(db: &'db DatabaseConnection) -> Self {
+        Self { db }
+    }
+
+    /// Fetch a build by ID.
+    pub async fn find(&self, id: BuildId) -> Result<Option<MBuild>> {
+        Ok(EBuild::find_by_id(id).one(self.db).await?)
+    }
+
+    /// Update build status and `updated_at` timestamp. Returns the updated row.
+    pub async fn update_status(&self, build: MBuild, status: BuildStatus) -> Result<MBuild> {
+        let mut active: ABuild = build.clone().into_active_model();
+        active.status = Set(status);
+        active.updated_at = Set(crate::types::now());
+        let updated = active.update(self.db).await?;
+        Ok(updated)
+    }
+
+    /// Persist elapsed build time.
+    pub async fn record_build_time(&self, build: MBuild, elapsed: Duration) -> Result<MBuild> {
+        let mut active: ABuild = build.clone().into_active_model();
+        active.build_time_ms = Set(Some(elapsed.as_millis() as i64));
+        let updated = active.update(self.db).await?;
+        Ok(updated)
+    }
+
+    /// Insert a batch of build rows (1 000 per chunk to avoid parameter limits).
+    pub async fn insert_builds(&self, builds: Vec<MBuild>) -> Result<()> {
+        const BATCH_SIZE: usize = 1000;
+        let active: Vec<ABuild> = builds.into_iter().map(|b| b.into_active_model()).collect();
+        for chunk in active.chunks(BATCH_SIZE) {
+            EBuild::insert_many(chunk.to_vec()).exec(self.db).await?;
+        }
+        Ok(())
+    }
+
+    /// Find all builds for an evaluation in a given status.
+    pub async fn find_by_evaluation_and_status(
+        &self,
+        evaluation_id: EvaluationId,
+        status: BuildStatus,
+    ) -> Result<Vec<MBuild>> {
+        let builds = EBuild::find()
+            .filter(CBuild::Evaluation.eq(evaluation_id))
+            .filter(CBuild::Status.eq(status))
+            .all(self.db)
+            .await?;
+        Ok(builds)
+    }
+
+    /// Find all builds for an evaluation regardless of status.
+    pub async fn find_by_evaluation(&self, evaluation_id: EvaluationId) -> Result<Vec<MBuild>> {
+        let builds = EBuild::find()
+            .filter(CBuild::Evaluation.eq(evaluation_id))
+            .all(self.db)
+            .await?;
+        Ok(builds)
+    }
+
+    /// Find all builds whose derivation depends (directly) on the given derivation.
+    /// Used for cascading `DependencyFailed`.
+    pub async fn find_dependents_in_evaluation(
+        &self,
+        evaluation_id: EvaluationId,
+        derivation_id: DerivationId,
+    ) -> Result<Vec<MBuild>> {
+        let dep_derivations = EDerivationDependency::find()
+            .filter(CDerivationDependency::Dependency.eq(derivation_id))
+            .all(self.db)
+            .await?;
+
+        if dep_derivations.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let dependent_derivation_ids: Vec<DerivationId> =
+            dep_derivations.into_iter().map(|d| d.derivation).collect();
+
+        let db = self.db;
+        let builds = crate::db::fetch_in_chunks(&dependent_derivation_ids, |chunk| async move {
+            EBuild::find()
+                .filter(CBuild::Evaluation.eq(evaluation_id))
+                .filter(CBuild::Derivation.is_in(chunk))
+                .all(db)
+                .await
+        })
+        .await?;
+        Ok(builds)
+    }
+
+    /// Return the IDs of builds to skip in the current scheduling cycle
+    /// (already assigned or skipped this tick).
+    pub async fn find_queued_with_satisfied_deps(
+        &self,
+        skip: &HashSet<BuildId>,
+    ) -> Result<Option<(MBuild, MDerivation)>> {
+        // Raw SQL for the dependency satisfaction check is handled in
+        // builder/src/build/queue.rs. This stub exists for the repo boundary.
+        // Full migration of that query into the repo is a follow-up step.
+        let _ = skip;
+        Ok(None)
+    }
+}

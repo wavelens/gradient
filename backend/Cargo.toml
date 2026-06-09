@@ -1,6 +1,6 @@
 [workspace]
-members      = [".", "cache", "core", "entity", "migration", "proto", "scheduler", "score", "test-support", "web", "worker"]
-default-members = [".", "cache", "core", "entity", "migration", "proto", "scheduler", "score", "test-support", "web", "worker"]
+members      = [".", "gradient-cache", "gradient-core", "gradient-entity", "gradient-migration", "gradient-proto", "gradient-scheduler", "gradient-score", "gradient-test-support", "gradient-web", "gradient-worker"]
+default-members = [".", "gradient-cache", "gradient-core", "gradient-entity", "gradient-migration", "gradient-proto", "gradient-scheduler", "gradient-score", "gradient-test-support", "gradient-web", "gradient-worker"]
 resolver     = "2"
 
 [workspace.package]
@@ -17,17 +17,16 @@ todo      = "warn"
 
 [workspace.dependencies]
 # Internal crates
-cache         = { path = "cache" }
-core          = { path = "core", package = "core" }
-gradient-core = { path = "core", package = "core" }
-score         = { path = "score" }
-entity        = { path = "entity" }
-migration     = { path = "migration" }
-proto         = { path = "proto" }
-scheduler     = { path = "scheduler" }
-test-support  = { path = "test-support" }
-web           = { path = "web" }
-worker        = { path = "worker" }
+gradient-cache        = { path = "gradient-cache" }
+gradient-core         = { path = "gradient-core" }
+gradient-entity       = { path = "gradient-entity" }
+gradient-migration    = { path = "gradient-migration" }
+gradient-proto        = { path = "gradient-proto" }
+gradient-scheduler    = { path = "gradient-scheduler" }
+gradient-score        = { path = "gradient-score" }
+gradient-test-support = { path = "gradient-test-support" }
+gradient-web          = { path = "gradient-web" }
+gradient-worker       = { path = "gradient-worker" }
 
 # Async / runtime
 async-stream = { version = "0.3", default-features = false }
@@ -164,11 +163,11 @@ repository.workspace  = true
 workspace = true
 
 [dependencies]
-cache              = { workspace = true }
+gradient-cache     = { workspace = true }
 clap               = { workspace = true }
 gradient-core      = { workspace = true }
 sentry             = { workspace = true }
 tokio              = { workspace = true, features = ["process", "signal", "macros"] }
 tracing            = { workspace = true }
 tracing-subscriber = { workspace = true }
-web                = { workspace = true }
+gradient-web       = { workspace = true }

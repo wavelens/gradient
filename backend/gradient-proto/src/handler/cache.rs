@@ -1,0 +1,1107 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+
+use gradient_core::types::ids::{CacheId, CachedPathId, CachedPathSignatureId, OrganizationId};
+use gradient_core::types::*;
+use sea_orm::sea_query::OnConflict;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use tracing::{error, warn};
+
+async fn build_local_cache_map(
+    state: &ServerState,
+    hashes: &[&str],
+) -> HashMap<String, (Option<i64>, Option<i64>)> {
+    // Source the (file_size, nar_size) pair straight from `cached_path` -
+    // the worker writes both columns there during NarUploaded, so it's the
+    // single authoritative copy.  We still scope the result to outputs the
+    // server marks `is_cached`, so an in-flight upload doesn't leak.
+    let derivation_outputs = match EDerivationOutput::find()
+        .filter(
+            sea_orm::Condition::all()
+                .add(CDerivationOutput::IsCached.eq(true))
+                .add(CDerivationOutput::Hash.is_in(hashes.to_vec())),
+        )
+        .all(&state.worker_db)
+        .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            warn!(error = %e, "CacheQuery local DB lookup failed");
+            return HashMap::new();
+        }
+    };
+
+    let cached_paths = match ECachedPath::find()
+        .filter(CCachedPath::Hash.is_in(hashes.to_vec()))
+        .all(&state.worker_db)
+        .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            warn!(error = %e, "CacheQuery cached_path lookup failed");
+            return HashMap::new();
+        }
+    };
+
+    // Only paths whose NAR upload actually completed count as cached.
+    // `is_fully_cached()` requires `file_hash IS NOT NULL`; rows without
+    // it are placeholders for an in-flight or failed upload and would
+    // cause the worker to issue a `NarRequest` the server can't satisfy.
+    let sizes: HashMap<String, (Option<i64>, Option<i64>)> = cached_paths
+        .into_iter()
+        .filter(|cp| cp.is_fully_cached())
+        .map(|cp| (cp.hash, (cp.file_size, cp.nar_size)))
+        .collect();
+
+    derivation_outputs
+        .into_iter()
+        .filter_map(|row| sizes.get(&row.hash).map(|sizes| (row.hash, *sizes)))
+        .collect()
+}
+
+async fn load_cached_path_rows(
+    state: &ServerState,
+    hashes: &[&str],
+) -> Vec<gradient_entity::cached_path::Model> {
+    match ECachedPath::find()
+        .filter(CCachedPath::Hash.is_in(hashes.to_vec()))
+        .all(&state.worker_db)
+        .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            warn!(error = %e, "CacheQuery cached_path lookup failed");
+            vec![]
+        }
+    }
+}
+
+/// For Push mode: ensure a `cached_path_signature` row exists for each
+/// (cached_path, org cache) pair so that the signing job is triggered for
+/// paths that were already cached before this worker connected.
+async fn ensure_push_signatures(
+    state: &ServerState,
+    org_id: OrganizationId,
+    cached_path_rows: &[gradient_entity::cached_path::Model],
+) {
+    if cached_path_rows.is_empty() {
+        return;
+    }
+
+    let org_caches = EOrganizationCache::find()
+        .filter(COrganizationCache::Organization.eq(org_id))
+        .all(&state.worker_db)
+        .await
+        .unwrap_or_default();
+    if org_caches.is_empty() {
+        return;
+    }
+
+    let now = gradient_core::types::now();
+    let rows: Vec<ACachedPathSignature> = cached_path_rows
+        .iter()
+        .flat_map(|cp| {
+            org_caches.iter().map(move |oc| ACachedPathSignature {
+                id: sea_orm::ActiveValue::Set(CachedPathSignatureId::now_v7()),
+                cached_path: sea_orm::ActiveValue::Set(cp.id),
+                cache: sea_orm::ActiveValue::Set(oc.cache),
+                signature: sea_orm::ActiveValue::Set(None),
+                created_at: sea_orm::ActiveValue::Set(now),
+                last_fetched_at: sea_orm::ActiveValue::Set(None),
+                fetch_count: sea_orm::ActiveValue::Set(0),
+            })
+        })
+        .collect();
+
+    let result = ECachedPathSignature::insert_many(rows)
+        .on_conflict(
+            OnConflict::columns([
+                CCachedPathSignature::CachedPath,
+                CCachedPathSignature::Cache,
+            ])
+            .do_nothing()
+            .to_owned(),
+        )
+        .do_nothing()
+        .exec(&state.worker_db)
+        .await;
+    if let Err(e) = result {
+        warn!(
+            %org_id,
+            error = %e,
+            "failed to insert cached_path_signature placeholders (Push mode)"
+        );
+    }
+}
+
+async fn load_cached_path_signatures(
+    state: &ServerState,
+    cached_path_id: CachedPathId,
+    hash: &str,
+) -> Option<Vec<String>> {
+    let rows = match ECachedPathSignature::find()
+        .filter(CCachedPathSignature::CachedPath.eq(cached_path_id))
+        .all(&state.worker_db)
+        .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            warn!(%hash, error = %e, "failed to load cached_path signatures");
+            return None;
+        }
+    };
+
+    let cache_ids: Vec<CacheId> = rows.iter().map(|r| r.cache).collect();
+    let cache_names: HashMap<CacheId, String> = if cache_ids.is_empty() {
+        HashMap::new()
+    } else {
+        ECache::find()
+            .filter(CCache::Id.is_in(cache_ids))
+            .all(&state.worker_db)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|c| (c.id, c.name))
+            .collect()
+    };
+
+    let serve_url = &state.config.server.serve_url;
+    let sigs: Vec<String> = rows
+        .into_iter()
+        .filter_map(|r| {
+            let stored = r.signature?;
+            let cache_name = cache_names.get(&r.cache)?;
+            Some(gradient_core::sources::full_signature_token(
+                &stored, serve_url, cache_name,
+            ))
+        })
+        .collect();
+    if sigs.is_empty() { None } else { Some(sigs) }
+}
+
+/// Resolve the import metadata a worker needs to construct a `ValidPathInfo`
+/// and call `add_to_store_nar` on its local nix-daemon.
+///
+/// Returns `(None, None, None, None, None)` if no `cached_path` row exists.
+async fn fetch_pull_metadata(
+    state: &ServerState,
+    hash: &str,
+) -> (
+    Option<String>,      // nar_hash
+    Option<Vec<String>>, // references (full /nix/store/... paths)
+    Option<Vec<String>>, // signatures (narinfo wire format)
+    Option<String>,      // deriver
+    Option<String>,      // ca
+) {
+    let cached_row = match ECachedPath::find()
+        .filter(CCachedPath::Hash.eq(hash))
+        .one(&state.worker_db)
+        .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return (None, None, None, None, None),
+        Err(e) => {
+            warn!(%hash, error = %e, "failed to load cached_path for Pull metadata");
+            return (None, None, None, None, None);
+        }
+    };
+
+    let references = expand_references(cached_row.references.as_deref());
+    let signatures = load_cached_path_signatures(state, cached_row.id, hash).await;
+
+    (
+        cached_row.nar_hash,
+        references,
+        signatures,
+        cached_row.deriver,
+        cached_row.ca,
+    )
+}
+
+async fn build_cached_entry(
+    state: &ServerState,
+    hash: &str,
+    path: &str,
+    file_size: &Option<i64>,
+    nar_size: &Option<i64>,
+    mode: gradient_core::types::proto::QueryMode,
+    expire: std::time::Duration,
+) -> gradient_core::types::proto::CachedPath {
+    use gradient_core::types::proto::{CachedPath, QueryMode};
+
+    // Push mode carries only `path` + `cached`. No URL, no metadata.
+    if matches!(mode, QueryMode::Push) {
+        return CachedPath {
+            path: path.to_string(),
+            cached: true,
+            file_size: None,
+            nar_size: None,
+            url: None,
+            nar_hash: None,
+            references: None,
+            signatures: None,
+            deriver: None,
+            ca: None,
+        };
+    }
+
+    let (url, nar_hash, references, signatures, deriver, ca) = match mode {
+        QueryMode::Pull => {
+            let url = match state.nar_storage.presigned_get_url(hash, expire).await {
+                Ok(u) => u,
+                Err(e) => {
+                    warn!(%hash, error = %e, "failed to generate presigned GET URL");
+                    None
+                }
+            };
+            let meta = fetch_pull_metadata(state, hash).await;
+            (url, meta.0, meta.1, meta.2, meta.3, meta.4)
+        }
+        _ => (None, None, None, None, None, None),
+    };
+
+    CachedPath {
+        path: path.to_string(),
+        cached: true,
+        file_size: file_size.map(|v| v as u64),
+        nar_size: nar_size.map(|v| v as u64),
+        url,
+        nar_hash,
+        references,
+        signatures,
+        deriver,
+        ca,
+    }
+}
+
+/// Push-mode response for an uncached path: `path` + `cached: false` plus
+/// a presigned PUT URL when the NAR store supports one (S3). Local stores
+/// return `url: None` and the worker uploads via `NarPush` over the
+/// WebSocket. No metadata, no upstream lookup.
+async fn build_uncached_push_entry(
+    state: &ServerState,
+    hash: &str,
+    path: &str,
+    expire: std::time::Duration,
+) -> gradient_core::types::proto::CachedPath {
+    use gradient_core::types::proto::CachedPath;
+
+    let url = match state.nar_storage.presigned_put_url(hash, expire).await {
+        Ok(u) => u,
+        Err(e) => {
+            error!(
+                %hash,
+                error = %e,
+                "S3 presigned PUT URL generation failed; worker will fall back to \
+                 direct NarPush (this defeats S3 - check S3 credentials / endpoint / \
+                 region config)"
+            );
+            None
+        }
+    };
+
+    CachedPath {
+        path: path.to_string(),
+        cached: false,
+        file_size: None,
+        nar_size: None,
+        url,
+        nar_hash: None,
+        references: None,
+        signatures: None,
+        deriver: None,
+        ca: None,
+    }
+}
+
+/// Probe org-configured upstream caches for any `uncached_pairs` not found
+/// locally, extending `result` with any hits.
+///
+/// Concurrency-capped at 16 to bound worst-case latency. No-ops if the org
+/// has no upstream URLs configured.
+async fn extend_with_upstream_results(
+    state: &ServerState,
+    org_id: OrganizationId,
+    uncached_pairs: Vec<(String, String)>,
+    result: &mut Vec<gradient_core::types::proto::CachedPath>,
+) {
+    use futures::stream::{FuturesUnordered, StreamExt as _};
+
+    const UPSTREAM_LOOKUP_CONCURRENCY: usize = 16;
+
+    let upstream_urls =
+        match gradient_core::db::upstream_urls_for_org(&state.worker_db, org_id).await {
+            Ok(urls) => urls,
+            Err(e) => {
+                warn!(%org_id, error = %e, "CacheQuery upstream lookup failed");
+                return;
+            }
+        };
+    if upstream_urls.is_empty() {
+        return;
+    }
+
+    let http = state.http.clone();
+
+    let upstream_urls = Arc::new(upstream_urls);
+    let mut futs = FuturesUnordered::new();
+    let mut iter = uncached_pairs.into_iter();
+
+    for _ in 0..UPSTREAM_LOOKUP_CONCURRENCY {
+        if let Some((hash, store_path)) = iter.next() {
+            futs.push(lookup_upstream_narinfo(
+                http.clone(),
+                Arc::clone(&upstream_urls),
+                hash,
+                store_path,
+            ));
+        }
+    }
+    while let Some(found) = futs.next().await {
+        if let Some(cp) = found {
+            result.push(cp);
+        }
+        if let Some((hash, store_path)) = iter.next() {
+            futs.push(lookup_upstream_narinfo(
+                http.clone(),
+                Arc::clone(&upstream_urls),
+                hash,
+                store_path,
+            ));
+        }
+    }
+}
+
+/// Pull availability for any still-uncached paths from the org's configured
+/// gradient_proto upstreams, extending `result` with hits.
+async fn extend_with_gradient_proto_results(
+    state: &ServerState,
+    org_id: OrganizationId,
+    uncached_pairs: &[(String, String)],
+    result: &mut Vec<gradient_core::types::proto::CachedPath>,
+) {
+    let upstreams =
+        match gradient_core::db::gradient_proto_upstreams_for_org(&state.worker_db, org_id).await {
+            Ok(u) => u,
+            Err(e) => {
+                warn!(%org_id, error = %e, "gradient_proto upstream lookup failed");
+                return;
+            }
+        };
+    if upstreams.is_empty() {
+        return;
+    }
+
+    let already: HashSet<String> = result.iter().map(|c| c.path.clone()).collect();
+    let want: Vec<String> = uncached_pairs
+        .iter()
+        .map(|(_, p)| p.clone())
+        .filter(|p| !already.contains(p))
+        .collect();
+    if want.is_empty() {
+        return;
+    }
+
+    for up in upstreams {
+        let api_key = up.api_key_enc.as_deref().and_then(|enc| {
+            gradient_core::sources::decrypt_secret(&state.config.secrets.crypt_secret_file, enc).ok()
+        });
+        let found =
+            super::cache_consumer::pull_paths(&up.url, &up.remote_cache, api_key.as_deref(), &want)
+                .await;
+        for cp in found {
+            if !result.iter().any(|r| r.path == cp.path) {
+                result.push(cp);
+            }
+        }
+    }
+}
+
+/// Check which store paths are available - in the local Gradient cache or upstream.
+///
+/// Behaviour depends on `mode`:
+/// - `Normal` - return only locally-cached paths; probe upstream for misses.
+/// - `Pull`   - same as Normal but cached paths include a presigned S3 GET URL.
+/// - `Push`   - return **all** queried paths with `cached` set; skip upstream.
+///   Uncached paths include a presigned S3 PUT URL when S3-backed.
+async fn query(
+    state: &ServerState,
+    org_id: Option<OrganizationId>,
+    paths: &[String],
+    mode: gradient_core::types::proto::QueryMode,
+) -> Vec<gradient_core::types::proto::CachedPath> {
+    use gradient_core::types::proto::QueryMode;
+
+    let hash_path_pairs: Vec<(&str, &str)> = paths
+        .iter()
+        .filter_map(|p| {
+            let base = p.strip_prefix("/nix/store/").unwrap_or(p);
+            let hash = base.split('-').next()?;
+            if hash.len() == 32 {
+                Some((hash, p.as_str()))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if hash_path_pairs.is_empty() {
+        return vec![];
+    }
+
+    let hashes: Vec<&str> = hash_path_pairs.iter().map(|(h, _)| *h).collect();
+
+    let cached_map = build_local_cache_map(state, &hashes).await;
+    let cached_path_rows = load_cached_path_rows(state, &hashes).await;
+
+    // Merge source-path cache hits into the map (keyed by hash string).
+    let mut cached_map = cached_map;
+    for cp in &cached_path_rows {
+        if cp.is_fully_cached() {
+            cached_map
+                .entry(cp.hash.clone())
+                .or_insert((cp.file_size, cp.nar_size));
+        }
+    }
+
+    if matches!(mode, QueryMode::Push)
+        && let Some(oid) = org_id
+    {
+        ensure_push_signatures(state, oid, &cached_path_rows).await;
+    }
+
+    let expire = std::time::Duration::from_secs(3600);
+    let mut result: Vec<gradient_core::types::proto::CachedPath> = Vec::new();
+
+    for (hash, path) in &hash_path_pairs {
+        if let Some((file_size, nar_size)) = cached_map.get(*hash) {
+            result.push(
+                build_cached_entry(state, hash, path, file_size, nar_size, mode.clone(), expire)
+                    .await,
+            );
+        } else if matches!(mode, QueryMode::Push) {
+            result.push(build_uncached_push_entry(state, hash, path, expire).await);
+        }
+    }
+
+    if matches!(mode, QueryMode::Push) {
+        return result;
+    }
+
+    let locally_cached_hashes: std::collections::HashSet<&str> =
+        cached_map.keys().map(|s| s.as_str()).collect();
+    let uncached_pairs: Vec<(String, String)> = hash_path_pairs
+        .iter()
+        .filter(|(hash, _)| !locally_cached_hashes.contains(hash))
+        .map(|(h, p)| (h.to_string(), p.to_string()))
+        .collect();
+
+    if !uncached_pairs.is_empty()
+        && let Some(oid) = org_id
+    {
+        extend_with_upstream_results(state, oid, uncached_pairs.clone(), &mut result).await;
+        extend_with_gradient_proto_results(state, oid, &uncached_pairs, &mut result).await;
+    }
+
+    if matches!(mode, QueryMode::Pull) {
+        let returned: std::collections::HashSet<String> =
+            result.iter().map(|cp| cp.path.clone()).collect();
+        let missing: Vec<gradient_core::types::proto::CachedPath> = hash_path_pairs
+            .iter()
+            .filter(|(_, p)| !returned.contains(*p))
+            .map(|(_, p)| build_uncached_pull_entry(p))
+            .collect();
+        result.extend(missing);
+    }
+
+    result
+}
+
+/// Pull-mode response for a path the server cannot serve (neither in the
+/// local cache nor in any configured upstream). Carries `cached: false` and
+/// no metadata so the worker's prefetch hard-fail can distinguish "server has
+/// nothing for this path" from "this path was never queried".
+fn build_uncached_pull_entry(path: &str) -> gradient_core::types::proto::CachedPath {
+    use gradient_core::types::proto::CachedPath;
+    CachedPath {
+        path: path.to_string(),
+        cached: false,
+        file_size: None,
+        nar_size: None,
+        url: None,
+        nar_hash: None,
+        references: None,
+        signatures: None,
+        deriver: None,
+        ca: None,
+    }
+}
+
+/// Return the subset of `hashes` that have a `cached_path_signature` row for
+/// `cache_id`. Fails closed: any DB error yields an empty set so a public
+/// cache never leaks paths it cannot prove belong to it.
+async fn hashes_in_cache(
+    state: &ServerState,
+    cache_id: CacheId,
+    hashes: &[&str],
+) -> HashSet<String> {
+    if hashes.is_empty() {
+        return HashSet::new();
+    }
+
+    let cached_paths = match ECachedPath::find()
+        .filter(CCachedPath::Hash.is_in(hashes.to_vec()))
+        .all(&state.worker_db)
+        .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            warn!(error = %e, "cache-scoped query cached_path lookup failed");
+            return HashSet::new();
+        }
+    };
+
+    let id_to_hash: HashMap<CachedPathId, String> =
+        cached_paths.into_iter().map(|cp| (cp.id, cp.hash)).collect();
+    if id_to_hash.is_empty() {
+        return HashSet::new();
+    }
+
+    let ids: Vec<CachedPathId> = id_to_hash.keys().copied().collect();
+    let signatures = match ECachedPathSignature::find()
+        .filter(
+            sea_orm::Condition::all()
+                .add(CCachedPathSignature::Cache.eq(cache_id))
+                .add(CCachedPathSignature::CachedPath.is_in(ids)),
+        )
+        .all(&state.worker_db)
+        .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            warn!(error = %e, "cache-scoped query signature lookup failed");
+            return HashSet::new();
+        }
+    };
+
+    signatures
+        .into_iter()
+        .filter_map(|s| id_to_hash.get(&s.cached_path).cloned())
+        .collect()
+}
+
+/// Read-only query scoped to a single cache. Only paths with a
+/// `cached_path_signature` row for `cache_id` are returned. `Push` is never
+/// honored - it would mint upload URLs and is meaningless for a public cache.
+pub(super) async fn query_for_cache(
+    state: &ServerState,
+    cache_id: CacheId,
+    paths: &[String],
+    mode: gradient_core::types::proto::QueryMode,
+) -> Vec<gradient_core::types::proto::CachedPath> {
+    use gradient_core::types::proto::QueryMode;
+
+    if matches!(mode, QueryMode::Push) {
+        return vec![];
+    }
+
+    let hash_path_pairs: Vec<(&str, &str)> = paths
+        .iter()
+        .filter_map(|p| {
+            let base = p.strip_prefix("/nix/store/").unwrap_or(p);
+            let hash = base.split('-').next()?;
+            if hash.len() == 32 {
+                Some((hash, p.as_str()))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if hash_path_pairs.is_empty() {
+        return vec![];
+    }
+
+    let hashes: Vec<&str> = hash_path_pairs.iter().map(|(h, _)| *h).collect();
+
+    let in_cache = hashes_in_cache(state, cache_id, &hashes).await;
+    let cached_map = build_local_cache_map(state, &hashes).await;
+
+    let expire = std::time::Duration::from_secs(3600);
+    let mut result: Vec<gradient_core::types::proto::CachedPath> = Vec::new();
+
+    for (hash, path) in &hash_path_pairs {
+        if !in_cache.contains(*hash) {
+            continue;
+        }
+        if let Some((file_size, nar_size)) = cached_map.get(*hash) {
+            result.push(
+                build_cached_entry(state, hash, path, file_size, nar_size, mode.clone(), expire)
+                    .await,
+            );
+        }
+    }
+
+    if matches!(mode, QueryMode::Pull) {
+        let returned: HashSet<String> = result.iter().map(|cp| cp.path.clone()).collect();
+        let missing: Vec<gradient_core::types::proto::CachedPath> = hash_path_pairs
+            .iter()
+            .filter(|(_, p)| !returned.contains(*p))
+            .map(|(_, p)| build_uncached_pull_entry(p))
+            .collect();
+        result.extend(missing);
+    }
+
+    result
+}
+
+/// Authorize a single store path against `cache_id`: true only when the path
+/// has a `cached_path_signature` row for this cache.
+pub(super) async fn path_in_cache(
+    state: &ServerState,
+    cache_id: CacheId,
+    store_path: &str,
+) -> bool {
+    let base = store_path.strip_prefix("/nix/store/").unwrap_or(store_path);
+    let Some(hash) = base.split('-').next() else {
+        return false;
+    };
+    if hash.len() != 32 {
+        return false;
+    }
+    !hashes_in_cache(state, cache_id, &[hash]).await.is_empty()
+}
+
+pub(super) async fn handle_cache_query(
+    state: &ServerState,
+    org_id: Option<OrganizationId>,
+    paths: &[String],
+    mode: gradient_core::types::proto::QueryMode,
+) -> Vec<gradient_core::types::proto::CachedPath> {
+    query(state, org_id, paths, mode).await
+}
+
+/// Probe each `upstream_url` for `<hash>.narinfo` until one responds 2xx.
+/// Returns `Some(CachedPath)` pointing at the upstream NAR URL on first hit,
+/// `None` if no upstream has the path.
+///
+/// The full narinfo body is parsed so the worker receives the metadata it
+/// needs to construct a `ValidPathInfo` (NarHash, NarSize, FileSize,
+/// References, Deriver, Sig, CA). Without these, `add_to_store_nar` on the
+/// worker's local daemon cannot accept the import and the build fails with
+/// a missing-dependency error.
+async fn lookup_upstream_narinfo(
+    http: reqwest::Client,
+    upstream_urls: Arc<Vec<String>>,
+    hash: String,
+    store_path: String,
+) -> Option<crate::messages::CachedPath> {
+    for base_url in upstream_urls.iter() {
+        let narinfo_url = format!("{}/{}.narinfo", base_url.trim_end_matches('/'), &hash);
+        let body = match http
+            .get(&narinfo_url)
+            .timeout(std::time::Duration::from_secs(5))
+            .send()
+            .await
+        {
+            Ok(r) if r.status().is_success() => match r.text().await {
+                Ok(b) => b,
+                Err(_) => continue,
+            },
+            _ => continue,
+        };
+        if let Some(cp) = parse_upstream_narinfo(base_url, &store_path, &body) {
+            return Some(cp);
+        }
+    }
+    None
+}
+
+/// Parse a narinfo body into a [`CachedPath`] rooted at `base_url`.
+///
+/// Returns `None` when the body lacks a `URL:` line (without it the worker
+/// has nowhere to download from). All other fields are best-effort -
+/// missing/unparseable `NarSize` / `FileSize` are silently dropped; `NarHash`
+/// / `References` / `Deriver` / `Sig` / `CA` default to `None`.
+fn parse_upstream_narinfo(
+    base_url: &str,
+    store_path: &str,
+    body: &str,
+) -> Option<crate::messages::CachedPath> {
+    let mut nar_path: Option<&str> = None;
+    let mut nar_hash: Option<String> = None;
+    let mut nar_size: Option<u64> = None;
+    let mut file_size: Option<u64> = None;
+    let mut references: Option<Vec<String>> = None;
+    let mut deriver: Option<String> = None;
+    let mut ca: Option<String> = None;
+    let mut sigs: Vec<String> = Vec::new();
+
+    for line in body.lines() {
+        if let Some(v) = line.strip_prefix("URL: ") {
+            nar_path = Some(v.trim());
+        } else if let Some(v) = line.strip_prefix("NarHash: ") {
+            nar_hash = Some(v.trim().to_owned());
+        } else if let Some(v) = line.strip_prefix("NarSize: ") {
+            nar_size = v.trim().parse().ok();
+        } else if let Some(v) = line.strip_prefix("FileSize: ") {
+            file_size = v.trim().parse().ok();
+        } else if let Some(v) = line.strip_prefix("References: ") {
+            references = Some(
+                v.split_whitespace()
+                    .map(|r| {
+                        if r.starts_with("/nix/store/") {
+                            r.to_owned()
+                        } else {
+                            format!("/nix/store/{}", r)
+                        }
+                    })
+                    .collect(),
+            );
+        } else if let Some(v) = line.strip_prefix("Deriver: ") {
+            let d = v.trim();
+            if !d.is_empty() {
+                deriver = Some(if d.starts_with("/nix/store/") {
+                    d.to_owned()
+                } else {
+                    format!("/nix/store/{}", d)
+                });
+            }
+        } else if let Some(v) = line.strip_prefix("CA: ") {
+            let c = v.trim();
+            if !c.is_empty() {
+                ca = Some(c.to_owned());
+            }
+        } else if let Some(v) = line.strip_prefix("Sig: ") {
+            sigs.push(v.trim().to_owned());
+        }
+    }
+
+    let nar_path = nar_path?;
+    let url = format!("{}/{}", base_url.trim_end_matches('/'), nar_path);
+
+    Some(crate::messages::CachedPath {
+        path: store_path.to_string(),
+        cached: true,
+        file_size,
+        nar_size,
+        url: Some(url),
+        nar_hash,
+        references,
+        signatures: if sigs.is_empty() { None } else { Some(sigs) },
+        deriver,
+        ca,
+    })
+}
+
+fn expand_references(raw: Option<&str>) -> Option<Vec<String>> {
+    raw.map(|s| {
+        s.split_whitespace()
+            .map(|r| {
+                if r.starts_with("/nix/store/") {
+                    r.to_owned()
+                } else {
+                    format!("/nix/store/{}", r)
+                }
+            })
+            .collect()
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gradient_core::types::proto::QueryMode;
+
+    fn make_state() -> ServerState {
+        let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection();
+        Arc::try_unwrap(gradient_test_support::prelude::test_state(db)).unwrap()
+    }
+
+    #[test]
+    fn parse_upstream_narinfo_full_fields() {
+        let body = "StorePath: /nix/store/6ak2iyrql4xlj0mpxcibqnzdlwl0vlwj-bzip2-0.6.1\n\
+                    URL: nar/abc.nar.xz\n\
+                    Compression: xz\n\
+                    FileHash: sha256:124l7vc762nsgl8wmfgp1gm9vsl3gk0j6136nyv3ff7s7da11yvz\n\
+                    FileSize: 35372\n\
+                    NarHash: sha256:1bnnhb0pfx49mg15fmk3jx34wj8j24ygqcq7xww9g8qcyaf23rkf\n\
+                    NarSize: 102760\n\
+                    References: aaaa-dep1 /nix/store/bbbb-dep2\n\
+                    Deriver: vmc3d9j1qnwhqyxqkwzsnf3pv98shq18-bzip2-0.6.1.drv\n\
+                    Sig: cache.nixos.org-1:a84Gyv6ieXj7HclpmXu/i+so=\n";
+        let cp = parse_upstream_narinfo(
+            "https://upstream.example/",
+            "/nix/store/6ak2iyrql4xlj0mpxcibqnzdlwl0vlwj-bzip2-0.6.1",
+            body,
+        )
+        .unwrap();
+        assert!(cp.cached);
+        assert_eq!(
+            cp.url.as_deref(),
+            Some("https://upstream.example/nar/abc.nar.xz")
+        );
+        assert_eq!(cp.nar_size, Some(102760));
+        assert_eq!(cp.file_size, Some(35372));
+        assert_eq!(
+            cp.nar_hash.as_deref(),
+            Some("sha256:1bnnhb0pfx49mg15fmk3jx34wj8j24ygqcq7xww9g8qcyaf23rkf")
+        );
+        let refs = cp.references.unwrap();
+        assert_eq!(refs.len(), 2);
+        assert!(refs.contains(&"/nix/store/aaaa-dep1".to_string()));
+        assert!(refs.contains(&"/nix/store/bbbb-dep2".to_string()));
+        assert_eq!(
+            cp.deriver.as_deref(),
+            Some("/nix/store/vmc3d9j1qnwhqyxqkwzsnf3pv98shq18-bzip2-0.6.1.drv")
+        );
+        assert_eq!(cp.signatures.as_ref().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn parse_upstream_narinfo_empty_references_is_some_empty() {
+        let body = "URL: nar/x.nar.xz\n\
+                    NarHash: sha256:deadbeef\n\
+                    NarSize: 1\n\
+                    References: \n";
+        let cp = parse_upstream_narinfo("https://up/", "/nix/store/aa-x", body).unwrap();
+        assert_eq!(cp.references.as_deref(), Some(&[][..]));
+    }
+
+    #[test]
+    fn parse_upstream_narinfo_requires_url() {
+        let body = "NarHash: sha256:abc\nNarSize: 1\n";
+        assert!(parse_upstream_narinfo("https://up/", "/nix/store/aa-x", body).is_none());
+    }
+
+    #[test]
+    fn parse_upstream_narinfo_trims_base_url_trailing_slash() {
+        let body = "URL: nar/x.nar\n";
+        let cp = parse_upstream_narinfo("https://up.example/", "/nix/store/aa-x", body).unwrap();
+        assert_eq!(cp.url.as_deref(), Some("https://up.example/nar/x.nar"));
+    }
+
+    #[test]
+    fn parse_upstream_narinfo_ignores_unparseable_sizes() {
+        let body = "URL: nar/x.nar\nNarSize: not-a-number\nFileSize: also-bad\n";
+        let cp = parse_upstream_narinfo("https://up/", "/nix/store/aa-x", body).unwrap();
+        assert!(cp.nar_size.is_none());
+        assert!(cp.file_size.is_none());
+    }
+
+    #[tokio::test]
+    async fn cache_query_empty_paths_returns_empty() {
+        let state = make_state();
+
+        assert!(query(&state, None, &[], QueryMode::Normal).await.is_empty());
+        assert!(query(&state, None, &[], QueryMode::Push).await.is_empty());
+        assert!(query(&state, None, &[], QueryMode::Pull).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn cache_query_invalid_store_paths_skipped() {
+        let state = make_state();
+
+        let paths = vec![
+            "not-a-store-path".to_string(),
+            "/nix/store/short-name".to_string(),
+        ];
+        assert!(
+            query(&state, None, &paths, QueryMode::Normal)
+                .await
+                .is_empty()
+        );
+        assert!(
+            query(&state, None, &paths, QueryMode::Push)
+                .await
+                .is_empty()
+        );
+        assert!(
+            query(&state, None, &paths, QueryMode::Pull)
+                .await
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn cache_query_normal_uncached_returns_empty() {
+        let state = make_state();
+        let paths = vec!["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello".to_string()];
+        let result = query(&state, None, &paths, QueryMode::Normal).await;
+        assert!(
+            result.is_empty(),
+            "Normal mode should not return uncached paths"
+        );
+    }
+
+    #[tokio::test]
+    async fn cache_query_pull_uncached_returns_entries_with_cached_false() {
+        // Pull mode must surface every queried path, even ones the server cannot
+        // serve. Without an explicit `cached: false` entry the worker has no way
+        // to distinguish "server omitted this path" from "this path was never
+        // queried", so its closure-walk hard-fail is bypassed and the build
+        // proceeds to import a dependent path with an unsatisfiable reference,
+        // surfacing as a confusing `daemon add_to_store_nar … path '…' is not
+        // valid` error instead of the intended `not available in the gradient
+        // cache` message.
+        let state = make_state();
+        let paths = vec![
+            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string(),
+            "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-bar".to_string(),
+        ];
+        let result = query(&state, None, &paths, QueryMode::Pull).await;
+        assert_eq!(result.len(), 2, "Pull must return all queried paths");
+        for cp in &result {
+            assert!(!cp.cached, "uncached path: {}", cp.path);
+            assert!(cp.url.is_none(), "Pull-uncached carries no URL");
+            assert!(cp.nar_hash.is_none(), "Pull-uncached carries no nar_hash");
+            assert!(
+                cp.references.is_none(),
+                "Pull-uncached carries no references"
+            );
+            assert!(
+                cp.signatures.is_none(),
+                "Pull-uncached carries no signatures"
+            );
+            assert!(cp.deriver.is_none(), "Pull-uncached carries no deriver");
+            assert!(cp.ca.is_none(), "Pull-uncached carries no ca");
+            assert!(cp.file_size.is_none(), "Pull-uncached carries no file_size");
+            assert!(cp.nar_size.is_none(), "Pull-uncached carries no nar_size");
+        }
+        let returned: Vec<&str> = result.iter().map(|c| c.path.as_str()).collect();
+        assert!(returned.contains(&paths[0].as_str()));
+        assert!(returned.contains(&paths[1].as_str()));
+    }
+
+    #[tokio::test]
+    async fn cache_query_push_uncached_returns_all_with_cached_false() {
+        let state = make_state();
+        let paths = vec![
+            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string(),
+            "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-bar".to_string(),
+        ];
+        let result = query(&state, None, &paths, QueryMode::Push).await;
+        assert_eq!(result.len(), 2, "Push should return all queried paths");
+        for cp in &result {
+            assert!(!cp.cached, "all should be uncached (empty DB): {}", cp.path);
+            // Local NAR storage returns None for presigned PUT (no S3); Push
+            // with S3 would populate `url` - that's the only field Push may set
+            // beyond `path` + `cached`.
+            assert!(cp.url.is_none(), "local store → no presigned URL");
+            assert!(cp.file_size.is_none(), "Push carries no file_size");
+            assert!(cp.nar_size.is_none(), "Push carries no nar_size");
+            assert!(cp.nar_hash.is_none(), "Push carries no nar_hash");
+            assert!(cp.references.is_none(), "Push carries no references");
+            assert!(cp.signatures.is_none(), "Push carries no signatures");
+            assert!(cp.deriver.is_none(), "Push carries no deriver");
+            assert!(cp.ca.is_none(), "Push carries no ca");
+        }
+        let returned_paths: Vec<&str> = result.iter().map(|c| c.path.as_str()).collect();
+        assert!(returned_paths.contains(&paths[0].as_str()));
+        assert!(returned_paths.contains(&paths[1].as_str()));
+    }
+
+    #[tokio::test]
+    async fn cache_query_rejects_overlong_hash() {
+        // Hash component of 33 chars must be rejected - nix-base32 hashes are
+        // exactly 32 chars. Guards against an `== 32` → `>= 32` length-check
+        // relaxation.
+        let state = make_state();
+        let paths = vec!["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string()];
+        for mode in [QueryMode::Normal, QueryMode::Pull, QueryMode::Push] {
+            let result = query(&state, None, &paths, mode).await;
+            assert!(result.is_empty(), "33-char hash must be filtered out");
+        }
+    }
+
+    #[tokio::test]
+    async fn cache_query_push_deduplicates_by_hash() {
+        let state = make_state();
+        let paths = vec![
+            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string(),
+            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string(),
+        ];
+        let result = query(&state, None, &paths, QueryMode::Push).await;
+        for cp in &result {
+            assert!(!cp.cached);
+        }
+    }
+
+    #[tokio::test]
+    async fn cache_scoped_query_rejects_push() {
+        let state = make_state();
+        let cache = CacheId::new(uuid::Uuid::now_v7());
+        let paths = vec!["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string()];
+        assert!(
+            query_for_cache(&state, cache, &paths, QueryMode::Push)
+                .await
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn cache_scoped_query_empty_returns_empty() {
+        let state = make_state();
+        let cache = CacheId::new(uuid::Uuid::now_v7());
+        assert!(
+            query_for_cache(&state, cache, &[], QueryMode::Normal)
+                .await
+                .is_empty()
+        );
+    }
+
+    // ── expand_references ────────────────────────────────────────────────────
+
+    #[test]
+    fn expand_references_none_passthrough() {
+        assert_eq!(expand_references(None), None);
+    }
+
+    #[test]
+    fn expand_references_empty_string_empty_vec() {
+        assert_eq!(expand_references(Some("")), Some(vec![]));
+    }
+
+    #[test]
+    fn expand_references_splits_whitespace() {
+        let out = expand_references(Some("aaaa-a bbbb-b cccc-c")).unwrap();
+        assert_eq!(out.len(), 3);
+    }
+
+    #[test]
+    fn expand_references_prefixes_bare_names() {
+        let out = expand_references(Some("aaaa-a")).unwrap();
+        assert_eq!(out, vec!["/nix/store/aaaa-a".to_string()]);
+    }
+
+    #[test]
+    fn expand_references_preserves_absolute() {
+        let out = expand_references(Some("/nix/store/aaaa-a")).unwrap();
+        assert_eq!(out, vec!["/nix/store/aaaa-a".to_string()]);
+    }
+
+    #[test]
+    fn expand_references_mixed_forms() {
+        let out = expand_references(Some("aaaa-a /nix/store/bbbb-b")).unwrap();
+        assert_eq!(
+            out,
+            vec![
+                "/nix/store/aaaa-a".to_string(),
+                "/nix/store/bbbb-b".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn expand_references_collapses_multiple_whitespace() {
+        // split_whitespace collapses runs of spaces/tabs.
+        let out = expand_references(Some("aaaa-a   \t bbbb-b")).unwrap();
+        assert_eq!(out.len(), 2);
+    }
+}

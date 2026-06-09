@@ -1,0 +1,41 @@
+[package]
+name        = "gradient-test-support"
+version.workspace    = true
+edition.workspace    = true
+license.workspace    = true
+authors.workspace    = true
+repository.workspace = true
+publish     = false
+
+[lib]
+name = "gradient_test_support"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+gradient-core       = { workspace = true }
+gradient-entity = { workspace = true }
+gradient-proto = { workspace = true }
+gradient-web = { workspace = true }
+
+anyhow              = { workspace = true }
+async-trait         = { workspace = true }
+bytes               = { workspace = true }
+chrono              = { workspace = true }
+futures             = { workspace = true }
+harmonia-file-nar         = { workspace = true }
+harmonia-store-derivation = { workspace = true }
+password-auth       = { workspace = true }
+rkyv                = { workspace = true }
+sea-orm             = { workspace = true }
+serde               = { workspace = true }
+tempfile            = { workspace = true }
+tokio               = { workspace = true, features = ["macros", "sync"] }
+tokio-tungstenite   = { workspace = true }
+uuid                = { workspace = true }
+zstd                = { workspace = true }
+
+axum-test    = { version = "20.0", default-features = false }
+jsonwebtoken = { version = "10.3", default-features = false, features = ["aws_lc_rs"] }

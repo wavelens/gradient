@@ -785,33 +785,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cache"
-version = "1.2.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "base64",
- "chrono",
- "core",
- "entity",
- "futures",
- "mockall",
- "ring",
- "sea-orm",
- "sentry",
- "serde",
- "serde_json",
- "tempfile",
- "test-support",
- "thiserror 2.0.18",
- "tokio",
- "tokio-test",
- "tracing",
- "uuid",
- "zstd",
-]
-
-[[package]]
 name = "cc"
 version = "1.2.62"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1025,71 +998,6 @@ checksum = "4ddef33a339a91ea89fb53151bd0a4689cfce27055c291dfa69945475d22c747"
 dependencies = [
  "time",
  "version_check",
-]
-
-[[package]]
-name = "core"
-version = "1.2.0"
-dependencies = [
- "anyhow",
- "async-compression",
- "async-ssh2-lite",
- "async-trait",
- "base64",
- "blake3",
- "bytes",
- "chrono",
- "clap",
- "cron",
- "crypter",
- "ed25519-compact",
- "entity",
- "futures",
- "git-url-parse",
- "git2",
- "harmonia-file-nar",
- "harmonia-protocol",
- "harmonia-store-content-address",
- "harmonia-store-path",
- "harmonia-store-remote",
- "harmonia-utils-hash",
- "hex",
- "hmac 0.13.0",
- "ipnet",
- "lettre",
- "libc",
- "migration",
- "mockall",
- "nix-bindings",
- "num_enum",
- "object_store",
- "password-auth",
- "rand 0.10.1",
- "rand_core 0.10.1",
- "reqwest 0.13.3",
- "ring",
- "rkyv",
- "rustls",
- "rustls-native-certs",
- "sea-orm",
- "sea-orm-migration",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "ssh-key",
- "tar",
- "tempfile",
- "test-support",
- "thiserror 2.0.18",
- "tokio",
- "tokio-test",
- "tokio-util",
- "tracing",
- "url",
- "uuid",
- "webpki-roots 1.0.7",
- "wiremock",
- "zstd",
 ]
 
 [[package]]
@@ -1601,20 +1509,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "entity"
-version = "1.2.0"
-dependencies = [
- "chrono",
- "num_enum",
- "sea-orm",
- "serde",
- "serde_json",
- "tokio",
- "tokio-test",
- "uuid",
-]
-
-[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2090,17 +1984,327 @@ dependencies = [
 ]
 
 [[package]]
+name = "gradient-cache"
+version = "1.2.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64",
+ "chrono",
+ "futures",
+ "gradient-core",
+ "gradient-entity",
+ "gradient-test-support",
+ "mockall",
+ "ring",
+ "sea-orm",
+ "sentry",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-test",
+ "tracing",
+ "uuid",
+ "zstd",
+]
+
+[[package]]
+name = "gradient-core"
+version = "1.2.0"
+dependencies = [
+ "anyhow",
+ "async-compression",
+ "async-ssh2-lite",
+ "async-trait",
+ "base64",
+ "blake3",
+ "bytes",
+ "chrono",
+ "clap",
+ "cron",
+ "crypter",
+ "ed25519-compact",
+ "futures",
+ "git-url-parse",
+ "git2",
+ "gradient-entity",
+ "gradient-migration",
+ "gradient-test-support",
+ "harmonia-file-nar",
+ "harmonia-protocol",
+ "harmonia-store-content-address",
+ "harmonia-store-path",
+ "harmonia-store-remote",
+ "harmonia-utils-hash",
+ "hex",
+ "hmac 0.13.0",
+ "ipnet",
+ "lettre",
+ "libc",
+ "mockall",
+ "nix-bindings",
+ "num_enum",
+ "object_store",
+ "password-auth",
+ "rand 0.10.1",
+ "rand_core 0.10.1",
+ "reqwest 0.13.3",
+ "ring",
+ "rkyv",
+ "rustls",
+ "rustls-native-certs",
+ "sea-orm",
+ "sea-orm-migration",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "ssh-key",
+ "tar",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-test",
+ "tokio-util",
+ "tracing",
+ "url",
+ "uuid",
+ "webpki-roots 1.0.7",
+ "wiremock",
+ "zstd",
+]
+
+[[package]]
+name = "gradient-entity"
+version = "1.2.0"
+dependencies = [
+ "chrono",
+ "num_enum",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-test",
+ "uuid",
+]
+
+[[package]]
+name = "gradient-migration"
+version = "1.2.0"
+dependencies = [
+ "async-std",
+ "async-trait",
+ "sea-orm-migration",
+ "sha2 0.11.0",
+ "uuid",
+]
+
+[[package]]
+name = "gradient-proto"
+version = "1.2.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "chrono",
+ "futures",
+ "gradient-core",
+ "gradient-entity",
+ "gradient-scheduler",
+ "gradient-test-support",
+ "hex",
+ "password-auth",
+ "reqwest 0.13.3",
+ "rkyv",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "subtle",
+ "tempfile",
+ "tokio",
+ "tokio-tungstenite",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "gradient-scheduler"
+version = "1.2.0"
+dependencies = [
+ "anyhow",
+ "arc-swap",
+ "chrono",
+ "cron",
+ "futures",
+ "gradient-core",
+ "gradient-entity",
+ "gradient-score",
+ "gradient-test-support",
+ "reqwest 0.13.3",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "uuid",
+ "wiremock",
+]
+
+[[package]]
+name = "gradient-score"
+version = "1.2.0"
+dependencies = [
+ "chrono",
+ "gradient-core",
+ "serde",
+ "tracing",
+]
+
+[[package]]
 name = "gradient-server"
 version = "1.2.0"
 dependencies = [
- "cache",
  "clap",
- "core",
+ "gradient-cache",
+ "gradient-core",
+ "gradient-web",
  "sentry",
  "tokio",
  "tracing",
  "tracing-subscriber",
- "web",
+]
+
+[[package]]
+name = "gradient-test-support"
+version = "1.2.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum-test",
+ "bytes",
+ "chrono",
+ "futures",
+ "gradient-core",
+ "gradient-entity",
+ "gradient-proto",
+ "gradient-web",
+ "harmonia-file-nar",
+ "harmonia-store-derivation",
+ "jsonwebtoken",
+ "password-auth",
+ "rkyv",
+ "sea-orm",
+ "serde",
+ "tempfile",
+ "tokio",
+ "tokio-tungstenite",
+ "uuid",
+ "zstd",
+]
+
+[[package]]
+name = "gradient-web"
+version = "1.2.0"
+dependencies = [
+ "anyhow",
+ "async-stream",
+ "axum",
+ "axum-streams",
+ "axum-test",
+ "axum_typed_multipart",
+ "base64",
+ "blake3",
+ "bytes",
+ "chrono",
+ "email_address",
+ "futures",
+ "git-url-parse",
+ "governor",
+ "gradient-cache",
+ "gradient-core",
+ "gradient-entity",
+ "gradient-proto",
+ "gradient-scheduler",
+ "gradient-test-support",
+ "harmonia-file-nar",
+ "hex",
+ "hmac 0.13.0",
+ "http",
+ "http-body-util",
+ "ipnet",
+ "jsonwebtoken",
+ "mime_guess",
+ "opentelemetry",
+ "opentelemetry-otlp",
+ "opentelemetry_sdk",
+ "password-auth",
+ "prometheus",
+ "rand 0.10.1",
+ "reqwest 0.13.3",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "subtle",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-test",
+ "tokio-util",
+ "tower",
+ "tower-http",
+ "tower_governor",
+ "tracing",
+ "url",
+ "uuid",
+ "zstd",
+]
+
+[[package]]
+name = "gradient-worker"
+version = "1.2.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64",
+ "bytes",
+ "bzip2",
+ "clap",
+ "futures",
+ "git2",
+ "gradient-core",
+ "gradient-entity",
+ "gradient-proto",
+ "gradient-test-support",
+ "harmonia-file-nar",
+ "harmonia-protocol",
+ "harmonia-store-content-address",
+ "harmonia-store-derivation",
+ "harmonia-store-path",
+ "harmonia-store-remote",
+ "harmonia-utils-hash",
+ "harmonia-utils-signature",
+ "hex",
+ "libc",
+ "nix-bindings",
+ "reqwest 0.13.3",
+ "rkyv",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "sysinfo",
+ "tempfile",
+ "tokio",
+ "tokio-tungstenite",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+ "xz2",
+ "zstd",
 ]
 
 [[package]]
@@ -3138,17 +3342,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "488016bfae457b036d996092f6cb448677611ce4449e970ceaf42695203f218a"
 dependencies = [
  "autocfg",
-]
-
-[[package]]
-name = "migration"
-version = "1.2.0"
-dependencies = [
- "async-std",
- "async-trait",
- "sea-orm-migration",
- "sha2 0.11.0",
- "uuid",
 ]
 
 [[package]]
@@ -4270,35 +4463,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "proto"
-version = "1.2.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "axum",
- "chrono",
- "core",
- "entity",
- "futures",
- "hex",
- "password-auth",
- "reqwest 0.13.3",
- "rkyv",
- "scheduler",
- "sea-orm",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "subtle",
- "tempfile",
- "test-support",
- "tokio",
- "tokio-tungstenite",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "ptr_meta"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4928,44 +5092,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "scheduler"
-version = "1.2.0"
-dependencies = [
- "anyhow",
- "arc-swap",
- "chrono",
- "core",
- "cron",
- "entity",
- "futures",
- "reqwest 0.13.3",
- "score",
- "sea-orm",
- "serde",
- "serde_json",
- "tempfile",
- "test-support",
- "tokio",
- "tracing",
- "uuid",
- "wiremock",
-]
-
-[[package]]
 name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
-
-[[package]]
-name = "score"
-version = "1.2.0"
-dependencies = [
- "chrono",
- "core",
- "serde",
- "tracing",
-]
 
 [[package]]
 name = "sea-bae"
@@ -5875,34 +6005,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f50febec83f5ee1df3015341d8bd429f2d1cc62bcba7ea2076759d315084683"
 
 [[package]]
-name = "test-support"
-version = "1.2.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "axum-test",
- "bytes",
- "chrono",
- "core",
- "entity",
- "futures",
- "harmonia-file-nar",
- "harmonia-store-derivation",
- "jsonwebtoken",
- "password-auth",
- "proto",
- "rkyv",
- "sea-orm",
- "serde",
- "tempfile",
- "tokio",
- "tokio-tungstenite",
- "uuid",
- "web",
- "zstd",
-]
-
-[[package]]
 name = "thiserror"
 version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6695,64 +6797,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "web"
-version = "1.2.0"
-dependencies = [
- "anyhow",
- "async-stream",
- "axum",
- "axum-streams",
- "axum-test",
- "axum_typed_multipart",
- "base64",
- "blake3",
- "bytes",
- "cache",
- "chrono",
- "core",
- "email_address",
- "entity",
- "futures",
- "git-url-parse",
- "governor",
- "harmonia-file-nar",
- "hex",
- "hmac 0.13.0",
- "http",
- "http-body-util",
- "ipnet",
- "jsonwebtoken",
- "mime_guess",
- "opentelemetry",
- "opentelemetry-otlp",
- "opentelemetry_sdk",
- "password-auth",
- "prometheus",
- "proto",
- "rand 0.10.1",
- "reqwest 0.13.3",
- "scheduler",
- "sea-orm",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "subtle",
- "tempfile",
- "test-support",
- "thiserror 2.0.18",
- "tokio",
- "tokio-test",
- "tokio-util",
- "tower",
- "tower-http",
- "tower_governor",
- "tracing",
- "url",
- "uuid",
- "zstd",
-]
-
-[[package]]
 name = "web-sys"
 version = "0.3.98"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7298,50 +7342,6 @@ dependencies = [
  "serde_json",
  "unicode-xid",
  "wasmparser",
-]
-
-[[package]]
-name = "worker"
-version = "1.2.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "base64",
- "bytes",
- "bzip2",
- "clap",
- "core",
- "entity",
- "futures",
- "git2",
- "harmonia-file-nar",
- "harmonia-protocol",
- "harmonia-store-content-address",
- "harmonia-store-derivation",
- "harmonia-store-path",
- "harmonia-store-remote",
- "harmonia-utils-hash",
- "harmonia-utils-signature",
- "hex",
- "libc",
- "nix-bindings",
- "proto",
- "reqwest 0.13.3",
- "rkyv",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "sysinfo",
- "tempfile",
- "test-support",
- "tokio",
- "tokio-tungstenite",
- "tokio-util",
- "tracing",
- "tracing-subscriber",
- "uuid",
- "xz2",
- "zstd",
 ]
 
 [[package]]

@@ -97,10 +97,10 @@ async fn run() -> std::io::Result<()> {
     };
 
     info!("Starting cache service");
-    cache::start_cache(Arc::clone(&state)).await?;
+    gradient_cache::start_cache(Arc::clone(&state)).await?;
 
     info!("Starting web service");
-    web::serve_web(Arc::clone(&state)).await?;
+    gradient_web::serve_web(Arc::clone(&state)).await?;
 
     Ok(())
 }
