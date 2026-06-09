@@ -397,6 +397,7 @@ impl<'a> MessageHandler<'a> {
             cands,
             false,
             is_final,
+            Vec::new(),
         );
     }
 
@@ -419,6 +420,19 @@ impl<'a> MessageHandler<'a> {
                 .collect()
         };
         if !new_candidates.is_empty() {
+            let active_eval =
+                self.job_kinds.values().filter(|k| **k == JobKind::Flake).count() as u32;
+            let active_build =
+                self.job_kinds.values().filter(|k| **k == JobKind::Build).count() as u32;
+            let mut request_after = Vec::new();
+            if active_build < self.max_build {
+                request_after.push(JobKind::Build);
+            }
+
+            if active_eval < self.max_eval {
+                request_after.push(JobKind::Flake);
+            }
+
             spawn_scoring_task(
                 self.scorer,
                 Arc::clone(&self.executor.store),
@@ -427,6 +441,7 @@ impl<'a> MessageHandler<'a> {
                 new_candidates,
                 true,
                 true,
+                request_after,
             );
         }
     }
@@ -460,6 +475,7 @@ impl<'a> MessageHandler<'a> {
                 all,
                 true,
                 true,
+                Vec::new(),
             );
         }
     }

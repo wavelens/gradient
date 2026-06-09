@@ -310,6 +310,8 @@ The "new candidates available" signal is a level-triggered `watch` generation co
 
 `build_dispatch_loop` runs on a 5s timer but is also kicked reactively (`Scheduler::dispatch_kick`, `notify_one`) when a job completes **and leaves its worker idle**, so the dependents it unblocks are enqueued and offered immediately. Without this, a serial dependency chain (e.g. the stdenv bootstrap) advances only one level per 5s tick. The idle gate avoids redundant passes while a worker is still busy (e.g. completing 1 of 8 concurrent builds) — that worker keeps pulling on its own and the timer covers the rest.
 
+Closing the loop on the worker side: after scoring a fresh `JobOffer` the worker sends a capacity-gated `RequestJob` (not just on its 10s heartbeat). Scoring is what clears the server's rescore gate, so the worker's post-completion `RequestJob` would otherwise race ahead of its own scores, miss, and idle until the next heartbeat — collapsing a serial chain to one level per ~10s.
+
 Jobs are scoped to the worker's authorized peers - a worker only receives candidates from peers (orgs, caches) it has successfully authenticated against.
 
 ### Dispatch Flow
