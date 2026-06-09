@@ -566,8 +566,6 @@ impl Scheduler {
         source: String,
         message: String,
     ) -> Result<()> {
-        use gradient_core::repo::eval::EvalRepo;
-
         let evaluation_id = {
             let tracker = self.job_tracker.read().await;
             match tracker.active_job(job_id) {
@@ -591,9 +589,15 @@ impl Scheduler {
             }
         };
 
-        EvalRepo::new(self.state.worker_db.inner())
-            .insert_message(evaluation_id, entity_level, message, Some(source))
-            .await
+        gradient_core::db::insert_evaluation_message(
+            self.state.worker_db.inner(),
+            evaluation_id,
+            entity_level,
+            message,
+            Some(source),
+        )
+        .await
+        .map_err(Into::into)
     }
 
     /// Return the peer (org) UUID that owns the active job, if found.

@@ -15,7 +15,6 @@ pub mod ip_allowlist;
 pub mod nix;
 pub mod nix_hash;
 pub mod permissions;
-pub mod repo;
 pub mod shutdown;
 pub mod sources;
 pub mod state;
