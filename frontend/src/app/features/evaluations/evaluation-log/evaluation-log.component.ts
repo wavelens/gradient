@@ -43,7 +43,12 @@ import { environment } from '@environments/environment';
   standalone: true,
   imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonModule],
   templateUrl: './evaluation-log.component.html',
-  styleUrl: './evaluation-log.component.scss',
+  styleUrls: [
+    './evaluation-log.component.scss',
+    './evaluation-log.sidebar.scss',
+    './evaluation-log.messages.scss',
+    './evaluation-log.log.scss',
+  ],
 })
 export class EvaluationLogComponent implements OnInit, OnDestroy {
   private route = inject(ActivatedRoute);
