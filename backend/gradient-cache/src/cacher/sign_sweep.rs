@@ -16,6 +16,7 @@
 use gradient_core::nix_hash::normalize_nar_hash;
 use gradient_core::sources::CacheSigner;
 use gradient_core::types::*;
+use gradient_core::ServerState;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, QuerySelect, Set,
 };

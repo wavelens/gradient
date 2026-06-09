@@ -6,7 +6,8 @@
 
 use axum::extract::State;
 use axum::{Extension, Json};
-use gradient_core::types::{BaseResponse, MUser, ServerState};
+use gradient_core::types::{BaseResponse, MUser};
+use gradient_core::ServerState;
 use gradient_scheduler::{Scheduler, WorkerInfo};
 use std::sync::Arc;
 

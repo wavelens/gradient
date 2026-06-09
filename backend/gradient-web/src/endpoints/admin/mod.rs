@@ -15,7 +15,7 @@ pub mod workers;
 
 use axum::Router;
 use axum::routing::{get, post};
-use gradient_core::types::ServerState;
+use gradient_core::ServerState;
 use std::sync::Arc;
 
 /// Returns the sub-router that is nested under `/admin` by `create_router`.

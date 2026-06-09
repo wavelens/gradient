@@ -22,6 +22,7 @@ use gradient_core::types::input::{check_project_name, validate_display_name, vec
 use gradient_core::types::triggers::{ConcurrencyPolicy, TriggerConfig, TriggerType};
 use gradient_core::types::wildcard::Wildcard;
 use gradient_core::types::*;
+use gradient_core::ServerState;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
@@ -69,7 +70,7 @@ pub async fn get_project_name_available(
     if check_project_name(&name).is_err() {
         return Ok(ok_json(false));
     }
-    let org = get_any_organization_by_name(state.0.clone(), organization)
+    let org = get_any_organization_by_name(&state.db(), organization)
         .await?
         .or_not_found("Organization")?;
     let exists = EProject::find()
@@ -627,7 +628,7 @@ pub async fn post_project_check_repository(
     )
     .await?;
 
-    let (_has_updates, remote_hash) = check_project_updates(Arc::clone(&state), &project, None)
+    let (_has_updates, remote_hash) = check_project_updates(&state.db(), &project, None)
         .await
         .map_err(|e| {
             WebError::bad_request_with(

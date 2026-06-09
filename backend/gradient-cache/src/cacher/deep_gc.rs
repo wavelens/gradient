@@ -12,6 +12,7 @@ use anyhow::{Context, Result};
 use gradient_entity::ids::AdminTaskId;
 use gradient_core::db::admin_tasks;
 use gradient_core::types::*;
+use gradient_core::ServerState;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
 use serde::Serialize;
 use std::collections::HashSet;
@@ -197,6 +198,7 @@ async fn pass_logs(state: Arc<ServerState>, report: &mut DeepGcReport) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_core::db::{WebDb, WorkerDb};
     use gradient_entity::ids::{BuildRequestBlobId, OrganizationId};
     use gradient_core::storage::{EmailSender, FileLogStorage, LogStorage, NarStore};
     use sea_orm::{DatabaseBackend, MockDatabase};

@@ -6,6 +6,7 @@
 
 //! Project Actions dispatch and execution.
 
+use crate::ci::context::CiContext;
 use crate::ci::integration_lookup::{ForgeType, IntegrationKind};
 use crate::ci::reporter::{
     APPROVAL_ACTION_ID, CiReport, CiReporter, CiStatus, GiteaReporter, GithubAppReporter,
@@ -17,7 +18,7 @@ use crate::types::{
     AProjectActionDelivery, ActionConfig, ActionType, BuildId, CEntryPoint, CIntegration,
     CProjectAction, EBuild, ECommit, EEntryPoint, EEvaluation, EIntegration, EOrganization,
     EProject, EProjectAction, EvaluationId, IntegrationId, MProjectAction, ProjectActionDeliveryId,
-    ProjectId, ServerState,
+    ProjectId,
 };
 use anyhow::{Context, Result, anyhow};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
@@ -111,12 +112,12 @@ fn requested_actions_for(status: CiStatus) -> Vec<RequestedAction> {
 }
 
 pub async fn dispatch_evaluation_event(
-    state: &Arc<ServerState>,
+    ctx: &CiContext,
     project_id: ProjectId,
     event: &str,
     payload: JsonValue,
 ) {
-    dispatch_event(state, project_id, event, payload).await;
+    dispatch_event(ctx, project_id, event, payload).await;
 }
 
 /// Dispatch the first forge-status event for a freshly-created evaluation.
@@ -136,10 +137,7 @@ pub async fn dispatch_evaluation_event(
 /// - `Waiting + NoCache` → `evaluation.queued` (Pending, "no cache" description).
 /// - `Waiting + Workers` → `evaluation.queued` (Pending, "no eval-capable
 ///   worker" description). Issue #268.
-pub async fn dispatch_evaluation_created(
-    state: &Arc<ServerState>,
-    eval: &crate::types::MEvaluation,
-) {
+pub async fn dispatch_evaluation_created(ctx: &CiContext, eval: &crate::types::MEvaluation) {
     use crate::types::waiting_reason::WaitingReason;
     use gradient_entity::evaluation::EvaluationStatus;
 
@@ -189,28 +187,23 @@ pub async fn dispatch_evaluation_created(
         payload["description"] = JsonValue::String(text.to_string());
     }
 
-    dispatch_evaluation_event(state, project_id, event, payload).await;
+    dispatch_evaluation_event(ctx, project_id, event, payload).await;
 }
 
 pub async fn dispatch_build_event(
-    state: &Arc<ServerState>,
+    ctx: &CiContext,
     project_id: ProjectId,
     event: &str,
     payload: JsonValue,
 ) {
-    dispatch_event(state, project_id, event, payload).await;
+    dispatch_event(ctx, project_id, event, payload).await;
 }
 
-async fn dispatch_event(
-    state: &Arc<ServerState>,
-    project_id: ProjectId,
-    event: &str,
-    payload: JsonValue,
-) {
+async fn dispatch_event(ctx: &CiContext, project_id: ProjectId, event: &str, payload: JsonValue) {
     let actions = match EProjectAction::find()
         .filter(CProjectAction::Project.eq(project_id))
         .filter(CProjectAction::Active.eq(true))
-        .all(&state.worker_db)
+        .all(&ctx.db.worker_db)
         .await
     {
         Ok(a) => a,
@@ -224,11 +217,11 @@ async fn dispatch_event(
         if !matches_event(&action, event) {
             continue;
         }
-        let state = Arc::clone(state);
+        let ctx = ctx.clone();
         let payload = payload.clone();
         let event = event.to_string();
         tokio::spawn(async move {
-            if let Err(e) = execute_action(&state, action, &event, payload).await {
+            if let Err(e) = execute_action(&ctx, action, &event, payload).await {
                 warn!(error = %e, "Action execution failed");
             }
         });
@@ -241,7 +234,7 @@ pub(crate) struct ExecutorOk {
 }
 
 pub async fn execute_action(
-    state: &Arc<ServerState>,
+    ctx: &CiContext,
     action: MProjectAction,
     event: &str,
     payload: JsonValue,
@@ -260,7 +253,7 @@ pub async fn execute_action(
             subject_template,
         } => {
             execute_send_mail(
-                state,
+                ctx,
                 event,
                 &payload,
                 &recipients,
@@ -269,10 +262,10 @@ pub async fn execute_action(
             .await
         }
         ActionConfig::SendWebRequest { url, token } => {
-            execute_send_web_request(state, event, &payload, &url, token.as_deref()).await
+            execute_send_web_request(ctx, event, &payload, &url, token.as_deref()).await
         }
         ActionConfig::ForgeStatusReport { integration_id } => {
-            execute_forge_status_report(state, event, &payload, integration_id).await
+            execute_forge_status_report(ctx, event, &payload, integration_id).await
         }
     };
 
@@ -302,7 +295,7 @@ pub async fn execute_action(
         duration_ms: Set(duration_ms),
         delivered_at: Set(crate::types::now()),
     };
-    if let Err(e) = delivery.insert(&state.worker_db).await {
+    if let Err(e) = delivery.insert(&ctx.db.worker_db).await {
         warn!(error = %e, %action_id, "Failed to record action delivery");
     }
 
@@ -310,7 +303,7 @@ pub async fn execute_action(
         let mut am = sea_orm::IntoActiveModel::into_active_model(action);
         am.last_fired_at = Set(Some(crate::types::now()));
         am.updated_at = Set(crate::types::now());
-        if let Err(e) = am.update(&state.worker_db).await {
+        if let Err(e) = am.update(&ctx.db.worker_db).await {
             warn!(error = %e, %action_id, "Failed to update action last_fired_at");
         }
     }
@@ -330,7 +323,7 @@ fn truncate(mut s: String, max: usize) -> String {
 }
 
 async fn execute_send_mail(
-    state: &Arc<ServerState>,
+    ctx: &CiContext,
     event: &str,
     payload: &JsonValue,
     recipients: &[String],
@@ -341,7 +334,9 @@ async fn execute_send_mail(
     }
     let subject = render_subject(subject_template, event, payload);
     let body = render_default_body(event, payload);
-    let r = state
+    let r = ctx
+        .db
+        .storage
         .email
         .send_action_mail(recipients, &subject, &body)
         .await?;
@@ -352,7 +347,7 @@ async fn execute_send_mail(
 }
 
 async fn execute_send_web_request(
-    state: &Arc<ServerState>,
+    ctx: &CiContext,
     event: &str,
     payload: &JsonValue,
     url: &str,
@@ -361,14 +356,14 @@ async fn execute_send_web_request(
     crate::ci::http_validation::validate_webhook_url(url)
         .map_err(|e| anyhow!("URL rejected: {}", e))?;
     let body = serde_json::to_string(payload).context("serializing webhook payload")?;
-    let mut req = state
+    let mut req = ctx
         .http
         .post(url)
         .header("Content-Type", "application/json")
         .header("X-Gradient-Event", event)
         .body(body);
     if let Some(tok) = token {
-        let key = load_secret_bytes(&state.config.secrets.crypt_secret_file)
+        let key = load_secret_bytes(&ctx.db.config.secrets.crypt_secret_file)
             .context("loading crypt key")?;
         let decrypted = decrypt_action_secret(tok, key.expose())?;
         req = req.bearer_auth(decrypted);
@@ -383,7 +378,7 @@ async fn execute_send_web_request(
 }
 
 async fn execute_forge_status_report(
-    state: &Arc<ServerState>,
+    ctx: &CiContext,
     event: &str,
     payload: &JsonValue,
     integration_id: IntegrationId,
@@ -391,7 +386,7 @@ async fn execute_forge_status_report(
     let ci_status = forge_status_for_event(event)
         .ok_or_else(|| anyhow!("event '{}' has no forge status mapping", event))?;
 
-    let Some(report) = build_ci_report_from_payload(state, event, payload, ci_status).await? else {
+    let Some(report) = build_ci_report_from_payload(ctx, event, payload, ci_status).await? else {
         // Build event for an intermediate dependency (no entry_point row).
         // Nothing to post - the entry-point check covers the user-visible
         // status.
@@ -401,7 +396,7 @@ async fn execute_forge_status_report(
         });
     };
     let context_key = report.context.clone();
-    let reporter = build_reporter_for_integration(state, integration_id).await?;
+    let reporter = build_reporter_for_integration(ctx, integration_id).await?;
     let new_id = reporter
         .report(&report)
         .await
@@ -411,7 +406,7 @@ async fn execute_forge_status_report(
         payload.get("evaluation_id").and_then(|v| v.as_str()),
     ) && let Ok(evaluation_id) = eid.parse::<EvaluationId>()
     {
-        persist_evaluation_check_id(state, evaluation_id, &context_key, new_id).await;
+        persist_evaluation_check_id(ctx, evaluation_id, &context_key, new_id).await;
     }
     let body = new_id.map(|id| format!("{{\"check_run_id\":{}}}", id));
     Ok(ExecutorOk {
@@ -427,14 +422,15 @@ async fn execute_forge_status_report(
 /// over a JSON column would let the slower writer's snapshot clobber the
 /// faster writer's entry.
 async fn persist_evaluation_check_id(
-    state: &Arc<ServerState>,
+    ctx: &CiContext,
     evaluation_id: EvaluationId,
     context: &str,
     check_run_id: i64,
 ) {
     use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
 
-    let result = state
+    let result = ctx
+        .db
         .worker_db
         .execute(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
@@ -472,7 +468,7 @@ fn check_run_id_for_context(eval: &crate::types::MEvaluation, context: &str) -> 
 /// build that has no `entry_point` row - those are intermediate dependency
 /// builds, not user-visible CI targets, so we skip the forge POST.
 async fn build_ci_report_from_payload(
-    state: &Arc<ServerState>,
+    ctx: &CiContext,
     event: &str,
     payload: &JsonValue,
     status: CiStatus,
@@ -507,12 +503,12 @@ async fn build_ci_report_from_payload(
     let (evaluation, build) = if let Some(bid) = s("build_id") {
         let build_id: BuildId = bid.parse().map_err(|_| anyhow!("invalid build_id"))?;
         let build = EBuild::find_by_id(build_id)
-            .one(&state.worker_db)
+            .one(&ctx.db.worker_db)
             .await
             .context("loading build")?
             .ok_or_else(|| anyhow!("build {} not found", build_id))?;
         let evaluation = EEvaluation::find_by_id(build.evaluation)
-            .one(&state.worker_db)
+            .one(&ctx.db.worker_db)
             .await
             .context("loading evaluation")?
             .ok_or_else(|| anyhow!("evaluation {} not found", build.evaluation))?;
@@ -521,7 +517,7 @@ async fn build_ci_report_from_payload(
         let evaluation_id: EvaluationId =
             eid.parse().map_err(|_| anyhow!("invalid evaluation_id"))?;
         let evaluation = EEvaluation::find_by_id(evaluation_id)
-            .one(&state.worker_db)
+            .one(&ctx.db.worker_db)
             .await
             .context("loading evaluation")?
             .ok_or_else(|| anyhow!("evaluation {} not found", evaluation_id))?;
@@ -537,13 +533,13 @@ async fn build_ci_report_from_payload(
         .ok_or_else(|| anyhow!("evaluation has no project (direct build)"))?;
 
     let project = EProject::find_by_id(project_id)
-        .one(&state.worker_db)
+        .one(&ctx.db.worker_db)
         .await
         .context("loading project")?
         .ok_or_else(|| anyhow!("project {} not found", project_id))?;
 
     let commit = ECommit::find_by_id(evaluation.commit)
-        .one(&state.worker_db)
+        .one(&ctx.db.worker_db)
         .await
         .context("loading commit")?
         .ok_or_else(|| anyhow!("commit {} not found", evaluation.commit))?;
@@ -559,7 +555,7 @@ async fn build_ci_report_from_payload(
     let entry_points = match &build {
         Some(b) => EEntryPoint::find()
             .filter(CEntryPoint::Build.eq(b.id))
-            .all(&state.worker_db)
+            .all(&ctx.db.worker_db)
             .await
             .context("loading entry points")?,
         None => Vec::new(),
@@ -572,7 +568,7 @@ async fn build_ci_report_from_payload(
     let entry_point_eval = entry_points.first().map(|ep| ep.eval.clone());
 
     let org_name = EOrganization::find_by_id(project.organization)
-        .one(&state.worker_db)
+        .one(&ctx.db.worker_db)
         .await
         .ok()
         .flatten()
@@ -600,7 +596,7 @@ async fn build_ci_report_from_payload(
     let details_url = org_name.as_ref().map(|org| {
         format!(
             "{}/organization/{}/log/{}",
-            state.config.server.frontend_url, org, evaluation.id
+            ctx.db.config.server.frontend_url, org, evaluation.id
         )
     });
 
@@ -622,14 +618,14 @@ async fn build_ci_report_from_payload(
 /// `CiReporter` from its integration. Used by the PR-approval trust probe to
 /// reuse the same forge credentials Actions already use for status reporting.
 pub async fn reporter_for_project(
-    state: &Arc<ServerState>,
+    ctx: &CiContext,
     project_id: ProjectId,
 ) -> Result<Option<Arc<dyn CiReporter>>> {
     let action = EProjectAction::find()
         .filter(CProjectAction::Project.eq(project_id))
         .filter(CProjectAction::Active.eq(true))
         .filter(CProjectAction::ActionType.eq(ActionType::ForgeStatusReport.to_i16()))
-        .one(&state.worker_db)
+        .one(&ctx.db.worker_db)
         .await
         .context("loading forge_status_report action")?;
     let Some(action) = action else {
@@ -641,17 +637,17 @@ pub async fn reporter_for_project(
         return Ok(None);
     };
     Ok(Some(
-        build_reporter_for_integration(state, integration_id).await?,
+        build_reporter_for_integration(ctx, integration_id).await?,
     ))
 }
 
 async fn build_reporter_for_integration(
-    state: &Arc<ServerState>,
+    ctx: &CiContext,
     integration_id: IntegrationId,
 ) -> Result<Arc<dyn CiReporter>> {
     let integration = EIntegration::find_by_id(integration_id)
         .filter(CIntegration::Kind.eq(i16::from(IntegrationKind::Outbound)))
-        .one(&state.worker_db)
+        .one(&ctx.db.worker_db)
         .await
         .context("loading integration")?
         .ok_or_else(|| anyhow!("outbound integration {} not found", integration_id))?;
@@ -661,7 +657,7 @@ async fn build_reporter_for_integration(
 
     let token = match integration.access_token.as_deref() {
         Some(enc) => Some(
-            decrypt_secret_with_file(&state.config.secrets.crypt_secret_file, enc)
+            decrypt_secret_with_file(&ctx.db.config.secrets.crypt_secret_file, enc)
                 .map_err(|e| anyhow!("decrypt integration token: {}", e))?,
         ),
         None => None,
@@ -675,7 +671,7 @@ async fn build_reporter_for_integration(
                 .filter(|s| !s.is_empty())
                 .ok_or_else(|| anyhow!("Gitea/Forgejo integration missing endpoint_url"))?;
             let token = token.ok_or_else(|| anyhow!("Gitea/Forgejo integration missing token"))?;
-            let r = GiteaReporter::new(state.http.clone(), base_url, token.expose().to_string())?;
+            let r = GiteaReporter::new(ctx.http.clone(), base_url, token.expose().to_string())?;
             Ok(Arc::new(r))
         }
         ForgeType::GitLab => {
@@ -685,21 +681,21 @@ async fn build_reporter_for_integration(
                 .filter(|s| !s.is_empty())
                 .ok_or_else(|| anyhow!("GitLab integration missing endpoint_url"))?;
             let token = token.ok_or_else(|| anyhow!("GitLab integration missing token"))?;
-            let r = GitlabReporter::new(state.http.clone(), base_url, token.expose().to_string())?;
+            let r = GitlabReporter::new(ctx.http.clone(), base_url, token.expose().to_string())?;
             Ok(Arc::new(r))
         }
-        ForgeType::GitHub => build_github_reporter(state, &integration, token).await,
+        ForgeType::GitHub => build_github_reporter(ctx, &integration, token).await,
     }
 }
 
 async fn build_github_reporter(
-    state: &Arc<ServerState>,
+    ctx: &CiContext,
     integration: &gradient_entity::integration::Model,
     token: Option<crate::types::SecretString>,
 ) -> Result<Arc<dyn CiReporter>> {
-    if let Some(github_app) = state.config.github_app.clone() {
+    if let Some(github_app) = ctx.db.config.github_app.clone() {
         let project_org = EOrganization::find_by_id(integration.organization)
-            .one(&state.worker_db)
+            .one(&ctx.db.worker_db)
             .await
             .context("loading organization for github app")?
             .ok_or_else(|| anyhow!("integration organization not found"))?;
@@ -707,7 +703,7 @@ async fn build_github_reporter(
             let pem = std::fs::read_to_string(&github_app.private_key_file)
                 .context("reading github app private key")?;
             let r = GithubAppReporter::new(
-                state.http.clone(),
+                ctx.http.clone(),
                 "",
                 github_app.app_id,
                 pem,
@@ -717,7 +713,7 @@ async fn build_github_reporter(
         }
     }
     let token = token.ok_or_else(|| anyhow!("GitHub integration missing token"))?;
-    let r = GithubReporter::new(state.http.clone(), "", token.expose().to_string())?;
+    let r = GithubReporter::new(ctx.http.clone(), "", token.expose().to_string())?;
     Ok(Arc::new(r))
 }
 
@@ -930,9 +926,10 @@ mod tests {
             .block_on(fut)
     }
 
-    fn make_state() -> Arc<ServerState> {
+    fn make_state() -> Arc<crate::AppState> {
+        use crate::db::{WebDb, WorkerDb};
         use crate::storage::{EmailSender, LogStorage, NarStore};
-        use crate::types::{RuntimeConfig, SecretString, WebDb, WorkerDb};
+        use crate::types::{RuntimeConfig, SecretString};
         use futures::future::BoxFuture;
         use sea_orm::{DatabaseBackend, MockDatabase};
 
@@ -952,10 +949,15 @@ mod tests {
             ) -> BoxFuture<'a, anyhow::Result<String>> {
                 Box::pin(async { Ok(String::new()) })
             }
-            fn delete<'a>(&'a self, _: gradient_entity::ids::BuildId) -> BoxFuture<'a, anyhow::Result<()>> {
+            fn delete<'a>(
+                &'a self,
+                _: gradient_entity::ids::BuildId,
+            ) -> BoxFuture<'a, anyhow::Result<()>> {
                 Box::pin(async { Ok(()) })
             }
-            fn list_logs<'a>(&'a self) -> BoxFuture<'a, anyhow::Result<Vec<gradient_entity::ids::BuildId>>> {
+            fn list_logs<'a>(
+                &'a self,
+            ) -> BoxFuture<'a, anyhow::Result<Vec<gradient_entity::ids::BuildId>>> {
                 Box::pin(async { Ok(Vec::new()) })
             }
             fn write_chunk<'a>(
@@ -1044,7 +1046,7 @@ mod tests {
         };
         let config = std::sync::Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
         let nar_storage = NarStore::local(&config.storage.base_path).expect("nar store");
-        Arc::new(crate::types::ServerState {
+        Arc::new(crate::AppState {
             web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
             worker_db: WorkerDb::new(
                 MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
@@ -1083,11 +1085,15 @@ mod tests {
                 "details_url": "https://example.com/log/1",
                 "check_run_id": 99,
             });
-            let report =
-                build_ci_report_from_payload(&state, "build.started", &payload, CiStatus::Running)
-                    .await
-                    .expect("fast path should succeed")
-                    .expect("fast path always emits a report");
+            let report = build_ci_report_from_payload(
+                &state.ci(),
+                "build.started",
+                &payload,
+                CiStatus::Running,
+            )
+            .await
+            .expect("fast path should succeed")
+            .expect("fast path always emits a report");
             assert_eq!(report.owner, "acme");
             assert_eq!(report.repo, "widgets");
             assert_eq!(report.sha, "deadbeef");
@@ -1102,7 +1108,7 @@ mod tests {
         run(async {
             let state = make_state();
             let err = build_ci_report_from_payload(
-                &state,
+                &state.ci(),
                 "build.started",
                 &json!({}),
                 CiStatus::Running,
@@ -1118,10 +1124,14 @@ mod tests {
         run(async {
             let state = make_state();
             let payload = json!({ "build_id": "not-a-uuid" });
-            let err =
-                build_ci_report_from_payload(&state, "build.started", &payload, CiStatus::Running)
-                    .await
-                    .unwrap_err();
+            let err = build_ci_report_from_payload(
+                &state.ci(),
+                "build.started",
+                &payload,
+                CiStatus::Running,
+            )
+            .await
+            .unwrap_err();
             assert!(err.to_string().contains("invalid build_id"), "error: {err}");
         });
     }

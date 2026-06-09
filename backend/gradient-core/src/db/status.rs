@@ -17,24 +17,29 @@ use sea_orm::{
     QueryFilter,
 };
 use std::collections::HashMap;
-use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 
+use super::DbContext;
 use crate::state_machine::{BuildStateMachine, EvalStateMachine};
 use crate::types::*;
 
 /// Compress a finalized build log into zstd chunks, persist the chunk index,
 /// and drop the inline copy. Best-effort: failures are logged, never propagated.
-pub async fn finalize_build_log(state: &Arc<ServerState>, log_id: gradient_entity::ids::BuildId) {
-    let log_text = state.log_storage.read(log_id).await.unwrap_or_default();
+pub async fn finalize_build_log(ctx: &DbContext, log_id: gradient_entity::ids::BuildId) {
+    let log_text = ctx
+        .storage
+        .log_storage
+        .read(log_id)
+        .await
+        .unwrap_or_default();
     if log_text.is_empty() {
         return;
     }
     let descs = match crate::storage::log_chunk::compress_and_store_chunks(
-        state.log_storage.as_ref(),
+        ctx.storage.log_storage.as_ref(),
         log_id,
         &log_text,
-        state.config.storage.log_chunk_bytes,
+        ctx.config.storage.log_chunk_bytes,
     )
     .await
     {
@@ -44,11 +49,11 @@ pub async fn finalize_build_log(state: &Arc<ServerState>, log_id: gradient_entit
             return;
         }
     };
-    if let Err(e) = replace_log_chunk_index(&state.worker_db, log_id, &descs).await {
+    if let Err(e) = replace_log_chunk_index(&ctx.worker_db, log_id, &descs).await {
         error!(error = %e, build_id = %log_id, "Failed to write log chunk index");
         return;
     }
-    if let Err(e) = state.log_storage.delete_inline_log(log_id).await {
+    if let Err(e) = ctx.storage.log_storage.delete_inline_log(log_id).await {
         warn!(error = %e, build_id = %log_id, "Failed to drop inline log after chunking");
     }
 }
@@ -110,16 +115,15 @@ pub async fn record_phase_event(
         worker_id: Set(worker_id),
         detail: Set(None),
     };
-    if let Err(e) = gradient_entity::phase_event::Entity::insert(ev).exec(db).await {
+    if let Err(e) = gradient_entity::phase_event::Entity::insert(ev)
+        .exec(db)
+        .await
+    {
         warn!(error = %e, "failed to record phase_event");
     }
 }
 
-pub async fn update_build_status(
-    state: Arc<ServerState>,
-    build: MBuild,
-    status: BuildStatus,
-) -> MBuild {
+pub async fn update_build_status(ctx: &DbContext, build: MBuild, status: BuildStatus) -> MBuild {
     if build.status == status {
         return build;
     }
@@ -187,9 +191,9 @@ pub async fn update_build_status(
         active_build.build_finished_at = Set(Some(now));
     }
 
-    match active_build.update(&state.worker_db).await {
+    match active_build.update(&ctx.worker_db).await {
         Ok(updated_build) => {
-            let _ = state
+            let _ = ctx
                 .board_events
                 .send(crate::types::BoardEvent::BuildStatusChanged {
                     evaluation_id: updated_build.evaluation.into_inner(),
@@ -200,24 +204,26 @@ pub async fn update_build_status(
                 updated_build.status,
                 BuildStatus::Completed | BuildStatus::Substituted
             ) {
-                let _ = state.board_events.send(crate::types::BoardEvent::CacheChanged);
+                let _ = ctx
+                    .board_events
+                    .send(crate::types::BoardEvent::CacheChanged);
             }
 
-            let action_state = Arc::clone(&state);
+            let action_ctx = ctx.clone();
             let action_build = updated_build.clone();
-            state.shutdown.spawn(async move {
-                action_state
+            ctx.shutdown.spawn(async move {
+                action_ctx
                     .reactor
-                    .on_build_terminal(&action_state, action_build, event_status)
+                    .on_build_terminal(&action_ctx, action_build, event_status)
                     .await;
             });
 
-            let pe_state = Arc::clone(&state);
+            let pe_ctx = ctx.clone();
             let pe_worker = updated_build.worker.clone();
             let pe_id = updated_build.id.into_inner();
-            state.shutdown.spawn(async move {
+            ctx.shutdown.spawn(async move {
                 record_phase_event(
-                    &pe_state.worker_db,
+                    &pe_ctx.worker_db,
                     PHASE_SUBJECT_BUILD,
                     pe_id,
                     i32::from(event_status) as i16,
@@ -239,10 +245,10 @@ pub async fn update_build_status(
                     | BuildStatus::Aborted
                     | BuildStatus::DependencyFailed
             ) {
-                let log_state = Arc::clone(&state);
+                let log_ctx = ctx.clone();
                 let log_id = updated_build.log_id.unwrap_or(updated_build.id);
-                state.shutdown.spawn(async move {
-                    finalize_build_log(&log_state, log_id).await;
+                ctx.shutdown.spawn(async move {
+                    finalize_build_log(&log_ctx, log_id).await;
                 });
             }
 
@@ -256,7 +262,7 @@ pub async fn update_build_status(
 }
 
 pub async fn update_evaluation_status(
-    state: Arc<ServerState>,
+    ctx: &DbContext,
     evaluation: MEvaluation,
     status: EvaluationStatus,
 ) -> MEvaluation {
@@ -309,7 +315,7 @@ pub async fn update_evaluation_status(
                 .add(CEvaluation::Status.ne(EvaluationStatus::Failed))
                 .add(CEvaluation::Status.ne(EvaluationStatus::Completed)),
         )
-        .exec(&state.worker_db)
+        .exec(&ctx.worker_db)
         .await;
 
     match update_result {
@@ -317,7 +323,7 @@ pub async fn update_evaluation_status(
             // Row was concurrently transitioned to a terminal state -
             // honor it and return the fresh value instead of clobbering.
             return EEvaluation::find_by_id(evaluation.id)
-                .one(&state.worker_db)
+                .one(&ctx.worker_db)
                 .await
                 .ok()
                 .flatten()
@@ -331,7 +337,7 @@ pub async fn update_evaluation_status(
     }
 
     let updated_eval = EEvaluation::find_by_id(evaluation.id)
-        .one(&state.worker_db)
+        .one(&ctx.worker_db)
         .await
         .ok()
         .flatten()
@@ -342,7 +348,7 @@ pub async fn update_evaluation_status(
             e
         });
 
-    let _ = state
+    let _ = ctx
         .board_events
         .send(crate::types::BoardEvent::EvaluationStatusChanged {
             project: updated_eval.project.map(|p| p.into_inner()),
@@ -350,20 +356,20 @@ pub async fn update_evaluation_status(
             status: i32::from(event_status) as i16,
         });
 
-    let action_state = Arc::clone(&state);
+    let action_ctx = ctx.clone();
     let action_eval = updated_eval.clone();
-    state.shutdown.spawn(async move {
-        action_state
+    ctx.shutdown.spawn(async move {
+        action_ctx
             .reactor
-            .on_eval_terminal(&action_state, action_eval, event_status)
+            .on_eval_terminal(&action_ctx, action_eval, event_status)
             .await;
     });
 
-    let pe_state = Arc::clone(&state);
+    let pe_ctx = ctx.clone();
     let pe_id = updated_eval.id.into_inner();
-    state.shutdown.spawn(async move {
+    ctx.shutdown.spawn(async move {
         record_phase_event(
-            &pe_state.worker_db,
+            &pe_ctx.worker_db,
             PHASE_SUBJECT_EVALUATION,
             pe_id,
             i32::from(event_status) as i16,
@@ -381,7 +387,7 @@ pub async fn update_evaluation_status(
 /// `source` identifies where the error originated - e.g. `"flake-prefetch"`,
 /// `"nix-eval"`, `"nix-eval:packages.x86_64-linux.hello"`, `"db-insert"`.
 pub async fn update_evaluation_status_with_error(
-    state: Arc<ServerState>,
+    ctx: &DbContext,
     evaluation: MEvaluation,
     status: EvaluationStatus,
     error_message: String,
@@ -407,11 +413,11 @@ pub async fn update_evaluation_status_with_error(
         source: Set(source),
         created_at: Set(crate::types::now()),
     };
-    if let Err(e) = EEvaluationMessage::insert(msg).exec(&state.worker_db).await {
+    if let Err(e) = EEvaluationMessage::insert(msg).exec(&ctx.worker_db).await {
         error!(error = %e, evaluation_id = %evaluation.id, "Failed to insert evaluation_message");
     }
 
-    update_evaluation_status(state, evaluation, status).await
+    update_evaluation_status(ctx, evaluation, status).await
 }
 
 /// Inserts a single `evaluation_message` row, propagating any DB error.
@@ -439,20 +445,20 @@ pub async fn insert_evaluation_message<C: ConnectionTrait>(
 /// Use for partial failures (e.g. one attr path failed to evaluate) where the
 /// evaluation as a whole continues.
 pub async fn record_evaluation_message(
-    state: &Arc<ServerState>,
+    ctx: &DbContext,
     evaluation_id: EvaluationId,
     level: MessageLevel,
     message: String,
     source: Option<String>,
 ) {
     if let Err(e) =
-        insert_evaluation_message(&state.worker_db, evaluation_id, level, message, source).await
+        insert_evaluation_message(&ctx.worker_db, evaluation_id, level, message, source).await
     {
         error!(error = %e, %evaluation_id, "Failed to insert evaluation_message");
     }
 }
 
-pub async fn abort_evaluation(state: Arc<ServerState>, evaluation: MEvaluation) {
+pub async fn abort_evaluation(ctx: &DbContext, evaluation: MEvaluation) {
     if evaluation.status == EvaluationStatus::Completed {
         return;
     }
@@ -465,7 +471,7 @@ pub async fn abort_evaluation(state: Arc<ServerState>, evaluation: MEvaluation) 
                 .add(CBuild::Status.eq(BuildStatus::Queued))
                 .add(CBuild::Status.eq(BuildStatus::Building)),
         )
-        .all(&state.worker_db)
+        .all(&ctx.worker_db)
         .await
     {
         Ok(builds) => builds,
@@ -480,14 +486,14 @@ pub async fn abort_evaluation(state: Arc<ServerState>, evaluation: MEvaluation) 
             // Follower: aborting it does not interrupt the leader's work in
             // another evaluation. Clear `via` so the eventual leader-completion
             // sweep skips it, then mark Aborted.
-            abort_follower(&state, build).await;
+            abort_follower(ctx, build).await;
             continue;
         }
 
         // Leader (or plain build).
         let has_followers = match EBuild::find()
             .filter(CBuild::Via.eq(build.id))
-            .one(&state.worker_db)
+            .one(&ctx.worker_db)
             .await
         {
             Ok(opt) => opt.is_some(),
@@ -505,25 +511,25 @@ pub async fn abort_evaluation(state: Arc<ServerState>, evaluation: MEvaluation) 
 
         if has_followers && matches!(build.status, BuildStatus::Queued | BuildStatus::Created) {
             // Hand off leadership before aborting.
-            if let Err(e) = reelect_leader(&state, &build).await {
+            if let Err(e) = reelect_leader(ctx, &build).await {
                 error!(error = %e, build_id = %build.id, "Failed to re-elect leader on abort");
             }
         }
 
-        update_build_status(Arc::clone(&state), build, BuildStatus::Aborted).await;
+        update_build_status(ctx, build, BuildStatus::Aborted).await;
     }
 
-    update_evaluation_status(state, evaluation, EvaluationStatus::Aborted).await;
+    update_evaluation_status(ctx, evaluation, EvaluationStatus::Aborted).await;
 }
 
-async fn abort_follower(state: &Arc<ServerState>, build: MBuild) {
+async fn abort_follower(ctx: &DbContext, build: MBuild) {
     let mut active: ABuild = build.clone().into_active_model();
     active.via = Set(None);
-    if let Err(e) = active.update(&state.worker_db).await {
+    if let Err(e) = active.update(&ctx.worker_db).await {
         error!(error = %e, build_id = %build.id, "Failed to clear via on follower abort");
         return;
     }
-    let reloaded = match EBuild::find_by_id(build.id).one(&state.worker_db).await {
+    let reloaded = match EBuild::find_by_id(build.id).one(&ctx.worker_db).await {
         Ok(Some(b)) => b,
         Ok(None) => return,
         Err(e) => {
@@ -531,26 +537,23 @@ async fn abort_follower(state: &Arc<ServerState>, build: MBuild) {
             return;
         }
     };
-    update_build_status(Arc::clone(state), reloaded, BuildStatus::Aborted).await;
+    update_build_status(ctx, reloaded, BuildStatus::Aborted).await;
 }
 
 /// Promote one same-org follower of `leader` to be the new leader.
 /// Cross-org followers have their `via` cleared (made independent).
 /// No-op if no followers exist.
-pub(crate) async fn reelect_leader(
-    state: &Arc<ServerState>,
-    leader: &MBuild,
-) -> Result<(), sea_orm::DbErr> {
+pub(crate) async fn reelect_leader(ctx: &DbContext, leader: &MBuild) -> Result<(), sea_orm::DbErr> {
     use gradient_entity::derivation::{Column as CDerivation, Entity as EDerivation};
 
     let leader_org = EDerivation::find_by_id(leader.derivation)
-        .one(&state.worker_db)
+        .one(&ctx.worker_db)
         .await?
         .map(|d| d.organization);
 
     let all_followers = EBuild::find()
         .filter(CBuild::Via.eq(leader.id))
-        .all(&state.worker_db)
+        .all(&ctx.worker_db)
         .await?;
     if all_followers.is_empty() {
         return Ok(());
@@ -561,7 +564,7 @@ pub(crate) async fn reelect_leader(
         crate::db::fetch_in_chunks(&follower_drv_ids, |chunk| async move {
             EDerivation::find()
                 .filter(CDerivation::Id.is_in(chunk))
-                .all(&state.worker_db)
+                .all(&ctx.worker_db)
                 .await
         })
         .await?
@@ -596,14 +599,14 @@ pub(crate) async fn reelect_leader(
     if let Some(new_leader) = same_org.first().cloned() {
         let mut active: ABuild = new_leader.clone().into_active_model();
         active.via = Set(None);
-        active.update(&state.worker_db).await?;
+        active.update(&ctx.worker_db).await?;
 
         let same_org_remaining_ids: Vec<BuildId> = same_org.iter().skip(1).map(|f| f.id).collect();
         crate::db::for_each_chunk(&same_org_remaining_ids, |chunk| async move {
             EBuild::update_many()
                 .col_expr(CBuild::Via, sea_orm::sea_query::Expr::value(new_leader.id))
                 .filter(CBuild::Id.is_in(chunk))
-                .exec(&state.worker_db)
+                .exec(&ctx.worker_db)
                 .await
         })
         .await?;
@@ -616,7 +619,7 @@ pub(crate) async fn reelect_leader(
                     sea_orm::sea_query::Expr::value(Option::<BuildId>::None),
                 )
                 .filter(CBuild::Id.is_in(chunk))
-                .exec(&state.worker_db)
+                .exec(&ctx.worker_db)
                 .await
         })
         .await?;
@@ -639,7 +642,7 @@ pub(crate) async fn reelect_leader(
                     sea_orm::sea_query::Expr::value(Option::<BuildId>::None),
                 )
                 .filter(CBuild::Id.is_in(chunk))
-                .exec(&state.worker_db)
+                .exec(&ctx.worker_db)
                 .await
         })
         .await?;
@@ -864,9 +867,10 @@ mod reelect_leader_tests {
         }
     }
 
-    fn make_state(db: sea_orm::DatabaseConnection) -> std::sync::Arc<crate::types::ServerState> {
+    fn make_state(db: sea_orm::DatabaseConnection) -> std::sync::Arc<crate::AppState> {
+        use crate::db::{WebDb, WorkerDb};
         use crate::storage::{EmailSender, LogStorage, NarStore};
-        use crate::types::{RuntimeConfig, SecretString, WebDb, WorkerDb};
+        use crate::types::{RuntimeConfig, SecretString};
         use futures::future::BoxFuture;
 
         #[derive(Debug)]
@@ -885,10 +889,15 @@ mod reelect_leader_tests {
             ) -> BoxFuture<'a, anyhow::Result<String>> {
                 Box::pin(async { Ok(String::new()) })
             }
-            fn delete<'a>(&'a self, _: gradient_entity::ids::BuildId) -> BoxFuture<'a, anyhow::Result<()>> {
+            fn delete<'a>(
+                &'a self,
+                _: gradient_entity::ids::BuildId,
+            ) -> BoxFuture<'a, anyhow::Result<()>> {
                 Box::pin(async { Ok(()) })
             }
-            fn list_logs<'a>(&'a self) -> BoxFuture<'a, anyhow::Result<Vec<gradient_entity::ids::BuildId>>> {
+            fn list_logs<'a>(
+                &'a self,
+            ) -> BoxFuture<'a, anyhow::Result<Vec<gradient_entity::ids::BuildId>>> {
                 Box::pin(async { Ok(Vec::new()) })
             }
             fn write_chunk<'a>(
@@ -977,7 +986,7 @@ mod reelect_leader_tests {
         };
         let config = std::sync::Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
         let nar_storage = NarStore::local(&config.storage.base_path).expect("nar store");
-        std::sync::Arc::new(crate::types::ServerState {
+        std::sync::Arc::new(crate::AppState {
             web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
             worker_db: WorkerDb::new(db),
             config,
@@ -1048,7 +1057,9 @@ mod reelect_leader_tests {
                 .into_connection();
 
             let state = make_state(db);
-            reelect_leader(&state, &leader).await.expect("reelect ok");
+            reelect_leader(&state.db(), &leader)
+                .await
+                .expect("reelect ok");
         });
     }
 
@@ -1083,7 +1094,9 @@ mod reelect_leader_tests {
                 .into_connection();
 
             let state = make_state(db);
-            reelect_leader(&state, &leader).await.expect("reelect ok");
+            reelect_leader(&state.db(), &leader)
+                .await
+                .expect("reelect ok");
         });
     }
 }
@@ -1094,7 +1107,9 @@ mod find_active_leaders_tests {
     use gradient_entity::build::{BuildStatus, Model as MBuild};
     use gradient_entity::cache_upstream::Model as MCacheUpstream;
     use gradient_entity::derivation::Model as MDerivation;
-    use gradient_entity::ids::{BuildId, CacheId, DerivationId, OrganizationCacheId, OrganizationId};
+    use gradient_entity::ids::{
+        BuildId, CacheId, DerivationId, OrganizationCacheId, OrganizationId,
+    };
     use gradient_entity::organization_cache::{CacheSubscriptionMode, Model as MOrganizationCache};
     use sea_orm::{DatabaseBackend, MockDatabase};
     use uuid::Uuid;

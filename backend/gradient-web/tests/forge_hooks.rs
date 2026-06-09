@@ -21,7 +21,8 @@ use gradient_core::ci::actions::encrypt_secret_with_file as encrypt_webhook_secr
 use gradient_core::storage::{EmailSender, NarStore};
 use gradient_core::types::ids::*;
 use gradient_core::types::triggers::TriggerConfig;
-use gradient_core::types::{ServerState, WebDb, WorkerDb};
+use gradient_core::ServerState;
+use gradient_core::db::{WebDb, WorkerDb};
 use hmac::{Hmac, KeyInit, Mac};
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 use serde_json::Value;

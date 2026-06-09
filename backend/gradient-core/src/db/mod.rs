@@ -11,12 +11,14 @@ pub mod cache_upstream;
 pub mod chunked;
 pub mod closure;
 pub mod connection;
+pub mod context;
 pub mod dependency_graph;
 pub mod derivation;
 pub mod drv_output_spec;
 pub mod gc;
 pub mod org_cache;
 pub mod org_workers;
+pub mod pool;
 pub mod retention;
 pub mod rollup;
 pub mod runtime_closure;
@@ -28,16 +30,20 @@ pub use self::cache_storage::{
     STORAGE_HEADROOM_BYTES, cache_used_bytes, instance_used_bytes, org_caches_all_full,
     org_writable_caches,
 };
-pub use self::cache_upstream::{GradientProtoUpstream, gradient_proto_upstreams_for_org, upstream_urls_for_org};
+pub use self::cache_upstream::{
+    GradientProtoUpstream, gradient_proto_upstreams_for_org, upstream_urls_for_org,
+};
 pub use self::chunked::{IN_CHUNK_SIZE, fetch_in_chunks, for_each_chunk};
 pub use self::closure::*;
 pub use self::connection::*;
+pub use self::context::DbContext;
 pub use self::dependency_graph::*;
 pub use self::derivation::*;
 pub use self::drv_output_spec::DrvOutputSpec;
 pub use self::gc::*;
 pub use self::org_cache::org_has_writable_cache;
 pub use self::org_workers::org_has_eval_capable_worker_registration;
+pub use self::pool::{WebDb, WorkerDb};
 pub use self::runtime_closure::*;
 pub use self::status::*;
 pub use self::status_reactor::{NoReactor, StatusReactor};

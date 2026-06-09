@@ -25,7 +25,7 @@ pub use self::cleanup::{
 pub use self::invalidate::invalidate_cache_for_path;
 pub use self::sign_sweep::sign_missing_signatures;
 
-use gradient_core::types::*;
+use gradient_core::ServerState;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time;
@@ -64,7 +64,7 @@ pub async fn cache_loop(state: Arc<ServerState>) {
             info!("Evaluation GC completed successfully");
         }
         if let Err(e) = gradient_core::db::gc_orphan_derivations(
-            Arc::clone(&state),
+            &state.db(),
             state.config.storage.keep_orphan_derivations_hours,
         )
         .await

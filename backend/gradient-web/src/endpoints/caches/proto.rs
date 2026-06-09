@@ -13,7 +13,7 @@ use crate::access::{Caller, CacheAccess, load_cache};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::client_ip::ClientIp;
 use crate::error::{WebError, WebResult};
-use gradient_core::types::ServerState;
+use gradient_core::ServerState;
 use gradient_proto::handler::{PerIpLimiter, ProtoLimiter};
 
 /// `GET /cache/{cache}/proto` - cache-scoped read-only proto WebSocket.

@@ -9,7 +9,8 @@
 use axum_test::TestServer;
 use gradient_core::storage::{EmailSender, NarStore};
 use gradient_core::types::ids::*;
-use gradient_core::types::{ServerState, WebDb, WorkerDb};
+use gradient_core::ServerState;
+use gradient_core::db::{WebDb, WorkerDb};
 use sea_orm::{DatabaseBackend, MockDatabase};
 use std::sync::Arc;
 use gradient_test_support::fakes::email::InMemoryEmailSender;

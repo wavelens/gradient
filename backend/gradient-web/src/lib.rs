@@ -43,7 +43,7 @@ use tracing::Span;
 use uuid::Uuid;
 
 use endpoints::{admin, *};
-use gradient_core::types::ServerState;
+use gradient_core::ServerState;
 use gradient_proto::handler::PerIpLimiter;
 use gradient_proto::{ProtoLimiter, proto_router};
 use gradient_scheduler::Scheduler;
@@ -611,8 +611,8 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
 
     let scheduler = Arc::new(Scheduler::new(Arc::clone(&state)));
     scheduler.start();
-    gradient_core::db::retention::start_retention_loop(Arc::clone(&state));
-    gradient_core::db::rollup::start_rollup_loop(Arc::clone(&state));
+    gradient_core::db::retention::start_retention_loop(state.db());
+    gradient_core::db::rollup::start_rollup_loop(state.db());
     otlp::start_otlp(Arc::clone(&state), Arc::clone(&scheduler));
     gradient_proto::outbound::start_outbound_loop(Arc::clone(&scheduler));
 

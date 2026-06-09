@@ -32,6 +32,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use gradient_core::types::*;
+use gradient_core::ServerState;
 use tokio::sync::RwLock;
 
 use jobs::JobTracker;

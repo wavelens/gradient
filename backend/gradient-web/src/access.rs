@@ -32,8 +32,9 @@ use gradient_core::types::ids::{CacheId, IntegrationId, OrganizationId, UserId};
 use gradient_core::types::{
     CCacheUser, CIntegration, COrganizationCache, COrganizationUser, ECacheRole, ECacheUser,
     EIntegration, EOrganizationCache, EOrganizationUser, ERole, MCache, MIntegration, MOrganization,
-    MOrganizationUser, MProject, MUser, ServerState,
+    MOrganizationUser, MProject, MUser,
 };
+use gradient_core::ServerState;
 use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter};
 use std::sync::Arc;
 
@@ -137,7 +138,7 @@ pub async fn load_org(
         _ => "Organization",
     };
 
-    let org = get_any_organization_by_name(Arc::clone(state), org_name)
+    let org = get_any_organization_by_name(&state.db(), org_name)
         .await?
         .or_not_found(label)?;
 
@@ -195,7 +196,7 @@ pub async fn load_project(
 
     let label = "Project";
 
-    let (org, project) = get_any_project_by_name(Arc::clone(state), org_name, project_name)
+    let (org, project) = get_any_project_by_name(&state.db(), org_name, project_name)
         .await?
         .or_not_found(label)?;
 
@@ -245,7 +246,7 @@ pub async fn load_cache(
 ) -> WebResult<MCache> {
     let label = "Cache";
 
-    let cache = get_any_cache_by_name(Arc::clone(state), cache_name)
+    let cache = get_any_cache_by_name(&state.db(), cache_name)
         .await?
         .or_not_found(label)?;
 
@@ -561,7 +562,8 @@ mod tests {
         BASE_CACHE_ROLE_VIEW_ID, BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID,
     };
     use gradient_core::types::ids::{OrganizationUserId, ProjectId, RoleId};
-    use gradient_core::types::{RuntimeConfig, WebDb, WorkerDb};
+    use gradient_core::types::{RuntimeConfig};
+    use gradient_core::db::{WebDb, WorkerDb};
     use sea_orm::{DatabaseBackend, MockDatabase};
     use gradient_test_support::cli::test_cli;
     use gradient_test_support::fakes::email::InMemoryEmailSender;

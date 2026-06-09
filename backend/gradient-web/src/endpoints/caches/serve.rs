@@ -11,7 +11,7 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::Response;
 use gradient_core::storage::nar_extract::{ExtractError, Extracted, extract_path_from_nar_bytes};
-use gradient_core::types::ServerState;
+use gradient_core::ServerState;
 use std::sync::Arc;
 
 pub async fn serve(

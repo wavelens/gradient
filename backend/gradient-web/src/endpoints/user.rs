@@ -22,6 +22,7 @@ use gradient_core::db::get_any_organization_by_name;
 use gradient_core::types::consts::*;
 use gradient_core::types::input::{validate_display_name, validate_username};
 use gradient_core::types::*;
+use gradient_core::ServerState;
 use password_auth::verify_password;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
@@ -284,7 +285,7 @@ async fn resolve_org_pin(
             trimmed
         ))
     };
-    let org = get_any_organization_by_name(Arc::clone(state), trimmed.into())
+    let org = get_any_organization_by_name(&state.db(), trimmed.into())
         .await?
         .ok_or_else(unknown)?;
     let is_member = crate::access::is_org_member(state, user_id, org.id, None).await?;

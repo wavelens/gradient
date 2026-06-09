@@ -16,6 +16,7 @@ use std::sync::Arc;
 ///
 /// All NARs are stored pre-compressed (`.nar.zst`). The key path within the store is
 /// `nars/{hash[..2]}/{hash[2..]}.nar.zst` (same two-level sharding used locally).
+#[derive(Clone)]
 pub struct NarStore {
     inner: Arc<dyn ObjectStore>,
     /// Non-empty only for S3: prepended to the object key.

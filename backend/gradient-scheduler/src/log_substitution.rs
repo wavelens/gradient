@@ -18,7 +18,7 @@ use anyhow::Result;
 use gradient_entity::build::{ActiveModel as ABuild, BuildStatus, Column as CBuild, Entity as EBuild};
 use gradient_entity::derivation::Entity as EDerivation;
 use futures::StreamExt;
-use gradient_core::types::ServerState;
+use gradient_core::ServerState;
 use gradient_core::types::ids::{BuildId, DerivationId};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,

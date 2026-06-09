@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_core::types::{ServerState, ids::OrganizationId};
+use gradient_core::types::{ids::OrganizationId};
+use gradient_core::ServerState;
 use std::collections::HashSet;
 use tracing::warn;
 use uuid::Uuid;

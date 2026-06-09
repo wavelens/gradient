@@ -4,22 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Typed wrappers around the two `SeaORM` connection pools held by
-//! [`super::ServerState`].
+//! Typed wrappers around the two `SeaORM` connection pools.
 //!
 //! Gradient runs two pools so HTTP requests served by the axum layer cannot
-//! be starved by the proto/scheduler/cache work. Before these wrappers
-//! existed, both pools were `DatabaseConnection` fields named `db` and
-//! `web_db`; nothing stopped a web handler from reaching for `state.db` (or
-//! a worker-side caller from grabbing `state.web_db`), and code review had
-//! no compile-time signal to flag the mistake.
-//!
-//! [`WebDb`] and [`WorkerDb`] are newtypes around `DatabaseConnection`. They
-//! both forward `ConnectionTrait` to the inner pool so existing call sites
-//! (`find().one(&state.web_db)`, `state.worker_db.execute(stmt)`, …) work
-//! unchanged. The compile-time defense kicks in at any function boundary
-//! that types its parameter explicitly as `&WebDb` or `&WorkerDb`: the two
-//! newtypes are non-substitutable.
+//! be starved by the proto/scheduler/cache work. [`WebDb`] and [`WorkerDb`]
+//! are newtypes around `DatabaseConnection` that both forward
+//! `ConnectionTrait`, so existing call sites (`find().one(&ctx.web_db)`, …)
+//! work unchanged while the two newtypes stay non-substitutable at any
+//! explicitly-typed `&WebDb` / `&WorkerDb` boundary.
+
+use std::sync::Arc;
 
 use sea_orm::{
     ConnectionTrait, DatabaseConnection, DbBackend, DbErr, ExecResult, QueryResult, Statement,
@@ -27,36 +21,37 @@ use sea_orm::{
 
 /// The pool dedicated to axum/HTTP request handling. Use this from any
 /// `gradient_web::endpoints::*` handler so HTTP latency is not coupled to the
-/// proto/scheduler workload.
-#[derive(Debug)]
-pub struct WebDb(DatabaseConnection);
+/// proto/scheduler workload. `Arc`-wrapped so the context slices that carry it
+/// stay cheaply `Clone` (`DatabaseConnection` itself is not `Clone`).
+#[derive(Debug, Clone)]
+pub struct WebDb(Arc<DatabaseConnection>);
 
 /// The pool used by the proto handler, scheduler, cache GC, and any
 /// fire-and-forget background task spawned from a web handler that should
 /// not contend with foreground HTTP requests.
-#[derive(Debug)]
-pub struct WorkerDb(DatabaseConnection);
+#[derive(Debug, Clone)]
+pub struct WorkerDb(Arc<DatabaseConnection>);
 
 impl WebDb {
     pub fn new(conn: DatabaseConnection) -> Self {
-        Self(conn)
+        Self(Arc::new(conn))
     }
 
     /// Borrow the inner `DatabaseConnection` - needed in the few places
     /// where a function signature is hard-coded to `&DatabaseConnection`
     /// instead of `&impl ConnectionTrait`.
     pub fn inner(&self) -> &DatabaseConnection {
-        &self.0
+        self.0.as_ref()
     }
 }
 
 impl WorkerDb {
     pub fn new(conn: DatabaseConnection) -> Self {
-        Self(conn)
+        Self(Arc::new(conn))
     }
 
     pub fn inner(&self) -> &DatabaseConnection {
-        &self.0
+        self.0.as_ref()
     }
 }
 

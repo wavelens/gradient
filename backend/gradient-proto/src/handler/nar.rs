@@ -8,6 +8,7 @@ use chrono::Timelike;
 use crate::ingest::{IngestInput, SignTargets, ingest_metadata_only};
 use gradient_core::types::ids::{CacheId, CacheMetricId};
 use gradient_core::types::*;
+use gradient_core::ServerState;
 use gradient_scheduler::Scheduler;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
 use tracing::{info, warn};

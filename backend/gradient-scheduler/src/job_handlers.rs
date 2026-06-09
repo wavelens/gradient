@@ -23,6 +23,7 @@ use gradient_core::types::proto::{
 };
 
 use gradient_core::types::*;
+use gradient_core::ServerState;
 
 use crate::Scheduler;
 use crate::jobs::{
@@ -211,7 +212,7 @@ impl Scheduler {
         {
             Ok(Some(eval)) => {
                 gradient_core::db::update_evaluation_status(
-                    Arc::clone(&self.state),
+                    &self.state.db(),
                     eval,
                     new_status,
                 )
@@ -274,7 +275,7 @@ impl Scheduler {
                     }
                 }
                 gradient_core::db::update_build_status(
-                    Arc::clone(&self.state),
+                    &self.state.db(),
                     build,
                     BuildStatus::Building,
                 )
@@ -520,7 +521,7 @@ impl Scheduler {
         let evaluation_id = evaluation.id;
 
         // Update DB (builds → Aborted, eval → Aborted).
-        gradient_core::db::abort_evaluation(Arc::clone(&self.state), evaluation).await;
+        gradient_core::db::abort_evaluation(&self.state.db(), evaluation).await;
 
         // Find active jobs for this evaluation and abort them.
         let tracker = self.job_tracker.read().await;

@@ -14,6 +14,7 @@ use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use axum_streams::StreamBodyAs;
 use gradient_core::types::*;
+use gradient_core::ServerState;
 use sea_orm::EntityTrait;
 use std::sync::Arc;
 use tokio::time::Duration;

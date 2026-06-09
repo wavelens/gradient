@@ -12,13 +12,12 @@
 //! propagated. Timestamps are compared in UTC to match the naive-UTC values the
 //! recording layer writes via `crate::types::now()`.
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use sea_orm::ConnectionTrait;
 use tracing::{debug, warn};
 
-use crate::types::ServerState;
+use super::DbContext;
 
 /// A simple count metric over the `build` table, attributed to the owning org
 /// via the `derivation` join.
@@ -29,10 +28,26 @@ struct BuildCount {
 }
 
 const BUILD_COUNTS: &[BuildCount] = &[
-    BuildCount { name: "builds.created", time_col: "created_at", filter: "TRUE" },
-    BuildCount { name: "builds.dispatched", time_col: "dispatched_at", filter: "TRUE" },
-    BuildCount { name: "builds.completed", time_col: "build_finished_at", filter: "b.status = 3" },
-    BuildCount { name: "builds.substituted", time_col: "build_finished_at", filter: "b.status = 7" },
+    BuildCount {
+        name: "builds.created",
+        time_col: "created_at",
+        filter: "TRUE",
+    },
+    BuildCount {
+        name: "builds.dispatched",
+        time_col: "dispatched_at",
+        filter: "TRUE",
+    },
+    BuildCount {
+        name: "builds.completed",
+        time_col: "build_finished_at",
+        filter: "b.status = 3",
+    },
+    BuildCount {
+        name: "builds.substituted",
+        time_col: "build_finished_at",
+        filter: "b.status = 7",
+    },
     BuildCount {
         name: "builds.failed",
         time_col: "build_finished_at",
@@ -78,8 +93,14 @@ struct EvalCount {
 }
 
 const EVAL_COUNTS: &[EvalCount] = &[
-    EvalCount { name: "evals.completed", filter: "e.status = 5" },
-    EvalCount { name: "evals.failed", filter: "e.status IN (6, 7)" },
+    EvalCount {
+        name: "evals.completed",
+        filter: "e.status = 5",
+    },
+    EvalCount {
+        name: "evals.failed",
+        filter: "e.status IN (6, 7)",
+    },
 ];
 
 /// (target_granularity, source_granularity, date_trunc unit, trailing window).
@@ -119,22 +140,22 @@ const CACHE_STORAGE_SQL: &str = "INSERT INTO metric_rollup \
     ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
     DO UPDATE SET count = EXCLUDED.count, sum = EXCLUDED.sum";
 
-pub fn start_rollup_loop(state: Arc<ServerState>) {
-    let shutdown = state.shutdown.clone();
-    shutdown.spawn(async move { rollup_loop(state).await });
+pub fn start_rollup_loop(ctx: DbContext) {
+    let shutdown = ctx.shutdown.clone();
+    shutdown.spawn(async move { rollup_loop(ctx).await });
 }
 
-async fn rollup_loop(state: Arc<ServerState>) {
-    let secs = state.config.metrics_args.metrics_rollup_interval_secs.max(1);
+async fn rollup_loop(ctx: DbContext) {
+    let secs = ctx.config.metrics_args.metrics_rollup_interval_secs.max(1);
     let mut interval = tokio::time::interval(Duration::from_secs(secs));
     loop {
         interval.tick().await;
-        run_rollup(&state).await;
+        run_rollup(&ctx).await;
     }
 }
 
-async fn run_rollup(state: &Arc<ServerState>) {
-    let db = &state.worker_db;
+async fn run_rollup(ctx: &DbContext) {
+    let db = &ctx.worker_db;
     for m in BUILD_COUNTS {
         if let Err(e) = db.execute_unprepared(&build_count_sql(m)).await {
             warn!(metric = m.name, error = %e, "rollup build-count failed");
@@ -162,7 +183,10 @@ async fn run_rollup(state: &Arc<ServerState>) {
     }
 
     for (target, source, unit, window) in CASCADES {
-        if let Err(e) = db.execute_unprepared(&cascade_sql(*target, *source, unit, window)).await {
+        if let Err(e) = db
+            .execute_unprepared(&cascade_sql(*target, *source, unit, window))
+            .await
+        {
             warn!(target, error = %e, "rollup cascade failed");
         }
     }
@@ -193,7 +217,10 @@ fn build_count_sql(m: &BuildCount) -> String {
 }
 
 fn build_duration_sql(m: &BuildDuration) -> String {
-    let ms = format!("extract(epoch from (b.{} - b.{})) * 1000", m.end_col, m.start_col);
+    let ms = format!(
+        "extract(epoch from (b.{} - b.{})) * 1000",
+        m.end_col, m.start_col
+    );
     format!(
         "INSERT INTO metric_rollup \
          (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \

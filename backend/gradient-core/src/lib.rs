@@ -17,10 +17,13 @@ pub mod shutdown;
 pub mod sources;
 pub mod state;
 pub mod state_machine;
+pub mod state_root;
 pub mod storage;
 pub mod types;
 
-use db::{connect_db, connect_web_db};
+pub use state_root::{AppState, ServerState};
+
+use db::{WebDb, WorkerDb, connect_db, connect_web_db};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
 };
@@ -169,8 +172,8 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
         );
         store
     } else {
-        let store =
-            NarStore::local(&cli.storage.base_path).map_err(|e| InitError::LocalStorage(e.to_string()))?;
+        let store = NarStore::local(&cli.storage.base_path)
+            .map_err(|e| InitError::LocalStorage(e.to_string()))?;
         tracing::info!(path = %cli.storage.base_path, "NAR storage: local");
         store
     };
@@ -185,6 +188,9 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
     } else {
         Arc::new(local_log_storage)
     };
+
+    let reactor: Arc<dyn db::StatusReactor> =
+        Arc::new(crate::ci::CiStatusReactor::new(http.clone()));
 
     Ok(Arc::new(ServerState {
         worker_db: WorkerDb::new(db),
@@ -202,6 +208,6 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
         pending_org_memberships,
         oidc_group_roles,
         board_events: tokio::sync::broadcast::channel(256).0,
-        reactor: Arc::new(crate::ci::CiStatusReactor),
+        reactor,
     }))
 }

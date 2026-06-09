@@ -15,7 +15,8 @@ use gradient_entity::worker_registration::{
 };
 use gradient_core::types::ids::*;
 use gradient_core::types::proto::GradientCapabilities;
-use gradient_core::types::{BaseResponse, MUser, ServerState};
+use gradient_core::types::{BaseResponse, MUser};
+use gradient_core::ServerState;
 use rand::RngExt as _;
 use gradient_scheduler::{Scheduler, WorkerInfo};
 use sea_orm::ActiveValue::Set;

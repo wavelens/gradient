@@ -24,6 +24,7 @@ use gradient_core::sources::get_path_from_derivation_output;
 use gradient_core::types::input::vec_to_hex;
 use gradient_core::types::wildcard::Wildcard;
 use gradient_core::types::*;
+use gradient_core::ServerState;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
 use tracing::{debug, error, info};
@@ -276,7 +277,7 @@ pub(crate) async fn requeue_transient_failures(scheduler: &Scheduler) -> anyhow:
         .await?;
     for build in transient {
         if retry_backoff_elapsed(build.attempt, build.updated_at, now, base) {
-            gradient_core::db::update_build_status(Arc::clone(state), build, BuildStatus::Queued)
+            gradient_core::db::update_build_status(&state.db(), build, BuildStatus::Queued)
                 .await;
         }
     }

@@ -14,10 +14,10 @@ use sea_orm::{
     Value,
 };
 use sea_orm_migration::prelude::*;
-use std::sync::Arc;
 use std::time::Duration;
 use tracing::log::LevelFilter;
 
+use super::DbContext;
 use crate::permissions::{
     admin_mask, cache_admin_mask, cache_view_mask, cache_write_mask, view_mask, write_mask,
 };
@@ -282,7 +282,7 @@ async fn seed_builtin_cache_role(
 }
 
 pub async fn add_features(
-    state: Arc<ServerState>,
+    ctx: &DbContext,
     features: Vec<String>,
     kind: gradient_entity::feature::FeatureKind,
     derivation_id: Option<DerivationId>,
@@ -291,7 +291,7 @@ pub async fn add_features(
         let feature = EFeature::find()
             .filter(CFeature::Name.eq(f.clone()))
             .filter(CFeature::Kind.eq(kind.clone()))
-            .one(&state.worker_db)
+            .one(&ctx.worker_db)
             .await
             .context("Failed to query feature")?;
 
@@ -305,7 +305,7 @@ pub async fn add_features(
             };
 
             afeature
-                .insert(&state.worker_db)
+                .insert(&ctx.worker_db)
                 .await
                 .context("Failed to insert feature")?
         };
@@ -332,7 +332,7 @@ pub async fn add_features(
                     .to_owned(),
                 )
                 .do_nothing()
-                .exec(&state.worker_db)
+                .exec(&ctx.worker_db)
                 .await
                 .context("Failed to insert derivation feature")?;
         }
@@ -341,7 +341,7 @@ pub async fn add_features(
 }
 
 pub async fn get_organization_by_name(
-    state: Arc<ServerState>,
+    ctx: &DbContext,
     user_id: UserId,
     name: String,
 ) -> Result<Option<MOrganization>> {
@@ -358,33 +358,33 @@ pub async fn get_organization_by_name(
                 .add(COrganizationUser::User.eq(user_id))
                 .add(COrganization::Name.eq(name)),
         )
-        .one(&state.web_db)
+        .one(&ctx.web_db)
         .await
         .context("Failed to query organization")
 }
 
 pub async fn get_any_organization_by_name(
-    state: Arc<ServerState>,
+    ctx: &DbContext,
     name: String,
 ) -> Result<Option<MOrganization>> {
     EOrganization::find()
         .filter(COrganization::Name.eq(name))
-        .one(&state.web_db)
+        .one(&ctx.web_db)
         .await
         .context("Failed to query organization")
 }
 
 pub async fn get_project_by_name(
-    state: Arc<ServerState>,
+    ctx: &DbContext,
     user_id: UserId,
     organization_name: String,
     project_name: String,
 ) -> Result<Option<(MOrganization, MProject)>> {
-    match get_organization_by_name(state.clone(), user_id, organization_name).await? {
+    match get_organization_by_name(ctx, user_id, organization_name).await? {
         Some(o) => Ok(EProject::find()
             .filter(CProject::Organization.eq(o.id))
             .filter(CProject::Name.eq(project_name))
-            .one(&state.web_db)
+            .one(&ctx.web_db)
             .await
             .context("Failed to query project")?
             .map(|p| (o, p))),
@@ -393,15 +393,15 @@ pub async fn get_project_by_name(
 }
 
 pub async fn get_any_project_by_name(
-    state: Arc<ServerState>,
+    ctx: &DbContext,
     organization_name: String,
     project_name: String,
 ) -> Result<Option<(MOrganization, MProject)>> {
-    match get_any_organization_by_name(state.clone(), organization_name).await? {
+    match get_any_organization_by_name(ctx, organization_name).await? {
         Some(o) => Ok(EProject::find()
             .filter(CProject::Organization.eq(o.id))
             .filter(CProject::Name.eq(project_name))
-            .one(&state.web_db)
+            .one(&ctx.web_db)
             .await
             .context("Failed to query project")?
             .map(|p| (o, p))),
@@ -410,7 +410,7 @@ pub async fn get_any_project_by_name(
 }
 
 pub async fn get_cache_by_name(
-    state: Arc<ServerState>,
+    ctx: &DbContext,
     user_id: UserId,
     name: String,
 ) -> Result<Option<MCache>> {
@@ -420,18 +420,15 @@ pub async fn get_cache_by_name(
                 .add(CCache::CreatedBy.eq(user_id))
                 .add(CCache::Name.eq(name)),
         )
-        .one(&state.web_db)
+        .one(&ctx.web_db)
         .await
         .context("Failed to query cache")
 }
 
-pub async fn get_any_cache_by_name(
-    state: Arc<ServerState>,
-    name: String,
-) -> Result<Option<MCache>> {
+pub async fn get_any_cache_by_name(ctx: &DbContext, name: String) -> Result<Option<MCache>> {
     ECache::find()
         .filter(CCache::Name.eq(name))
-        .one(&state.web_db)
+        .one(&ctx.web_db)
         .await
         .context("Failed to query cache")
 }
@@ -456,7 +453,10 @@ mod startup_recovery_tests {
             EvaluationStatus::EvaluatingDerivation,
             EvaluationStatus::Building,
         ] {
-            assert!(!eval_survives_restart(status), "{status:?} must not survive");
+            assert!(
+                !eval_survives_restart(status),
+                "{status:?} must not survive"
+            );
         }
     }
 

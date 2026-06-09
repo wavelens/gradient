@@ -14,9 +14,9 @@ use axum_test::TestServer;
 use chrono::{Duration, Utc};
 use gradient_entity::{api, session};
 use gradient_core::storage::{EmailSender, NarStore};
-use gradient_core::types::{
-    ApiId, RuntimeConfig, SecretString, ServerState, SessionId, UserId, WebDb, WorkerDb,
-};
+use gradient_core::types::{ApiId, RuntimeConfig, SecretString, SessionId, UserId};
+use gradient_core::ServerState;
+use gradient_core::db::{WebDb, WorkerDb};
 use jsonwebtoken::{EncodingKey, Header, encode};
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 use serde::Serialize;
