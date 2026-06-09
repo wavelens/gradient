@@ -10,7 +10,6 @@ pub mod db;
 pub mod executor;
 pub mod http;
 pub mod hydra;
-pub mod ip_allowlist;
 pub mod nix;
 pub mod nix_hash;
 pub mod permissions;

@@ -3052,7 +3052,7 @@ Run with: `pnpm --dir frontend exec ng test --watch=false`
 
 ### Backend
 
-Run with: `cargo test -p core --test ip_allowlist`
+Run with: `cargo test -p gradient-web --test ip_allowlist`
 
 - `empty_list_allows_everything` — empty allowlist is a permissive default so
   existing rows keep working after migration.

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_core::ip_allowlist::{is_allowed, normalize_entry};
+use gradient_web::ip_allowlist::{is_allowed, normalize_entry};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 fn v4(a: u8, b: u8, c: u8, d: u8) -> IpAddr {

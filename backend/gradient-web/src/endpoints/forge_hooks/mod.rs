@@ -29,7 +29,7 @@ use gradient_core::ci::actions::decrypt_secret_with_file;
 use gradient_core::ci::{
     ForgeType, IntegrationKind, verify_gitea_signature, verify_github_signature,
 };
-use gradient_core::ip_allowlist::is_allowed as ip_allowed;
+use crate::ip_allowlist::is_allowed as ip_allowed;
 use gradient_core::types::input::load_secret;
 use gradient_core::types::*;
 use gradient_scheduler::Scheduler;

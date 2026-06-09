@@ -245,7 +245,7 @@ async fn resolve_badge_user(
                 .await
                 .map_err(|_| WebError::unauthorized("Invalid token"))?;
             if let Some(ctx) = decoded.api_key_context()
-                && !gradient_core::ip_allowlist::is_allowed(client_ip, &ctx.allowed_ips)
+                && !crate::ip_allowlist::is_allowed(client_ip, &ctx.allowed_ips)
             {
                 return Err(WebError::forbidden_with(
                     crate::error::ErrorCode::FORBIDDEN_SOURCE_IP,
