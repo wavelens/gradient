@@ -1048,6 +1048,7 @@ mod tests {
                 std::collections::HashMap::new(),
             )),
             http: crate::http::build_client().expect("http client"),
+            forge: crate::forge::ForgeRegistry::with_builtin(),
             shutdown: crate::shutdown::Shutdown::new(),
             jwt_secret: SecretString::new("test-jwt-secret".to_string()),
             started_at: chrono::Utc::now(),
