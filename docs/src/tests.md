@@ -177,6 +177,22 @@ a banner instructing the admin to subscribe to a cache before workers can run.
 - `WorkersComponent - no-cache banner` - banner show/hide specs at
   `frontend/src/app/features/organizations/workers/workers.component.spec.ts`
 
+## Frontend - HTTP upstream Gradient-cache probe (#363)
+
+The "Add HTTP Upstream" dialog probes the entered substituter URL for
+`gradient-cache-info` to offer switching to the native Gradient protocol. The
+probe must only fire for real absolute URLs and only trust a genuine
+gradient-cache-info body, so a scheme-less input (which resolves to the SPA's
+own origin and returns a 200 `index.html`) no longer reports a Gradient cache.
+
+- `normalizeProbeUrl` / `isGradientCacheInfo` - pure-logic specs at
+  `frontend/src/app/features/caches/cache-upstreams/cache-upstream-probe.spec.ts`
+  (absolute http(s)-only URL gating; body must carry `GradientVersion` +
+  `GradientUrl`).
+- `CacheUpstreamsComponent - HTTP upstream probe` - wiring specs at
+  `frontend/src/app/features/caches/cache-upstreams/cache-upstreams.component.spec.ts`
+  (skips fetch for scheme-less input; suggests proto only on a valid body).
+
 ## Auth middleware response envelope
 
 Integration tests in `backend/web/tests/auth_middleware.rs` lock in the
