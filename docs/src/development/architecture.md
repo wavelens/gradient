@@ -58,7 +58,7 @@ Defines `ServerState` - the shared `Arc<ServerState>` threaded through every Axu
 - `db: DatabaseConnection` - SeaORM PostgreSQL pool
 - `cli: Cli` - resolved configuration from env/flags
 
-Key modules: `core::executer` (Nix store interaction), `core::sources` (key generation, NAR helpers), `core::input` (validation), `core::database` (common queries).
+Key modules: `core::executor` (Nix store interaction), `core::sources` (key generation, NAR helpers), `core::input` (validation), `core::database` (common queries).
 
 ### `entity`
 

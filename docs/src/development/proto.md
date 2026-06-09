@@ -944,7 +944,7 @@ evaluation that owns the active job.  The server:
 1. Looks up `active_job(job_id)` in the scheduler's job tracker.
 2. If found, resolves `PendingJob::evaluation_id()` (both eval and build
    jobs carry this) and inserts into `evaluation_message` via
-   `EvalRepo::insert_message`.
+   `db::insert_evaluation_message`.
 3. If the job is not active (already completed or evicted), the message is
    silently dropped - late infra signals for a finished job have no useful
    destination.
