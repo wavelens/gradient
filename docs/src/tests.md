@@ -803,6 +803,10 @@ Backend (`cargo test -p scheduler --tests scheduler_tests::job_notify_bump_is_no
   while the dispatch loop is mid-pass is retained (`notify_one` permit) and woke
   on the next iteration, so serial chains advance at completion speed rather than
   one level per 5s tick.
+- `worker_pool::tests::test_assign_and_release_job` - `release_job` reports the
+  worker idle only after its last in-flight job is released, so the dispatch kick
+  fires for a now-idle worker (serial chain) but not while it is still building
+  (e.g. 1 of 8 done).
 
 ## Cache GC - orphan files keep predicate
 
