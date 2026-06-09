@@ -193,6 +193,19 @@ own origin and returns a 200 `index.html`) no longer reports a Gradient cache.
   `frontend/src/app/features/caches/cache-upstreams/cache-upstreams.component.spec.ts`
   (skips fetch for scheme-less input; suggests proto only on a valid body).
 
+## Frontend - evaluation builds search reveal
+
+The sidebar "Search builds" bar on the evaluation-log page is hidden by default
+and revealed with `/` (when not already typing) or Ctrl/Cmd+F while the sidebar
+holds focus; Escape closes it and resets the filter.
+
+- `isTypingTarget` - pure guard spec at
+  `frontend/src/app/features/evaluations/evaluation-log/keyboard.spec.ts`
+  (true for input/textarea/select/contenteditable so `/` is not hijacked while typing).
+- `EvaluationLogComponent - sidebar search visibility` - toggle specs at
+  `frontend/src/app/features/evaluations/evaluation-log/evaluation-log.component.spec.ts`
+  (open on `/` and focused Ctrl+F; closed otherwise; Escape resets).
+
 ## Frontend - component style budget (#325)
 
 The `anyComponentStyle` budget in `frontend/angular.json` (`maximumWarning: 6kB`,
