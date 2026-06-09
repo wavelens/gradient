@@ -14,7 +14,6 @@
 //! | `POST /hooks/github`                                  | GitHub App     | `X-Hub-Signature-256`   |
 //! | `POST /hooks/{forge}/{org}/{integration_name}`        | Gitea/Forgejo/GitLab | per-integration secret |
 
-mod events;
 mod response;
 mod trigger;
 
@@ -26,9 +25,8 @@ use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
 use gradient_core::ci::actions::decrypt_secret_with_file;
-use gradient_core::ci::{
-    ForgeType, IntegrationKind, verify_gitea_signature, verify_github_signature,
-};
+use gradient_core::ci::{ForgeType, IntegrationKind, verify_github_signature};
+use gradient_core::forge::WebhookEventKind;
 use crate::ip_allowlist::is_allowed as ip_allowed;
 use gradient_core::types::input::load_secret;
 use gradient_core::types::*;
@@ -37,14 +35,13 @@ use gradient_scheduler::Scheduler;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
-use subtle::ConstantTimeEq;
 use tracing::{debug, warn};
 
 use crate::client_ip::{OptionalPeer, resolve_client_ip};
 use crate::error::{ErrorCode, WebError, WebResult};
 use crate::helpers::ok_json;
 
-use events::{ParsedPullRequestEvent, ParsedPushEvent, ParsedReleaseEvent};
+use gradient_core::forge::{ParsedPullRequestEvent, ParsedPushEvent, ParsedReleaseEvent};
 use trigger::{
     PushRefKind, handle_github_installation, resolve_github_app_targets,
     trigger_pr_for_integration, trigger_push_for_integration, trigger_release_for_integration,
@@ -356,7 +353,11 @@ pub async fn forge_webhook(
         warn!(forge = %forge, "Unknown forge path segment");
         return Err(WebError::not_found_msg("integration not found"));
     };
-    if matches!(forge_type, ForgeType::GitHub) {
+    let Some(provider) = state.forge.get(forge_type).cloned() else {
+        warn!(forge = %forge, "No forge provider registered");
+        return Err(WebError::not_found_msg("integration not found"));
+    };
+    if !provider.accepts_per_integration_webhook() {
         return Err(WebError::bad_request("unsupported forge"));
     }
 
@@ -399,7 +400,8 @@ pub async fn forge_webhook(
         WebError::internal("internal error")
     })?;
 
-    if !verify_forge_signature(forge_type, plaintext_secret.expose(), &headers, &body) {
+    let signature = first_header(&headers, &[provider.signature_header()]);
+    if !provider.verify_signature(plaintext_secret.expose(), signature, &body) {
         warn!(org = %org_name, forge = %forge, integration = %integration_name, "Forge webhook: invalid signature");
         return Err(WebError::unauthorized("invalid webhook signature"));
     }
@@ -427,16 +429,12 @@ pub async fn forge_webhook(
     }
 
     let integration_id = integration.id;
-    let event_type = forge_event_type(forge_type, &headers);
+    let raw_event = first_header(&headers, provider.event_headers());
+    let event_type = provider.classify_event(raw_event);
 
     let response = match event_type {
-        ForgeEvent::Push => {
-            let parsed = match forge_type {
-                ForgeType::Gitea | ForgeType::Forgejo => ParsedPushEvent::from_gitea(&body),
-                ForgeType::GitLab => ParsedPushEvent::from_gitlab(&body),
-                ForgeType::GitHub => unreachable!(),
-            };
-            let Some(parsed) = parsed else {
+        WebhookEventKind::Push => {
+            let Some(parsed) = provider.parse_push_event(&body) else {
                 return Err(WebError::bad_request("malformed webhook payload"));
             };
             let urls = parsed.repository_urls.clone();
@@ -465,13 +463,8 @@ pub async fn forge_webhook(
                 skipped: outcome.skipped,
             }
         }
-        ForgeEvent::PullRequest => {
-            let parsed = match forge_type {
-                ForgeType::Gitea | ForgeType::Forgejo => ParsedPullRequestEvent::from_gitea(&body),
-                ForgeType::GitLab => ParsedPullRequestEvent::from_gitlab(&body),
-                ForgeType::GitHub => unreachable!(),
-            };
-            let Some(parsed) = parsed else {
+        WebhookEventKind::PullRequest => {
+            let Some(parsed) = provider.parse_pull_request_event(&body) else {
                 return Err(WebError::bad_request("malformed webhook payload"));
             };
             let urls = parsed.repository_urls.clone();
@@ -501,13 +494,8 @@ pub async fn forge_webhook(
                 skipped: outcome.skipped,
             }
         }
-        ForgeEvent::Release => {
-            let parsed = match forge_type {
-                ForgeType::Gitea | ForgeType::Forgejo => ParsedReleaseEvent::from_gitea(&body),
-                ForgeType::GitLab => ParsedReleaseEvent::from_gitlab(&body),
-                ForgeType::GitHub => unreachable!(),
-            };
-            let Some(parsed) = parsed else {
+        WebhookEventKind::Release => {
+            let Some(parsed) = provider.parse_release_event(&body) else {
                 return Err(WebError::bad_request("malformed webhook payload"));
             };
             let urls = parsed.repository_urls.clone();
@@ -529,7 +517,7 @@ pub async fn forge_webhook(
                 skipped: outcome.skipped,
             }
         }
-        ForgeEvent::Comment => {
+        WebhookEventKind::Comment => {
             let peer_ip = peer
                 .map(|p| p.ip())
                 .unwrap_or_else(|| IpAddr::V4(Ipv4Addr::UNSPECIFIED));
@@ -546,131 +534,17 @@ pub async fn forge_webhook(
             .await;
             WebhookResponse::empty("comment")
         }
-        ForgeEvent::Unknown(name) => WebhookResponse::empty(&name),
+        WebhookEventKind::Unknown(name) => WebhookResponse::empty(&name),
     };
 
     Ok(ok_json(response))
 }
 
-// ── Forge event type detection ─────────────────────────────────────────────
-
-enum ForgeEvent {
-    Push,
-    PullRequest,
-    Release,
-    Comment,
-    Unknown(String),
-}
-
-fn forge_event_type(forge: ForgeType, headers: &HeaderMap) -> ForgeEvent {
-    match forge {
-        ForgeType::Gitea | ForgeType::Forgejo => {
-            let event = headers
-                .get("X-Gitea-Event")
-                .or_else(|| headers.get("X-Gogs-Event"))
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("");
-            match event {
-                "push" => ForgeEvent::Push,
-                "pull_request" => ForgeEvent::PullRequest,
-                "release" => ForgeEvent::Release,
-                "issue_comment" | "pull_request_comment" => ForgeEvent::Comment,
-                other => ForgeEvent::Unknown(other.to_string()),
-            }
-        }
-        ForgeType::GitLab => {
-            let event = headers
-                .get("X-Gitlab-Event")
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("");
-            match event {
-                "Push Hook" | "Tag Push Hook" => ForgeEvent::Push,
-                "Merge Request Hook" => ForgeEvent::PullRequest,
-                "Release Hook" => ForgeEvent::Release,
-                "Note Hook" => ForgeEvent::Comment,
-                other => ForgeEvent::Unknown(other.to_string()),
-            }
-        }
-        ForgeType::GitHub => ForgeEvent::Unknown("github".into()),
-    }
-}
-
-// ── Helpers ────────────────────────────────────────────────────────────────
-
-fn verify_forge_signature(
-    forge: ForgeType,
-    secret: &str,
-    headers: &HeaderMap,
-    body: &[u8],
-) -> bool {
-    match forge {
-        ForgeType::Gitea | ForgeType::Forgejo => {
-            let sig = headers
-                .get("X-Gitea-Signature")
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("");
-            verify_gitea_signature(secret, sig, body)
-        }
-        ForgeType::GitLab => {
-            let token = headers
-                .get("X-Gitlab-Token")
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("");
-            token.as_bytes().ct_eq(secret.as_bytes()).into()
-        }
-        ForgeType::GitHub => {
-            let sig = headers
-                .get("X-Hub-Signature-256")
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("");
-            verify_github_signature(secret, sig, body)
-        }
-    }
-}
-
-#[cfg(test)]
-mod verify_tests {
-    use super::*;
-    use axum::http::{HeaderMap, HeaderValue};
-
-    #[test]
-    fn gitlab_matches_token_exactly() {
-        let mut h = HeaderMap::new();
-        h.insert("X-Gitlab-Token", HeaderValue::from_static("s3cret"));
-        assert!(verify_forge_signature(ForgeType::GitLab, "s3cret", &h, b""));
-    }
-
-    #[test]
-    fn gitlab_rejects_mismatched_token() {
-        let mut h = HeaderMap::new();
-        h.insert("X-Gitlab-Token", HeaderValue::from_static("wrong"));
-        assert!(!verify_forge_signature(
-            ForgeType::GitLab,
-            "s3cret",
-            &h,
-            b""
-        ));
-    }
-
-    #[test]
-    fn gitlab_rejects_missing_token() {
-        let h = HeaderMap::new();
-        assert!(!verify_forge_signature(
-            ForgeType::GitLab,
-            "s3cret",
-            &h,
-            b""
-        ));
-    }
-
-    #[test]
-    fn gitea_rejects_missing_signature() {
-        let h = HeaderMap::new();
-        assert!(!verify_forge_signature(
-            ForgeType::Gitea,
-            "s3cret",
-            &h,
-            b"body"
-        ));
-    }
+/// First present header among `names`, as a `&str` (empty string if absent).
+fn first_header<'a>(headers: &'a HeaderMap, names: &[&str]) -> &'a str {
+    names
+        .iter()
+        .find_map(|name| headers.get(*name))
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("")
 }

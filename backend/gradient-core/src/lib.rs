@@ -8,6 +8,7 @@ pub mod ci;
 pub mod constants;
 pub mod db;
 pub mod executor;
+pub mod forge;
 pub mod http;
 pub mod hydra;
 pub mod nix;
@@ -202,6 +203,7 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
         manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         http,
+        forge: forge::ForgeRegistry::with_builtin(),
         shutdown: Shutdown::new(),
         jwt_secret,
         started_at: chrono::Utc::now(),

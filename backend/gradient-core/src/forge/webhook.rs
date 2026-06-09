@@ -9,10 +9,22 @@
 use serde::Deserialize;
 use tracing::warn;
 
+/// The kind of webhook a forge delivered, classified from its event header.
+/// [`crate::forge::ForgeProvider::classify_event`] maps each forge's raw event
+/// string onto this shared enum so the web layer dispatches once, forge-agnostically.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WebhookEventKind {
+    Push,
+    PullRequest,
+    Release,
+    Comment,
+    Unknown(String),
+}
+
 // ── GitHub push payload ────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
-pub(super) struct GitHubPushPayload {
+pub struct GitHubPushPayload {
     #[serde(rename = "ref")]
     pub git_ref: String,
     pub after: String,
@@ -20,7 +32,7 @@ pub(super) struct GitHubPushPayload {
 }
 
 #[derive(Deserialize)]
-pub(super) struct GitHubRepository {
+pub struct GitHubRepository {
     pub clone_url: String,
     pub ssh_url: String,
     #[serde(default)]
@@ -30,7 +42,7 @@ pub(super) struct GitHubRepository {
 // ── Gitea/Forgejo push payload ─────────────────────────────────────────────
 
 #[derive(Deserialize)]
-pub(super) struct GiteaPushPayload {
+pub struct GiteaPushPayload {
     #[serde(rename = "ref")]
     pub git_ref: String,
     pub after: String,
@@ -38,7 +50,7 @@ pub(super) struct GiteaPushPayload {
 }
 
 #[derive(Deserialize)]
-pub(super) struct GiteaRepository {
+pub struct GiteaRepository {
     pub clone_url: String,
     pub ssh_url: Option<String>,
     #[serde(default)]
@@ -48,7 +60,7 @@ pub(super) struct GiteaRepository {
 // ── GitLab push payload ────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
-pub(super) struct GitLabPushPayload {
+pub struct GitLabPushPayload {
     #[serde(rename = "ref")]
     pub git_ref: String,
     pub after: String,
@@ -56,7 +68,7 @@ pub(super) struct GitLabPushPayload {
 }
 
 #[derive(Deserialize)]
-pub(super) struct GitLabProject {
+pub struct GitLabProject {
     pub http_url: String,
     pub ssh_url: Option<String>,
 }
@@ -64,7 +76,7 @@ pub(super) struct GitLabProject {
 // ── GitHub PR payload ──────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
-pub(super) struct GitHubPullRequestPayload {
+pub struct GitHubPullRequestPayload {
     pub action: String,
     pub pull_request: GitHubPullRequest,
     pub repository: GitHubRepository,
@@ -73,7 +85,7 @@ pub(super) struct GitHubPullRequestPayload {
 }
 
 #[derive(Deserialize)]
-pub(super) struct GitHubPullRequest {
+pub struct GitHubPullRequest {
     pub head: GitHubPRRef,
     #[serde(default)]
     pub base: Option<GitHubPRRef>,
@@ -84,7 +96,7 @@ pub(super) struct GitHubPullRequest {
 }
 
 #[derive(Deserialize)]
-pub(super) struct GitHubPRRef {
+pub struct GitHubPRRef {
     pub sha: String,
     #[serde(rename = "ref")]
     pub branch: String,
@@ -93,7 +105,7 @@ pub(super) struct GitHubPRRef {
 }
 
 #[derive(Deserialize)]
-pub(super) struct GitHubRepoStub {
+pub struct GitHubRepoStub {
     #[serde(default)]
     pub full_name: Option<String>,
     #[serde(default)]
@@ -103,7 +115,7 @@ pub(super) struct GitHubRepoStub {
 }
 
 #[derive(Deserialize)]
-pub(super) struct GitHubUser {
+pub struct GitHubUser {
     #[serde(default)]
     pub login: Option<String>,
 }
@@ -111,13 +123,13 @@ pub(super) struct GitHubUser {
 // ── GitHub release payload ─────────────────────────────────────────────────
 
 #[derive(Deserialize)]
-pub(super) struct GitHubReleasePayload {
+pub struct GitHubReleasePayload {
     pub release: GitHubRelease,
     pub repository: GitHubRepository,
 }
 
 #[derive(Deserialize)]
-pub(super) struct GitHubRelease {
+pub struct GitHubRelease {
     pub tag_name: String,
     pub target_commitish: String,
 }
@@ -125,7 +137,7 @@ pub(super) struct GitHubRelease {
 // ── Gitea/Forgejo PR payload ───────────────────────────────────────────────
 
 #[derive(Deserialize)]
-pub(super) struct GiteaPullRequestPayload {
+pub struct GiteaPullRequestPayload {
     pub action: String,
     pub pull_request: GiteaPullRequest,
     pub repository: GiteaRepository,
@@ -134,7 +146,7 @@ pub(super) struct GiteaPullRequestPayload {
 }
 
 #[derive(Deserialize)]
-pub(super) struct GiteaPullRequest {
+pub struct GiteaPullRequest {
     pub head: GiteaPRRef,
     #[serde(default)]
     pub base: Option<GiteaPRRef>,
@@ -145,7 +157,7 @@ pub(super) struct GiteaPullRequest {
 }
 
 #[derive(Deserialize)]
-pub(super) struct GiteaPRRef {
+pub struct GiteaPRRef {
     pub sha: String,
     #[serde(rename = "ref")]
     pub branch: Option<String>,
@@ -155,7 +167,7 @@ pub(super) struct GiteaPRRef {
 }
 
 #[derive(Deserialize)]
-pub(super) struct GiteaRepoStub {
+pub struct GiteaRepoStub {
     #[serde(default)]
     pub full_name: Option<String>,
     #[serde(default)]
@@ -165,7 +177,7 @@ pub(super) struct GiteaRepoStub {
 }
 
 #[derive(Deserialize)]
-pub(super) struct GiteaUser {
+pub struct GiteaUser {
     #[serde(default)]
     pub username: Option<String>,
     #[serde(default)]
@@ -175,13 +187,13 @@ pub(super) struct GiteaUser {
 // ── Gitea/Forgejo release payload ─────────────────────────────────────────
 
 #[derive(Deserialize)]
-pub(super) struct GiteaReleasePayload {
+pub struct GiteaReleasePayload {
     pub release: GiteaRelease,
     pub repository: GiteaRepository,
 }
 
 #[derive(Deserialize)]
-pub(super) struct GiteaRelease {
+pub struct GiteaRelease {
     pub tag_name: String,
     pub target_commitish: Option<String>,
     pub sha: Option<String>,
@@ -190,7 +202,7 @@ pub(super) struct GiteaRelease {
 // ── GitLab merge_request payload ───────────────────────────────────────────
 
 #[derive(Deserialize)]
-pub(super) struct GitLabMergeRequestPayload {
+pub struct GitLabMergeRequestPayload {
     pub object_attributes: GitLabMRAttributes,
     pub project: GitLabProject,
     #[serde(default)]
@@ -198,7 +210,7 @@ pub(super) struct GitLabMergeRequestPayload {
 }
 
 #[derive(Deserialize)]
-pub(super) struct GitLabMRAttributes {
+pub struct GitLabMRAttributes {
     pub action: String,
     pub source_branch: String,
     pub last_commit: GitLabCommit,
@@ -213,7 +225,7 @@ pub(super) struct GitLabMRAttributes {
 }
 
 #[derive(Deserialize)]
-pub(super) struct GitLabMRSource {
+pub struct GitLabMRSource {
     #[serde(default)]
     pub git_http_url: Option<String>,
     #[serde(default)]
@@ -221,20 +233,20 @@ pub(super) struct GitLabMRSource {
 }
 
 #[derive(Deserialize)]
-pub(super) struct GitLabUser {
+pub struct GitLabUser {
     #[serde(default)]
     pub username: Option<String>,
 }
 
 #[derive(Deserialize)]
-pub(super) struct GitLabCommit {
+pub struct GitLabCommit {
     pub id: String,
 }
 
 // ── GitLab release payload ─────────────────────────────────────────────────
 
 #[derive(Deserialize)]
-pub(super) struct GitLabReleasePayload {
+pub struct GitLabReleasePayload {
     pub project: GitLabProject,
     pub commit: Option<GitLabCommit>,
     pub tag: Option<String>,
@@ -244,7 +256,7 @@ pub(super) struct GitLabReleasePayload {
 
 /// Forge-agnostic push event extracted from any of the supported webhook
 /// payload shapes.
-pub(super) struct ParsedPushEvent {
+pub struct ParsedPushEvent {
     pub commit_hash: Vec<u8>,
     pub repository_urls: Vec<String>,
     pub commit_message: Option<String>,
@@ -257,7 +269,7 @@ pub(super) struct ParsedPushEvent {
 }
 
 /// Pull-request event normalised across forges. `commit_hash` is the PR head SHA.
-pub(super) struct ParsedPullRequestEvent {
+pub struct ParsedPullRequestEvent {
     pub commit_hash: Vec<u8>,
     pub repository_urls: Vec<String>,
     /// Forge-reported action: "opened", "synchronize", "reopened", "closed", "merged", etc.
@@ -288,7 +300,7 @@ pub(super) struct ParsedPullRequestEvent {
 }
 
 /// Release/tag event. `commit_hash` is the SHA the tag points at.
-pub(super) struct ParsedReleaseEvent {
+pub struct ParsedReleaseEvent {
     pub commit_hash: Vec<u8>,
     pub repository_urls: Vec<String>,
     /// Tag name (e.g. "v1.2.3"), if available.
@@ -298,7 +310,7 @@ pub(super) struct ParsedReleaseEvent {
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 /// Validated push commit info.
-pub(super) struct PushCommit {
+pub struct PushCommit {
     pub hash: Vec<u8>,
     pub ref_name: String,
     pub is_tag: bool,
@@ -308,7 +320,7 @@ pub(super) struct PushCommit {
 ///
 /// Returns `None` for branch/tag deletions (all-zero SHA) or unparseable hex.
 /// Handles both `refs/heads/<branch>` and `refs/tags/<tag>`.
-pub(super) fn decode_push_commit(git_ref: &str, after: &str, forge: &str) -> Option<PushCommit> {
+pub fn decode_push_commit(git_ref: &str, after: &str, forge: &str) -> Option<PushCommit> {
     if after == "0000000000000000000000000000000000000000" {
         return None;
     }

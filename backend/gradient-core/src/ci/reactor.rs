@@ -19,22 +19,28 @@ use crate::ci::actions::{dispatch_build_event, dispatch_evaluation_event, report
 use crate::ci::context::CiContext;
 use crate::ci::{ReactionKind, ReactionTarget};
 use crate::db::{DbContext, StatusReactor};
+use crate::forge::ForgeRegistry;
 use crate::types::*;
 
 #[derive(Debug)]
 pub struct CiStatusReactor {
     http: reqwest::Client,
+    forge: ForgeRegistry,
 }
 
 impl CiStatusReactor {
     pub fn new(http: reqwest::Client) -> Self {
-        Self { http }
+        Self {
+            http,
+            forge: ForgeRegistry::with_builtin(),
+        }
     }
 
     fn ci_context(&self, db: &DbContext) -> CiContext {
         CiContext {
             db: db.clone(),
             http: self.http.clone(),
+            forge: self.forge.clone(),
         }
     }
 }

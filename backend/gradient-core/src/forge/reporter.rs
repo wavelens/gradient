@@ -5,6 +5,8 @@
  */
 
 use crate::ci::http_validation::{WebhookUrlError, validate_webhook_url};
+use crate::ci::integration_lookup::ForgeType;
+use crate::forge::registry::ForgeRegistry;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -1280,7 +1282,7 @@ struct CheckRunCreateResponse {
 #[async_trait]
 impl CiReporter for GithubAppReporter {
     async fn report(&self, report: &CiReport) -> Result<Option<i64>> {
-        let token = crate::ci::github_app::get_installation_token(
+        let token = crate::forge::github_app::get_installation_token(
             &self.client,
             self.app_id,
             &self.private_key_pem,
@@ -1375,7 +1377,7 @@ impl CiReporter for GithubAppReporter {
     }
 
     async fn is_repo_writer(&self, owner: &str, repo: &str, username: &str) -> Result<bool> {
-        let token = crate::ci::github_app::get_installation_token(
+        let token = crate::forge::github_app::get_installation_token(
             &self.client,
             self.app_id,
             &self.private_key_pem,
@@ -1419,7 +1421,7 @@ impl CiReporter for GithubAppReporter {
         pr_number: u64,
         body: &str,
     ) -> Result<()> {
-        let token = crate::ci::github_app::get_installation_token(
+        let token = crate::forge::github_app::get_installation_token(
             &self.client,
             self.app_id,
             &self.private_key_pem,
@@ -1463,7 +1465,7 @@ impl CiReporter for GithubAppReporter {
         repo: &str,
         pr_number: u64,
     ) -> Result<Option<PullRequestSnapshot>> {
-        let token = crate::ci::github_app::get_installation_token(
+        let token = crate::forge::github_app::get_installation_token(
             &self.client,
             self.app_id,
             &self.private_key_pem,
@@ -1501,7 +1503,7 @@ impl CiReporter for GithubAppReporter {
     }
 
     async fn add_reaction(&self, target: &ReactionTarget, kind: ReactionKind) -> Result<()> {
-        let token = crate::ci::github_app::get_installation_token(
+        let token = crate::forge::github_app::get_installation_token(
             &self.client,
             self.app_id,
             &self.private_key_pem,
@@ -1531,40 +1533,31 @@ pub fn reporter_for_project(
     ci_url: Option<&str>,
     ci_token: Option<&str>,
 ) -> Arc<dyn CiReporter> {
-    let token = match ci_token {
-        Some(t) => t,
-        None => return Arc::new(NoopCiReporter),
+    let Some(token) = ci_token else {
+        return Arc::new(NoopCiReporter);
     };
 
-    let url = ci_url.unwrap_or("");
+    let forge = match ci_type.and_then(ForgeType::from_path_segment) {
+        Some(forge) => forge,
+        None => {
+            if let Some(unknown) = ci_type {
+                warn!(ci_type = %unknown, "Unknown CI reporter type, using noop");
+            }
+            return Arc::new(NoopCiReporter);
+        }
+    };
 
-    match ci_type {
-        Some("gitea") => match GiteaReporter::new(http, url, token) {
-            Ok(r) => Arc::new(r),
-            Err(e) => {
-                warn!(error = %e, "Failed to build GiteaReporter, falling back to noop");
-                Arc::new(NoopCiReporter)
-            }
-        },
-        Some("gitlab") => match GitlabReporter::new(http, url, token) {
-            Ok(r) => Arc::new(r),
-            Err(e) => {
-                warn!(error = %e, "Failed to build GitlabReporter, falling back to noop");
-                Arc::new(NoopCiReporter)
-            }
-        },
-        Some("github") => match GithubReporter::new(http, url, token) {
-            Ok(r) => Arc::new(r),
-            Err(e) => {
-                warn!(error = %e, "Failed to build GithubReporter, falling back to noop");
-                Arc::new(NoopCiReporter)
-            }
-        },
-        Some(unknown) => {
-            warn!(ci_type = %unknown, "Unknown CI reporter type, using noop");
+    let registry = ForgeRegistry::with_builtin();
+    let Some(provider) = registry.get(forge) else {
+        return Arc::new(NoopCiReporter);
+    };
+
+    match provider.build_reporter(http, ci_url, Some(token)) {
+        Ok(reporter) => reporter,
+        Err(e) => {
+            warn!(error = %e, ?forge, "Failed to build reporter, falling back to noop");
             Arc::new(NoopCiReporter)
         }
-        None => Arc::new(NoopCiReporter),
     }
 }
 

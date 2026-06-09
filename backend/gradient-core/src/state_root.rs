@@ -18,6 +18,7 @@ use tokio::sync::broadcast;
 use crate::ci::CiContext;
 use crate::ci::manifest_state::{ManifestStateStore, PendingCredentialsStore};
 use crate::db::{DbContext, StatusReactor, WebDb, WorkerDb};
+use crate::forge::ForgeRegistry;
 use crate::shutdown::Shutdown;
 use crate::state::{OidcGroupRoles, PendingOrgMemberships};
 use crate::storage::{EmailSender, LogStorage, NarStore, StorageCtx};
@@ -41,6 +42,9 @@ pub struct AppState {
     /// Shared outbound HTTP client - reuse for any outbound request from a
     /// handler or background task; never construct a fresh `reqwest::Client`.
     pub http: reqwest::Client,
+    /// Resolved-once registry of forge providers (reporters, webhook parsing,
+    /// signature verification) shared into every [`CiContext`].
+    pub forge: ForgeRegistry,
     /// Issued-but-unconsumed manifest CSRF state tokens with their issuance time.
     pub manifest_state: Arc<ManifestStateStore>,
     /// Manifest results awaiting one-shot pickup by the superuser's browser.
@@ -96,6 +100,7 @@ impl AppState {
         CiContext {
             db: self.db(),
             http: self.http.clone(),
+            forge: self.forge.clone(),
         }
     }
 }
