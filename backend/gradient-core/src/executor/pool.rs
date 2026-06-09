@@ -11,7 +11,7 @@ use harmonia_store_remote::DaemonStore as _;
 use harmonia_utils_hash::fmt::CommonHash as _;
 use std::collections::HashMap;
 
-use crate::executer::path_utils::{nix_store_path, strip_store_prefix};
+use crate::executor::path_utils::{nix_store_path, strip_store_prefix};
 use crate::sources::get_hash_from_path;
 
 pub use harmonia_store_remote::pool::{ConnectionPool, PoolConfig, PooledConnectionGuard};

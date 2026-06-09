@@ -79,7 +79,7 @@ fn make_build(
 }
 
 fn make_derivation(id: DerivationId, org_id: OrganizationId, path: &str) -> MDerivation {
-    let stripped = gradient_core::executer::strip_nix_store_prefix(path);
+    let stripped = gradient_core::executor::strip_nix_store_prefix(path);
     let (hash, name) = gradient_core::sources::parse_drv_hash_name(&stripped)
         .unwrap_or_else(|_| ("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(), "x".into()));
     gradient_entity::derivation::Model {

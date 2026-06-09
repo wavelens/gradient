@@ -15,7 +15,7 @@
 //! <hash>-<name>.drv` because the value flowed through the dispatcher and
 //! WS unmodified. Stripping uniformly removes the ambiguity, and the read
 //! path always reconstructs the canonical `/nix/store/<...>` form via
-//! `gradient_core::executer::nix_store_path`.
+//! `gradient_core::executor::nix_store_path`.
 //!
 //! Conflict handling: a `(organization, derivation_path)` unique index
 //! guards the table, so any pair of rows that already differ only by

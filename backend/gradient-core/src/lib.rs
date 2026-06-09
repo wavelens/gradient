@@ -8,7 +8,7 @@ pub mod cache;
 pub mod ci;
 pub mod constants;
 pub mod db;
-pub mod executer;
+pub mod executor;
 pub mod http;
 pub mod hydra;
 pub mod ip_allowlist;
