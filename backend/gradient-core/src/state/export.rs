@@ -311,12 +311,11 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
             continue;
         };
         // GitHub integration rows are server-managed and cannot be hand-authored.
-        let forge_type = match forge {
-            ForgeType::Gitea => "gitea",
-            ForgeType::Forgejo => "forgejo",
-            ForgeType::GitLab => "gitlab",
-            ForgeType::GitHub => continue,
-        };
+        if forge == ForgeType::GitHub {
+            continue;
+        }
+
+        let forge_type = forge.as_path_segment();
         config.integrations.insert(
             i.name.clone(),
             StateIntegration {

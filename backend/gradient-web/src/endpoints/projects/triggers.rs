@@ -57,13 +57,9 @@ impl TriggerIntegrationSummary {
 }
 
 fn forge_to_str(f: i16) -> &'static str {
-    match ForgeType::try_from(f) {
-        Ok(ForgeType::Gitea) => "gitea",
-        Ok(ForgeType::Forgejo) => "forgejo",
-        Ok(ForgeType::GitLab) => "gitlab",
-        Ok(ForgeType::GitHub) => "github",
-        Err(_) => "unknown",
-    }
+    ForgeType::try_from(f)
+        .map(ForgeType::as_path_segment)
+        .unwrap_or("unknown")
 }
 
 #[derive(Serialize, Debug)]

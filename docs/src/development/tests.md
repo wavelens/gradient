@@ -1206,7 +1206,7 @@ Tests use `RecordingJobReporter` - no real git server or WebSocket needed.
 
 ---
 
-## `core::ci::github_app` - GitHub App JWT & Webhook Verification
+## `core::forge::github_app` - GitHub App JWT & Webhook Verification
 
 | Test | What it checks |
 |------|---------------|

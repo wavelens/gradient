@@ -1054,7 +1054,7 @@ Unit tests (`cargo test -p core --tests ci::webhook`):
 ## CI reporter base URL - SSRF + redirect token leak (#113)
 
 `GiteaReporter`, `GithubReporter`, and `GithubAppReporter` (in
-`backend/core/src/ci/reporter.rs`) now validate any user-supplied
+`backend/core/src/forge/reporter.rs`) now validate any user-supplied
 `base_url` / `api_base_url` through the same SSRF gate as outgoing
 webhooks (`validate_webhook_url`), and build their reqwest clients with
 `redirect::Policy::none()` so that an attacker cannot pivot a status
@@ -1062,7 +1062,7 @@ POST to an internal endpoint and leak the integration token via a
 3xx `Location:` header. `reporter_for_project` continues to fall back
 to `NoopCiReporter` when construction fails, with a `warn!` log.
 
-Unit tests (`cargo test -p core --tests ci::reporter`):
+Unit tests (`cargo test -p core --tests forge::reporter`):
 
 - `gitea_reporter_rejects_aws_metadata_ip` /
   `github_reporter_rejects_aws_metadata_ip` /
@@ -1084,9 +1084,25 @@ Unit tests (`cargo test -p core --tests ci::reporter`):
   Gitea base URL plumbed through the factory degrades to
   `NoopCiReporter` rather than crashing the caller.
 
+## Forge provider registry
+
+Every per-forge decision (reporter construction, webhook parsing,
+signature verification, event classification) lives behind the
+`ForgeProvider` trait in `backend/core/src/forge/`; the `ForgeRegistry`
+maps each `ForgeType` to its provider and is shared via `CiContext.forge`.
+Reporter selection and webhook dispatch resolve a provider instead of
+matching on `ForgeType`.
+
+Unit tests (`cargo test -p core --tests forge::providers`):
+
+- `gitlab::tests::{matches_token_exactly, rejects_mismatched_token,
+  rejects_missing_token}` - constant-time `X-Gitlab-Token` equality.
+- `gitea::tests::rejects_missing_signature` - empty `X-Gitea-Signature`
+  is rejected.
+
 ## GitLab outbound CI reporter (#90)
 
-`GitlabReporter` (in `backend/core/src/ci/reporter.rs`) posts commit
+`GitlabReporter` (in `backend/core/src/forge/reporter.rs`) posts commit
 statuses to GitLab via `POST {base_url}/api/v4/projects/{id}/statuses/{sha}`,
 where `id` is the URL-encoded `owner/repo` path (also covers nested
 groups such as `group/sub/repo`). Authenticates with `PRIVATE-TOKEN`,
@@ -1096,7 +1112,7 @@ resolves the integration row and constructs a `GitlabReporter` (or the
 appropriate forge-specific reporter) per dispatch — the legacy per-project
 lookup helper has been removed.
 
-Unit tests (`cargo test -p core --tests ci::reporter`):
+Unit tests (`cargo test -p core --tests forge::reporter`):
 
 - `gitlab_state_from_ci_status_all_variants` - every `CiStatus` maps
   to the documented GitLab state (`pending`, `running`, `success`,
@@ -2876,7 +2892,7 @@ immediately. Coverage:
   the eval-capable count is zero, even if total connected workers
   are non-zero (the runtime caller passes the eval-capable count,
   not the total).
-- `web/src/endpoints/forge_hooks/events.rs` - extraction of
+- `core/src/forge/webhook.rs` - extraction of
   `pr_number`, `pr_author`, `is_fork`, `base_owner`, `base_repo` from
   GitHub / Gitea / GitLab payloads.
 - `web/src/endpoints/forge_hooks/trigger.rs::parse_gradient_*` -
@@ -2903,11 +2919,11 @@ immediately. Coverage:
   wildcard into the same row update that flips `Waiting -> Queued`,
   so the dispatcher reads a consistent row; same guards as
   `unpark_approval`.
-- `core/src/ci/reporter.rs::{gitea,github,gitlab}_comment_url_*`
+- `core/src/forge/reporter.rs::{gitea,github,gitlab}_comment_url_*`
   (issue #274) - per-forge URL builders for the `post_pr_comment`
   trait method that surfaces wildcard parse errors back to the
   commenter.
-- `core/src/ci/reporter.rs::forge_comment_payload_serializes_with_body_field`
+- `core/src/forge/reporter.rs::forge_comment_payload_serializes_with_body_field`
   (issue #274) - the shared `{"body": "..."}` JSON payload sent to
   all three forges.
 - `core/src/ci/unpark.rs::unpark_approval_*` - transitions

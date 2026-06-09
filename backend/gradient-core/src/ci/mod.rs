@@ -9,13 +9,11 @@ pub mod action_crypto;
 pub mod actions;
 pub mod apply;
 pub mod context;
-pub mod github_app;
 pub mod github_app_manifest;
 pub mod http_validation;
 pub mod integration_lookup;
 pub mod manifest_state;
 pub mod reactor;
-pub mod reporter;
 pub mod reporting;
 pub mod trigger;
 pub mod unpark;
@@ -26,12 +24,12 @@ pub use self::apply::{
     park_if_no_workers, park_if_pending_approval, park_if_storage_full,
 };
 pub use self::context::CiContext;
-pub use self::github_app::*;
 pub use self::http_validation::{WebhookUrlError, validate_webhook_url};
 pub use self::integration_lookup::*;
 pub use self::reactor::CiStatusReactor;
-pub use self::reporter::*;
 pub use self::reporting::*;
+pub use crate::forge::github_app::*;
+pub use crate::forge::reporter::*;
 pub use self::trigger::*;
 pub use self::unpark::{
     find_approval_gated_eval, set_evaluation_source_comment, unpark_approval,

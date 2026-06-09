@@ -8,9 +8,8 @@
 
 use crate::ci::context::CiContext;
 use crate::ci::integration_lookup::{ForgeType, IntegrationKind};
-use crate::ci::reporter::{
-    APPROVAL_ACTION_ID, CiReport, CiReporter, CiStatus, GiteaReporter, GithubAppReporter,
-    GithubReporter, GitlabReporter, RequestedAction,
+use crate::forge::reporter::{
+    APPROVAL_ACTION_ID, CiReport, CiReporter, CiStatus, GithubAppReporter, RequestedAction,
 };
 use crate::ci::{parse_owner_repo, reporting};
 use crate::types::input::{load_secret_bytes, vec_to_hex};
@@ -654,6 +653,10 @@ async fn build_reporter_for_integration(
 
     let forge = ForgeType::try_from(integration.forge_type)
         .map_err(|_| anyhow!("integration has unknown forge_type"))?;
+    let provider = ctx
+        .forge
+        .get(forge)
+        .ok_or_else(|| anyhow!("no forge provider registered for {:?}", forge))?;
 
     let token = match integration.access_token.as_deref() {
         Some(enc) => Some(
@@ -663,58 +666,41 @@ async fn build_reporter_for_integration(
         None => None,
     };
 
-    match forge {
-        ForgeType::Gitea | ForgeType::Forgejo => {
-            let base_url = integration
-                .endpoint_url
-                .as_deref()
-                .filter(|s| !s.is_empty())
-                .ok_or_else(|| anyhow!("Gitea/Forgejo integration missing endpoint_url"))?;
-            let token = token.ok_or_else(|| anyhow!("Gitea/Forgejo integration missing token"))?;
-            let r = GiteaReporter::new(ctx.http.clone(), base_url, token.expose().to_string())?;
-            Ok(Arc::new(r))
-        }
-        ForgeType::GitLab => {
-            let base_url = integration
-                .endpoint_url
-                .as_deref()
-                .filter(|s| !s.is_empty())
-                .ok_or_else(|| anyhow!("GitLab integration missing endpoint_url"))?;
-            let token = token.ok_or_else(|| anyhow!("GitLab integration missing token"))?;
-            let r = GitlabReporter::new(ctx.http.clone(), base_url, token.expose().to_string())?;
-            Ok(Arc::new(r))
-        }
-        ForgeType::GitHub => build_github_reporter(ctx, &integration, token).await,
+    if provider.supports_app_auth()
+        && let Some(reporter) = build_github_app_reporter(ctx, &integration).await?
+    {
+        return Ok(reporter);
     }
+
+    provider.build_reporter(
+        ctx.http.clone(),
+        integration.endpoint_url.as_deref(),
+        token.as_ref().map(|t| t.expose()),
+    )
 }
 
-async fn build_github_reporter(
+/// GitHub-App installation reporter, used when the App is configured and the
+/// integration's org has an installation. Returns `None` to fall back to the
+/// provider's token reporter.
+async fn build_github_app_reporter(
     ctx: &CiContext,
     integration: &gradient_entity::integration::Model,
-    token: Option<crate::types::SecretString>,
-) -> Result<Arc<dyn CiReporter>> {
-    if let Some(github_app) = ctx.db.config.github_app.clone() {
-        let project_org = EOrganization::find_by_id(integration.organization)
-            .one(&ctx.db.worker_db)
-            .await
-            .context("loading organization for github app")?
-            .ok_or_else(|| anyhow!("integration organization not found"))?;
-        if let Some(installation_id) = project_org.github_installation_id {
-            let pem = std::fs::read_to_string(&github_app.private_key_file)
-                .context("reading github app private key")?;
-            let r = GithubAppReporter::new(
-                ctx.http.clone(),
-                "",
-                github_app.app_id,
-                pem,
-                installation_id,
-            )?;
-            return Ok(Arc::new(r));
-        }
-    }
-    let token = token.ok_or_else(|| anyhow!("GitHub integration missing token"))?;
-    let r = GithubReporter::new(ctx.http.clone(), "", token.expose().to_string())?;
-    Ok(Arc::new(r))
+) -> Result<Option<Arc<dyn CiReporter>>> {
+    let Some(github_app) = ctx.db.config.github_app.clone() else {
+        return Ok(None);
+    };
+    let project_org = EOrganization::find_by_id(integration.organization)
+        .one(&ctx.db.worker_db)
+        .await
+        .context("loading organization for github app")?
+        .ok_or_else(|| anyhow!("integration organization not found"))?;
+    let Some(installation_id) = project_org.github_installation_id else {
+        return Ok(None);
+    };
+    let pem = std::fs::read_to_string(&github_app.private_key_file)
+        .context("reading github app private key")?;
+    let r = GithubAppReporter::new(ctx.http.clone(), "", github_app.app_id, pem, installation_id)?;
+    Ok(Some(Arc::new(r)))
 }
 
 /// Builds the payload skeleton expected by `execute_forge_status_report`.

@@ -112,6 +112,7 @@ pub fn make_test_server_with(
         manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         http: gradient_core::http::build_client().expect("http client"),
+        forge: gradient_core::forge::ForgeRegistry::with_builtin(),
         shutdown: gradient_core::shutdown::Shutdown::new(),
         jwt_secret: SecretString::new(TEST_JWT_SECRET.to_string()),
         started_at: chrono::Utc::now(),
