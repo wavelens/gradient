@@ -61,6 +61,13 @@ impl Scheduler {
         self.job_notify.subscribe()
     }
 
+    /// Wake `build_dispatch_loop` now instead of waiting for its 5s tick. Called
+    /// when a job completes so the dependents it just unblocked are enqueued and
+    /// offered immediately, collapsing per-level latency on serial chains.
+    pub(crate) fn kick_dispatch(&self) {
+        self.dispatch_kick.notify_one();
+    }
+
     /// Returns ALL pending job candidates visible to the given worker.
     /// Used for `RequestJobList` / `RequestAllCandidates` (full snapshot).
     /// Also marks all returned IDs as sent so delta pushes skip them.
@@ -409,10 +416,14 @@ impl Scheduler {
                 {
                     error!(error = %e, evaluation_id = %j.evaluation_id, "flush_deferred_deps failed");
                 }
-                eval::handle_eval_job_completed(&self.state, j.evaluation_id).await
+                let r = eval::handle_eval_job_completed(&self.state, j.evaluation_id).await;
+                self.kick_dispatch();
+                r
             }
             Some(PendingJob::Build(j)) => {
-                build::handle_build_job_completed(&self.state, j.build_id).await
+                let r = build::handle_build_job_completed(&self.state, j.build_id).await;
+                self.kick_dispatch();
+                r
             }
             None => {
                 warn!(%job_id, "job_completed for unknown job");

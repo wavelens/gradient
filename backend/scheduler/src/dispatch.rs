@@ -231,14 +231,21 @@ async fn build_dispatch_loop(scheduler: Arc<Scheduler>) {
     let cancel = scheduler.state.shutdown.token();
     info!("build dispatch loop started");
     loop {
-        tokio::select! {
+        let timer_tick = tokio::select! {
             _ = cancel.cancelled() => {
                 info!("build dispatch loop shutting down");
                 return;
             }
-            _ = interval.tick() => {}
+            _ = interval.tick() => true,
+            _ = scheduler.dispatch_kick.notified() => false,
+        };
+        // rescore_count is an anti-starvation timeout measured in dispatch
+        // intervals, so only the timer advances it - reactive kicks (which can
+        // fire many times per interval) just run an extra dispatch pass.
+        if timer_tick {
+            scheduler.job_tracker.write().await.bump_rescore_counts();
         }
-        scheduler.job_tracker.write().await.bump_rescore_counts();
+
         if let Err(e) = requeue_transient_failures(&scheduler).await {
             error!(error = %e, "requeue_transient_failures error");
         }

@@ -64,6 +64,11 @@ pub struct Scheduler {
     /// (not `Notify`) so a bump fired while a session is busy is still observed
     /// on its next loop iteration instead of being a lost edge-triggered wakeup.
     pub(crate) job_notify: Arc<tokio::sync::watch::Sender<u64>>,
+    /// Kicks `build_dispatch_loop` to run a dispatch pass immediately instead of
+    /// waiting for its 5s tick, so a serial dependency chain advances at
+    /// completion speed rather than one level per interval. `notify_one` keeps a
+    /// single permit, so a kick fired mid-pass is still serviced next iteration.
+    pub(crate) dispatch_kick: Arc<tokio::sync::Notify>,
     /// Per-evaluation deferred dependency edges.
     ///
     /// The worker's BFS walks roots→leaves, so batch N may contain a
@@ -96,6 +101,7 @@ impl Scheduler {
             worker_pool: Arc::new(RwLock::new(WorkerPool::new())),
             job_tracker: Arc::new(RwLock::new(JobTracker::new())),
             job_notify: Arc::new(tokio::sync::watch::channel(0u64).0),
+            dispatch_kick: Arc::new(tokio::sync::Notify::new()),
             deferred_deps: Arc::new(RwLock::new(HashMap::new())),
             policy,
             instance: Arc::new(arc_swap::ArcSwap::from_pointee(score::InstanceContext::default())),
