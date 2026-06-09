@@ -202,5 +202,6 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
         pending_org_memberships,
         oidc_group_roles,
         board_events: tokio::sync::broadcast::channel(256).0,
+        reactor: Arc::new(crate::ci::CiStatusReactor),
     }))
 }

@@ -163,6 +163,7 @@ fn server_with_email(
         pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         board_events: tokio::sync::broadcast::channel(256).0,
+        reactor: std::sync::Arc::new(gradient_core::db::NoReactor),
     });
     TestServer::new(create_router(state))
 }

@@ -125,7 +125,7 @@ pub async fn dispatch_evaluation_event(
 /// alongside the per-project outbound integration: an eval row that has just
 /// been INSERTed (Queued, or Waiting+Approval/NoCache/Workers due to the
 /// trigger-time gates) never transitions through `update_evaluation_status`,
-/// so `dispatch_evaluation_event_for_status` would not fire for it. Without
+/// so the terminal-status reactor would not fire for it. Without
 /// this helper, the commit shows no Gradient check at all until an eval
 /// worker actually starts processing it.
 ///
@@ -498,7 +498,7 @@ async fn build_ci_report_from_payload(
     }
 
     // `build_id` takes precedence over `evaluation_id` even when both are
-    // present: the build-status dispatch (status.rs:dispatch_build_event_for_status)
+    // present: the build-status dispatch (CiStatusReactor::on_build_terminal)
     // emits a payload carrying BOTH so downstream actions can correlate the
     // build to its eval, but the forge reporter must load the build so it
     // can pick the per-build check context. Falling back to the
@@ -1066,6 +1066,7 @@ mod tests {
             pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
             oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
             board_events: tokio::sync::broadcast::channel(256).0,
+            reactor: std::sync::Arc::new(crate::db::NoReactor),
         })
     }
 

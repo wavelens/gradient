@@ -20,7 +20,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 
-use crate::ci::actions::{dispatch_build_event, dispatch_evaluation_event};
 use crate::state_machine::{BuildStateMachine, EvalStateMachine};
 use crate::types::*;
 
@@ -207,7 +206,10 @@ pub async fn update_build_status(
             let action_state = Arc::clone(&state);
             let action_build = updated_build.clone();
             state.shutdown.spawn(async move {
-                dispatch_build_event_for_status(&action_state, action_build, event_status).await;
+                action_state
+                    .reactor
+                    .on_build_terminal(&action_state, action_build, event_status)
+                    .await;
             });
 
             let pe_state = Arc::clone(&state);
@@ -351,7 +353,10 @@ pub async fn update_evaluation_status(
     let action_state = Arc::clone(&state);
     let action_eval = updated_eval.clone();
     state.shutdown.spawn(async move {
-        dispatch_evaluation_event_for_status(&action_state, action_eval, event_status).await;
+        action_state
+            .reactor
+            .on_eval_terminal(&action_state, action_eval, event_status)
+            .await;
     });
 
     let pe_state = Arc::clone(&state);
@@ -798,146 +803,6 @@ pub async fn find_active_leaders<C: ConnectionTrait>(
     Ok(out)
 }
 
-pub async fn dispatch_build_event_for_status(
-    state: &Arc<ServerState>,
-    build: MBuild,
-    status: BuildStatus,
-) {
-    let event = match status {
-        BuildStatus::Queued => "build.queued",
-        BuildStatus::Building => "build.started",
-        BuildStatus::Completed => "build.completed",
-        BuildStatus::FailedPermanent => "build.failed",
-        BuildStatus::FailedTimeout => "build.failed",
-        BuildStatus::FailedTransient => "build.failed_transient",
-        BuildStatus::Substituted => "build.substituted",
-        BuildStatus::Created | BuildStatus::Aborted | BuildStatus::DependencyFailed => return,
-    };
-
-    let evaluation = match EEvaluation::find_by_id(build.evaluation)
-        .one(&state.worker_db)
-        .await
-    {
-        Ok(Some(e)) => e,
-        Ok(None) => {
-            warn!(evaluation_id = %build.evaluation, "Evaluation not found for action dispatch");
-            return;
-        }
-        Err(e) => {
-            error!(error = %e, evaluation_id = %build.evaluation, "DB error looking up evaluation for action dispatch");
-            return;
-        }
-    };
-
-    let project_id = match evaluation.project {
-        Some(id) => id,
-        None => return,
-    };
-
-    let derivation_path = EDerivation::find_by_id(build.derivation)
-        .one(&state.worker_db)
-        .await
-        .ok()
-        .flatten()
-        .map(|d| d.store_path());
-
-    let payload = serde_json::json!({
-        "build_id": build.id,
-        "evaluation_id": build.evaluation,
-        "derivation_path": derivation_path,
-        "status": event,
-    });
-
-    dispatch_build_event(state, project_id, event, payload).await;
-}
-
-async fn dispatch_evaluation_event_for_status(
-    state: &Arc<ServerState>,
-    evaluation: MEvaluation,
-    status: EvaluationStatus,
-) {
-    let event = match status {
-        EvaluationStatus::Queued => "evaluation.queued",
-        EvaluationStatus::Fetching
-        | EvaluationStatus::EvaluatingFlake
-        | EvaluationStatus::EvaluatingDerivation => "evaluation.started",
-        EvaluationStatus::Building => "evaluation.building",
-        EvaluationStatus::Waiting => "evaluation.waiting",
-        EvaluationStatus::Completed => "evaluation.completed",
-        EvaluationStatus::Failed => "evaluation.failed",
-        EvaluationStatus::Aborted => "evaluation.aborted",
-    };
-
-    let project_id = match evaluation.project {
-        Some(id) => id,
-        None => return,
-    };
-
-    let payload = serde_json::json!({
-        "evaluation_id": evaluation.id,
-        "project_id": evaluation.project,
-        "repository": evaluation.repository,
-        "status": event,
-    });
-
-    dispatch_evaluation_event(state, project_id, event, payload).await;
-
-    react_to_source_comment_on_terminal(state, project_id, &evaluation, status).await;
-}
-
-/// If the evaluation has a `source_comment` (set by the `/gradient run` or
-/// `/gradient approve` PR-comment pipeline) and the status is terminal, post a
-/// thumbs-up / thumbs-down reaction on that comment via the project's
-/// configured reporter. Best-effort: failures are logged and swallowed.
-async fn react_to_source_comment_on_terminal(
-    state: &Arc<ServerState>,
-    project_id: ProjectId,
-    evaluation: &MEvaluation,
-    status: EvaluationStatus,
-) {
-    use crate::ci::{ReactionKind, actions::reporter_for_project};
-
-    let kind = match status {
-        EvaluationStatus::Completed => ReactionKind::ThumbsUp,
-        EvaluationStatus::Failed | EvaluationStatus::Aborted => ReactionKind::ThumbsDown,
-        _ => return,
-    };
-    let Some(raw) = evaluation.source_comment.as_ref() else {
-        return;
-    };
-    let Some(target) = parse_source_comment(raw) else {
-        warn!(
-            evaluation_id = %evaluation.id,
-            "evaluation.source_comment present but malformed; skipping reaction"
-        );
-        return;
-    };
-    let reporter = match reporter_for_project(state, project_id).await {
-        Ok(Some(r)) => r,
-        Ok(None) => return,
-        Err(e) => {
-            warn!(error = %e, %project_id, "resolving reporter for terminal-status reaction");
-            return;
-        }
-    };
-    if let Err(e) = reporter.add_reaction(&target, kind).await {
-        warn!(error = %e, %project_id, ?kind, "/gradient terminal reaction post failed");
-    }
-}
-
-fn parse_source_comment(value: &serde_json::Value) -> Option<crate::ci::ReactionTarget> {
-    let owner = value.get("owner")?.as_str()?.to_string();
-    let repo = value.get("repo")?.as_str()?.to_string();
-    let pr_number = value.get("pr_number")?.as_u64()?;
-    let comment_id = value.get("comment_id")?.as_i64()?;
-    Some(crate::ci::ReactionTarget {
-        owner,
-        repo,
-        pr_number,
-        comment_id,
-    })
-}
-
 #[cfg(test)]
 mod reelect_leader_tests {
     use super::*;
@@ -1132,6 +997,7 @@ mod reelect_leader_tests {
             pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
             oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
             board_events: tokio::sync::broadcast::channel(256).0,
+            reactor: std::sync::Arc::new(crate::db::NoReactor),
         })
     }
 

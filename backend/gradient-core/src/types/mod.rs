@@ -150,6 +150,10 @@ pub struct ServerState {
     /// Broadcast of live events (queue depth, worker/job dispatch, evaluation/
     /// build status, cache changes) to WebSocket subscribers.
     pub board_events: tokio::sync::broadcast::Sender<BoardEvent>,
+    /// Terminal-status reaction hook: `ci` turns terminal build/eval statuses
+    /// into forge events and PR-comment reactions. Tests and worker-side flows
+    /// use [`crate::db::NoReactor`].
+    pub reactor: Arc<dyn crate::db::StatusReactor>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
