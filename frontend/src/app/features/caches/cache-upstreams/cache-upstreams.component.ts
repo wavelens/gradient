@@ -15,6 +15,7 @@ import { CachesService, UpstreamCache, CacheSubscriptionMode } from '@core/servi
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
 import { injectCacheAccess } from '@core/resolvers/inject-access';
+import { normalizeProbeUrl, isGradientCacheInfo } from './cache-upstream-probe';
 
 @Component({
   selector: 'app-cache-upstreams',
@@ -234,12 +235,13 @@ export class CacheUpstreamsComponent implements OnInit {
     });
   }
 
-  probeHttpUrl(): void {
+  probeHttpUrl(): Promise<void> {
     this.probeSuggestsProto.set(false);
-    const url = this.upstreamForm.url.trim().replace(/\/$/, '');
-    if (!url) return;
-    fetch(`${url}/gradient-cache-info`, { method: 'GET', mode: 'cors' })
-      .then((r) => { if (r.ok) this.probeSuggestsProto.set(true); })
+    const url = normalizeProbeUrl(this.upstreamForm.url);
+    if (!url) return Promise.resolve();
+    return fetch(`${url}/gradient-cache-info?json`, { method: 'GET', mode: 'cors' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((body) => { if (isGradientCacheInfo(body)) this.probeSuggestsProto.set(true); })
       .catch(() => {});
   }
 

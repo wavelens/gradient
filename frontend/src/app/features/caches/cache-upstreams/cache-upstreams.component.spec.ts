@@ -69,6 +69,47 @@ function setup(access: AccessState): ComponentFixture<CacheUpstreamsComponent> {
   return fixture;
 }
 
+describe('CacheUpstreamsComponent - HTTP upstream probe', () => {
+  const realFetch = globalThis.fetch;
+  afterEach(() => { globalThis.fetch = realFetch; });
+
+  function probeWith(url: string, fetchImpl: typeof fetch) {
+    globalThis.fetch = fetchImpl;
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    fixture.componentInstance.upstreamForm.url = url;
+    return fixture.componentInstance;
+  }
+
+  it('does not probe a scheme-less URL that would hit our own origin', async () => {
+    const fetchSpy = vi.fn();
+    const component = probeWith('randomtext', fetchSpy as unknown as typeof fetch);
+    await component.probeHttpUrl();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(component.probeSuggestsProto()).toBe(false);
+  });
+
+  it('suggests proto only when the body is a real gradient-cache-info', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ GradientVersion: '0.1.0', GradientUrl: 'https://g.example.com' }),
+    });
+    const component = probeWith('https://g.example.com', fetchSpy as unknown as typeof fetch);
+    await component.probeHttpUrl();
+    expect(fetchSpy).toHaveBeenCalledWith('https://g.example.com/gradient-cache-info?json', expect.anything());
+    expect(component.probeSuggestsProto()).toBe(true);
+  });
+
+  it('does not suggest proto when a 200 returns a non-gradient body', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.reject(new SyntaxError('Unexpected token <')),
+    });
+    const component = probeWith('https://not-gradient.example.com', fetchSpy as unknown as typeof fetch);
+    await component.probeHttpUrl();
+    expect(component.probeSuggestsProto()).toBe(false);
+  });
+});
+
 describe('CacheUpstreamsComponent - access gating', () => {
   it('renders the upstream list under read-only access', () => {
     const fixture = setup({ managed: false, canEdit: false, canTrigger: false });
