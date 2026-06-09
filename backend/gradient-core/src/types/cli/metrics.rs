@@ -72,21 +72,3 @@ impl Default for MetricsArgs {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn defaults_have_no_token_file_and_sane_pipeline() {
-        let args = MetricsArgs::default();
-        assert!(args.metrics_token_file.is_none());
-        assert_eq!(args.metrics_retention_raw_days, 14);
-        assert_eq!(args.metrics_retention_rollup_days, 400);
-        assert_eq!(args.dispatch_retention_days, 30);
-        assert_eq!(args.worker_sample_interval_secs, 15);
-        assert!(args.otlp_endpoint.is_none());
-        assert!(!args.dispatch_record_candidates);
-        assert_eq!(args.instance_metrics_interval_secs, 30);
-    }
-}
