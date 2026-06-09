@@ -193,6 +193,15 @@ own origin and returns a 200 `index.html`) no longer reports a Gradient cache.
   `frontend/src/app/features/caches/cache-upstreams/cache-upstreams.component.spec.ts`
   (skips fetch for scheme-less input; suggests proto only on a valid body).
 
+## Frontend - component style budget (#325)
+
+The `anyComponentStyle` budget in `frontend/angular.json` (`maximumWarning: 6kB`,
+`maximumError: 10kB`) is the regression guard for per-component CSS bloat:
+`ng build --configuration production` fails if any single component stylesheet
+compiles over 10 kB. Large stylesheets are split into cohesive region files via
+`styleUrls` (e.g. `evaluation-log.{component,sidebar,messages,log}.scss`) so each
+stays under the warning threshold.
+
 ## Auth middleware response envelope
 
 Integration tests in `backend/web/tests/auth_middleware.rs` lock in the
