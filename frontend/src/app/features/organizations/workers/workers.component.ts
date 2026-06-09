@@ -33,7 +33,7 @@ import { WritableDirective, ManagedDisableDirective } from '@shared/access';
     ManagedDisableDirective,
   ],
   templateUrl: './workers.component.html',
-  styleUrl: './workers.component.scss',
+  styleUrls: ['./workers.component.scss', './workers.dialog.scss'],
 })
 export class WorkersComponent implements OnInit {
   private route = inject(ActivatedRoute);
