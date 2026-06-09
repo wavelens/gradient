@@ -385,7 +385,7 @@ mod tests {
         org: OrganizationId,
         drv_path: String,
     ) -> gradient_entity::derivation::Model {
-        let stripped = gradient_core::executer::strip_nix_store_prefix(&drv_path);
+        let stripped = gradient_core::executor::strip_nix_store_prefix(&drv_path);
         let (hash, name) = gradient_core::sources::parse_drv_hash_name(&stripped)
             .unwrap_or_else(|_| ("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(), "x".into()));
         gradient_entity::derivation::Model {

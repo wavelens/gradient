@@ -16,7 +16,7 @@ use sea_orm::EntityTrait;
 use sea_orm::{ActiveModelTrait, ColumnTrait, IntoActiveModel, QueryFilter, Set};
 use tracing::{debug, error, info, warn};
 
-use gradient_core::executer::strip_nix_store_prefix;
+use gradient_core::executor::strip_nix_store_prefix;
 use gradient_core::types::proto::{
     BuildFailureKind, BuildMetrics, BuildOutput, CandidateScore, DiscoveredDerivation, JobCandidate,
     JobKind,

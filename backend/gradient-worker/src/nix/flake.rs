@@ -7,7 +7,7 @@
 use std::collections::HashSet;
 
 use anyhow::{Context, Result};
-use gradient_core::executer::strip_nix_store_prefix;
+use gradient_core::executor::strip_nix_store_prefix;
 use tracing::debug;
 
 use crate::nix::nix_eval::{NixEvaluator, escape_nix_str};

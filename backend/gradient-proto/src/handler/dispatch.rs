@@ -9,7 +9,7 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
-use gradient_core::executer::strip_nix_store_prefix;
+use gradient_core::executor::strip_nix_store_prefix;
 use gradient_core::types::ids::{DerivationId, OrganizationId};
 use gradient_core::types::*;
 use tokio::sync::Semaphore;
