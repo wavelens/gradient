@@ -71,7 +71,9 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
         "Starting Gradient server bootstrap",
     );
 
-    let config = Arc::new(RuntimeConfig::from_cli(&cli).map_err(InitError::NetworkConfig)?);
+    let config = Arc::new(
+        RuntimeConfig::from_cli(&cli).map_err(|e| InitError::NetworkConfig(e.to_string()))?,
+    );
 
     let db = connect_db(&cli).await.map_err(InitError::Database)?;
     let web_db = connect_web_db(&cli).await.map_err(InitError::WebDatabase)?;

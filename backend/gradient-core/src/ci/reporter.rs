@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::ci::http_validation::validate_webhook_url;
+use crate::ci::http_validation::{WebhookUrlError, validate_webhook_url};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -16,7 +16,7 @@ use tracing::warn;
 /// Reuses the SSRF guard from the webhook module: rejects non-http(s) schemes
 /// and IP literals / hostnames pointing at loopback, link-local (cloud
 /// metadata), private, or otherwise-unsafe ranges.
-fn validate_safe_outbound_url(url: &str) -> Result<(), String> {
+fn validate_safe_outbound_url(url: &str) -> Result<(), WebhookUrlError> {
     validate_webhook_url(url).map(|_| ())
 }
 

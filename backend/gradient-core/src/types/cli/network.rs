@@ -41,19 +41,29 @@ impl Default for NetworkArgs {
     }
 }
 
+/// Parse failure for a single CIDR entry; carries the offending token so the
+/// operator can spot which one was malformed.
+#[derive(Debug, thiserror::Error)]
+#[error("invalid CIDR `{entry}`: {source}")]
+pub struct CidrParseError {
+    pub entry: String,
+    #[source]
+    pub source: ipnet::AddrParseError,
+}
+
 /// Parse a comma-separated CIDR list. Empty / whitespace-only entries are
-/// skipped. Returns the original entry text as the error so the operator
-/// can spot which token was malformed.
-pub fn parse_cidr_list(s: &str) -> Result<Vec<IpNet>, String> {
+/// skipped.
+pub fn parse_cidr_list(s: &str) -> Result<Vec<IpNet>, CidrParseError> {
     let mut out = Vec::new();
     for raw in s.split(',') {
         let trimmed = raw.trim();
         if trimmed.is_empty() {
             continue;
         }
-        let net: IpNet = trimmed
-            .parse()
-            .map_err(|e| format!("invalid CIDR `{trimmed}`: {e}"))?;
+        let net: IpNet = trimmed.parse().map_err(|source| CidrParseError {
+            entry: trimmed.to_string(),
+            source,
+        })?;
         out.push(net);
     }
     Ok(out)
@@ -99,13 +109,13 @@ mod tests {
     #[test]
     fn malformed_entry_returns_err() {
         let err = parse_cidr_list("not-a-cidr").unwrap_err();
-        assert!(err.contains("not-a-cidr"));
+        assert!(err.to_string().contains("not-a-cidr"));
     }
 
     #[test]
     fn malformed_entry_in_middle_returns_err() {
         let err = parse_cidr_list("10.0.0.0/8, banana, 192.168.0.0/16").unwrap_err();
-        assert!(err.contains("banana"));
+        assert!(err.to_string().contains("banana"));
     }
 
     #[test]

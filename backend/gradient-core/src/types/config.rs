@@ -152,14 +152,14 @@ impl Cli {
         })
     }
 
-    /// Returns the resolved network config, or an error string naming the
-    /// offending entry if either CIDR list fails to parse.
-    pub fn network_config(&self) -> Result<NetworkConfig, String> {
+    /// Returns the resolved network config, naming the offending env var if
+    /// either CIDR list fails to parse.
+    pub fn network_config(&self) -> Result<NetworkConfig, ConfigError> {
         Ok(NetworkConfig {
             trusted_proxies: super::cli::parse_cidr_list(&self.network.trusted_proxies)
-                .map_err(|e| format!("GRADIENT_TRUSTED_PROXIES: {e}"))?,
+                .map_err(ConfigError::TrustedProxies)?,
             local_ips: super::cli::parse_cidr_list(&self.network.local_ips)
-                .map_err(|e| format!("GRADIENT_LOCAL_IPS: {e}"))?,
+                .map_err(ConfigError::LocalIps)?,
         })
     }
 
@@ -174,6 +174,14 @@ impl Cli {
         }
         Some(MetricsConfig { token })
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ConfigError {
+    #[error("GRADIENT_TRUSTED_PROXIES: {0}")]
+    TrustedProxies(#[source] super::cli::CidrParseError),
+    #[error("GRADIENT_LOCAL_IPS: {0}")]
+    LocalIps(#[source] super::cli::CidrParseError),
 }
 
 /// Resolved runtime configuration carried by `ServerState`.
@@ -210,7 +218,7 @@ pub struct RuntimeConfig {
 impl RuntimeConfig {
     /// Resolve a parsed [`Cli`] into a runtime configuration. Optional
     /// features collapse to `None` exactly when their accessor methods do.
-    pub fn from_cli(cli: &Cli) -> Result<Self, String> {
+    pub fn from_cli(cli: &Cli) -> Result<Self, ConfigError> {
         Ok(Self {
             logging: cli.logging.clone(),
             server: cli.server.clone(),
@@ -440,7 +448,7 @@ mod tests {
         let mut cli = base_cli();
         cli.network.trusted_proxies = "not-a-cidr".into();
         let err = cli.network_config().unwrap_err();
-        assert!(err.contains("GRADIENT_TRUSTED_PROXIES"));
+        assert!(err.to_string().contains("GRADIENT_TRUSTED_PROXIES"));
     }
 
     #[test]
@@ -448,8 +456,8 @@ mod tests {
         let mut cli = base_cli();
         cli.network.local_ips = "10.0.0.0/8, banana".into();
         let err = cli.network_config().unwrap_err();
-        assert!(err.contains("GRADIENT_LOCAL_IPS"));
-        assert!(err.contains("banana"));
+        assert!(err.to_string().contains("GRADIENT_LOCAL_IPS"));
+        assert!(err.to_string().contains("banana"));
     }
 
     #[test]

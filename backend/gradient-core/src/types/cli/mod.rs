@@ -34,7 +34,7 @@ pub use github_app::GitHubAppArgs;
 pub use limits::LimitsArgs;
 pub use logging::LoggingArgs;
 pub use metrics::MetricsArgs;
-pub use network::{NetworkArgs, in_any, parse_cidr_list};
+pub use network::{CidrParseError, NetworkArgs, in_any, parse_cidr_list};
 pub use oidc::OidcArgs;
 pub use proto::ProtoArgs;
 pub use registration::{DEFAULT_SENTRY_DSN, RegistrationArgs, effective_sentry_dsn};
