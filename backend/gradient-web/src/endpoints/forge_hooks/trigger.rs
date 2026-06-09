@@ -175,7 +175,7 @@ pub(super) async fn resolve_github_app_targets(
     client_ip: std::net::IpAddr,
 ) -> Vec<IntegrationId> {
     use gradient_core::ci::IntegrationKind;
-    use gradient_core::ip_allowlist::is_allowed as ip_allowed;
+    use crate::ip_allowlist::is_allowed as ip_allowed;
     use std::collections::HashSet;
 
     let candidate_orgs = EOrganization::find()

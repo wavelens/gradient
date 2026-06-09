@@ -20,7 +20,7 @@ use super::jwt::{decode_jwt, extract_bearer_or_cookie, token_from_cookie};
 use crate::audit::{RequestInfo, events, record as audit_record};
 use crate::client_ip::{ClientIp, resolve_client_ip};
 use crate::error::{ErrorCode, WebError, WebResult};
-use gradient_core::ip_allowlist::is_allowed as ip_allowed;
+use crate::ip_allowlist::is_allowed as ip_allowed;
 
 /// Extension type for optional authentication.
 /// Inserted by `authorize_optional` into every request regardless of whether

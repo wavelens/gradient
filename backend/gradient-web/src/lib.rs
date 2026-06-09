@@ -14,6 +14,7 @@ pub(crate) mod client_ip;
 pub mod endpoints;
 pub mod error;
 pub mod helpers;
+pub mod ip_allowlist;
 pub mod metrics_scope;
 pub mod otlp;
 pub mod permissions;

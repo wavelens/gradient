@@ -76,7 +76,7 @@ fn normalize_allowed_ips(raw: Option<Vec<String>>) -> Result<Option<Vec<String>>
     }
     let mut out = Vec::with_capacity(entries.len());
     for e in entries {
-        let canon = gradient_core::ip_allowlist::normalize_entry(&e).map_err(|err| {
+        let canon = crate::ip_allowlist::normalize_entry(&e).map_err(|err| {
             WebError::bad_request_with(
                 crate::error::ErrorCode::INVALID_ALLOWED_IP,
                 format!("invalid allowed_ips entry '{e}': {err}"),
