@@ -1,0 +1,296 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '../../../styles/variables' as *;
+
+// ── Log area ────────────────────────────────────────────────────────────────
+
+.log-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.no-log-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: $spacing-sm;
+  height: 100%;
+  color: $text-light;
+
+  .material-symbols-outlined { font-size: 32px; }
+}
+
+.metric-sep {
+  font-size: $font-size-xs;
+  color: $text-light;
+  margin: 0 2px;
+}
+
+.queue-waiting {
+  color: $color-warning;
+}
+
+.queued-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: $spacing-sm;
+  height: 100%;
+  color: $text-secondary;
+
+  .queued-icon {
+    font-size: 56px;
+    color: $color-warning;
+    animation: pulse 2s ease-in-out infinite;
+  }
+
+  .queued-title {
+    font-size: $font-size-lg;
+    font-weight: 600;
+    color: $text-primary;
+  }
+
+  .queued-sub {
+    font-size: $font-size-sm;
+    color: $text-light;
+  }
+
+  .waiting-unmet {
+    margin: $spacing-xs 0 0;
+    padding: 0;
+    list-style: none;
+    font-size: $font-size-sm;
+    color: $text-secondary;
+    text-align: left;
+
+    li {
+      padding: 2px 0;
+    }
+
+    code {
+      font-size: 0.85em;
+    }
+  }
+}
+
+.evaluating-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: $spacing-sm;
+  height: 100%;
+  color: $text-secondary;
+
+  .evaluating-icon {
+    font-size: 56px;
+    color: $color-info;
+    animation: pulse 1.8s ease-in-out infinite;
+  }
+
+  .evaluating-title {
+    font-size: $font-size-lg;
+    font-weight: 600;
+    color: $text-primary;
+  }
+
+  .evaluating-sub {
+    font-size: $font-size-sm;
+    color: $text-light;
+  }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+.select-build-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: $spacing-sm;
+  height: 100%;
+  color: $text-light;
+
+  .hint-icon {
+    font-size: 40px;
+    color: rgba($color-white, 0.1);
+  }
+
+  .hint-text {
+    font-size: $font-size-sm;
+    color: $text-light;
+  }
+}
+
+// Header shown above log output when a build is selected
+.log-build-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: $spacing-xs $spacing-md;
+  background: rgba($color-white, 0.03);
+  border-bottom: 1px solid rgba($color-border, 0.5);
+  flex-shrink: 0;
+  gap: $spacing-sm;
+  min-width: 0;
+}
+
+.log-build-path {
+  font-family: $font-family-mono;
+  font-size: $font-size-xs;
+  color: $text-secondary;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
+}
+
+.log-line-count {
+  font-size: $font-size-xs;
+  color: $text-light;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.log-container-wrapper {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.log-container {
+  flex: 1;
+  overflow-y: auto;
+  padding: $spacing-md $spacing-lg;
+}
+
+.log-output {
+  margin: 0;
+  font-family: $font-family-mono;
+  font-size: $font-size-xs;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: $text-primary;
+}
+
+.scroll-btn {
+  position: absolute;
+  bottom: $spacing-md;
+  right: $spacing-lg;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba($color-tertiary, 0.9);
+  border: 1px solid $color-border;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background $transition-fast;
+  backdrop-filter: blur(4px);
+
+  &:hover { background: $color-hover; }
+
+  .material-symbols-outlined { font-size: 18px; color: $text-primary; }
+}
+
+// ── Chunked log viewer ──────────────────────────────────────────────────────
+
+.log-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: $color-tertiary;
+  border-bottom: 1px solid $color-border;
+}
+
+.log-search-input {
+  flex: 1;
+  padding: 4px 8px;
+  font-family: $font-family-mono;
+  font-size: $font-size-xs;
+  background: $color-primary;
+  color: $text-primary;
+  border: 1px solid $color-border;
+  border-radius: 4px;
+}
+
+.log-search-count {
+  font-size: $font-size-xs;
+  color: $text-secondary;
+  white-space: nowrap;
+}
+
+.log-search-btn {
+  background: transparent;
+  border: 1px solid $color-border;
+  border-radius: 4px;
+  color: $text-secondary;
+  cursor: pointer;
+  padding: 2px 8px;
+
+  &:hover { color: $text-primary; }
+}
+
+.log-spacer {
+  width: 100%;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.log-line {
+  position: relative;
+  padding-left: 68px;
+  font-family: $font-family-mono;
+  font-size: $font-size-xs;
+  line-height: 1.6;
+  // Row is a plain block (not flex) so the content stays genuinely inline —
+  // a flex item would be blockified and re-introduce blank lines on copy.
+  user-select: none;
+  -webkit-user-select: none;
+
+  &--hl {
+    background: rgba(234, 179, 8, 0.18);
+  }
+}
+
+.log-gutter {
+  position: absolute;
+  left: 0;
+  width: 56px;
+  padding-right: 12px;
+  text-align: right;
+  color: $text-secondary;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: pointer;
+  opacity: 0.55;
+
+  &:hover { opacity: 1; }
+}
+
+.log-line-content {
+  display: inline;
+  color: $text-primary;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+  -webkit-user-select: text;
+}

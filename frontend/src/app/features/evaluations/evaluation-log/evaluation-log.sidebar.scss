@@ -1,0 +1,237 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '../../../styles/variables' as *;
+
+// ── Builds sidebar ──────────────────────────────────────────────────────────
+
+.builds-sidebar {
+  width: 260px;
+  flex-shrink: 0;
+  border-right: 1px solid $color-border;
+  background: $color-primary;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sidebar-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  padding: $spacing-sm $spacing-md;
+  font-size: $font-size-xs;
+  color: $text-light;
+
+  .breadcrumb-link {
+    color: $text-secondary;
+    &:hover { color: $text-primary; }
+  }
+  .breadcrumb-sep { color: $text-light; }
+  .breadcrumb-cur { color: $text-primary; font-weight: 500; }
+}
+
+.overview-block {
+  padding: $spacing-sm $spacing-md $spacing-md;
+  border-bottom: 1px solid rgba($color-border, 0.5);
+}
+
+.eval-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $spacing-sm;
+}
+
+.eval-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: $spacing-xs;
+  padding: $spacing-xs $spacing-sm;
+  border-radius: $border-radius-sm;
+  font-size: $font-size-xs;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+
+  .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  &.status-queued    { background: rgba($color-warning, 0.15); color: $color-warning; .dot { background: $color-warning; } }
+  &.status-fetching, &.status-evaluating, &.status-evaluatingflake, &.status-evaluatingderivation, &.status-building { background: rgba($color-info, 0.15); color: $color-info; .dot { background: $color-info; } }
+  &.status-waiting { background: rgba($color-warning, 0.15); color: $color-warning; .dot { background: $color-warning; } }
+  &.status-completed, &.status-substituted { background: rgba($color-success, 0.15); color: $color-success; .dot { background: $color-success; } }
+  &.status-failed  { background: rgba($color-danger, 0.15); color: $color-danger; .dot { background: $color-danger; } }
+  &.status-aborted, &.status-dependencyfailed { background: rgba($color-secondary, 0.15); color: $color-secondary; .dot { background: $color-secondary; } }
+}
+
+.builds-count {
+  font-size: $font-size-xs;
+  color: $text-light;
+  font-variant-numeric: tabular-nums;
+}
+
+.sidebar-search {
+  padding: 0 $spacing-md $spacing-sm;
+
+  input {
+    width: 100%;
+    box-sizing: border-box;
+    background: $color-primary;
+    border: 1px solid $color-border;
+    border-radius: $border-radius-sm;
+    color: $text-primary;
+    font-size: $font-size-xs;
+    padding: 6px 8px;
+    outline: none;
+
+    &:focus { border-color: $color-info; }
+    &::placeholder { color: $text-light; }
+  }
+}
+
+.builds-list-header {
+  padding: $spacing-xs $spacing-md;
+  font-size: $font-size-xs;
+  font-weight: 600;
+  color: $text-light;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  user-select: none;
+}
+
+.builds-list {
+  flex: 1;
+  overflow-y: auto;
+  display: block;
+  min-height: 0;
+}
+
+.no-builds {
+  padding: $spacing-md;
+  font-size: $font-size-sm;
+  color: $text-light;
+}
+
+.build-item {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  height: 36px;
+  box-sizing: border-box;
+  padding: 0 $spacing-md 0 calc($spacing-md - 3px);
+  cursor: pointer;
+  border-left: 3px solid transparent;
+  transition: background $transition-fast, border-color $transition-fast;
+
+  &:hover {
+    background: rgba($color-white, 0.04);
+    border-left-color: rgba($color-white, 0.12);
+  }
+
+  // Status-colored accent when selected
+  &.selected {
+    background: rgba($color-white, 0.06);
+
+    &.status-completed,
+    &.status-substituted            { border-left-color: $color-success; }
+    &.status-building               { border-left-color: $color-info; }
+    &.status-queued                 { border-left-color: $color-warning; }
+    &.status-failed  { border-left-color: $color-danger; }
+    &.status-aborted, &.status-dependencyfailed { border-left-color: $color-secondary; }
+  }
+}
+
+.build-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+
+  &.status-queued                 { background: $color-warning; }
+  &.status-building               { background: $color-info; }
+  &.status-completed,
+  &.status-substituted            { background: $color-success; }
+  &.status-failed  { background: $color-danger; }
+  &.status-aborted, &.status-dependencyfailed { background: $color-secondary; }
+}
+
+// Status sections (issue #32): the labelled, sticky header names the status so
+// it no longer relies on the dot colour alone.
+.build-group-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  padding: $spacing-xs $spacing-md;
+  background: $color-primary;
+  border-bottom: 1px solid $color-border;
+  font-size: $font-size-xs;
+  font-weight: 600;
+  color: $text-secondary;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  user-select: none;
+
+  .build-group-count {
+    margin-left: auto;
+    color: $text-light;
+    font-weight: 500;
+  }
+}
+
+.build-name {
+  flex: 1;
+  min-width: 0;
+  font-size: $font-size-sm;
+  color: $text-secondary;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color $transition-fast;
+
+  .build-item:hover &,
+  .build-item.selected & { color: $text-primary; }
+}
+
+.build-elapsed {
+  font-size: $font-size-xs;
+  color: $text-light;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+  white-space: nowrap;
+
+  &--running {
+    color: $color-info;
+  }
+}
+
+.build-dl-link,
+.graph-link {
+  display: none;
+  align-items: center;
+  color: $text-light;
+  text-decoration: none;
+  flex-shrink: 0;
+  padding: 2px;
+  border-radius: $border-radius-sm;
+  transition: color $transition-fast, background $transition-fast;
+
+  .material-symbols-outlined { font-size: 0.95rem; }
+
+  &:hover {
+    color: $text-primary;
+    background: $color-hover;
+  }
+}
+
+.build-item:hover .build-dl-link,
+.build-item:hover .graph-link { display: flex; }
