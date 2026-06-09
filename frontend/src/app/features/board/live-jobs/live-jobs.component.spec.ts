@@ -45,9 +45,30 @@ function setup(): ComponentFixture<BoardLiveJobsComponent> {
 }
 
 describe('BoardLiveJobsComponent - pending view toggle', () => {
+  beforeEach(() => sessionStorage.clear());
+
   it('defaults to dispatched view', () => {
     const fixture = setup();
     expect(fixture.componentInstance.view()).toBe('dispatched');
+  });
+
+  it('restores the persisted view and filters from sessionStorage', () => {
+    sessionStorage.setItem(
+      'board.live-jobs.filters',
+      JSON.stringify({ view: 'pending', kindFilter: 'build', statusFilter: 'all', scoreMin: null, scoreMax: null }),
+    );
+    const cmp = setup().componentInstance;
+    expect(cmp.view()).toBe('pending');
+    expect(cmp.kindFilter()).toBe('build');
+    expect(cmp.pendingJobs().length).toBe(1);
+  });
+
+  it('persists the view to sessionStorage when switched', () => {
+    const fixture = setup();
+    fixture.componentInstance.setView('pending');
+    fixture.detectChanges();
+    const stored = JSON.parse(sessionStorage.getItem('board.live-jobs.filters') ?? '{}');
+    expect(stored.view).toBe('pending');
   });
 
   it('loads pending jobs when switching to pending view', () => {

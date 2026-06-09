@@ -3697,3 +3697,26 @@ Frontend (`frontend/.../board/job-detail/job-detail.component.spec.ts`) -
 structured context panels: renders worker `cpu_count`, a derivations row
 (`pname`/`drv_path`), the job-context kind + history `peak_ram_mb`, and the
 instance-context windowed table with scalar counts.
+
+## Job & worker context fixes (#366)
+
+The dispatched-job detail now hides the server-only `core`/`cache` capability
+flags and the redundant standalone `fetch` row, shows the job-context
+architecture only for build jobs, links the worker id to its org-scoped metrics
+page (`organization_name` is now part of `DispatchedJobDetail`), makes the
+derivation rows the build entry-point, and falls back to a limited view (or a
+"Job not found" message) when a queued job has no dispatch record yet. The live
+board persists its tab/filter selection in `sessionStorage` and reconciles the
+optimistic live rows with the persisted, selectable rows shortly after a
+dispatch event.
+
+Frontend (`board/job-detail/job-detail.component.spec.ts`) - capability list
+excludes `core`/`cache` and has no separate `Fetch` row; architecture renders
+for build jobs and is hidden for eval jobs; the worker id links to
+`/organization/{org}/workers/{id}/metrics`; an undispatched job renders the
+pending view without a scoring breakdown, and an unknown id renders "Job not
+found".
+
+Frontend (`board/live-jobs/live-jobs.component.spec.ts`) - the view/filter
+selection round-trips through `sessionStorage`: a persisted `pending` view is
+restored on load and switching the tab writes it back.
