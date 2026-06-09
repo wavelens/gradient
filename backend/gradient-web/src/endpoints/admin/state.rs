@@ -17,7 +17,8 @@ use axum::extract::{Query, State};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, http::header};
 use gradient_core::state::export;
-use gradient_core::types::{MUser, ServerState};
+use gradient_core::types::{MUser};
+use gradient_core::ServerState;
 use serde::Deserialize;
 use std::sync::Arc;
 

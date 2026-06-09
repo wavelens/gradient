@@ -9,20 +9,19 @@
 //! implements it. The call stays an in-process awaited trait call, so ordering
 //! and error handling match the prior inline dispatch exactly.
 
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 
-use crate::types::{MBuild, MEvaluation, ServerState};
+use super::DbContext;
+use crate::types::{MBuild, MEvaluation};
 
 #[async_trait]
 pub trait StatusReactor: Send + Sync + std::fmt::Debug {
-    async fn on_build_terminal(&self, state: &Arc<ServerState>, build: MBuild, status: BuildStatus);
+    async fn on_build_terminal(&self, ctx: &DbContext, build: MBuild, status: BuildStatus);
     async fn on_eval_terminal(
         &self,
-        state: &Arc<ServerState>,
+        ctx: &DbContext,
         evaluation: MEvaluation,
         status: EvaluationStatus,
     );
@@ -34,6 +33,6 @@ pub struct NoReactor;
 
 #[async_trait]
 impl StatusReactor for NoReactor {
-    async fn on_build_terminal(&self, _: &Arc<ServerState>, _: MBuild, _: BuildStatus) {}
-    async fn on_eval_terminal(&self, _: &Arc<ServerState>, _: MEvaluation, _: EvaluationStatus) {}
+    async fn on_build_terminal(&self, _: &DbContext, _: MBuild, _: BuildStatus) {}
+    async fn on_eval_terminal(&self, _: &DbContext, _: MEvaluation, _: EvaluationStatus) {}
 }

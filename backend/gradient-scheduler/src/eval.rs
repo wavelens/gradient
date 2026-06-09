@@ -20,6 +20,7 @@ use gradient_core::db::{
 use gradient_core::executor::strip_nix_store_prefix;
 use gradient_core::sources::{get_hash_from_path, parse_drv_hash_name};
 use gradient_core::types::*;
+use gradient_core::ServerState;
 use sea_orm::{ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use tracing::{debug, error, info};
 
@@ -115,7 +116,7 @@ impl DerivationInsertBatch {
                 {
                     error!(error = %e, "failed to insert derivations");
                     update_evaluation_status_with_error(
-                        Arc::clone(state),
+                        &state.db(),
                         evaluation.clone(),
                         EvaluationStatus::Failed,
                         format!("failed to insert derivations: {}", e),
@@ -310,7 +311,7 @@ impl<'a> EvalResultProcessor<'a> {
                 {
                     error!(error = %e, "failed to insert builds");
                     update_evaluation_status_with_error(
-                        Arc::clone(self.state),
+                        &self.state.db(),
                         self.evaluation.clone(),
                         EvaluationStatus::Failed,
                         format!("failed to insert builds: {}", e),
@@ -358,7 +359,7 @@ impl<'a> EvalResultProcessor<'a> {
         for build in substituted {
             self.state
                 .reactor
-                .on_build_terminal(self.state, build, BuildStatus::Substituted)
+                .on_build_terminal(&self.state.db(), build, BuildStatus::Substituted)
                 .await;
         }
         Ok(())
@@ -485,7 +486,7 @@ impl<'a> EvalResultProcessor<'a> {
                 continue;
             };
             if let Err(e) = gradient_core::db::add_features(
-                Arc::clone(self.state),
+                &self.state.db(),
                 d.required_features.clone(),
                 gradient_entity::feature::FeatureKind::Feature,
                 Some(drv_id),
@@ -501,7 +502,7 @@ impl<'a> EvalResultProcessor<'a> {
     async fn record_eval_messages(&self, warnings: &[String], errors: &[String]) {
         for warning in warnings {
             record_evaluation_message(
-                self.state,
+                &self.state.db(),
                 self.evaluation_id,
                 MessageLevel::Warning,
                 warning.clone(),
@@ -511,7 +512,7 @@ impl<'a> EvalResultProcessor<'a> {
         }
         for error in errors {
             record_evaluation_message(
-                self.state,
+                &self.state.db(),
                 self.evaluation_id,
                 MessageLevel::Error,
                 error.clone(),
@@ -580,7 +581,7 @@ impl<'a> EvalResultProcessor<'a> {
             let gc_keep = project.keep_evaluations as usize;
             self.state.shutdown.spawn(async move {
                 if let Err(e) =
-                    gradient_core::db::gc_project_evaluations(gc_state, project_id, gc_keep).await
+                    gradient_core::db::gc_project_evaluations(&gc_state.db(), project_id, gc_keep).await
                 {
                     error!(error = %e, %project_id, "GC: per-project evaluation GC failed");
                 }
@@ -864,7 +865,7 @@ pub async fn handle_eval_job_completed(
         .unwrap_or_default();
     let queued_now = created.len();
     for build in created {
-        update_build_status(Arc::clone(state), build, BuildStatus::Queued).await;
+        update_build_status(&state.db(), build, BuildStatus::Queued).await;
     }
 
     if let Some(eval) = EEvaluation::find_by_id(evaluation_id)
@@ -880,7 +881,7 @@ pub async fn handle_eval_job_completed(
             queued = queued_now,
             "eval job complete; promoting evaluation to Building"
         );
-        update_evaluation_status(Arc::clone(state), eval, EvaluationStatus::Building).await;
+        update_evaluation_status(&state.db(), eval, EvaluationStatus::Building).await;
     }
 
     // If every build was already terminal (e.g. all Substituted), close the
@@ -999,7 +1000,7 @@ pub async fn handle_eval_job_failed(
         )
     {
         update_evaluation_status_with_error(
-            Arc::clone(state),
+            &state.db(),
             eval,
             EvaluationStatus::Failed,
             error.to_owned(),

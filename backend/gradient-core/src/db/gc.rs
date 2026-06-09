@@ -12,10 +12,10 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, IntoActiveModel,
     QueryFilter, QueryOrder, Statement,
 };
-use std::sync::Arc;
 use tracing::{info, warn};
 use uuid::Uuid;
 
+use super::DbContext;
 use crate::types::*;
 
 /// Deletes evaluations for `project_id`, retaining the most recent `keep`
@@ -24,7 +24,7 @@ use crate::types::*;
 /// Handles DB deletion, build log removal, NAR cache files, and GC root symlinks.
 /// Active evaluations are never deleted and never count toward `keep`.
 pub async fn gc_project_evaluations(
-    state: Arc<ServerState>,
+    ctx: &DbContext,
     project_id: ProjectId,
     keep: usize,
 ) -> Result<()> {
@@ -36,7 +36,7 @@ pub async fn gc_project_evaluations(
     let all_evals = EEvaluation::find()
         .filter(CEvaluation::Project.eq(project_id))
         .order_by_desc(CEvaluation::CreatedAt)
-        .all(&state.worker_db)
+        .all(&ctx.worker_db)
         .await
         .context("GC: failed to query evaluations")?;
 
@@ -46,7 +46,10 @@ pub async fn gc_project_evaluations(
         return Ok(());
     }
 
-    let to_delete: Vec<MEvaluation> = delete_indices.iter().map(|&i| all_evals[i].clone()).collect();
+    let to_delete: Vec<MEvaluation> = delete_indices
+        .iter()
+        .map(|&i| all_evals[i].clone())
+        .collect();
     let deleted_ids: std::collections::HashSet<EvaluationId> =
         to_delete.iter().map(|e| e.id).collect();
 
@@ -72,7 +75,7 @@ pub async fn gc_project_evaluations(
         if deleted_ids.contains(&eval.id) || drop_next {
             a.next = Set(None);
         }
-        a.update(&state.worker_db)
+        a.update(&ctx.worker_db)
             .await
             .context("GC: failed to NULL evaluation linked-list pointers")?;
     }
@@ -80,7 +83,7 @@ pub async fn gc_project_evaluations(
     for eval in &to_delete {
         let builds = EBuild::find()
             .filter(CBuild::Evaluation.eq(eval.id))
-            .all(&state.worker_db)
+            .all(&ctx.worker_db)
             .await
             .context("GC: failed to query builds")?;
 
@@ -89,7 +92,7 @@ pub async fn gc_project_evaluations(
             // NAR files and GC roots are owned by `derivation_output` /
             // `cache_derivation` and are cleaned up by the derivation GC pass.
             let log_id = build.log_id.unwrap_or(build.id);
-            if let Err(e) = state.log_storage.delete(log_id).await {
+            if let Err(e) = ctx.storage.log_storage.delete(log_id).await {
                 warn!(error = %e, build_id = %log_id, "GC: failed to remove build log");
             }
         }
@@ -98,25 +101,25 @@ pub async fn gc_project_evaluations(
         let commit_id = eval.commit;
 
         let a: AEvaluation = eval.clone().into_active_model();
-        a.delete(&state.worker_db)
+        a.delete(&ctx.worker_db)
             .await
             .context("GC: failed to delete evaluation")?;
 
         // Clean up the commit record if no other evaluation references it.
         let still_referenced = EEvaluation::find()
             .filter(CEvaluation::Commit.eq(commit_id))
-            .one(&state.worker_db)
+            .one(&ctx.worker_db)
             .await
             .context("GC: failed to check commit references")?;
 
         if still_referenced.is_none()
             && let Some(c) = ECommit::find_by_id(commit_id)
-                .one(&state.worker_db)
+                .one(&ctx.worker_db)
                 .await
                 .context("GC: failed to query commit")?
         {
             let ac: ACommit = c.into_active_model();
-            if let Err(e) = ac.delete(&state.worker_db).await {
+            if let Err(e) = ac.delete(&ctx.worker_db).await {
                 warn!(error = %e, commit_id = %commit_id, "GC: failed to delete orphaned commit");
             }
         }
@@ -165,12 +168,12 @@ fn evaluations_to_gc(statuses: &[EvaluationStatus], keep: usize) -> Vec<usize> {
 /// cascades from `cached_path`. The derivation rows are deleted last; FK
 /// cascade cleans up `cache_derivation`, `derivation_output`, dep edges,
 /// and feature edges.
-pub async fn gc_orphan_derivations(state: Arc<ServerState>, grace_hours: i64) -> Result<()> {
+pub async fn gc_orphan_derivations(ctx: &DbContext, grace_hours: i64) -> Result<()> {
     use std::collections::HashSet;
 
     let cutoff = crate::types::now() - ChronoDuration::hours(grace_hours.max(0));
 
-    let rows = state
+    let rows = ctx
         .worker_db
         .query_all(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
@@ -195,7 +198,7 @@ pub async fn gc_orphan_derivations(state: Arc<ServerState>, grace_hours: i64) ->
 
     info!(count = drv_ids.len(), "Running orphan derivation GC");
 
-    let db = &state.worker_db;
+    let db = &ctx.worker_db;
     let orphan_outputs = crate::db::fetch_in_chunks(&drv_ids, |chunk| async move {
         EDerivationOutput::find()
             .filter(CDerivationOutput::Derivation.is_in(chunk))
@@ -232,7 +235,7 @@ pub async fn gc_orphan_derivations(state: Arc<ServerState>, grace_hours: i64) ->
         .collect();
 
     for hash in &to_delete {
-        if let Err(e) = state.nar_storage.delete(hash).await {
+        if let Err(e) = ctx.storage.nar_storage.delete(hash).await {
             warn!(error = %e, %hash, "GC: failed to remove NAR file");
         }
     }
@@ -250,17 +253,19 @@ pub async fn gc_orphan_derivations(state: Arc<ServerState>, grace_hours: i64) ->
     }
 
     if !to_delete.is_empty() {
-        let _ = state.board_events.send(crate::types::BoardEvent::CacheChanged);
+        let _ = ctx
+            .board_events
+            .send(crate::types::BoardEvent::CacheChanged);
     }
 
     for drv_id in drv_ids {
         if let Some(d) = EDerivation::find_by_id(drv_id)
-            .one(&state.worker_db)
+            .one(&ctx.worker_db)
             .await
             .context("GC: failed to load derivation")?
         {
             let a: ADerivation = d.into_active_model();
-            if let Err(e) = a.delete(&state.worker_db).await {
+            if let Err(e) = a.delete(&ctx.worker_db).await {
                 warn!(error = %e, drv_id = %drv_id, "GC: failed to delete orphan derivation");
             }
         }
@@ -301,7 +306,10 @@ mod tests {
 
     #[test]
     fn deletes_done_evaluations_beyond_keep() {
-        assert_eq!(evaluations_to_gc(&[Completed, Failed, Completed], 1), vec![1, 2]);
+        assert_eq!(
+            evaluations_to_gc(&[Completed, Failed, Completed], 1),
+            vec![1, 2]
+        );
     }
 
     #[test]

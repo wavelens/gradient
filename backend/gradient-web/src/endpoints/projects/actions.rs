@@ -22,6 +22,7 @@ use gradient_core::ci::http_validation::validate_webhook_url;
 use gradient_core::types::actions::{ActionConfig, ActionType};
 use gradient_core::types::input::load_secret_bytes;
 use gradient_core::types::*;
+use gradient_core::ServerState;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, Order, QueryFilter, QueryOrder, QuerySelect,
@@ -554,7 +555,7 @@ pub async fn test_action(
         "context": "gradient/test-fire",
     });
 
-    gradient_core::ci::actions::execute_action(&state, action, &event, payload)
+    gradient_core::ci::actions::execute_action(&state.ci(), action, &event, payload)
         .await
         .map_err(|e| WebError::internal(format!("test fire failed: {}", e)))?;
 

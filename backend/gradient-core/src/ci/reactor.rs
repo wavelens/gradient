@@ -5,9 +5,9 @@
  */
 
 //! `ci` side of the [`StatusReactor`] inversion: turns terminal build/evaluation
-//! statuses into forge events and `/gradient` PR-comment reactions.
-
-use std::sync::Arc;
+//! statuses into forge events and `/gradient` PR-comment reactions. `db` hands
+//! us a [`DbContext`]; we pair it with our own HTTP client to form the
+//! [`CiContext`] the dispatch helpers need.
 
 use async_trait::async_trait;
 use gradient_entity::build::BuildStatus;
@@ -16,21 +16,32 @@ use sea_orm::EntityTrait;
 use tracing::{error, warn};
 
 use crate::ci::actions::{dispatch_build_event, dispatch_evaluation_event, reporter_for_project};
+use crate::ci::context::CiContext;
 use crate::ci::{ReactionKind, ReactionTarget};
-use crate::db::StatusReactor;
+use crate::db::{DbContext, StatusReactor};
 use crate::types::*;
 
 #[derive(Debug)]
-pub struct CiStatusReactor;
+pub struct CiStatusReactor {
+    http: reqwest::Client,
+}
+
+impl CiStatusReactor {
+    pub fn new(http: reqwest::Client) -> Self {
+        Self { http }
+    }
+
+    fn ci_context(&self, db: &DbContext) -> CiContext {
+        CiContext {
+            db: db.clone(),
+            http: self.http.clone(),
+        }
+    }
+}
 
 #[async_trait]
 impl StatusReactor for CiStatusReactor {
-    async fn on_build_terminal(
-        &self,
-        state: &Arc<ServerState>,
-        build: MBuild,
-        status: BuildStatus,
-    ) {
+    async fn on_build_terminal(&self, db: &DbContext, build: MBuild, status: BuildStatus) {
         let event = match status {
             BuildStatus::Queued => "build.queued",
             BuildStatus::Building => "build.started",
@@ -42,8 +53,10 @@ impl StatusReactor for CiStatusReactor {
             BuildStatus::Created | BuildStatus::Aborted | BuildStatus::DependencyFailed => return,
         };
 
+        let ctx = self.ci_context(db);
+
         let evaluation = match EEvaluation::find_by_id(build.evaluation)
-            .one(&state.worker_db)
+            .one(&ctx.db.worker_db)
             .await
         {
             Ok(Some(e)) => e,
@@ -63,7 +76,7 @@ impl StatusReactor for CiStatusReactor {
         };
 
         let derivation_path = EDerivation::find_by_id(build.derivation)
-            .one(&state.worker_db)
+            .one(&ctx.db.worker_db)
             .await
             .ok()
             .flatten()
@@ -76,12 +89,12 @@ impl StatusReactor for CiStatusReactor {
             "status": event,
         });
 
-        dispatch_build_event(state, project_id, event, payload).await;
+        dispatch_build_event(&ctx, project_id, event, payload).await;
     }
 
     async fn on_eval_terminal(
         &self,
-        state: &Arc<ServerState>,
+        db: &DbContext,
         evaluation: MEvaluation,
         status: EvaluationStatus,
     ) {
@@ -102,6 +115,8 @@ impl StatusReactor for CiStatusReactor {
             None => return,
         };
 
+        let ctx = self.ci_context(db);
+
         let payload = serde_json::json!({
             "evaluation_id": evaluation.id,
             "project_id": evaluation.project,
@@ -109,16 +124,16 @@ impl StatusReactor for CiStatusReactor {
             "status": event,
         });
 
-        dispatch_evaluation_event(state, project_id, event, payload).await;
+        dispatch_evaluation_event(&ctx, project_id, event, payload).await;
 
-        react_to_source_comment_on_terminal(state, project_id, &evaluation, status).await;
+        react_to_source_comment_on_terminal(&ctx, project_id, &evaluation, status).await;
     }
 }
 
 /// Post a thumbs-up/-down reaction on the `/gradient` PR comment that triggered
 /// this evaluation, once it reaches a terminal status. Best-effort.
 async fn react_to_source_comment_on_terminal(
-    state: &Arc<ServerState>,
+    ctx: &CiContext,
     project_id: ProjectId,
     evaluation: &MEvaluation,
     status: EvaluationStatus,
@@ -138,7 +153,7 @@ async fn react_to_source_comment_on_terminal(
         );
         return;
     };
-    let reporter = match reporter_for_project(state, project_id).await {
+    let reporter = match reporter_for_project(ctx, project_id).await {
         Ok(Some(r)) => r,
         Ok(None) => return,
         Err(e) => {

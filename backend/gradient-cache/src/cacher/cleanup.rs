@@ -7,6 +7,7 @@
 use anyhow::{Context, Result};
 use gradient_entity::build::BuildStatus;
 use gradient_core::types::*;
+use gradient_core::ServerState;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, IntoActiveModel,
     QueryFilter, Statement,
@@ -103,7 +104,7 @@ pub async fn cleanup_old_evaluations(state: Arc<ServerState>) -> Result<()> {
             continue;
         }
         if let Err(e) =
-            gradient_core::db::gc_project_evaluations(Arc::clone(&state), project.id, keep).await
+            gradient_core::db::gc_project_evaluations(&state.db(), project.id, keep).await
         {
             warn!(error = %e, project_id = %project.id, "Evaluation GC failed for project");
         }
@@ -387,6 +388,7 @@ async fn active_hashes(state: &Arc<ServerState>) -> Result<HashSet<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_core::db::{WebDb, WorkerDb};
     use gradient_core::storage::{EmailSender, NarStore};
     use sea_orm::{MockDatabase, Value};
     use std::collections::BTreeMap;

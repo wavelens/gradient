@@ -11,35 +11,34 @@
 //! are pruned while day/week aggregates are kept indefinitely. All bounds come
 //! from [`MetricsArgs`]; a `0` day-count disables that table's pruning.
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use tracing::{debug, warn};
 
-use crate::types::ServerState;
+use super::DbContext;
 
 const RETENTION_INTERVAL_SECS: u64 = 3600;
 const GRAN_MINUTE: i16 = 0;
 const GRAN_HOUR: i16 = 1;
 
-pub fn start_retention_loop(state: Arc<ServerState>) {
-    let shutdown = state.shutdown.clone();
-    shutdown.spawn(async move { retention_loop(state).await });
+pub fn start_retention_loop(ctx: DbContext) {
+    let shutdown = ctx.shutdown.clone();
+    shutdown.spawn(async move { retention_loop(ctx).await });
 }
 
-async fn retention_loop(state: Arc<ServerState>) {
+async fn retention_loop(ctx: DbContext) {
     let mut interval = tokio::time::interval(Duration::from_secs(RETENTION_INTERVAL_SECS));
     loop {
         interval.tick().await;
-        run_retention(&state).await;
+        run_retention(&ctx).await;
     }
 }
 
-async fn run_retention(state: &Arc<ServerState>) {
-    let cfg = &state.config.metrics_args;
+async fn run_retention(ctx: &DbContext) {
+    let cfg = &ctx.config.metrics_args;
     let now = crate::types::now();
-    let db = &state.worker_db;
+    let db = &ctx.worker_db;
 
     if cfg.metrics_retention_raw_days > 0 {
         let cutoff = now - chrono::Duration::days(cfg.metrics_retention_raw_days);
@@ -74,7 +73,9 @@ async fn run_retention(state: &Arc<ServerState>) {
         let cutoff = now - chrono::Duration::days(cfg.metrics_retention_rollup_days);
         if let Err(e) = gradient_entity::metric_rollup::Entity::delete_many()
             .filter(gradient_entity::metric_rollup::Column::BucketStart.lt(cutoff))
-            .filter(gradient_entity::metric_rollup::Column::Granularity.is_in([GRAN_MINUTE, GRAN_HOUR]))
+            .filter(
+                gradient_entity::metric_rollup::Column::Granularity.is_in([GRAN_MINUTE, GRAN_HOUR]),
+            )
             .exec(db)
             .await
         {

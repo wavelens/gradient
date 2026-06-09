@@ -5,13 +5,13 @@
  */
 
 use super::{FlakePrefetcher, PrefetchedFlake, SourceError};
+use crate::db::DbContext;
 use crate::types::input::{check_repository_url_is_ssh, vec_to_hex};
 use crate::types::*;
 use anyhow::Result;
 use async_trait::async_trait;
 use git2::{Direction, RemoteCallbacks};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, sea_query::Expr};
-use std::sync::Arc;
 use tracing::{debug, info, instrument, warn};
 
 // ── ProjectGitContext ─────────────────────────────────────────────────────────
@@ -25,7 +25,7 @@ use tracing::{debug, info, instrument, warn};
 /// trip and key decryption only happen once even when both are called in
 /// sequence (e.g. in `dispatch::poll_projects_for_evaluations`).
 struct ProjectGitContext<'a> {
-    state: &'a Arc<ServerState>,
+    ctx: &'a DbContext,
     project: &'a MProject,
     /// `Some((private_key, public_key))` for SSH repos; `None` for HTTPS/git.
     ssh_creds: Option<(String, String)>,
@@ -33,11 +33,11 @@ struct ProjectGitContext<'a> {
 
 impl<'a> ProjectGitContext<'a> {
     /// Resolve SSH credentials from the DB if the repository URL is SSH.
-    async fn new(state: &'a Arc<ServerState>, project: &'a MProject) -> Result<Self, SourceError> {
+    async fn new(ctx: &'a DbContext, project: &'a MProject) -> Result<Self, SourceError> {
         let url = &project.repository;
         let ssh_creds = if check_repository_url_is_ssh(url) {
             let organization = EOrganization::find_by_id(project.organization)
-                .one(&state.worker_db)
+                .one(&ctx.worker_db)
                 .await
                 .map_err(|e| SourceError::Database {
                     reason: e.to_string(),
@@ -46,15 +46,15 @@ impl<'a> ProjectGitContext<'a> {
                     id: project.organization,
                 })?;
             Some(super::ssh_key::decrypt_ssh_private_key(
-                &state.config.secrets.crypt_secret_file,
+                &ctx.config.secrets.crypt_secret_file,
                 organization,
-                &state.config.server.serve_url,
+                &ctx.config.server.serve_url,
             )?)
         } else {
             None
         };
         Ok(Self {
-            state,
+            ctx,
             project,
             ssh_creds,
         })
@@ -102,9 +102,11 @@ impl<'a> ProjectGitContext<'a> {
             // progress (perpetual re-eval under a fast poll interval).
             if let Some(last_evaluation) = self.project.last_evaluation
                 && let Some(evaluation) = EEvaluation::find_by_id(last_evaluation)
-                    .one(&self.state.worker_db)
+                    .one(&self.ctx.worker_db)
                     .await
-                    .map_err(|e| SourceError::Database { reason: e.to_string() })?
+                    .map_err(|e| SourceError::Database {
+                        reason: e.to_string(),
+                    })?
                 && evaluation.status.is_active()
             {
                 debug!(status = ?evaluation.status, "Evaluation already in progress, skipping forced re-eval");
@@ -116,7 +118,7 @@ impl<'a> ProjectGitContext<'a> {
             if let Err(e) = EProject::update_many()
                 .col_expr(CProject::ForceEvaluation, Expr::value(false))
                 .filter(CProject::Id.eq(self.project.id))
-                .exec(&self.state.worker_db)
+                .exec(&self.ctx.worker_db)
                 .await
             {
                 warn!(error = %e, "failed to clear force_evaluation flag");
@@ -130,7 +132,7 @@ impl<'a> ProjectGitContext<'a> {
         // successful trigger.
         if let Some(last_evaluation) = self.project.last_evaluation {
             let evaluation = EEvaluation::find_by_id(last_evaluation)
-                .one(&self.state.worker_db)
+                .one(&self.ctx.worker_db)
                 .await
                 .map_err(|e| SourceError::Database {
                     reason: e.to_string(),
@@ -143,7 +145,7 @@ impl<'a> ProjectGitContext<'a> {
                 }
 
                 let commit = ECommit::find_by_id(evaluation.commit)
-                    .one(&self.state.worker_db)
+                    .one(&self.ctx.worker_db)
                     .await
                     .map_err(|e| SourceError::Database {
                         reason: e.to_string(),
@@ -238,25 +240,25 @@ impl<'a> ProjectGitContext<'a> {
 
 // ── Public entry points ───────────────────────────────────────────────────────
 
-#[instrument(skip(state), fields(project_id = %project.id, project_name = %project.name))]
+#[instrument(skip(ctx), fields(project_id = %project.id, project_name = %project.name))]
 pub async fn check_project_updates(
-    state: Arc<ServerState>,
+    ctx: &DbContext,
     project: &MProject,
     branch: Option<&str>,
 ) -> Result<(bool, Vec<u8>), SourceError> {
-    ProjectGitContext::new(&state, project)
+    ProjectGitContext::new(ctx, project)
         .await?
         .check_for_updates(branch)
         .await
 }
 
-#[instrument(skip(state), fields(project_id = %project.id, project_name = %project.name, commit_hash = %vec_to_hex(commit_hash)))]
+#[instrument(skip(ctx), fields(project_id = %project.id, project_name = %project.name, commit_hash = %vec_to_hex(commit_hash)))]
 pub async fn get_commit_info(
-    state: Arc<ServerState>,
+    ctx: &DbContext,
     project: &MProject,
     commit_hash: &[u8],
 ) -> Result<(String, Option<String>, String), SourceError> {
-    ProjectGitContext::new(&state, project)
+    ProjectGitContext::new(ctx, project)
         .await?
         .commit_info(commit_hash)
         .await
@@ -265,15 +267,14 @@ pub async fn get_commit_info(
 /// Best-effort: resolve the project's current HEAD (or branch) commit, message,
 /// and author name. Used for manual trigger fires where we want a concrete
 /// commit even if the polling source says "no update".
-#[instrument(skip(state), fields(project_id = %project.id, project_name = %project.name))]
+#[instrument(skip(ctx), fields(project_id = %project.id, project_name = %project.name))]
 pub async fn resolve_head(
-    state: Arc<ServerState>,
+    ctx: &DbContext,
     project: &MProject,
     branch: Option<&str>,
 ) -> Result<(Vec<u8>, String, String), SourceError> {
-    let (_has_update, commit_hash) =
-        check_project_updates(Arc::clone(&state), project, branch).await?;
-    let (msg, _email, author) = get_commit_info(Arc::clone(&state), project, &commit_hash).await?;
+    let (_has_update, commit_hash) = check_project_updates(ctx, project, branch).await?;
+    let (msg, _email, author) = get_commit_info(ctx, project, &commit_hash).await?;
     Ok((commit_hash, msg, author))
 }
 

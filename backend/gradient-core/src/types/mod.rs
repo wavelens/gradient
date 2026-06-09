@@ -11,7 +11,6 @@ pub mod cached_path_info;
 pub mod cli;
 pub mod config;
 pub mod consts;
-pub mod db;
 pub mod ids;
 pub mod input;
 pub mod log_api;
@@ -39,7 +38,6 @@ pub use self::config::{
     RuntimeConfig, S3Config,
 };
 pub use self::consts::*;
-pub use self::db::{WebDb, WorkerDb};
 pub use self::entity_aliases::*;
 pub use self::ids::*;
 pub use self::input::*;
@@ -51,14 +49,9 @@ pub use self::triggers::{ConcurrencyPolicy, TriggerConfig, TriggerConfigError, T
 pub use self::waiting_reason::{UnmetRequirement, WaitingReason};
 pub use self::wildcard::*;
 
-use super::shutdown::Shutdown;
-use super::storage::LogStorage;
-use super::storage::NarStore;
-use super::storage::email::EmailSender;
 use chrono::NaiveDateTime;
 use clap::Parser;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 
 /// Current UTC wall-clock as a naive `NaiveDateTime`, the timestamp shape
 /// every persisted column expects. Single source of truth for code that
@@ -101,59 +94,6 @@ pub struct Cli {
     pub metrics: MetricsArgs,
     #[command(flatten)]
     pub network: NetworkArgs,
-}
-
-#[derive(Debug)]
-pub struct ServerState {
-    /// Pool used by the proto handler, scheduler, cache GC, and any
-    /// fire-and-forget background task spawned from a web handler that
-    /// should not contend with foreground HTTP requests.
-    pub worker_db: WorkerDb,
-    /// Dedicated DB pool used by the axum/web layer so HTTP requests are
-    /// not starved by the busy proto/scheduler pool under heavy NarPush load.
-    pub web_db: WebDb,
-    /// Resolved runtime configuration. Built once at startup from the parsed
-    /// [`Cli`]. Replaces the prior `cli: Cli` field so handlers depend on the
-    /// slice they need (`state.config.<group>.<field>`) instead of the full
-    /// 65-field parser DTO.
-    pub config: Arc<RuntimeConfig>,
-    pub log_storage: Arc<dyn LogStorage>,
-    pub email: Arc<dyn EmailSender>,
-    pub nar_storage: NarStore,
-    /// Shared outbound HTTP client. Reuse this for any outbound request
-    /// made from a handler or background task - never construct a fresh
-    /// `reqwest::Client` per call.
-    pub http: reqwest::Client,
-    /// Issued-but-unconsumed manifest CSRF state tokens with their issuance time.
-    pub manifest_state: Arc<crate::ci::manifest_state::ManifestStateStore>,
-    /// Manifest results awaiting one-shot pickup by the superuser's browser.
-    pub pending_credentials: Arc<crate::ci::manifest_state::PendingCredentialsStore>,
-    /// Graceful-shutdown coordination for all long-lived background tasks
-    /// (dispatch loops, outbound, cache loops, action deliveries, etc.).
-    pub shutdown: Shutdown,
-    /// JWT signing/verification secret loaded once at startup. Holding it in
-    /// memory avoids reading `secrets.jwt_secret_file` on every request and
-    /// makes the auth path resilient to transient filesystem errors.
-    pub jwt_secret: SecretString,
-    /// Wall-clock time the process bootstrapped. Used to derive
-    /// `gradient_uptime_seconds` for the metrics endpoint.
-    pub started_at: chrono::DateTime<chrono::Utc>,
-    /// Org memberships declared in state for users who did not exist at
-    /// apply time. Drained per-username when a user later registers or
-    /// signs in via OIDC for the first time. Empty when no state file is
-    /// configured or when every declared member already existed.
-    pub pending_org_memberships: Arc<crate::state::PendingOrgMemberships>,
-    /// OIDC group → (organization, role) grants resolved from state at startup
-    /// (`StateRole.oidc_group`). Applied additively on every OIDC login. Empty
-    /// when no state file is configured.
-    pub oidc_group_roles: Arc<crate::state::OidcGroupRoles>,
-    /// Broadcast of live events (queue depth, worker/job dispatch, evaluation/
-    /// build status, cache changes) to WebSocket subscribers.
-    pub board_events: tokio::sync::broadcast::Sender<BoardEvent>,
-    /// Terminal-status reaction hook: `ci` turns terminal build/eval statuses
-    /// into forge events and PR-comment reactions. Tests and worker-side flows
-    /// use [`crate::db::NoReactor`].
-    pub reactor: Arc<dyn crate::db::StatusReactor>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

@@ -17,6 +17,7 @@ use gradient_core::db::{
     collect_transitive_dependents, update_build_status, update_evaluation_status,
 };
 use gradient_core::types::*;
+use gradient_core::ServerState;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
 };
@@ -161,7 +162,7 @@ impl<'a> BuildStateHandler<'a> {
         // build `Substituted` here so the later `JobCompleted` finalizes it as
         // such instead of `Completed` (issue #303).
         if substituted {
-            update_build_status(Arc::clone(self.state), build, BuildStatus::Substituted).await;
+            update_build_status(&self.state.db(), build, BuildStatus::Substituted).await;
         }
 
         Ok(())
@@ -190,7 +191,7 @@ impl<'a> BuildStateHandler<'a> {
         } else {
             BuildStatus::Completed
         };
-        let leader = update_build_status(Arc::clone(self.state), build, terminal).await;
+        let leader = update_build_status(&self.state.db(), build, terminal).await;
         self.propagate_to_followers(&leader).await?;
 
         if was_external_cached {
@@ -337,20 +338,20 @@ impl<'a> BuildStateHandler<'a> {
                     .one(&self.state.worker_db)
                     .await?
                     .unwrap_or(build);
-                update_build_status(Arc::clone(self.state), reloaded, BuildStatus::FailedTransient)
+                update_build_status(&self.state.db(), reloaded, BuildStatus::FailedTransient)
                     .await;
                 info!(%build_id, attempt = attempt + 1, "transient build failure; scheduled for retry");
                 return Ok(());
             }
             FailureOutcome::Permanent => {
                 let leader =
-                    update_build_status(Arc::clone(self.state), build, BuildStatus::FailedPermanent)
+                    update_build_status(&self.state.db(), build, BuildStatus::FailedPermanent)
                         .await;
                 self.propagate_to_followers(&leader).await?;
             }
             FailureOutcome::Timeout => {
                 let leader =
-                    update_build_status(Arc::clone(self.state), build, BuildStatus::FailedTimeout)
+                    update_build_status(&self.state.db(), build, BuildStatus::FailedTimeout)
                         .await;
                 self.propagate_to_followers(&leader).await?;
             }
@@ -434,7 +435,7 @@ impl<'a> BuildStateHandler<'a> {
             else {
                 continue;
             };
-            update_build_status(Arc::clone(self.state), reloaded, leader.status).await;
+            update_build_status(&self.state.db(), reloaded, leader.status).await;
 
             if follower.derivation != leader.derivation {
                 let existing_outs = EDerivationOutput::find()
@@ -532,7 +533,7 @@ impl<'a> BuildStateHandler<'a> {
         .context("fetch builds for cascade")?;
 
         for build in cascaded_builds {
-            update_build_status(Arc::clone(self.state), build, BuildStatus::DependencyFailed).await;
+            update_build_status(&self.state.db(), build, BuildStatus::DependencyFailed).await;
         }
         Ok(())
     }
@@ -604,7 +605,7 @@ impl<'a> BuildStateHandler<'a> {
             eval_errors = eval_error_messages.len(),
             "evaluation finished"
         );
-        update_evaluation_status(Arc::clone(self.state), eval, target).await;
+        update_evaluation_status(&self.state.db(), eval, target).await;
         Ok(())
     }
 
@@ -729,7 +730,7 @@ impl<'a> BuildStateHandler<'a> {
             .await;
 
             if eval.status != target {
-                update_evaluation_status(Arc::clone(self.state), eval, target).await;
+                update_evaluation_status(&self.state.db(), eval, target).await;
             }
         }
 

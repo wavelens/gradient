@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Live events broadcast to WebSocket subscribers. Held on [`ServerState`] so
+//! Live events broadcast to WebSocket subscribers. Held on `AppState` so
 //! both the scheduler (queue/worker events) and the DB status helpers
 //! (evaluation/build/cache changes) can publish without a cyclic crate
 //! dependency. The web layer filters the stream per subscribed resource.

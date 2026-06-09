@@ -13,9 +13,9 @@
 
 use axum_test::TestServer;
 use gradient_core::storage::{EmailSender, NarStore};
-use gradient_core::types::{
-    MetricsConfig, RuntimeConfig, SecretString, ServerState, WebDb, WorkerDb,
-};
+use gradient_core::types::{MetricsConfig, RuntimeConfig, SecretString};
+use gradient_core::ServerState;
+use gradient_core::db::{WebDb, WorkerDb};
 use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase, Value};
 use std::collections::BTreeMap;
 use std::sync::Arc;

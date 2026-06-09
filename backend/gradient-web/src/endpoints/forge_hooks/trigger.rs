@@ -16,6 +16,7 @@ use gradient_core::ci::{
 use gradient_core::types::triggers::{TriggerConfig, TriggerType};
 use gradient_core::types::wildcard::Wildcard;
 use gradient_core::types::*;
+use gradient_core::ServerState;
 use gradient_scheduler::Scheduler;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
@@ -536,7 +537,7 @@ where
                     evaluation_id = %eval.id,
                     "forge webhook trigger fired"
                 );
-                gradient_core::ci::actions::dispatch_evaluation_created(state, &eval).await;
+                gradient_core::ci::actions::dispatch_evaluation_created(&state.ci(), &eval).await;
                 outcome.queued.push(QueuedEvaluation {
                     project_id: project.id,
                     project_name: project.name.clone(),
@@ -865,7 +866,7 @@ async fn dispatch_approval_granted(state: &Arc<ServerState>, eval: &MEvaluation)
         "status": "evaluation.approval_granted",
     });
     gradient_core::ci::actions::dispatch_evaluation_event(
-        state,
+        &state.ci(),
         project_id,
         "evaluation.approval_granted",
         payload,
@@ -876,7 +877,7 @@ async fn dispatch_approval_granted(state: &Arc<ServerState>, eval: &MEvaluation)
     // the gradient pipeline is now in flight. Without this the user only sees
     // the Approval check turn green and nothing else until the eval worker
     // actually picks the row up - looks like the click did nothing.
-    gradient_core::ci::actions::dispatch_evaluation_created(state, eval).await;
+    gradient_core::ci::actions::dispatch_evaluation_created(&state.ci(), eval).await;
 }
 
 async fn find_eval_by_check_id(state: &Arc<ServerState>, check_id: i64) -> Option<MEvaluation> {
@@ -925,7 +926,7 @@ async fn sender_is_trusted(
     repo: &str,
     sender: &str,
 ) -> bool {
-    let reporter = match gradient_core::ci::actions::reporter_for_project(state, project_id).await {
+    let reporter = match gradient_core::ci::actions::reporter_for_project(&state.ci(), project_id).await {
         Ok(Some(r)) => r,
         Ok(None) => return false,
         Err(e) => {
@@ -1321,7 +1322,7 @@ async fn fire_reaction_via_project(
     target: &gradient_core::ci::ReactionTarget,
     kind: gradient_core::ci::ReactionKind,
 ) {
-    let reporter = match gradient_core::ci::actions::reporter_for_project(state, project_id).await {
+    let reporter = match gradient_core::ci::actions::reporter_for_project(&state.ci(), project_id).await {
         Ok(Some(r)) => r,
         Ok(None) => return,
         Err(e) => {
@@ -1343,7 +1344,7 @@ async fn first_project_with_reporter(
 ) -> Option<ProjectId> {
     for project_id in project_ids {
         if let Ok(Some(_)) =
-            gradient_core::ci::actions::reporter_for_project(state, *project_id).await
+            gradient_core::ci::actions::reporter_for_project(&state.ci(), *project_id).await
         {
             return Some(*project_id);
         }
@@ -1363,7 +1364,7 @@ async fn fetch_pr_snapshot(
 ) -> Option<gradient_core::ci::PullRequestSnapshot> {
     for project_id in project_ids {
         let reporter =
-            match gradient_core::ci::actions::reporter_for_project(state, *project_id).await {
+            match gradient_core::ci::actions::reporter_for_project(&state.ci(), *project_id).await {
                 Ok(Some(r)) => r,
                 _ => continue,
             };
@@ -1408,7 +1409,7 @@ async fn post_wildcard_error_comment(
         };
         for project_id in project_ids {
             let reporter =
-                match gradient_core::ci::actions::reporter_for_project(state, project_id).await {
+                match gradient_core::ci::actions::reporter_for_project(&state.ci(), project_id).await {
                     Ok(Some(r)) => r,
                     Ok(None) => continue,
                     Err(e) => {

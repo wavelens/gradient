@@ -11,10 +11,10 @@
 //! propagates the `SourceError` to the caller so the web layer can return
 //! a 4xx with a useful message.
 
-use gradient_entity::project;
 use gradient_core::sources::check_project_updates;
-use sea_orm::{DatabaseBackend, MockDatabase};
+use gradient_entity::project;
 use gradient_test_support::state::test_state;
+use sea_orm::{DatabaseBackend, MockDatabase};
 
 /// `git://` URLs use the pure-Rust pkt-line path, so `TcpStream::connect`
 /// to an unbound loopback port returns "connection refused" without
@@ -35,7 +35,7 @@ fn check_project_updates_propagates_unreachable_remote_error() {
             ..Default::default()
         };
 
-        let result = check_project_updates(state, &project, None).await;
+        let result = check_project_updates(&state.db(), &project, None).await;
 
         assert!(
             result.is_err(),

@@ -11,7 +11,7 @@ use axum::extract::{Path, State};
 use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Response};
 use futures::StreamExt as _;
-use gradient_core::types::ServerState;
+use gradient_core::ServerState;
 use harmonia_file_nar::parse_nar;
 use serde::Serialize;
 use std::collections::BTreeMap;

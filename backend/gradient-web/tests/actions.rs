@@ -13,7 +13,9 @@
 use axum_test::TestServer;
 use gradient_entity::{ids::*, organization_user, project, project_action, project_action_delivery};
 use gradient_core::storage::{EmailSender, NarStore};
-use gradient_core::types::{RuntimeConfig, SecretString, ServerState, SessionId, WebDb, WorkerDb};
+use gradient_core::types::{RuntimeConfig, SecretString, SessionId};
+use gradient_core::ServerState;
+use gradient_core::db::{WebDb, WorkerDb};
 use sea_orm::{DatabaseBackend, MockDatabase};
 use serde_json::{Value, json};
 use std::sync::Arc;

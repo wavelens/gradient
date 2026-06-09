@@ -11,6 +11,7 @@ use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
 use gradient_core::types::input::vec_to_hex;
 use gradient_core::types::*;
+use gradient_core::ServerState;
 use sea_orm::{ColumnTrait, EntityTrait, Order, QueryFilter, QueryOrder};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;

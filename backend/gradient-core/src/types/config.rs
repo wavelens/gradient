@@ -184,7 +184,7 @@ pub enum ConfigError {
     LocalIps(#[source] super::cli::CidrParseError),
 }
 
-/// Resolved runtime configuration carried by `ServerState`.
+/// Resolved runtime configuration carried by `AppState`.
 ///
 /// Built once at startup from a parsed [`Cli`]. Handlers depend on the slice
 /// they need (`state.config.<group>.<field>`) instead of the full 65-field

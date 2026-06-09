@@ -95,6 +95,7 @@ use gradient_core::ci::{ApplyInput, ApplyOutcome, apply_trigger};
 use gradient_core::sources::{check_project_updates, get_commit_info};
 use gradient_core::types::triggers::{TriggerConfig, TriggerType};
 use gradient_core::types::*;
+use gradient_core::ServerState;
 use sea_orm::{ActiveModelTrait as _, ColumnTrait, Condition, EntityTrait, QueryFilter};
 use tracing::{debug, error, info, warn};
 
@@ -192,7 +193,7 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
         // Resolve target commit. Polling skips when there's no new commit;
         // time triggers always fire with whatever HEAD currently is.
         let commit_hash =
-            match check_project_updates(Arc::clone(state), project, branch_for_check.as_deref())
+            match check_project_updates(&state.db(), project, branch_for_check.as_deref())
                 .await
             {
                 Ok((true, hash)) => hash,
@@ -209,7 +210,7 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
                 }
             };
 
-        let (msg, _email, author) = get_commit_info(Arc::clone(state), project, &commit_hash)
+        let (msg, _email, author) = get_commit_info(&state.db(), project, &commit_hash)
             .await
             .unwrap_or_else(|_| (String::new(), None, String::new()));
 
@@ -244,7 +245,7 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
                         .await;
                 }
                 info!(project = %project.name, trigger_id = %trig.id, evaluation_id = %eval.id, "trigger created evaluation");
-                gradient_core::ci::actions::dispatch_evaluation_created(state, &eval).await;
+                gradient_core::ci::actions::dispatch_evaluation_created(&state.ci(), &eval).await;
             }
             Ok(other) => {
                 debug!(project = %project.name, trigger_id = %trig.id, ?other, "trigger applied without creating eval");

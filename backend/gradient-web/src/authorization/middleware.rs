@@ -11,6 +11,7 @@ use axum::middleware::Next;
 use axum::response::Response;
 
 use gradient_core::types::*;
+use gradient_core::ServerState;
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;

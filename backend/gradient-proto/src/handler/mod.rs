@@ -22,7 +22,7 @@ use axum::extract::{Extension, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use gradient_core::types::*;
+use gradient_core::ServerState;
 use gradient_scheduler::Scheduler;
 
 pub use cache_session::handle_cache_socket;

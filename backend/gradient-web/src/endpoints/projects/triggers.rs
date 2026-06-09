@@ -19,6 +19,7 @@ use gradient_core::ci::{ApplyInput, ApplyOutcome, ForgeType, apply_trigger};
 use gradient_core::sources::resolve_head;
 use gradient_core::types::triggers::{TriggerConfig, TriggerType};
 use gradient_core::types::*;
+use gradient_core::ServerState;
 use gradient_scheduler::Scheduler;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
@@ -386,7 +387,7 @@ pub async fn fire_now(
         });
 
     let (commit_hash, commit_message, author_name) =
-        resolve_head(Arc::clone(&state), &proj, branch_for_fire.as_deref())
+        resolve_head(&state.db(), &proj, branch_for_fire.as_deref())
             .await
             .map_err(|e| WebError::internal(e.to_string()))?;
 
@@ -431,7 +432,7 @@ pub async fn fire_now(
                     .cancel_evaluation_jobs(aborted_id, &aborted_builds)
                     .await;
             }
-            gradient_core::ci::actions::dispatch_evaluation_created(&state, &eval).await;
+            gradient_core::ci::actions::dispatch_evaluation_created(&state.ci(), &eval).await;
             serde_json::json!({
                 "outcome": "Created",
                 "evaluation_id": eval.id,

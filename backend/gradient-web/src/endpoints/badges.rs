@@ -32,6 +32,7 @@ use crate::error::WebError;
 use crate::helpers::OptionExt;
 use gradient_core::db::get_any_organization_by_name;
 use gradient_core::types::*;
+use gradient_core::ServerState;
 
 // ── Query parameters ─────────────────────────────────────────────────────────
 
@@ -390,7 +391,7 @@ pub async fn get_project_badge(
     Path((organization, project)): Path<(String, String)>,
     Query(params): Query<BadgeParams>,
 ) -> Result<Response, WebError> {
-    let organization = get_any_organization_by_name(state.0.clone(), organization)
+    let organization = get_any_organization_by_name(&state.db(), organization)
         .await?
         .or_not_found("Organization")?;
 

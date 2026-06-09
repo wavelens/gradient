@@ -16,9 +16,10 @@ use chrono::{Duration, Utc};
 use gradient_entity::{cli_device_authorization, session};
 use gradient_core::storage::{EmailSender, NarStore};
 use gradient_core::types::{
-    CliDeviceAuthorizationId, RuntimeConfig, SecretString, ServerState, SessionId, UserId, WebDb,
-    WorkerDb,
+    CliDeviceAuthorizationId, RuntimeConfig, SecretString, SessionId, UserId,
 };
+use gradient_core::ServerState;
+use gradient_core::db::{WebDb, WorkerDb};
 use jsonwebtoken::{EncodingKey, Header, encode};
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 use serde::Serialize;

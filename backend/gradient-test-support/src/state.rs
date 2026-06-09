@@ -10,7 +10,9 @@ use crate::log_storage::NoopLogStorage;
 use gradient_core::storage::EmailSender;
 use gradient_core::storage::LogStorage;
 use gradient_core::storage::NarStore;
-use gradient_core::types::{RuntimeConfig, SecretString, ServerState, WebDb, WorkerDb};
+use gradient_core::types::{RuntimeConfig, SecretString};
+use gradient_core::ServerState;
+use gradient_core::db::{WebDb, WorkerDb};
 use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase};
 use std::sync::Arc;
 

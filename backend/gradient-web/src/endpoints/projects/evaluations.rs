@@ -23,6 +23,7 @@ use gradient_core::sources::{check_project_updates, get_path_from_derivation_out
 use gradient_core::storage::nar_extract::{ExtractError, Extracted, extract_path_from_nar_bytes};
 use gradient_core::types::input::vec_to_hex;
 use gradient_core::types::*;
+use gradient_core::ServerState;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -218,7 +219,7 @@ pub async fn post_project_evaluate(
     let mut project_for_check = project.clone();
     project_for_check.force_evaluation = true;
     let (_has_updates, commit_hash) =
-        check_project_updates(Arc::clone(&state), &project_for_check, None)
+        check_project_updates(&state.db(), &project_for_check, None)
             .await
             .map_err(|e| {
                 WebError::bad_request_with(
@@ -261,7 +262,7 @@ pub async fn post_project_evaluate(
     .await?;
     let eval =
         gradient_core::ci::park_if_no_workers(&state.web_db, eval, project.organization).await?;
-    gradient_core::ci::actions::dispatch_evaluation_created(&state, &eval).await;
+    gradient_core::ci::actions::dispatch_evaluation_created(&state.ci(), &eval).await;
 
     Ok(ok_json("Evaluation started".to_string()))
 }
@@ -689,7 +690,7 @@ pub async fn get_entry_point_download(
     Path((organization, project)): Path<(String, String)>,
     Query(params): Query<EntryPointDownloadQuery>,
 ) -> Result<Response, WebError> {
-    let organization = get_any_organization_by_name(state.0.clone(), organization)
+    let organization = get_any_organization_by_name(&state.db(), organization)
         .await?
         .or_not_found("Organization")?;
 
