@@ -45,7 +45,7 @@ pub fn issue_state(store: &ManifestStateStore, user_id: UserId) -> String {
     use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
     let token = URL_SAFE_NO_PAD.encode(bytes);
 
-    let mut guard = store.lock().expect("manifest state store poisoned");
+    let mut guard = store.lock().unwrap_or_else(|p| p.into_inner());
     let cutoff = Instant::now() - STATE_TTL;
     guard.retain(|_, (_, ts)| *ts > cutoff);
     guard.insert(token.clone(), (user_id, Instant::now()));
@@ -55,7 +55,7 @@ pub fn issue_state(store: &ManifestStateStore, user_id: UserId) -> String {
 /// Removes the state from the store and returns the initiating user id iff
 /// the token existed and is not expired. One-shot consumption.
 pub fn validate_and_consume(store: &ManifestStateStore, state: &str) -> Option<UserId> {
-    let mut guard = store.lock().expect("manifest state store poisoned");
+    let mut guard = store.lock().unwrap_or_else(|p| p.into_inner());
     match guard.remove(state) {
         Some((user_id, ts)) if ts > Instant::now() - STATE_TTL => Some(user_id),
         _ => None,
@@ -65,7 +65,7 @@ pub fn validate_and_consume(store: &ManifestStateStore, state: &str) -> Option<U
 /// Stores `creds` keyed by `user_id`, overwriting any prior entry. Prunes
 /// expired entries as a side-effect.
 pub fn store_credentials(store: &PendingCredentialsStore, user_id: UserId, creds: ManifestResult) {
-    let mut guard = store.lock().expect("pending credentials store poisoned");
+    let mut guard = store.lock().unwrap_or_else(|p| p.into_inner());
     let cutoff = Instant::now() - STATE_TTL;
     guard.retain(|_, (_, ts)| *ts > cutoff);
     guard.insert(user_id, (creds, Instant::now()));
@@ -76,7 +76,7 @@ pub fn take_credentials(
     store: &PendingCredentialsStore,
     user_id: UserId,
 ) -> Option<ManifestResult> {
-    let mut guard = store.lock().expect("pending credentials store poisoned");
+    let mut guard = store.lock().unwrap_or_else(|p| p.into_inner());
     match guard.remove(&user_id) {
         Some((creds, ts)) if ts > Instant::now() - STATE_TTL => Some(creds),
         _ => None,
