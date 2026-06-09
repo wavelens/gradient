@@ -73,7 +73,13 @@ async fn run() -> std::io::Result<()> {
         return validate_state_and_exit(cli.storage.state_file.as_deref());
     }
 
-    let state = init_state(cli).await;
+    let state = match init_state(cli).await {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!(error = %e, "server bootstrap failed");
+            std::process::exit(1);
+        }
+    };
 
     info!(
         version = env!("CARGO_PKG_VERSION"),

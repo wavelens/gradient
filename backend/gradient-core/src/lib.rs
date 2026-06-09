@@ -33,12 +33,35 @@ use storage::NarStore;
 use storage::{FileLogStorage, S3LogStorage};
 use types::*;
 
-pub async fn init_state(cli: Cli) -> Arc<ServerState> {
+#[derive(Debug, thiserror::Error)]
+pub enum InitError {
+    #[error("missing required secret files (--crypt-secret-file / --jwt-secret-file)")]
+    MissingSecrets,
+    #[error("invalid network config: {0}")]
+    NetworkConfig(String),
+    #[error("database connection failed: {0}")]
+    Database(#[source] anyhow::Error),
+    #[error("web database pool failed: {0}")]
+    WebDatabase(#[source] anyhow::Error),
+    #[error("failed to load state configuration: {0}")]
+    StateLoad(String),
+    #[error("log storage init failed: {0}")]
+    LogStorage(#[source] anyhow::Error),
+    #[error("http client build failed: {0}")]
+    HttpClient(#[source] anyhow::Error),
+    #[error("failed to load JWT secret: {0}")]
+    JwtSecret(#[source] anyhow::Error),
+    #[error("email service init failed: {0}")]
+    Email(#[source] anyhow::Error),
+    #[error("S3 NAR storage error: {0}")]
+    S3Storage(String),
+    #[error("local NAR storage error: {0}")]
+    LocalStorage(String),
+}
+
+pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
     if cli.secrets.crypt_secret_file.is_empty() || cli.secrets.jwt_secret_file.is_empty() {
-        tracing::error!(
-            "--crypt-secret-file and --jwt-secret-file are required to run the server"
-        );
-        std::process::exit(1);
+        return Err(InitError::MissingSecrets);
     }
 
     tracing::info!(
@@ -48,28 +71,12 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
         "Starting Gradient server bootstrap",
     );
 
-    let config = Arc::new(RuntimeConfig::from_cli(&cli).unwrap_or_else(|e| {
-        tracing::error!(error = %e, "invalid network config");
-        std::process::exit(1);
-    }));
+    let config = Arc::new(RuntimeConfig::from_cli(&cli).map_err(InitError::NetworkConfig)?);
 
-    let db = match connect_db(&cli).await {
-        Ok(db) => db,
-        Err(e) => {
-            tracing::error!(error = %e, "Failed to connect to database");
-            std::process::exit(1);
-        }
-    };
+    let db = connect_db(&cli).await.map_err(InitError::Database)?;
+    let web_db = connect_web_db(&cli).await.map_err(InitError::WebDatabase)?;
 
-    let web_db = match connect_web_db(&cli).await {
-        Ok(db) => db,
-        Err(e) => {
-            tracing::error!(error = %e, "Failed to connect web database pool");
-            std::process::exit(1);
-        }
-    };
-
-    let (pending_org_memberships, oidc_group_roles) = match load_and_apply_state(
+    let state_result = load_and_apply_state(
         &db,
         cli.storage.state_file.as_deref(),
         &cli.secrets.crypt_secret_file,
@@ -77,13 +84,9 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
         cli.email.email_enabled,
     )
     .await
-    {
-        Ok(r) => (Arc::new(r.pending), Arc::new(r.oidc_group_roles)),
-        Err(e) => {
-            tracing::error!(error = %e, "Failed to load state configuration");
-            std::process::exit(1);
-        }
-    };
+    .map_err(|e| InitError::StateLoad(e.to_string()))?;
+    let pending_org_memberships = Arc::new(state_result.pending);
+    let oidc_group_roles = Arc::new(state_result.oidc_group_roles);
 
     if cli.storage.keep_evaluations > 0 {
         let max = cli.storage.keep_evaluations as i32;
@@ -112,56 +115,36 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
         }
     }
 
-    let local_log_storage = match FileLogStorage::new(Path::new(&cli.storage.base_path)).await {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::error!(error = %e, "Failed to initialize log storage");
-            std::process::exit(1);
-        }
-    };
+    let local_log_storage = FileLogStorage::new(Path::new(&cli.storage.base_path))
+        .await
+        .map_err(InitError::LogStorage)?;
 
-    let http = match http::build_client() {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::error!(error = %e, "Failed to build shared HTTP client");
-            std::process::exit(1);
-        }
-    };
+    let http = http::build_client().map_err(|e| InitError::HttpClient(e.into()))?;
 
-    let jwt_secret = match types::input::load_secret(&cli.secrets.jwt_secret_file) {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::error!(error = %e, "Failed to load JWT secret");
-            std::process::exit(1);
-        }
-    };
+    let jwt_secret =
+        types::input::load_secret(&cli.secrets.jwt_secret_file).map_err(InitError::JwtSecret)?;
 
-    let email_service = match EmailService::new(cli.email_config()).await {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::error!(error = %e, "Failed to initialize email service");
-            std::process::exit(1);
-        }
-    };
+    let email_service = EmailService::new(cli.email_config())
+        .await
+        .map_err(InitError::Email)?;
     let email: Arc<dyn storage::EmailSender> = Arc::new(email_service);
 
     let nar_storage = if let Some(s3) = cli.s3_config() {
         let secret = match s3.secret_access_key_file.as_deref() {
-            Some(path) => match std::fs::read_to_string(path) {
-                Ok(s) => Some(s.trim().to_string()),
-                Err(e) => {
-                    tracing::error!(
-                        path,
-                        error = %e,
-                        "Failed to read S3 secret access key file",
-                    );
-                    std::process::exit(1);
-                }
-            },
+            Some(path) => Some(
+                std::fs::read_to_string(path)
+                    .map_err(|e| {
+                        InitError::S3Storage(format!(
+                            "failed to read S3 secret access key file '{path}': {e}"
+                        ))
+                    })?
+                    .trim()
+                    .to_string(),
+            ),
             None => None,
         };
 
-        let store = match NarStore::s3(
+        let store = NarStore::s3(
             &s3.bucket,
             &s3.region,
             s3.endpoint.as_deref(),
@@ -169,21 +152,13 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
             secret.as_deref(),
             &s3.prefix,
             s3.virtual_hosted_style,
-        ) {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::error!(error = %e, "Failed to initialize S3 NAR storage");
-                std::process::exit(1);
-            }
-        };
-        if let Err(e) = store.ping().await {
-            tracing::error!(
-                bucket = %s3.bucket,
-                error = format!("{e:#}"),
-                "S3 NAR storage unreachable",
-            );
-            std::process::exit(1);
-        }
+        )
+        .map_err(|e| InitError::S3Storage(e.to_string()))?;
+
+        store.ping().await.map_err(|e| {
+            InitError::S3Storage(format!("bucket '{}' unreachable: {e:#}", s3.bucket))
+        })?;
+
         tracing::info!(
             bucket = %s3.bucket,
             access_key_id = ?s3.access_key_id.as_deref(),
@@ -192,16 +167,10 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
         );
         store
     } else {
-        match NarStore::local(&cli.storage.base_path) {
-            Ok(store) => {
-                tracing::info!(path = %cli.storage.base_path, "NAR storage: local");
-                store
-            }
-            Err(e) => {
-                tracing::error!(error = %e, "Failed to initialize local NAR storage");
-                std::process::exit(1);
-            }
-        }
+        let store =
+            NarStore::local(&cli.storage.base_path).map_err(|e| InitError::LocalStorage(e.to_string()))?;
+        tracing::info!(path = %cli.storage.base_path, "NAR storage: local");
+        store
     };
 
     let log_storage: Arc<dyn storage::LogStorage> = if cli.s3_config().is_some() {
@@ -215,7 +184,7 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
         Arc::new(local_log_storage)
     };
 
-    Arc::new(ServerState {
+    Ok(Arc::new(ServerState {
         worker_db: WorkerDb::new(db),
         web_db: WebDb::new(web_db),
         config,
@@ -231,5 +200,5 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
         pending_org_memberships,
         oidc_group_roles,
         board_events: tokio::sync::broadcast::channel(256).0,
-    })
+    }))
 }
