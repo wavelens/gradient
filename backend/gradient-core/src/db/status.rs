@@ -409,6 +409,26 @@ pub async fn update_evaluation_status_with_error(
     update_evaluation_status(state, evaluation, status).await
 }
 
+/// Inserts a single `evaluation_message` row, propagating any DB error.
+pub async fn insert_evaluation_message<C: ConnectionTrait>(
+    db: &C,
+    evaluation_id: EvaluationId,
+    level: MessageLevel,
+    message: String,
+    source: Option<String>,
+) -> Result<(), sea_orm::DbErr> {
+    let msg = AEvaluationMessage {
+        id: Set(EvaluationMessageId::now_v7()),
+        evaluation: Set(evaluation_id),
+        level: Set(level),
+        message: Set(message),
+        source: Set(source),
+        created_at: Set(crate::types::now()),
+    };
+    EEvaluationMessage::insert(msg).exec(db).await?;
+    Ok(())
+}
+
 /// Inserts a single `evaluation_message` row without changing the evaluation status.
 ///
 /// Use for partial failures (e.g. one attr path failed to evaluate) where the
@@ -420,15 +440,9 @@ pub async fn record_evaluation_message(
     message: String,
     source: Option<String>,
 ) {
-    let msg = AEvaluationMessage {
-        id: Set(EvaluationMessageId::now_v7()),
-        evaluation: Set(evaluation_id),
-        level: Set(level),
-        message: Set(message),
-        source: Set(source),
-        created_at: Set(crate::types::now()),
-    };
-    if let Err(e) = EEvaluationMessage::insert(msg).exec(&state.worker_db).await {
+    if let Err(e) =
+        insert_evaluation_message(&state.worker_db, evaluation_id, level, message, source).await
+    {
         error!(error = %e, %evaluation_id, "Failed to insert evaluation_message");
     }
 }
