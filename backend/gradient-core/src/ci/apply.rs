@@ -150,7 +150,8 @@ pub async fn apply_trigger<C: ConnectionTrait>(
                 abort_evaluation(db, running.id, AbortKind::Soft).await?;
                 aborted_evaluation = Some(running.id);
             }
-            ConcurrencyPolicy::All => unreachable!("filtered above"),
+            // Excluded by the `!concurrent_flag` guard; `All` allows concurrent runs, so no abort.
+            ConcurrencyPolicy::All => {}
         }
     }
 
