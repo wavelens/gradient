@@ -5,7 +5,7 @@
  */
 
 use chrono::Timelike;
-use gradient_core::cache::ingest::{IngestInput, SignTargets, ingest_metadata_only};
+use crate::ingest::{IngestInput, SignTargets, ingest_metadata_only};
 use gradient_core::types::ids::{CacheId, CacheMetricId};
 use gradient_core::types::*;
 use gradient_scheduler::Scheduler;

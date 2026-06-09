@@ -13,7 +13,7 @@ use axum::Extension;
 use axum::extract::{Multipart, Path, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use gradient_core::cache::ingest::{IngestInput, SignTargets, ingest_nar};
+use gradient_proto::ingest::{IngestInput, SignTargets, ingest_nar};
 use gradient_core::types::*;
 use serde::Deserialize;
 use serde_json::json;

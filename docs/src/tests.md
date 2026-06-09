@@ -3149,9 +3149,9 @@ Run with: `cargo test -p web --lib forge_hooks` and
 
 ## Cache upload - NAR ingest, endpoint, connector, and CLI (issue #261)
 
-### Shared NAR ingest (`core::cache::ingest`)
+### Shared NAR ingest (`gradient_proto::ingest`)
 
-Run with: `cargo test -p core cache::ingest`
+Run with: `cargo test -p gradient-proto ingest`
 
 - `malformed_store_path_bails_before_any_io` — a syntactically invalid store
   path is rejected before any blob write is attempted.

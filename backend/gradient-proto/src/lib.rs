@@ -40,6 +40,7 @@
 pub mod cap;
 pub mod client;
 pub mod handler;
+pub mod ingest;
 pub mod messages;
 pub mod outbound;
 pub mod server;

@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-pub mod cache;
 pub mod ci;
 pub mod constants;
 pub mod db;

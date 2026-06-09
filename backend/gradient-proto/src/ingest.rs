@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::nix_hash::{is_nix32_hash, normalize_nar_hash};
-use crate::storage::nar::NarStore;
-use crate::types::ids::{CacheId, CachedPathId, CachedPathSignatureId, OrganizationId};
-use crate::types::*;
+use gradient_core::nix_hash::{is_nix32_hash, normalize_nar_hash};
+use gradient_core::storage::nar::NarStore;
+use gradient_core::types::ids::{CacheId, CachedPathId, CachedPathSignatureId, OrganizationId};
+use gradient_core::types::*;
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter, Set,
@@ -187,7 +187,6 @@ async fn upsert_and_sign<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_entity::ids::*;
     use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
     use uuid::Uuid;
 
