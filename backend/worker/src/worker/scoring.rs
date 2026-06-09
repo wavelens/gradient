@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use proto::messages::{CandidateScore, JobCandidate};
+use proto::messages::{CandidateScore, JobCandidate, JobKind};
 use tracing::warn;
 
 use crate::connection::ProtoWriter;
@@ -25,6 +25,13 @@ use crate::proto::scorer::JobScorer;
 /// `delta_filter` is `true`, and sends `RequestJobChunk` messages to
 /// the server.  The final chunk always carries `is_final = true`; the
 /// server uses that to know the full submission is complete.
+///
+/// After the scores are sent, a `RequestJob` is emitted for each kind in
+/// `request_after` (capacity-gated by the caller). Scoring a fresh offer is what
+/// clears the server's rescore gate, so requesting here — rather than waiting for
+/// the next 10s heartbeat — lets a serial dependency chain advance at round-trip
+/// speed instead of one level per heartbeat.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn spawn_scoring_task(
     scorer: JobScorer,
     store: Arc<LocalNixStore>,
@@ -33,6 +40,7 @@ pub(super) fn spawn_scoring_task(
     candidates: Vec<JobCandidate>,
     delta_filter: bool,
     is_final: bool,
+    request_after: Vec<JobKind>,
 ) {
     tokio::spawn(async move {
         let started = std::time::Instant::now();
@@ -65,12 +73,12 @@ pub(super) fn spawn_scoring_task(
             "scoring task complete"
         );
 
+        use proto::messages::ClientMessage;
         if is_final {
             if let Err(e) = send_score_chunks(&writer, to_send) {
                 warn!(error = %e, "send_score_chunks (final) failed");
             }
         } else {
-            use proto::messages::ClientMessage;
             for chunk in to_send.chunks(1_000) {
                 if let Err(e) = writer.send(ClientMessage::RequestJobChunk {
                     scores: chunk.to_vec(),
@@ -79,6 +87,14 @@ pub(super) fn spawn_scoring_task(
                     warn!(error = %e, "send RequestJobChunk (non-final) failed");
                     break;
                 }
+            }
+        }
+
+        // Now that the server has the scores, claim work: the freshly-scored
+        // candidates have cleared the rescore gate and may be dispatchable.
+        for kind in request_after {
+            if let Err(e) = writer.send(ClientMessage::RequestJob { kind: kind.clone() }) {
+                warn!(error = %e, ?kind, "RequestJob after scoring failed");
             }
         }
     });
