@@ -11,7 +11,7 @@
 use gradient_core::ci::actions::{
     FORGE_STATUS_EVENTS, forge_status_for_event, forge_status_payload, matches_event,
 };
-use gradient_core::ci::reporter::CiStatus;
+use gradient_core::ci::CiStatus;
 use gradient_core::types::{ActionType, MProjectAction, ProjectActionId, ProjectId, UserId};
 use serde_json::json;
 use uuid::Uuid;
