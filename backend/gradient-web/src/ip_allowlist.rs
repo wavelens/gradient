@@ -21,10 +21,18 @@ pub fn is_allowed(ip: IpAddr, allowlist: &[String]) -> bool {
         .any(|net| net.contains(&ip))
 }
 
-pub fn normalize_entry(raw: &str) -> Result<String, String> {
+#[derive(Debug, thiserror::Error)]
+pub enum IpAllowlistError {
+    #[error("empty entry")]
+    Empty,
+    #[error("not a valid IP or CIDR: {0}")]
+    Invalid(String),
+}
+
+pub fn normalize_entry(raw: &str) -> Result<String, IpAllowlistError> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
-        return Err("empty entry".into());
+        return Err(IpAllowlistError::Empty);
     }
     if let Ok(net) = trimmed.parse::<IpNet>() {
         return Ok(net.to_string());
@@ -34,10 +42,11 @@ pub fn normalize_entry(raw: &str) -> Result<String, String> {
             IpAddr::V4(_) => 32,
             IpAddr::V6(_) => 128,
         };
-        let net = IpNet::new(ip, prefix).map_err(|e| e.to_string())?;
+        let net =
+            IpNet::new(ip, prefix).map_err(|_| IpAllowlistError::Invalid(trimmed.to_string()))?;
         return Ok(net.to_string());
     }
-    Err(format!("not a valid IP or CIDR: {trimmed}"))
+    Err(IpAllowlistError::Invalid(trimmed.to_string()))
 }
 
 fn normalize(ip: IpAddr) -> IpAddr {

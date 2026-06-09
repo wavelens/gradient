@@ -19,38 +19,48 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 /// multicast / unique-local (fc00::/7) / link-local (fe80::/10) /
 /// IPv4-mapped unsafe ranges. Hostnames are accepted at validation time;
 /// delivery-time DNS resolution is the caller's responsibility.
-pub fn validate_webhook_url(url: &str) -> Result<reqwest::Url, String> {
-    let parsed = reqwest::Url::parse(url).map_err(|e| format!("Invalid URL: {}", e))?;
+#[derive(Debug, thiserror::Error)]
+pub enum WebhookUrlError {
+    #[error("Invalid URL: {0}")]
+    Parse(#[from] url::ParseError),
+    #[error("URL scheme must be http or https, got '{0}'")]
+    Scheme(String),
+    #[error("URL must include a host")]
+    MissingHost,
+    #[error(
+        "URL points to a disallowed address ({0}); private/loopback/link-local/cloud-metadata addresses are blocked"
+    )]
+    UnsafeAddress(std::net::IpAddr),
+    #[error("URL host is empty")]
+    EmptyHost,
+    #[error("URL host 'localhost' is not allowed")]
+    Localhost,
+}
+
+pub fn validate_webhook_url(url: &str) -> Result<reqwest::Url, WebhookUrlError> {
+    let parsed = reqwest::Url::parse(url)?;
     match parsed.scheme() {
         "http" | "https" => {}
-        s => return Err(format!("URL scheme must be http or https, got '{}'", s)),
+        s => return Err(WebhookUrlError::Scheme(s.to_string())),
     }
-    let host = parsed
-        .host()
-        .ok_or_else(|| "URL must include a host".to_string())?;
+    let host = parsed.host().ok_or(WebhookUrlError::MissingHost)?;
     match host {
         url::Host::Ipv4(ip) => {
             if is_unsafe_ipv4(&ip) {
-                return Err(format!(
-                    "URL points to a disallowed address ({}); private/loopback/link-local/cloud-metadata addresses are blocked",
-                    ip
-                ));
+                return Err(WebhookUrlError::UnsafeAddress(ip.into()));
             }
         }
         url::Host::Ipv6(ip) => {
             if is_unsafe_ipv6(&ip) {
-                return Err(format!(
-                    "URL points to a disallowed address ({}); private/loopback/link-local addresses are blocked",
-                    ip
-                ));
+                return Err(WebhookUrlError::UnsafeAddress(ip.into()));
             }
         }
         url::Host::Domain(d) => {
             if d.is_empty() {
-                return Err("URL host is empty".to_string());
+                return Err(WebhookUrlError::EmptyHost);
             }
             if d.eq_ignore_ascii_case("localhost") {
-                return Err("URL host 'localhost' is not allowed".to_string());
+                return Err(WebhookUrlError::Localhost);
             }
         }
     }

@@ -194,7 +194,7 @@ pub async fn create_action(
         }
         ActionConfig::SendWebRequest { url, .. } => {
             if let Err(e) = validate_webhook_url(url) {
-                return Err(WebError::unprocessable_entity(e));
+                return Err(WebError::unprocessable_entity(e.to_string()));
             }
         }
     }
@@ -365,7 +365,7 @@ pub async fn update_action(
             }
             ActionConfig::SendWebRequest { url, .. } => {
                 if let Err(e) = validate_webhook_url(url) {
-                    return Err(WebError::unprocessable_entity(e));
+                    return Err(WebError::unprocessable_entity(e.to_string()));
                 }
             }
             ActionConfig::ForgeStatusReport { integration_id } => {

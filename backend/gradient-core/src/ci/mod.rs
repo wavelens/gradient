@@ -24,7 +24,7 @@ pub use self::apply::{
     park_if_no_workers, park_if_pending_approval, park_if_storage_full,
 };
 pub use self::github_app::*;
-pub use self::http_validation::validate_webhook_url;
+pub use self::http_validation::{WebhookUrlError, validate_webhook_url};
 pub use self::integration_lookup::*;
 pub use self::reporter::*;
 pub use self::reporting::*;
