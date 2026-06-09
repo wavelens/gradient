@@ -5,16 +5,17 @@
  */
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { ActivatedRoute } from '@angular/router';
-import { EMPTY, of } from 'rxjs';
+import { ActivatedRoute, provideRouter } from '@angular/router';
+import { EMPTY, of, throwError } from 'rxjs';
 import { BoardJobDetailComponent } from './job-detail.component';
-import { BoardService, DispatchedJobDetail } from '@core/services/board.service';
+import { BoardService, DispatchedJobDetail, PendingJobSummary } from '@core/services/board.service';
 import { EvaluationsService } from '@core/services/evaluations.service';
 
 const DETAIL: DispatchedJobDetail = {
   id: 'job-1',
   kind: 1,
   organization: 'o1',
+  organization_name: 'org-one',
   worker_id: 'w1',
   score: 12.5,
   dispatched_at: '2026-06-08T00:01:00Z',
@@ -26,7 +27,6 @@ const DETAIL: DispatchedJobDetail = {
   worker_context: {
     architectures: ['x86_64-linux'],
     system_features: ['kvm'],
-    fetch: true,
     capabilities: { core: true, federate: false, fetch: true, eval: false, build: true, cache: true },
     cpu_count: 8,
     cpu_core_score: 1.5,
@@ -82,12 +82,45 @@ const DETAIL: DispatchedJobDetail = {
   candidates: null,
 };
 
-function setup(): ComponentFixture<BoardJobDetailComponent> {
+const EVAL_DETAIL: DispatchedJobDetail = {
+  ...DETAIL,
+  kind: 0,
+  job_context: {
+    kind: 'Eval',
+    architecture: '',
+    missing_count: null,
+    missing_nar_size: null,
+    org_work_share: null,
+    rescore_count: 0,
+    queued_at: '2026-06-08T00:00:00Z',
+    ready_at: '2026-06-08T00:00:30Z',
+    fetch_flake: true,
+  },
+};
+
+const PENDING: PendingJobSummary = {
+  kind: 1,
+  organization: 'o1',
+  evaluation_id: 'e1',
+  build_id: 'b9',
+  queued_at: '2026-06-08T00:00:00Z',
+  dependency_count: 3,
+};
+
+function setup(board: Partial<BoardService> = {}, id = 'job-1'): ComponentFixture<BoardJobDetailComponent> {
   TestBed.configureTestingModule({
     imports: [BoardJobDetailComponent],
     providers: [
-      { provide: ActivatedRoute, useValue: { snapshot: { paramMap: { get: () => 'job-1' } } } },
-      { provide: BoardService, useValue: { getJob: () => of(DETAIL) } },
+      provideRouter([]),
+      { provide: ActivatedRoute, useValue: { snapshot: { paramMap: { get: () => id } } } },
+      {
+        provide: BoardService,
+        useValue: {
+          getJob: () => of(DETAIL),
+          getPendingJobs: () => of({ jobs: [], other_pending: 0 }),
+          ...board,
+        },
+      },
       { provide: EvaluationsService, useValue: { getBuild: () => EMPTY } },
     ],
   });
@@ -110,6 +143,23 @@ describe('BoardJobDetailComponent - structured context panels', () => {
     expect(worker.textContent).toContain('8');
   });
 
+  it('lists only worker capabilities, never the server-only core/cache flags', () => {
+    const el = setup().nativeElement as HTMLElement;
+    const caps = Array.from(el.querySelectorAll('.ctx.worker tr')).find((r) =>
+      r.textContent?.includes('Capabilities'),
+    ) as HTMLElement;
+    expect(caps.textContent).toContain('fetch');
+    expect(caps.textContent).toContain('build');
+    expect(caps.textContent).not.toContain('core');
+    expect(caps.textContent).not.toContain('cache');
+  });
+
+  it('has no redundant standalone Fetch row in the worker context', () => {
+    const el = setup().nativeElement as HTMLElement;
+    const labels = Array.from(el.querySelectorAll('.ctx.worker td.label')).map((c) => c.textContent?.trim());
+    expect(labels).not.toContain('Fetch');
+  });
+
   it('renders a derivations row with the pname / drv_path', () => {
     const el = setup().nativeElement as HTMLElement;
     const drv = el.querySelector('.ctx.job .drv-row') as HTMLElement;
@@ -118,19 +168,48 @@ describe('BoardJobDetailComponent - structured context panels', () => {
     expect(drv.textContent).toContain('/nix/store/xxx-foo');
   });
 
-  it('shows the job-context kind and history peak_ram_mb', () => {
+  it('links the worker id to the org-scoped worker metrics page', () => {
     const el = setup().nativeElement as HTMLElement;
-    const job = el.querySelector('section.ctx.job') as HTMLElement;
-    expect(job).toBeTruthy();
-    expect(job.textContent).toContain('Build');
-    expect(job.textContent).toContain('777');
+    const link = el.querySelector('.ids .worker-link') as HTMLAnchorElement;
+    expect(link).toBeTruthy();
+    expect(link.getAttribute('href')).toBe('/organization/org-one/workers/w1/metrics');
   });
 
-  it('renders the instance-context windowed table with scalar counts', () => {
+  it('shows the architecture for build jobs', () => {
     const el = setup().nativeElement as HTMLElement;
-    const inst = el.querySelector('section.ctx.instance') as HTMLElement;
-    expect(inst).toBeTruthy();
-    expect(inst.textContent).toContain('Instance context');
-    expect(inst.textContent).toContain('7');
+    const job = el.querySelector('section.ctx.job') as HTMLElement;
+    expect(job.textContent).toContain('Architecture');
+  });
+
+  it('hides the architecture for eval jobs', () => {
+    const el = setup({ getJob: () => of(EVAL_DETAIL) }).nativeElement as HTMLElement;
+    const job = el.querySelector('section.ctx.job') as HTMLElement;
+    expect(job.textContent).toContain('Eval');
+    expect(job.textContent).not.toContain('Architecture');
+  });
+});
+
+describe('BoardJobDetailComponent - pending fallback', () => {
+  it('renders a limited pending view when the job is not yet dispatched', () => {
+    const el = setup(
+      {
+        getJob: () => throwError(() => new Error('not found')),
+        getPendingJobs: () => of({ jobs: [PENDING], other_pending: 0 }),
+      },
+      'e1',
+    ).nativeElement as HTMLElement;
+    expect(el.textContent).toContain('Pending job');
+    expect(el.textContent).not.toContain('Score breakdown');
+  });
+
+  it('shows "Job not found" when neither dispatched nor pending', () => {
+    const el = setup(
+      {
+        getJob: () => throwError(() => new Error('not found')),
+        getPendingJobs: () => of({ jobs: [], other_pending: 0 }),
+      },
+      'missing',
+    ).nativeElement as HTMLElement;
+    expect(el.textContent).toContain('Job not found');
   });
 });

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnDestroy, OnInit, inject, signal, computed } from '@angular/core';
+import { Component, OnDestroy, OnInit, inject, signal, computed, effect } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterModule } from '@angular/router';
@@ -119,10 +119,13 @@ type StatusFilter = 'all' | 'pending' | 'dispatched';
   ],
 })
 export class BoardLiveJobsComponent implements OnInit, OnDestroy {
+  private static readonly STATE_KEY = 'board.live-jobs.filters';
+
   private board = inject(BoardService);
   private live = inject(BoardLiveService);
   private router = inject(Router);
   private sub?: Subscription;
+  private refreshTimer?: ReturnType<typeof setTimeout>;
 
   jobs = signal<DispatchedJobSummary[]>([]);
   otherRunning = signal(0);
@@ -135,6 +138,24 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
   statusFilter = signal<StatusFilter>('all');
   scoreMin = signal<number | null>(null);
   scoreMax = signal<number | null>(null);
+
+  constructor() {
+    this.restoreState();
+    effect(() => {
+      const state = {
+        view: this.view(),
+        kindFilter: this.kindFilter(),
+        statusFilter: this.statusFilter(),
+        scoreMin: this.scoreMin(),
+        scoreMax: this.scoreMax(),
+      };
+      try {
+        sessionStorage.setItem(BoardLiveJobsComponent.STATE_KEY, JSON.stringify(state));
+      } catch {
+        /* storage unavailable */
+      }
+    });
+  }
 
   filteredJobs = computed(() => {
     const kind = this.kindFilter();
@@ -154,10 +175,8 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
   });
 
   ngOnInit(): void {
-    this.board.getDispatchedJobs().subscribe((r) => {
-      this.jobs.set(r.jobs);
-      this.otherRunning.set(r.other_running);
-    });
+    this.loadDispatched();
+    if (this.view() === 'pending') this.loadPending();
     this.sub = this.live.connect().subscribe({
       next: (ev) => {
         if (ev.type === 'job_dispatched' && ev.organization) {
@@ -176,6 +195,7 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
               ...list,
             ].slice(0, 200)
           );
+          this.scheduleRefresh();
         }
       },
       error: () => {},
@@ -184,11 +204,45 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.sub?.unsubscribe();
+    clearTimeout(this.refreshTimer);
   }
 
   setView(v: 'dispatched' | 'pending'): void {
     this.view.set(v);
     if (v === 'pending') this.loadPending();
+  }
+
+  private loadDispatched(): void {
+    this.board.getDispatchedJobs().subscribe((r) => {
+      this.jobs.set(r.jobs);
+      this.otherRunning.set(r.other_running);
+    });
+  }
+
+  /// Reconcile the optimistic live rows with the persisted, selectable rows.
+  /// Throttled so a busy board refreshes at most once per window instead of
+  /// deferring forever under a steady event stream.
+  private scheduleRefresh(): void {
+    if (this.refreshTimer) return;
+    this.refreshTimer = setTimeout(() => {
+      this.refreshTimer = undefined;
+      this.loadDispatched();
+    }, 1500);
+  }
+
+  private restoreState(): void {
+    try {
+      const raw = sessionStorage.getItem(BoardLiveJobsComponent.STATE_KEY);
+      if (!raw) return;
+      const s = JSON.parse(raw);
+      if (s.view) this.view.set(s.view);
+      if (s.kindFilter) this.kindFilter.set(s.kindFilter);
+      if (s.statusFilter) this.statusFilter.set(s.statusFilter);
+      this.scoreMin.set(s.scoreMin ?? null);
+      this.scoreMax.set(s.scoreMax ?? null);
+    } catch {
+      /* ignore malformed state */
+    }
   }
 
   private loadPending(): void {

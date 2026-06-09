@@ -47,7 +47,6 @@ export interface Windowed { w5m: number; w1h: number; w24h: number; }
 export interface WorkerContextView {
   architectures: string[];
   system_features: string[];
-  fetch: boolean;
   capabilities: GradientCapabilities;
   cpu_count: number;
   cpu_core_score: number;
@@ -105,6 +104,7 @@ export interface InstanceContextView {
 }
 
 export interface DispatchedJobDetail extends DispatchedJobSummary {
+  organization_name: string;
   queued_at: string;
   finished_at: string | null;
   score_breakdown: { rules: Record<string, number>; total: number };

@@ -14,6 +14,7 @@ import {
   DispatchedJobDetail,
   GradientCapabilities,
   InstanceContextView,
+  PendingJobSummary,
   Windowed,
 } from '@core/services/board.service';
 import { EvaluationsService, BuildWithOutputs } from '@core/services/evaluations.service';
@@ -45,11 +46,11 @@ interface RuleRow {
       </header>
 
       <section class="ids">
-        <div><span class="label">Worker</span><span class="mono">{{ j.worker_id }}</span></div>
+        <div>
+          <span class="label">Worker</span>
+          <a class="mono worker-link" [routerLink]="['/organization', j.organization_name, 'workers', j.worker_id, 'metrics']">{{ j.worker_id }}</a>
+        </div>
         <div><span class="label">Evaluation</span><span class="mono">{{ j.evaluation_id }}</span></div>
-        @if (j.build_id) {
-          <div><span class="label">Build</span><button type="button" class="mono link" (click)="openBuild(j.build_id)">{{ j.build_id }}</button></div>
-        }
       </section>
 
       <section class="timeline">
@@ -89,7 +90,6 @@ interface RuleRow {
             <tr><td class="label">Architectures</td><td class="mono">{{ j.worker_context.architectures.join(', ') || '—' }}</td></tr>
             <tr><td class="label">System features</td><td class="mono">{{ j.worker_context.system_features.join(', ') || '—' }}</td></tr>
             <tr><td class="label">Capabilities</td><td class="mono">{{ capabilityList(j.worker_context.capabilities) || '—' }}</td></tr>
-            <tr><td class="label">Fetch</td><td class="mono">{{ j.worker_context.fetch ? 'yes' : 'no' }}</td></tr>
             <tr><td class="label">CPU count</td><td class="mono">{{ j.worker_context.cpu_count }}</td></tr>
             <tr><td class="label">CPU core score</td><td class="mono">{{ j.worker_context.cpu_core_score | number: '1.0-2' }}</td></tr>
             <tr><td class="label">CPU usage</td><td class="mono">{{ j.worker_context.cpu_usage_pct | number: '1.0-1' }} %</td></tr>
@@ -106,7 +106,9 @@ interface RuleRow {
         <table class="kv">
           <tbody>
             <tr><td class="label">Kind</td><td class="mono">{{ j.job_context.kind }}</td></tr>
-            <tr><td class="label">Architecture</td><td class="mono">{{ j.job_context.architecture }}</td></tr>
+            @if (j.job_context.kind === 'Build') {
+              <tr><td class="label">Architecture</td><td class="mono">{{ j.job_context.architecture }}</td></tr>
+            }
             <tr><td class="label">Missing count</td><td class="mono">{{ j.job_context.missing_count ?? '—' }}</td></tr>
             <tr><td class="label">Missing NAR size</td><td class="mono">{{ j.job_context.missing_nar_size != null ? (j.job_context.missing_nar_size | number) : '—' }}</td></tr>
             <tr><td class="label">Org work share</td><td class="mono">{{ j.job_context.org_work_share != null ? (j.job_context.org_work_share | number: '1.0-3') : '—' }}</td></tr>
@@ -143,7 +145,7 @@ interface RuleRow {
           <h3>Derivations</h3>
           <div class="drv-list">
             @for (d of j.job_context.derivations; track d.drv_path) {
-              <div class="drv-row">
+              <div class="drv-row clickable" (click)="openBuild(d.build_id)">
                 <span class="mono pname">{{ d.pname ?? '—' }}</span>
                 <span class="mono path">{{ d.drv_path }}</span>
               </div>
@@ -178,6 +180,26 @@ interface RuleRow {
           </table>
         </section>
       }
+    } @else if (pending(); as p) {
+      <header class="head">
+        <div>
+          <span class="kind" [class.build]="p.kind === 1">{{ p.kind === 1 ? 'build' : 'eval' }}</span>
+          <h1>Pending job</h1>
+        </div>
+      </header>
+      <p class="muted">Still queued — limited details are available until it is dispatched.</p>
+      <section class="ids">
+        <div><span class="label">Evaluation</span><span class="mono">{{ p.evaluation_id }}</span></div>
+        @if (p.build_id) {
+          <div><span class="label">Build</span><span class="mono">{{ p.build_id }}</span></div>
+        }
+      </section>
+      <section class="timeline">
+        <div class="step"><span class="label">Queued</span><span>{{ p.queued_at | date: 'medium' }}</span></div>
+        <div class="step"><span class="label">Dependencies</span><span class="hl">{{ p.dependency_count }}</span></div>
+      </section>
+    } @else if (notFound()) {
+      <p class="muted">Job not found.</p>
     } @else {
       <p class="muted">Loading job…</p>
     }
@@ -239,8 +261,8 @@ interface RuleRow {
       .step { background: #21262d; border: 1px solid #2d333b; border-radius: 8px; padding: 0.75rem; color: #abb0b4; font-size: 0.85rem; }
       .step .hl { color: #17a2b8; font-weight: 600; }
       .mono { font-family: monospace; color: #d6dade; font-size: 0.85rem; }
-      .link { background: none; border: none; padding: 0; cursor: pointer; text-align: left; color: #17a2b8; text-decoration: underline; }
-      .link:hover { color: #4cc2d4; }
+      .worker-link { text-decoration: none; cursor: pointer; }
+      .worker-link:hover { color: #17a2b8; }
       .build-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
       .build-grid .span2 { grid-column: 1 / -1; }
       .build-grid .out { word-break: break-all; margin-top: 0.25rem; }
@@ -261,6 +283,8 @@ interface RuleRow {
       table.kv.counts { margin-top: 1rem; }
       .drv-list { display: flex; flex-direction: column; gap: 0.5rem; }
       .drv-row { display: flex; flex-direction: column; gap: 0.15rem; background: #21262d; border: 1px solid #2d333b; border-radius: 6px; padding: 0.5rem 0.75rem; }
+      .drv-row.clickable { cursor: pointer; transition: background 0.1s, border-color 0.1s; }
+      .drv-row.clickable:hover { background: #2d333b; border-color: #444c56; }
       .drv-row .pname { color: #d6dade; }
       .drv-row .path { color: #818181; font-size: 0.8rem; word-break: break-all; }
     `,
@@ -272,10 +296,14 @@ export class BoardJobDetailComponent implements OnInit {
   private evaluations = inject(EvaluationsService);
 
   job = signal<DispatchedJobDetail | null>(null);
+  pending = signal<PendingJobSummary | null>(null);
+  notFound = signal(false);
   build = signal<BuildWithOutputs | null>(null);
   buildDialog = signal(false);
   buildLoading = signal(false);
   buildError = signal<string | null>(null);
+
+  private static readonly WORKER_CAPS: (keyof GradientCapabilities)[] = ['federate', 'fetch', 'eval', 'build'];
 
   currentState = computed(() => {
     const j = this.job();
@@ -310,14 +338,26 @@ export class BoardJobDetailComponent implements OnInit {
 
   ngOnInit(): void {
     const id = this.route.snapshot.paramMap.get('id');
-    if (id) {
-      this.board.getJob(id).subscribe((d) => {
+    if (!id) return;
+    this.board.getJob(id).subscribe({
+      next: (d) => {
         this.job.set(d);
         if (d.build_id) {
           this.loadBuild(d.build_id);
         }
-      });
-    }
+      },
+      error: () => this.loadPending(id),
+    });
+  }
+
+  private loadPending(id: string): void {
+    this.board.getPendingJobs().subscribe({
+      next: (r) => {
+        const match = r.jobs.find((p) => p.evaluation_id === id || p.build_id === id);
+        match ? this.pending.set(match) : this.notFound.set(true);
+      },
+      error: () => this.notFound.set(true),
+    });
   }
 
   openBuild(buildId: string): void {
@@ -332,10 +372,7 @@ export class BoardJobDetailComponent implements OnInit {
   }
 
   capabilityList(c: GradientCapabilities): string {
-    return Object.entries(c)
-      .filter(([, on]) => on)
-      .map(([name]) => name)
-      .join(', ');
+    return BoardJobDetailComponent.WORKER_CAPS.filter((k) => c[k]).join(', ');
   }
 
   instanceWindows(inst: InstanceContextView): { name: string; w: Windowed }[] {
