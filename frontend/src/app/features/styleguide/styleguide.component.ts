@@ -76,7 +76,7 @@ interface DemoCounty {
   ],
   providers: [ConfirmationService, MessageService],
   templateUrl: './styleguide.component.html',
-  styleUrl: './styleguide.component.scss',
+  styleUrls: ['./styleguide.component.scss', './styleguide.demos.scss'],
 })
 export class StyleguideComponent {
   private ff = inject(FormFieldsBuilder);

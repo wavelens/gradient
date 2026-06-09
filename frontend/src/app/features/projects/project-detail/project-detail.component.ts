@@ -33,7 +33,7 @@ import { formatEvaluationDuration, isRunningEvaluationStatus, parseUtcTimestamp 
     WritableDirective,
   ],
   templateUrl: './project-detail.component.html',
-  styleUrl: './project-detail.component.scss',
+  styleUrls: ['./project-detail.component.scss', './project-detail.evaluations.scss'],
 })
 export class ProjectDetailComponent implements OnInit, OnDestroy {
   private route = inject(ActivatedRoute);
