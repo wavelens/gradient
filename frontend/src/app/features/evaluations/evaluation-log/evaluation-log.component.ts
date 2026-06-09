@@ -23,6 +23,7 @@ import {
   windowAround,
 } from './log-window';
 import { matchesBuildSearch } from './build-search';
+import { isTypingTarget } from './keyboard';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
@@ -130,6 +131,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   highlightLine = signal<number | null>(null);
   searchOpen = signal(false);
   searchQuery = signal('');
+  sidebarSearchOpen = signal(false);
   sidebarSearchQuery = signal('');
   private sidebarFocused = false;
   searchHits = signal<LogSearchHit[]>([]);
@@ -767,19 +769,22 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     navigator.clipboard?.writeText(url).catch(() => { /* ignore */ });
   }
 
-  // ── Ctrl+F search ───────────────────────────────────────────────────────────
+  // ── Search shortcuts ──────────────────────────────────────────────────────
 
   @HostListener('document:keydown', ['$event'])
   onKeydown(event: KeyboardEvent): void {
     const isFind = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f';
-    if (isFind && this.sidebarFocused) {
+
+    // Reveal the builds search on "/" (when not already typing) or on Ctrl/Cmd+F
+    // while the sidebar holds focus.
+    if ((event.key === '/' && !isTypingTarget(event.target)) || (isFind && this.sidebarFocused)) {
       event.preventDefault();
-      setTimeout(() => { (document.querySelector('.sidebar-search input') as HTMLInputElement | null)?.focus(); }, 0);
+      this.openSidebarSearch();
       return;
     }
 
-    if (event.key === 'Escape' && this.sidebarSearchQuery()) {
-      this.sidebarSearchQuery.set('');
+    if (event.key === 'Escape' && this.sidebarSearchOpen()) {
+      this.closeSidebarSearch();
       return;
     }
 
@@ -791,6 +796,16 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     } else if (event.key === 'Escape' && this.searchOpen()) {
       this.closeSearch();
     }
+  }
+
+  openSidebarSearch(): void {
+    this.sidebarSearchOpen.set(true);
+    setTimeout(() => { (document.querySelector('.sidebar-search input') as HTMLInputElement | null)?.focus(); }, 0);
+  }
+
+  closeSidebarSearch(): void {
+    this.sidebarSearchOpen.set(false);
+    this.sidebarSearchQuery.set('');
   }
 
   onSearchInput(event: Event): void {
