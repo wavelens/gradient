@@ -1,0 +1,42 @@
+[package]
+name        = "gradient-cache"
+version.workspace    = true
+edition.workspace    = true
+license.workspace    = true
+authors.workspace    = true
+repository.workspace = true
+publish     = false
+
+[lib]
+name = "gradient_cache"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+gradient-core       = { workspace = true }
+gradient-entity = { workspace = true }
+
+anyhow              = { workspace = true }
+async-trait         = { workspace = true }
+base64              = { workspace = true }
+chrono              = { workspace = true }
+futures             = { workspace = true }
+ring                = { workspace = true }
+sea-orm             = { workspace = true }
+sentry              = { workspace = true }
+serde               = { workspace = true }
+serde_json          = { workspace = true }
+thiserror           = { workspace = true }
+tokio               = { workspace = true, features = ["process", "macros"] }
+tracing             = { workspace = true }
+uuid                = { workspace = true }
+zstd                = { workspace = true }
+
+[dev-dependencies]
+mockall      = { workspace = true }
+tempfile     = { workspace = true }
+gradient-test-support = { workspace = true }
+tokio        = { workspace = true, features = ["macros"] }
+tokio-test   = { workspace = true }

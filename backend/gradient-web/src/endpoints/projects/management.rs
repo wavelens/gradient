@@ -1,0 +1,716 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+use super::ProjectResponse;
+use crate::access::{Caller, OrgAccess, ProjectAccess, has_permission, load_org, load_project};
+use crate::audit::{RequestInfo, events, record as audit_record};
+use crate::authorization::{MaybeApiKey, MaybeUser};
+use crate::error::{ErrorCode, WebError, WebResult};
+use crate::helpers::{OptionExt, ok_json};
+use crate::permissions::Permission;
+use axum::extract::{Path, Query, State};
+use axum::{Extension, Json};
+
+use gradient_core::db::get_any_organization_by_name;
+use gradient_core::nix::RepositoryUrl;
+use gradient_core::sources::check_project_updates;
+use gradient_core::types::consts::*;
+use gradient_core::types::input::{check_project_name, validate_display_name, vec_to_hex};
+use gradient_core::types::triggers::{ConcurrencyPolicy, TriggerConfig, TriggerType};
+use gradient_core::types::wildcard::Wildcard;
+use gradient_core::types::*;
+use sea_orm::ActiveValue::Set;
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
+};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::Arc;
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct MakeProjectRequest {
+    pub name: String,
+    pub display_name: String,
+    pub description: String,
+    pub repository: String,
+    pub wildcard: String,
+    #[serde(default)]
+    pub concurrency: Option<ConcurrencyPolicy>,
+    #[serde(default)]
+    pub sign_cache: Option<bool>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct PatchProjectRequest {
+    pub name: Option<String>,
+    pub display_name: Option<String>,
+    pub description: Option<String>,
+    pub repository: Option<String>,
+    pub wildcard: Option<String>,
+    pub keep_evaluations: Option<i32>,
+    pub concurrency: Option<ConcurrencyPolicy>,
+    pub sign_cache: Option<bool>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct TransferOwnershipRequest {
+    pub organization: String,
+}
+
+pub async fn get_project_name_available(
+    state: State<Arc<ServerState>>,
+    Path(organization): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> WebResult<Json<BaseResponse<bool>>> {
+    let name = params.get("name").cloned().unwrap_or_default();
+    if check_project_name(&name).is_err() {
+        return Ok(ok_json(false));
+    }
+    let org = get_any_organization_by_name(state.0.clone(), organization)
+        .await?
+        .or_not_found("Organization")?;
+    let exists = EProject::find()
+        .filter(CProject::Name.eq(name.as_str()))
+        .filter(CProject::Organization.eq(org.id))
+        .one(&state.web_db)
+        .await?
+        .is_some();
+    Ok(ok_json(!exists))
+}
+
+pub async fn get(
+    state: State<Arc<ServerState>>,
+    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
+    Path(organization): Path<String>,
+    Query(params): Query<PaginationParams>,
+) -> WebResult<Json<BaseResponse<Paginated<Vec<ProjectResponse>>>>> {
+    let api_key_ref = api_key.as_ref();
+    let organization = load_org(
+        &state.0,
+        Caller::from_option(&maybe_user),
+        api_key_ref,
+        organization,
+        OrgAccess::Readable {
+            label: "Organization",
+        },
+    )
+    .await?;
+
+    let page = params.page();
+    let per_page = params.per_page();
+    let (can_edit, can_trigger) = match &maybe_user {
+        Some(user) => (
+            has_permission(
+                &state,
+                user.id,
+                organization.id,
+                Permission::EditProject,
+                api_key_ref,
+            )
+            .await?,
+            has_permission(
+                &state,
+                user.id,
+                organization.id,
+                Permission::TriggerEvaluation,
+                api_key_ref,
+            )
+            .await?,
+        ),
+        None => (false, false),
+    };
+
+    let paginator = EProject::find()
+        .filter(CProject::Organization.eq(organization.id))
+        .order_by_asc(CProject::CreatedAt)
+        .paginate(&state.web_db, per_page);
+
+    let total = paginator.num_items().await?;
+    let raw = paginator.fetch_page(page - 1).await?;
+
+    // Batch-fetch the status of the last evaluation for each project.
+    let eval_ids: Vec<EvaluationId> = raw.iter().filter_map(|p| p.last_evaluation).collect();
+    let db = &state.web_db;
+    let eval_status_map: HashMap<EvaluationId, gradient_entity::evaluation::EvaluationStatus> =
+        gradient_core::db::fetch_in_chunks(&eval_ids, |chunk| async move {
+            EEvaluation::find()
+                .filter(CEvaluation::Id.is_in(chunk))
+                .all(db)
+                .await
+        })
+        .await?
+        .into_iter()
+        .map(|e| (e.id, e.status))
+        .collect();
+
+    let items: Vec<ProjectResponse> = raw
+        .into_iter()
+        .map(|p| {
+            let last_evaluation_status = p
+                .last_evaluation
+                .and_then(|id| eval_status_map.get(&id).cloned());
+            ProjectResponse {
+                id: p.id,
+                organization: p.organization,
+                name: p.name,
+                active: p.active,
+                display_name: p.display_name,
+                description: p.description,
+                repository: p.repository,
+                wildcard: p.wildcard,
+                last_evaluation: p.last_evaluation,
+                last_evaluation_status,
+                force_evaluation: p.force_evaluation,
+                keep_evaluations: p.keep_evaluations,
+                concurrency: ConcurrencyPolicy::try_from(p.concurrency)
+                    .unwrap_or(ConcurrencyPolicy::SoftAbort),
+                created_by: p.created_by,
+                created_at: p.created_at,
+                managed: p.managed,
+                sign_cache: p.sign_cache,
+                can_edit,
+                can_trigger,
+            }
+        })
+        .collect();
+
+    Ok(ok_json(Paginated {
+        items,
+        total,
+        page,
+        per_page,
+    }))
+}
+
+pub async fn put(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
+    Path(organization): Path<String>,
+    Json(body): Json<MakeProjectRequest>,
+) -> WebResult<Json<BaseResponse<String>>> {
+    if check_project_name(body.name.clone().as_str()).is_err() {
+        return Err(WebError::invalid_name("Project Name"));
+    }
+
+    if let Err(e) = validate_display_name(&body.display_name) {
+        return Err(WebError::bad_request(format!(
+            "Invalid display name: {}",
+            e
+        )));
+    }
+
+    body.repository
+        .parse::<RepositoryUrl>()
+        .map_err(|e| WebError::bad_request(e.to_string()))?;
+
+    let organization = load_org(
+        &state.0,
+        Caller::User(&user),
+        api_key.as_ref(),
+        organization,
+        OrgAccess::Require {
+            permission: Permission::CreateProject,
+            reject_managed: true,
+        },
+    )
+    .await?;
+
+    let existing_project = EProject::find()
+        .filter(
+            Condition::all()
+                .add(CProject::Organization.eq(organization.id))
+                .add(CProject::Name.eq(body.name.clone())),
+        )
+        .one(&state.web_db)
+        .await?;
+
+    if existing_project.is_some() {
+        return Err(WebError::already_exists("Project Name"));
+    }
+
+    let wildcard = body
+        .wildcard
+        .trim()
+        .parse::<Wildcard>()
+        .map_err(|e| WebError::bad_request(e.to_string()))?
+        .to_string();
+
+    let project = AProject {
+        id: Set(ProjectId::now_v7()),
+        organization: Set(organization.id),
+        name: Set(body.name.clone()),
+        active: Set(true),
+        display_name: Set(body.display_name.trim().to_string()),
+        description: Set(body.description.trim().to_string()),
+        repository: Set(body.repository.clone()),
+        wildcard: Set(wildcard),
+        last_evaluation: Set(None),
+        last_check_at: Set(*NULL_TIME),
+        force_evaluation: Set(false),
+        created_by: Set(user.id),
+        created_at: Set(gradient_core::types::now()),
+        managed: Set(false),
+        keep_evaluations: Set(30),
+        concurrency: Set(i16::from(
+            body.concurrency.unwrap_or(ConcurrencyPolicy::SoftAbort),
+        )),
+        sign_cache: Set(body.sign_cache.unwrap_or(true)),
+    };
+
+    let project = project.insert(&state.web_db).await?;
+
+    let now = gradient_core::types::now();
+    let default_cfg = TriggerConfig::Polling {
+        interval_secs: 300,
+        branch: None,
+    };
+    AProjectTrigger {
+        id: Set(ProjectTriggerId::now_v7()),
+        project: Set(project.id),
+        trigger_type: Set(i16::from(TriggerType::Polling)),
+        config: Set(default_cfg.to_db_json()),
+        active: Set(true),
+        last_fired_at: Set(None),
+        created_at: Set(now),
+        updated_at: Set(now),
+    }
+    .insert(&state.web_db)
+    .await?;
+
+    let res = BaseResponse {
+        error: false,
+        message: project.id.to_string(),
+    };
+
+    Ok(Json(res))
+}
+
+pub async fn get_project(
+    state: State<Arc<ServerState>>,
+    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
+    Path((organization, project)): Path<(String, String)>,
+) -> WebResult<Json<BaseResponse<ProjectResponse>>> {
+    let api_key_ref = api_key.as_ref();
+    let (organization, project) = load_project(
+        &state.0,
+        Caller::from_option(&maybe_user),
+        api_key_ref,
+        organization,
+        project,
+        ProjectAccess::Readable,
+    )
+    .await?;
+
+    let (can_edit, can_trigger) = match &maybe_user {
+        Some(user) => (
+            has_permission(
+                &state,
+                user.id,
+                organization.id,
+                Permission::EditProject,
+                api_key_ref,
+            )
+            .await?,
+            has_permission(
+                &state,
+                user.id,
+                organization.id,
+                Permission::TriggerEvaluation,
+                api_key_ref,
+            )
+            .await?,
+        ),
+        None => (false, false),
+    };
+
+    let last_evaluation_status = if let Some(eval_id) = project.last_evaluation {
+        EEvaluation::find_by_id(eval_id)
+            .one(&state.web_db)
+            .await?
+            .map(|e| e.status)
+    } else {
+        None
+    };
+
+    Ok(ok_json(ProjectResponse {
+        id: project.id,
+        organization: project.organization,
+        name: project.name,
+        active: project.active,
+        display_name: project.display_name,
+        description: project.description,
+        repository: project.repository,
+        wildcard: project.wildcard,
+        last_evaluation: project.last_evaluation,
+        last_evaluation_status,
+        force_evaluation: project.force_evaluation,
+        created_by: project.created_by,
+        created_at: project.created_at,
+        managed: project.managed,
+        keep_evaluations: project.keep_evaluations,
+        concurrency: ConcurrencyPolicy::try_from(project.concurrency)
+            .unwrap_or(ConcurrencyPolicy::SoftAbort),
+        sign_cache: project.sign_cache,
+        can_edit,
+        can_trigger,
+    }))
+}
+
+pub async fn patch_project(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
+    Path((organization, project)): Path<(String, String)>,
+    Json(body): Json<PatchProjectRequest>,
+) -> WebResult<Json<BaseResponse<String>>> {
+    let (organization, project) = load_project(
+        &state,
+        Caller::User(&user),
+        api_key.as_ref(),
+        organization,
+        project,
+        ProjectAccess::Require {
+            permission: Permission::EditProject,
+            reject_managed: true,
+        },
+    )
+    .await?;
+    let mut aproject: AProject = project.into();
+    let mut patcher = ProjectPatcher::new(&state, &mut aproject);
+
+    if let Some(name) = body.name {
+        patcher.apply_name(&organization, name).await?;
+    }
+    if let Some(display_name) = body.display_name {
+        patcher.apply_display_name(display_name)?;
+    }
+    if let Some(description) = body.description {
+        patcher.aproject.description = Set(description.trim().to_string());
+    }
+    if let Some(repository) = body.repository {
+        patcher.apply_repository(repository)?;
+    }
+    if let Some(wildcard) = body.wildcard {
+        patcher.apply_wildcard(wildcard)?;
+    }
+    if let Some(keep) = body.keep_evaluations {
+        patcher.apply_keep_evaluations(keep)?;
+    }
+    if let Some(concurrency) = body.concurrency {
+        patcher.apply_concurrency(concurrency)?;
+    }
+    if let Some(sign_cache) = body.sign_cache {
+        patcher.apply_sign_cache(sign_cache);
+    }
+
+    aproject.force_evaluation = Set(true);
+    aproject.update(&state.web_db).await?;
+
+    Ok(ok_json("Project updated".to_string()))
+}
+
+/// Holds shared context for the project-patch field validators so that
+/// `state` and `aproject` are not threaded through every helper as parameters.
+struct ProjectPatcher<'a> {
+    state: &'a State<Arc<ServerState>>,
+    aproject: &'a mut AProject,
+}
+
+impl<'a> ProjectPatcher<'a> {
+    fn new(state: &'a State<Arc<ServerState>>, aproject: &'a mut AProject) -> Self {
+        Self { state, aproject }
+    }
+
+    async fn apply_name(&mut self, organization: &MOrganization, name: String) -> WebResult<()> {
+        if check_project_name(name.as_str()).is_err() {
+            return Err(WebError::invalid_name("Project Name"));
+        }
+        let existing = EProject::find()
+            .filter(
+                Condition::all()
+                    .add(CProject::Organization.eq(organization.id))
+                    .add(CProject::Name.eq(name.clone())),
+            )
+            .one(&self.state.web_db)
+            .await?;
+        if existing.is_some() {
+            return Err(WebError::already_exists("Project Name"));
+        }
+        self.aproject.name = Set(name);
+        Ok(())
+    }
+
+    fn apply_display_name(&mut self, display_name: String) -> WebResult<()> {
+        let display_name = display_name.trim().to_string();
+        if let Err(e) = validate_display_name(&display_name) {
+            return Err(WebError::bad_request(format!(
+                "Invalid display name: {}",
+                e
+            )));
+        }
+        self.aproject.display_name = Set(display_name);
+        Ok(())
+    }
+
+    fn apply_repository(&mut self, repository: String) -> WebResult<()> {
+        repository
+            .parse::<RepositoryUrl>()
+            .map_err(|e| WebError::bad_request(e.to_string()))?;
+        self.aproject.repository = Set(repository);
+        Ok(())
+    }
+
+    fn apply_wildcard(&mut self, wildcard: String) -> WebResult<()> {
+        let wildcard = wildcard
+            .trim()
+            .parse::<Wildcard>()
+            .map_err(|e| WebError::bad_request(e.to_string()))?
+            .to_string();
+        self.aproject.wildcard = Set(wildcard);
+        Ok(())
+    }
+
+    fn apply_keep_evaluations(&mut self, keep: i32) -> WebResult<()> {
+        if keep < 1 {
+            return Err(WebError::bad_request(
+                "keep_evaluations must be at least 1".to_string(),
+            ));
+        }
+        let global_max = self.state.config.storage.keep_evaluations as i32;
+        if global_max > 0 && keep > global_max {
+            return Err(WebError::bad_request(format!(
+                "keep_evaluations cannot exceed the server maximum of {}",
+                global_max
+            )));
+        }
+        self.aproject.keep_evaluations = Set(keep);
+        Ok(())
+    }
+
+    fn apply_concurrency(&mut self, concurrency: ConcurrencyPolicy) -> WebResult<()> {
+        self.aproject.concurrency = Set(i16::from(concurrency));
+        Ok(())
+    }
+
+    fn apply_sign_cache(&mut self, sign_cache: bool) {
+        self.aproject.sign_cache = Set(sign_cache);
+    }
+}
+
+pub async fn delete_project(
+    state: State<Arc<ServerState>>,
+    info: RequestInfo,
+    Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
+    Path((organization, project)): Path<(String, String)>,
+) -> WebResult<Json<BaseResponse<String>>> {
+    let (organization_row, project) = load_project(
+        &state,
+        Caller::User(&user),
+        api_key.as_ref(),
+        organization,
+        project,
+        ProjectAccess::Require {
+            permission: Permission::EditProject,
+            reject_managed: true,
+        },
+    )
+    .await?;
+    let project_id = project.id;
+    let project_name = project.name.clone();
+    let aproject: AProject = project.into();
+    aproject.delete(&state.web_db).await?;
+
+    audit_record(
+        &state.web_db,
+        Some(user.id),
+        events::PROJECT_DELETE,
+        &info,
+        Some(serde_json::json!({
+            "organization_id": organization_row.id.to_string(),
+            "project_id": project_id.to_string(),
+            "project_name": project_name,
+        })),
+    )
+    .await;
+
+    let res = BaseResponse {
+        error: false,
+        message: "Project deleted".to_string(),
+    };
+
+    Ok(Json(res))
+}
+
+pub async fn post_project_active(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
+    Path((organization, project)): Path<(String, String)>,
+) -> WebResult<Json<BaseResponse<String>>> {
+    let (_organization, project) = load_project(
+        &state,
+        Caller::User(&user),
+        api_key.as_ref(),
+        organization,
+        project,
+        ProjectAccess::Require {
+            permission: Permission::EditProject,
+            reject_managed: true,
+        },
+    )
+    .await?;
+    let mut aproject: AProject = project.into();
+    aproject.active = Set(true);
+    aproject.update(&state.web_db).await?;
+
+    let res = BaseResponse {
+        error: false,
+        message: "Project enabled".to_string(),
+    };
+
+    Ok(Json(res))
+}
+
+pub async fn delete_project_active(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
+    Path((organization, project)): Path<(String, String)>,
+) -> WebResult<Json<BaseResponse<String>>> {
+    let (_organization, project) = load_project(
+        &state,
+        Caller::User(&user),
+        api_key.as_ref(),
+        organization,
+        project,
+        ProjectAccess::Require {
+            permission: Permission::EditProject,
+            reject_managed: true,
+        },
+    )
+    .await?;
+    let mut aproject: AProject = project.into();
+    aproject.active = Set(false);
+    aproject.update(&state.web_db).await?;
+
+    let res = BaseResponse {
+        error: false,
+        message: "Project disabled".to_string(),
+    };
+
+    Ok(Json(res))
+}
+
+pub async fn post_project_check_repository(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
+    Path((organization, project)): Path<(String, String)>,
+) -> WebResult<Json<BaseResponse<String>>> {
+    let (_organization, project) = load_project(
+        &state,
+        Caller::User(&user),
+        api_key.as_ref(),
+        organization,
+        project,
+        ProjectAccess::Require {
+            permission: Permission::EditProject,
+            reject_managed: true,
+        },
+    )
+    .await?;
+
+    let (_has_updates, remote_hash) = check_project_updates(Arc::clone(&state), &project, None)
+        .await
+        .map_err(|e| {
+            WebError::bad_request_with(
+                ErrorCode::REPOSITORY_UNREACHABLE,
+                format!("Failed to check repository: {}", e),
+            )
+        })?;
+
+    let res = BaseResponse {
+        error: false,
+        message: vec_to_hex(&remote_hash),
+    };
+
+    Ok(Json(res))
+}
+
+pub async fn post_project_transfer(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
+    Path((organization, project)): Path<(String, String)>,
+    Json(body): Json<TransferOwnershipRequest>,
+) -> WebResult<Json<BaseResponse<String>>> {
+    let api_key_ref = api_key.as_ref();
+    let (organization, project) = load_project(
+        &state,
+        Caller::User(&user),
+        api_key_ref,
+        organization,
+        project,
+        ProjectAccess::Member,
+    )
+    .await?;
+
+    // Only an org member with EditProject permission, or the current owner,
+    // may transfer ownership.
+    let is_admin = has_permission(
+        &state,
+        user.id,
+        organization.id,
+        Permission::EditProject,
+        api_key_ref,
+    )
+    .await?;
+    let is_owner = project.created_by == user.id;
+    if !is_admin && !is_owner {
+        return Err(WebError::forbidden(
+            "Only the project owner or an organization admin can transfer ownership.".to_string(),
+        ));
+    }
+
+    if project.managed {
+        return Err(WebError::forbidden(
+            "Cannot transfer ownership of a state-managed project.".to_string(),
+        ));
+    }
+
+    let new_organization = load_org(
+        &state.0,
+        Caller::User(&user),
+        api_key_ref,
+        body.organization.clone(),
+        OrgAccess::Require {
+            permission: Permission::CreateProject,
+            reject_managed: true,
+        },
+    )
+    .await?;
+
+    if new_organization.id == organization.id {
+        return Err(WebError::bad_request(
+            "Project is already in this organization.".to_string(),
+        ));
+    }
+
+    let mut aproject: AProject = project.into();
+    aproject.organization = Set(new_organization.id);
+    aproject.update(&state.web_db).await?;
+
+    let res = BaseResponse {
+        error: false,
+        message: "Ownership transferred".to_string(),
+    };
+
+    Ok(Json(res))
+}

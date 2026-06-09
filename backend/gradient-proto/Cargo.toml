@@ -1,0 +1,44 @@
+[package]
+name        = "gradient-proto"
+version.workspace    = true
+edition.workspace    = true
+license.workspace    = true
+authors.workspace    = true
+repository.workspace = true
+publish     = false
+
+[lib]
+name = "gradient_proto"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+gradient-core = { workspace = true }
+gradient-scheduler = { workspace = true }
+gradient-entity = { workspace = true }
+
+anyhow            = { workspace = true }
+async-trait       = { workspace = true }
+chrono            = { workspace = true }
+futures           = { workspace = true }
+hex               = { workspace = true }
+password-auth     = { workspace = true }
+reqwest           = { workspace = true }
+rkyv              = { workspace = true }
+sea-orm           = { workspace = true }
+serde             = { workspace = true }
+sha2              = { workspace = true }
+subtle            = { workspace = true }
+tokio             = { workspace = true, features = ["macros", "sync"] }
+tokio-tungstenite = { workspace = true }
+tracing           = { workspace = true }
+uuid              = { workspace = true }
+
+axum = { version = "0.8", default-features = false, features = ["ws", "http1", "tokio"] }
+
+[dev-dependencies]
+serde_json   = { workspace = true }
+tempfile     = { workspace = true }
+gradient-test-support = { workspace = true }
