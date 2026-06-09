@@ -799,6 +799,10 @@ Backend (`cargo test -p scheduler --tests scheduler_tests::job_notify_bump_is_no
   `true`). Guards against the regression where an edge-triggered
   `Notify::notify_waiters()` dropped wakeups fired during NAR/job traffic,
   starving deep build chains of `JobOffer`s and timing out the cache VM test.
+- `dispatch_kick_is_retained_when_not_awaiting` - a `kick_dispatch()` fired
+  while the dispatch loop is mid-pass is retained (`notify_one` permit) and woke
+  on the next iteration, so serial chains advance at completion speed rather than
+  one level per 5s tick.
 
 ## Cache GC - orphan files keep predicate
 

@@ -308,6 +308,8 @@ Job dispatch uses **eager push + pull-based claiming**. The server pushes **new*
 
 The "new candidates available" signal is a level-triggered `watch` generation counter (`Scheduler::job_notify`) bumped on every enqueue, so a bump fired while a session is busy serving NAR/job traffic is still observed on its next loop iteration — an edge-triggered `Notify` would drop it and starve deep build chains of `JobOffer`s.
 
+`build_dispatch_loop` runs on a 5s timer but is also kicked reactively (`Scheduler::dispatch_kick`, `notify_one`) the moment a job completes, so the dependents it unblocks are enqueued and offered immediately. Without this, a serial dependency chain (e.g. the stdenv bootstrap) advances only one level per 5s tick.
+
 Jobs are scoped to the worker's authorized peers - a worker only receives candidates from peers (orgs, caches) it has successfully authenticated against.
 
 ### Dispatch Flow

@@ -97,6 +97,22 @@ async fn job_notify_bump_is_not_lost_when_not_awaiting() {
     assert!(rx.has_changed().unwrap(), "a later enqueue re-arms the receiver");
 }
 
+/// Reactive dispatch (#359): a kick fired while the dispatch loop is mid-pass
+/// (not awaiting) is retained — `notify_one` stores one permit — and serviced on
+/// the loop's next iteration, so a serial dependency chain advances at
+/// completion speed instead of one level per 5s tick.
+#[tokio::test]
+async fn dispatch_kick_is_retained_when_not_awaiting() {
+    let scheduler = test_scheduler();
+    scheduler.kick_dispatch();
+    let woke = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        scheduler.dispatch_kick.notified(),
+    )
+    .await;
+    assert!(woke.is_ok(), "kick fired while not awaiting must still wake the dispatch loop");
+}
+
 #[tokio::test]
 async fn test_candidates_filtered_by_authorized_peers() {
     let scheduler = test_scheduler();
