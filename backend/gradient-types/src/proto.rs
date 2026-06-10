@@ -405,4 +405,7 @@ pub enum BuildFailureKind {
     Permanent,
     /// Wall-clock or silent timeout exceeded — terminal.
     Timeout,
+    /// A substitute attempt could not pull the output from cache. Penalty-free
+    /// re-queue; escalates to a real arch-bound build after repeated misses.
+    SubstituteUnavailable,
 }

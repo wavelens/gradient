@@ -12,9 +12,11 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 
 use gradient_entity::build::BuildStatus;
+use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_db::{
-    collect_transitive_dependents, update_build_status, update_evaluation_status,
+    collect_transitive_dependents, fail_latest_attempt, update_build_status,
+    update_evaluation_status,
 };
 use gradient_types::*;
 use gradient_core::ServerState;
@@ -34,6 +36,9 @@ pub(crate) enum FailureOutcome {
     Retry,
     Permanent,
     Timeout,
+    /// Penalty-free re-queue (substitute miss): back to `Queued` without
+    /// bumping `attempt`. Escalation to a real build is decided at dispatch.
+    Requeue,
 }
 
 /// Decide what to do with a failed build given its classification and how many
@@ -46,6 +51,7 @@ pub(crate) fn decide_failure_outcome(
     match kind {
         BuildFailureKind::Timeout => FailureOutcome::Timeout,
         BuildFailureKind::Permanent => FailureOutcome::Permanent,
+        BuildFailureKind::SubstituteUnavailable => FailureOutcome::Requeue,
         BuildFailureKind::Transient => {
             if (attempt + 1) < max_attempts as i32 {
                 FailureOutcome::Retry
@@ -53,6 +59,17 @@ pub(crate) fn decide_failure_outcome(
                 FailureOutcome::Permanent
             }
         }
+    }
+}
+
+/// Best-effort mapping from the worker's failure classification to a stored
+/// `build_attempt.reason`. `Transient` has no single cause, so it stays `None`.
+fn attempt_reason(kind: BuildFailureKind) -> Option<AttemptFailureReason> {
+    match kind {
+        BuildFailureKind::SubstituteUnavailable => Some(AttemptFailureReason::SubstituteUnavailable),
+        BuildFailureKind::Permanent => Some(AttemptFailureReason::BuilderNonzero),
+        BuildFailureKind::Timeout => Some(AttemptFailureReason::WallClockTimeout),
+        BuildFailureKind::Transient => None,
     }
 }
 
@@ -316,6 +333,17 @@ impl<'a> BuildStateHandler<'a> {
         let attempt = build.attempt;
         let max_attempts = self.state.config.eval.build_max_attempts;
 
+        if let Err(e) = fail_latest_attempt(
+            &self.state.worker_db,
+            build_id,
+            AttemptOutcome::Failed,
+            attempt_reason(kind),
+        )
+        .await
+        {
+            warn!(%build_id, error = %e, "failed to record attempt failure reason");
+        }
+
         match decide_failure_outcome(kind, attempt, max_attempts) {
             FailureOutcome::Retry => {
                 let mut active: ABuild = build.clone().into_active_model();
@@ -330,6 +358,15 @@ impl<'a> BuildStateHandler<'a> {
                 update_build_status(&self.state.db(), reloaded, BuildStatus::FailedTransient)
                     .await;
                 info!(%build_id, attempt = attempt + 1, "transient build failure; scheduled for retry");
+                return Ok(());
+            }
+            FailureOutcome::Requeue => {
+                // Substitute miss: back to the queue without an `attempt` bump
+                // or a permanent mark. Dispatch escalates to a real build once
+                // the substitute-miss count crosses the threshold. Followers and
+                // dependents are untouched - nothing failed.
+                update_build_status(&self.state.db(), build, BuildStatus::Queued).await;
+                info!(%build_id, "substitute unavailable; re-queued for re-dispatch/escalation");
                 return Ok(());
             }
             FailureOutcome::Permanent => {
@@ -628,9 +665,7 @@ impl<'a> BuildStateHandler<'a> {
                 ) {
                     continue;
                 }
-                let drv_ids: Vec<DerivationId> =
-                    pending_builds.iter().map(|b| b.derivation).collect();
-                let checker = BuildabilityChecker::load(self.state, &drv_ids).await?;
+                let checker = BuildabilityChecker::load(self.state, &pending_builds).await?;
                 let target = if checker.any_buildable(&pending_builds, worker_caps) {
                     EvaluationStatus::Building
                 } else {
@@ -816,19 +851,31 @@ pub async fn reconcile_waiting_state(
 /// re-querying the DB per evaluation.
 struct BuildabilityChecker {
     drv_by_id: HashMap<DerivationId, MDerivation>,
+    /// build_id → `SubstituteUnavailable` miss count. A substitutable build is
+    /// only treated as buildable-anywhere while it is below the escalation
+    /// threshold; past it, it is checked against real arch/features like any
+    /// other build (so the parker can park it when no arch worker exists).
+    substitute_misses: HashMap<BuildId, i64>,
     /// Maps derivation ID → list of required feature IDs.
     features_by_drv: HashMap<DerivationId, Vec<FeatureId>>,
     feature_name: HashMap<FeatureId, String>,
 }
 
 impl BuildabilityChecker {
-    /// Query the DB for all derivations and required features referenced by
-    /// `drv_ids`, returning a checker ready to call [`any_buildable`].
+    /// Query the DB for all derivations, required features, and substitute-miss
+    /// counts referenced by `builds`, returning a checker ready to call
+    /// [`any_buildable`].
     ///
     /// [`any_buildable`]: BuildabilityChecker::any_buildable
-    async fn load(state: &Arc<ServerState>, drv_ids: &[DerivationId]) -> Result<Self> {
+    async fn load(state: &Arc<ServerState>, builds: &[MBuild]) -> Result<Self> {
         let db = &state.worker_db;
-        let drvs = gradient_db::fetch_in_chunks(drv_ids, |chunk| async move {
+        let drv_ids: Vec<DerivationId> = builds.iter().map(|b| b.derivation).collect();
+        let build_ids: Vec<BuildId> = builds.iter().map(|b| b.id).collect();
+        let substitute_misses = gradient_db::substitute_miss_counts(db, &build_ids)
+            .await
+            .context("fetch substitute-miss counts")?;
+
+        let drvs = gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
             EDerivation::find().filter(CDerivation::Id.is_in(chunk)).all(db).await
         })
         .await
@@ -836,7 +883,7 @@ impl BuildabilityChecker {
         let drv_by_id: HashMap<DerivationId, MDerivation> =
             drvs.into_iter().map(|d| (d.id, d)).collect();
 
-        let edges = gradient_db::fetch_in_chunks(drv_ids, |chunk| async move {
+        let edges = gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
             EDerivationFeature::find()
                 .filter(CDerivationFeature::Derivation.is_in(chunk))
                 .all(db)
@@ -863,9 +910,20 @@ impl BuildabilityChecker {
 
         Ok(Self {
             drv_by_id,
+            substitute_misses,
             features_by_drv,
             feature_name,
         })
+    }
+
+    /// True while `build` should still be dispatched as a substitute
+    /// (builtin / any-worker): it is substitutable and below the escalation
+    /// threshold. Once it crosses the threshold it is checked against its real
+    /// arch/features instead.
+    fn in_substitute_mode(&self, build: &MBuild) -> bool {
+        build.substitutable
+            && self.substitute_misses.get(&build.id).copied().unwrap_or(0)
+                < crate::dispatch::SUBSTITUTE_MISS_ESCALATION_THRESHOLD
     }
 
     /// Returns `true` if at least one build in `builds` can be satisfied by
@@ -873,7 +931,7 @@ impl BuildabilityChecker {
     /// `(build.arch ∈ worker.architectures) ∧ (∀ required feature ∈ worker.system_features)`.
     fn any_buildable(&self, builds: &[MBuild], worker_caps: &[(Vec<String>, Vec<String>)]) -> bool {
         builds.iter().any(|b| {
-            if b.substitutable {
+            if self.in_substitute_mode(b) {
                 return true;
             }
             let Some(drv) = self.drv_by_id.get(&b.derivation) else {
@@ -915,7 +973,7 @@ impl BuildabilityChecker {
     ) -> WaitingReason {
         let mut grouped: BTreeMap<(String, Vec<String>), u32> = BTreeMap::new();
         for b in builds {
-            if b.substitutable {
+            if self.in_substitute_mode(b) {
                 continue;
             }
             let Some(drv) = self.drv_by_id.get(&b.derivation) else {
@@ -1003,6 +1061,15 @@ mod retry_tests {
         );
     }
     #[test]
+    fn substitute_unavailable_requeues_penalty_free() {
+        for attempt in [0, 5, 100] {
+            assert_eq!(
+                decide_failure_outcome(BuildFailureKind::SubstituteUnavailable, attempt, 3),
+                FailureOutcome::Requeue
+            );
+        }
+    }
+    #[test]
     fn backoff_grows_per_attempt() {
         let t0 = chrono::NaiveDateTime::default();
         assert!(!retry_backoff_elapsed(1, t0, t0 + chrono::Duration::seconds(29), 30));
@@ -1062,6 +1129,7 @@ mod waiting_reason_tests {
         }
         BuildabilityChecker {
             drv_by_id,
+            substitute_misses: HashMap::new(),
             features_by_drv,
             feature_name,
         }
@@ -1245,5 +1313,55 @@ mod waiting_reason_tests {
         let (unmet, _, _) = workers_view(&reason);
 
         assert!(unmet.is_empty());
+    }
+
+    fn substitutable_build(drv_id: DerivationId, eval_id: EvaluationId) -> MBuild {
+        gradient_entity::build::Model {
+            id: BuildId::now_v7(),
+            evaluation: eval_id,
+            derivation: drv_id,
+            status: BuildStatus::Queued,
+            substitutable: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn substitutable_below_threshold_is_buildable_anywhere() {
+        let eval_id = EvaluationId::now_v7();
+        let d = drv(DerivationId::now_v7(), "aarch64-linux");
+        let build = substitutable_build(d.id, eval_id);
+        let mut checker = checker_with(vec![d], vec![]);
+        checker
+            .substitute_misses
+            .insert(build.id, crate::dispatch::SUBSTITUTE_MISS_ESCALATION_THRESHOLD - 1);
+
+        let caps: Vec<(Vec<String>, Vec<String>)> = vec![(vec!["x86_64-linux".into()], vec![])];
+        let builds = [build];
+        assert!(checker.any_buildable(&builds, &caps));
+        let reason = checker.compute_waiting_reason(&builds, &caps);
+        let (unmet, _, _) = workers_view(&reason);
+        assert!(unmet.is_empty());
+    }
+
+    #[test]
+    fn substitutable_at_threshold_escalates_to_real_arch_check() {
+        let eval_id = EvaluationId::now_v7();
+        let d = drv(DerivationId::now_v7(), "aarch64-linux");
+        let build = substitutable_build(d.id, eval_id);
+        let mut checker = checker_with(vec![d], vec![]);
+        checker
+            .substitute_misses
+            .insert(build.id, crate::dispatch::SUBSTITUTE_MISS_ESCALATION_THRESHOLD);
+
+        // No aarch64 worker: the escalated build is no longer buildable-anywhere
+        // and surfaces as an unmet aarch64 requirement so the parker can park it.
+        let caps: Vec<(Vec<String>, Vec<String>)> = vec![(vec!["x86_64-linux".into()], vec![])];
+        let builds = [build];
+        assert!(!checker.any_buildable(&builds, &caps));
+        let reason = checker.compute_waiting_reason(&builds, &caps);
+        let (unmet, _, _) = workers_view(&reason);
+        assert_eq!(unmet.len(), 1);
+        assert_eq!(unmet[0].architecture, "aarch64-linux");
     }
 }
