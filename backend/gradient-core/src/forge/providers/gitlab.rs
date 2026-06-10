@@ -12,7 +12,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use subtle::ConstantTimeEq;
 
-use crate::ci::integration_lookup::ForgeType;
+use crate::types::ForgeType;
 use crate::forge::provider::ForgeProvider;
 use crate::forge::reporter::{CiReporter, GitlabReporter};
 use crate::forge::webhook::{

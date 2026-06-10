@@ -11,6 +11,7 @@ pub mod cached_path_info;
 pub mod cli;
 pub mod config;
 pub mod consts;
+pub mod forge;
 pub mod ids;
 pub mod input;
 pub mod log_api;
@@ -39,6 +40,7 @@ pub use self::config::{
 };
 pub use self::consts::*;
 pub use self::entity_aliases::*;
+pub use self::forge::ForgeType;
 pub use self::ids::*;
 pub use self::input::*;
 pub use self::io::*;

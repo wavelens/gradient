@@ -10,7 +10,6 @@ pub mod actions;
 pub mod apply;
 pub mod context;
 pub mod github_app_manifest;
-pub mod http_validation;
 pub mod integration_lookup;
 pub mod manifest_state;
 pub mod reactor;
@@ -24,7 +23,6 @@ pub use self::apply::{
     park_if_no_workers, park_if_pending_approval, park_if_storage_full,
 };
 pub use self::context::CiContext;
-pub use self::http_validation::{WebhookUrlError, validate_webhook_url};
 pub use self::integration_lookup::*;
 pub use self::reactor::CiStatusReactor;
 pub use self::reporting::*;

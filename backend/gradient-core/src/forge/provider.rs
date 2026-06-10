@@ -12,7 +12,7 @@
 
 use std::sync::Arc;
 
-use crate::ci::integration_lookup::ForgeType;
+use crate::types::ForgeType;
 use crate::forge::reporter::CiReporter;
 use crate::forge::webhook::{
     ParsedPullRequestEvent, ParsedPushEvent, ParsedReleaseEvent, WebhookEventKind,

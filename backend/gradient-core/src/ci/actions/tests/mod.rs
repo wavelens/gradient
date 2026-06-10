@@ -12,7 +12,7 @@ use super::report::build_ci_report_from_payload;
 use super::truncate;
 use crate::forge::reporter::CiStatus;
 use crate::types::ActionType;
-use fixtures::{action_with, make_state, run};
+use fixtures::{action_with, make_ctx, run};
 use serde_json::json;
 
 #[test]
@@ -131,7 +131,7 @@ fn forge_status_payload_includes_optional_fields() {
 #[test]
 fn build_ci_report_fast_path_uses_payload_fields() {
     run(async {
-        let state = make_state();
+        let ctx = make_ctx();
         let payload = json!({
             "owner": "acme",
             "repo": "widgets",
@@ -142,7 +142,7 @@ fn build_ci_report_fast_path_uses_payload_fields() {
             "check_run_id": 99,
         });
         let report =
-            build_ci_report_from_payload(&state.ci(), "build.started", &payload, CiStatus::Running)
+            build_ci_report_from_payload(&ctx, "build.started", &payload, CiStatus::Running)
                 .await
                 .expect("fast path should succeed")
                 .expect("fast path always emits a report");
@@ -158,9 +158,9 @@ fn build_ci_report_fast_path_uses_payload_fields() {
 #[test]
 fn build_ci_report_errors_when_payload_empty() {
     run(async {
-        let state = make_state();
+        let ctx = make_ctx();
         let err =
-            build_ci_report_from_payload(&state.ci(), "build.started", &json!({}), CiStatus::Running)
+            build_ci_report_from_payload(&ctx, "build.started", &json!({}), CiStatus::Running)
                 .await
                 .unwrap_err();
         assert!(err.to_string().contains("build_id"), "error: {err}");
@@ -170,10 +170,10 @@ fn build_ci_report_errors_when_payload_empty() {
 #[test]
 fn build_ci_report_errors_on_invalid_build_id() {
     run(async {
-        let state = make_state();
+        let ctx = make_ctx();
         let payload = json!({ "build_id": "not-a-uuid" });
         let err =
-            build_ci_report_from_payload(&state.ci(), "build.started", &payload, CiStatus::Running)
+            build_ci_report_from_payload(&ctx, "build.started", &payload, CiStatus::Running)
                 .await
                 .unwrap_err();
         assert!(err.to_string().contains("invalid build_id"), "error: {err}");
