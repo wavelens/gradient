@@ -10,6 +10,7 @@ pub mod db;
 pub mod executor;
 pub mod forge;
 pub mod http;
+pub mod http_validation;
 pub mod hydra;
 pub mod nix;
 pub mod nix_hash;

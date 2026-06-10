@@ -19,7 +19,8 @@ use super::{
     StateFlakeInputOverride, StateIntegration, StateOrgMemberEntry, StateOrganization,
     StateProject, StateRole, StateTrigger, StateUpstream, StateUser, StateWorker,
 };
-use crate::ci::{ForgeType, IntegrationKind};
+use crate::ci::IntegrationKind;
+use crate::types::ForgeType;
 use crate::permissions::{cache_mask_to_vec, is_builtin_cache_role, is_builtin_role, mask_to_vec};
 use crate::types::actions::{ActionConfig, ActionType};
 use crate::types::triggers::{ConcurrencyPolicy, TriggerConfig, TriggerType};

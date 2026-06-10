@@ -9,7 +9,8 @@ use crate::ci::actions::matchers::forge_status_for_event;
 use crate::ci::actions::report::{build_ci_report_from_payload, persist_evaluation_check_id};
 use crate::ci::actions::ExecutorOk;
 use crate::ci::context::CiContext;
-use crate::ci::integration_lookup::{ForgeType, IntegrationKind};
+use crate::ci::integration_lookup::IntegrationKind;
+use crate::types::ForgeType;
 use crate::forge::reporter::{CiReporter, GithubAppReporter};
 use crate::types::{
     ActionConfig, ActionType, CIntegration, CProjectAction, EIntegration, EOrganization,

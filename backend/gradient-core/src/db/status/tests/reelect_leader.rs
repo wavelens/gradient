@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::fixtures::{bid, did, make_state, org, run};
+use super::fixtures::{bid, did, make_ctx, org, run};
 use super::super::leader_election::reelect_leader;
 use crate::types::{BuildId, DerivationId, EvaluationId, OrganizationId};
 use gradient_entity::build::{BuildStatus, Model as MBuild};
@@ -81,8 +81,8 @@ fn promotes_same_org_and_orphans_cross_org_follower() {
             }])
             .into_connection();
 
-        let state = make_state(db);
-        reelect_leader(&state.db(), &leader)
+        let ctx = make_ctx(db);
+        reelect_leader(&ctx, &leader)
             .await
             .expect("reelect ok");
     });
@@ -118,8 +118,8 @@ fn all_cross_org_followers_orphaned_when_no_same_org() {
             }])
             .into_connection();
 
-        let state = make_state(db);
-        reelect_leader(&state.db(), &leader)
+        let ctx = make_ctx(db);
+        reelect_leader(&ctx, &leader)
             .await
             .expect("reelect ok");
     });

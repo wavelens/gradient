@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::ci::http_validation::{WebhookUrlError, validate_webhook_url};
-use crate::ci::integration_lookup::ForgeType;
+use crate::http_validation::{WebhookUrlError, validate_webhook_url};
+use crate::types::ForgeType;
 use crate::forge::registry::ForgeRegistry;
 use anyhow::{Context, Result};
 use async_trait::async_trait;

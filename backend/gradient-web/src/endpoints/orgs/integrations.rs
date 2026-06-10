@@ -24,7 +24,8 @@ use axum::extract::{Path, State};
 use axum::{Extension, Json};
 
 use gradient_core::ci::actions::encrypt_secret_with_file;
-use gradient_core::ci::{ForgeType, GITHUB_APP_INTEGRATION_NAME, IntegrationKind};
+use gradient_core::ci::{GITHUB_APP_INTEGRATION_NAME, IntegrationKind};
+use gradient_core::types::ForgeType;
 use gradient_core::types::input::check_index_name;
 use gradient_core::types::*;
 use gradient_core::ServerState;

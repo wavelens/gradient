@@ -9,7 +9,7 @@
 use super::response::{QueuedEvaluation, SkippedProject, WebhookTriggerOutcome};
 use gradient_entity::project_trigger as ept;
 use gradient_core::ci::{
-    APPROVAL_ACTION_ID, ApplyInput, ApplyOutcome, ApprovalInfo, ForgeType, apply_trigger,
+    APPROVAL_ACTION_ID, ApplyInput, ApplyOutcome, ApprovalInfo, apply_trigger,
     find_approval_gated_eval, parse_owner_repo, set_evaluation_source_comment, unpark_approval,
     unpark_approval_with_wildcard,
 };
@@ -216,7 +216,7 @@ pub(super) async fn resolve_github_app_targets(
         let integration = EIntegration::find()
             .filter(CIntegration::Organization.eq(org.id))
             .filter(CIntegration::Kind.eq(i16::from(IntegrationKind::Inbound)))
-            .filter(CIntegration::ForgeType.eq(i16::from(gradient_core::ci::ForgeType::GitHub)))
+            .filter(CIntegration::ForgeType.eq(i16::from(gradient_core::types::ForgeType::GitHub)))
             .one(&state.web_db)
             .await
             .ok()

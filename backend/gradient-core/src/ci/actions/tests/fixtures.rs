@@ -6,7 +6,6 @@
 
 use crate::types::{ActionType, MProjectAction, ProjectId};
 use serde_json::json;
-use std::sync::Arc;
 use uuid::Uuid;
 
 pub fn action_with(action_type: ActionType, events: Vec<&str>) -> MProjectAction {
@@ -33,10 +32,11 @@ pub fn run<F: std::future::Future>(fut: F) -> F::Output {
         .block_on(fut)
 }
 
-pub fn make_state() -> Arc<crate::AppState> {
-    use crate::db::{WebDb, WorkerDb};
-    use crate::storage::{EmailSender, LogStorage, NarStore};
-    use crate::types::{RuntimeConfig, SecretString};
+pub fn make_ctx() -> crate::ci::CiContext {
+    use crate::ci::CiContext;
+    use crate::db::{DbContext, NoReactor, WebDb, WorkerDb};
+    use crate::storage::{EmailSender, LogStorage, NarStore, StorageCtx};
+    use crate::types::RuntimeConfig;
     use futures::future::BoxFuture;
     use sea_orm::{DatabaseBackend, MockDatabase};
 
@@ -153,25 +153,22 @@ pub fn make_state() -> Arc<crate::AppState> {
     };
     let config = std::sync::Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
     let nar_storage = NarStore::local(&config.storage.base_path).expect("nar store");
-    Arc::new(crate::AppState {
-        web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
+    let db = DbContext {
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
+        web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config,
-        log_storage: std::sync::Arc::new(NoopLog),
-        email: std::sync::Arc::new(NoopEmail) as std::sync::Arc<dyn EmailSender>,
-        nar_storage,
-        manifest_state: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-        pending_credentials: std::sync::Arc::new(std::sync::Mutex::new(
-            std::collections::HashMap::new(),
-        )),
+        storage: StorageCtx {
+            nar_storage,
+            log_storage: std::sync::Arc::new(NoopLog),
+            email: std::sync::Arc::new(NoopEmail) as std::sync::Arc<dyn EmailSender>,
+        },
+        shutdown: crate::shutdown::Shutdown::new(),
+        board_events: tokio::sync::broadcast::channel(256).0,
+        reactor: std::sync::Arc::new(NoReactor),
+    };
+    CiContext {
+        db,
         http: crate::http::build_client().expect("http client"),
         forge: crate::forge::ForgeRegistry::with_builtin(),
-        shutdown: crate::shutdown::Shutdown::new(),
-        jwt_secret: SecretString::new("test-jwt-secret".to_string()),
-        started_at: chrono::Utc::now(),
-        pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
-        oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
-        board_events: tokio::sync::broadcast::channel(256).0,
-        reactor: std::sync::Arc::new(crate::db::NoReactor),
-    })
+    }
 }

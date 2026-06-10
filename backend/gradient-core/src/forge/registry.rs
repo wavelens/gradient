@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::ci::integration_lookup::ForgeType;
+use crate::types::ForgeType;
 use crate::forge::provider::ForgeProvider;
 use crate::forge::providers::{gitea::GiteaProvider, github::GithubProvider, gitlab::GitlabProvider};
 
