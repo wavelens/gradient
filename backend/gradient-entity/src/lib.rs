@@ -10,6 +10,7 @@ pub mod admin_task;
 pub mod api;
 pub mod audit_log;
 pub mod build;
+pub mod build_attempt;
 pub mod build_log_chunk;
 pub mod build_product;
 pub mod build_request_blob;
