@@ -61,7 +61,8 @@ pub async fn post_evaluation_builds(
                 Ok(Some(d)) => d.name,
                 _ => String::new(),
             };
-            let log = state.log_storage.read(build.log_id.unwrap_or(build.id)).await.unwrap_or_default();
+            let log_key = gradient_db::latest_attempt_log_id(&state.web_db, build.id).await.unwrap_or(build.id);
+            let log = state.log_storage.read(log_key).await.unwrap_or_default();
             last_logs.insert(build.id, log.len());
 
             // TODO: Chunkify past log
@@ -118,7 +119,8 @@ pub async fn post_evaluation_builds(
                     Ok(Some(d)) => d.name,
                     _ => String::new(),
                 };
-                let log = state.log_storage.read(build.log_id.unwrap_or(build.id)).await.unwrap_or_default();
+                let log_key = gradient_db::latest_attempt_log_id(&state.web_db, build.id).await.unwrap_or(build.id);
+                let log = state.log_storage.read(log_key).await.unwrap_or_default();
                 let last_offset = *last_logs.get(&build.id).unwrap_or(&0);
                 let log_new = log[last_offset..].to_string();
 

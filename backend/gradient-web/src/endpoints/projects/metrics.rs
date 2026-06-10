@@ -77,8 +77,17 @@ pub async fn get_project_metrics(
             .filter(CBuild::Evaluation.eq(evaluation.id))
             .all(&state.web_db)
             .await?;
-        // Only sum actual build times; substituted builds contribute nothing.
-        let build_time_total_ms: i64 = builds.iter().filter_map(|b| b.build_time_ms).sum();
+        let mut build_time_total_ms: i64 = 0;
+        for b in &builds {
+            if let Some(ms) = gradient_db::latest_attempt(&state.web_db, b.id)
+                .await
+                .ok()
+                .flatten()
+                .and_then(|a| a.duration_ms())
+            {
+                build_time_total_ms += ms;
+            }
+        }
 
         // Resolve entry-point builds for this evaluation.
         let ep_build_ids: Vec<BuildId> = EEntryPoint::find()
@@ -206,9 +215,11 @@ pub async fn get_entry_point_metrics(
             continue;
         };
 
-        // Substituted builds have build_time_ms = None; leave as null rather than
-        // falling back to (updated_at - created_at) which gives ~0 ms.
-        let build_time_ms = build.build_time_ms;
+        let build_time_ms = gradient_db::latest_attempt(&state.web_db, build.id)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|a| a.duration_ms());
 
         let closure = derivation_closure_reachable(&state.web_db, vec![build.derivation]).await?;
         let dependencies_count = (closure.len() as i64).saturating_sub(1);

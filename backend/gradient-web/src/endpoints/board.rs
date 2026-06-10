@@ -25,6 +25,7 @@ use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, QueryFilter, QueryOrder,
     QuerySelect, Set, Statement,
 };
+use gradient_entity::build_attempt;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -109,6 +110,14 @@ pub async fn get_dispatched_jobs(
     let mut other_running = 0u64;
     for j in open {
         if scope.allows(&Uuid::from(j.organization)) {
+            let build_id = build_attempt::Entity::find()
+                .filter(build_attempt::Column::DispatchedJob.eq(j.id))
+                .one(&state.web_db)
+                .await
+                .ok()
+                .flatten()
+                .map(|a| a.build.into());
+
             jobs.push(DispatchedJobSummary {
                 id: j.id.into(),
                 kind: j.kind,
@@ -116,7 +125,7 @@ pub async fn get_dispatched_jobs(
                 worker_id: j.worker_id,
                 score: j.score,
                 dispatched_at: j.dispatched_at.and_utc().to_rfc3339(),
-                build_id: j.build_id.map(Into::into),
+                build_id,
                 evaluation_id: j.evaluation_id.into(),
             });
         } else {
@@ -169,6 +178,14 @@ pub async fn get_dispatched_job(
         .map(|o| o.name)
         .unwrap_or_default();
 
+    let build_id = build_attempt::Entity::find()
+        .filter(build_attempt::Column::DispatchedJob.eq(j.id))
+        .one(&state.web_db)
+        .await
+        .ok()
+        .flatten()
+        .map(|a| a.build.into());
+
     Ok(ok_json(DispatchedJobDetail {
         id: j.id.into(),
         kind: j.kind,
@@ -179,7 +196,7 @@ pub async fn get_dispatched_job(
         queued_at: j.queued_at.and_utc().to_rfc3339(),
         dispatched_at: j.dispatched_at.and_utc().to_rfc3339(),
         finished_at: j.finished_at.map(|t| t.and_utc().to_rfc3339()),
-        build_id: j.build_id.map(Into::into),
+        build_id,
         evaluation_id: j.evaluation_id.into(),
         score_breakdown: j.score_breakdown,
         worker_context: j.worker_context,
@@ -264,7 +281,7 @@ pub async fn get_expensive_jobs(
 ) -> WebResult<Json<BaseResponse<Vec<ExpensiveBuild>>>> {
     let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
     let mut clauses = vec![
-        "b.build_time_ms IS NOT NULL".to_string(),
+        "ba.build_started_at IS NOT NULL AND ba.build_finished_at IS NOT NULL".to_string(),
         "b.status = 3".to_string(),
     ];
 
@@ -290,9 +307,18 @@ pub async fn get_expensive_jobs(
     }
 
     let sql = format!(
-        "SELECT b.id, d.organization, d.name, b.build_time_ms, b.worker \
-         FROM build b JOIN derivation d ON d.id = b.derivation \
-         WHERE {} ORDER BY b.build_time_ms DESC LIMIT 20",
+        "SELECT b.id, d.organization, d.name, \
+         EXTRACT(EPOCH FROM (ba.build_finished_at - ba.build_started_at))::bigint * 1000 AS build_time_ms, \
+         dj.worker_id AS worker \
+         FROM build b \
+         JOIN derivation d ON d.id = b.derivation \
+         JOIN LATERAL ( \
+           SELECT ba2.build_started_at, ba2.build_finished_at, ba2.dispatched_job \
+           FROM build_attempt ba2 WHERE ba2.build = b.id \
+           ORDER BY ba2.created_at DESC LIMIT 1 \
+         ) ba ON true \
+         JOIN dispatched_job dj ON dj.id = ba.dispatched_job \
+         WHERE {} ORDER BY build_time_ms DESC LIMIT 20",
         clauses.join(" AND ")
     );
 
@@ -468,10 +494,19 @@ pub async fn get_top_orgs_by_buildtime(
     require_superuser(&user)?;
     let window = params.window_days.unwrap_or(30).max(1);
     let sql = format!(
-        "SELECT d.organization, sum(b.build_time_ms)::bigint AS total, count(*)::bigint AS cnt \
-         FROM build b JOIN derivation d ON d.id = b.derivation \
-         WHERE b.status = 3 AND b.build_time_ms IS NOT NULL \
-           AND b.build_finished_at >= (now() AT TIME ZONE 'UTC') - interval '{window} days' \
+        "SELECT d.organization, \
+         sum(EXTRACT(EPOCH FROM (ba.build_finished_at - ba.build_started_at))::bigint * 1000)::bigint AS total, \
+         count(*)::bigint AS cnt \
+         FROM build b \
+         JOIN derivation d ON d.id = b.derivation \
+         JOIN LATERAL ( \
+           SELECT ba2.build_started_at, ba2.build_finished_at \
+           FROM build_attempt ba2 WHERE ba2.build = b.id \
+           ORDER BY ba2.created_at DESC LIMIT 1 \
+         ) ba ON true \
+         WHERE b.status = 3 \
+           AND ba.build_started_at IS NOT NULL AND ba.build_finished_at IS NOT NULL \
+           AND ba.build_finished_at >= (now() AT TIME ZONE 'UTC') - interval '{window} days' \
          GROUP BY d.organization ORDER BY total DESC LIMIT 15"
     );
 
