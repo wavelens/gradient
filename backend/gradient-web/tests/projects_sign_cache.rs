@@ -15,7 +15,7 @@ use chrono::{Duration, Utc};
 use gradient_entity::{ids::*, organization_user, project, project_trigger, role, session};
 use gradient_core::permissions::admin_mask;
 use gradient_core::storage::{EmailSender, NarStore};
-use gradient_core::types::{RuntimeConfig, SecretString, SessionId};
+use gradient_types::{RuntimeConfig, SecretString, SessionId};
 use gradient_core::ServerState;
 use gradient_core::db::{WebDb, WorkerDb};
 use jsonwebtoken::{EncodingKey, Header, encode};
@@ -101,13 +101,13 @@ fn admin_membership() -> organization_user::Model {
         ),
         organization: org_id(),
         user: user_id(),
-        role: gradient_core::types::consts::BASE_ROLE_ADMIN_ID,
+        role: gradient_types::consts::BASE_ROLE_ADMIN_ID,
     }
 }
 
 fn admin_role_row() -> role::Model {
     role::Model {
-        id: gradient_core::types::consts::BASE_ROLE_ADMIN_ID,
+        id: gradient_types::consts::BASE_ROLE_ADMIN_ID,
         name: "Admin".into(),
         permission: admin_mask(),
         ..Default::default()

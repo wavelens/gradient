@@ -6,7 +6,7 @@
 
 use super::restart_build_status;
 use crate::ci::trigger::TriggerError;
-use crate::types::*;
+use gradient_types::*;
 use chrono::NaiveDateTime;
 use gradient_entity::build::BuildStatus;
 use sea_orm::ActiveValue::Set;

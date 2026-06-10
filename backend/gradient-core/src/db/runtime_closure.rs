@@ -14,7 +14,7 @@
 use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
 use std::collections::{HashMap, HashSet};
 
-use crate::types::*;
+use gradient_types::*;
 
 /// Extract the 32-char store hash from a `hash-name` reference token. Store
 /// hashes are dash-free, so the hash is everything before the first `-`.

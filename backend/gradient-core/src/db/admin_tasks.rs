@@ -14,7 +14,7 @@ use sea_orm::{
 };
 use serde_json::Value as JsonValue;
 
-use crate::types::*;
+use gradient_types::*;
 use gradient_entity::ids::{AdminTaskId, UserId};
 
 #[derive(Debug)]

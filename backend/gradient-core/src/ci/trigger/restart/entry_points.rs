@@ -5,7 +5,7 @@
  */
 
 use crate::ci::trigger::TriggerError;
-use crate::types::*;
+use gradient_types::*;
 use chrono::NaiveDateTime;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};

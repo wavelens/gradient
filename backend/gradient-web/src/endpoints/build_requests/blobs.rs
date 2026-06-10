@@ -18,8 +18,8 @@ use crate::permissions::Permission;
 use axum::Extension;
 use axum::Json;
 use axum::extract::{Multipart, Path, State};
-use gradient_core::types::ids::{BuildRequestBlobId, UploadSessionId};
-use gradient_core::types::{
+use gradient_types::ids::{BuildRequestBlobId, UploadSessionId};
+use gradient_types::{
     ABuildRequestBlob, AUploadSession, BaseResponse, EUploadSession, MUser, now,
 };
 use gradient_core::ServerState;

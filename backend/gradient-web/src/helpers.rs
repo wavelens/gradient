@@ -8,7 +8,7 @@
 
 use crate::error::{WebError, WebResult};
 use axum::Json;
-use gradient_core::types::BaseResponse;
+use gradient_types::BaseResponse;
 
 /// Wraps a value in the standard successful `BaseResponse` envelope.
 /// Replaces the boilerplate `Json(BaseResponse { error: false, message })`.

@@ -6,7 +6,7 @@
 
 use super::helpers::{EntityLookup, ErrorCollector};
 use crate::ci::GITHUB_APP_INTEGRATION_NAME;
-use crate::types::triggers::TriggerType;
+use gradient_types::triggers::TriggerType;
 use std::collections::HashSet;
 
 pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {

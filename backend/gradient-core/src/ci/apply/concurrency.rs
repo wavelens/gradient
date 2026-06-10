@@ -5,8 +5,8 @@
  */
 
 use crate::ci::abort::{AbortKind, abort_evaluation};
-use crate::types::triggers::ConcurrencyPolicy;
-use crate::types::*;
+use gradient_types::triggers::ConcurrencyPolicy;
+use gradient_types::*;
 use sea_orm::ConnectionTrait;
 
 /// Outcome of applying the project's [`ConcurrencyPolicy`] to the in-flight

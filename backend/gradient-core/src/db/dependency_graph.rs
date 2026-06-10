@@ -19,7 +19,7 @@ use anyhow::{Context, Result};
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use std::collections::HashSet;
 
-use crate::types::*;
+use gradient_types::*;
 
 /// Returns the set of all transitive dependents of `start`, **including** `start`
 /// itself. Walks reverse `derivation_dependency` edges in BFS layers, batching

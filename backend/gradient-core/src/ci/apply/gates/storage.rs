@@ -5,8 +5,8 @@
  */
 
 use crate::db::org_caches_all_full;
-use crate::types::waiting_reason::WaitingReason;
-use crate::types::*;
+use gradient_types::waiting_reason::WaitingReason;
+use gradient_types::*;
 use gradient_entity::evaluation::EvaluationStatus;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ConnectionTrait};
@@ -32,6 +32,6 @@ pub async fn park_if_storage_full<C: ConnectionTrait>(
     let mut ae: AEvaluation = eval.into();
     ae.status = Set(EvaluationStatus::Waiting);
     ae.waiting_reason = Set(Some(WaitingReason::CacheStorageFull.to_json()));
-    ae.updated_at = Set(crate::types::now());
+    ae.updated_at = Set(gradient_types::now());
     ae.update(db).await
 }

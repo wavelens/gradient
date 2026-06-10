@@ -13,7 +13,7 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::Response;
 use gradient_core::sources::get_hash_from_url;
-use gradient_core::types::*;
+use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
@@ -113,7 +113,7 @@ fn spawn_cache_derivation_fetch_update(state: Arc<ServerState>, cache_id: CacheI
     let s = Arc::clone(&state);
     state.shutdown.spawn(async move {
         use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
-        let now = gradient_core::types::now();
+        let now = gradient_types::now();
         let now_val = sea_orm::Value::ChronoDateTimeUtc(Some(Box::new(
             chrono::DateTime::from_naive_utc_and_offset(now, chrono::Utc),
         )));
@@ -178,7 +178,7 @@ mod tests {
 
     fn cached_path_row() -> gradient_entity::cached_path::Model {
         gradient_entity::cached_path::Model {
-            id: gradient_core::types::ids::CachedPathId::now_v7(),
+            id: gradient_types::ids::CachedPathId::now_v7(),
             store_path: format!("/nix/store/{STORE_HASH}-hello.drv"),
             hash: STORE_HASH.to_string(),
             package: "hello.drv".to_string(),
@@ -187,7 +187,7 @@ mod tests {
             nar_size: Some(2048),
             nar_hash: Some(format!("sha256:{FILE_HASH_NIX32}")),
             references: Some(String::new()),
-            created_at: gradient_core::types::now(),
+            created_at: gradient_types::now(),
             ..Default::default()
         }
     }

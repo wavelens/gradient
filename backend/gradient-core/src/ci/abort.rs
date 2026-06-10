@@ -14,7 +14,7 @@
 //! - `AbortKind::Soft` marks only the evaluation. In-flight builds keep
 //!   running and their outputs land in the cache for the next eval to reuse.
 
-use crate::types::*;
+use gradient_types::*;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 use sea_orm::ActiveValue::Set;
@@ -41,7 +41,7 @@ pub async fn abort_evaluation<C: ConnectionTrait>(
 
     let mut active: AEvaluation = eval.clone().into();
     active.status = Set(EvaluationStatus::Aborted);
-    active.updated_at = Set(crate::types::now());
+    active.updated_at = Set(gradient_types::now());
     active.update(db).await?;
 
     if kind == AbortKind::Hard {
@@ -64,7 +64,7 @@ pub async fn abort_evaluation<C: ConnectionTrait>(
             aborted_ids.push(b.id);
             let mut ab: ABuild = b.into();
             ab.status = Set(BuildStatus::Aborted);
-            ab.updated_at = Set(crate::types::now());
+            ab.updated_at = Set(gradient_types::now());
             ab.update(db).await?;
         }
         return Ok(aborted_ids);

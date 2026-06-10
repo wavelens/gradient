@@ -5,7 +5,7 @@
  */
 
 use clap::Parser;
-use gradient_core::types::proto::GradientCapabilities;
+use gradient_types::proto::GradientCapabilities;
 
 /// CLI arguments and environment variables for `gradient-worker`.
 #[derive(Parser, Debug, Clone)]

@@ -19,7 +19,7 @@ pub struct SecretsArgs {
 
 #[cfg(test)]
 mod tests {
-    use crate::types::Cli;
+    use crate::Cli;
     use clap::Parser;
 
     #[test]

@@ -10,9 +10,9 @@ use crate::ci::actions::report::{build_ci_report_from_payload, persist_evaluatio
 use crate::ci::actions::ExecutorOk;
 use crate::ci::context::CiContext;
 use crate::ci::integration_lookup::IntegrationKind;
-use crate::types::ForgeType;
+use gradient_types::ForgeType;
 use crate::forge::reporter::{CiReporter, GithubAppReporter};
-use crate::types::{
+use gradient_types::{
     ActionConfig, ActionType, CIntegration, CProjectAction, EIntegration, EOrganization,
     EProjectAction, EvaluationId, IntegrationId, ProjectId,
 };

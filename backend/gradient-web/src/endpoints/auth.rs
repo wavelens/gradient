@@ -20,9 +20,9 @@ use axum::Extension;
 use chrono::Duration;
 use email_address::EmailAddress;
 use gradient_core::storage::generate_verification_token;
-use gradient_core::types::consts::*;
-use gradient_core::types::input::{validate_display_name, validate_password, validate_username};
-use gradient_core::types::*;
+use gradient_types::consts::*;
+use gradient_types::input::{validate_display_name, validate_password, validate_username};
+use gradient_types::*;
 use gradient_core::ServerState;
 use password_auth::{generate_hash, verify_password};
 use rand::distr::{Alphanumeric, SampleString};
@@ -104,7 +104,7 @@ pub async fn post_basic_register(
         .is_some_and(|e| e.require_verification)
     {
         let token = generate_verification_token();
-        let expires = gradient_core::types::now() + chrono::Duration::hours(24);
+        let expires = gradient_types::now() + chrono::Duration::hours(24);
         (false, Some(token), Some(expires))
     } else {
         (true, None, None)
@@ -117,7 +117,7 @@ pub async fn post_basic_register(
         email: Set(body.email.clone()),
         password: Set(Some(generate_hash(body.password.clone()))),
         last_login_at: Set(*NULL_TIME),
-        created_at: Set(gradient_core::types::now()),
+        created_at: Set(gradient_types::now()),
         email_verified: Set(email_verified),
         email_verification_token: Set(verification_token.clone()),
         email_verification_token_expires: Set(verification_expires),
@@ -524,7 +524,7 @@ pub async fn post_logout(
         let user_id = data.claims.id;
         if let Ok(Some(session)) = ESession::find_by_id(session_id).one(&state.web_db).await {
             let mut active: ASession = session.into_active_model();
-            active.revoked_at = Set(Some(gradient_core::types::now()));
+            active.revoked_at = Set(Some(gradient_types::now()));
             let _ = active.update(&state.web_db).await;
         }
 
@@ -623,7 +623,7 @@ pub async fn get_verify_email(
         .ok_or_else(|| WebError::bad_request("Invalid verification token"))?;
 
     if let Some(expires) = user.email_verification_token_expires
-        && gradient_core::types::now() > expires
+        && gradient_types::now() > expires
     {
         return Err(WebError::bad_request(
             "Verification token has expired".to_string(),
@@ -674,7 +674,7 @@ pub async fn post_resend_verification(
     }
 
     let verification_token = generate_verification_token();
-    let verification_expires = gradient_core::types::now() + chrono::Duration::hours(24);
+    let verification_expires = gradient_types::now() + chrono::Duration::hours(24);
 
     let tx = state.web_db.inner().begin().await?;
 
@@ -785,7 +785,7 @@ pub async fn post_cli_device_start(
         let candidate = generate_user_code();
         let exists = ECliDeviceAuthorization::find()
             .filter(CCliDeviceAuthorization::UserCode.eq(candidate.clone()))
-            .filter(CCliDeviceAuthorization::ExpiresAt.gt(gradient_core::types::now()))
+            .filter(CCliDeviceAuthorization::ExpiresAt.gt(gradient_types::now()))
             .one(&state.web_db)
             .await?;
         if exists.is_none() {
@@ -793,7 +793,7 @@ pub async fn post_cli_device_start(
         }
     };
 
-    let now = gradient_core::types::now();
+    let now = gradient_types::now();
     let expires_at = now + Duration::minutes(CLI_DEVICE_LIFETIME_MINUTES);
 
     let row = ACliDeviceAuthorization {
@@ -845,7 +845,7 @@ pub async fn post_cli_device_poll(
         .await?
         .ok_or_else(|| WebError::not_found("Device authorization"))?;
 
-    let now = gradient_core::types::now();
+    let now = gradient_types::now();
     if row.denied_at.is_some() {
         return Err(WebError::bad_request_with(
             ErrorCode::CLI_AUTH_DENIED,
@@ -880,7 +880,7 @@ async fn find_active_user_code(
         .await?
         .ok_or_else(|| WebError::not_found("Device authorization"))?;
 
-    let now = gradient_core::types::now();
+    let now = gradient_types::now();
     if row.denied_at.is_some() {
         return Err(WebError::bad_request_with(
             ErrorCode::CLI_AUTH_DENIED,
@@ -933,7 +933,7 @@ pub async fn post_cli_device_authorize(
     .await
     .map_err(|_| WebError::failed_to_generate_token())?;
 
-    let now = gradient_core::types::now();
+    let now = gradient_types::now();
     let mut active: ACliDeviceAuthorization = row.into();
     active.user_id = Set(Some(user.id));
     active.token = Set(Some(token));
@@ -960,7 +960,7 @@ pub async fn post_cli_device_deny(
 ) -> WebResult<Json<BaseResponse<String>>> {
     let row = find_active_user_code(&state, &body.user_code).await?;
 
-    let now = gradient_core::types::now();
+    let now = gradient_types::now();
     let mut active: ACliDeviceAuthorization = row.into();
     active.denied_at = Set(Some(now));
     active.update(&state.web_db).await?;

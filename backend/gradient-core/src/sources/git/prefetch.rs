@@ -7,8 +7,8 @@
 use super::remote::accept_cert;
 use super::url::parse_nix_git_url;
 use crate::sources::{FlakePrefetcher, PrefetchedFlake, SourceError};
-use crate::types::input::check_repository_url_is_ssh;
-use crate::types::*;
+use gradient_types::input::check_repository_url_is_ssh;
+use gradient_types::*;
 use anyhow::Result;
 use async_trait::async_trait;
 use git2::RemoteCallbacks;

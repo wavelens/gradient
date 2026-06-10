@@ -18,8 +18,8 @@
 
 use gradient_entity::{ids::*, organization_user, role};
 use gradient_core::permissions::{Permission, admin_mask, view_mask, write_mask};
-use gradient_core::types::SessionId;
-use gradient_core::types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID};
+use gradient_types::SessionId;
+use gradient_types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID};
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 use serde_json::{Value, json};
 use gradient_test_support::fixtures::{org, org_id, user, user_id};

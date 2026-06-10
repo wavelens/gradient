@@ -16,7 +16,7 @@
 //!   probe credential state.
 
 use gradient_entity::{ids::*, integration, organization_user};
-use gradient_core::types::SessionId;
+use gradient_types::SessionId;
 use sea_orm::{DatabaseBackend, MockDatabase};
 use serde_json::Value;
 use gradient_test_support::fixtures::{org, org_id, test_date, user, user_id};
@@ -36,7 +36,7 @@ fn member_only_membership() -> organization_user::Model {
         ),
         organization: org_id(),
         user: user_id(),
-        role: gradient_core::types::consts::BASE_ROLE_VIEW_ID,
+        role: gradient_types::consts::BASE_ROLE_VIEW_ID,
     }
 }
 

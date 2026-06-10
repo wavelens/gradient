@@ -20,10 +20,10 @@ use super::{
     StateProject, StateRole, StateTrigger, StateUpstream, StateUser, StateWorker,
 };
 use crate::ci::IntegrationKind;
-use crate::types::ForgeType;
+use gradient_types::ForgeType;
 use crate::permissions::{cache_mask_to_vec, is_builtin_cache_role, is_builtin_role, mask_to_vec};
-use crate::types::actions::{ActionConfig, ActionType};
-use crate::types::triggers::{ConcurrencyPolicy, TriggerConfig, TriggerType};
+use gradient_types::actions::{ActionConfig, ActionType};
+use gradient_types::triggers::{ConcurrencyPolicy, TriggerConfig, TriggerType};
 use gradient_entity::cache_upstream::CacheUpstreamKind;
 use gradient_entity::ids::*;
 use sea_orm::{ConnectionTrait, DbErr, EntityTrait};

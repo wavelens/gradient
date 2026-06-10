@@ -22,7 +22,7 @@ use gradient_proto::messages::{BuildJob, FlakeJob, FlakeTask};
 use tokio::sync::watch;
 use tracing::instrument;
 
-use gradient_core::types::CachedPathInfo;
+use gradient_types::CachedPathInfo;
 use gradient_proto::messages::QueryMode;
 
 use crate::nix::gcroots::{GcRootHandle, GcRootKeeper};

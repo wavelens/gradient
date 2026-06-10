@@ -19,9 +19,9 @@ use chrono::Utc;
 use gradient_core::ci::IntegrationKind;
 use gradient_core::ci::actions::encrypt_action_secret;
 use gradient_core::http_validation::validate_webhook_url;
-use gradient_core::types::actions::{ActionConfig, ActionType};
-use gradient_core::types::input::load_secret_bytes;
-use gradient_core::types::*;
+use gradient_types::actions::{ActionConfig, ActionType};
+use gradient_types::input::load_secret_bytes;
+use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{

@@ -5,7 +5,7 @@
  */
 
 use super::SourceError;
-use crate::types::*;
+use gradient_types::*;
 use anyhow::Result;
 use base64::{Engine, engine::general_purpose};
 use ed25519_compact::KeyPair;
@@ -15,7 +15,7 @@ use ssh_key::{
 };
 pub fn generate_ssh_key(secret_file: &str) -> Result<(String, String), SourceError> {
     let secret =
-        crate::types::input::load_secret_bytes(secret_file).map_err(|e| SourceError::FileRead {
+        gradient_types::input::load_secret_bytes(secret_file).map_err(|e| SourceError::FileRead {
             reason: e.to_string(),
         })?;
 
@@ -74,7 +74,7 @@ pub fn decrypt_ssh_private_key(
     serve_url: &str,
 ) -> Result<(String, String), SourceError> {
     let secret =
-        crate::types::input::load_secret_bytes(secret_file).map_err(|e| SourceError::FileRead {
+        gradient_types::input::load_secret_bytes(secret_file).map_err(|e| SourceError::FileRead {
             reason: e.to_string(),
         })?;
 
@@ -121,7 +121,7 @@ mod tests {
 
     fn make_org(name: &str, public_key: &str) -> MOrganization {
         MOrganization {
-            id: crate::types::ids::OrganizationId::nil(),
+            id: gradient_types::ids::OrganizationId::nil(),
             name: name.to_string(),
             display_name: name.to_string(),
             description: String::new(),
@@ -129,7 +129,7 @@ mod tests {
             private_key: String::new(),
             public: false,
             hide_build_requests: false,
-            created_by: crate::types::ids::UserId::nil(),
+            created_by: gradient_types::ids::UserId::nil(),
             created_at: NaiveDateTime::default(),
             managed: false,
             github_installation_id: None,

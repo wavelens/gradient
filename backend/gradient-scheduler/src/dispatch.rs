@@ -21,9 +21,9 @@ use std::time::Duration;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_core::sources::get_path_from_derivation_output;
-use gradient_core::types::input::vec_to_hex;
-use gradient_core::types::wildcard::Wildcard;
-use gradient_core::types::*;
+use gradient_types::input::vec_to_hex;
+use gradient_types::wildcard::Wildcard;
+use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
@@ -31,7 +31,7 @@ use tracing::{debug, error, info};
 
 use super::Scheduler;
 use super::jobs::{PendingBuildJob, PendingEvalJob};
-use gradient_core::types::proto::{
+use gradient_types::proto::{
     BuildJob, BuildTask, CacheInfo, FlakeJob, FlakeTask, RequiredPath,
 };
 
@@ -74,7 +74,7 @@ async fn instance_metrics_loop(scheduler: Arc<Scheduler>) {
         let ctx = crate::instance::compute_instance_context(
             &scheduler.state.worker_db,
             counts,
-            gradient_core::types::now(),
+            gradient_types::now(),
         )
         .await;
         scheduler.instance.store(Arc::new(ctx));
@@ -163,7 +163,7 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
                 .all(&state.worker_db)
                 .await?
                 .into_iter()
-                .map(|r| gradient_core::types::proto::FlakeInputOverride {
+                .map(|r| gradient_types::proto::FlakeInputOverride {
                     input_name: r.input_name,
                     url: r.url,
                 })
@@ -183,7 +183,7 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
 
         let flake_job = FlakeJob {
             tasks,
-            source: gradient_core::types::proto::FlakeSource::Repository {
+            source: gradient_types::proto::FlakeSource::Repository {
                 url: eval.repository.clone(),
                 commit: commit_sha,
             },
@@ -269,7 +269,7 @@ pub(crate) async fn requeue_transient_failures(scheduler: &Scheduler) -> anyhow:
     use crate::build::retry_backoff_elapsed;
     let state = &scheduler.state;
     let base = state.config.eval.build_retry_backoff_secs;
-    let now = gradient_core::types::now();
+    let now = gradient_types::now();
 
     let transient = EBuild::find()
         .filter(CBuild::Status.eq(BuildStatus::FailedTransient))

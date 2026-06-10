@@ -8,7 +8,7 @@ use super::build_status::update_build_status;
 use super::evaluation_status::update_evaluation_status;
 use super::leader_election::reelect_leader;
 use crate::db::DbContext;
-use crate::types::*;
+use gradient_types::*;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 use sea_orm::ActiveValue::Set;

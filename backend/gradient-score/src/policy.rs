@@ -125,8 +125,8 @@ pub fn policy_by_name(name: &str) -> std::sync::Arc<dyn ScoringPolicy> {
 mod tests {
     use super::*;
     use crate::context::{HistoryPrediction, LazyProviders, ScoredJob};
-    use gradient_core::types::ids::OrganizationId;
-    use gradient_core::types::now;
+    use gradient_types::ids::OrganizationId;
+    use gradient_types::now;
 
     fn scored_job(arch: &str) -> ScoredJob<'_> {
         ScoredJob::new_build(

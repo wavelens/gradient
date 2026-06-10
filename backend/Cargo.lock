@@ -1995,6 +1995,7 @@ dependencies = [
  "gradient-core",
  "gradient-entity",
  "gradient-test-support",
+ "gradient-types",
  "mockall",
  "ring",
  "sea-orm",
@@ -2032,6 +2033,7 @@ dependencies = [
  "gradient-entity",
  "gradient-migration",
  "gradient-test-support",
+ "gradient-types",
  "harmonia-file-nar",
  "harmonia-protocol",
  "harmonia-store-content-address",
@@ -2114,6 +2116,7 @@ dependencies = [
  "gradient-entity",
  "gradient-scheduler",
  "gradient-test-support",
+ "gradient-types",
  "hex",
  "password-auth",
  "reqwest 0.13.3",
@@ -2143,6 +2146,7 @@ dependencies = [
  "gradient-entity",
  "gradient-score",
  "gradient-test-support",
+ "gradient-types",
  "reqwest 0.13.3",
  "sea-orm",
  "serde",
@@ -2160,6 +2164,7 @@ version = "1.2.0"
 dependencies = [
  "chrono",
  "gradient-core",
+ "gradient-types",
  "serde",
  "tracing",
 ]
@@ -2171,6 +2176,7 @@ dependencies = [
  "clap",
  "gradient-cache",
  "gradient-core",
+ "gradient-types",
  "gradient-web",
  "sentry",
  "tokio",
@@ -2191,6 +2197,7 @@ dependencies = [
  "gradient-core",
  "gradient-entity",
  "gradient-proto",
+ "gradient-types",
  "gradient-web",
  "harmonia-file-nar",
  "harmonia-store-derivation",
@@ -2204,6 +2211,30 @@ dependencies = [
  "tokio-tungstenite",
  "uuid",
  "zstd",
+]
+
+[[package]]
+name = "gradient-types"
+version = "1.2.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "chrono",
+ "clap",
+ "cron",
+ "gradient-entity",
+ "hex",
+ "ipnet",
+ "libc",
+ "num_enum",
+ "rkyv",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -2230,6 +2261,7 @@ dependencies = [
  "gradient-proto",
  "gradient-scheduler",
  "gradient-test-support",
+ "gradient-types",
  "harmonia-file-nar",
  "hex",
  "hmac 0.13.0",
@@ -2280,6 +2312,7 @@ dependencies = [
  "gradient-entity",
  "gradient-proto",
  "gradient-test-support",
+ "gradient-types",
  "harmonia-file-nar",
  "harmonia-protocol",
  "harmonia-store-content-address",

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::types::input::load_secret_bytes;
+use gradient_types::input::load_secret_bytes;
 use anyhow::{Result, anyhow};
 
 pub fn encrypt_action_secret(plaintext: &str, crypt_key: &[u8]) -> Result<String> {
@@ -23,12 +23,12 @@ pub fn encrypt_secret_with_file(crypt_secret_file: &str, plaintext: &str) -> Res
 }
 
 /// Load the server's crypt key from `crypt_secret_file` and decrypt `ciphertext`,
-/// returning a [`crate::types::SecretString`] so the plaintext is zeroized on drop.
+/// returning a [`gradient_types::SecretString`] so the plaintext is zeroized on drop.
 pub fn decrypt_secret_with_file(
     crypt_secret_file: &str,
     ciphertext: &str,
-) -> Result<crate::types::SecretString> {
+) -> Result<gradient_types::SecretString> {
     let key =
         load_secret_bytes(crypt_secret_file).map_err(|e| anyhow!("loading crypt key: {}", e))?;
-    decrypt_action_secret(ciphertext, key.expose()).map(crate::types::SecretString::new)
+    decrypt_action_secret(ciphertext, key.expose()).map(gradient_types::SecretString::new)
 }

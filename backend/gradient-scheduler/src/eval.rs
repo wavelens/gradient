@@ -19,14 +19,14 @@ use gradient_core::db::{
 };
 use gradient_core::executor::strip_nix_store_prefix;
 use gradient_core::sources::{get_hash_from_path, parse_drv_hash_name};
-use gradient_core::types::*;
+use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::{ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use tracing::{debug, error, info};
 
 use super::build::check_evaluation_done;
 use super::jobs::PendingEvalJob;
-use gradient_core::types::proto::DiscoveredDerivation;
+use gradient_types::proto::DiscoveredDerivation;
 
 const BATCH_SIZE: usize = 1000;
 
@@ -50,7 +50,7 @@ impl DerivationInsertBatch {
         let mut drv_path_to_id: HashMap<String, DerivationId> =
             existing.iter().map(|d| (d.drv_path(), d.id)).collect();
 
-        let now = gradient_core::types::now();
+        let now = gradient_types::now();
         let mut new_derivations: Vec<ADerivation> = Vec::new();
         let mut new_outputs: Vec<ADerivationOutput> = Vec::new();
 
@@ -216,7 +216,7 @@ impl<'a> EvalResultProcessor<'a> {
         derivations: &[DiscoveredDerivation],
         drv_path_to_id: &HashMap<String, DerivationId>,
     ) -> Result<()> {
-        let now = gradient_core::types::now();
+        let now = gradient_types::now();
         let mut builds: Vec<ABuild> = Vec::new();
 
         let all_drv_ids: Vec<DerivationId> = derivations
@@ -529,7 +529,7 @@ impl<'a> EvalResultProcessor<'a> {
         derivations: &[DiscoveredDerivation],
         drv_path_to_id: &HashMap<String, DerivationId>,
     ) {
-        let now = gradient_core::types::now();
+        let now = gradient_types::now();
 
         // Build a lookup: derivation_uuid → build_uuid for this evaluation.
         let eval_builds = EBuild::find()
@@ -656,7 +656,7 @@ async fn expand_substituted_closure(
         return Ok(());
     }
 
-    let now = gradient_core::types::now();
+    let now = gradient_types::now();
     let mut builds: Vec<ABuild> = Vec::with_capacity(rows.len());
     let mut spawn_inputs: Vec<(BuildId, DerivationId)> = Vec::new();
     for row in &rows {

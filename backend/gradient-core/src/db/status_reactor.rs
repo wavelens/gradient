@@ -14,7 +14,7 @@ use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 
 use super::DbContext;
-use crate::types::{MBuild, MEvaluation};
+use gradient_types::{MBuild, MEvaluation};
 
 #[async_trait]
 pub trait StatusReactor: Send + Sync + std::fmt::Debug {

@@ -11,7 +11,7 @@
 //! for both formats. A full round-trip against real data lives in the nix api
 //! integration test (`nix/tests/gradient/api`).
 
-use gradient_core::types::SessionId;
+use gradient_types::SessionId;
 use sea_orm::{DatabaseBackend, MockDatabase};
 use serde_json::Value;
 use gradient_test_support::fixtures::user;

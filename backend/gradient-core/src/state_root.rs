@@ -22,7 +22,7 @@ use crate::forge::ForgeRegistry;
 use crate::shutdown::Shutdown;
 use crate::state::{OidcGroupRoles, PendingOrgMemberships};
 use crate::storage::{EmailSender, LogStorage, NarStore, StorageCtx};
-use crate::types::{BoardEvent, RuntimeConfig, SecretString};
+use gradient_types::{BoardEvent, RuntimeConfig, SecretString};
 
 #[derive(Debug)]
 pub struct AppState {
@@ -34,7 +34,7 @@ pub struct AppState {
     /// not starved by the busy proto/scheduler pool under heavy NarPush load.
     pub web_db: WebDb,
     /// Resolved runtime configuration, built once at startup from the parsed
-    /// [`crate::types::Cli`].
+    /// [`gradient_types::Cli`].
     pub config: Arc<RuntimeConfig>,
     pub log_storage: Arc<dyn LogStorage>,
     pub email: Arc<dyn EmailSender>,

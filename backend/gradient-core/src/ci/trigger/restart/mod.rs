@@ -11,7 +11,7 @@ mod previous_lookup;
 use super::TriggerError;
 use super::flake_snapshot::snapshot_flake_input_overrides;
 use super::new_evaluation::ensure_no_active_evaluation;
-use crate::types::*;
+use gradient_types::*;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 use sea_orm::ActiveValue::Set;
@@ -46,7 +46,7 @@ pub async fn trigger_restart_builds<C: ConnectionTrait>(
     let (prev_eval, prev_builds) =
         previous_lookup::previous_evaluation_with_builds(db, project.id).await?;
 
-    let now = crate::types::now();
+    let now = gradient_types::now();
 
     // Decide the new evaluation's initial status from the previous builds. If
     // every previous build maps to `Substituted` (nothing to actually rebuild),

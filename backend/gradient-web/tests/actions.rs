@@ -13,7 +13,7 @@
 use axum_test::TestServer;
 use gradient_entity::{ids::*, organization_user, project, project_action, project_action_delivery};
 use gradient_core::storage::{EmailSender, NarStore};
-use gradient_core::types::{RuntimeConfig, SecretString, SessionId};
+use gradient_types::{RuntimeConfig, SecretString, SessionId};
 use gradient_core::ServerState;
 use gradient_core::db::{WebDb, WorkerDb};
 use sea_orm::{DatabaseBackend, MockDatabase};
@@ -59,13 +59,13 @@ fn admin_membership() -> organization_user::Model {
         ),
         organization: org_id(),
         user: user_id(),
-        role: gradient_core::types::consts::BASE_ROLE_ADMIN_ID,
+        role: gradient_types::consts::BASE_ROLE_ADMIN_ID,
     }
 }
 
 fn admin_role_row() -> gradient_entity::role::Model {
     gradient_entity::role::Model {
-        id: gradient_core::types::consts::BASE_ROLE_ADMIN_ID,
+        id: gradient_types::consts::BASE_ROLE_ADMIN_ID,
         name: "Admin".into(),
         permission: gradient_core::permissions::admin_mask(),
         ..Default::default()

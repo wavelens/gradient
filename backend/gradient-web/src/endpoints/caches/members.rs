@@ -12,8 +12,8 @@ use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::CachePermission;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
-use gradient_core::types::consts::BASE_CACHE_ROLE_ADMIN_ID;
-use gradient_core::types::*;
+use gradient_types::consts::BASE_CACHE_ROLE_ADMIN_ID;
+use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{

@@ -6,7 +6,7 @@
 
 //! Resource-usage predictions derived from historical `derivation_metric` rows.
 
-use gradient_core::types::{CDerivationMetric, EDerivationMetric, MDerivationMetric};
+use gradient_types::{CDerivationMetric, EDerivationMetric, MDerivationMetric};
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 
 /// Most recent rows considered when predicting; bounds query cost.

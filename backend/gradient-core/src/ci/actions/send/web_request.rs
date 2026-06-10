@@ -7,7 +7,7 @@
 use crate::ci::actions::crypto::decrypt_action_secret;
 use crate::ci::actions::{ExecutorOk, MAX_BODY_BYTES, truncate};
 use crate::ci::context::CiContext;
-use crate::types::input::load_secret_bytes;
+use gradient_types::input::load_secret_bytes;
 use anyhow::{Context, Result, anyhow};
 use serde_json::Value as JsonValue;
 

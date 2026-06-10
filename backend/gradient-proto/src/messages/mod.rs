@@ -8,10 +8,10 @@ pub mod client;
 pub mod server;
 pub mod wire;
 
-// Job and scheduling types live in gradient_core::types::proto - re-exported here for
+// Job and scheduling types live in gradient_types::proto - re-exported here for
 // backward compatibility so existing `crate::messages::FlakeJob` paths still work.
 pub use client::ClientMessage;
-pub use gradient_core::types::proto::{
+pub use gradient_types::proto::{
     BuildFailureKind, BuildJob, BuildMetrics, BuildOutput, BuildProduct, BuildTask, CacheInfo,
     CachedPath, CandidateScore, CredentialKind, DerivationOutput, DiscoveredDerivation,
     EvalMessageLevel, FlakeInputOverride,

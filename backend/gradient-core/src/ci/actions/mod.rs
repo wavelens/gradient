@@ -16,7 +16,7 @@ mod report;
 mod send;
 
 use crate::ci::context::CiContext;
-use crate::types::{CProjectAction, EProjectAction, ProjectId};
+use gradient_types::{CProjectAction, EProjectAction, ProjectId};
 use serde_json::Value as JsonValue;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use tracing::{error, warn};
@@ -75,8 +75,8 @@ pub async fn dispatch_evaluation_event(
 /// - `Waiting + NoCache` → `evaluation.queued` (Pending, "no cache" description).
 /// - `Waiting + Workers` → `evaluation.queued` (Pending, "no eval-capable
 ///   worker" description). Issue #268.
-pub async fn dispatch_evaluation_created(ctx: &CiContext, eval: &crate::types::MEvaluation) {
-    use crate::types::waiting_reason::WaitingReason;
+pub async fn dispatch_evaluation_created(ctx: &CiContext, eval: &gradient_types::MEvaluation) {
+    use gradient_types::waiting_reason::WaitingReason;
     use gradient_entity::evaluation::EvaluationStatus;
 
     let Some(project_id) = eval.project else {

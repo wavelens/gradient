@@ -8,8 +8,8 @@ use super::matchers::requested_actions_for;
 use crate::ci::context::CiContext;
 use crate::ci::{parse_owner_repo, reporting};
 use crate::forge::reporter::{CiReport, CiStatus};
-use crate::types::input::vec_to_hex;
-use crate::types::{
+use gradient_types::input::vec_to_hex;
+use gradient_types::{
     BuildId, CEntryPoint, EBuild, ECommit, EEntryPoint, EEvaluation, EOrganization, EProject,
     EvaluationId,
 };
@@ -59,7 +59,7 @@ pub(super) async fn persist_evaluation_check_id(
 
 /// Read a check_run_id previously stored under `context` in
 /// `evaluation.check_run_ids`.
-fn check_run_id_for_context(eval: &crate::types::MEvaluation, context: &str) -> Option<i64> {
+fn check_run_id_for_context(eval: &gradient_types::MEvaluation, context: &str) -> Option<i64> {
     eval.check_run_ids
         .as_ref()
         .and_then(|v| v.as_object())

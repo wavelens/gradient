@@ -5,7 +5,7 @@
  */
 
 use super::super::{generate_signing_key, sign_narinfo_fingerprint};
-use crate::types::MCache;
+use gradient_types::MCache;
 use chrono::NaiveDateTime;
 use std::io::Write;
 
@@ -19,7 +19,7 @@ pub fn temp_secret_file() -> (tempfile::NamedTempFile, String) {
 
 pub fn make_cache(name: &str, public_key: &str, private_key: &str) -> MCache {
     MCache {
-        id: crate::types::ids::CacheId::nil(),
+        id: gradient_types::ids::CacheId::nil(),
         name: name.to_string(),
         display_name: name.to_string(),
         description: String::new(),
@@ -29,7 +29,7 @@ pub fn make_cache(name: &str, public_key: &str, private_key: &str) -> MCache {
         public_key: public_key.to_string(),
         private_key: private_key.to_string(),
         public: false,
-        created_by: crate::types::ids::UserId::nil(),
+        created_by: gradient_types::ids::UserId::nil(),
         created_at: NaiveDateTime::default(),
         managed: false,
         max_storage_gb: 0,

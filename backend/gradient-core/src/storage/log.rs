@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::types::ids::BuildId;
+use gradient_types::ids::BuildId;
 use anyhow::Result;
 use futures::future::BoxFuture;
 use object_store::{ObjectStore, ObjectStoreExt as _, PutPayload, path::Path as ObjectPath};
@@ -390,7 +390,7 @@ impl LogStorage for S3LogStorage {
 #[cfg(test)]
 mod chunk_tests {
     use super::*;
-    use crate::types::ids::BuildId;
+    use gradient_types::ids::BuildId;
 
     #[tokio::test]
     async fn write_read_delete_chunk_roundtrip() {

@@ -200,8 +200,8 @@ fn is_unique_violation(err: &DbErr) -> bool {
     )
 }
 
-impl From<gradient_core::types::input::InputError> for WebError {
-    fn from(err: gradient_core::types::input::InputError) -> Self {
+impl From<gradient_types::input::InputError> for WebError {
+    fn from(err: gradient_types::input::InputError) -> Self {
         Self::BadRequest(ErrorCode::INPUT_VALIDATION, err.to_string())
     }
 }
@@ -418,7 +418,7 @@ impl WebError {
 
 /// Returns `Forbidden` when the user is not a superuser. Use at the top of
 /// admin handlers.
-pub fn require_superuser(user: &gradient_core::types::MUser) -> Result<(), WebError> {
+pub fn require_superuser(user: &gradient_types::MUser) -> Result<(), WebError> {
     if user.superuser {
         Ok(())
     } else {

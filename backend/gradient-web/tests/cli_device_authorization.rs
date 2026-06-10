@@ -15,7 +15,7 @@ use axum_test::TestServer;
 use chrono::{Duration, Utc};
 use gradient_entity::{cli_device_authorization, session};
 use gradient_core::storage::{EmailSender, NarStore};
-use gradient_core::types::{
+use gradient_types::{
     CliDeviceAuthorizationId, RuntimeConfig, SecretString, SessionId, UserId,
 };
 use gradient_core::ServerState;

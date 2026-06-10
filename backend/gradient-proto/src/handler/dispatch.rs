@@ -10,8 +10,8 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 use gradient_core::executor::strip_nix_store_prefix;
-use gradient_core::types::ids::{DerivationId, OrganizationId};
-use gradient_core::types::*;
+use gradient_types::ids::{DerivationId, OrganizationId};
+use gradient_types::*;
 use gradient_core::ServerState;
 use tokio::sync::Semaphore;
 use tracing::{debug, error, info, warn};
@@ -302,7 +302,7 @@ impl<'a> DispatchContext<'a> {
     async fn on_eval_message(
         &mut self,
         job_id: String,
-        level: gradient_core::types::proto::EvalMessageLevel,
+        level: gradient_types::proto::EvalMessageLevel,
         source: String,
         message: String,
     ) {
@@ -584,7 +584,7 @@ impl<'a> DispatchContext<'a> {
         &mut self,
         job_id: String,
         error: String,
-        kind: gradient_core::types::proto::BuildFailureKind,
+        kind: gradient_types::proto::BuildFailureKind,
     ) {
         warn!(peer_id = %self.peer_id, %job_id, %error, ?kind, "job failed");
         if let Err(e) = self
@@ -794,7 +794,7 @@ impl<'a> DispatchContext<'a> {
         &mut self,
         job_id: String,
         paths: Vec<String>,
-        mode: gradient_core::types::proto::QueryMode,
+        mode: gradient_types::proto::QueryMode,
     ) -> bool {
         debug!(peer_id = %self.peer_id, %job_id, count = paths.len(), ?mode, "CacheQuery");
         let org_id = self.scheduler.peer_id_for_job(&job_id).await;

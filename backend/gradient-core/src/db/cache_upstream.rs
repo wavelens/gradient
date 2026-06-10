@@ -11,7 +11,7 @@ use gradient_entity::organization_cache::{
 };
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 
-use crate::types::ids::{CacheId, OrganizationId};
+use gradient_types::ids::{CacheId, OrganizationId};
 
 pub async fn upstream_urls_for_org<C: ConnectionTrait>(
     db: &C,
@@ -108,7 +108,7 @@ mod tests {
         mode: CacheSubscriptionMode,
     ) -> organization_cache::Model {
         organization_cache::Model {
-            id: crate::types::ids::OrganizationCacheId::now_v7(),
+            id: gradient_types::ids::OrganizationCacheId::now_v7(),
             organization: org,
             cache,
             mode,
@@ -117,7 +117,7 @@ mod tests {
 
     fn upstream_row(cache: CacheId, kind: CacheUpstreamKind, url: Option<&str>) -> cache_upstream::Model {
         cache_upstream::Model {
-            id: crate::types::ids::CacheUpstreamId::now_v7(),
+            id: gradient_types::ids::CacheUpstreamId::now_v7(),
             cache,
             display_name: "test".into(),
             mode: CacheSubscriptionMode::ReadOnly,

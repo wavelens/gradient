@@ -7,7 +7,7 @@
 //! Organisation ↔ worker registration helpers consumed by the trigger
 //! pipeline (no-workers gate) and the worker-register reconcile path.
 
-use crate::types::ids::OrganizationId;
+use gradient_types::ids::OrganizationId;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 
 /// Returns `true` when the organisation has at least one active worker
@@ -35,7 +35,7 @@ pub async fn org_has_eval_capable_worker_registration<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::ids::{UserId, WorkerRegistrationId};
+    use gradient_types::ids::{UserId, WorkerRegistrationId};
     use sea_orm::{DatabaseBackend, MockDatabase};
 
     fn registration_row(active: bool, enable_eval: bool) -> gradient_entity::worker_registration::Model {

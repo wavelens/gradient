@@ -45,7 +45,7 @@ impl ScoreRule for PreferLocalBuildRule {
 mod tests {
     use super::*;
     use crate::context::{HistoryPrediction, LazyProviders, ScoredJob};
-    use gradient_core::types::ids::OrganizationId;
+    use gradient_types::ids::OrganizationId;
 
     fn job(prefer_local_build: bool) -> ScoredJob<'static> {
         ScoredJob::new_build(
@@ -60,7 +60,7 @@ mod tests {
     }
 
     fn ctx<'a>(job: &'a ScoredJob<'a>, missing_count: Option<u32>) -> JobContext<'a> {
-        JobContext { job, missing_count, missing_nar_size: None, dependency_count: 0, queued_at: gradient_core::types::now(), ready_at: gradient_core::types::now(), org_work_share: None, rescore_count: 0 }
+        JobContext { job, missing_count, missing_nar_size: None, dependency_count: 0, queued_at: gradient_types::now(), ready_at: gradient_types::now(), org_work_share: None, rescore_count: 0 }
     }
 
     fn worker() -> WorkerContext<'static> {

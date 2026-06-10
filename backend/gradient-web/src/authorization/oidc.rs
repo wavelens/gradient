@@ -8,8 +8,8 @@ use anyhow::{Context, Result, bail};
 use axum::extract::State;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{Duration, Utc};
-use gradient_core::types::input::load_secret;
-use gradient_core::types::*;
+use gradient_types::input::load_secret;
+use gradient_types::*;
 use gradient_core::ServerState;
 use jsonwebtoken::{
     Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, decode_header, encode,
@@ -384,7 +384,7 @@ async fn create_or_update_user(
         let name_changed = claims.name.as_ref().is_some_and(|n| n != &user.name);
 
         let mut auser: AUser = user.into();
-        auser.last_login_at = Set(gradient_core::types::now());
+        auser.last_login_at = Set(gradient_types::now());
         if let Some(ref new_email) = claims.email
             && email_changed
         {
@@ -432,7 +432,7 @@ async fn create_or_update_user(
         let mut auser: AUser = existing.into();
         auser.oidc_issuer = Set(Some(claims.iss));
         auser.oidc_subject = Set(Some(claims.sub));
-        auser.last_login_at = Set(gradient_core::types::now());
+        auser.last_login_at = Set(gradient_types::now());
         if let Some(ref new_email) = claims.email {
             auser.email = Set(new_email.clone());
         }
@@ -478,8 +478,8 @@ async fn create_or_update_user(
         name: Set(display_name),
         email: Set(email),
         password: Set(None),
-        last_login_at: Set(gradient_core::types::now()),
-        created_at: Set(gradient_core::types::now()),
+        last_login_at: Set(gradient_types::now()),
+        created_at: Set(gradient_types::now()),
         email_verified: Set(true),
         email_verification_token: Set(None),
         email_verification_token_expires: Set(None),

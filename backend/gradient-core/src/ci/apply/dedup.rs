@@ -5,8 +5,8 @@
  */
 
 use super::ApplyInput;
-use crate::types::triggers::TriggerType;
-use crate::types::*;
+use gradient_types::triggers::TriggerType;
+use gradient_types::*;
 use sea_orm::{ConnectionTrait, EntityTrait};
 
 /// Same-commit deduplication. Returns `true` when the trigger should be skipped

@@ -12,7 +12,7 @@ use crate::helpers::ok_json;
 use axum::extract::{Query, State};
 use axum::response::Redirect;
 use axum::{Extension, Json};
-use gradient_core::types::{BaseResponse, MUser};
+use gradient_types::{BaseResponse, MUser};
 use gradient_core::ServerState;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;

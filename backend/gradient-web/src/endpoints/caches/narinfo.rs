@@ -11,7 +11,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::{IntoResponse, Response};
 use gradient_core::sources::{get_hash_from_url, verify_narinfo_signature};
-use gradient_core::types::*;
+use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
@@ -123,7 +123,7 @@ pub async fn path(
     let rewritten = fetch_from_upstream(&state, &ctx.cache, &path_hash).await;
     if let Some(body) = rewritten {
         if flag.is_set() {
-            return match gradient_core::types::parse_narinfo_body(&body) {
+            return match gradient_types::parse_narinfo_body(&body) {
                 Ok(parsed) => Ok(axum::Json(parsed).into_response()),
                 Err(_) => Err(WebError::internal("Upstream narinfo malformed")),
             };

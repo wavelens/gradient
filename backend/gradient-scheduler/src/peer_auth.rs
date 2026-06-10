@@ -20,7 +20,7 @@
 
 use std::collections::HashSet;
 
-use gradient_core::types::ids::OrganizationId;
+use gradient_types::ids::OrganizationId;
 
 /// Peer authorization mode for a connected worker.
 #[derive(Debug, Clone)]

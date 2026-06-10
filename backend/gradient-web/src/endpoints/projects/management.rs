@@ -17,11 +17,11 @@ use axum::{Extension, Json};
 use gradient_core::db::get_any_organization_by_name;
 use gradient_core::nix::RepositoryUrl;
 use gradient_core::sources::check_project_updates;
-use gradient_core::types::consts::*;
-use gradient_core::types::input::{check_project_name, validate_display_name, vec_to_hex};
-use gradient_core::types::triggers::{ConcurrencyPolicy, TriggerConfig, TriggerType};
-use gradient_core::types::wildcard::Wildcard;
-use gradient_core::types::*;
+use gradient_types::consts::*;
+use gradient_types::input::{check_project_name, validate_display_name, vec_to_hex};
+use gradient_types::triggers::{ConcurrencyPolicy, TriggerConfig, TriggerType};
+use gradient_types::wildcard::Wildcard;
+use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
@@ -254,7 +254,7 @@ pub async fn put(
         last_check_at: Set(*NULL_TIME),
         force_evaluation: Set(false),
         created_by: Set(user.id),
-        created_at: Set(gradient_core::types::now()),
+        created_at: Set(gradient_types::now()),
         managed: Set(false),
         keep_evaluations: Set(30),
         concurrency: Set(i16::from(
@@ -265,7 +265,7 @@ pub async fn put(
 
     let project = project.insert(&state.web_db).await?;
 
-    let now = gradient_core::types::now();
+    let now = gradient_types::now();
     let default_cfg = TriggerConfig::Polling {
         interval_secs: 300,
         branch: None,

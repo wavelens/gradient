@@ -5,7 +5,7 @@
  */
 
 use crate::db::DbContext;
-use crate::types::*;
+use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use tracing::{error, warn};
@@ -124,7 +124,7 @@ pub async fn insert_evaluation_message<C: ConnectionTrait>(
         level: Set(level),
         message: Set(message),
         source: Set(source),
-        created_at: Set(crate::types::now()),
+        created_at: Set(gradient_types::now()),
     };
     EEvaluationMessage::insert(msg).exec(db).await?;
     Ok(())

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_core::types::{ids::OrganizationId};
+use gradient_types::{ids::OrganizationId};
 use gradient_core::ServerState;
 use std::collections::HashSet;
 use tracing::warn;
@@ -509,8 +509,8 @@ mod tests {
             private_key: String::new(),
             public: false,
             hide_build_requests: false,
-            created_by: gradient_core::types::ids::UserId::nil(),
-            created_at: gradient_core::types::now(),
+            created_by: gradient_types::ids::UserId::nil(),
+            created_at: gradient_types::now(),
             managed: false,
             github_installation_id: None,
         }
@@ -518,10 +518,10 @@ mod tests {
 
     fn org_cache_row(
         org: OrganizationId,
-        cache: gradient_core::types::ids::CacheId,
+        cache: gradient_types::ids::CacheId,
     ) -> OrgCacheModel {
         OrgCacheModel {
-            id: gradient_core::types::ids::OrganizationCacheId::now_v7(),
+            id: gradient_types::ids::OrganizationCacheId::now_v7(),
             organization: org,
             cache,
             mode: CacheSubscriptionMode::ReadWrite,
@@ -535,7 +535,7 @@ mod tests {
     #[tokio::test]
     async fn filter_org_peers_passes_through_org_with_cache() {
         let org = OrganizationId::now_v7();
-        let cache = gradient_core::types::ids::CacheId::now_v7();
+        let cache = gradient_types::ids::CacheId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![org_row(org)]])
             .append_query_results([vec![org_cache_row(org, cache)]])
@@ -584,7 +584,7 @@ mod tests {
     async fn filter_org_peers_mixed() {
         let org_with = OrganizationId::now_v7();
         let org_without = OrganizationId::now_v7();
-        let cache = gradient_core::types::ids::CacheId::now_v7();
+        let cache = gradient_types::ids::CacheId::now_v7();
         let cache_peer = OrganizationId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![org_row(org_with), org_row(org_without)]])
@@ -623,7 +623,7 @@ mod tests {
         assert_eq!(authorized.len(), 2);
         assert!(failed.is_empty());
 
-        let cache = gradient_core::types::ids::CacheId::now_v7();
+        let cache = gradient_types::ids::CacheId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![org_row(org_with), org_row(org_without)]])
             .append_query_results([vec![org_cache_row(org_with, cache)]])

@@ -19,8 +19,8 @@
 //! strongest sequencing guarantee mocks can provide.
 
 use gradient_entity::{cache, cache_upstream, cache_user, ids::*};
-use gradient_core::types::SessionId;
-use gradient_core::types::consts::BASE_CACHE_ROLE_ADMIN_ID;
+use gradient_types::SessionId;
+use gradient_types::consts::BASE_CACHE_ROLE_ADMIN_ID;
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 use serde_json::{Value, json};
 use gradient_test_support::fixtures::{test_date, user, user_id};

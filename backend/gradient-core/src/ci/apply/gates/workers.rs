@@ -5,8 +5,8 @@
  */
 
 use crate::db::org_has_eval_capable_worker_registration;
-use crate::types::waiting_reason::WaitingReason;
-use crate::types::*;
+use gradient_types::waiting_reason::WaitingReason;
+use gradient_types::*;
 use gradient_entity::evaluation::EvaluationStatus;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ConnectionTrait};
@@ -38,6 +38,6 @@ pub async fn park_if_no_workers<C: ConnectionTrait>(
     ae.waiting_reason = Set(Some(
         WaitingReason::workers(Vec::new(), 0, Vec::new()).to_json(),
     ));
-    ae.updated_at = Set(crate::types::now());
+    ae.updated_at = Set(gradient_types::now());
     ae.update(db).await
 }

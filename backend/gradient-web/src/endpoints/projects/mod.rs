@@ -22,13 +22,13 @@ pub use self::management::{
 };
 pub use self::metrics::{EntryPointMetricsQuery, get_entry_point_metrics, get_project_metrics};
 
-use gradient_core::types::ids::*;
+use gradient_types::ids::*;
 
 // ── Shared types ─────────────────────────────────────────────────────────────
 
 use gradient_entity::evaluation::EvaluationStatus;
-use gradient_core::types::triggers::ConcurrencyPolicy;
-use gradient_core::types::{ProjectTriggerId, TriggerType};
+use gradient_types::triggers::ConcurrencyPolicy;
+use gradient_types::{ProjectTriggerId, TriggerType};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]

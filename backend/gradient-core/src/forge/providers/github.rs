@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 
-use crate::types::ForgeType;
+use gradient_types::ForgeType;
 use crate::forge::github_app::verify_github_signature;
 use crate::forge::provider::ForgeProvider;
 use crate::forge::reporter::{CiReporter, GithubReporter};

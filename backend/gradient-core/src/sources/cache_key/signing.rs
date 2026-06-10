@@ -7,7 +7,7 @@
 use super::format::decrypt_signing_key;
 use super::narinfo;
 use crate::sources::{SourceError, cache_key_host};
-use crate::types::*;
+use gradient_types::*;
 use base64::{Engine, engine::general_purpose};
 use ed25519_compact::SecretKey;
 

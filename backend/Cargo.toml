@@ -1,6 +1,6 @@
 [workspace]
-members      = [".", "gradient-cache", "gradient-core", "gradient-entity", "gradient-migration", "gradient-proto", "gradient-scheduler", "gradient-score", "gradient-test-support", "gradient-web", "gradient-worker"]
-default-members = [".", "gradient-cache", "gradient-core", "gradient-entity", "gradient-migration", "gradient-proto", "gradient-scheduler", "gradient-score", "gradient-test-support", "gradient-web", "gradient-worker"]
+members      = [".", "gradient-cache", "gradient-core", "gradient-entity", "gradient-migration", "gradient-proto", "gradient-scheduler", "gradient-score", "gradient-test-support", "gradient-types", "gradient-web", "gradient-worker"]
+default-members = [".", "gradient-cache", "gradient-core", "gradient-entity", "gradient-migration", "gradient-proto", "gradient-scheduler", "gradient-score", "gradient-test-support", "gradient-types", "gradient-web", "gradient-worker"]
 resolver     = "2"
 
 [workspace.package]
@@ -25,6 +25,7 @@ gradient-proto        = { path = "gradient-proto" }
 gradient-scheduler    = { path = "gradient-scheduler" }
 gradient-score        = { path = "gradient-score" }
 gradient-test-support = { path = "gradient-test-support" }
+gradient-types        = { path = "gradient-types" }
 gradient-web          = { path = "gradient-web" }
 gradient-worker       = { path = "gradient-worker" }
 
@@ -166,6 +167,7 @@ workspace = true
 gradient-cache     = { workspace = true }
 clap               = { workspace = true }
 gradient-core      = { workspace = true }
+gradient-types     = { workspace = true }
 sentry             = { workspace = true }
 tokio              = { workspace = true, features = ["process", "signal", "macros"] }
 tracing            = { workspace = true }

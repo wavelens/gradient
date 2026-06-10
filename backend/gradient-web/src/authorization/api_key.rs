@@ -13,8 +13,8 @@
 //! to short-circuit on a pinned-org mismatch.
 
 use crate::permissions::PermissionMask;
-use gradient_core::types::ids::CacheId;
-use gradient_core::types::{ApiId, OrganizationId, UserId};
+use gradient_types::ids::CacheId;
+use gradient_types::{ApiId, OrganizationId, UserId};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApiKeyContext {

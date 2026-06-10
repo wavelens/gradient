@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::types::input::port_in_range;
+use crate::input::port_in_range;
 use clap::Args;
 
 #[derive(Args, Debug, Clone)]

@@ -7,7 +7,7 @@
 use super::send::{execute_forge_status_report, execute_send_mail, execute_send_web_request};
 use super::{MAX_BODY_BYTES, truncate};
 use crate::ci::context::CiContext;
-use crate::types::{
+use gradient_types::{
     AProjectActionDelivery, ActionConfig, MProjectAction, ProjectActionDeliveryId,
 };
 use anyhow::{Context, Result};
@@ -77,7 +77,7 @@ pub async fn execute_action(
         error_message: Set(error_message),
         success: Set(success),
         duration_ms: Set(duration_ms),
-        delivered_at: Set(crate::types::now()),
+        delivered_at: Set(gradient_types::now()),
     };
     if let Err(e) = delivery.insert(&ctx.db.worker_db).await {
         warn!(error = %e, %action_id, "Failed to record action delivery");
@@ -85,8 +85,8 @@ pub async fn execute_action(
 
     if success {
         let mut am = sea_orm::IntoActiveModel::into_active_model(action);
-        am.last_fired_at = Set(Some(crate::types::now()));
-        am.updated_at = Set(crate::types::now());
+        am.last_fired_at = Set(Some(gradient_types::now()));
+        am.updated_at = Set(gradient_types::now());
         if let Err(e) = am.update(&ctx.db.worker_db).await {
             warn!(error = %e, %action_id, "Failed to update action last_fired_at");
         }

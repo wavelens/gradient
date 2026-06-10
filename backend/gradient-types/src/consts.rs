@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::types::ids::RoleId;
+use crate::ids::RoleId;
 use chrono::{DateTime, NaiveDateTime};
 use std::ops::RangeInclusive;
 use std::sync::LazyLock;

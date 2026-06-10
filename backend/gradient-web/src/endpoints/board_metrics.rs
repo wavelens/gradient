@@ -17,7 +17,7 @@ use crate::helpers::ok_json;
 use crate::metrics_scope::MetricsScope;
 use axum::extract::{Query, State};
 use axum::{Extension, Json};
-use gradient_core::types::*;
+use gradient_types::*;
 use gradient_core::ServerState;
 use gradient_scheduler::Scheduler;
 use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};

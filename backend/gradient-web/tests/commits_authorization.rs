@@ -29,7 +29,7 @@ use axum_test::TestServer;
 use chrono::{Duration, Utc};
 use gradient_entity::ids::*;
 use gradient_core::storage::{EmailSender, NarStore};
-use gradient_core::types::{RuntimeConfig, SecretString, SessionId};
+use gradient_types::{RuntimeConfig, SecretString, SessionId};
 use gradient_core::ServerState;
 use gradient_core::db::{WebDb, WorkerDb};
 use jsonwebtoken::{EncodingKey, Header, encode};
@@ -143,7 +143,7 @@ fn membership_row() -> gradient_entity::organization_user::Model {
         ),
         organization: org_id(),
         user: user_id(),
-        role: gradient_core::types::consts::BASE_ROLE_VIEW_ID,
+        role: gradient_types::consts::BASE_ROLE_VIEW_ID,
     }
 }
 

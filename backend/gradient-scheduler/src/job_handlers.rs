@@ -17,12 +17,12 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, IntoActiveModel, QueryFilter, Set};
 use tracing::{debug, error, info, warn};
 
 use gradient_core::executor::strip_nix_store_prefix;
-use gradient_core::types::proto::{
+use gradient_types::proto::{
     BuildFailureKind, BuildMetrics, BuildOutput, CandidateScore, DiscoveredDerivation, JobCandidate,
     JobKind,
 };
 
-use gradient_core::types::*;
+use gradient_types::*;
 use gradient_core::ServerState;
 
 use crate::Scheduler;
@@ -563,7 +563,7 @@ impl Scheduler {
     pub async fn record_eval_message(
         &self,
         job_id: &str,
-        level: gradient_core::types::proto::EvalMessageLevel,
+        level: gradient_types::proto::EvalMessageLevel,
         source: String,
         message: String,
     ) -> Result<()> {
@@ -579,13 +579,13 @@ impl Scheduler {
         };
 
         let entity_level = match level {
-            gradient_core::types::proto::EvalMessageLevel::Error => {
+            gradient_types::proto::EvalMessageLevel::Error => {
                 gradient_entity::evaluation_message::MessageLevel::Error
             }
-            gradient_core::types::proto::EvalMessageLevel::Warning => {
+            gradient_types::proto::EvalMessageLevel::Warning => {
                 gradient_entity::evaluation_message::MessageLevel::Warning
             }
-            gradient_core::types::proto::EvalMessageLevel::Notice => {
+            gradient_types::proto::EvalMessageLevel::Notice => {
                 gradient_entity::evaluation_message::MessageLevel::Notice
             }
         };
@@ -615,7 +615,7 @@ impl Scheduler {
     pub async fn worker_gradient_caps(
         &self,
         worker_id: &str,
-    ) -> Option<gradient_core::types::proto::GradientCapabilities> {
+    ) -> Option<gradient_types::proto::GradientCapabilities> {
         self.worker_pool.read().await.gradient_caps_for(worker_id)
     }
 

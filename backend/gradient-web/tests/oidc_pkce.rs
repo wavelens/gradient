@@ -13,8 +13,8 @@ use axum::routing::get;
 use axum::{Json, Router};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use gradient_core::storage::{EmailSender, NarStore};
-use gradient_core::types::cli::OidcArgs;
-use gradient_core::types::{RuntimeConfig};
+use gradient_types::cli::OidcArgs;
+use gradient_types::{RuntimeConfig};
 use gradient_core::ServerState;
 use gradient_core::db::{WebDb, WorkerDb};
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
@@ -105,7 +105,7 @@ async fn authorize_redirect_carries_pkce_and_cookie_holds_verifier() {
         pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         http: gradient_core::http::build_client().expect("http client"),
         shutdown: gradient_core::shutdown::Shutdown::new(),
-        jwt_secret: gradient_core::types::SecretString::new("test-jwt-secret".to_string()),
+        jwt_secret: gradient_types::SecretString::new("test-jwt-secret".to_string()),
         started_at: chrono::Utc::now(),
         pending_org_memberships: Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: Arc::new(std::collections::HashMap::new()),

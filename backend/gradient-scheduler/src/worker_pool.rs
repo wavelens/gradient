@@ -16,8 +16,8 @@ use std::sync::Arc;
 
 use tokio::sync::{Notify, mpsc};
 
-use gradient_core::types::ids::OrganizationId;
-use gradient_core::types::proto::{GradientCapabilities, JobKind};
+use gradient_types::ids::OrganizationId;
+use gradient_types::proto::{GradientCapabilities, JobKind};
 
 use crate::peer_auth::PeerAuth;
 use crate::worker_state::{Active, Draining, TypedWorker};

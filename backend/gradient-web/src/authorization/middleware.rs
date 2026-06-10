@@ -10,7 +10,7 @@ use axum::extract::{ConnectInfo, Request, State};
 use axum::middleware::Next;
 use axum::response::Response;
 
-use gradient_core::types::*;
+use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -211,7 +211,7 @@ pub async fn authorize_optional(
 pub async fn update_last_login(state: State<Arc<ServerState>>, user: MUser) -> Result<MUser> {
     let mut auser: AUser = user.into();
 
-    auser.last_login_at = Set(gradient_core::types::now());
+    auser.last_login_at = Set(gradient_types::now());
     auser
         .update(&state.web_db)
         .await

@@ -8,7 +8,7 @@ mod fixtures;
 
 use super::restart::restart_build_status;
 use super::*;
-use crate::types::*;
+use gradient_types::*;
 use fixtures::{make_build, make_build_drv, make_eval, make_project};
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::{self, EvaluationStatus};

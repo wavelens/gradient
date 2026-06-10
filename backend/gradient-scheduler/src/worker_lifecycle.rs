@@ -14,8 +14,8 @@ use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, QueryOrder};
 use tracing::{debug, info, warn};
 
-use gradient_core::types::ids::OrganizationId;
-use gradient_core::types::proto::GradientCapabilities;
+use gradient_types::ids::OrganizationId;
+use gradient_types::proto::GradientCapabilities;
 
 use crate::Scheduler;
 use crate::build;
@@ -33,7 +33,7 @@ pub(crate) async fn record_worker_sample(
         id: Set(gradient_entity::ids::WorkerSampleId::now_v7()),
         worker_id: Set(info.id.clone()),
         organization: Set(org),
-        at: Set(gradient_core::types::now()),
+        at: Set(gradient_types::now()),
         cpu_usage_pct: Set(Some(info.cpu_usage_pct)),
         ram_free_mb: Set(Some(info.ram_free_mb as i64)),
         ram_total_mb: Set(Some(info.ram_total_mb as i64)),
@@ -96,7 +96,7 @@ impl Scheduler {
             worker_id: Set(peer_id.to_string()),
             organization: Set(reg.peer_id),
             display_name: Set(reg.display_name),
-            connected_at: Set(gradient_core::types::now()),
+            connected_at: Set(gradient_types::now()),
             disconnected_at: Set(None),
             capabilities: Set(capabilities),
             reason: Set(None),
@@ -126,7 +126,7 @@ impl Scheduler {
             .await;
         if let Ok(Some(conn)) = conn {
             let mut am = conn.into_active_model();
-            am.disconnected_at = Set(Some(gradient_core::types::now()));
+            am.disconnected_at = Set(Some(gradient_types::now()));
             if let Err(e) = am.update(&self.state.worker_db).await {
                 warn!(error = %e, %peer_id, "failed to close worker_connection");
             }

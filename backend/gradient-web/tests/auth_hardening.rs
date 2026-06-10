@@ -14,7 +14,7 @@ use axum_test::TestServer;
 use chrono::{Duration, Utc};
 use gradient_entity::{api, session};
 use gradient_core::storage::{EmailSender, NarStore};
-use gradient_core::types::{ApiId, RuntimeConfig, SecretString, SessionId, UserId};
+use gradient_types::{ApiId, RuntimeConfig, SecretString, SessionId, UserId};
 use gradient_core::ServerState;
 use gradient_core::db::{WebDb, WorkerDb};
 use jsonwebtoken::{EncodingKey, Header, encode};
@@ -304,10 +304,10 @@ fn api_key_with_only_view_cannot_trigger_evaluation() {
             id: gradient_entity::ids::OrganizationUserId::now_v7(),
             organization: org_id(),
             user: user_id(),
-            role: gradient_core::types::consts::BASE_ROLE_ADMIN_ID,
+            role: gradient_types::consts::BASE_ROLE_ADMIN_ID,
         };
         let admin_role = gradient_entity::role::Model {
-            id: gradient_core::types::consts::BASE_ROLE_ADMIN_ID,
+            id: gradient_types::consts::BASE_ROLE_ADMIN_ID,
             name: "Admin".into(),
             permission: gradient_core::permissions::admin_mask(),
             ..Default::default()

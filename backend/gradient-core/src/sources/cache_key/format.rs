@@ -5,7 +5,7 @@
  */
 
 use crate::sources::{SourceError, cache_key_host};
-use crate::types::*;
+use gradient_types::*;
 use base64::{Engine, engine::general_purpose};
 
 pub fn format_cache_public_key(
@@ -38,7 +38,7 @@ pub fn format_cache_public_key(
 
 pub fn decrypt_signing_key(secret_file: &str, cache: MCache) -> Result<String, SourceError> {
     let secret =
-        crate::types::input::load_secret_bytes(secret_file).map_err(|e| SourceError::FileRead {
+        gradient_types::input::load_secret_bytes(secret_file).map_err(|e| SourceError::FileRead {
             reason: e.to_string(),
         })?;
 

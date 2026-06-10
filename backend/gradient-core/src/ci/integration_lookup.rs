@@ -11,7 +11,7 @@
 //! reference an integration id directly (issue #262); the per-project link
 //! table is gone.
 
-use crate::types::*;
+use gradient_types::*;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};

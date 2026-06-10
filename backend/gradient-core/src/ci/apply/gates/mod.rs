@@ -15,7 +15,7 @@ mod storage;
 mod workers;
 
 use crate::ci::apply::ApprovalInfo;
-use crate::types::*;
+use gradient_types::*;
 use sea_orm::ConnectionTrait;
 
 pub use approval::park_if_pending_approval;

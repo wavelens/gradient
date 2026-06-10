@@ -7,8 +7,8 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use gradient_core::types::ids::{CacheId, CachedPathId, CachedPathSignatureId, OrganizationId};
-use gradient_core::types::*;
+use gradient_types::ids::{CacheId, CachedPathId, CachedPathSignatureId, OrganizationId};
+use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
@@ -104,7 +104,7 @@ async fn ensure_push_signatures(
         return;
     }
 
-    let now = gradient_core::types::now();
+    let now = gradient_types::now();
     let rows: Vec<ACachedPathSignature> = cached_path_rows
         .iter()
         .flat_map(|cp| {
@@ -231,10 +231,10 @@ async fn build_cached_entry(
     path: &str,
     file_size: &Option<i64>,
     nar_size: &Option<i64>,
-    mode: gradient_core::types::proto::QueryMode,
+    mode: gradient_types::proto::QueryMode,
     expire: std::time::Duration,
-) -> gradient_core::types::proto::CachedPath {
-    use gradient_core::types::proto::{CachedPath, QueryMode};
+) -> gradient_types::proto::CachedPath {
+    use gradient_types::proto::{CachedPath, QueryMode};
 
     // Push mode carries only `path` + `cached`. No URL, no metadata.
     if matches!(mode, QueryMode::Push) {
@@ -290,8 +290,8 @@ async fn build_uncached_push_entry(
     hash: &str,
     path: &str,
     expire: std::time::Duration,
-) -> gradient_core::types::proto::CachedPath {
-    use gradient_core::types::proto::CachedPath;
+) -> gradient_types::proto::CachedPath {
+    use gradient_types::proto::CachedPath;
 
     let url = match state.nar_storage.presigned_put_url(hash, expire).await {
         Ok(u) => u,
@@ -330,7 +330,7 @@ async fn extend_with_upstream_results(
     state: &ServerState,
     org_id: OrganizationId,
     uncached_pairs: Vec<(String, String)>,
-    result: &mut Vec<gradient_core::types::proto::CachedPath>,
+    result: &mut Vec<gradient_types::proto::CachedPath>,
 ) {
     use futures::stream::{FuturesUnordered, StreamExt as _};
 
@@ -385,7 +385,7 @@ async fn extend_with_gradient_proto_results(
     state: &ServerState,
     org_id: OrganizationId,
     uncached_pairs: &[(String, String)],
-    result: &mut Vec<gradient_core::types::proto::CachedPath>,
+    result: &mut Vec<gradient_types::proto::CachedPath>,
 ) {
     let upstreams =
         match gradient_core::db::gradient_proto_upstreams_for_org(&state.worker_db, org_id).await {
@@ -435,9 +435,9 @@ async fn query(
     state: &ServerState,
     org_id: Option<OrganizationId>,
     paths: &[String],
-    mode: gradient_core::types::proto::QueryMode,
-) -> Vec<gradient_core::types::proto::CachedPath> {
-    use gradient_core::types::proto::QueryMode;
+    mode: gradient_types::proto::QueryMode,
+) -> Vec<gradient_types::proto::CachedPath> {
+    use gradient_types::proto::QueryMode;
 
     let hash_path_pairs: Vec<(&str, &str)> = paths
         .iter()
@@ -478,7 +478,7 @@ async fn query(
     }
 
     let expire = std::time::Duration::from_secs(3600);
-    let mut result: Vec<gradient_core::types::proto::CachedPath> = Vec::new();
+    let mut result: Vec<gradient_types::proto::CachedPath> = Vec::new();
 
     for (hash, path) in &hash_path_pairs {
         if let Some((file_size, nar_size)) = cached_map.get(*hash) {
@@ -513,7 +513,7 @@ async fn query(
     if matches!(mode, QueryMode::Pull) {
         let returned: std::collections::HashSet<String> =
             result.iter().map(|cp| cp.path.clone()).collect();
-        let missing: Vec<gradient_core::types::proto::CachedPath> = hash_path_pairs
+        let missing: Vec<gradient_types::proto::CachedPath> = hash_path_pairs
             .iter()
             .filter(|(_, p)| !returned.contains(*p))
             .map(|(_, p)| build_uncached_pull_entry(p))
@@ -528,8 +528,8 @@ async fn query(
 /// local cache nor in any configured upstream). Carries `cached: false` and
 /// no metadata so the worker's prefetch hard-fail can distinguish "server has
 /// nothing for this path" from "this path was never queried".
-fn build_uncached_pull_entry(path: &str) -> gradient_core::types::proto::CachedPath {
-    use gradient_core::types::proto::CachedPath;
+fn build_uncached_pull_entry(path: &str) -> gradient_types::proto::CachedPath {
+    use gradient_types::proto::CachedPath;
     CachedPath {
         path: path.to_string(),
         cached: false,
@@ -604,9 +604,9 @@ pub(super) async fn query_for_cache(
     state: &ServerState,
     cache_id: CacheId,
     paths: &[String],
-    mode: gradient_core::types::proto::QueryMode,
-) -> Vec<gradient_core::types::proto::CachedPath> {
-    use gradient_core::types::proto::QueryMode;
+    mode: gradient_types::proto::QueryMode,
+) -> Vec<gradient_types::proto::CachedPath> {
+    use gradient_types::proto::QueryMode;
 
     if matches!(mode, QueryMode::Push) {
         return vec![];
@@ -635,7 +635,7 @@ pub(super) async fn query_for_cache(
     let cached_map = build_local_cache_map(state, &hashes).await;
 
     let expire = std::time::Duration::from_secs(3600);
-    let mut result: Vec<gradient_core::types::proto::CachedPath> = Vec::new();
+    let mut result: Vec<gradient_types::proto::CachedPath> = Vec::new();
 
     for (hash, path) in &hash_path_pairs {
         if !in_cache.contains(*hash) {
@@ -651,7 +651,7 @@ pub(super) async fn query_for_cache(
 
     if matches!(mode, QueryMode::Pull) {
         let returned: HashSet<String> = result.iter().map(|cp| cp.path.clone()).collect();
-        let missing: Vec<gradient_core::types::proto::CachedPath> = hash_path_pairs
+        let missing: Vec<gradient_types::proto::CachedPath> = hash_path_pairs
             .iter()
             .filter(|(_, p)| !returned.contains(*p))
             .map(|(_, p)| build_uncached_pull_entry(p))
@@ -683,8 +683,8 @@ pub(super) async fn handle_cache_query(
     state: &ServerState,
     org_id: Option<OrganizationId>,
     paths: &[String],
-    mode: gradient_core::types::proto::QueryMode,
-) -> Vec<gradient_core::types::proto::CachedPath> {
+    mode: gradient_types::proto::QueryMode,
+) -> Vec<gradient_types::proto::CachedPath> {
     query(state, org_id, paths, mode).await
 }
 
@@ -818,7 +818,7 @@ fn expand_references(raw: Option<&str>) -> Option<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_core::types::proto::QueryMode;
+    use gradient_types::proto::QueryMode;
 
     fn make_state() -> ServerState {
         let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection();

@@ -6,8 +6,8 @@
 
 use clap::Parser;
 use gradient_core::init_state;
-use gradient_core::types::Cli;
-use gradient_core::types::cli::LoggingArgs;
+use gradient_types::Cli;
+use gradient_types::cli::LoggingArgs;
 use std::sync::Arc;
 use tracing::info;
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
@@ -94,7 +94,7 @@ async fn run() -> std::io::Result<()> {
     );
 
     let _guard = if state.config.registration.report_errors {
-        let dsn = gradient_core::types::cli::effective_sentry_dsn(&state.config.registration);
+        let dsn = gradient_types::cli::effective_sentry_dsn(&state.config.registration);
         info!(dsn, "Error reporting enabled - initializing Sentry");
         Some(sentry::init(dsn.to_string()))
     } else {

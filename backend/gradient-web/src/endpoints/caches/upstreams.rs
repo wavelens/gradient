@@ -14,7 +14,7 @@ use axum::Json;
 use axum::extract::{Path, State};
 use gradient_entity::cache_upstream::{CacheUpstreamKind, CacheUpstreamSource};
 use gradient_entity::organization_cache::CacheSubscriptionMode;
-use gradient_core::types::*;
+use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};

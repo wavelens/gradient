@@ -5,8 +5,8 @@
 
 use gradient_core::nix_hash::{is_nix32_hash, normalize_nar_hash};
 use gradient_core::storage::nar::NarStore;
-use gradient_core::types::ids::{CacheId, CachedPathId, CachedPathSignatureId, OrganizationId};
-use gradient_core::types::*;
+use gradient_types::ids::{CacheId, CachedPathId, CachedPathSignatureId, OrganizationId};
+use gradient_types::*;
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter, Set,

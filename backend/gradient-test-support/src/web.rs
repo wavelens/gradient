@@ -22,7 +22,7 @@ use chrono::{Duration, Utc};
 use gradient_entity::ids::{SessionId, UserId};
 use gradient_entity::session;
 use gradient_core::storage::{EmailSender, NarStore};
-use gradient_core::types::{RuntimeConfig, SecretString};
+use gradient_types::{RuntimeConfig, SecretString};
 use gradient_core::ServerState;
 use gradient_core::db::{WebDb, WorkerDb};
 use jsonwebtoken::{EncodingKey, Header, encode};

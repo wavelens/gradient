@@ -20,9 +20,9 @@
 //! `active`/`enable_eval` flags transition to `true`.
 
 use crate::db::org_has_eval_capable_worker_registration;
-use crate::types::ids::OrganizationId;
-use crate::types::waiting_reason::WaitingReason;
-use crate::types::*;
+use gradient_types::ids::OrganizationId;
+use gradient_types::waiting_reason::WaitingReason;
+use gradient_types::*;
 
 use gradient_entity::evaluation::EvaluationStatus;
 use sea_orm::ActiveValue::Set;
@@ -166,7 +166,7 @@ async fn unpark_for_org<C: ConnectionTrait, F: Fn(&WaitingReason) -> bool>(
         let mut ae: AEvaluation = eval.into();
         ae.status = Set(EvaluationStatus::Queued);
         ae.waiting_reason = Set(None);
-        ae.updated_at = Set(crate::types::now());
+        ae.updated_at = Set(gradient_types::now());
         unparked.push(ae.update(db).await?);
     }
     Ok(unparked)
@@ -197,7 +197,7 @@ pub async fn unpark_approval(
     let mut ae: AEvaluation = eval.into();
     ae.status = Set(EvaluationStatus::Queued);
     ae.waiting_reason = Set(None);
-    ae.updated_at = Set(crate::types::now());
+    ae.updated_at = Set(gradient_types::now());
     Ok(Some(ae.update(db).await?))
 }
 
@@ -229,7 +229,7 @@ pub async fn unpark_approval_with_wildcard(
     ae.status = Set(EvaluationStatus::Queued);
     ae.waiting_reason = Set(None);
     ae.wildcard = Set(wildcard.to_string());
-    ae.updated_at = Set(crate::types::now());
+    ae.updated_at = Set(gradient_types::now());
     Ok(Some(ae.update(db).await?))
 }
 
@@ -248,7 +248,7 @@ pub async fn set_evaluation_source_comment(
     };
     let mut ae: AEvaluation = eval.into();
     ae.source_comment = Set(Some(source_comment));
-    ae.updated_at = Set(crate::types::now());
+    ae.updated_at = Set(gradient_types::now());
     ae.update(db).await?;
     Ok(())
 }
@@ -372,7 +372,7 @@ mod tests {
             name: "p".into(),
             active: true,
             wildcard: "*".into(),
-            created_by: crate::types::ids::UserId::nil(),
+            created_by: gradient_types::ids::UserId::nil(),
             keep_evaluations: 10,
             concurrency: 3,
             sign_cache: true,
@@ -382,14 +382,14 @@ mod tests {
 
     fn eval_capable_registration() -> gradient_entity::worker_registration::Model {
         gradient_entity::worker_registration::Model {
-            id: crate::types::ids::WorkerRegistrationId::now_v7(),
+            id: gradient_types::ids::WorkerRegistrationId::now_v7(),
             peer_id: OrganizationId::nil(),
             worker_id: "00000000-0000-4000-8000-000000000001".into(),
             active: true,
             enable_fetch: true,
             enable_eval: true,
             enable_build: true,
-            created_by: Some(crate::types::ids::UserId::nil()),
+            created_by: Some(gradient_types::ids::UserId::nil()),
             ..Default::default()
         }
     }

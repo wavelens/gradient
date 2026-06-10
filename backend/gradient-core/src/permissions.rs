@@ -16,8 +16,8 @@
 //! canonical bitmasks at startup; organizations can additionally create their
 //! own custom roles via the role-management API.
 
-use crate::types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID};
-use crate::types::ids::RoleId;
+use gradient_types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID};
+use gradient_types::ids::RoleId;
 
 /// A capability that a role may grant within an organization.
 ///
@@ -215,7 +215,7 @@ pub fn is_builtin_role(role_id: RoleId) -> bool {
 
 // ── CachePermission ──────────────────────────────────────────────────────────
 
-use crate::types::consts::{
+use gradient_types::consts::{
     BASE_CACHE_ROLE_ADMIN_ID, BASE_CACHE_ROLE_VIEW_ID, BASE_CACHE_ROLE_WRITE_ID,
 };
 
@@ -481,7 +481,7 @@ mod tests {
 
     #[test]
     fn is_builtin_cache_role_recognises_seed_uuids() {
-        use crate::types::consts::{
+        use gradient_types::consts::{
             BASE_CACHE_ROLE_ADMIN_ID, BASE_CACHE_ROLE_VIEW_ID, BASE_CACHE_ROLE_WRITE_ID,
         };
         assert!(is_builtin_cache_role(BASE_CACHE_ROLE_ADMIN_ID));

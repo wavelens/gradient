@@ -21,7 +21,6 @@ pub mod state;
 pub mod state_machine;
 pub mod state_root;
 pub mod storage;
-pub mod types;
 
 pub use state_root::{AppState, ServerState};
 
@@ -36,7 +35,7 @@ use std::sync::Arc;
 use storage::EmailService;
 use storage::NarStore;
 use storage::{FileLogStorage, S3LogStorage};
-use types::*;
+use gradient_types::*;
 
 #[derive(Debug, thiserror::Error)]
 pub enum InitError {
@@ -129,7 +128,7 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
     let http = http::build_client().map_err(|e| InitError::HttpClient(e.into()))?;
 
     let jwt_secret =
-        types::input::load_secret(&cli.secrets.jwt_secret_file).map_err(InitError::JwtSecret)?;
+        gradient_types::input::load_secret(&cli.secrets.jwt_secret_file).map_err(InitError::JwtSecret)?;
 
     let email_service = EmailService::new(cli.email_config())
         .await

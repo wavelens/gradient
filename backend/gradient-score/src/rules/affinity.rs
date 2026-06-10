@@ -82,7 +82,7 @@ impl ScoreRule for DiskAffinityRule {
 mod tests {
     use super::*;
     use crate::context::{HistoryPrediction, LazyProviders, ScoredJob, WorkerMetricsView};
-    use gradient_core::types::ids::OrganizationId;
+    use gradient_types::ids::OrganizationId;
 
     fn job(is_fixed_output: bool, h: HistoryPrediction) -> ScoredJob<'static> {
         let provider: &'static dyn Fn() -> HistoryPrediction = Box::leak(Box::new(move || h));
@@ -98,7 +98,7 @@ mod tests {
     }
 
     fn ctx<'a>(job: &'a ScoredJob<'a>) -> JobContext<'a> {
-        JobContext { job, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: gradient_core::types::now(), ready_at: gradient_core::types::now(), org_work_share: None, rescore_count: 0 }
+        JobContext { job, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: gradient_types::now(), ready_at: gradient_types::now(), org_work_share: None, rescore_count: 0 }
     }
 
     fn worker_with(metrics: WorkerMetricsView) -> WorkerContext<'static> {

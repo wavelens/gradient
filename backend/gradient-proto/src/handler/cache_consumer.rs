@@ -10,7 +10,7 @@
 
 use std::time::Duration;
 
-use gradient_core::types::proto::{CachedPath, GradientCapabilities, QueryMode};
+use gradient_types::proto::{CachedPath, GradientCapabilities, QueryMode};
 
 use crate::messages::{ClientMessage, PROTO_VERSION, ServerMessage};
 

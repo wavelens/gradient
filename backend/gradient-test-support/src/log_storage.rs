@@ -10,7 +10,7 @@ use std::sync::Mutex;
 use anyhow::Result;
 use futures::future::BoxFuture;
 use gradient_core::storage::LogStorage;
-use gradient_core::types::ids::BuildId;
+use gradient_types::ids::BuildId;
 
 /// Minimal no-op log storage for tests.
 #[derive(Debug, Default)]

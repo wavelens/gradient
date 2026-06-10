@@ -14,7 +14,7 @@ use axum::{
 };
 use gradient_entity::ids::{AdminTaskId, UserId};
 use gradient_core::db::admin_tasks;
-use gradient_core::types::{BaseResponse, MAdminTask, MUser};
+use gradient_types::{BaseResponse, MAdminTask, MUser};
 use gradient_core::ServerState;
 use serde::Serialize;
 use std::sync::Arc;
