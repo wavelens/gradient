@@ -25,6 +25,7 @@
 
 use axum_test::TestServer;
 use gradient_entity::build::BuildStatus;
+use gradient_entity::build_attempt::{AttemptOutcome, Model as MBuildAttempt};
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::ids::*;
 use gradient_storage::{EmailSender, NarStore};
@@ -144,7 +145,6 @@ fn leader_build_row() -> gradient_entity::build::Model {
         evaluation: leader_eval_id(),
         derivation: leader_drv_id(),
         status: BuildStatus::Building,
-        worker: Some("worker-1".into()),
         created_at: test_date(),
         updated_at: test_date() + chrono::Duration::seconds(30),
         ..Default::default()
@@ -169,6 +169,20 @@ fn follower_org_membership() -> gradient_entity::organization_user::Model {
         organization: follower_org_id(),
         user: user_id(),
         role: gradient_types::consts::BASE_ROLE_VIEW_ID,
+    }
+}
+
+fn empty_build_attempt(build: BuildId) -> MBuildAttempt {
+    MBuildAttempt {
+        id: BuildAttemptId::now_v7(),
+        build,
+        dispatched_job: DispatchedJobId::now_v7(),
+        substitute: false,
+        outcome: AttemptOutcome::Running,
+        build_started_at: None,
+        build_finished_at: None,
+        created_at: test_date(),
+        ..Default::default()
     }
 }
 
@@ -239,6 +253,7 @@ fn evaluation_builds_resolves_cross_org_leader_row() {
             .append_query_results([vec![leader_build_row()]]) // 9. SELECT builds (id in [leader_build_id])
             .append_query_results([vec![leader_derivation_row()]]) // 10. SELECT derivations (id in [leader_drv_id])
             .append_query_results([Vec::<gradient_entity::derivation_output::Model>::new()]) // 11. SELECT derivation_outputs (empty)
+            .append_query_results([vec![empty_build_attempt(leader_build_id())]]) // 12. latest_attempt for leader build
             .into_connection();
 
         let server = make_server(db);

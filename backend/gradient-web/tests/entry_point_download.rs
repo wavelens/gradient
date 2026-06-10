@@ -129,8 +129,6 @@ fn completed_build_row() -> gradient_entity::build::Model {
         evaluation: newest_eval_id(),
         derivation: derivation_id(),
         status: BuildStatus::Completed,
-        build_time_ms: Some(1_000),
-        worker: Some("worker-1".into()),
         created_at: test_date(),
         updated_at: test_date(),
         ..Default::default()

@@ -139,7 +139,6 @@ fn leader_build_row() -> gradient_entity::build::Model {
         evaluation: leader_eval_id(),
         derivation: DerivationId::now_v7(),
         status: BuildStatus::Completed,
-        build_time_ms: Some(1000),
         created_at: test_date(),
         updated_at: test_date(),
         ..Default::default()
@@ -152,7 +151,6 @@ fn follower_build_row() -> gradient_entity::build::Model {
         evaluation: follower_eval_id(),
         derivation: DerivationId::now_v7(),
         status: BuildStatus::Completed,
-        build_time_ms: Some(1000),
         via: Some(leader_build_id()),
         created_at: test_date(),
         updated_at: test_date(),

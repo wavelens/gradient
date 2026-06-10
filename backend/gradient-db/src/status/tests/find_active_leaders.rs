@@ -18,7 +18,7 @@ fn build(
     id: BuildId,
     drv: DerivationId,
     status: BuildStatus,
-    external_cached: bool,
+    substitutable: bool,
     offset_secs: i64,
 ) -> MBuild {
     let t = chrono::NaiveDate::from_ymd_opt(2026, 1, 1)
@@ -31,11 +31,8 @@ fn build(
         evaluation: gradient_entity::ids::EvaluationId::now_v7(),
         derivation: drv,
         status,
-        log_id: None,
-        build_time_ms: None,
-        worker: None,
         via: None,
-        external_cached,
+        substitutable,
         attempt: 0,
         timeout_secs: None,
         max_silent_secs: None,
@@ -45,8 +42,6 @@ fn build(
         queued_at: None,
         ready_at: None,
         dispatched_at: None,
-        build_started_at: None,
-        build_finished_at: None,
     }
 }
 

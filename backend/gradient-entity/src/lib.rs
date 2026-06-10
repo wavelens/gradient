@@ -77,7 +77,7 @@ mod model_default_tests {
     fn build_default_has_initial_status() {
         let m = build::Model::default();
         assert_eq!(m.status, build::BuildStatus::Created);
-        assert!(!m.external_cached);
+        assert!(!m.substitutable);
     }
 
     #[test]
@@ -114,7 +114,6 @@ mod model_default_tests {
         let m = dispatched_job::Model::default();
         assert_eq!(Uuid::from(m.id), Uuid::nil());
         assert_eq!(m.score, 0.0);
-        assert!(m.build_id.is_none());
         assert!(m.finished_at.is_none());
     }
 
@@ -156,8 +155,6 @@ mod model_default_tests {
         let m = build::Model::default();
         assert!(m.ready_at.is_none());
         assert!(m.dispatched_at.is_none());
-        assert!(m.build_started_at.is_none());
-        assert!(m.build_finished_at.is_none());
     }
 
     #[test]
