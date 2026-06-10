@@ -264,6 +264,7 @@ mod tests {
                 eval_workers: 1,
                 max_evaluations_per_worker: 0,
                 build_max_attempts: 3,
+                substitute_miss_escalation_threshold: 2,
                 build_retry_backoff_secs: 30,
                 build_default_timeout_secs: 14400,
                 build_default_max_silent_secs: 3600,

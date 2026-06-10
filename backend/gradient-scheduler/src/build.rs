@@ -856,6 +856,7 @@ struct BuildabilityChecker {
     /// threshold; past it, it is checked against real arch/features like any
     /// other build (so the parker can park it when no arch worker exists).
     substitute_misses: HashMap<BuildId, i64>,
+    substitute_miss_escalation_threshold: i64,
     /// Maps derivation ID → list of required feature IDs.
     features_by_drv: HashMap<DerivationId, Vec<FeatureId>>,
     feature_name: HashMap<FeatureId, String>,
@@ -911,6 +912,10 @@ impl BuildabilityChecker {
         Ok(Self {
             drv_by_id,
             substitute_misses,
+            substitute_miss_escalation_threshold: state
+                .config
+                .eval
+                .substitute_miss_escalation_threshold as i64,
             features_by_drv,
             feature_name,
         })
@@ -923,7 +928,7 @@ impl BuildabilityChecker {
     fn in_substitute_mode(&self, build: &MBuild) -> bool {
         build.substitutable
             && self.substitute_misses.get(&build.id).copied().unwrap_or(0)
-                < crate::dispatch::SUBSTITUTE_MISS_ESCALATION_THRESHOLD
+                < self.substitute_miss_escalation_threshold
     }
 
     /// Returns `true` if at least one build in `builds` can be satisfied by
@@ -1077,6 +1082,14 @@ mod retry_tests {
         assert!(!retry_backoff_elapsed(2, t0, t0 + chrono::Duration::seconds(59), 30));
         assert!(retry_backoff_elapsed(2, t0, t0 + chrono::Duration::seconds(60), 30));
     }
+    #[test]
+    fn substitute_miss_requeues_but_real_failures_cap_at_three() {
+        assert!(matches!(decide_failure_outcome(BuildFailureKind::SubstituteUnavailable, 0, 3), FailureOutcome::Requeue));
+        assert!(matches!(decide_failure_outcome(BuildFailureKind::SubstituteUnavailable, 99, 3), FailureOutcome::Requeue));
+        assert!(matches!(decide_failure_outcome(BuildFailureKind::Transient, 0, 3), FailureOutcome::Retry));
+        assert!(matches!(decide_failure_outcome(BuildFailureKind::Transient, 1, 3), FailureOutcome::Retry));
+        assert!(matches!(decide_failure_outcome(BuildFailureKind::Transient, 2, 3), FailureOutcome::Permanent));
+    }
 }
 
 #[cfg(test)]
@@ -1130,6 +1143,7 @@ mod waiting_reason_tests {
         BuildabilityChecker {
             drv_by_id,
             substitute_misses: HashMap::new(),
+            substitute_miss_escalation_threshold: 2,
             features_by_drv,
             feature_name,
         }
@@ -1332,9 +1346,7 @@ mod waiting_reason_tests {
         let d = drv(DerivationId::now_v7(), "aarch64-linux");
         let build = substitutable_build(d.id, eval_id);
         let mut checker = checker_with(vec![d], vec![]);
-        checker
-            .substitute_misses
-            .insert(build.id, crate::dispatch::SUBSTITUTE_MISS_ESCALATION_THRESHOLD - 1);
+        checker.substitute_misses.insert(build.id, 1);
 
         let caps: Vec<(Vec<String>, Vec<String>)> = vec![(vec!["x86_64-linux".into()], vec![])];
         let builds = [build];
@@ -1350,9 +1362,7 @@ mod waiting_reason_tests {
         let d = drv(DerivationId::now_v7(), "aarch64-linux");
         let build = substitutable_build(d.id, eval_id);
         let mut checker = checker_with(vec![d], vec![]);
-        checker
-            .substitute_misses
-            .insert(build.id, crate::dispatch::SUBSTITUTE_MISS_ESCALATION_THRESHOLD);
+        checker.substitute_misses.insert(build.id, 2);
 
         // No aarch64 worker: the escalated build is no longer buildable-anywhere
         // and surfaces as an unmet aarch64 requirement so the parker can park it.

@@ -35,11 +35,6 @@ use gradient_types::proto::{
     BuildJob, BuildTask, CacheInfo, FlakeJob, FlakeTask, RequiredPath,
 };
 
-/// Consecutive `SubstituteUnavailable` misses after which a substitutable build
-/// is escalated to a real arch-bound build instead of being dispatched as a
-/// `builtin` substitute. TODO: make this server-configurable.
-pub(crate) const SUBSTITUTE_MISS_ESCALATION_THRESHOLD: i64 = 2;
-
 /// Spawns all dispatch loops on the shared shutdown tracker so they drain on SIGTERM.
 pub fn start_dispatch_loops(scheduler: Arc<Scheduler>) {
     let shutdown = scheduler.state.shutdown.clone();
@@ -316,9 +311,8 @@ struct BuildDispatchMaps {
     /// derivation has no `pname` or no matching history).
     histories: HashMap<DerivationId, gradient_score::HistoryPrediction>,
     /// build_id → consecutive `SubstituteUnavailable` miss count. Absent ⇒ 0.
-    /// A substitutable build escalates to a real build once this reaches
-    /// [`SUBSTITUTE_MISS_ESCALATION_THRESHOLD`].
     substitute_misses: HashMap<BuildId, i64>,
+    substitute_miss_escalation_threshold: i64,
     default_timeout_secs: Option<u64>,
     default_max_silent_secs: Option<u64>,
 }
@@ -574,6 +568,10 @@ impl BuildDispatchMaps {
             closure_sizes,
             histories,
             substitute_misses,
+            substitute_miss_escalation_threshold: state
+                .config
+                .eval
+                .substitute_miss_escalation_threshold as i64,
             default_timeout_secs,
             default_max_silent_secs,
         })
@@ -619,7 +617,7 @@ impl BuildDispatchMaps {
         // attempts. After repeated misses it escalates to a real arch-bound
         // build so an arch worker takes it (or the parker parks the eval).
         let miss_count = self.substitute_misses.get(&build.id).copied().unwrap_or(0);
-        let substitute = build.substitutable && miss_count < SUBSTITUTE_MISS_ESCALATION_THRESHOLD;
+        let substitute = build.substitutable && miss_count < self.substitute_miss_escalation_threshold;
         // Placeholder; the real value is set per-assignment in
         // `job_handlers::apply_sign_flag` based on the receiving worker's
         // `sign` capability.

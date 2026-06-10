@@ -469,6 +469,12 @@ in {
           default = 3;
         };
 
+        substituteMissEscalationThreshold = lib.mkOption {
+          description = "Consecutive substitute misses before a substitutable build escalates to a real arch-bound build (must be ≥ 1).";
+          type = lib.types.ints.positive;
+          default = 2;
+        };
+
         buildRetryBackoffSecs = lib.mkOption {
           description = "Base backoff in seconds before retrying a transient build failure; doubled per prior attempt.";
           type = lib.types.ints.unsigned;
@@ -764,6 +770,7 @@ in {
         GRADIENT_DISPATCH_RECORD_CANDIDATES = lib.boolToString cfg.settings.dispatchRecordCandidates;
         GRADIENT_INSTANCE_METRICS_INTERVAL = toString cfg.settings.instanceMetricsIntervalSecs;
         GRADIENT_BUILD_MAX_ATTEMPTS = toString cfg.settings.buildMaxAttempts;
+        GRADIENT_SUBSTITUTE_MISS_ESCALATION_THRESHOLD = toString cfg.settings.substituteMissEscalationThreshold;
         GRADIENT_BUILD_RETRY_BACKOFF_SECS = toString cfg.settings.buildRetryBackoffSecs;
         GRADIENT_BUILD_DEFAULT_TIMEOUT_SECS = toString cfg.settings.buildDefaultTimeoutSecs;
         GRADIENT_BUILD_DEFAULT_MAX_SILENT_SECS = toString cfg.settings.buildDefaultMaxSilentSecs;

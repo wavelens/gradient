@@ -3349,6 +3349,10 @@ Run with: `cargo test -p scheduler --lib build::retry_tests`
 - `substitute_unavailable_requeues_penalty_free` — a `SubstituteUnavailable`
   failure always maps to `FailureOutcome::Requeue` (back to `Queued`, no
   `attempt` bump), regardless of the attempt count.
+- `substitute_miss_requeues_but_real_failures_cap_at_three` — documents the
+  interaction: substitute misses never consume the attempt budget (always
+  `Requeue`), while real transient failures hit `FailedPermanent` at attempt 2
+  (with `build_max_attempts = 3`).
 
 ### Substitute-miss escalation — `scheduler/src/build.rs`
 
