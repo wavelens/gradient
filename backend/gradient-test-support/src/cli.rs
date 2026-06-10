@@ -34,6 +34,7 @@ pub fn test_cli_with_crypt(crypt_secret_file: String) -> Cli {
             eval_workers: 1,
             max_evaluations_per_worker: 0,
             build_max_attempts: 3,
+            substitute_miss_escalation_threshold: 2,
             build_retry_backoff_secs: 30,
             build_default_timeout_secs: 3600,
             build_default_max_silent_secs: 1800,
