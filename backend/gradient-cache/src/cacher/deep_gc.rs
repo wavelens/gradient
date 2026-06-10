@@ -163,20 +163,19 @@ async fn pass_logs(state: Arc<ServerState>, report: &mut DeepGcReport) -> Result
     }
 
     let referenced: HashSet<BuildId> = {
-        let by_log = EBuild::find()
-            .filter(CBuild::LogId.is_in(on_disk.clone()))
+        let by_log = gradient_entity::build_attempt::Entity::find()
+            .filter(gradient_entity::build_attempt::Column::LogId.is_in(on_disk.clone()))
             .all(&state.worker_db)
             .await
-            .context("query builds by log_id")?
+            .context("query build_attempts by log_id")?
             .into_iter()
-            .filter_map(|b| b.log_id)
+            .filter_map(|a| a.log_id)
             .collect::<HashSet<_>>();
         let by_id = EBuild::find()
             .filter(CBuild::Id.is_in(on_disk.clone()))
-            .filter(CBuild::LogId.is_null())
             .all(&state.worker_db)
             .await
-            .context("query builds by id with null log_id")?
+            .context("query builds by id")?
             .into_iter()
             .map(|b| b.id)
             .collect::<HashSet<_>>();
