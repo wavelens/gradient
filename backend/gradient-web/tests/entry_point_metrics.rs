@@ -128,10 +128,25 @@ fn completed_build_row() -> gradient_entity::build::Model {
         evaluation: eval_id(),
         derivation: derivation_id(),
         status: BuildStatus::Completed,
-        build_time_ms: Some(12_345),
-        worker: Some("worker-1".into()),
         created_at: test_date(),
         updated_at: test_date(),
+        ..Default::default()
+    }
+}
+
+fn build_attempt_row(build_time_ms: Option<i64>) -> gradient_entity::build_attempt::Model {
+    use gradient_entity::ids::{BuildAttemptId, DispatchedJobId};
+    let started = test_date();
+    let finished = build_time_ms.map(|ms| started + chrono::Duration::milliseconds(ms));
+    gradient_entity::build_attempt::Model {
+        id: BuildAttemptId::now_v7(),
+        build: build_id(),
+        dispatched_job: DispatchedJobId::now_v7(),
+        substitute: false,
+        outcome: gradient_entity::build_attempt::AttemptOutcome::Built,
+        build_started_at: Some(started),
+        build_finished_at: finished,
+        created_at: test_date(),
         ..Default::default()
     }
 }
@@ -165,8 +180,6 @@ fn make_state(db: sea_orm::DatabaseConnection) -> Arc<ServerState> {
 fn substituted_build_row() -> gradient_entity::build::Model {
     gradient_entity::build::Model {
         status: BuildStatus::Substituted,
-        build_time_ms: None,
-        worker: None,
         ..completed_build_row()
     }
 }
@@ -188,6 +201,7 @@ fn returns_point_when_eval_is_in_progress_but_build_is_completed() {
             .append_query_results([vec![entry_point_row("packages.x86_64-linux.hello")]])
             .append_query_results([vec![building_eval_row()]])
             .append_query_results([vec![completed_build_row()]])
+            .append_query_results([vec![build_attempt_row(Some(12_345))]])
             .append_query_results([Vec::<gradient_entity::derivation_dependency::Model>::new()])
             .append_query_results([Vec::<gradient_entity::derivation_output::Model>::new()])
             .append_query_results([Vec::<gradient_entity::derivation_output::Model>::new()])
@@ -229,6 +243,7 @@ fn returns_point_when_eval_is_in_progress_but_build_is_substituted() {
             .append_query_results([vec![entry_point_row("packages.x86_64-linux.hello")]])
             .append_query_results([vec![building_eval_row()]])
             .append_query_results([vec![substituted_build_row()]])
+            .append_query_results([vec![build_attempt_row(None)]])
             .append_query_results([Vec::<gradient_entity::derivation_dependency::Model>::new()])
             .append_query_results([Vec::<gradient_entity::derivation_output::Model>::new()])
             .append_query_results([Vec::<gradient_entity::derivation_output::Model>::new()])

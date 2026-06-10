@@ -17,11 +17,8 @@ fn build(id: BuildId, drv: DerivationId, via: Option<BuildId>, status: BuildStat
         evaluation: EvaluationId::now_v7(),
         derivation: drv,
         status,
-        log_id: None,
-        build_time_ms: None,
-        worker: None,
         via,
-        external_cached: false,
+        substitutable: false,
         attempt: 0,
         timeout_secs: None,
         max_silent_secs: None,
@@ -31,8 +28,6 @@ fn build(id: BuildId, drv: DerivationId, via: Option<BuildId>, status: BuildStat
         queued_at: None,
         ready_at: None,
         dispatched_at: None,
-        build_started_at: None,
-        build_finished_at: None,
     }
 }
 

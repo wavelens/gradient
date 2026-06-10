@@ -24,6 +24,7 @@
 use axum_test::TestServer;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
+use gradient_entity::ids::{BuildAttemptId, DispatchedJobId};
 use gradient_storage::{EmailSender, NarStore};
 use gradient_types::ids::*;
 use gradient_core::ServerState;
@@ -149,9 +150,22 @@ fn leader_build_row() -> gradient_entity::build::Model {
         evaluation: other_eval_id(),
         derivation: derivation_id(),
         status: BuildStatus::Building,
-        worker: Some("worker-7".into()),
         created_at: test_date(),
         updated_at: test_date() + chrono::Duration::seconds(42),
+        ..Default::default()
+    }
+}
+
+fn empty_build_attempt(build: BuildId) -> gradient_entity::build_attempt::Model {
+    gradient_entity::build_attempt::Model {
+        id: BuildAttemptId::now_v7(),
+        build,
+        dispatched_job: DispatchedJobId::now_v7(),
+        substitute: false,
+        outcome: gradient_entity::build_attempt::AttemptOutcome::Running,
+        build_started_at: None,
+        build_finished_at: None,
+        created_at: test_date(),
         ..Default::default()
     }
 }
@@ -200,6 +214,7 @@ fn follower_build_is_replaced_with_leader_row() {
             .append_query_results([vec![leader_build_row()]])
             .append_query_results([vec![derivation_row()]])
             .append_query_results([Vec::<gradient_entity::derivation_output::Model>::new()])
+            .append_query_results([vec![empty_build_attempt(leader_build_id())]])
             .into_connection();
 
         let server = TestServer::new(create_router(make_state(db)));
@@ -247,9 +262,20 @@ fn plain_build_returns_own_row_without_extra_query() {
         let plain = gradient_entity::build::Model {
             via: None,
             status: BuildStatus::Completed,
-            build_time_ms: Some(1234),
             updated_at: test_date() + chrono::Duration::seconds(7),
             ..follower_build_row()
+        };
+
+        let build_attempt = gradient_entity::build_attempt::Model {
+            id: BuildAttemptId::now_v7(),
+            build: follower_build_id(),
+            dispatched_job: DispatchedJobId::now_v7(),
+            substitute: false,
+            outcome: gradient_entity::build_attempt::AttemptOutcome::Built,
+            build_started_at: Some(test_date()),
+            build_finished_at: Some(test_date() + chrono::Duration::milliseconds(1234)),
+            created_at: test_date(),
+            ..Default::default()
         };
 
         let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -259,6 +285,7 @@ fn plain_build_returns_own_row_without_extra_query() {
             .append_query_results([vec![plain]])
             .append_query_results([vec![derivation_row()]])
             .append_query_results([Vec::<gradient_entity::derivation_output::Model>::new()])
+            .append_query_results([vec![build_attempt]])
             .into_connection();
 
         let server = TestServer::new(create_router(make_state(db)));
