@@ -526,7 +526,18 @@ impl JobTracker {
                 instance_context: serde_json::to_value(instance)
                     .unwrap_or(serde_json::Value::Null),
                 substitute: matches!(job, PendingJob::Build(b) if b.substitute),
-                build_context: serde_json::json!({}),
+                build_context: match job {
+                    PendingJob::Build(b) => serde_json::json!({
+                        "architecture": b.architecture,
+                        "required_features": b.required_features,
+                        "dependency_count": b.dependency_count,
+                        "closure_size": b.closure_size,
+                        "prefer_local_build": b.prefer_local_build,
+                        "is_fixed_output": b.is_fixed_output,
+                        "substitute": b.substitute,
+                    }),
+                    PendingJob::Eval(_) => serde_json::json!({}),
+                },
             }
         });
 
