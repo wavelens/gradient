@@ -97,46 +97,17 @@ pub struct Model {
     pub evaluation: EvaluationId,
     pub derivation: DerivationId,
     pub status: BuildStatus,
-    pub log_id: Option<BuildId>,
-    pub build_time_ms: Option<i64>,
-    /// Worker identity (the `worker_id` string sent in `InitConnection`) that
-    /// executed this build. `None` for builds that never reached a worker
-    /// (still queued, aborted before dispatch, or pre-migration rows).
-    pub worker: Option<String>,
-    /// Points at another build sharing the same derivation whose result this
-    /// build follows. `None` for leaders (and plain builds). Followers are
-    /// skipped by the dispatcher; the leader's terminal status, log_id,
-    /// build_time_ms, and worker are copied to followers when the leader
-    /// finishes. Same-organization only - followers always share a `derivation`
-    /// row with their leader.
     pub via: Option<BuildId>,
-    /// `true` when the build's outputs are known to be available from an
-    /// upstream cache (cache.nixos.org etc.) but are not yet in the gradient
-    /// cache. The dispatcher hands these jobs to a worker which downloads
-    /// from upstream, recompresses, and pushes to our cache instead of
-    /// running an actual `nix build`. Always `false` for `Substituted`
-    /// rows (those are already in our cache) and for plain rebuild jobs.
-    pub external_cached: bool,
-    /// Number of build attempts made so far. Incremented on each transient
-    /// failure; when it reaches the configured cap the build becomes
-    /// `FailedPermanent`.
+    pub substitutable: bool,
     pub attempt: i32,
-    /// Wall-clock build limit in seconds extracted from the derivation
-    /// (`timeout` attr). `None` means use the server default.
     pub timeout_secs: Option<i64>,
-    /// No-output (silent) build limit in seconds (`maxSilent` attr).
-    /// `None` means use the server default.
     pub max_silent_secs: Option<i64>,
-    /// `preferLocalBuild` derivation attribute. Plumbed for future scheduling
-    /// use; not consulted by placement yet.
     pub prefer_local_build: bool,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
     pub queued_at: Option<NaiveDateTime>,
     pub ready_at: Option<NaiveDateTime>,
     pub dispatched_at: Option<NaiveDateTime>,
-    pub build_started_at: Option<NaiveDateTime>,
-    pub build_finished_at: Option<NaiveDateTime>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
