@@ -607,7 +607,7 @@ impl BuildDispatchMaps {
             builds: vec![BuildTask {
                 build_id: build.id.to_string(),
                 drv_path: derivation.store_path(),
-                external_cached: build.external_cached,
+                external_cached: build.substitutable,
                 timeout_secs: resolve_limit(build.timeout_secs, self.default_timeout_secs),
                 max_silent_secs: resolve_limit(build.max_silent_secs, self.default_max_silent_secs),
             }],

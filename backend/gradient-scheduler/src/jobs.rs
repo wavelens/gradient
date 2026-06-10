@@ -8,9 +8,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use gradient_types::ids::{
-    BuildId, CommitId, DerivationId, EvaluationId, OrganizationId, ProjectId,
-};
+use gradient_types::ids::{BuildId, CommitId, EvaluationId, OrganizationId, ProjectId};
 use gradient_types::proto::{
     BuildJob, CandidateScore, FlakeJob, FlakeSource, FlakeTask, Job, JobCandidate, JobKind,
     RequiredPath,
@@ -222,7 +220,6 @@ pub struct DispatchRecord {
     pub evaluation_id: EvaluationId,
     pub organization: OrganizationId,
     pub project: Option<ProjectId>,
-    pub derivation: Option<DerivationId>,
     pub score: f64,
     pub queued_at: chrono::NaiveDateTime,
     pub ready_at: chrono::NaiveDateTime,
@@ -230,6 +227,8 @@ pub struct DispatchRecord {
     pub worker_context: serde_json::Value,
     pub job_context: serde_json::Value,
     pub instance_context: serde_json::Value,
+    pub substitute: bool,
+    pub build_context: serde_json::Value,
 }
 
 /// Returns true when the worker can execute `job`: a flake job that fetches
@@ -509,7 +508,6 @@ impl JobTracker {
                 evaluation_id: job.evaluation_id(),
                 organization: job.peer_id(),
                 project,
-                derivation: None,
                 score: breakdown.total,
                 queued_at: job.queued_at(),
                 ready_at: ctx.ready_at,
@@ -524,6 +522,8 @@ impl JobTracker {
                     .unwrap_or(serde_json::Value::Null),
                 instance_context: serde_json::to_value(instance)
                     .unwrap_or(serde_json::Value::Null),
+                substitute: false,
+                build_context: serde_json::json!({}),
             }
         });
 

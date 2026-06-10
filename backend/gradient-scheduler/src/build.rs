@@ -88,7 +88,7 @@ impl<'a> BuildStateHandler<'a> {
         metrics: Option<BuildMetrics>,
         substituted: bool,
     ) -> Result<()> {
-        let mut build = EBuild::find_by_id(build_id)
+        let build = EBuild::find_by_id(build_id)
             .one(&self.state.worker_db)
             .await
             .context("fetch build")?
@@ -99,7 +99,7 @@ impl<'a> BuildStateHandler<'a> {
         // Per-build metrics: a multi-build job yields one `BuildOutput` per
         // build, so this records exactly one `derivation_metric` row per build.
         if let Some(metrics) = metrics {
-            self.record_metrics(&mut build, derivation_id, &metrics)
+            self.record_metrics(&build, derivation_id, &metrics)
                 .await;
         }
 
@@ -181,7 +181,7 @@ impl<'a> BuildStateHandler<'a> {
         };
         let evaluation_id = build.evaluation;
         let derivation_id = build.derivation;
-        let was_external_cached = build.external_cached;
+        let was_external_cached = build.substitutable;
 
         // `handle_build_output` already moved the build to `Substituted` when the
         // outputs were found already valid; preserve that terminal state instead
@@ -229,29 +229,14 @@ impl<'a> BuildStateHandler<'a> {
         self.check_evaluation_done(evaluation_id).await
     }
 
-    /// Insert a `derivation_metric` history row from a build's worker metrics
-    /// and persist the worker-measured build time onto the build row (overriding
-    /// the wall-clock fallback in `update_build_status`). Called once per build
-    /// from the `BuildOutput` handler.
+    /// Insert a `derivation_metric` history row from a build's worker metrics.
+    /// Called once per build from the `BuildOutput` handler.
     async fn record_metrics(
         &self,
-        build: &mut MBuild,
+        build: &MBuild,
         derivation_id: DerivationId,
         metrics: &BuildMetrics,
     ) {
-        if let Some(ms) = metrics.build_time_ms {
-            build.build_time_ms = Some(ms as i64);
-            let build_id = build.id;
-            let res = EBuild::update_many()
-                .col_expr(CBuild::BuildTimeMs, sea_orm::sea_query::Expr::value(ms as i64))
-                .filter(CBuild::Id.eq(build_id))
-                .exec(&self.state.worker_db)
-                .await;
-            if let Err(e) = res {
-                warn!(%build_id, error = %e, "failed to persist build_time_ms");
-            }
-        }
-
         let (pname, closure_size) = match EDerivation::find_by_id(derivation_id)
             .one(&self.state.worker_db)
             .await
@@ -280,7 +265,11 @@ impl<'a> BuildStateHandler<'a> {
             peak_network_mbps: Set(metrics.peak_network_mbps.map(|v| v as f64)),
             oom_killed: Set(metrics.oom_killed),
             build_time_ms: Set(metrics.build_time_ms.map(|v| v as i64)),
-            worker_id: Set(build.worker.clone().unwrap_or_default()),
+            worker_id: Set(gradient_db::latest_attempt_worker(&self.state.worker_db, build.id)
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or_default()),
             created_at: Set(gradient_types::now()),
         };
 
@@ -310,9 +299,9 @@ impl<'a> BuildStateHandler<'a> {
         // frontend's log viewer renders it. Without this, pre-`nix build`
         // aborts (prefetch-time errors, daemon connection failures, etc.)
         // produce a Failed badge with an empty log - useless for diagnosis.
-        // Followers share this `log_id` via `propagate_to_followers`, so a
-        // single append covers the whole leader→followers fan-out.
-        let log_id = build.log_id.unwrap_or(build.id);
+        let log_id = gradient_db::latest_attempt_log_id(&self.state.worker_db, build.id)
+            .await
+            .unwrap_or(build.id);
         if let Err(e) = self
             .state
             .log_storage
@@ -361,30 +350,31 @@ impl<'a> BuildStateHandler<'a> {
         self.check_evaluation_done(evaluation_id).await
     }
 
-    /// Copy a leader's terminal status (and `log_id`, `build_time_ms`, `worker`)
-    /// onto every build with `via = leader.id`, then run the per-evaluation
-    /// finalisation each follower needs (`DependencyFailed` cascade on failure,
-    /// `check_evaluation_done` to flip the eval).
+    /// Resolve the fate of every build held behind `leader` via `via = leader.id`.
     ///
-    /// Same-org followers share the leader's `derivation` row, so its
-    /// `derivation_output` and `build_product` children are already visible to
-    /// the follower's evaluation without any copy. Cross-org followers (whose
-    /// `derivation` differs from the leader's - created when the leader belongs
-    /// to a cache-connected organisation) have those rows mirrored onto the
-    /// follower's `derivation`.
+    /// On leader SUCCESS (`Completed`/`Substituted`) the followers are RELEASED
+    /// back to the queue (`status = Queued`, `via = None`) so they are
+    /// re-dispatched: nix transparently substitutes the leader's now-cached
+    /// output and each follower registers its own artefacts + `build_attempt`.
+    ///
+    /// On leader FAILURE (`FailedPermanent`/`FailedTimeout`/`DependencyFailed`)
+    /// the failure is propagated onto each follower and its dependents are
+    /// cascaded, exactly as before.
     ///
     /// `Aborted` is not propagated - when a leader is aborted (its eval was
     /// cancelled), callers re-elect a new leader from the followers instead.
     async fn propagate_to_followers(&self, leader: &MBuild) -> Result<()> {
-        let propagate = matches!(
+        let is_success = matches!(
             leader.status,
-            BuildStatus::Completed
-                | BuildStatus::Substituted
-                | BuildStatus::FailedPermanent
+            BuildStatus::Completed | BuildStatus::Substituted
+        );
+        let is_failure = matches!(
+            leader.status,
+            BuildStatus::FailedPermanent
                 | BuildStatus::FailedTimeout
                 | BuildStatus::DependencyFailed
         );
-        if !propagate {
+        if !is_success && !is_failure {
             return Ok(());
         }
 
@@ -397,35 +387,29 @@ impl<'a> BuildStateHandler<'a> {
             return Ok(());
         }
 
-        let leader_outputs = EDerivationOutput::find()
-            .filter(CDerivationOutput::Derivation.eq(leader.derivation))
-            .all(&self.state.worker_db)
-            .await
-            .context("fetch leader's derivation_output rows")?;
-        let leader_output_ids: Vec<_> = leader_outputs.iter().map(|o| o.id).collect();
-        let db = &self.state.worker_db;
-        let leader_products = gradient_db::fetch_in_chunks(
-            &leader_output_ids,
-            |chunk| async move {
-                EBuildProduct::find()
-                    .filter(CBuildProduct::DerivationOutput.is_in(chunk))
-                    .all(db)
-                    .await
-            },
-        )
-        .await
-        .context("fetch leader's build_product rows")?;
+        if is_success {
+            let now = gradient_types::now();
+            for follower in followers {
+                let follower_id = follower.id;
+                let mut active: ABuild = follower.into_active_model();
+                active.status = Set(BuildStatus::Queued);
+                active.via = Set(None);
+                active.updated_at = Set(now);
+                if let Err(e) = active.update(&self.state.worker_db).await {
+                    error!(error = %e, %follower_id, "failed to release follower for re-dispatch");
+                }
+            }
+
+            return Ok(());
+        }
 
         for follower in followers {
             let evaluation_id = follower.evaluation;
             let derivation_id = follower.derivation;
             let mut active: ABuild = follower.clone().into_active_model();
-            active.log_id = Set(leader.log_id);
-            active.build_time_ms = Set(leader.build_time_ms);
-            active.worker = Set(leader.worker.clone());
             active.via = Set(None);
             if let Err(e) = active.update(&self.state.worker_db).await {
-                error!(error = %e, follower_id = %follower.id, "failed to copy leader fields to follower");
+                error!(error = %e, follower_id = %follower.id, "failed to clear follower via");
                 continue;
             }
 
@@ -436,55 +420,6 @@ impl<'a> BuildStateHandler<'a> {
                 continue;
             };
             update_build_status(&self.state.db(), reloaded, leader.status).await;
-
-            if follower.derivation != leader.derivation {
-                let existing_outs = EDerivationOutput::find()
-                    .filter(CDerivationOutput::Derivation.eq(follower.derivation))
-                    .all(&self.state.worker_db)
-                    .await
-                    .context("fetch follower's existing derivation_output rows")?;
-                let existing_out_ids: Vec<_> = existing_outs.iter().map(|o| o.id).collect();
-                if !existing_out_ids.is_empty() {
-                    if let Err(e) = gradient_db::for_each_chunk(&existing_out_ids, |chunk| async move {
-                        EBuildProduct::delete_many()
-                            .filter(CBuildProduct::DerivationOutput.is_in(chunk))
-                            .exec(db)
-                            .await
-                    })
-                    .await
-                    {
-                        warn!(error = %e, follower_id = %follower.id, "failed to clear stale follower build_products");
-                    }
-
-                    if let Err(e) = gradient_db::for_each_chunk(&existing_out_ids, |chunk| async move {
-                        EDerivationOutput::delete_many()
-                            .filter(CDerivationOutput::Id.is_in(chunk))
-                            .exec(db)
-                            .await
-                    })
-                    .await
-                    {
-                        warn!(error = %e, follower_id = %follower.id, "failed to clear stale follower derivation_outputs");
-                    }
-                }
-
-                let (new_outputs, new_products) = build_cross_org_artefact_rows(
-                    follower.derivation,
-                    &leader_outputs,
-                    &leader_products,
-                );
-
-                for out in new_outputs {
-                    if let Err(e) = out.insert(&self.state.worker_db).await {
-                        warn!(error = %e, follower_id = %follower.id, "failed to mirror derivation_output to follower");
-                    }
-                }
-                for product in new_products {
-                    if let Err(e) = product.insert(&self.state.worker_db).await {
-                        warn!(error = %e, follower_id = %follower.id, "failed to mirror build_product to follower");
-                    }
-                }
-            }
 
             if matches!(
                 leader.status,
@@ -868,63 +803,6 @@ pub async fn reconcile_waiting_state(
     BuildStateHandler::new(state)
         .reconcile_waiting_state(worker_caps, eval_capable_workers)
         .await
-}
-
-/// Build the `derivation_output` and `build_product` rows to insert under a
-/// cross-org follower's `derivation` so its evaluation can resolve artefacts
-/// without org-aware indirection. Pure: no DB, no I/O.
-///
-/// Returns `(new_outputs, new_products)`. `new_outputs[i]` has a fresh
-/// `DerivationOutputId` and `derivation = follower_derivation`; every other
-/// column is copied from the corresponding leader row. `new_products` rewrites
-/// the `derivation_output` FK to point at the matching new output id.
-pub(crate) fn build_cross_org_artefact_rows(
-    follower_derivation: DerivationId,
-    leader_outputs: &[MDerivationOutput],
-    leader_products: &[MBuildProduct],
-) -> (Vec<ADerivationOutput>, Vec<ABuildProduct>) {
-    use gradient_entity::ids::{BuildProductId, DerivationOutputId};
-    use std::collections::HashMap;
-
-    let mut old_to_new: HashMap<DerivationOutputId, DerivationOutputId> = HashMap::new();
-    let new_outputs: Vec<ADerivationOutput> = leader_outputs
-        .iter()
-        .map(|src| {
-            let new_id = DerivationOutputId::now_v7();
-            old_to_new.insert(src.id, new_id);
-            ADerivationOutput {
-                id: Set(new_id),
-                derivation: Set(follower_derivation),
-                name: Set(src.name.clone()),
-                hash: Set(src.hash.clone()),
-                package: Set(src.package.clone()),
-                ca: Set(src.ca.clone()),
-                nar_size: Set(src.nar_size),
-                is_cached: Set(src.is_cached),
-                cached_path: Set(src.cached_path),
-                created_at: Set(src.created_at),
-            }
-        })
-        .collect();
-
-    let new_products: Vec<ABuildProduct> = leader_products
-        .iter()
-        .filter_map(|src| {
-            let new_output_id = old_to_new.get(&src.derivation_output).copied()?;
-            Some(ABuildProduct {
-                id: Set(BuildProductId::now_v7()),
-                derivation_output: Set(new_output_id),
-                file_type: Set(src.file_type.clone()),
-                subtype: Set(src.subtype.clone()),
-                name: Set(src.name.clone()),
-                path: Set(src.path.clone()),
-                size: Set(src.size),
-                created_at: Set(src.created_at),
-            })
-        })
-        .collect();
-
-    (new_outputs, new_products)
 }
 
 // ---------------------------------------------------------------------------
@@ -1361,96 +1239,5 @@ mod waiting_reason_tests {
         let (unmet, _, _) = workers_view(&reason);
 
         assert!(unmet.is_empty());
-    }
-}
-
-#[cfg(test)]
-mod cross_org_mirror_tests {
-    use super::*;
-    use gradient_entity::ids::{BuildProductId, DerivationId, DerivationOutputId};
-
-    fn output_fixture(
-        id: DerivationOutputId,
-        derivation: DerivationId,
-        hash: &str,
-    ) -> MDerivationOutput {
-        MDerivationOutput {
-            id,
-            derivation,
-            name: "out".into(),
-            hash: hash.into(),
-            package: "foo".into(),
-            ca: None,
-            nar_size: Some(1024),
-            is_cached: true,
-            cached_path: None,
-            created_at: chrono::NaiveDateTime::default(),
-        }
-    }
-
-    fn product_fixture(id: BuildProductId, output: DerivationOutputId) -> MBuildProduct {
-        MBuildProduct {
-            id,
-            derivation_output: output,
-            file_type: "file".into(),
-            subtype: "doc".into(),
-            name: "readme".into(),
-            path: "share/doc/readme".into(),
-            size: Some(512),
-            created_at: chrono::NaiveDateTime::default(),
-        }
-    }
-
-    #[test]
-    fn mirrors_outputs_and_rewrites_product_foreign_keys() {
-        let leader_drv = DerivationId::now_v7();
-        let follower_drv = DerivationId::now_v7();
-        let leader_out_id = DerivationOutputId::now_v7();
-        let leader_outputs = vec![output_fixture(leader_out_id, leader_drv, "deadbeef")];
-        let leader_products = vec![product_fixture(BuildProductId::now_v7(), leader_out_id)];
-
-        let (new_outputs, new_products) =
-            build_cross_org_artefact_rows(follower_drv, &leader_outputs, &leader_products);
-
-        assert_eq!(new_outputs.len(), 1);
-        let mirrored_out = &new_outputs[0];
-        match &mirrored_out.derivation {
-            Set(d) => assert_eq!(*d, follower_drv),
-            _ => panic!("derivation not set"),
-        }
-        match &mirrored_out.hash {
-            Set(h) => assert_eq!(h, "deadbeef"),
-            _ => panic!("hash not set"),
-        }
-        match &mirrored_out.id {
-            Set(new_id) => assert_ne!(*new_id, leader_out_id),
-            _ => panic!("id not set"),
-        }
-
-        assert_eq!(new_products.len(), 1);
-        let mirrored_product = &new_products[0];
-        match (&mirrored_out.id, &mirrored_product.derivation_output) {
-            (Set(out_id), Set(prod_out)) => assert_eq!(prod_out, out_id),
-            _ => panic!("product FK not rewritten"),
-        }
-    }
-
-    #[test]
-    fn dangling_product_without_owning_output_is_dropped() {
-        let follower_drv = DerivationId::now_v7();
-        let leader_outputs: Vec<MDerivationOutput> = vec![];
-        let leader_products = vec![product_fixture(
-            BuildProductId::now_v7(),
-            DerivationOutputId::now_v7(),
-        )];
-
-        let (new_outputs, new_products) =
-            build_cross_org_artefact_rows(follower_drv, &leader_outputs, &leader_products);
-
-        assert!(new_outputs.is_empty());
-        assert!(
-            new_products.is_empty(),
-            "orphan product must not be inserted"
-        );
     }
 }
