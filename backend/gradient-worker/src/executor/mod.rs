@@ -315,51 +315,50 @@ impl JobExecutor {
             gc_handles.push(self.gcroots.add(&build_task.drv_path).await);
 
             if build_task.external_cached {
-                // Optimistic path: the worker reported the outputs as
-                // available from an upstream cache during eval. Pull them
-                // through if we can - `compress_and_push_paths` below will
-                // land them in our cache. If anything goes wrong (cache
-                // miss, presigned download error, output missing on disk),
-                // fall through to a real local build instead of failing
-                // the whole job; the optimistic flag is just a hint.
-                match crate::proto::nar_import::fetch_external_cached_outputs(
+                // Substitute attempt: the output was reported cache-available
+                // during eval, so this build was dispatched arch-agnostically
+                // (`builtin`). Pulling it through is the whole job - there is no
+                // safe local-build fallback (this worker may be the wrong arch).
+                // On a miss, fail with `SubstituteUnavailable`; the scheduler
+                // re-dispatches or escalates to a real arch-bound build.
+                let outputs = crate::proto::nar_import::fetch_external_cached_outputs(
                     &self.store,
                     build_task,
                     updater,
                 )
                 .await
-                {
-                    Ok(outputs) => {
-                        let mut reported = Vec::with_capacity(outputs.len());
-                        for (name, path) in &outputs {
-                            let hash = gradient_sources::get_hash_from_path(path.clone())
-                                .map(|(h, _)| h)
-                                .unwrap_or_default();
-                            let products = build::load_products(path).await;
-                            reported.push(gradient_proto::messages::BuildOutput {
-                                name: name.clone(),
-                                store_path: path.clone(),
-                                hash,
-                                nar_size: None,
-                                nar_hash: None,
-                                products,
-                            });
-                        }
-                        updater.report_build_output(build_task.build_id.clone(), reported, None, false)?;
-                        for (_, p) in &outputs {
-                            gc_handles.push(self.gcroots.add(p).await);
-                        }
-                        all_output_paths.extend(outputs.into_iter().map(|(_, p)| p));
-                        continue;
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            build_id = %build_task.build_id,
-                            error = %e,
-                            "external_cached fetch failed; falling back to local build"
-                        );
-                    }
+                .map_err(|e| {
+                    tracing::warn!(
+                        build_id = %build_task.build_id,
+                        error = %e,
+                        "external_cached fetch missed; reporting SubstituteUnavailable"
+                    );
+                    crate::executor::build::BuildError::substitute_unavailable(e)
+                })?;
+
+                let mut reported = Vec::with_capacity(outputs.len());
+                for (name, path) in &outputs {
+                    let hash = gradient_sources::get_hash_from_path(path.clone())
+                        .map(|(h, _)| h)
+                        .unwrap_or_default();
+                    let products = build::load_products(path).await;
+                    reported.push(gradient_proto::messages::BuildOutput {
+                        name: name.clone(),
+                        store_path: path.clone(),
+                        hash,
+                        nar_size: None,
+                        nar_hash: None,
+                        products,
+                    });
                 }
+
+                updater.report_build_output(build_task.build_id.clone(), reported, None, false)?;
+                for (_, p) in &outputs {
+                    gc_handles.push(self.gcroots.add(p).await);
+                }
+
+                all_output_paths.extend(outputs.into_iter().map(|(_, p)| p));
+                continue;
             }
 
             // Import cache-resident inputs the daemon will need. A hard

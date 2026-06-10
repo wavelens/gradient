@@ -3346,6 +3346,26 @@ Run with: `cargo test -p scheduler --lib build::retry_tests`
   is `FailedPermanent`.
 - `backoff_grows_per_attempt` — the retry delay doubles with each attempt
   (exponential backoff).
+- `substitute_unavailable_requeues_penalty_free` — a `SubstituteUnavailable`
+  failure always maps to `FailureOutcome::Requeue` (back to `Queued`, no
+  `attempt` bump), regardless of the attempt count.
+
+### Substitute-miss escalation — `scheduler/src/build.rs`
+
+Run with: `cargo test -p scheduler --lib build::waiting_reason_tests`
+
+- `substitutable_below_threshold_is_buildable_anywhere` — a substitutable build
+  under `SUBSTITUTE_MISS_ESCALATION_THRESHOLD` misses is buildable-anywhere
+  (substitute mode) and never appears in the waiting reason.
+- `substitutable_at_threshold_escalates_to_real_arch_check` — once a
+  substitutable build reaches the threshold it is checked against its real
+  arch/features; with no matching arch worker it is not buildable-anywhere and
+  surfaces as an unmet requirement so the parker can park the eval.
+
+### Substitute-miss state transition — `gradient-db/src/state_machine/build.rs`
+
+- `build_sm_building_to_queued_for_substitute_requeue` — a `Building` substitute
+  attempt may transition back to `Queued` (penalty-free re-queue).
 
 ### Per-build limit resolution — `scheduler/src/dispatch.rs`
 
@@ -3366,6 +3386,10 @@ Run with: `cargo test -p worker --lib executor::build::classify_tests`
   `BuildFailureKind::Permanent`.
 - `oom_signature_is_transient` — a log line matching the OOM heuristic
   maps to `BuildFailureKind::Transient`.
+
+A substitute miss (`external_cached` build whose `fetch_external_cached_outputs`
+fails) reports `BuildFailureKind::SubstituteUnavailable` and never falls back to
+a local build — see `BuildError::substitute_unavailable`.
 
 ### Entity helpers — `entity/src/build.rs`
 

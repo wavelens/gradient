@@ -69,6 +69,10 @@ impl BuildStateMachine {
 
             // FailedTransient can be retried (back to Queued) or promoted to permanent.
             (BuildStatus::FailedTransient, BuildStatus::Queued) => Ok(to),
+
+            // Substitute miss: a `Building` substitute attempt is re-queued
+            // penalty-free (no `attempt` bump), to be re-dispatched or escalated.
+            (BuildStatus::Building, BuildStatus::Queued) => Ok(to),
             (_, BuildStatus::FailedPermanent) => Ok(to),
             (_, BuildStatus::FailedTransient) => Ok(to),
             (_, BuildStatus::FailedTimeout) => Ok(to),
@@ -252,6 +256,11 @@ mod tests {
         assert!(
             BuildStateMachine::validate(BuildStatus::Building, BuildStatus::FailedTransient).is_ok()
         );
+    }
+
+    #[test]
+    fn build_sm_building_to_queued_for_substitute_requeue() {
+        assert!(BuildStateMachine::validate(BuildStatus::Building, BuildStatus::Queued).is_ok());
     }
 
     #[test]

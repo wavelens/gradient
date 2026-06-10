@@ -35,6 +35,11 @@ use gradient_types::proto::{
     BuildJob, BuildTask, CacheInfo, FlakeJob, FlakeTask, RequiredPath,
 };
 
+/// Consecutive `SubstituteUnavailable` misses after which a substitutable build
+/// is escalated to a real arch-bound build instead of being dispatched as a
+/// `builtin` substitute. TODO: make this server-configurable.
+pub(crate) const SUBSTITUTE_MISS_ESCALATION_THRESHOLD: i64 = 2;
+
 /// Spawns all dispatch loops on the shared shutdown tracker so they drain on SIGTERM.
 pub fn start_dispatch_loops(scheduler: Arc<Scheduler>) {
     let shutdown = scheduler.state.shutdown.clone();
@@ -310,6 +315,10 @@ struct BuildDispatchMaps {
     /// derivation_id → historical resource prediction (default when the
     /// derivation has no `pname` or no matching history).
     histories: HashMap<DerivationId, gradient_score::HistoryPrediction>,
+    /// build_id → consecutive `SubstituteUnavailable` miss count. Absent ⇒ 0.
+    /// A substitutable build escalates to a real build once this reaches
+    /// [`SUBSTITUTE_MISS_ESCALATION_THRESHOLD`].
+    substitute_misses: HashMap<BuildId, i64>,
     default_timeout_secs: Option<u64>,
     default_max_silent_secs: Option<u64>,
 }
@@ -325,6 +334,7 @@ impl BuildDispatchMaps {
         let default_max_silent_secs = nonzero(state.config.eval.build_default_max_silent_secs);
 
         let drv_ids: Vec<DerivationId> = builds.iter().map(|b| b.derivation).collect();
+        let build_ids: Vec<BuildId> = builds.iter().map(|b| b.id).collect();
         let eval_ids: Vec<EvaluationId> = builds
             .iter()
             .map(|b| b.evaluation)
@@ -333,6 +343,10 @@ impl BuildDispatchMaps {
             .collect();
 
         let db = &state.worker_db;
+        let substitute_misses = gradient_db::substitute_miss_counts(db, &build_ids)
+            .await
+            .unwrap_or_default();
+
         let derivations: HashMap<DerivationId, MDerivation> = gradient_db::fetch_in_chunks(
             &drv_ids,
             |chunk| async move { EDerivation::find().filter(CDerivation::Id.is_in(chunk)).all(db).await },
@@ -559,6 +573,7 @@ impl BuildDispatchMaps {
             direct_inputs,
             closure_sizes,
             histories,
+            substitute_misses,
             default_timeout_secs,
             default_max_silent_secs,
         })
@@ -600,6 +615,11 @@ impl BuildDispatchMaps {
         })?;
 
         let job_id = format!("build:{}", build.id);
+        // Substitute-mode only while the build hasn't exhausted its substitute
+        // attempts. After repeated misses it escalates to a real arch-bound
+        // build so an arch worker takes it (or the parker parks the eval).
+        let miss_count = self.substitute_misses.get(&build.id).copied().unwrap_or(0);
+        let substitute = build.substitutable && miss_count < SUBSTITUTE_MISS_ESCALATION_THRESHOLD;
         // Placeholder; the real value is set per-assignment in
         // `job_handlers::apply_sign_flag` based on the receiving worker's
         // `sign` capability.
@@ -607,12 +627,12 @@ impl BuildDispatchMaps {
             builds: vec![BuildTask {
                 build_id: build.id.to_string(),
                 drv_path: derivation.store_path(),
-                external_cached: build.substitutable,
+                external_cached: substitute,
                 timeout_secs: resolve_limit(build.timeout_secs, self.default_timeout_secs),
                 max_silent_secs: resolve_limit(build.max_silent_secs, self.default_max_silent_secs),
             }],
         };
-        let (architecture, required_features) = if build.substitutable {
+        let (architecture, required_features) = if substitute {
             ("builtin".to_string(), Vec::new())
         } else {
             (derivation.architecture.clone(), self.required_features(build.derivation))
@@ -643,7 +663,7 @@ impl BuildDispatchMaps {
             ready_at: now(),
             rescore_count: 0,
             pname: derivation.pname.clone(),
-            substitute: build.substitutable,
+            substitute,
         };
 
         Some((job_id, pending))

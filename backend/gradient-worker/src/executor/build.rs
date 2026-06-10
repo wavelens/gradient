@@ -86,6 +86,15 @@ impl BuildError {
             source: e.into(),
         }
     }
+    /// A substitute attempt missed: this worker could not pull the output from
+    /// cache. Never falls back to a local build (wrong-arch); the scheduler
+    /// re-dispatches or escalates to a real build.
+    pub(crate) fn substitute_unavailable(e: impl Into<anyhow::Error>) -> Self {
+        Self {
+            kind: BuildFailureKind::SubstituteUnavailable,
+            source: e.into(),
+        }
+    }
     /// The server sent `AbortJob` while the daemon was building. Terminal: the
     /// build is already in a terminal state server-side, so retrying is wrong.
     pub(crate) fn aborted(drv_path: &str) -> Self {
