@@ -12,7 +12,7 @@ use axum::body::Body;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::Response;
-use gradient_core::sources::get_hash_from_url;
+use gradient_sources::get_hash_from_url;
 use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};

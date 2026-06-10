@@ -6,7 +6,7 @@
 
 use super::context::ProjectGitContext;
 use super::remote::ls_remote_head;
-use crate::sources::SourceError;
+use crate::SourceError;
 use gradient_types::input::vec_to_hex;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, sea_query::Expr};

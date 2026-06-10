@@ -13,7 +13,7 @@ use axum::http::HeaderMap;
 use base64::Engine;
 use crate::ip_allowlist::is_allowed as ip_allowed;
 use gradient_util::nix_hash::{normalize_nar_hash, strip_hash_algo};
-use gradient_core::sources::get_path_from_derivation_output;
+use gradient_sources::get_path_from_derivation_output;
 use gradient_types::*;
 use gradient_core::ServerState;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -230,7 +230,7 @@ async fn get_nar_by_hash_inner(
     let deriver = cached_path_row.deriver.clone();
     let ca = cached_path_row.ca.clone();
 
-    let sig = gradient_core::sources::full_signature_token(
+    let sig = gradient_sources::full_signature_token(
         &signature,
         &state.config.server.serve_url,
         &cache.name,
@@ -300,7 +300,7 @@ async fn get_nar_by_cached_path(
         .signature
         .or_not_found("Signature not yet computed")?;
 
-    let sig = gradient_core::sources::full_signature_token(
+    let sig = gradient_sources::full_signature_token(
         &signature,
         &state.config.server.serve_url,
         &cache.name,

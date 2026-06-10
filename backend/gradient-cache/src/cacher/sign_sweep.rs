@@ -14,7 +14,7 @@
 //! become cached for a given cache.
 
 use gradient_util::nix_hash::normalize_nar_hash;
-use gradient_core::sources::CacheSigner;
+use gradient_sources::CacheSigner;
 use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::{

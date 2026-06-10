@@ -1,0 +1,41 @@
+# SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+[package]
+name = "gradient-sources"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "gradient_sources"
+path = "src/lib.rs"
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+gradient-types = { workspace = true }
+gradient-db    = { workspace = true }
+gradient-nix   = { workspace = true }
+
+anyhow      = { workspace = true }
+async-trait = { workspace = true }
+base64      = { workspace = true }
+bytes       = { workspace = true }
+chrono      = { workspace = true }
+git2        = { workspace = true }
+git-url-parse = { workspace = true }
+hex         = { workspace = true }
+sea-orm     = { workspace = true }
+tempfile    = { workspace = true }
+thiserror   = { workspace = true }
+tokio       = { workspace = true, features = ["rt", "macros", "sync", "process", "fs", "io-util", "time"] }
+tracing     = { workspace = true }
+url         = { workspace = true }
+
+ed25519-compact = { version = "2.2", default-features = false, features = ["random"] }
+ssh-key         = { version = "0.6", features = ["ed25519"] }

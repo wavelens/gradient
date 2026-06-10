@@ -17,7 +17,7 @@ use axum::extract::{Path, Query, State};
 use chrono::NaiveDateTime;
 use gradient_entity::cache_upstream::CacheUpstreamKind;
 use gradient_entity::organization_cache::CacheSubscriptionMode;
-use gradient_core::sources::{format_cache_public_key, generate_signing_key};
+use gradient_sources::{format_cache_public_key, generate_signing_key};
 use gradient_types::input::{check_index_name, validate_display_name};
 use gradient_types::*;
 use gradient_core::ServerState;

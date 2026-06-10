@@ -1996,6 +1996,7 @@ dependencies = [
  "gradient-db",
  "gradient-entity",
  "gradient-forge",
+ "gradient-sources",
  "gradient-storage",
  "gradient-test-support",
  "gradient-types",
@@ -2036,9 +2037,11 @@ dependencies = [
  "git2",
  "gradient-db",
  "gradient-entity",
+ "gradient-exec",
  "gradient-forge",
  "gradient-migration",
  "gradient-nix",
+ "gradient-sources",
  "gradient-storage",
  "gradient-test-support",
  "gradient-types",
@@ -2124,6 +2127,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "gradient-exec"
+version = "1.2.0"
+dependencies = [
+ "anyhow",
+ "futures",
+ "gradient-sources",
+ "gradient-types",
+ "tokio",
+]
+
+[[package]]
 name = "gradient-forge"
 version = "1.2.0"
 dependencies = [
@@ -2182,7 +2196,9 @@ dependencies = [
  "gradient-core",
  "gradient-db",
  "gradient-entity",
+ "gradient-exec",
  "gradient-scheduler",
+ "gradient-sources",
  "gradient-storage",
  "gradient-test-support",
  "gradient-types",
@@ -2215,7 +2231,9 @@ dependencies = [
  "gradient-core",
  "gradient-db",
  "gradient-entity",
+ "gradient-exec",
  "gradient-score",
+ "gradient-sources",
  "gradient-test-support",
  "gradient-types",
  "reqwest 0.13.3",
@@ -2254,6 +2272,31 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "gradient-sources"
+version = "1.2.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64",
+ "bytes",
+ "chrono",
+ "ed25519-compact",
+ "git-url-parse",
+ "git2",
+ "gradient-db",
+ "gradient-nix",
+ "gradient-types",
+ "hex",
+ "sea-orm",
+ "ssh-key",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "url",
 ]
 
 [[package]]
@@ -2298,9 +2341,11 @@ dependencies = [
  "gradient-core",
  "gradient-db",
  "gradient-entity",
+ "gradient-exec",
  "gradient-forge",
  "gradient-nix",
  "gradient-proto",
+ "gradient-sources",
  "gradient-storage",
  "gradient-types",
  "gradient-util",
@@ -2386,6 +2431,7 @@ dependencies = [
  "gradient-nix",
  "gradient-proto",
  "gradient-scheduler",
+ "gradient-sources",
  "gradient-storage",
  "gradient-test-support",
  "gradient-types",
@@ -2439,8 +2485,10 @@ dependencies = [
  "gradient-core",
  "gradient-db",
  "gradient-entity",
+ "gradient-exec",
  "gradient-nix",
  "gradient-proto",
+ "gradient-sources",
  "gradient-test-support",
  "gradient-types",
  "gradient-util",

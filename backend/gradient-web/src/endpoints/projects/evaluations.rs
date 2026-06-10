@@ -19,7 +19,7 @@ use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use gradient_entity::build::BuildStatus;
 use gradient_db::get_any_organization_by_name;
-use gradient_core::sources::{check_project_updates, get_path_from_derivation_output};
+use gradient_sources::{check_project_updates, get_path_from_derivation_output};
 use gradient_storage::nar_extract::{ExtractError, Extracted, extract_path_from_nar_bytes};
 use gradient_types::input::vec_to_hex;
 use gradient_types::*;

@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
-use gradient_core::sources::get_path_from_derivation_output;
+use gradient_sources::get_path_from_derivation_output;
 use gradient_types::input::vec_to_hex;
 use gradient_types::wildcard::Wildcard;
 use gradient_types::*;

@@ -6,7 +6,7 @@
 
 use super::remote::accept_cert;
 use super::url::parse_nix_git_url;
-use crate::sources::{FlakePrefetcher, PrefetchedFlake, SourceError};
+use crate::{FlakePrefetcher, PrefetchedFlake, SourceError};
 use gradient_types::input::check_repository_url_is_ssh;
 use gradient_types::*;
 use anyhow::Result;
@@ -54,7 +54,7 @@ async fn prefetch_flake_inner(
 
     debug!(repository, "SSH repository – cloning via libgit2");
 
-    let (private_key, public_key) = crate::sources::ssh_key::decrypt_ssh_private_key(
+    let (private_key, public_key) = crate::ssh_key::decrypt_ssh_private_key(
         &crypt_secret_file,
         organization,
         &serve_url,

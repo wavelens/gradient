@@ -19,7 +19,7 @@ mod update_check;
 mod url;
 
 use gradient_db::DbContext;
-use crate::sources::SourceError;
+use crate::SourceError;
 use gradient_types::input::vec_to_hex;
 use gradient_types::*;
 use context::ProjectGitContext;

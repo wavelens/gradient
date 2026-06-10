@@ -11,7 +11,7 @@ mod git_protocol;
 mod https;
 mod ssh;
 
-use crate::sources::SourceError;
+use crate::SourceError;
 use git_protocol::ls_remote_head_git_protocol;
 use https::ls_remote_head_no_creds;
 use ssh::ls_remote_head_ssh;

@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::sources::SourceError;
-use crate::sources::git::pktline::read_ref_from_pktlines;
-use crate::sources::git::url::parse_git_protocol_url;
+use crate::SourceError;
+use crate::git::pktline::read_ref_from_pktlines;
+use crate::git::url::parse_git_protocol_url;
 
 /// List the remote HEAD ref using the raw git wire protocol (v0) over TCP.
 ///

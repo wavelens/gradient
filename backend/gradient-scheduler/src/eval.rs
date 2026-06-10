@@ -17,8 +17,8 @@ use gradient_db::{
     find_active_leaders, record_evaluation_message, update_build_status, update_evaluation_status,
     update_evaluation_status_with_error,
 };
-use gradient_core::executor::strip_nix_store_prefix;
-use gradient_core::sources::{get_hash_from_path, parse_drv_hash_name};
+use gradient_exec::strip_nix_store_prefix;
+use gradient_sources::{get_hash_from_path, parse_drv_hash_name};
 use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::{ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder};

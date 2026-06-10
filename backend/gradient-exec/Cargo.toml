@@ -1,0 +1,26 @@
+# SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+[package]
+name = "gradient-exec"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "gradient_exec"
+path = "src/lib.rs"
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+gradient-types   = { workspace = true }
+gradient-sources = { workspace = true }
+
+anyhow  = { workspace = true }
+futures = { workspace = true }
+tokio   = { workspace = true, features = ["rt", "macros", "sync", "process", "time", "io-util"] }

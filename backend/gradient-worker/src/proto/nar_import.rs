@@ -32,7 +32,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use futures::stream::{FuturesUnordered, StreamExt as _};
 use gradient_db::parse_drv;
-use gradient_core::executor::path_utils::nix_store_path;
+use gradient_exec::path_utils::nix_store_path;
 use gradient_types::CachedPathInfo;
 use harmonia_protocol::valid_path_info::{UnkeyedValidPathInfo, ValidPathInfo};
 use harmonia_store_path::{StoreDir, StorePath};

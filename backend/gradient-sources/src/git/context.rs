@@ -5,7 +5,7 @@
  */
 
 use gradient_db::DbContext;
-use crate::sources::SourceError;
+use crate::SourceError;
 use gradient_types::input::check_repository_url_is_ssh;
 use gradient_types::*;
 use sea_orm::EntityTrait;
@@ -43,7 +43,7 @@ impl<'a> ProjectGitContext<'a> {
                 .ok_or(SourceError::OrganizationNotFound {
                     id: project.organization,
                 })?;
-            Some(crate::sources::ssh_key::decrypt_ssh_private_key(
+            Some(crate::ssh_key::decrypt_ssh_private_key(
                 &ctx.config.secrets.crypt_secret_file,
                 organization,
                 &ctx.config.server.serve_url,

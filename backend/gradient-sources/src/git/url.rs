@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::sources::SourceError;
+use crate::SourceError;
 
 /// Parses a `git://[host[:port]]/repo/path` URL into its host, port, and repo
 /// path components. Defaults port to 9418 (git-daemon).

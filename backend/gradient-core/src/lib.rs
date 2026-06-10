@@ -6,8 +6,6 @@
 
 pub mod ci;
 pub mod constants;
-pub mod executor;
-pub mod sources;
 pub mod state;
 pub mod state_root;
 
