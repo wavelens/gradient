@@ -53,11 +53,11 @@ anyhow    = { version = "1.0", default-features = false, features = ["std"] }
 thiserror = { version = "2.0", default-features = false }
 
 # System / host metrics
-sysinfo = { version = "0.33", default-features = false, features = ["system"] }
+sysinfo = { version = "0.39", default-features = false, features = ["system"] }
 
 # Time / random / ids
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
-cron   = { version = "0.12", default-features = false }
+cron   = { version = "0.16", default-features = false }
 rand   = { version = "0.10", default-features = false, features = ["std", "std_rng", "thread_rng"] }
 uuid   = { version = "1.23", default-features = false, features = ["std", "v7", "fast-rng", "serde", "macro-diagnostics"] }
 
@@ -118,7 +118,7 @@ tower-http           = { version = "0.6", default-features = false, features = [
 tower_governor       = { version = "0.8", default-features = false, features = ["axum"] }
 
 # Object store / git
-git2         = { version = "0.20", default-features = false, features = ["https", "ssh"] }
+git2         = { version = "0.21", default-features = false, features = ["https", "ssh"] }
 libc         = { version = "0.2", default-features = false }
 object_store = { version = "0.13", default-features = false, features = ["aws", "fs"] }
 
@@ -142,9 +142,9 @@ git-url-parse = { version = "0.6" } # defaults: re-exports the `url` crate
 ipnet         = { version = "2.10", default-features = false, features = ["std"] }
 password-auth = { version = "1.0", default-features = false, features = ["argon2"] }
 prometheus    = { version = "0.14", default-features = false, features = ["process"] }
-opentelemetry = { version = "0.27", default-features = false, features = ["metrics"] }
-opentelemetry_sdk = { version = "0.27", default-features = false, features = ["metrics", "rt-tokio"] }
-opentelemetry-otlp = { version = "0.27", default-features = false, features = ["metrics", "http-proto", "reqwest-client"] }
+opentelemetry = { version = "0.32", default-features = false, features = ["metrics"] }
+opentelemetry_sdk = { version = "0.32", default-features = false, features = ["metrics"] }
+opentelemetry-otlp = { version = "0.32", default-features = false, features = ["metrics", "http-proto", "reqwest-blocking-client", "reqwest-rustls"] }
 rustls        = { version = "0.23", default-features = false, features = ["std", "aws-lc-rs", "tls12"] }
 rustls-native-certs = { version = "0.8", default-features = false }
 subtle        = { version = "2.6", default-features = false }

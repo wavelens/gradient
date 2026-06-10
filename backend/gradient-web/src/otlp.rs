@@ -15,7 +15,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use gradient_core::ServerState;
-use opentelemetry::KeyValue;
 use opentelemetry::metrics::MeterProvider as _;
 use opentelemetry_otlp::WithExportConfig as _;
 use gradient_scheduler::Scheduler;
@@ -49,17 +48,17 @@ pub fn start_otlp(state: Arc<ServerState>, scheduler: Arc<Scheduler>) {
         }
     };
 
-    let reader =
-        opentelemetry_sdk::metrics::PeriodicReader::builder(exporter, opentelemetry_sdk::runtime::Tokio)
-            .with_interval(interval)
-            .build();
+    let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(exporter)
+        .with_interval(interval)
+        .build();
 
     let provider = opentelemetry_sdk::metrics::SdkMeterProvider::builder()
         .with_reader(reader)
-        .with_resource(opentelemetry_sdk::Resource::new(vec![KeyValue::new(
-            "service.name",
-            "gradient",
-        )]))
+        .with_resource(
+            opentelemetry_sdk::Resource::builder()
+                .with_service_name("gradient")
+                .build(),
+        )
         .build();
 
     let meter = provider.meter("gradient");
