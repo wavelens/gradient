@@ -140,6 +140,9 @@ mod m20260607_000008_add_phase_timing_to_evaluation;
 mod m20260607_000009_add_queued_at_to_build;
 mod m20260607_000010_add_network_to_derivation_metric;
 mod m20260608_000001_add_dispatched_job_instance_context;
+mod m20260610_000001_create_build_attempt;
+mod m20260610_000002_backfill_build_attempt;
+mod m20260610_000003_slim_build_and_dispatched_job;
 
 pub struct Migrator;
 
@@ -281,6 +284,9 @@ impl MigratorTrait for Migrator {
             Box::new(m20260607_000009_add_queued_at_to_build::Migration),
             Box::new(m20260607_000010_add_network_to_derivation_metric::Migration),
             Box::new(m20260608_000001_add_dispatched_job_instance_context::Migration),
+            Box::new(m20260610_000001_create_build_attempt::Migration),
+            Box::new(m20260610_000002_backfill_build_attempt::Migration),
+            Box::new(m20260610_000003_slim_build_and_dispatched_job::Migration),
         ]
     }
 }
