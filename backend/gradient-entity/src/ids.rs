@@ -125,6 +125,7 @@ id_newtype!(AuditLogId);
 id_newtype!(WorkerRegistrationId);
 id_newtype!(CliDeviceAuthorizationId);
 id_newtype!(AcknowledgedDerivationId);
+id_newtype!(BuildAttemptId);
 id_newtype!(DispatchedJobId);
 id_newtype!(MetricRollupId);
 id_newtype!(PhaseEventId);
@@ -196,6 +197,12 @@ mod tests {
         let u = Uuid::now_v7();
         let user: UserId = u.into();
         let _org: OrganizationId = user.into_inner().into();
+    }
+
+    #[test]
+    fn build_attempt_id_roundtrips() {
+        let u = Uuid::now_v7();
+        assert_eq!(Uuid::from(BuildAttemptId::from(u)), u);
     }
 
     #[test]
