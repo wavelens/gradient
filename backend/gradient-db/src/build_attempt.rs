@@ -92,9 +92,7 @@ pub async fn stamp_attempt_started<C: ConnectionTrait>(
     Ok(())
 }
 
-/// Stamp finish time + elapsed on the latest attempt when its build leaves Building.
-/// Mirrors the old `build.build_time_ms` finalize (elapsed since the attempt started,
-/// falling back to its created_at).
+/// Stamp elapsed `build_time_ms` on the latest attempt (only when leaving Building).
 pub async fn finalize_attempt_timing<C: ConnectionTrait>(
     db: &C,
     build: BuildId,
@@ -106,8 +104,24 @@ pub async fn finalize_attempt_timing<C: ConnectionTrait>(
         let started = att.build_started_at.unwrap_or(att.created_at);
         let elapsed_ms = (now - started).num_milliseconds().max(0);
         let mut a = att.into_active_model();
-        a.build_finished_at = Set(Some(now));
         a.build_time_ms = Set(Some(elapsed_ms));
+        a.update(db).await?;
+    }
+
+    Ok(())
+}
+
+/// Stamp `build_finished_at` on the latest attempt for any terminal status incl. Substituted.
+pub async fn stamp_attempt_finished<C: ConnectionTrait>(
+    db: &C,
+    build: BuildId,
+    now: NaiveDateTime,
+) -> Result<(), DbErr> {
+    if let Some(att) = latest_attempt(db, build).await?
+        && att.build_finished_at.is_none()
+    {
+        let mut a = att.into_active_model();
+        a.build_finished_at = Set(Some(now));
         a.update(db).await?;
     }
 
