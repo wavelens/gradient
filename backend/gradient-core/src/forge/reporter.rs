@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::http_validation::{WebhookUrlError, validate_webhook_url};
+use gradient_util::http_validation::{WebhookUrlError, validate_webhook_url};
 use gradient_types::ForgeType;
 use crate::forge::registry::ForgeRegistry;
 use anyhow::{Context, Result};
@@ -1597,7 +1597,7 @@ mod tests {
     use super::*;
 
     fn test_client() -> reqwest::Client {
-        crate::http::build_client().expect("build test http client")
+        gradient_util::http::build_client().expect("build test http client")
     }
 
     // ── State conversions ─────────────────────────────────────────────────────

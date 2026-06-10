@@ -9,13 +9,8 @@ pub mod constants;
 pub mod db;
 pub mod executor;
 pub mod forge;
-pub mod http;
-pub mod http_validation;
-pub mod hydra;
 pub mod nix;
-pub mod nix_hash;
 pub mod permissions;
-pub mod shutdown;
 pub mod sources;
 pub mod state;
 pub mod state_machine;
@@ -28,7 +23,7 @@ use db::{WebDb, WorkerDb, connect_db, connect_web_db};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
 };
-use shutdown::Shutdown;
+use gradient_util::shutdown::Shutdown;
 use state::load_and_apply_state;
 use std::path::Path;
 use std::sync::Arc;
@@ -125,7 +120,7 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
         .await
         .map_err(InitError::LogStorage)?;
 
-    let http = http::build_client().map_err(|e| InitError::HttpClient(e.into()))?;
+    let http = gradient_util::http::build_client().map_err(|e| InitError::HttpClient(e.into()))?;
 
     let jwt_secret =
         gradient_types::input::load_secret(&cli.secrets.jwt_secret_file).map_err(InitError::JwtSecret)?;

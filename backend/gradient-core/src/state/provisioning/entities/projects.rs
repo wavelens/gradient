@@ -520,7 +520,7 @@ pub(crate) fn build_action_config(
                 .as_str()
                 .ok_or_else(|| format!("action '{}': url must be a string", a.name))?
                 .to_owned();
-            crate::http_validation::validate_webhook_url(&url)
+            gradient_util::http_validation::validate_webhook_url(&url)
                 .map_err(|e| format!("action '{}': {}", a.name, e))?;
             let token = if a.config.get("token_file").is_some() {
                 let (plain, _) =

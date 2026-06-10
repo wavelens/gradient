@@ -25,7 +25,7 @@ use bytes::Bytes;
 use futures::StreamExt as _;
 use gradient_core::db::{DrvOutputSpec, parse_drv};
 use gradient_core::executor::path_utils::{nix_store_path, strip_nix_store_prefix};
-use gradient_core::hydra::parse_hydra_product_line;
+use gradient_util::hydra::parse_hydra_product_line;
 use gradient_core::sources::get_hash_from_path;
 use harmonia_protocol::daemon_wire::types2::{BuildMode, BuildResultInner, Microseconds};
 use harmonia_protocol::log::{Field, LogMessage, ResultType, Verbosity};

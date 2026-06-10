@@ -20,6 +20,6 @@ static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 /// (which only happens in pathological TLS-init failures).
 pub fn client() -> &'static reqwest::Client {
     CLIENT.get_or_init(|| {
-        gradient_core::http::build_client().expect("failed to build worker HTTP client")
+        gradient_util::http::build_client().expect("failed to build worker HTTP client")
     })
 }

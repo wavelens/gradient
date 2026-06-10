@@ -232,7 +232,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client = crate::http::build_client().unwrap();
+        let client = gradient_util::http::build_client().unwrap();
         let result = exchange_code_with_base(&client, &server.uri(), "abc")
             .await
             .expect("happy path");
@@ -251,7 +251,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client = crate::http::build_client().unwrap();
+        let client = gradient_util::http::build_client().unwrap();
         let err = exchange_code_with_base(&client, &server.uri(), "bad")
             .await
             .expect_err("404 should error");

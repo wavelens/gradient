@@ -99,7 +99,7 @@ pub async fn get_config(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_core::hydra::parse_hydra_product_line;
+    use gradient_util::hydra::parse_hydra_product_line;
 
     #[test]
     fn parse_hydra_product_line_typical() {

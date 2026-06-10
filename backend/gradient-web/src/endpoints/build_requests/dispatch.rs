@@ -20,7 +20,7 @@ use crate::permissions::Permission;
 use axum::Extension;
 use axum::Json;
 use axum::extract::{Path, State};
-use gradient_core::nix_hash::normalize_nar_hash;
+use gradient_util::nix_hash::normalize_nar_hash;
 use gradient_core::storage::source_nar::{SourceNar, materialise_source_nar};
 use gradient_types::ConcurrencyPolicy;
 use gradient_types::ids::{

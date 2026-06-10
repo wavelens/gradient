@@ -74,7 +74,7 @@ impl NarStore {
             .with_bucket_name(bucket)
             .with_region(region)
             .with_client_options(ClientOptions::new().with_user_agent(
-                crate::http::user_agent().parse().expect("static UA is valid"),
+                gradient_util::http::user_agent().parse().expect("static UA is valid"),
             ));
 
         if let Some(ep) = endpoint {

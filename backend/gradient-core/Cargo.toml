@@ -20,6 +20,7 @@ workspace = true
 gradient-entity = { workspace = true }
 gradient-migration = { workspace = true }
 gradient-types = { workspace = true }
+gradient-util = { workspace = true }
 
 # Workspace
 anyhow                = { workspace = true }
