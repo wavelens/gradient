@@ -40,6 +40,6 @@ tracing                        = { workspace = true }
 uuid                           = { workspace = true }
 zstd                           = { workspace = true }
 
-async-compression = { version = "0.4", default-features = false, features = ["tokio", "zstd"] }
-lettre            = { version = "0.11", default-features = false, features = ["smtp-transport", "builder", "tokio1-rustls-tls"] }
-tar               = { version = "0.4", default-features = false }
+async-compression = { workspace = true }
+lettre            = { workspace = true }
+tar               = { workspace = true }

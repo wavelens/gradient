@@ -20,4 +20,4 @@ sea-orm-migration = { workspace = true }
 sha2              = { workspace = true }
 uuid              = { workspace = true }
 
-async-std = { version = "1", features = ["attributes", "tokio1"] }
+async-std = { workspace = true }

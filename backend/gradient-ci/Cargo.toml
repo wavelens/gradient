@@ -28,7 +28,7 @@ gradient-forge   = { workspace = true }
 anyhow      = { workspace = true }
 async-trait = { workspace = true }
 base64      = { workspace = true }
-crypter     = { version = "0.3", default-features = false, features = ["argon"] }
+crypter     = { workspace = true }
 bytes       = { workspace = true }
 chrono      = { workspace = true }
 futures     = { workspace = true }

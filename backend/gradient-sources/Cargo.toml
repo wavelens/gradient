@@ -37,6 +37,6 @@ tokio       = { workspace = true, features = ["rt", "macros", "sync", "process",
 tracing     = { workspace = true }
 url         = { workspace = true }
 
-crypter         = { version = "0.3", default-features = false, features = ["argon"] }
-ed25519-compact = { version = "2.2", default-features = false, features = ["random"] }
-ssh-key         = { version = "0.6", features = ["ed25519"] }
+crypter         = { workspace = true }
+ed25519-compact = { workspace = true }
+ssh-key         = { workspace = true }

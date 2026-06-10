@@ -46,5 +46,5 @@ tokio-tungstenite   = { workspace = true }
 uuid                = { workspace = true }
 zstd                = { workspace = true }
 
-axum-test    = { version = "20.0", default-features = false }
-jsonwebtoken = { version = "10.3", default-features = false, features = ["aws_lc_rs"] }
+axum-test    = { workspace = true }
+jsonwebtoken = { workspace = true }

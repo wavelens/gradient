@@ -76,22 +76,21 @@ url                   = { workspace = true }
 uuid                  = { workspace = true }
 zstd                  = { workspace = true }
 
-# Crate-specific (no workspace counterpart yet)
-async-compression = { version = "0.4", default-features = false, features = ["tokio", "zstd"] }
-async-ssh2-lite   = { version = "0.5", default-features = false, features = ["tokio"] }
-cron              = { version = "0.12" }
-crypter           = { version = "0.3", default-features = false, features = ["argon"] }
-ed25519-compact   = { version = "2.2", default-features = false, features = ["random"] }
-lettre            = { version = "0.11", default-features = false, features = ["smtp-transport", "builder", "tokio1-rustls-tls"] }
+async-compression = { workspace = true }
+async-ssh2-lite   = { workspace = true }
+cron              = { workspace = true }
+crypter           = { workspace = true }
+ed25519-compact   = { workspace = true }
+lettre            = { workspace = true }
 password-auth     = { workspace = true }
-rand_core         = { version = "0.10", default-features = false }
-ssh-key           = { version = "0.6", features = ["ed25519"] }
-tar               = { version = "0.4", default-features = false }
+rand_core         = { workspace = true }
+ssh-key           = { workspace = true }
+tar               = { workspace = true }
 
 [dev-dependencies]
 harmonia-file-nar = { workspace = true, features = ["test"] }
 mockall      = { workspace = true }
 gradient-test-support = { workspace = true }
 tokio-test   = { workspace = true }
-wiremock     = { version = "0.6", default-features = false }
+wiremock     = { workspace = true }
 zstd         = { workspace = true }

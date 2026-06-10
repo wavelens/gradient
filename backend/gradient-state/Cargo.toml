@@ -37,5 +37,5 @@ tracing       = { workspace = true }
 url           = { workspace = true }
 uuid          = { workspace = true }
 
-crypter = { version = "0.3", default-features = false, features = ["argon"] }
-ssh-key = { version = "0.6", features = ["ed25519"] }
+crypter = { workspace = true }
+ssh-key = { workspace = true }

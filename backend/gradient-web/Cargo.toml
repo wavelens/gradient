@@ -60,26 +60,26 @@ url           = { workspace = true }
 uuid          = { workspace = true }
 zstd          = { workspace = true }
 
-axum                 = { version = "0.8", default-features = false, features = ["multipart", "http1", "json", "tokio", "matched-path", "query", "form", "original-uri"] }
-axum_typed_multipart = { version = "0.16", default-features = false, features = ["tempfile_3"] }
-axum-streams         = { version = "0.25", default-features = false, features = ["json"] }
-email_address        = { version = "0.2", default-features = false }
-governor             = { version = "0.10", default-features = false, features = ["std"] }
-http                 = { version = "1.4", default-features = false }
-http-body-util       = { version = "0.1", default-features = false }
+axum                 = { workspace = true, features = ["multipart", "http1", "json", "tokio", "matched-path", "query", "form", "original-uri"] }
+axum_typed_multipart = { workspace = true }
+axum-streams         = { workspace = true }
+email_address        = { workspace = true }
+governor             = { workspace = true }
+http                 = { workspace = true }
+http-body-util       = { workspace = true }
 ipnet                = { workspace = true }
-jsonwebtoken         = { version = "10.3", default-features = false, features = ["aws_lc_rs"] }
+jsonwebtoken         = { workspace = true }
 mime_guess           = { workspace = true }
-tower                = { version = "0.5", default-features = false }
-tower-http           = { version = "0.6", default-features = false, features = ["cors", "request-id", "trace"] }
-tower_governor       = { version = "0.8", default-features = false, features = ["axum"] }
+tower                = { workspace = true }
+tower-http           = { workspace = true }
+tower_governor       = { workspace = true }
 harmonia-file-nar = { workspace = true }
 
 [dev-dependencies]
-axum-test         = { version = "20.0", default-features = false }
+axum-test         = { workspace = true }
 harmonia-file-nar = { workspace = true, features = ["test"] }
 hmac              = { workspace = true }
 gradient-test-support = { workspace = true }
 tokio-test   = { workspace = true }
-tower        = { version = "0.5", default-features = false }
+tower        = { workspace = true }
 zstd         = { workspace = true }
