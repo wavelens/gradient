@@ -10,7 +10,7 @@ use super::super::{lookup_id, read_credential};
 use gradient_ci::actions::encrypt_secret_with_file;
 use gradient_ci::{GITHUB_APP_INTEGRATION_NAME, IntegrationKind};
 use gradient_types::ForgeType;
-use crate::state::config::*;
+use crate::config::*;
 use gradient_types::*;
 use anyhow::Result;
 use gradient_entity::*;

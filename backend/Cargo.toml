@@ -1,6 +1,6 @@
 [workspace]
-members      = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-db", "gradient-entity", "gradient-exec", "gradient-forge", "gradient-migration", "gradient-nix", "gradient-proto", "gradient-scheduler", "gradient-score", "gradient-sources", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-worker"]
-default-members = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-db", "gradient-entity", "gradient-exec", "gradient-forge", "gradient-migration", "gradient-nix", "gradient-proto", "gradient-scheduler", "gradient-score", "gradient-sources", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-worker"]
+members      = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-db", "gradient-entity", "gradient-exec", "gradient-forge", "gradient-migration", "gradient-nix", "gradient-proto", "gradient-scheduler", "gradient-score", "gradient-sources", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-worker"]
+default-members = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-db", "gradient-entity", "gradient-exec", "gradient-forge", "gradient-migration", "gradient-nix", "gradient-proto", "gradient-scheduler", "gradient-score", "gradient-sources", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-worker"]
 resolver     = "2"
 
 [workspace.package]
@@ -30,6 +30,7 @@ gradient-proto        = { path = "gradient-proto" }
 gradient-scheduler    = { path = "gradient-scheduler" }
 gradient-score        = { path = "gradient-score" }
 gradient-sources      = { path = "gradient-sources" }
+gradient-state        = { path = "gradient-state" }
 gradient-storage      = { path = "gradient-storage" }
 gradient-test-support = { path = "gradient-test-support" }
 gradient-types        = { path = "gradient-types" }
@@ -175,6 +176,7 @@ workspace = true
 gradient-cache     = { workspace = true }
 clap               = { workspace = true }
 gradient-core      = { workspace = true }
+gradient-state     = { workspace = true }
 gradient-util      = { workspace = true }
 gradient-types     = { workspace = true }
 sentry             = { workspace = true }

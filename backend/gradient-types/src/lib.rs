@@ -10,6 +10,7 @@ pub mod build_output_metadata;
 pub mod cached_path_info;
 pub mod cli;
 pub mod config;
+pub mod constants;
 pub mod consts;
 pub mod forge;
 pub mod ids;

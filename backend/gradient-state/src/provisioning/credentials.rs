@@ -180,7 +180,7 @@ mod api_key_hash_tests {
 #[cfg(test)]
 mod helper_tests {
     use super::{credentials_dir, read_credential};
-    use crate::state::provisioning::lookup_id;
+    use crate::provisioning::lookup_id;
     use std::collections::HashMap;
     use uuid::Uuid;
 

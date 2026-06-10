@@ -37,3 +37,6 @@ tracing    = { workspace = true }
 uuid       = { workspace = true }
 
 cron       = { version = "0.12" }
+
+[dev-dependencies]
+tempfile = { workspace = true }

@@ -331,7 +331,7 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         .route(
             "/build-requests/{session}/blobs",
             post(build_requests::blobs::post_blobs).layer(DefaultBodyLimit::max(
-                gradient_core::constants::MAX_BUILD_REQUEST_SIZE,
+                gradient_types::constants::MAX_BUILD_REQUEST_SIZE,
             )),
         )
         .route(

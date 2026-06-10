@@ -7,7 +7,7 @@
 use super::super::DynError;
 use super::super::StateApplicator;
 use super::super::{lookup_id, read_credential};
-use crate::state::config::*;
+use crate::config::*;
 use gradient_types::*;
 use anyhow::Result;
 use gradient_entity::*;

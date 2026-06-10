@@ -132,7 +132,7 @@ pub async fn post_basic_register(
         .await
         .map_err(|e| WebError::from_db_err(e, "User"))?;
 
-    if let Err(e) = gradient_core::state::apply_pending_org_memberships(
+    if let Err(e) = gradient_state::apply_pending_org_memberships(
         &state.web_db,
         &state.pending_org_memberships,
         &user.username,

@@ -6,7 +6,7 @@
 
 //! Re-export of the org permission system, plus web-layer helpers shared
 //! between the role-management API and the API-key endpoints. The canonical
-//! capability set lives in [`gradient_core::permissions`].
+//! capability set lives in [`gradient_db::permissions`].
 
 pub use gradient_db::permissions::*;
 

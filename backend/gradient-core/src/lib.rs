@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-pub mod constants;
-pub mod state;
 pub mod state_root;
 
 pub use state_root::{AppState, ServerState};
@@ -15,7 +13,7 @@ use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
 };
 use gradient_util::shutdown::Shutdown;
-use state::load_and_apply_state;
+use gradient_state::load_and_apply_state;
 use std::path::Path;
 use std::sync::Arc;
 use gradient_storage::EmailService;

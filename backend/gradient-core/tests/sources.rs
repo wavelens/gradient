@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Tests for `gradient_core::sources` - path/hash utilities and SSH key generation.
+//! Tests for `gradient_sources` - path/hash utilities and SSH key generation.
 use base64::Engine;
-use gradient_core::sources::*;
+use gradient_sources::*;
 use std::io::Write;
 use tempfile::NamedTempFile;
 

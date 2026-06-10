@@ -11,7 +11,7 @@
 //! propagates the `SourceError` to the caller so the web layer can return
 //! a 4xx with a useful message.
 
-use gradient_core::sources::check_project_updates;
+use gradient_sources::check_project_updates;
 use gradient_entity::project;
 use gradient_test_support::state::test_state;
 use sea_orm::{DatabaseBackend, MockDatabase};

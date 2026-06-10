@@ -5,7 +5,7 @@
  */
 
 use super::ValidationError;
-use crate::state::config::StateConfiguration;
+use crate::config::StateConfiguration;
 
 /// Accumulates [`ValidationError`]s across the per-entity validators, hiding the
 /// `ValidationError { field, message }` construction at each call site.

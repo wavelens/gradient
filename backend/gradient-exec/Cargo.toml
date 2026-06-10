@@ -21,6 +21,9 @@ workspace = true
 gradient-types   = { workspace = true }
 gradient-sources = { workspace = true }
 
-anyhow  = { workspace = true }
-futures = { workspace = true }
-tokio   = { workspace = true, features = ["rt", "macros", "sync", "process", "time", "io-util"] }
+anyhow                = { workspace = true }
+futures               = { workspace = true }
+harmonia-store-path   = { workspace = true }
+harmonia-store-remote = { workspace = true }
+harmonia-utils-hash   = { workspace = true }
+tokio                 = { workspace = true, features = ["rt", "macros", "sync", "process", "time", "io-util"] }

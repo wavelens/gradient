@@ -4,15 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Integration tests for `gradient_core::ci::actions`.
+//! Integration tests for `gradient_ci::actions`.
 //!
 //! Async assertions use sync `#[test]` + `tokio::runtime::Builder::block_on`.
 
-use gradient_core::ci::actions::{
+use gradient_ci::actions::{
     FORGE_STATUS_EVENTS, forge_status_for_event, forge_status_payload, matches_event,
 };
-use gradient_core::ci::CiStatus;
-use gradient_core::types::{ActionType, MProjectAction, ProjectActionId, ProjectId, UserId};
+use gradient_ci::CiStatus;
+use gradient_types::{ActionType, MProjectAction, ProjectActionId, ProjectId, UserId};
 use serde_json::json;
 use uuid::Uuid;
 
