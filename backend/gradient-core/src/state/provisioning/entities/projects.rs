@@ -526,7 +526,7 @@ pub(crate) fn build_action_config(
                 let (plain, _) =
                     read_credential("action", &a.name, "token", "action token file")?;
                 let plain = plain.trim();
-                let enc = crate::ci::actions::encrypt_action_secret(plain, crypt_key)
+                let enc = gradient_ci::actions::encrypt_action_secret(plain, crypt_key)
                     .map_err(|e| format!("encrypt action token: {e}"))?;
                 Some(enc)
             } else {

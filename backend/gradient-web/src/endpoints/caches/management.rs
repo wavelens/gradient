@@ -387,7 +387,7 @@ pub async fn patch_cache(
             .map(|oc| oc.organization)
             .collect();
         for org in org_ids {
-            if let Err(e) = gradient_core::ci::unpark_storage_full_for_org(
+            if let Err(e) = gradient_ci::unpark_storage_full_for_org(
                 &state.web_db,
                 org,
                 state.config.storage.max_storage_gb,

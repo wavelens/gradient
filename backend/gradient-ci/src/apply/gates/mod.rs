@@ -14,7 +14,7 @@ mod cache;
 mod storage;
 mod workers;
 
-use crate::ci::apply::ApprovalInfo;
+use crate::apply::ApprovalInfo;
 use gradient_types::*;
 use sea_orm::ConnectionTrait;
 

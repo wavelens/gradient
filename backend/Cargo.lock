@@ -1992,6 +1992,7 @@ dependencies = [
  "base64",
  "chrono",
  "futures",
+ "gradient-ci",
  "gradient-core",
  "gradient-db",
  "gradient-entity",
@@ -2017,6 +2018,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "gradient-ci"
+version = "1.2.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64",
+ "bytes",
+ "chrono",
+ "futures",
+ "gradient-db",
+ "gradient-entity",
+ "gradient-forge",
+ "gradient-storage",
+ "gradient-types",
+ "gradient-util",
+ "num_enum",
+ "rand 0.10.1",
+ "reqwest 0.13.3",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "gradient-core"
 version = "1.2.0"
 dependencies = [
@@ -2035,6 +2064,7 @@ dependencies = [
  "futures",
  "git-url-parse",
  "git2",
+ "gradient-ci",
  "gradient-db",
  "gradient-entity",
  "gradient-exec",
@@ -2228,6 +2258,7 @@ dependencies = [
  "chrono",
  "cron",
  "futures",
+ "gradient-ci",
  "gradient-core",
  "gradient-db",
  "gradient-entity",
@@ -2338,6 +2369,7 @@ dependencies = [
  "bytes",
  "chrono",
  "futures",
+ "gradient-ci",
  "gradient-core",
  "gradient-db",
  "gradient-entity",
@@ -2424,6 +2456,7 @@ dependencies = [
  "git-url-parse",
  "governor",
  "gradient-cache",
+ "gradient-ci",
  "gradient-core",
  "gradient-db",
  "gradient-entity",

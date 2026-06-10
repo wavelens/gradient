@@ -5,7 +5,7 @@
  */
 
 use super::restart_build_status;
-use crate::ci::trigger::TriggerError;
+use crate::trigger::TriggerError;
 use gradient_types::*;
 use chrono::NaiveDateTime;
 use gradient_entity::build::BuildStatus;

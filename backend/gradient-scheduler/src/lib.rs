@@ -111,7 +111,7 @@ impl Scheduler {
 
     /// Drop the eval job and any associated build jobs from the in-memory
     /// tracker. Workers that have already been assigned will finish or time out
-    /// normally; the DB-side abort (via `gradient_core::ci::abort_evaluation`) is the
+    /// normally; the DB-side abort (via `gradient_ci::abort_evaluation`) is the
     /// caller's responsibility.
     pub async fn cancel_evaluation_jobs(&self, eval_id: EvaluationId, build_ids: &[BuildId]) {
         let mut tracker = self.job_tracker.write().await;

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::ci::apply::ApprovalInfo;
+use crate::apply::ApprovalInfo;
 use gradient_types::waiting_reason::WaitingReason;
 use gradient_types::*;
 use gradient_entity::evaluation::EvaluationStatus;

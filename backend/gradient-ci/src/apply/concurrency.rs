@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::ci::abort::{AbortKind, abort_evaluation};
+use crate::abort::{AbortKind, abort_evaluation};
 use gradient_types::triggers::ConcurrencyPolicy;
 use gradient_types::*;
 use sea_orm::ConnectionTrait;

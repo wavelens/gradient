@@ -6,7 +6,7 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use gradient_core::ci::{CiReport, CiReporter};
+use gradient_ci::{CiReport, CiReporter};
 use std::sync::Mutex;
 
 /// A PR/MR comment captured by [`RecordingCiReporter`].

@@ -116,7 +116,7 @@ impl<'a> StateApplicator<'a> {
                 None => false,
             };
             if installation_known {
-                crate::ci::ensure_github_app_integrations(self.db, org_id, created_by_id).await?;
+                gradient_ci::ensure_github_app_integrations(self.db, org_id, created_by_id).await?;
             }
         }
 

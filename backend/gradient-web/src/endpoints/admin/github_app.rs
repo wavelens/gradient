@@ -68,9 +68,9 @@ pub async fn request_manifest(
     validate_host(&host)?;
 
     let manifest =
-        gradient_core::ci::github_app_manifest::build_manifest(&state.config.server.serve_url);
-    let token = gradient_core::ci::manifest_state::issue_state(&state.manifest_state, user.id);
-    let post_url = gradient_core::ci::github_app_manifest::manifest_post_url(&host, &token);
+        gradient_ci::github_app_manifest::build_manifest(&state.config.server.serve_url);
+    let token = gradient_ci::manifest_state::issue_state(&state.manifest_state, user.id);
+    let post_url = gradient_ci::github_app_manifest::manifest_post_url(&host, &token);
 
     Ok(ok_json(ManifestResponse {
         manifest,
@@ -96,19 +96,19 @@ pub async fn callback(
     validate_host(&host)?;
 
     let Some(user_id) =
-        gradient_core::ci::manifest_state::validate_and_consume(&state.manifest_state, &q.state)
+        gradient_ci::manifest_state::validate_and_consume(&state.manifest_state, &q.state)
     else {
         return Err(WebError::bad_request("manifest state invalid or expired"));
     };
 
-    let creds = gradient_core::ci::github_app_manifest::exchange_code(&state.http, &host, &q.code)
+    let creds = gradient_ci::github_app_manifest::exchange_code(&state.http, &host, &q.code)
         .await
         .map_err(|e| {
             warn!(error = %e, "github manifest exchange failed");
             WebError::internal(format!("github exchange failed: {e}"))
         })?;
 
-    gradient_core::ci::manifest_state::store_credentials(
+    gradient_ci::manifest_state::store_credentials(
         &state.pending_credentials,
         user_id,
         creds,
@@ -120,11 +120,11 @@ pub async fn callback(
 pub async fn credentials(
     State(state): State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
-) -> WebResult<Json<BaseResponse<gradient_core::ci::github_app_manifest::ManifestResult>>> {
+) -> WebResult<Json<BaseResponse<gradient_ci::github_app_manifest::ManifestResult>>> {
     require_superuser(&user)?;
 
     let creds =
-        gradient_core::ci::manifest_state::take_credentials(&state.pending_credentials, user.id)
+        gradient_ci::manifest_state::take_credentials(&state.pending_credentials, user.id)
             .ok_or_else(|| WebError::not_found_msg("Pending credentials"))?;
 
     Ok(ok_json(creds))

@@ -8,11 +8,11 @@ use gradient_types::input::load_secret_bytes;
 use anyhow::{Result, anyhow};
 
 pub fn encrypt_action_secret(plaintext: &str, crypt_key: &[u8]) -> Result<String> {
-    crate::ci::action_crypto::encrypt(plaintext, crypt_key)
+    crate::action_crypto::encrypt(plaintext, crypt_key)
 }
 
 pub fn decrypt_action_secret(ciphertext: &str, crypt_key: &[u8]) -> Result<String> {
-    crate::ci::action_crypto::decrypt(ciphertext, crypt_key)
+    crate::action_crypto::decrypt(ciphertext, crypt_key)
 }
 
 /// Load the server's crypt key from `crypt_secret_file` and encrypt `plaintext`.

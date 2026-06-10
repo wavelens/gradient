@@ -27,6 +27,7 @@ gradient-nix = { workspace = true }
 gradient-forge = { workspace = true }
 gradient-sources = { workspace = true }
 gradient-exec = { workspace = true }
+gradient-ci = { workspace = true }
 
 # Workspace
 anyhow                = { workspace = true }

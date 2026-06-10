@@ -19,7 +19,7 @@ use sea_orm::{ActiveModelTrait, ConnectionTrait};
 /// Callers that go through [`apply_trigger`](super::super::apply_trigger) get
 /// this automatically; the manual `/projects/{org}/{project}/evaluate` endpoint
 /// applies it directly after calling
-/// [`trigger_evaluation`](crate::ci::trigger_evaluation).
+/// [`trigger_evaluation`](crate::trigger_evaluation).
 pub async fn park_if_no_cache<C: ConnectionTrait>(
     db: &C,
     eval: MEvaluation,

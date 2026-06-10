@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::ci::actions::ExecutorOk;
-use crate::ci::actions::payload::{render_default_body, render_subject};
-use crate::ci::context::CiContext;
+use crate::actions::ExecutorOk;
+use crate::actions::payload::{render_default_body, render_subject};
+use crate::context::CiContext;
 use anyhow::{Result, anyhow};
 use serde_json::Value as JsonValue;
 

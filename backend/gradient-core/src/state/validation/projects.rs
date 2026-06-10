@@ -5,7 +5,7 @@
  */
 
 use super::helpers::{EntityLookup, ErrorCollector};
-use crate::ci::GITHUB_APP_INTEGRATION_NAME;
+use gradient_ci::GITHUB_APP_INTEGRATION_NAME;
 use gradient_types::triggers::TriggerType;
 use std::collections::HashSet;
 
