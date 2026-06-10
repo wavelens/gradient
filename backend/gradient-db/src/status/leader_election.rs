@@ -237,7 +237,7 @@ pub async fn find_active_leaders<C: ConnectionTrait>(
                 BuildStatus::Building,
             ]))
             .filter(CBuild::Via.is_null())
-            .filter(CBuild::ExternalCached.eq(false))
+            .filter(CBuild::Substitutable.eq(false))
             .all(db)
             .await
     })

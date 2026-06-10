@@ -88,12 +88,26 @@ pub async fn gc_project_evaluations(
             .context("GC: failed to query builds")?;
 
         for build in &builds {
-            // Remove the build log from all backing stores (local + S3).
-            // NAR files and GC roots are owned by `derivation_output` /
+            // Remove every attempt's log from all backing stores (local + S3),
+            // falling back to the build id for never-dispatched builds. NAR
+            // files and GC roots are owned by `derivation_output` /
             // `cache_derivation` and are cleaned up by the derivation GC pass.
-            let log_id = build.log_id.unwrap_or(build.id);
-            if let Err(e) = ctx.storage.log_storage.delete(log_id).await {
-                warn!(error = %e, build_id = %log_id, "GC: failed to remove build log");
+            let attempts = gradient_entity::build_attempt::Entity::find()
+                .filter(gradient_entity::build_attempt::Column::Build.eq(build.id))
+                .all(&ctx.worker_db)
+                .await
+                .context("GC: failed to query build attempts")?;
+
+            let log_ids: Vec<BuildId> = if attempts.is_empty() {
+                vec![build.id]
+            } else {
+                attempts.iter().filter_map(|a| a.log_id).collect()
+            };
+
+            for log_id in log_ids {
+                if let Err(e) = ctx.storage.log_storage.delete(log_id).await {
+                    warn!(error = %e, build_id = %log_id, "GC: failed to remove build log");
+                }
             }
         }
 

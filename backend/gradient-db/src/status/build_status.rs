@@ -44,31 +44,17 @@ pub async fn update_build_status(ctx: &DbContext, build: MBuild, status: BuildSt
 
     let event_status = status;
     let now = gradient_types::now();
-    // When transitioning out of `Building` into a terminal state, record the
-    // elapsed wall-clock time. `build.updated_at` is the timestamp of the
-    // previous transition (into `Building` by `Scheduler::handle_build_status_update`).
-    if build.status == BuildStatus::Building
-        && matches!(
-            status,
-            BuildStatus::Completed
-                | BuildStatus::FailedPermanent
-                | BuildStatus::FailedTimeout
-                | BuildStatus::Aborted
-                | BuildStatus::DependencyFailed
-        )
-        && build.build_time_ms.is_none()
-    {
-        let elapsed_ms = (now - build.updated_at).num_milliseconds().max(0);
-        active_build.build_time_ms = Set(Some(elapsed_ms));
-    }
     active_build.status = Set(status);
     active_build.updated_at = Set(now);
     if status == BuildStatus::Queued && build.queued_at.is_none() {
         active_build.queued_at = Set(Some(now));
     }
+
+    // Per-attempt timing lives on the build's latest `build_attempt`.
     if status == BuildStatus::Building {
-        active_build.build_started_at = Set(Some(now));
+        let _ = crate::build_attempt::stamp_attempt_started(&ctx.worker_db, build.id, now).await;
     }
+
     if matches!(
         status,
         BuildStatus::Completed
@@ -78,7 +64,7 @@ pub async fn update_build_status(ctx: &DbContext, build: MBuild, status: BuildSt
             | BuildStatus::Aborted
             | BuildStatus::DependencyFailed
     ) {
-        active_build.build_finished_at = Set(Some(now));
+        let _ = crate::build_attempt::finalize_attempt_timing(&ctx.worker_db, build.id, now).await;
     }
 
     match active_build.update(&ctx.worker_db).await {
@@ -109,7 +95,11 @@ pub async fn update_build_status(ctx: &DbContext, build: MBuild, status: BuildSt
             });
 
             let pe_ctx = ctx.clone();
-            let pe_worker = updated_build.worker.clone();
+            let pe_worker =
+                crate::build_attempt::latest_attempt_worker(&ctx.worker_db, updated_build.id)
+                    .await
+                    .ok()
+                    .flatten();
             let pe_id = updated_build.id.into_inner();
             ctx.shutdown.spawn(async move {
                 record_phase_event(
@@ -136,7 +126,10 @@ pub async fn update_build_status(ctx: &DbContext, build: MBuild, status: BuildSt
                     | BuildStatus::DependencyFailed
             ) {
                 let log_ctx = ctx.clone();
-                let log_id = updated_build.log_id.unwrap_or(updated_build.id);
+                let log_id =
+                    crate::build_attempt::latest_attempt_log_id(&ctx.worker_db, updated_build.id)
+                        .await
+                        .unwrap_or(updated_build.id);
                 ctx.shutdown.spawn(async move {
                     finalize_build_log(&log_ctx, log_id).await;
                 });
