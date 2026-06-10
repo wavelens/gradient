@@ -52,20 +52,6 @@ pub enum AttemptFailureReason {
     SilentTimeout = 7,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum FailureClass { Transient, Permanent, Timeout }
-
-impl AttemptFailureReason {
-    pub const fn class(self) -> FailureClass {
-        match self {
-            Self::SubstituteUnavailable | Self::Oom | Self::DiskFull
-            | Self::Network | Self::BuilderCrash => FailureClass::Transient,
-            Self::BuilderNonzero => FailureClass::Permanent,
-            Self::WallClockTimeout | Self::SilentTimeout => FailureClass::Timeout,
-        }
-    }
-}
-
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "build_attempt")]
 pub struct Model {
@@ -87,22 +73,18 @@ pub struct Model {
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
-    #[sea_orm(belongs_to = "super::build::Entity", from = "Column::Build", to = "super::build::Column::Id")]
+    #[sea_orm(
+        belongs_to = "super::build::Entity",
+        from = "Column::Build",
+        to = "super::build::Column::Id"
+    )]
     Build,
-    #[sea_orm(belongs_to = "super::dispatched_job::Entity", from = "Column::DispatchedJob", to = "super::dispatched_job::Column::Id")]
+    #[sea_orm(
+        belongs_to = "super::dispatched_job::Entity",
+        from = "Column::DispatchedJob",
+        to = "super::dispatched_job::Column::Id"
+    )]
     DispatchedJob,
 }
 
 impl ActiveModelBehavior for ActiveModel {}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn reason_class_mapping() {
-        assert_eq!(AttemptFailureReason::SubstituteUnavailable.class(), FailureClass::Transient);
-        assert_eq!(AttemptFailureReason::BuilderNonzero.class(), FailureClass::Permanent);
-        assert_eq!(AttemptFailureReason::WallClockTimeout.class(), FailureClass::Timeout);
-    }
-}
