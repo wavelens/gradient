@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::forge::reporter::{APPROVAL_ACTION_ID, CiStatus, RequestedAction};
+use gradient_forge::reporter::{APPROVAL_ACTION_ID, CiStatus, RequestedAction};
 use gradient_types::{ActionType, MProjectAction};
 
 pub const FORGE_STATUS_EVENTS: &[&str] = &[

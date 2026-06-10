@@ -15,7 +15,7 @@ use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
 
 use gradient_db::get_any_organization_by_name;
-use gradient_core::nix::RepositoryUrl;
+use gradient_nix::RepositoryUrl;
 use gradient_core::sources::check_project_updates;
 use gradient_types::consts::*;
 use gradient_types::input::{check_project_name, validate_display_name, vec_to_hex};

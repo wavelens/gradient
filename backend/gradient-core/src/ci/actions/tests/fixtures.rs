@@ -169,6 +169,6 @@ pub fn make_ctx() -> crate::ci::CiContext {
     CiContext {
         db,
         http: gradient_util::http::build_client().expect("http client"),
-        forge: crate::forge::ForgeRegistry::with_builtin(),
+        forge: gradient_forge::ForgeRegistry::with_builtin(),
     }
 }

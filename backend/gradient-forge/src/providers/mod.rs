@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! One [`ForgeProvider`](crate::forge::ForgeProvider) impl per forge. `gitea`
+//! One [`ForgeProvider`](crate::ForgeProvider) impl per forge. `gitea`
 //! serves both Gitea and Forgejo (identical APIs).
 
 pub mod gitea;

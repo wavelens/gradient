@@ -7,14 +7,14 @@
 //! The per-forge behaviour seam. Every forge-specific decision — which reporter
 //! to build, how to verify a webhook signature, which header carries the event,
 //! how to parse each payload — lives behind this trait, so the rest of the
-//! codebase dispatches through [`ForgeRegistry`](crate::forge::ForgeRegistry)
+//! codebase dispatches through [`ForgeRegistry`](crate::ForgeRegistry)
 //! instead of matching on [`ForgeType`].
 
 use std::sync::Arc;
 
 use gradient_types::ForgeType;
-use crate::forge::reporter::CiReporter;
-use crate::forge::webhook::{
+use crate::reporter::CiReporter;
+use crate::webhook::{
     ParsedPullRequestEvent, ParsedPushEvent, ParsedReleaseEvent, WebhookEventKind,
 };
 

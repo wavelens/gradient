@@ -19,7 +19,7 @@ use crate::ci::actions::{dispatch_build_event, dispatch_evaluation_event, report
 use crate::ci::context::CiContext;
 use crate::ci::{ReactionKind, ReactionTarget};
 use gradient_db::{DbContext, StatusReactor};
-use crate::forge::ForgeRegistry;
+use gradient_forge::ForgeRegistry;
 use gradient_types::*;
 
 #[derive(Debug)]

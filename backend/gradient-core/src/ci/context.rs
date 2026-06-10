@@ -5,7 +5,7 @@
  */
 
 use gradient_db::DbContext;
-use crate::forge::ForgeRegistry;
+use gradient_forge::ForgeRegistry;
 
 /// CI-layer slice: the full [`DbContext`], the shared outbound HTTP client used
 /// to deliver project Actions and post forge status checks, and the resolved

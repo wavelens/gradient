@@ -1995,6 +1995,7 @@ dependencies = [
  "gradient-core",
  "gradient-db",
  "gradient-entity",
+ "gradient-forge",
  "gradient-storage",
  "gradient-test-support",
  "gradient-types",
@@ -2035,7 +2036,9 @@ dependencies = [
  "git2",
  "gradient-db",
  "gradient-entity",
+ "gradient-forge",
  "gradient-migration",
+ "gradient-nix",
  "gradient-storage",
  "gradient-test-support",
  "gradient-types",
@@ -2121,6 +2124,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "gradient-forge"
+version = "1.2.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64",
+ "bytes",
+ "gradient-types",
+ "gradient-util",
+ "hex",
+ "hmac 0.13.0",
+ "reqwest 0.13.3",
+ "ring",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "subtle",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "gradient-migration"
 version = "1.2.0"
 dependencies = [
@@ -2129,6 +2154,20 @@ dependencies = [
  "sea-orm-migration",
  "sha2 0.11.0",
  "uuid",
+]
+
+[[package]]
+name = "gradient-nix"
+version = "1.2.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bytes",
+ "gradient-db",
+ "gradient-types",
+ "nix-bindings",
+ "tempfile",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -2259,6 +2298,8 @@ dependencies = [
  "gradient-core",
  "gradient-db",
  "gradient-entity",
+ "gradient-forge",
+ "gradient-nix",
  "gradient-proto",
  "gradient-storage",
  "gradient-types",
@@ -2341,6 +2382,8 @@ dependencies = [
  "gradient-core",
  "gradient-db",
  "gradient-entity",
+ "gradient-forge",
+ "gradient-nix",
  "gradient-proto",
  "gradient-scheduler",
  "gradient-storage",
@@ -2396,6 +2439,7 @@ dependencies = [
  "gradient-core",
  "gradient-db",
  "gradient-entity",
+ "gradient-nix",
  "gradient-proto",
  "gradient-test-support",
  "gradient-types",

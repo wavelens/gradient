@@ -10,7 +10,7 @@ use serde::Deserialize;
 use tracing::warn;
 
 /// The kind of webhook a forge delivered, classified from its event header.
-/// [`crate::forge::ForgeProvider::classify_event`] maps each forge's raw event
+/// [`crate::ForgeProvider::classify_event`] maps each forge's raw event
 /// string onto this shared enum so the web layer dispatches once, forge-agnostically.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WebhookEventKind {

@@ -21,7 +21,7 @@ use crate::worker_pool::WorkerPoolResolver;
 use anyhow::{Context, Result};
 use futures::stream::{FuturesUnordered, StreamExt as _};
 use gradient_db::parse_drv;
-use gradient_core::nix::DerivationResolver;
+use gradient_nix::DerivationResolver;
 use gradient_proto::messages::{DerivationOutput, DiscoveredDerivation, FlakeJob, FlakeSource};
 use tokio::sync::watch;
 use tracing::{debug, info, warn};
@@ -189,7 +189,7 @@ fn build_flake_url(job: &FlakeJob, local_flake_path: Option<&str>) -> String {
     }
     match &job.source {
         FlakeSource::Repository { url, commit } => {
-            gradient_core::nix::NixFlakeUrl::new(url, commit)
+            gradient_nix::NixFlakeUrl::new(url, commit)
                 .map(|u| u.to_string())
                 .unwrap_or_else(|_| url.clone())
         }

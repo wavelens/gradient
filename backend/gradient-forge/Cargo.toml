@@ -1,0 +1,37 @@
+# SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+[package]
+name = "gradient-forge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "gradient_forge"
+path = "src/lib.rs"
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+gradient-types = { workspace = true }
+gradient-util  = { workspace = true }
+
+anyhow      = { workspace = true }
+async-trait = { workspace = true }
+base64      = { workspace = true }
+bytes       = { workspace = true }
+hex         = { workspace = true }
+hmac        = { workspace = true }
+reqwest     = { workspace = true }
+ring        = { workspace = true }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+sha2        = { workspace = true }
+subtle      = { workspace = true }
+tracing     = { workspace = true }
+url         = { workspace = true }

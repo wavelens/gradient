@@ -11,7 +11,7 @@ use crate::ci::actions::ExecutorOk;
 use crate::ci::context::CiContext;
 use crate::ci::integration_lookup::IntegrationKind;
 use gradient_types::ForgeType;
-use crate::forge::reporter::{CiReporter, GithubAppReporter};
+use gradient_forge::reporter::{CiReporter, GithubAppReporter};
 use gradient_types::{
     ActionConfig, ActionType, CIntegration, CProjectAction, EIntegration, EOrganization,
     EProjectAction, EvaluationId, IntegrationId, ProjectId,

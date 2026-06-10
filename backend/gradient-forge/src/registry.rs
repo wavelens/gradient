@@ -5,14 +5,14 @@
  */
 
 //! Resolved-once map of [`ForgeType`] -> [`ForgeProvider`], shared via
-//! [`CiContext`](crate::ci::CiContext) and [`AppState`](crate::AppState).
+//! the `ci` context and the composed app state.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use gradient_types::ForgeType;
-use crate::forge::provider::ForgeProvider;
-use crate::forge::providers::{gitea::GiteaProvider, github::GithubProvider, gitlab::GitlabProvider};
+use crate::provider::ForgeProvider;
+use crate::providers::{gitea::GiteaProvider, github::GithubProvider, gitlab::GitlabProvider};
 
 #[derive(Clone, Debug)]
 pub struct ForgeRegistry {

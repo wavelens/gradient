@@ -26,8 +26,8 @@ pub use self::context::CiContext;
 pub use self::integration_lookup::*;
 pub use self::reactor::CiStatusReactor;
 pub use self::reporting::*;
-pub use crate::forge::github_app::*;
-pub use crate::forge::reporter::*;
+pub use gradient_forge::github_app::*;
+pub use gradient_forge::reporter::*;
 pub use self::trigger::*;
 pub use self::unpark::{
     find_approval_gated_eval, set_evaluation_source_comment, unpark_approval,

@@ -7,7 +7,7 @@
 use super::matchers::requested_actions_for;
 use crate::ci::context::CiContext;
 use crate::ci::{parse_owner_repo, reporting};
-use crate::forge::reporter::{CiReport, CiStatus};
+use gradient_forge::reporter::{CiReport, CiStatus};
 use gradient_types::input::vec_to_hex;
 use gradient_types::{
     BuildId, CEntryPoint, EBuild, ECommit, EEntryPoint, EEvaluation, EOrganization, EProject,
