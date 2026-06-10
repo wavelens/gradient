@@ -19,7 +19,7 @@ use super::{
     StateFlakeInputOverride, StateIntegration, StateOrgMemberEntry, StateOrganization,
     StateProject, StateRole, StateTrigger, StateUpstream, StateUser, StateWorker,
 };
-use crate::ci::IntegrationKind;
+use gradient_ci::IntegrationKind;
 use gradient_types::ForgeType;
 use gradient_db::permissions::{cache_mask_to_vec, is_builtin_cache_role, is_builtin_role, mask_to_vec};
 use gradient_types::actions::{ActionConfig, ActionType};

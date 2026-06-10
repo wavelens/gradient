@@ -15,8 +15,8 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use tokio::sync::broadcast;
 
-use crate::ci::CiContext;
-use crate::ci::manifest_state::{ManifestStateStore, PendingCredentialsStore};
+use gradient_ci::CiContext;
+use gradient_ci::manifest_state::{ManifestStateStore, PendingCredentialsStore};
 use gradient_db::{DbContext, StatusReactor, WebDb, WorkerDb};
 use gradient_forge::ForgeRegistry;
 use gradient_util::shutdown::Shutdown;

@@ -7,7 +7,7 @@
 //! Pure-logic helpers for naming CI check rows and mapping internal
 //! evaluation/build statuses to the [`CiStatus`] reported via Actions.
 
-use crate::ci::CiStatus;
+use crate::CiStatus;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 

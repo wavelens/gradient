@@ -91,7 +91,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gradient_entity::project_trigger as ept;
-use gradient_core::ci::{ApplyInput, ApplyOutcome, apply_trigger};
+use gradient_ci::{ApplyInput, ApplyOutcome, apply_trigger};
 use gradient_sources::{check_project_updates, get_commit_info};
 use gradient_types::triggers::{TriggerConfig, TriggerType};
 use gradient_types::*;
@@ -245,7 +245,7 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
                         .await;
                 }
                 info!(project = %project.name, trigger_id = %trig.id, evaluation_id = %eval.id, "trigger created evaluation");
-                gradient_core::ci::actions::dispatch_evaluation_created(&state.ci(), &eval).await;
+                gradient_ci::actions::dispatch_evaluation_created(&state.ci(), &eval).await;
             }
             Ok(other) => {
                 debug!(project = %project.name, trigger_id = %trig.id, ?other, "trigger applied without creating eval");

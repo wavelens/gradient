@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-pub mod ci;
 pub mod constants;
 pub mod state;
 pub mod state_root;
@@ -178,7 +177,7 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
     };
 
     let reactor: Arc<dyn gradient_db::StatusReactor> =
-        Arc::new(crate::ci::CiStatusReactor::new(http.clone()));
+        Arc::new(gradient_ci::CiStatusReactor::new(http.clone()));
 
     Ok(Arc::new(ServerState {
         worker_db: WorkerDb::new(db),

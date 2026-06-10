@@ -8,7 +8,7 @@
 
 use super::DynError;
 use super::StateApplicator;
-use crate::ci::IntegrationKind;
+use gradient_ci::IntegrationKind;
 use gradient_types::*;
 use gradient_entity::*;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};

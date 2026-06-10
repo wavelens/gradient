@@ -8,7 +8,7 @@
 
 use super::response::{QueuedEvaluation, SkippedProject, WebhookTriggerOutcome};
 use gradient_entity::project_trigger as ept;
-use gradient_core::ci::{
+use gradient_ci::{
     APPROVAL_ACTION_ID, ApplyInput, ApplyOutcome, ApprovalInfo, apply_trigger,
     find_approval_gated_eval, parse_owner_repo, set_evaluation_source_comment, unpark_approval,
     unpark_approval_with_wildcard,
@@ -118,7 +118,7 @@ async fn store_installation_id(state: &Arc<ServerState>, payload: &GitHubInstall
         }
         info!(installation_id, org_name = %github_login, "GitHub App installed on organization");
         if let Err(e) =
-            gradient_core::ci::ensure_github_app_integrations(&state.web_db, org_id, creator).await
+            gradient_ci::ensure_github_app_integrations(&state.web_db, org_id, creator).await
         {
             warn!(error = %e, %org_id, "Failed to materialise GitHub App integration rows");
         }
@@ -175,7 +175,7 @@ pub(super) async fn resolve_github_app_targets(
     repository_urls: &[String],
     client_ip: std::net::IpAddr,
 ) -> Vec<IntegrationId> {
-    use gradient_core::ci::IntegrationKind;
+    use gradient_ci::IntegrationKind;
     use crate::ip_allowlist::is_allowed as ip_allowed;
     use std::collections::HashSet;
 
@@ -537,7 +537,7 @@ where
                     evaluation_id = %eval.id,
                     "forge webhook trigger fired"
                 );
-                gradient_core::ci::actions::dispatch_evaluation_created(&state.ci(), &eval).await;
+                gradient_ci::actions::dispatch_evaluation_created(&state.ci(), &eval).await;
                 outcome.queued.push(QueuedEvaluation {
                     project_id: project.id,
                     project_name: project.name.clone(),
@@ -865,7 +865,7 @@ async fn dispatch_approval_granted(state: &Arc<ServerState>, eval: &MEvaluation)
         "project_id": project_id,
         "status": "evaluation.approval_granted",
     });
-    gradient_core::ci::actions::dispatch_evaluation_event(
+    gradient_ci::actions::dispatch_evaluation_event(
         &state.ci(),
         project_id,
         "evaluation.approval_granted",
@@ -877,7 +877,7 @@ async fn dispatch_approval_granted(state: &Arc<ServerState>, eval: &MEvaluation)
     // the gradient pipeline is now in flight. Without this the user only sees
     // the Approval check turn green and nothing else until the eval worker
     // actually picks the row up - looks like the click did nothing.
-    gradient_core::ci::actions::dispatch_evaluation_created(&state.ci(), eval).await;
+    gradient_ci::actions::dispatch_evaluation_created(&state.ci(), eval).await;
 }
 
 async fn find_eval_by_check_id(state: &Arc<ServerState>, check_id: i64) -> Option<MEvaluation> {
@@ -926,7 +926,7 @@ async fn sender_is_trusted(
     repo: &str,
     sender: &str,
 ) -> bool {
-    let reporter = match gradient_core::ci::actions::reporter_for_project(&state.ci(), project_id).await {
+    let reporter = match gradient_ci::actions::reporter_for_project(&state.ci(), project_id).await {
         Ok(Some(r)) => r,
         Ok(None) => return false,
         Err(e) => {
@@ -1145,7 +1145,7 @@ pub(super) async fn handle_issue_comment(
         },
     };
 
-    let reaction_target = comment_id.map(|id| gradient_core::ci::ReactionTarget {
+    let reaction_target = comment_id.map(|id| gradient_ci::ReactionTarget {
         owner: owner.to_string(),
         repo: repo.to_string(),
         pr_number,
@@ -1171,9 +1171,9 @@ pub(super) async fn handle_issue_comment(
         let is_maintainer = sender_is_trusted(state, probe_project, owner, repo, &sender).await;
         if let Some(target) = &reaction_target {
             let kind = if is_maintainer {
-                gradient_core::ci::ReactionKind::Eyes
+                gradient_ci::ReactionKind::Eyes
             } else {
-                gradient_core::ci::ReactionKind::Confused
+                gradient_ci::ReactionKind::Confused
             };
             fire_reaction_via_project(state, probe_project, target, kind).await;
         }
@@ -1319,10 +1319,10 @@ pub(super) async fn handle_issue_comment(
 async fn fire_reaction_via_project(
     state: &Arc<ServerState>,
     project_id: ProjectId,
-    target: &gradient_core::ci::ReactionTarget,
-    kind: gradient_core::ci::ReactionKind,
+    target: &gradient_ci::ReactionTarget,
+    kind: gradient_ci::ReactionKind,
 ) {
-    let reporter = match gradient_core::ci::actions::reporter_for_project(&state.ci(), project_id).await {
+    let reporter = match gradient_ci::actions::reporter_for_project(&state.ci(), project_id).await {
         Ok(Some(r)) => r,
         Ok(None) => return,
         Err(e) => {
@@ -1344,7 +1344,7 @@ async fn first_project_with_reporter(
 ) -> Option<ProjectId> {
     for project_id in project_ids {
         if let Ok(Some(_)) =
-            gradient_core::ci::actions::reporter_for_project(&state.ci(), *project_id).await
+            gradient_ci::actions::reporter_for_project(&state.ci(), *project_id).await
         {
             return Some(*project_id);
         }
@@ -1361,10 +1361,10 @@ async fn fetch_pr_snapshot(
     owner: &str,
     repo: &str,
     pr_number: u64,
-) -> Option<gradient_core::ci::PullRequestSnapshot> {
+) -> Option<gradient_ci::PullRequestSnapshot> {
     for project_id in project_ids {
         let reporter =
-            match gradient_core::ci::actions::reporter_for_project(&state.ci(), *project_id).await {
+            match gradient_ci::actions::reporter_for_project(&state.ci(), *project_id).await {
                 Ok(Some(r)) => r,
                 _ => continue,
             };
@@ -1409,7 +1409,7 @@ async fn post_wildcard_error_comment(
         };
         for project_id in project_ids {
             let reporter =
-                match gradient_core::ci::actions::reporter_for_project(&state.ci(), project_id).await {
+                match gradient_ci::actions::reporter_for_project(&state.ci(), project_id).await {
                     Ok(Some(r)) => r,
                     Ok(None) => continue,
                     Err(e) => {

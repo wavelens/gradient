@@ -15,7 +15,7 @@ use axum::extract::{Path, State};
 use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
 use chrono::Utc;
-use gradient_core::ci::{ApplyInput, ApplyOutcome, apply_trigger};
+use gradient_ci::{ApplyInput, ApplyOutcome, apply_trigger};
 use gradient_types::ForgeType;
 use gradient_sources::resolve_head;
 use gradient_types::triggers::{TriggerConfig, TriggerType};
@@ -429,7 +429,7 @@ pub async fn fire_now(
                     .cancel_evaluation_jobs(aborted_id, &aborted_builds)
                     .await;
             }
-            gradient_core::ci::actions::dispatch_evaluation_created(&state.ci(), &eval).await;
+            gradient_ci::actions::dispatch_evaluation_created(&state.ci(), &eval).await;
             serde_json::json!({
                 "outcome": "Created",
                 "evaluation_id": eval.id,

@@ -7,8 +7,8 @@
 use super::super::DynError;
 use super::super::StateApplicator;
 use super::super::{lookup_id, read_credential};
-use crate::ci::actions::encrypt_secret_with_file;
-use crate::ci::{GITHUB_APP_INTEGRATION_NAME, IntegrationKind};
+use gradient_ci::actions::encrypt_secret_with_file;
+use gradient_ci::{GITHUB_APP_INTEGRATION_NAME, IntegrationKind};
 use gradient_types::ForgeType;
 use crate::state::config::*;
 use gradient_types::*;

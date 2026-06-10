@@ -16,8 +16,8 @@ use axum::extract::Query;
 use axum::extract::{Path, State};
 use axum::{Extension, Json, Router};
 use chrono::Utc;
-use gradient_core::ci::IntegrationKind;
-use gradient_core::ci::actions::encrypt_action_secret;
+use gradient_ci::IntegrationKind;
+use gradient_ci::actions::encrypt_action_secret;
 use gradient_util::http_validation::validate_webhook_url;
 use gradient_types::actions::{ActionConfig, ActionType};
 use gradient_types::input::load_secret_bytes;
@@ -555,7 +555,7 @@ pub async fn test_action(
         "context": "gradient/test-fire",
     });
 
-    gradient_core::ci::actions::execute_action(&state.ci(), action, &event, payload)
+    gradient_ci::actions::execute_action(&state.ci(), action, &event, payload)
         .await
         .map_err(|e| WebError::internal(format!("test fire failed: {}", e)))?;
 

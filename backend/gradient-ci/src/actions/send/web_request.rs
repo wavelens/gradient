@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::ci::actions::crypto::decrypt_action_secret;
-use crate::ci::actions::{ExecutorOk, MAX_BODY_BYTES, truncate};
-use crate::ci::context::CiContext;
+use crate::actions::crypto::decrypt_action_secret;
+use crate::actions::{ExecutorOk, MAX_BODY_BYTES, truncate};
+use crate::context::CiContext;
 use gradient_types::input::load_secret_bytes;
 use anyhow::{Context, Result, anyhow};
 use serde_json::Value as JsonValue;

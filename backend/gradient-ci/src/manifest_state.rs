@@ -16,7 +16,7 @@ use std::time::Instant;
 
 use gradient_types::ids::UserId;
 
-use crate::ci::github_app_manifest::ManifestResult;
+use crate::github_app_manifest::ManifestResult;
 
 /// Map of state-token → (initiating superuser id, issuance time). Tokens older
 /// than 10 minutes are pruned on each `issue_state` call.

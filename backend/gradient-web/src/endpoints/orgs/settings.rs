@@ -186,7 +186,7 @@ pub async fn post_organization_subscribe_cache(
     // org. Only ReadWrite/WriteOnly subscriptions unblock builds; ReadOnly
     // subscriptions leave the org without anywhere to push outputs.
     if unparks_builds
-        && let Err(e) = gradient_core::ci::unpark_no_cache_for_org(&state.web_db, org.id).await
+        && let Err(e) = gradient_ci::unpark_no_cache_for_org(&state.web_db, org.id).await
     {
         tracing::warn!(
             error = %e,

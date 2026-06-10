@@ -15,7 +15,7 @@ mod payload;
 mod report;
 mod send;
 
-use crate::ci::context::CiContext;
+use crate::context::CiContext;
 use gradient_types::{CProjectAction, EProjectAction, ProjectId};
 use serde_json::Value as JsonValue;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};

@@ -23,8 +23,8 @@ use crate::permissions::Permission;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 
-use gradient_core::ci::actions::encrypt_secret_with_file;
-use gradient_core::ci::{GITHUB_APP_INTEGRATION_NAME, IntegrationKind};
+use gradient_ci::actions::encrypt_secret_with_file;
+use gradient_ci::{GITHUB_APP_INTEGRATION_NAME, IntegrationKind};
 use gradient_types::ForgeType;
 use gradient_types::input::check_index_name;
 use gradient_types::*;

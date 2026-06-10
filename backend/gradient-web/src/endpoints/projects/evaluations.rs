@@ -201,16 +201,16 @@ pub async fn post_project_evaluate(
     let mode = body.as_ref().and_then(|b| b.mode.as_deref());
 
     if mode == Some("restart_failed") {
-        gradient_core::ci::trigger_restart_builds(&state.web_db, &project)
+        gradient_ci::trigger_restart_builds(&state.web_db, &project)
             .await
             .map_err(|e| match e {
-                gradient_core::ci::TriggerError::AlreadyInProgress => {
+                gradient_ci::TriggerError::AlreadyInProgress => {
                     WebError::bad_request("Evaluation already in progress")
                 }
-                gradient_core::ci::TriggerError::NoPreviousEvaluation => {
+                gradient_ci::TriggerError::NoPreviousEvaluation => {
                     WebError::bad_request("No previous evaluation to restart from")
                 }
-                gradient_core::ci::TriggerError::Db(db_err) => WebError::from(db_err),
+                gradient_ci::TriggerError::Db(db_err) => WebError::from(db_err),
             })?;
 
         return Ok(ok_json("Restarting failed builds".to_string()));
@@ -228,7 +228,7 @@ pub async fn post_project_evaluate(
                 )
             })?;
 
-    let eval = gradient_core::ci::trigger_evaluation(
+    let eval = gradient_ci::trigger_evaluation(
         &state.web_db,
         &project,
         commit_hash,
@@ -242,18 +242,18 @@ pub async fn post_project_evaluate(
     )
     .await
     .map_err(|e| match e {
-        gradient_core::ci::TriggerError::AlreadyInProgress => {
+        gradient_ci::TriggerError::AlreadyInProgress => {
             WebError::bad_request("Evaluation already in progress")
         }
-        gradient_core::ci::TriggerError::NoPreviousEvaluation => {
+        gradient_ci::TriggerError::NoPreviousEvaluation => {
             WebError::internal("Unexpected error")
         }
-        gradient_core::ci::TriggerError::Db(db_err) => WebError::from(db_err),
+        gradient_ci::TriggerError::Db(db_err) => WebError::from(db_err),
     })?;
 
     let eval =
-        gradient_core::ci::park_if_no_cache(&state.web_db, eval, project.organization).await?;
-    let eval = gradient_core::ci::park_if_storage_full(
+        gradient_ci::park_if_no_cache(&state.web_db, eval, project.organization).await?;
+    let eval = gradient_ci::park_if_storage_full(
         &state.web_db,
         eval,
         project.organization,
@@ -261,8 +261,8 @@ pub async fn post_project_evaluate(
     )
     .await?;
     let eval =
-        gradient_core::ci::park_if_no_workers(&state.web_db, eval, project.organization).await?;
-    gradient_core::ci::actions::dispatch_evaluation_created(&state.ci(), &eval).await;
+        gradient_ci::park_if_no_workers(&state.web_db, eval, project.organization).await?;
+    gradient_ci::actions::dispatch_evaluation_created(&state.ci(), &eval).await;
 
     Ok(ok_json("Evaluation started".to_string()))
 }

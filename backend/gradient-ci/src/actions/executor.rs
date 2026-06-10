@@ -6,7 +6,7 @@
 
 use super::send::{execute_forge_status_report, execute_send_mail, execute_send_web_request};
 use super::{MAX_BODY_BYTES, truncate};
-use crate::ci::context::CiContext;
+use crate::context::CiContext;
 use gradient_types::{
     AProjectActionDelivery, ActionConfig, MProjectAction, ProjectActionDeliveryId,
 };

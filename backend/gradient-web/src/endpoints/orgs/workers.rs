@@ -183,7 +183,7 @@ pub async fn post_org_worker(
 
     // Re-queue any evaluations parked because the org had no eval-capable
     // worker registration. No-op when the new row isn't eval-capable.
-    if let Err(e) = gradient_core::ci::unpark_no_workers_for_org(&state.web_db, org.id).await {
+    if let Err(e) = gradient_ci::unpark_no_workers_for_org(&state.web_db, org.id).await {
         tracing::warn!(
             error = %e,
             org_id = %org.id,
@@ -435,7 +435,7 @@ pub async fn patch_org_worker(
     // lacking an eval-capable registration, so calling unconditionally here
     // is safe.
     if (matches!(body.active, Some(true)) || matches!(body.enable_eval, Some(true)))
-        && let Err(e) = gradient_core::ci::unpark_no_workers_for_org(&state.web_db, org.id).await
+        && let Err(e) = gradient_ci::unpark_no_workers_for_org(&state.web_db, org.id).await
     {
         tracing::warn!(
             error = %e,

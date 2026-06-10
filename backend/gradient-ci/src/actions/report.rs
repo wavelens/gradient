@@ -5,8 +5,8 @@
  */
 
 use super::matchers::requested_actions_for;
-use crate::ci::context::CiContext;
-use crate::ci::{parse_owner_repo, reporting};
+use crate::context::CiContext;
+use crate::{parse_owner_repo, reporting};
 use gradient_forge::reporter::{CiReport, CiStatus};
 use gradient_types::input::vec_to_hex;
 use gradient_types::{
