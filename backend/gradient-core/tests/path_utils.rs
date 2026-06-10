@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Tests for `gradient_core::executor::path_utils` - pure string manipulation.
-use gradient_core::executor::path_utils::{
+//! Tests for `gradient_exec::path_utils` - pure string manipulation.
+use gradient_exec::path_utils::{
     nix_store_path, strip_nix_store_prefix, strip_store_prefix,
 };
 

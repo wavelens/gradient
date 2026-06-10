@@ -1,0 +1,41 @@
+# SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+[package]
+name = "gradient-state"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "gradient_state"
+path = "src/lib.rs"
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+gradient-entity = { workspace = true }
+gradient-types  = { workspace = true }
+gradient-util   = { workspace = true }
+gradient-db     = { workspace = true }
+gradient-ci     = { workspace = true }
+
+anyhow        = { workspace = true }
+base64        = { workspace = true }
+chrono        = { workspace = true }
+password-auth = { workspace = true }
+sea-orm       = { workspace = true }
+serde         = { workspace = true }
+serde_json    = { workspace = true }
+thiserror     = { workspace = true }
+tokio         = { workspace = true, features = ["rt", "macros", "sync"] }
+tracing       = { workspace = true }
+url           = { workspace = true }
+uuid          = { workspace = true }
+
+crypter = { version = "0.3", default-features = false, features = ["argon"] }
+ssh-key = { version = "0.6", features = ["ed25519"] }

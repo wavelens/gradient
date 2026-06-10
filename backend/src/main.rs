@@ -118,7 +118,7 @@ fn validate_state_and_exit(state_file: Option<&str>) -> std::io::Result<()> {
         eprintln!("--validate-state requires --state-file");
         std::process::exit(2);
     };
-    match gradient_core::state::validate_state_file(path) {
+    match gradient_state::validate_state_file(path) {
         Ok(errors) if errors.is_empty() => {
             println!("State configuration '{path}' is valid");
             Ok(())

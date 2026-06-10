@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Tests for `gradient_core::input` - all pure functions, no DB or I/O needed.
-use gradient_core::types::input::*;
+//! Tests for `gradient_types::input` - all pure functions, no DB or I/O needed.
+use gradient_types::input::*;
 
 // ── url_to_addr ───────────────────────────────────────────────────────────────
 
@@ -293,7 +293,7 @@ fn index_name_space_rejected() {
 
 #[test]
 fn project_name_rejects_build_request() {
-    use gradient_core::types::input::check_project_name;
+    use gradient_types::input::check_project_name;
     let err = check_project_name("build-request").unwrap_err();
     assert_eq!(
         err.to_string(),
@@ -303,7 +303,7 @@ fn project_name_rejects_build_request() {
 
 #[test]
 fn project_name_allows_similar() {
-    use gradient_core::types::input::check_project_name;
+    use gradient_types::input::check_project_name;
     for name in ["build-requests", "buildrequest", "my-build-request"] {
         check_project_name(name).unwrap();
     }
@@ -311,7 +311,7 @@ fn project_name_allows_similar() {
 
 #[test]
 fn project_name_inherits_index_rules() {
-    use gradient_core::types::input::{InputError, check_project_name};
+    use gradient_types::input::{InputError, check_project_name};
     assert_eq!(
         check_project_name("Build-Request"),
         Err(InputError::NameNotLowercase)
@@ -431,7 +431,7 @@ fn username_valid() {
 fn username_empty_rejected() {
     assert_eq!(
         validate_username("").unwrap_err(),
-        gradient_core::types::input::InputError::UsernameEmpty
+        gradient_types::input::InputError::UsernameEmpty
     );
 }
 

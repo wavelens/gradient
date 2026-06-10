@@ -14,7 +14,7 @@ mod entities;
 mod lookups;
 mod reconciliation;
 
-use crate::state::config::StateConfiguration;
+use crate::config::StateConfiguration;
 use gradient_types::*;
 use gradient_entity::*;
 use sea_orm::{
@@ -45,7 +45,7 @@ pub type PendingOrgMemberships = HashMap<String, Vec<PendingOrgMembership>>;
 /// exists, and the OIDC group → role grants resolved from `StateRole.oidc_group`.
 pub struct StateApplyResult {
     pub pending: PendingOrgMemberships,
-    pub oidc_group_roles: crate::state::OidcGroupRoles,
+    pub oidc_group_roles: crate::OidcGroupRoles,
 }
 
 pub(super) async fn apply_state_to_database(

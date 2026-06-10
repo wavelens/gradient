@@ -8,7 +8,7 @@
 
 use super::DynError;
 use super::StateApplicator;
-use crate::state::config::StateConfiguration;
+use crate::config::StateConfiguration;
 use gradient_types::*;
 use gradient_entity::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};

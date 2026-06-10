@@ -4,12 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Integration tests for `gradient_core::storage::nar_extract`.
+//! Integration tests for `gradient_storage::nar_extract`.
 //!
 //! Async assertions use sync `#[test]` + `tokio::runtime::Builder::block_on`.
 
 use bytes::Bytes;
-use gradient_core::storage::nar_extract::{ExtractError, Extracted, extract_path_from_nar_bytes};
+use gradient_storage::nar_extract::{ExtractError, Extracted, extract_path_from_nar_bytes};
 use harmonia_file_nar::archive::test_data::{TestNarEvent, TestNarEvents};
 use harmonia_file_nar::archive::write_nar;
 use std::collections::BTreeMap;

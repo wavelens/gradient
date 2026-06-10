@@ -20,7 +20,7 @@ use gradient_ci::manifest_state::{ManifestStateStore, PendingCredentialsStore};
 use gradient_db::{DbContext, StatusReactor, WebDb, WorkerDb};
 use gradient_forge::ForgeRegistry;
 use gradient_util::shutdown::Shutdown;
-use crate::state::{OidcGroupRoles, PendingOrgMemberships};
+use gradient_state::{OidcGroupRoles, PendingOrgMemberships};
 use gradient_storage::{EmailSender, LogStorage, NarStore, StorageCtx};
 use gradient_types::{BoardEvent, RuntimeConfig, SecretString};
 

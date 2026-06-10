@@ -2026,6 +2026,7 @@ dependencies = [
  "base64",
  "bytes",
  "chrono",
+ "crypter",
  "futures",
  "gradient-db",
  "gradient-entity",
@@ -2043,6 +2044,7 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+ "wiremock",
 ]
 
 [[package]]
@@ -2072,6 +2074,7 @@ dependencies = [
  "gradient-migration",
  "gradient-nix",
  "gradient-sources",
+ "gradient-state",
  "gradient-storage",
  "gradient-test-support",
  "gradient-types",
@@ -2164,6 +2167,9 @@ dependencies = [
  "futures",
  "gradient-sources",
  "gradient-types",
+ "harmonia-store-path",
+ "harmonia-store-remote",
+ "harmonia-utils-hash",
  "tokio",
 ]
 
@@ -2296,6 +2302,7 @@ dependencies = [
  "clap",
  "gradient-cache",
  "gradient-core",
+ "gradient-state",
  "gradient-types",
  "gradient-util",
  "gradient-web",
@@ -2314,6 +2321,7 @@ dependencies = [
  "base64",
  "bytes",
  "chrono",
+ "crypter",
  "ed25519-compact",
  "git-url-parse",
  "git2",
@@ -2328,6 +2336,31 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "gradient-state"
+version = "1.2.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "chrono",
+ "crypter",
+ "gradient-ci",
+ "gradient-db",
+ "gradient-entity",
+ "gradient-types",
+ "gradient-util",
+ "password-auth",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "ssh-key",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "url",
+ "uuid",
 ]
 
 [[package]]
@@ -2414,6 +2447,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.0",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -2465,6 +2499,7 @@ dependencies = [
  "gradient-proto",
  "gradient-scheduler",
  "gradient-sources",
+ "gradient-state",
  "gradient-storage",
  "gradient-test-support",
  "gradient-types",

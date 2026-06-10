@@ -69,7 +69,7 @@ fn is_claimable(password: &Option<String>, oidc_subject: &Option<String>) -> boo
 
 /// Distinct `(org, role)` grants for the groups a user presents on login.
 fn grants_for_groups(
-    map: &gradient_core::state::OidcGroupRoles,
+    map: &gradient_state::OidcGroupRoles,
     groups: &[String],
 ) -> Vec<(OrganizationId, RoleId)> {
     let mut out: Vec<(OrganizationId, RoleId)> = Vec::new();
@@ -87,7 +87,7 @@ fn grants_for_groups(
 /// missing, upgrade the role when it differs. Never removes a membership.
 async fn apply_oidc_group_grants<C: sea_orm::ConnectionTrait>(
     tx: &C,
-    map: &gradient_core::state::OidcGroupRoles,
+    map: &gradient_state::OidcGroupRoles,
     groups: &[String],
     user_id: UserId,
 ) -> Result<()> {
@@ -444,7 +444,7 @@ async fn create_or_update_user(
             .await
             .context("Failed to claim OIDC account")?;
 
-        if let Err(e) = gradient_core::state::apply_pending_org_memberships(
+        if let Err(e) = gradient_state::apply_pending_org_memberships(
             &tx,
             &state.pending_org_memberships,
             &user.username,
@@ -492,7 +492,7 @@ async fn create_or_update_user(
     .await
     .context("Failed to create user")?;
 
-    if let Err(e) = gradient_core::state::apply_pending_org_memberships(
+    if let Err(e) = gradient_state::apply_pending_org_memberships(
         &tx,
         &state.pending_org_memberships,
         &user.username,
@@ -618,7 +618,7 @@ mod tests {
         use std::collections::HashMap;
         let org = OrganizationId::now_v7();
         let role = RoleId::now_v7();
-        let mut map: gradient_core::state::OidcGroupRoles = HashMap::new();
+        let mut map: gradient_state::OidcGroupRoles = HashMap::new();
         map.insert("platform-team".into(), vec![(org, role)]);
         map.insert("ops".into(), vec![(org, role)]);
 

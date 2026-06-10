@@ -18,7 +18,7 @@ mod roles;
 mod users;
 mod workers;
 
-use crate::state::config::StateConfiguration;
+use crate::config::StateConfiguration;
 use helpers::{EntityLookup, ErrorCollector};
 
 #[derive(Debug, Clone, thiserror::Error)]

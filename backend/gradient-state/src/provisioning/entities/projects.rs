@@ -9,7 +9,7 @@ use super::super::StateApplicator;
 use super::super::{
     inbound_integrations_by_name, lookup_id, outbound_integrations_by_name, read_credential,
 };
-use crate::state::config::*;
+use crate::config::*;
 use gradient_types::triggers::TriggerConfig;
 use gradient_types::*;
 use anyhow::{Context, Result};
@@ -564,7 +564,7 @@ pub(crate) fn build_action_config(
 #[cfg(test)]
 mod trigger_helper_tests {
     use super::{build_trigger_config, trigger_key};
-    use crate::state::StateTrigger;
+    use crate::StateTrigger;
     use gradient_types::IntegrationId;
     use gradient_types::triggers::{TriggerConfig, TriggerType};
     use std::collections::HashMap;
