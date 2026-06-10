@@ -233,6 +233,7 @@ fn follower_org_member_gets_leader_log() {
             .append_query_results([vec![follower_eval]]) // 10. SELECT evaluation WHERE id IN [...]
             .append_query_results([vec![project_row(follower_project_id(), follower_org_id())]]) // 11. SELECT project
             .append_query_results([vec![follower_org_membership()]]) // 12. SELECT organization_user (member of follower-org)
+            .append_query_results([Vec::<gradient_entity::build_attempt::Model>::new()]) // 13. latest_attempt_log_id
             .into_connection();
 
         let server = make_server(db);
