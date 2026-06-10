@@ -11,7 +11,7 @@ use tokio::sync::broadcast;
 use super::pool::{WebDb, WorkerDb};
 use super::status_reactor::StatusReactor;
 use gradient_util::shutdown::Shutdown;
-use crate::storage::StorageCtx;
+use gradient_storage::StorageCtx;
 use gradient_types::{BoardEvent, RuntimeConfig};
 
 /// Persistence-layer slice threaded through every `db` function: the two

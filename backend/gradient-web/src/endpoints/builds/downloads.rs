@@ -12,7 +12,7 @@ use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use gradient_core::sources::get_path_from_derivation_output;
-use gradient_core::storage::nar_extract::{ExtractError, Extracted, extract_path_from_nar_bytes};
+use gradient_storage::nar_extract::{ExtractError, Extracted, extract_path_from_nar_bytes};
 use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};

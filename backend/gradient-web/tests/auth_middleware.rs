@@ -11,7 +11,7 @@
 //! stays observably equivalent to the prior hand-built responses.
 
 use axum_test::TestServer;
-use gradient_core::storage::{EmailSender, NarStore};
+use gradient_storage::{EmailSender, NarStore};
 use gradient_types::{RuntimeConfig};
 use gradient_core::ServerState;
 use gradient_core::db::{WebDb, WorkerDb};

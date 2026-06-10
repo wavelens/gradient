@@ -14,7 +14,7 @@ use axum::http::StatusCode;
 use axum_test::TestServer;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
-use gradient_core::storage::{EmailSender, NarStore};
+use gradient_storage::{EmailSender, NarStore};
 use gradient_types::ids::*;
 use gradient_core::ServerState;
 use gradient_core::db::{WebDb, WorkerDb};

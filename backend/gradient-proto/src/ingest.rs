@@ -4,7 +4,7 @@
  */
 
 use gradient_util::nix_hash::{is_nix32_hash, normalize_nar_hash};
-use gradient_core::storage::nar::NarStore;
+use gradient_storage::nar::NarStore;
 use gradient_types::ids::{CacheId, CachedPathId, CachedPathSignatureId, OrganizationId};
 use gradient_types::*;
 use sea_orm::sea_query::OnConflict;

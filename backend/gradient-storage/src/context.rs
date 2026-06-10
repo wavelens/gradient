@@ -9,7 +9,7 @@ use std::sync::Arc;
 use super::{EmailSender, LogStorage, NarStore};
 
 /// Storage-layer slice: the NAR object store, build-log storage, and the email
-/// sender. The narrowest context; carried by [`crate::db::DbContext`] so `db`
+/// sender. The narrowest context; carried by `DbContext` so `db`
 /// and `ci` reach storage without naming the composed `AppState`.
 #[derive(Clone, Debug)]
 pub struct StorageCtx {

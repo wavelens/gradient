@@ -1994,6 +1994,7 @@ dependencies = [
  "futures",
  "gradient-core",
  "gradient-entity",
+ "gradient-storage",
  "gradient-test-support",
  "gradient-types",
  "gradient-util",
@@ -2033,6 +2034,7 @@ dependencies = [
  "git2",
  "gradient-entity",
  "gradient-migration",
+ "gradient-storage",
  "gradient-test-support",
  "gradient-types",
  "gradient-util",
@@ -2117,6 +2119,7 @@ dependencies = [
  "gradient-core",
  "gradient-entity",
  "gradient-scheduler",
+ "gradient-storage",
  "gradient-test-support",
  "gradient-types",
  "gradient-util",
@@ -2189,6 +2192,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "gradient-storage"
+version = "1.2.0"
+dependencies = [
+ "anyhow",
+ "async-compression",
+ "async-trait",
+ "bytes",
+ "futures",
+ "gradient-types",
+ "gradient-util",
+ "harmonia-file-nar",
+ "harmonia-store-content-address",
+ "harmonia-store-path",
+ "harmonia-utils-hash",
+ "hex",
+ "lettre",
+ "object_store",
+ "rand 0.10.1",
+ "reqwest 0.13.3",
+ "tar",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+ "zstd",
+]
+
+[[package]]
 name = "gradient-test-support"
 version = "1.2.0"
 dependencies = [
@@ -2201,6 +2233,7 @@ dependencies = [
  "gradient-core",
  "gradient-entity",
  "gradient-proto",
+ "gradient-storage",
  "gradient-types",
  "gradient-util",
  "gradient-web",
@@ -2282,6 +2315,7 @@ dependencies = [
  "gradient-entity",
  "gradient-proto",
  "gradient-scheduler",
+ "gradient-storage",
  "gradient-test-support",
  "gradient-types",
  "gradient-util",

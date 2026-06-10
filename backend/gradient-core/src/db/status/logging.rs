@@ -22,7 +22,7 @@ pub async fn finalize_build_log(ctx: &DbContext, log_id: gradient_entity::ids::B
     if log_text.is_empty() {
         return;
     }
-    let descs = match crate::storage::log_chunk::compress_and_store_chunks(
+    let descs = match gradient_storage::log_chunk::compress_and_store_chunks(
         ctx.storage.log_storage.as_ref(),
         log_id,
         &log_text,
@@ -49,7 +49,7 @@ pub async fn finalize_build_log(ctx: &DbContext, log_id: gradient_entity::ids::B
 async fn replace_log_chunk_index(
     db: &impl ConnectionTrait,
     log_id: gradient_entity::ids::BuildId,
-    descs: &[crate::storage::log_chunk::StoredChunkDesc],
+    descs: &[gradient_storage::log_chunk::StoredChunkDesc],
 ) -> Result<(), sea_orm::DbErr> {
     use gradient_entity::build_log_chunk::{ActiveModel, Column, Entity};
     Entity::delete_many()

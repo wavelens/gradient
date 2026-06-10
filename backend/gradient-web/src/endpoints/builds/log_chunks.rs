@@ -13,7 +13,7 @@ use axum::http::header;
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use axum_streams::StreamBodyAs;
-use gradient_core::storage::sgr::SgrState;
+use gradient_storage::sgr::SgrState;
 use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};

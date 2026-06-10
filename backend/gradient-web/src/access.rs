@@ -557,7 +557,7 @@ mod tests {
     use super::*;
     use crate::authorization::ApiKeyContext;
     use gradient_core::permissions::mask_from;
-    use gradient_core::storage::{EmailSender, NarStore};
+    use gradient_storage::{EmailSender, NarStore};
     use gradient_types::consts::{
         BASE_CACHE_ROLE_VIEW_ID, BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID,
     };

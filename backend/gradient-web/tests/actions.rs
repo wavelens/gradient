@@ -12,7 +12,7 @@
 
 use axum_test::TestServer;
 use gradient_entity::{ids::*, organization_user, project, project_action, project_action_delivery};
-use gradient_core::storage::{EmailSender, NarStore};
+use gradient_storage::{EmailSender, NarStore};
 use gradient_types::{RuntimeConfig, SecretString, SessionId};
 use gradient_core::ServerState;
 use gradient_core::db::{WebDb, WorkerDb};
