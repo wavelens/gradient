@@ -386,6 +386,7 @@ pub async fn cache_with_completed_build_in_cache() -> (Arc<ServerState>, String)
         .append_query_results([vec![derivation_row()]])
         .append_query_results([vec![cache_derivation_row()]])
         .append_query_results([vec![build_row(gradient_entity::build::BuildStatus::Completed)]])
+        .append_query_results([Vec::<gradient_entity::build_attempt::Model>::new()])
         .into_connection();
 
     (make_state(db, log_storage), log_body)
@@ -471,6 +472,7 @@ pub async fn cache_with_two_completed_builds() -> (Arc<ServerState>, String) {
         .append_query_results([vec![derivation_row()]])
         .append_query_results([vec![cache_derivation_row()]])
         .append_query_results([vec![build_row(gradient_entity::build::BuildStatus::Completed)]])
+        .append_query_results([Vec::<gradient_entity::build_attempt::Model>::new()])
         .into_connection();
 
     (make_state(db, log_storage), newer_log)
