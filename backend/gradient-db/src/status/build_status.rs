@@ -55,19 +55,6 @@ pub async fn update_build_status(ctx: &DbContext, build: MBuild, status: BuildSt
         let _ = crate::build_attempt::stamp_attempt_started(&ctx.worker_db, build.id, now).await;
     }
 
-    if build.status == BuildStatus::Building
-        && matches!(
-            status,
-            BuildStatus::Completed
-                | BuildStatus::FailedPermanent
-                | BuildStatus::FailedTimeout
-                | BuildStatus::Aborted
-                | BuildStatus::DependencyFailed
-        )
-    {
-        let _ = crate::build_attempt::finalize_attempt_timing(&ctx.worker_db, build.id, now).await;
-    }
-
     if matches!(
         status,
         BuildStatus::Completed

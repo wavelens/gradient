@@ -26,7 +26,6 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(BuildAttempt::FailureMessage).text().null())
                     .col(ColumnDef::new(BuildAttempt::LogId).uuid().null())
                     .col(ColumnDef::new(BuildAttempt::BuildContext).json_binary().not_null())
-                    .col(ColumnDef::new(BuildAttempt::BuildTimeMs).big_integer().null())
                     .col(ColumnDef::new(BuildAttempt::BuildStartedAt).timestamp().null())
                     .col(ColumnDef::new(BuildAttempt::BuildFinishedAt).timestamp().null())
                     .col(ColumnDef::new(BuildAttempt::CreatedAt).timestamp().not_null())
@@ -72,7 +71,6 @@ enum BuildAttempt {
     FailureMessage,
     LogId,
     BuildContext,
-    BuildTimeMs,
     BuildStartedAt,
     BuildFinishedAt,
     CreatedAt,
