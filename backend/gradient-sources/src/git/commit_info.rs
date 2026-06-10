@@ -67,8 +67,8 @@ impl ProjectGitContext<'_> {
                     stderr: e.message().to_string(),
                 })?;
 
-            let message = commit.summary().unwrap_or("").to_string();
-            let author_email = commit.author().email().map(|s| s.to_string());
+            let message = commit.summary().ok().flatten().unwrap_or("").to_string();
+            let author_email = commit.author().email().ok().map(|s| s.to_string());
             let author_name = commit.author().name().unwrap_or("").to_string();
 
             Ok((message, author_email, author_name))

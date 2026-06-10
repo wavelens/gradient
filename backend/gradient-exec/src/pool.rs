@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use futures::stream::{FuturesUnordered, StreamExt};
 use harmonia_store_path::StorePath;
 use harmonia_store_remote::DaemonStore as _;
-use harmonia_utils_hash::fmt::CommonHash as _;
+use harmonia_utils_hash::HashFormat as _;
 use std::collections::HashMap;
 
 use crate::path_utils::{nix_store_path, strip_store_prefix};

@@ -17,8 +17,7 @@ use futures::StreamExt as _;
 use harmonia_file_nar::NarByteStream;
 use harmonia_store_content_address::{ContentAddress, make_store_path_from_ca};
 use harmonia_store_path::{StoreDir, StorePathName};
-use harmonia_utils_hash::fmt::CommonHash as _;
-use harmonia_utils_hash::{Algorithm, Hash, Sha256};
+use harmonia_utils_hash::{Algorithm, Hash, HashFormat as _, Sha256};
 use std::path::Path;
 
 pub struct SourceNar {
