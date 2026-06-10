@@ -345,7 +345,7 @@ async fn send_ssh_key_credential(
         .await
     {
         Ok(Some(org)) => {
-            match gradient_core::sources::ssh_key::decrypt_ssh_private_key(
+            match gradient_sources::ssh_key::decrypt_ssh_private_key(
                 &state.config.secrets.crypt_secret_file,
                 org,
                 &state.config.server.serve_url,

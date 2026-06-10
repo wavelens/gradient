@@ -9,7 +9,7 @@ use gradient_types::*;
 use anyhow::Result;
 use base64::{Engine, engine::general_purpose};
 use ed25519_compact::KeyPair;
-use ssh_key::{
+use ::ssh_key::{
     Algorithm, LineEnding, PrivateKey, private::Ed25519Keypair, private::Ed25519PrivateKey,
     private::KeypairData, public::Ed25519PublicKey,
 };

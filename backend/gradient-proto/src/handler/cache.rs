@@ -178,7 +178,7 @@ async fn load_cached_path_signatures(
         .filter_map(|r| {
             let stored = r.signature?;
             let cache_name = cache_names.get(&r.cache)?;
-            Some(gradient_core::sources::full_signature_token(
+            Some(gradient_sources::full_signature_token(
                 &stored, serve_url, cache_name,
             ))
         })
@@ -411,7 +411,7 @@ async fn extend_with_gradient_proto_results(
 
     for up in upstreams {
         let api_key = up.api_key_enc.as_deref().and_then(|enc| {
-            gradient_core::sources::decrypt_secret(&state.config.secrets.crypt_secret_file, enc).ok()
+            gradient_sources::decrypt_secret(&state.config.secrets.crypt_secret_file, enc).ok()
         });
         let found =
             super::cache_consumer::pull_paths(&up.url, &up.remote_cache, api_key.as_deref(), &want)

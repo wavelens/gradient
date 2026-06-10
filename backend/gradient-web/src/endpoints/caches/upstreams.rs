@@ -248,7 +248,7 @@ pub async fn put_cache_upstream(
             validate_gradient_proto(&url, &remote_cache, key.as_deref())?;
             let api_key_enc = match key {
                 Some(k) if !k.trim().is_empty() => Some(
-                    gradient_core::sources::encrypt_secret(
+                    gradient_sources::encrypt_secret(
                         &state.config.secrets.crypt_secret_file,
                         k.trim(),
                     )

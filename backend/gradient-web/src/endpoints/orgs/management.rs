@@ -13,7 +13,7 @@ use crate::permissions::Permission;
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
 
-use gradient_core::sources::generate_ssh_key;
+use gradient_sources::generate_ssh_key;
 use gradient_types::consts::BASE_ROLE_ADMIN_ID;
 use gradient_types::input::{check_index_name, validate_display_name};
 use gradient_types::*;

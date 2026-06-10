@@ -25,6 +25,8 @@ gradient-storage = { workspace = true }
 gradient-db = { workspace = true }
 gradient-nix = { workspace = true }
 gradient-forge = { workspace = true }
+gradient-sources = { workspace = true }
+gradient-exec = { workspace = true }
 
 # Workspace
 anyhow                = { workspace = true }

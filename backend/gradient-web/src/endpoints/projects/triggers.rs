@@ -17,7 +17,7 @@ use axum::{Extension, Json, Router};
 use chrono::Utc;
 use gradient_core::ci::{ApplyInput, ApplyOutcome, apply_trigger};
 use gradient_types::ForgeType;
-use gradient_core::sources::resolve_head;
+use gradient_sources::resolve_head;
 use gradient_types::triggers::{TriggerConfig, TriggerType};
 use gradient_types::*;
 use gradient_core::ServerState;

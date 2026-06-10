@@ -92,7 +92,7 @@ use std::time::Duration;
 
 use gradient_entity::project_trigger as ept;
 use gradient_core::ci::{ApplyInput, ApplyOutcome, apply_trigger};
-use gradient_core::sources::{check_project_updates, get_commit_info};
+use gradient_sources::{check_project_updates, get_commit_info};
 use gradient_types::triggers::{TriggerConfig, TriggerType};
 use gradient_types::*;
 use gradient_core::ServerState;

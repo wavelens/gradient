@@ -9,7 +9,7 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
-use gradient_core::executor::strip_nix_store_prefix;
+use gradient_exec::strip_nix_store_prefix;
 use gradient_types::ids::{DerivationId, OrganizationId};
 use gradient_types::*;
 use gradient_core::ServerState;
@@ -814,7 +814,7 @@ impl<'a> DispatchContext<'a> {
         let hashes: Vec<String> = stripped
             .iter()
             .filter_map(|p| {
-                gradient_core::sources::parse_drv_hash_name(p)
+                gradient_sources::parse_drv_hash_name(p)
                     .ok()
                     .map(|(h, _)| h)
             })

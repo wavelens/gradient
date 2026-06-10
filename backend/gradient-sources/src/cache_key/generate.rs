@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::sources::SourceError;
+use crate::SourceError;
 use base64::{Engine, engine::general_purpose};
 use ed25519_compact::KeyPair;
 

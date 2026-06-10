@@ -332,7 +332,7 @@ impl JobExecutor {
                     Ok(outputs) => {
                         let mut reported = Vec::with_capacity(outputs.len());
                         for (name, path) in &outputs {
-                            let hash = gradient_core::sources::get_hash_from_path(path.clone())
+                            let hash = gradient_sources::get_hash_from_path(path.clone())
                                 .map(|(h, _)| h)
                                 .unwrap_or_default();
                             let products = build::load_products(path).await;

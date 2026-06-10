@@ -8,7 +8,7 @@ mod fixtures;
 
 use super::pktline::read_ref_from_pktlines;
 use super::url::{parse_git_protocol_url, parse_nix_git_url};
-use crate::sources::SourceError;
+use crate::SourceError;
 use fixtures::{FAKE_SHA, FLUSH, ref_line, ref_line_with_caps};
 
 // ── parse_nix_git_url ────────────────────────────────────────────────────

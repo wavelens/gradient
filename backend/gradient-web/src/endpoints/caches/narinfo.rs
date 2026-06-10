@@ -10,7 +10,7 @@ use crate::error::{WebError, WebResult};
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::{IntoResponse, Response};
-use gradient_core::sources::{get_hash_from_url, verify_narinfo_signature};
+use gradient_sources::{get_hash_from_url, verify_narinfo_signature};
 use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};

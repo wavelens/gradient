@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::sources::SourceError;
+use crate::SourceError;
 use tracing::debug;
 
 const ZERO_SHA: &str = "0000000000000000000000000000000000000000";

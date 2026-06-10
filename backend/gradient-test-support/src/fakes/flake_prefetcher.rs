@@ -7,7 +7,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use gradient_entity::organization::Model as MOrganization;
-use gradient_core::sources::{FlakePrefetcher, PrefetchedFlake};
+use gradient_sources::{FlakePrefetcher, PrefetchedFlake};
 use std::sync::Mutex;
 
 #[derive(Debug, Clone)]

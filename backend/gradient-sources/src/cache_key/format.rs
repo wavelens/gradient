@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::sources::{SourceError, cache_key_host};
+use crate::{SourceError, cache_key_host};
 use gradient_types::*;
 use base64::{Engine, engine::general_purpose};
 

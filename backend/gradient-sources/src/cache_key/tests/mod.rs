@@ -7,7 +7,7 @@
 mod fixtures;
 
 use super::*;
-use crate::sources::SourceError;
+use crate::SourceError;
 use base64::{Engine, engine::general_purpose};
 use fixtures::{make_cache, signed_narinfo_fixture, temp_secret_file};
 
