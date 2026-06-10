@@ -726,6 +726,20 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
         Err(e) => tracing::error!(error = ?e, "failed to clear stale admin tasks"),
     }
 
+    match gradient_db::recover_interrupted_work(&state.worker_db).await {
+        Ok(r) if r.attempts_aborted > 0 || r.builds_requeued > 0 || r.evals_aborted > 0 || r.projects_forced > 0 => {
+            tracing::warn!(
+                attempts_aborted = r.attempts_aborted,
+                builds_requeued = r.builds_requeued,
+                evals_aborted = r.evals_aborted,
+                projects_forced = r.projects_forced,
+                "recovered interrupted work from previous process"
+            )
+        }
+        Ok(_) => {}
+        Err(e) => tracing::error!(error = ?e, "failed to recover interrupted work"),
+    }
+
     let app = create_router(Arc::clone(&state));
 
     let listener = tokio::net::TcpListener::bind(&server_url)
