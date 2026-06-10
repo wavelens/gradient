@@ -27,7 +27,7 @@ use axum::http::HeaderMap;
 use gradient_core::ci::actions::decrypt_secret_with_file;
 use gradient_core::ci::{IntegrationKind, verify_github_signature};
 use gradient_types::ForgeType;
-use gradient_core::forge::WebhookEventKind;
+use gradient_forge::WebhookEventKind;
 use crate::ip_allowlist::is_allowed as ip_allowed;
 use gradient_types::input::load_secret;
 use gradient_types::*;
@@ -42,7 +42,7 @@ use crate::client_ip::{OptionalPeer, resolve_client_ip};
 use crate::error::{ErrorCode, WebError, WebResult};
 use crate::helpers::ok_json;
 
-use gradient_core::forge::{ParsedPullRequestEvent, ParsedPushEvent, ParsedReleaseEvent};
+use gradient_forge::{ParsedPullRequestEvent, ParsedPushEvent, ParsedReleaseEvent};
 use trigger::{
     PushRefKind, handle_github_installation, resolve_github_app_targets,
     trigger_pr_for_integration, trigger_push_for_integration, trigger_release_for_integration,

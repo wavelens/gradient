@@ -13,9 +13,9 @@ use anyhow::anyhow;
 use subtle::ConstantTimeEq;
 
 use gradient_types::ForgeType;
-use crate::forge::provider::ForgeProvider;
-use crate::forge::reporter::{CiReporter, GitlabReporter};
-use crate::forge::webhook::{
+use crate::provider::ForgeProvider;
+use crate::reporter::{CiReporter, GitlabReporter};
+use crate::webhook::{
     ParsedPullRequestEvent, ParsedPushEvent, ParsedReleaseEvent, WebhookEventKind,
 };
 

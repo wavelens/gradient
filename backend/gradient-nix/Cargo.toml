@@ -1,0 +1,29 @@
+# SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+[package]
+name = "gradient-nix"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "gradient_nix"
+path = "src/lib.rs"
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+gradient-types = { workspace = true }
+gradient-db    = { workspace = true }
+
+anyhow       = { workspace = true }
+async-trait  = { workspace = true }
+bytes        = { workspace = true }
+nix-bindings = { workspace = true }
+tempfile     = { workspace = true }
+thiserror    = { workspace = true }

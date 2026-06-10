@@ -23,6 +23,8 @@ gradient-types = { workspace = true }
 gradient-util = { workspace = true }
 gradient-storage = { workspace = true }
 gradient-db = { workspace = true }
+gradient-nix = { workspace = true }
+gradient-forge = { workspace = true }
 
 # Workspace
 anyhow                = { workspace = true }

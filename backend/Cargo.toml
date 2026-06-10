@@ -1,6 +1,6 @@
 [workspace]
-members      = [".", "gradient-cache", "gradient-core", "gradient-db", "gradient-entity", "gradient-migration", "gradient-proto", "gradient-scheduler", "gradient-score", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-worker"]
-default-members = [".", "gradient-cache", "gradient-core", "gradient-db", "gradient-entity", "gradient-migration", "gradient-proto", "gradient-scheduler", "gradient-score", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-worker"]
+members      = [".", "gradient-cache", "gradient-core", "gradient-db", "gradient-entity", "gradient-forge", "gradient-migration", "gradient-nix", "gradient-proto", "gradient-scheduler", "gradient-score", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-worker"]
+default-members = [".", "gradient-cache", "gradient-core", "gradient-db", "gradient-entity", "gradient-forge", "gradient-migration", "gradient-nix", "gradient-proto", "gradient-scheduler", "gradient-score", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-worker"]
 resolver     = "2"
 
 [workspace.package]
@@ -21,7 +21,9 @@ gradient-cache        = { path = "gradient-cache" }
 gradient-core         = { path = "gradient-core" }
 gradient-db           = { path = "gradient-db" }
 gradient-entity       = { path = "gradient-entity" }
+gradient-forge        = { path = "gradient-forge" }
 gradient-migration    = { path = "gradient-migration" }
+gradient-nix          = { path = "gradient-nix" }
 gradient-proto        = { path = "gradient-proto" }
 gradient-scheduler    = { path = "gradient-scheduler" }
 gradient-score        = { path = "gradient-score" }

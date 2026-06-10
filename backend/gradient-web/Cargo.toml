@@ -16,6 +16,8 @@ workspace = true
 
 [dependencies]
 gradient-core = { workspace = true }
+gradient-forge = { workspace = true }
+gradient-nix = { workspace = true }
 gradient-db = { workspace = true }
 gradient-storage = { workspace = true }
 gradient-util = { workspace = true }

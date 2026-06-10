@@ -6,7 +6,7 @@
 
 use gradient_util::http_validation::{WebhookUrlError, validate_webhook_url};
 use gradient_types::ForgeType;
-use crate::forge::registry::ForgeRegistry;
+use crate::registry::ForgeRegistry;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -1282,7 +1282,7 @@ struct CheckRunCreateResponse {
 #[async_trait]
 impl CiReporter for GithubAppReporter {
     async fn report(&self, report: &CiReport) -> Result<Option<i64>> {
-        let token = crate::forge::github_app::get_installation_token(
+        let token = crate::github_app::get_installation_token(
             &self.client,
             self.app_id,
             &self.private_key_pem,
@@ -1377,7 +1377,7 @@ impl CiReporter for GithubAppReporter {
     }
 
     async fn is_repo_writer(&self, owner: &str, repo: &str, username: &str) -> Result<bool> {
-        let token = crate::forge::github_app::get_installation_token(
+        let token = crate::github_app::get_installation_token(
             &self.client,
             self.app_id,
             &self.private_key_pem,
@@ -1421,7 +1421,7 @@ impl CiReporter for GithubAppReporter {
         pr_number: u64,
         body: &str,
     ) -> Result<()> {
-        let token = crate::forge::github_app::get_installation_token(
+        let token = crate::github_app::get_installation_token(
             &self.client,
             self.app_id,
             &self.private_key_pem,
@@ -1465,7 +1465,7 @@ impl CiReporter for GithubAppReporter {
         repo: &str,
         pr_number: u64,
     ) -> Result<Option<PullRequestSnapshot>> {
-        let token = crate::forge::github_app::get_installation_token(
+        let token = crate::github_app::get_installation_token(
             &self.client,
             self.app_id,
             &self.private_key_pem,
@@ -1503,7 +1503,7 @@ impl CiReporter for GithubAppReporter {
     }
 
     async fn add_reaction(&self, target: &ReactionTarget, kind: ReactionKind) -> Result<()> {
-        let token = crate::forge::github_app::get_installation_token(
+        let token = crate::github_app::get_installation_token(
             &self.client,
             self.app_id,
             &self.private_key_pem,

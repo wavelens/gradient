@@ -15,10 +15,10 @@ use std::sync::Arc;
 use anyhow::anyhow;
 
 use gradient_types::ForgeType;
-use crate::forge::github_app::verify_github_signature;
-use crate::forge::provider::ForgeProvider;
-use crate::forge::reporter::{CiReporter, GithubReporter};
-use crate::forge::webhook::{
+use crate::github_app::verify_github_signature;
+use crate::provider::ForgeProvider;
+use crate::reporter::{CiReporter, GithubReporter};
+use crate::webhook::{
     ParsedPullRequestEvent, ParsedPushEvent, ParsedReleaseEvent, WebhookEventKind,
 };
 

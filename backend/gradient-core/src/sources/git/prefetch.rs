@@ -103,7 +103,7 @@ async fn prefetch_flake_inner(
 
         debug!(?temp_path, rev, "Cloned repository");
 
-        crate::nix::lock_flake_with_ssh_key(&temp_path, &private_key).map_err(|e| {
+        gradient_nix::lock_flake_with_ssh_key(&temp_path, &private_key).map_err(|e| {
             SourceError::NixFlakeArchiveFailed {
                 stderr: e.to_string(),
             }

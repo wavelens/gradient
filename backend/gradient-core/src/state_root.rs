@@ -18,7 +18,7 @@ use tokio::sync::broadcast;
 use crate::ci::CiContext;
 use crate::ci::manifest_state::{ManifestStateStore, PendingCredentialsStore};
 use gradient_db::{DbContext, StatusReactor, WebDb, WorkerDb};
-use crate::forge::ForgeRegistry;
+use gradient_forge::ForgeRegistry;
 use gradient_util::shutdown::Shutdown;
 use crate::state::{OidcGroupRoles, PendingOrgMemberships};
 use gradient_storage::{EmailSender, LogStorage, NarStore, StorageCtx};
