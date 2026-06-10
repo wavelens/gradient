@@ -370,6 +370,7 @@ async fn record_eval_message_inserts_for_active_build_job() {
                 ready_at: gradient_types::now(),
                 rescore_count: 0,
                 pname: None,
+                substitute: false,
             },
         )
         .await;
@@ -535,6 +536,7 @@ async fn cancel_evaluation_jobs_drops_eval_and_build_jobs() {
                     ready_at: gradient_types::now(),
                     rescore_count: 0,
                     pname: None,
+                    substitute: false,
                 },
             )
             .await;

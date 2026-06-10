@@ -180,6 +180,7 @@ mod tests {
             ready_at: now,
             rescore_count: 0,
             pname: Some("curl".into()),
+            substitute: false,
         })
     }
 

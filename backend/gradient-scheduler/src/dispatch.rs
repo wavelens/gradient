@@ -612,6 +612,12 @@ impl BuildDispatchMaps {
                 max_silent_secs: resolve_limit(build.max_silent_secs, self.default_max_silent_secs),
             }],
         };
+        let (architecture, required_features) = if build.substitutable {
+            ("builtin".to_string(), Vec::new())
+        } else {
+            (derivation.architecture.clone(), self.required_features(build.derivation))
+        };
+
         let pending = PendingBuildJob {
             build_id: build.id,
             evaluation_id: build.evaluation,
@@ -622,8 +628,8 @@ impl BuildDispatchMaps {
                 .get(&build.derivation)
                 .cloned()
                 .unwrap_or_default(),
-            architecture: derivation.architecture.clone(),
-            required_features: self.required_features(build.derivation),
+            architecture,
+            required_features,
             dependency_count: self.dep_counts.get(&build.derivation).copied().unwrap_or(0),
             closure_size: self.closure_sizes.get(&build.derivation).copied().flatten(),
             prefer_local_build: derivation.prefer_local_build,
@@ -637,6 +643,7 @@ impl BuildDispatchMaps {
             ready_at: now(),
             rescore_count: 0,
             pname: derivation.pname.clone(),
+            substitute: build.substitutable,
         };
 
         Some((job_id, pending))

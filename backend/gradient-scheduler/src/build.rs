@@ -873,6 +873,9 @@ impl BuildabilityChecker {
     /// `(build.arch ∈ worker.architectures) ∧ (∀ required feature ∈ worker.system_features)`.
     fn any_buildable(&self, builds: &[MBuild], worker_caps: &[(Vec<String>, Vec<String>)]) -> bool {
         builds.iter().any(|b| {
+            if b.substitutable {
+                return true;
+            }
             let Some(drv) = self.drv_by_id.get(&b.derivation) else {
                 return false;
             };
@@ -912,6 +915,9 @@ impl BuildabilityChecker {
     ) -> WaitingReason {
         let mut grouped: BTreeMap<(String, Vec<String>), u32> = BTreeMap::new();
         for b in builds {
+            if b.substitutable {
+                continue;
+            }
             let Some(drv) = self.drv_by_id.get(&b.derivation) else {
                 continue;
             };
