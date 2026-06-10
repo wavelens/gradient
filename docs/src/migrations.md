@@ -1,6 +1,6 @@
 # Database migrations
 
-Gradient uses [SeaORM migrations](https://www.sea-ql.org/SeaORM/docs/migration/setting-up-migration/). Migration files live in `backend/migration/src/` and are registered in `backend/migration/src/lib.rs`. Each NixOS service start runs `Migrator::up(&db, None)` (see `backend/core/src/db/connection.rs`), which applies every registered migration not yet recorded in the `seaql_migrations` table.
+Gradient uses [SeaORM migrations](https://www.sea-ql.org/SeaORM/docs/migration/setting-up-migration/). Migration files live in `backend/migration/src/` and are registered in `backend/migration/src/lib.rs`. Each NixOS service start runs `Migrator::up(&db, None)` (see `backend/gradient-db/src/connection.rs`), which applies every registered migration not yet recorded in the `seaql_migrations` table.
 
 ## Squash policy for cancelling pairs
 
@@ -20,7 +20,7 @@ A migration pair `add_X` / `drop_X` may be removed once **both** of these are tr
 
 ### Existing installs
 
-Removing a pair leaves orphan rows in the `seaql_migrations` table on installs that already ran the deleted migrations. SeaORM 1.1's validator rejects this state with "Applied migrations not found in migration list", so Gradient prunes any row whose `version` is no longer in `Migrator::migrations()` at startup, before `Migrator::up`, via `prune_removed_migrations` in `backend/core/src/db/connection.rs`. The pruned versions are emitted at `info` so the cleanup is auditable. No per-retirement bookkeeping is required: deleting a migration file and dropping its entry from `migrator/src/lib.rs` is the complete change.
+Removing a pair leaves orphan rows in the `seaql_migrations` table on installs that already ran the deleted migrations. SeaORM 1.1's validator rejects this state with "Applied migrations not found in migration list", so Gradient prunes any row whose `version` is no longer in `Migrator::migrations()` at startup, before `Migrator::up`, via `prune_removed_migrations` in `backend/gradient-db/src/connection.rs`. The pruned versions are emitted at `info` so the cleanup is auditable. No per-retirement bookkeeping is required: deleting a migration file and dropping its entry from `migrator/src/lib.rs` is the complete change.
 
 ### What is out of scope
 
