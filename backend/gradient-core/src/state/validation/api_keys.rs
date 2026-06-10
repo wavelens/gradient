@@ -5,7 +5,7 @@
  */
 
 use super::helpers::{EntityLookup, ErrorCollector};
-use crate::permissions::Permission;
+use gradient_db::permissions::Permission;
 
 pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
     for api_key in lookup.config.api_keys.values() {

@@ -7,7 +7,7 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use futures::stream::{FuturesUnordered, StreamExt};
-use gradient_core::db::{Derivation, parse_drv};
+use gradient_db::{Derivation, parse_drv};
 use gradient_core::nix::{DerivationResolver, ResolvedDerivation};
 use std::sync::Arc;
 use tracing::warn;

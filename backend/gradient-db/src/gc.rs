@@ -199,7 +199,7 @@ pub async fn gc_orphan_derivations(ctx: &DbContext, grace_hours: i64) -> Result<
     info!(count = drv_ids.len(), "Running orphan derivation GC");
 
     let db = &ctx.worker_db;
-    let orphan_outputs = crate::db::fetch_in_chunks(&drv_ids, |chunk| async move {
+    let orphan_outputs = crate::fetch_in_chunks(&drv_ids, |chunk| async move {
         EDerivationOutput::find()
             .filter(CDerivationOutput::Derivation.is_in(chunk))
             .all(db)
@@ -215,7 +215,7 @@ pub async fn gc_orphan_derivations(ctx: &DbContext, grace_hours: i64) -> Result<
     } else {
         let drv_id_set: HashSet<DerivationId> = drv_ids.iter().copied().collect();
         let orphan_hash_vec: Vec<String> = orphan_hashes.iter().cloned().collect();
-        crate::db::fetch_in_chunks(&orphan_hash_vec, |chunk| async move {
+        crate::fetch_in_chunks(&orphan_hash_vec, |chunk| async move {
             EDerivationOutput::find()
                 .filter(CDerivationOutput::Hash.is_in(chunk))
                 .all(db)
@@ -241,7 +241,7 @@ pub async fn gc_orphan_derivations(ctx: &DbContext, grace_hours: i64) -> Result<
     }
 
     if !to_delete.is_empty()
-        && let Err(e) = crate::db::for_each_chunk(&to_delete, |chunk| async move {
+        && let Err(e) = crate::for_each_chunk(&to_delete, |chunk| async move {
             ECachedPath::delete_many()
                 .filter(CCachedPath::Hash.is_in(chunk))
                 .exec(db)

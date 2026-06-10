@@ -39,8 +39,8 @@ pub fn run<F: std::future::Future>(fut: F) -> F::Output {
         .block_on(fut)
 }
 
-pub fn make_ctx(db: sea_orm::DatabaseConnection) -> crate::db::DbContext {
-    use crate::db::{DbContext, NoReactor, WebDb, WorkerDb};
+pub fn make_ctx(db: sea_orm::DatabaseConnection) -> crate::DbContext {
+    use crate::{DbContext, NoReactor, WebDb, WorkerDb};
     use gradient_storage::{EmailSender, LogStorage, NarStore, StorageCtx};
     use gradient_types::RuntimeConfig;
     use futures::future::BoxFuture;

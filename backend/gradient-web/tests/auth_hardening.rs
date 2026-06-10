@@ -16,7 +16,7 @@ use gradient_entity::{api, session};
 use gradient_storage::{EmailSender, NarStore};
 use gradient_types::{ApiId, RuntimeConfig, SecretString, SessionId, UserId};
 use gradient_core::ServerState;
-use gradient_core::db::{WebDb, WorkerDb};
+use gradient_db::{WebDb, WorkerDb};
 use jsonwebtoken::{EncodingKey, Header, encode};
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 use serde::Serialize;
@@ -89,7 +89,7 @@ fn server_with(web_db_setup: impl FnOnce(MockDatabase) -> MockDatabase) -> TestS
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         board_events: tokio::sync::broadcast::channel(256).0,
         forge: gradient_core::forge::ForgeRegistry::with_builtin(),
-        reactor: std::sync::Arc::new(gradient_core::db::NoReactor),
+        reactor: std::sync::Arc::new(gradient_db::NoReactor),
     });
     TestServer::new(create_router(state))
 }
@@ -185,7 +185,7 @@ fn revoked_api_key_is_rejected() {
             last_used_at: now,
             created_at: now,
             revoked_at: Some(now),
-            permission: gradient_core::permissions::admin_mask(),
+            permission: gradient_db::permissions::admin_mask(),
             ..Default::default()
         };
 
@@ -213,7 +213,7 @@ fn expired_api_key_is_rejected() {
             last_used_at: now,
             created_at: now,
             expires_at: Some(now - chrono::Duration::seconds(1)),
-            permission: gradient_core::permissions::admin_mask(),
+            permission: gradient_db::permissions::admin_mask(),
             ..Default::default()
         };
 
@@ -283,7 +283,7 @@ fn delete_user_with_wrong_password_is_forbidden() {
 
 #[test]
 fn api_key_with_only_view_cannot_trigger_evaluation() {
-    use gradient_core::permissions::{Permission, mask_from};
+    use gradient_db::permissions::{Permission, mask_from};
     use gradient_test_support::fixtures::{org, org_id};
 
     let rt = tokio::runtime::Runtime::new().unwrap();
@@ -309,7 +309,7 @@ fn api_key_with_only_view_cannot_trigger_evaluation() {
         let admin_role = gradient_entity::role::Model {
             id: gradient_types::consts::BASE_ROLE_ADMIN_ID,
             name: "Admin".into(),
-            permission: gradient_core::permissions::admin_mask(),
+            permission: gradient_db::permissions::admin_mask(),
             ..Default::default()
         };
 
@@ -358,7 +358,7 @@ fn api_key_with_only_view_cannot_trigger_evaluation() {
 
 #[test]
 fn api_key_pinned_to_other_org_is_invisible() {
-    use gradient_core::permissions::{Permission, mask_from};
+    use gradient_db::permissions::{Permission, mask_from};
     use gradient_test_support::fixtures::org;
 
     let rt = tokio::runtime::Runtime::new().unwrap();
@@ -411,7 +411,7 @@ fn api_key_cannot_create_api_keys() {
             key: hash_api_key(&raw),
             last_used_at: now,
             created_at: now,
-            permission: gradient_core::permissions::admin_mask(),
+            permission: gradient_db::permissions::admin_mask(),
             ..Default::default()
         };
 

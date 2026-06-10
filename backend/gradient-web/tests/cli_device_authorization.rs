@@ -19,7 +19,7 @@ use gradient_types::{
     CliDeviceAuthorizationId, RuntimeConfig, SecretString, SessionId, UserId,
 };
 use gradient_core::ServerState;
-use gradient_core::db::{WebDb, WorkerDb};
+use gradient_db::{WebDb, WorkerDb};
 use jsonwebtoken::{EncodingKey, Header, encode};
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 use serde::Serialize;
@@ -114,7 +114,7 @@ fn server_with(web_db_setup: impl FnOnce(MockDatabase) -> MockDatabase) -> TestS
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         board_events: tokio::sync::broadcast::channel(256).0,
         forge: gradient_core::forge::ForgeRegistry::with_builtin(),
-        reactor: std::sync::Arc::new(gradient_core::db::NoReactor),
+        reactor: std::sync::Arc::new(gradient_db::NoReactor),
     });
     TestServer::new(create_router(state))
 }

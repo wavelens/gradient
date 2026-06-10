@@ -1,6 +1,6 @@
 [workspace]
-members      = [".", "gradient-cache", "gradient-core", "gradient-entity", "gradient-migration", "gradient-proto", "gradient-scheduler", "gradient-score", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-worker"]
-default-members = [".", "gradient-cache", "gradient-core", "gradient-entity", "gradient-migration", "gradient-proto", "gradient-scheduler", "gradient-score", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-worker"]
+members      = [".", "gradient-cache", "gradient-core", "gradient-db", "gradient-entity", "gradient-migration", "gradient-proto", "gradient-scheduler", "gradient-score", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-worker"]
+default-members = [".", "gradient-cache", "gradient-core", "gradient-db", "gradient-entity", "gradient-migration", "gradient-proto", "gradient-scheduler", "gradient-score", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-worker"]
 resolver     = "2"
 
 [workspace.package]
@@ -19,6 +19,7 @@ todo      = "warn"
 # Internal crates
 gradient-cache        = { path = "gradient-cache" }
 gradient-core         = { path = "gradient-core" }
+gradient-db           = { path = "gradient-db" }
 gradient-entity       = { path = "gradient-entity" }
 gradient-migration    = { path = "gradient-migration" }
 gradient-proto        = { path = "gradient-proto" }

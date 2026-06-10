@@ -18,7 +18,7 @@ use tracing::{error, warn};
 use crate::ci::actions::{dispatch_build_event, dispatch_evaluation_event, reporter_for_project};
 use crate::ci::context::CiContext;
 use crate::ci::{ReactionKind, ReactionTarget};
-use crate::db::{DbContext, StatusReactor};
+use gradient_db::{DbContext, StatusReactor};
 use crate::forge::ForgeRegistry;
 use gradient_types::*;
 

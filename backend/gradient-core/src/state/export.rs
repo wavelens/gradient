@@ -21,7 +21,7 @@ use super::{
 };
 use crate::ci::IntegrationKind;
 use gradient_types::ForgeType;
-use crate::permissions::{cache_mask_to_vec, is_builtin_cache_role, is_builtin_role, mask_to_vec};
+use gradient_db::permissions::{cache_mask_to_vec, is_builtin_cache_role, is_builtin_role, mask_to_vec};
 use gradient_types::actions::{ActionConfig, ActionType};
 use gradient_types::triggers::{ConcurrencyPolicy, TriggerConfig, TriggerType};
 use gradient_entity::cache_upstream::CacheUpstreamKind;

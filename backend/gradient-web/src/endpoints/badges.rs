@@ -30,7 +30,7 @@ use crate::access::is_org_member;
 use crate::authorization::{ApiKeyContext, MaybeApiKey, MaybeUser};
 use crate::error::WebError;
 use crate::helpers::OptionExt;
-use gradient_core::db::get_any_organization_by_name;
+use gradient_db::get_any_organization_by_name;
 use gradient_types::*;
 use gradient_core::ServerState;
 

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::db::DbContext;
+use gradient_db::DbContext;
 use crate::sources::SourceError;
 use gradient_types::input::check_repository_url_is_ssh;
 use gradient_types::*;

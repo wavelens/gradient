@@ -611,8 +611,8 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
 
     let scheduler = Arc::new(Scheduler::new(Arc::clone(&state)));
     scheduler.start();
-    gradient_core::db::retention::start_retention_loop(state.db());
-    gradient_core::db::rollup::start_rollup_loop(state.db());
+    gradient_db::retention::start_retention_loop(state.db());
+    gradient_db::rollup::start_rollup_loop(state.db());
     otlp::start_otlp(Arc::clone(&state), Arc::clone(&scheduler));
     gradient_proto::outbound::start_outbound_loop(Arc::clone(&scheduler));
 
@@ -717,7 +717,7 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
 
     // Free the partial unique index from any admin_task left in Pending/Running
     // by a previous process. Sweeps are idempotent so the operator can re-issue.
-    match gradient_core::db::admin_tasks::mark_all_active_failed(&state.worker_db).await {
+    match gradient_db::admin_tasks::mark_all_active_failed(&state.worker_db).await {
         Ok(n) if n > 0 => tracing::warn!(
             tasks_marked_failed = n,
             "marked stale admin tasks Failed (server restart)"

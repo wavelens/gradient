@@ -10,7 +10,7 @@
 
 use anyhow::{Context, Result};
 use gradient_entity::ids::AdminTaskId;
-use gradient_core::db::admin_tasks;
+use gradient_db::admin_tasks;
 use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
@@ -198,7 +198,7 @@ async fn pass_logs(state: Arc<ServerState>, report: &mut DeepGcReport) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_core::db::{WebDb, WorkerDb};
+    use gradient_db::{WebDb, WorkerDb};
     use gradient_entity::ids::{BuildRequestBlobId, OrganizationId};
     use gradient_storage::{EmailSender, FileLogStorage, LogStorage, NarStore};
     use sea_orm::{DatabaseBackend, MockDatabase};
@@ -229,7 +229,7 @@ mod tests {
             oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
             board_events: tokio::sync::broadcast::channel(256).0,
             forge: gradient_core::forge::ForgeRegistry::with_builtin(),
-            reactor: std::sync::Arc::new(gradient_core::db::NoReactor),
+            reactor: std::sync::Arc::new(gradient_db::NoReactor),
         })
     }
 

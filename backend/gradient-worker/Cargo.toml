@@ -20,6 +20,7 @@ workspace = true
 
 [dependencies]
 gradient-core = { workspace = true }
+gradient-db = { workspace = true }
 gradient-util = { workspace = true }
 gradient-types = { workspace = true }
 gradient-entity = { workspace = true }

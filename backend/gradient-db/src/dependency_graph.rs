@@ -35,7 +35,7 @@ pub async fn collect_transitive_dependents<C: ConnectionTrait>(
     let mut frontier: Vec<DerivationId> = vec![start];
 
     while !frontier.is_empty() {
-        let edges = crate::db::fetch_in_chunks(&frontier, |chunk| async move {
+        let edges = crate::fetch_in_chunks(&frontier, |chunk| async move {
             EDerivationDependency::find()
                 .filter(CDerivationDependency::Dependency.is_in(chunk))
                 .all(db)

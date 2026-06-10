@@ -507,7 +507,7 @@ pub(super) async fn delete_nar_from_cache(
         .collect();
 
     let txn = &tx;
-    gradient_core::db::for_each_chunk(&derivation_ids, |chunk| async move {
+    gradient_db::for_each_chunk(&derivation_ids, |chunk| async move {
         ECacheDerivation::delete_many()
             .filter(CCacheDerivation::Cache.eq(cache_id))
             .filter(CCacheDerivation::Derivation.is_in(chunk))

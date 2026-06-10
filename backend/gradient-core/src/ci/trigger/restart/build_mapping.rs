@@ -37,7 +37,7 @@ pub(super) async fn create_restart_builds<C: ConnectionTrait>(
         .into_iter()
         .collect();
     let leader_for_drv =
-        crate::db::find_active_leaders(db, project.organization, &queued_drv_ids).await?;
+        gradient_db::find_active_leaders(db, project.organization, &queued_drv_ids).await?;
 
     let mut build_id_map: HashMap<BuildId, BuildId> = HashMap::with_capacity(prev_builds.len());
 

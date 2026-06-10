@@ -24,7 +24,7 @@ use gradient_entity::session;
 use gradient_storage::{EmailSender, NarStore};
 use gradient_types::{RuntimeConfig, SecretString};
 use gradient_core::ServerState;
-use gradient_core::db::{WebDb, WorkerDb};
+use gradient_db::{WebDb, WorkerDb};
 use jsonwebtoken::{EncodingKey, Header, encode};
 use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase};
 use serde::Serialize;
@@ -119,7 +119,7 @@ pub fn make_test_server_with(
         pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         board_events: tokio::sync::broadcast::channel(256).0,
-        reactor: std::sync::Arc::new(gradient_core::db::NoReactor),
+        reactor: std::sync::Arc::new(gradient_db::NoReactor),
     });
     TestServer::new(gradient_web::create_router(state))
 }

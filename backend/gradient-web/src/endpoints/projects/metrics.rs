@@ -7,7 +7,7 @@
 use crate::access::{Caller, OrgAccess, load_org};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::endpoints::builds::closure::{derivation_closure_reachable, sum_output_sizes};
-use gradient_core::db::{output_hashes_for_drvs, runtime_closure_size};
+use gradient_db::{output_hashes_for_drvs, runtime_closure_size};
 use crate::error::WebResult;
 use crate::helpers::{OptionExt, ok_json};
 use axum::extract::{Path, Query, State};
@@ -91,7 +91,7 @@ pub async fn get_project_metrics(
 
         let db = &state.web_db;
         let ep_drv_ids: Vec<DerivationId> =
-            gradient_core::db::fetch_in_chunks(&ep_build_ids, |chunk| async move {
+            gradient_db::fetch_in_chunks(&ep_build_ids, |chunk| async move {
                 EBuild::find().filter(CBuild::Id.is_in(chunk)).all(db).await
             })
             .await?

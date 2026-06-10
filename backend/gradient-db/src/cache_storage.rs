@@ -56,7 +56,7 @@ pub async fn cache_used_bytes<C: ConnectionTrait>(
     }
 
     let mut total: i64 = 0;
-    for chunk in path_ids.chunks(crate::db::IN_CHUNK_SIZE) {
+    for chunk in path_ids.chunks(crate::IN_CHUNK_SIZE) {
         let sum: Option<i64> = ECP::find()
             .filter(CCP::Id.is_in(chunk.to_vec()))
             .select_only()

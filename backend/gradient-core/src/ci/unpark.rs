@@ -19,7 +19,7 @@
 //! [`unpark_no_workers_for_org`] when a registration is created or its
 //! `active`/`enable_eval` flags transition to `true`.
 
-use crate::db::org_has_eval_capable_worker_registration;
+use gradient_db::org_has_eval_capable_worker_registration;
 use gradient_types::ids::OrganizationId;
 use gradient_types::waiting_reason::WaitingReason;
 use gradient_types::*;
@@ -47,7 +47,7 @@ pub async fn unpark_storage_full_for_org<C: ConnectionTrait>(
     organization: OrganizationId,
     instance_max_storage_gb: i32,
 ) -> Result<Vec<MEvaluation>, sea_orm::DbErr> {
-    if crate::db::org_caches_all_full(db, organization, instance_max_storage_gb).await? {
+    if gradient_db::org_caches_all_full(db, organization, instance_max_storage_gb).await? {
         return Ok(Vec::new());
     }
     unpark_for_org(db, organization, |r| {
@@ -142,7 +142,7 @@ async fn unpark_for_org<C: ConnectionTrait, F: Fn(&WaitingReason) -> bool>(
         return Ok(Vec::new());
     }
 
-    let parked = crate::db::fetch_in_chunks(&project_ids, |chunk| async move {
+    let parked = gradient_db::fetch_in_chunks(&project_ids, |chunk| async move {
         EEvaluation::find()
             .filter(CEvaluation::Project.is_in(chunk))
             .filter(CEvaluation::Status.eq(EvaluationStatus::Waiting))

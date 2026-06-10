@@ -31,7 +31,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use futures::stream::{FuturesUnordered, StreamExt as _};
-use gradient_core::db::parse_drv;
+use gradient_db::parse_drv;
 use gradient_core::executor::path_utils::nix_store_path;
 use gradient_types::CachedPathInfo;
 use harmonia_protocol::valid_path_info::{UnkeyedValidPathInfo, ValidPathInfo};
@@ -1001,7 +1001,7 @@ async fn extract_single_file_from_nar(nar_bytes: &[u8]) -> Result<Vec<u8>> {
 /// without this fallback the daemon then rejects the `.drv` import with
 /// `path '…' is not valid` for a reference parsed straight out of the
 /// `.drv` text.
-fn drv_closure_seeds(drv: &gradient_core::db::Derivation, mode: ClosureMode) -> Vec<String> {
+fn drv_closure_seeds(drv: &gradient_db::Derivation, mode: ClosureMode) -> Vec<String> {
     let mut out = Vec::with_capacity(
         drv.outputs.len() + drv.input_derivations.len() + drv.input_sources.len(),
     );
@@ -1403,7 +1403,7 @@ mod tests {
     /// out of the `.drv` content.
     #[test]
     fn drv_closure_seeds_include_outputs_inputs_and_sources() {
-        use gradient_core::db::parse_drv;
+        use gradient_db::parse_drv;
 
         let drv_bytes = br#"Derive([("out","/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-out","","")],[("/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-dep.drv",["out"])],["/nix/store/cccccccccccccccccccccccccccccccc-src.sh"],"x86_64-linux","/nix/store/dddddddddddddddddddddddddddddddd-bash",[],[])"#;
         let drv = parse_drv(drv_bytes).unwrap();
@@ -1434,7 +1434,7 @@ mod tests {
     /// for the build target's input_derivation `.drv`.
     #[test]
     fn drv_closure_seeds_inputs_only_excludes_outputs() {
-        use gradient_core::db::parse_drv;
+        use gradient_db::parse_drv;
 
         let drv_bytes = br#"Derive([("out","/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-out","","")],[("/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-dep.drv",["out"])],["/nix/store/cccccccccccccccccccccccccccccccc-src.sh"],"x86_64-linux","/nix/store/dddddddddddddddddddddddddddddddd-bash",[],[])"#;
         let drv = parse_drv(drv_bytes).unwrap();
@@ -1460,7 +1460,7 @@ mod tests {
     /// failure several stages downstream.
     #[test]
     fn drv_closure_seeds_skip_empty_output_paths() {
-        use gradient_core::db::parse_drv;
+        use gradient_db::parse_drv;
 
         let drv_bytes = br#"Derive([("out","","r:sha256","deadbeef")],[],["/nix/store/cccccccccccccccccccccccccccccccc-src"],"x86_64-linux","/nix/store/dddddddddddddddddddddddddddddddd-bash",[],[])"#;
         let drv = parse_drv(drv_bytes).unwrap();

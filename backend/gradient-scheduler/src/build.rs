@@ -13,7 +13,7 @@ use anyhow::{Context, Result};
 
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
-use gradient_core::db::{
+use gradient_db::{
     collect_transitive_dependents, update_build_status, update_evaluation_status,
 };
 use gradient_types::*;
@@ -404,7 +404,7 @@ impl<'a> BuildStateHandler<'a> {
             .context("fetch leader's derivation_output rows")?;
         let leader_output_ids: Vec<_> = leader_outputs.iter().map(|o| o.id).collect();
         let db = &self.state.worker_db;
-        let leader_products = gradient_core::db::fetch_in_chunks(
+        let leader_products = gradient_db::fetch_in_chunks(
             &leader_output_ids,
             |chunk| async move {
                 EBuildProduct::find()
@@ -445,7 +445,7 @@ impl<'a> BuildStateHandler<'a> {
                     .context("fetch follower's existing derivation_output rows")?;
                 let existing_out_ids: Vec<_> = existing_outs.iter().map(|o| o.id).collect();
                 if !existing_out_ids.is_empty() {
-                    if let Err(e) = gradient_core::db::for_each_chunk(&existing_out_ids, |chunk| async move {
+                    if let Err(e) = gradient_db::for_each_chunk(&existing_out_ids, |chunk| async move {
                         EBuildProduct::delete_many()
                             .filter(CBuildProduct::DerivationOutput.is_in(chunk))
                             .exec(db)
@@ -456,7 +456,7 @@ impl<'a> BuildStateHandler<'a> {
                         warn!(error = %e, follower_id = %follower.id, "failed to clear stale follower build_products");
                     }
 
-                    if let Err(e) = gradient_core::db::for_each_chunk(&existing_out_ids, |chunk| async move {
+                    if let Err(e) = gradient_db::for_each_chunk(&existing_out_ids, |chunk| async move {
                         EDerivationOutput::delete_many()
                             .filter(CDerivationOutput::Id.is_in(chunk))
                             .exec(db)
@@ -517,7 +517,7 @@ impl<'a> BuildStateHandler<'a> {
 
         let closure_ids: Vec<DerivationId> = closure.into_iter().collect();
         let db = &self.state.worker_db;
-        let cascaded_builds = gradient_core::db::fetch_in_chunks(&closure_ids, |chunk| async move {
+        let cascaded_builds = gradient_db::fetch_in_chunks(&closure_ids, |chunk| async move {
             EBuild::find()
                 .filter(CBuild::Evaluation.eq(evaluation_id))
                 .filter(CBuild::Status.is_in(vec![
@@ -950,7 +950,7 @@ impl BuildabilityChecker {
     /// [`any_buildable`]: BuildabilityChecker::any_buildable
     async fn load(state: &Arc<ServerState>, drv_ids: &[DerivationId]) -> Result<Self> {
         let db = &state.worker_db;
-        let drvs = gradient_core::db::fetch_in_chunks(drv_ids, |chunk| async move {
+        let drvs = gradient_db::fetch_in_chunks(drv_ids, |chunk| async move {
             EDerivation::find().filter(CDerivation::Id.is_in(chunk)).all(db).await
         })
         .await
@@ -958,7 +958,7 @@ impl BuildabilityChecker {
         let drv_by_id: HashMap<DerivationId, MDerivation> =
             drvs.into_iter().map(|d| (d.id, d)).collect();
 
-        let edges = gradient_core::db::fetch_in_chunks(drv_ids, |chunk| async move {
+        let edges = gradient_db::fetch_in_chunks(drv_ids, |chunk| async move {
             EDerivationFeature::find()
                 .filter(CDerivationFeature::Derivation.is_in(chunk))
                 .all(db)
@@ -975,7 +975,7 @@ impl BuildabilityChecker {
         }
 
         let feature_ids: Vec<FeatureId> = edges.iter().map(|e| e.feature).collect();
-        let feature_rows = gradient_core::db::fetch_in_chunks(&feature_ids, |chunk| async move {
+        let feature_rows = gradient_db::fetch_in_chunks(&feature_ids, |chunk| async move {
             EFeature::find().filter(CFeature::Id.is_in(chunk)).all(db).await
         })
         .await

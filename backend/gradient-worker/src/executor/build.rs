@@ -23,7 +23,7 @@
 use anyhow::{Context, Result};
 use bytes::Bytes;
 use futures::StreamExt as _;
-use gradient_core::db::{DrvOutputSpec, parse_drv};
+use gradient_db::{DrvOutputSpec, parse_drv};
 use gradient_core::executor::path_utils::{nix_store_path, strip_nix_store_prefix};
 use gradient_util::hydra::parse_hydra_product_line;
 use gradient_core::sources::get_hash_from_path;
@@ -348,7 +348,7 @@ fn merge_cgroup_sample(prev: Option<BuildMetricsRaw>, cur: BuildMetricsRaw) -> B
 /// Obtain via [`ParsedDerivation::load`]; advance to built outputs via
 /// [`ParsedDerivation::realize`].
 pub(super) struct ParsedDerivation {
-    drv: gradient_core::db::Derivation,
+    drv: gradient_db::Derivation,
     harmonia_path: StorePath,
     basic_drv: BasicDerivation,
 }
@@ -551,7 +551,7 @@ fn output_pairs_from_built_or_drv(
         harmonia_store_derivation::derived_path::OutputName,
         harmonia_store_derivation::realisation::UnkeyedRealisation,
     >,
-    drv: &gradient_core::db::Derivation,
+    drv: &gradient_db::Derivation,
 ) -> Vec<(String, String)> {
     if !built_outputs.is_empty() {
         return built_outputs
@@ -925,7 +925,7 @@ fn log_message_to_text(msg: &LogMessage) -> Option<String> {
 /// `structured_attrs` so the daemon handles them correctly.
 fn get_basic_derivation(
     full_drv_path: &str,
-    drv: &gradient_core::db::Derivation,
+    drv: &gradient_db::Derivation,
 ) -> Result<BasicDerivation> {
     // ── Build outputs from .drv data ──────────────────────────────────────────
     //
@@ -1147,11 +1147,11 @@ mod tests {
         assert!(ca_fixed_output("sha256", "deadbeefdeadbeef").is_err());
     }
 
-    fn drv_with_outputs(outputs: Vec<(&str, &str)>) -> gradient_core::db::Derivation {
-        gradient_core::db::Derivation {
+    fn drv_with_outputs(outputs: Vec<(&str, &str)>) -> gradient_db::Derivation {
+        gradient_db::Derivation {
             outputs: outputs
                 .into_iter()
-                .map(|(name, path)| gradient_core::db::DerivationOutput {
+                .map(|(name, path)| gradient_db::DerivationOutput {
                     name: name.to_string(),
                     path: path.to_string(),
                     hash_algo: String::new(),
