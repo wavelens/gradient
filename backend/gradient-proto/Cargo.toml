@@ -42,7 +42,7 @@ tokio-tungstenite = { workspace = true }
 tracing           = { workspace = true }
 uuid              = { workspace = true }
 
-axum = { version = "0.8", default-features = false, features = ["ws", "http1", "tokio"] }
+axum = { workspace = true, features = ["ws", "http1", "tokio"] }
 
 [dev-dependencies]
 serde_json   = { workspace = true }

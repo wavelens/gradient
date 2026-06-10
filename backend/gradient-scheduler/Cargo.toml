@@ -27,7 +27,7 @@ gradient-score = { workspace = true }
 anyhow     = { workspace = true }
 arc-swap   = { workspace = true }
 chrono     = { workspace = true }
-cron       = "0.12"
+cron       = { workspace = true }
 futures    = { workspace = true }
 reqwest    = { workspace = true }
 sea-orm    = { workspace = true }
