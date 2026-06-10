@@ -1886,6 +1886,21 @@ Tests (`cargo test -p core startup_recovery_tests`):
 - `running_builds_are_aborted_even_under_a_surviving_evaluation`
 - `builds_of_an_aborted_evaluation_are_aborted`
 
+## Server startup: recover interrupted work (`gradient-db`)
+
+`gradient_db::recover_interrupted_work` (`backend/gradient-db/src/recovery.rs`) runs at
+`serve_web` startup to reconcile work left in-flight by the previous process: aborts
+`Running` `build_attempt` rows, re-queues `Building` builds, aborts `Fetching` /
+`EvaluatingFlake` / `EvaluatingDerivation` evaluations, and sets `force_evaluation` on
+their projects. `Building` evaluations and all terminal states are not touched.
+
+Unit tests in `backend/gradient-db/src/recovery.rs` (MockDatabase):
+
+- `all_four_operations_populate_report` — feeds mock `rows_affected` for each step and
+  asserts the `RecoveryReport` fields match.
+- `project_force_step_skipped_when_no_pre_build_evals` — empty eval SELECT causes steps
+  3b/3c to be skipped; report fields all zero.
+
 ## Cache GC - guard shared-hash NARs and purge zombie cached_path rows
 
 Two bugs together inflated cache stats and over-deleted shared NARs:
