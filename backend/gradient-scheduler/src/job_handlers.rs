@@ -13,7 +13,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use gradient_entity::build::BuildStatus;
 use sea_orm::EntityTrait;
-use sea_orm::{ActiveModelTrait, ColumnTrait, IntoActiveModel, QueryFilter, Set};
+use sea_orm::{ColumnTrait, QueryFilter, Set};
 use tracing::{debug, error, info, warn};
 
 use gradient_exec::strip_nix_store_prefix;
@@ -249,7 +249,7 @@ impl Scheduler {
         }
     }
 
-    pub async fn handle_build_status_update(&self, build_id_str: &str, worker_id: &str) {
+    pub async fn handle_build_status_update(&self, build_id_str: &str, _worker_id: &str) {
         let build_id = match build_id_str.parse::<BuildId>() {
             Ok(id) => id,
             Err(_) => {
@@ -263,17 +263,6 @@ impl Scheduler {
             .await
         {
             Ok(Some(build)) => {
-                // Record which worker is handling this build. Persisting here
-                // (rather than at dispatch time) means the worker that actually
-                // accepted the job is recorded, not whichever candidate the
-                // scheduler offered it to.
-                if build.worker.as_deref() != Some(worker_id) {
-                    let mut am: ABuild = build.clone().into_active_model();
-                    am.worker = Set(Some(worker_id.to_string()));
-                    if let Err(e) = am.update(&self.state.worker_db).await {
-                        warn!(error = %e, %build_id, %worker_id, "failed to persist worker on build");
-                    }
-                }
                 gradient_db::update_build_status(
                     &self.state.db(),
                     build,
@@ -501,13 +490,9 @@ impl Scheduler {
             }
         };
 
-        let log_id = match EBuild::find_by_id(build_id)
-            .one(&self.state.worker_db)
-            .await?
-        {
-            Some(b) => b.log_id.unwrap_or(b.id),
-            None => build_id,
-        };
+        let log_id = gradient_db::latest_attempt_log_id(&self.state.worker_db, build_id)
+            .await
+            .unwrap_or(build_id);
 
         debug!(%build_id, %log_id, bytes = bytes_len, "appending build log");
         self.state.log_storage.append(log_id, text).await
@@ -709,21 +694,19 @@ impl Scheduler {
 /// failures are logged so instrumentation can't break dispatch.
 async fn persist_dispatched_job(state: &Arc<ServerState>, worker_id: &str, rec: DispatchRecord) {
     let now = now();
+    let dispatched_job_id = gradient_entity::ids::DispatchedJobId::now_v7();
     let row = gradient_entity::dispatched_job::ActiveModel {
-        id: Set(gradient_entity::ids::DispatchedJobId::now_v7()),
+        id: Set(dispatched_job_id),
         kind: Set(rec.kind),
-        build_id: Set(rec.build_id),
         evaluation_id: Set(rec.evaluation_id),
         organization: Set(rec.organization),
         project: Set(rec.project),
-        derivation: Set(rec.derivation),
         worker_id: Set(worker_id.to_owned()),
         score: Set(rec.score),
         queued_at: Set(rec.queued_at),
         ready_at: Set(Some(rec.ready_at)),
         dispatched_at: Set(now),
         finished_at: Set(None),
-        outcome: Set(None),
         score_breakdown: Set(rec.score_breakdown),
         worker_context: Set(rec.worker_context),
         job_context: Set(rec.job_context),
@@ -737,6 +720,20 @@ async fn persist_dispatched_job(state: &Arc<ServerState>, worker_id: &str, rec: 
     {
         warn!(error = %e, "failed to insert dispatched_job");
     }
+
+    if let Some(build_id) = rec.build_id
+        && let Err(e) = gradient_db::open_attempt(
+            &state.worker_db,
+            build_id,
+            dispatched_job_id,
+            rec.substitute,
+            rec.build_context.clone(),
+        )
+        .await
+    {
+        warn!(error = %e, "failed to open build_attempt");
+    }
+
     if let Some(build_id) = rec.build_id
         && let Err(e) = gradient_entity::build::Entity::update_many()
             .col_expr(

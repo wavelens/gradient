@@ -4,24 +4,26 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Best-effort log substitution for `Substituted` and `external_cached` builds.
+//! Best-effort log substitution for `Substituted` and substitutable builds.
 //!
-//! Two-stage strategy: reuse a sibling build's `log_id` via DB pointer first,
-//! and (only when `allow_upstream_fetch == true`) fall back to the Hydra-style
-//! `/log/{drv}` endpoint on each configured upstream cache. All failures are
+//! Two-stage strategy: reuse a sibling build's attempt `log_id` first, and
+//! (only when `allow_upstream_fetch == true`) fall back to the Hydra-style
+//! `/log/{drv}` endpoint on each configured upstream cache. The resolved log id
+//! is recorded on the build's latest `build_attempt`. All failures are
 //! non-fatal - log substitution must never break the build pipeline.
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use gradient_entity::build::{ActiveModel as ABuild, BuildStatus, Column as CBuild, Entity as EBuild};
+use gradient_entity::build::{BuildStatus, Column as CBuild, Entity as EBuild};
 use gradient_entity::derivation::Entity as EDerivation;
 use futures::StreamExt;
 use gradient_core::ServerState;
 use gradient_types::ids::{BuildId, DerivationId};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
+    QueryOrder,
 };
 use tracing::{debug, warn};
 
@@ -38,8 +40,8 @@ pub async fn substitute_log(
     drv_path: String,
     allow_upstream_fetch: bool,
 ) -> Result<()> {
-    let build = match EBuild::find_by_id(build_id).one(&state.worker_db).await {
-        Ok(Some(b)) => b,
+    match EBuild::find_by_id(build_id).one(&state.worker_db).await {
+        Ok(Some(_)) => {}
         Ok(None) => {
             debug!(%build_id, "substitute_log: build not found");
             return Ok(());
@@ -50,7 +52,7 @@ pub async fn substitute_log(
         }
     };
 
-    if build.log_id.is_some() {
+    if attempt_log_id(&state, build_id).await.is_some() {
         return Ok(());
     }
 
@@ -134,40 +136,27 @@ async fn find_dedup_log_id(
     build_id: BuildId,
     derivation_id: DerivationId,
 ) -> Option<BuildId> {
-    match EBuild::find()
-        .filter(CBuild::Derivation.eq(derivation_id))
-        .filter(CBuild::Id.ne(build_id))
-        .filter(CBuild::LogId.is_not_null())
-        .order_by_desc(CBuild::CreatedAt)
-        .one(&state.worker_db)
-        .await
-    {
-        Ok(Some(prior)) => return prior.log_id,
-        Ok(None) => {}
-        Err(e) => {
-            warn!(%build_id, error = %e, "substitute_log: dedup query (a) failed");
-            return None;
-        }
-    }
-
     let candidate = match EBuild::find()
         .filter(CBuild::Derivation.eq(derivation_id))
         .filter(CBuild::Id.ne(build_id))
-        .filter(CBuild::Status.eq(BuildStatus::Completed))
+        .filter(CBuild::Status.is_in([BuildStatus::Completed, BuildStatus::Substituted]))
         .order_by_desc(CBuild::CreatedAt)
         .one(&state.worker_db)
         .await
     {
         Ok(c) => c,
         Err(e) => {
-            warn!(%build_id, error = %e, "substitute_log: dedup query (b) failed");
+            warn!(%build_id, error = %e, "substitute_log: dedup query failed");
             return None;
         }
     };
 
     let candidate = candidate?;
-    match state.log_storage.read(candidate.id).await {
-        Ok(body) if !body.is_empty() => Some(candidate.id),
+    let log_key = gradient_db::latest_attempt_log_id(&state.worker_db, candidate.id)
+        .await
+        .unwrap_or(candidate.id);
+    match state.log_storage.read(log_key).await {
+        Ok(body) if !body.is_empty() => Some(log_key),
         _ => None,
     }
 }
@@ -200,34 +189,32 @@ async fn fetch_log_body(http: &reqwest::Client, url: &str) -> anyhow::Result<Opt
     Ok(Some(body))
 }
 
+/// The build's substituted-log pointer, stored on its latest `build_attempt`.
+async fn attempt_log_id(state: &Arc<ServerState>, build_id: BuildId) -> Option<BuildId> {
+    gradient_db::latest_attempt(&state.worker_db, build_id)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|a| a.log_id)
+}
+
 async fn set_log_id(state: &Arc<ServerState>, build_id: BuildId, log_id: BuildId) {
-    let build = match EBuild::find_by_id(build_id).one(&state.worker_db).await {
-        Ok(Some(b)) => b,
-        Ok(None) => return,
+    let attempt = match gradient_db::latest_attempt(&state.worker_db, build_id).await {
+        Ok(Some(a)) => a,
+        Ok(None) => {
+            debug!(%build_id, "substitute_log: no attempt to record log_id on");
+            return;
+        }
         Err(e) => {
-            warn!(%build_id, error = %e, "substitute_log: reload before update failed");
+            warn!(%build_id, error = %e, "substitute_log: attempt lookup failed");
             return;
         }
     };
-    let mut am: ABuild = build.into();
+
+    let mut am = attempt.into_active_model();
     am.log_id = Set(Some(log_id));
     if let Err(e) = am.update(&state.worker_db).await {
-        warn!(%build_id, error = %e, "substitute_log: failed to set log_id");
-        return;
-    }
-
-    // Backfills followers whose `via = build_id` are visible now; followers inserted after this UPDATE remain unset.
-    if let Err(e) = EBuild::update_many()
-        .col_expr(
-            CBuild::LogId,
-            sea_orm::sea_query::Expr::value(log_id.into_inner()),
-        )
-        .filter(CBuild::Via.eq(build_id))
-        .filter(CBuild::LogId.is_null())
-        .exec(&state.worker_db)
-        .await
-    {
-        warn!(%build_id, error = %e, "substitute_log: follower backfill failed");
+        warn!(%build_id, error = %e, "substitute_log: failed to set attempt log_id");
     }
 }
 
