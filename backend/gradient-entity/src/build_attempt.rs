@@ -65,10 +65,18 @@ pub struct Model {
     pub failure_message: Option<String>,
     pub log_id: Option<BuildId>,
     pub build_context: Json,
-    pub build_time_ms: Option<i64>,
     pub build_started_at: Option<NaiveDateTime>,
     pub build_finished_at: Option<NaiveDateTime>,
     pub created_at: NaiveDateTime,
+}
+
+impl Model {
+    pub fn duration_ms(&self) -> Option<i64> {
+        match (self.build_started_at, self.build_finished_at) {
+            (Some(s), Some(f)) => Some((f - s).num_milliseconds().max(0)),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
