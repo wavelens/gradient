@@ -538,7 +538,7 @@ nix-daemon, filesystem, or WebSocket connection.
 
 ## `core::types::wildcard` - Evaluation Wildcard Parsing
 
-**File:** `backend/core/src/types/wildcard.rs`  
+**File:** `backend/gradient-types/src/wildcard.rs`  
 **Run:** `cargo test -p core --tests`
 
 Tests for the `Wildcard` type used in project evaluation patterns. Parsing is via `FromStr`; the inverse is `Display`. `get_eval_str()` produces the Nix attribute-set expression passed to the evaluator.
@@ -607,7 +607,7 @@ Tests for the `Wildcard` type used in project evaluation patterns. Parsing is vi
 
 ## `core::nix::url` - Repository & Flake URL Parsing
 
-**File:** `backend/core/src/nix/url.rs`  
+**File:** `backend/gradient-nix/src/url.rs`  
 **Run:** `cargo test -p core --tests`
 
 Tests for `RepositoryUrl` (stored in the database, used for display and git operations) and `NixFlakeUrl` (passed to `nix flake` commands, always includes `?rev=`).
@@ -644,7 +644,7 @@ Tests for `RepositoryUrl` (stored in the database, used for display and git oper
 
 ## `core::db::derivation` - `.drv` File Parsing
 
-**File:** `backend/core/src/db/derivation.rs`  
+**File:** `backend/gradient-db/src/derivation.rs`  
 **Run:** `cargo test -p core --tests`
 
 Tests for `parse_drv`, which parses the textual `Derive(…)` format produced by `nix derivation show`. The fixture derivation used by these tests is:
@@ -972,7 +972,7 @@ OOM rate from `derivation_metric` rows.
 
 ## `core::db::closure` - Derivation Closure Helpers
 
-**File:** `backend/core/src/db/closure.rs`
+**File:** `backend/gradient-db/src/closure.rs`
 **Run:** `cargo test -p core --tests`
 
 Tests for the shared closure helpers (`transitive_closure_reachable`,
@@ -1581,7 +1581,7 @@ with a valid `id: Uuid`.
 
 ### Group G: `abort_evaluation`
 
-Tests for `gradient_core::db::abort_evaluation`, which cascades `Aborted` to
+Tests for `gradient_ci::abort_evaluation`, which cascades `Aborted` to
 all active builds before aborting the evaluation itself.
 
 **DB call sequence:**

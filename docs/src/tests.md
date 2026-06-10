@@ -42,7 +42,7 @@ claims collect the distinct grants applied additively on login).
 All "load resource by name and check the caller may use it" logic lives in
 two modules:
 
-- `backend/core/src/permissions.rs` - declares the [`Permission`] capability
+- `backend/gradient-db/src/permissions.rs` - declares the [`Permission`] capability
   enum (e.g. `EditProject`, `ManageMembers`, `ManageRoles`, `ManageWebhooks`),
   each capability's stable bit position in the `role.permission` bitmask
   (`Permission::bit`), and the canonical bitmasks for the three built-in
@@ -275,7 +275,7 @@ Tests covered:
 **Deferred (Task 8):**
 
 The following scenarios are intentionally omitted because they would duplicate
-`trigger_evaluation` unit tests already present in `backend/core/src/ci/trigger.rs`:
+`trigger_evaluation` unit tests already present in `backend/gradient-ci/src/trigger.rs`:
 
 - *already_in_progress*: project has an in-progress eval → item appears in `skipped` with `reason="already_in_progress"`.
 - *no_previous_evaluation*: `trigger_restart_builds` finds no previous eval → `reason="no_previous_evaluation"`.
@@ -445,7 +445,7 @@ The `derivation_output.file_hash`, `cached_path.file_hash`, and
 written while issue #132's BLAKE3 default was active) so the URL hash
 extracted from a narinfo `URL:` field matches the column directly.
 Workers send the prefixed hash over the wire; the proto handler and
-scheduler call `gradient_core::nix_hash::normalize_nar_hash` before
+scheduler call `gradient_util::nix_hash::normalize_nar_hash` before
 `Set(...)`. Migration `m20260430_000000_normalize_hash_columns` backfills
 pre-existing rows.
 
@@ -560,21 +560,21 @@ Backend (`cargo test -p core --lib state::tests`):
   `types.ints.positive` constraint in `nix/modules/gradient-state.nix`
   and the API-level `apply_keep_evaluations` check.
 - `default_keep_evaluations_is_thirty`
-  (`backend/core/src/types/cli/storage.rs`) - `StorageArgs::default()`
+  (`backend/gradient-types/src/cli/storage.rs`) - `StorageArgs::default()`
   yields `keep_evaluations = 30` so a default `gradient-server` install
   bounds per-project evaluation retention instead of allowing unbounded
   growth (issue #92).
 - `default_nar_ttl_hours_is_two_weeks`
-  (`backend/core/src/types/cli/storage.rs`) - `StorageArgs::default()`
+  (`backend/gradient-types/src/cli/storage.rs`) - `StorageArgs::default()`
   yields `nar_ttl_hours = 336` (2 weeks) so cached NARs eventually
   expire on a default deploy (issue #92).
 - `clap_default_keep_evaluations_is_thirty`
-  (`backend/core/src/types/cli/storage.rs`) - parsing an empty argv
+  (`backend/gradient-types/src/cli/storage.rs`) - parsing an empty argv
   through clap yields `keep_evaluations = 30`, guarding against drift
   between the `#[arg(default_value …)]` attribute and the `Default`
   impl.
 - `clap_default_nar_ttl_hours_is_two_weeks`
-  (`backend/core/src/types/cli/storage.rs`) - parsing an empty argv
+  (`backend/gradient-types/src/cli/storage.rs`) - parsing an empty argv
   through clap yields `nar_ttl_hours = 336`, same drift guard.
 - `state_project_silently_ignores_legacy_force_evaluation_field` -
   state files written before the rename may still carry
@@ -612,12 +612,12 @@ Backend (`cargo test -p core --lib state::tests`):
   member entries with the same `user` in one org's `members` is an
   error.
 - `pending_membership_tests::apply_pending_returns_zero_for_unknown_user`
-  (`backend/core/src/state/provisioning.rs`) -
+  (`backend/gradient-state/src/provisioning.rs`) -
   `apply_pending_org_memberships` is a no-op when the username has no
   pending entries; callable from any user-creation path without a
   matching state declaration.
 - `keep_set_tests::keep_sets_track_inner_name_not_attrset_key`
-  (`backend/core/src/state/provisioning.rs`) - `gradient-state.nix`
+  (`backend/gradient-state/src/provisioning.rs`) - `gradient-state.nix`
   exposes `name = mkOption { default = <attrset key>; }` on users,
   organizations, projects, caches, and API keys, so a user may pin
   `projects.foo = { name = "main"; … }`. Every `apply_*` writes the
@@ -628,7 +628,7 @@ Backend (`cargo test -p core --lib state::tests`):
 
 These pin the wire contract between `nix/modules/gradient-state.nix`
 (`types.nullOr types.str` on `password_file` and the three `description`
-options) and `backend/core/src/state/mod.rs`. Without them, provisioning a
+options) and `backend/gradient-state/src/mod.rs`. Without them, provisioning a
 user intended for OIDC failed at startup with "missing field
 `password_file`", and the user's subsequent OIDC login was rejected by
 `web::authorization::oidc` with `User already exists with password
@@ -897,7 +897,7 @@ and zero remaining build references.
 
 ## Per-project evaluation GC retention policy (#305)
 
-`evaluations_to_gc` (`backend/core/src/db/gc.rs`) decides, by index into a
+`evaluations_to_gc` (`backend/gradient-db/src/gc.rs`) decides, by index into a
 newest-first evaluation list, which evaluations `gc_project_evaluations`
 deletes for a project's `keep_evaluations` count. Active evaluations
 (Queued/Fetching/Evaluating*/Building/Waiting) are never deleted and never
@@ -963,8 +963,8 @@ Specs (vitest + jsdom):
 CI check names reported to GitHub/Gitea now include the organization
 and project so multiple Gradient instances/projects sharing a forge
 repository remain distinguishable. Helpers live in
-`backend/core/src/ci/reporting.rs` and are reused by the
-`ForgeStatusReport` action dispatcher (`backend/core/src/ci/actions.rs`):
+`backend/gradient-ci/src/reporting.rs` and are reused by the
+`ForgeStatusReport` action dispatcher (`backend/gradient-ci/src/actions.rs`):
 
 - Evaluation roll-up: `Gradient Evaluation {org}/{project}` (e.g.
   `Gradient Evaluation wavelens/my-project`).
@@ -1012,7 +1012,7 @@ Tests (`cargo test -p web --test rate_limit`):
 
 ## Outgoing webhook URL - SSRF validation
 
-`validate_webhook_url` (in `backend/core/src/ci/webhook.rs`) is the gate
+`validate_webhook_url` (in `backend/gradient-util/src/http_validation.rs`) is the gate
 between user-supplied webhook URLs and the outbound HTTP client. It is
 called at create/update time (in `web::endpoints::webhooks::{put,
 patch_webhook}`) and again at delivery time inside
@@ -1054,7 +1054,7 @@ Unit tests (`cargo test -p core --tests ci::webhook`):
 ## CI reporter base URL - SSRF + redirect token leak (#113)
 
 `GiteaReporter`, `GithubReporter`, and `GithubAppReporter` (in
-`backend/core/src/forge/reporter.rs`) now validate any user-supplied
+`backend/gradient-forge/src/reporter.rs`) now validate any user-supplied
 `base_url` / `api_base_url` through the same SSRF gate as outgoing
 webhooks (`validate_webhook_url`), and build their reqwest clients with
 `redirect::Policy::none()` so that an attacker cannot pivot a status
@@ -1088,7 +1088,7 @@ Unit tests (`cargo test -p core --tests forge::reporter`):
 
 Every per-forge decision (reporter construction, webhook parsing,
 signature verification, event classification) lives behind the
-`ForgeProvider` trait in `backend/core/src/forge/`; the `ForgeRegistry`
+`ForgeProvider` trait in `backend/gradient-forge/src/`; the `ForgeRegistry`
 maps each `ForgeType` to its provider and is shared via `CiContext.forge`.
 Reporter selection and webhook dispatch resolve a provider instead of
 matching on `ForgeType`.
@@ -1102,12 +1102,12 @@ Unit tests (`cargo test -p core --tests forge::providers`):
 
 ## GitLab outbound CI reporter (#90)
 
-`GitlabReporter` (in `backend/core/src/forge/reporter.rs`) posts commit
+`GitlabReporter` (in `backend/gradient-forge/src/reporter.rs`) posts commit
 statuses to GitLab via `POST {base_url}/api/v4/projects/{id}/statuses/{sha}`,
 where `id` is the URL-encoded `owner/repo` path (also covers nested
 groups such as `group/sub/repo`). Authenticates with `PRIVATE-TOKEN`,
 which accepts personal, project, and group access tokens. The
-`ForgeStatusReport` action dispatcher in `backend/core/src/ci/actions.rs`
+`ForgeStatusReport` action dispatcher in `backend/gradient-ci/src/actions.rs`
 resolves the integration row and constructs a `GitlabReporter` (or the
 appropriate forge-specific reporter) per dispatch — the legacy per-project
 lookup helper has been removed.
@@ -1133,13 +1133,13 @@ Unit tests (`cargo test -p core --tests forge::reporter`):
 
 ## SSH private key decryption - no plaintext fallback
 
-`decrypt_ssh_private_key` in `backend/core/src/sources/ssh_key.rs`
+`decrypt_ssh_private_key` in `backend/gradient-sources/src/ssh_key.rs`
 decrypts the per-organization SSH key from `organization.private_key`.
 Decryption failure must NOT silently fall back to interpreting the
 stored value as a plaintext PEM, otherwise anyone with write access to
 that column could bypass encryption entirely.
 
-Tests (`backend/core/src/sources/ssh_key.rs`):
+Tests (`backend/gradient-sources/src/ssh_key.rs`):
 
 - `decrypt_ssh_key_corrupt_base64_fails` - non-base64 column rejected
   with `OrganizationKeyDecoding`.
@@ -1211,7 +1211,7 @@ migration). Tests:
   anonymous access, private-org evaluations 404 for anonymous callers.
 - `backend/web/tests/old_direct_build_gone.rs` - see the regression
   block above.
-- `backend/core/src/storage/source_nar.rs` - in-file unit tests for
+- `backend/gradient-storage/src/source_nar.rs` - in-file unit tests for
   `materialise_source_nar`: deterministic NAR hash + store path across
   repeat calls, `-source` suffix on the resulting `/nix/store/<hash>`,
   and the canonical 32-char base32 hash shape.
@@ -1275,7 +1275,7 @@ single backlog could pin one DB connection indefinitely.
 The sweep is now `LIMIT`-bounded (`SIGN_SWEEP_BATCH = 1000` rows per
 pass) and batches the `cache` / `cached_path` lookups into one
 `is_in(...)` query each. Per-cache decrypted keys are wrapped in a new
-`CacheSigner` (in `backend/core/src/sources/cache_key.rs`) built once
+`CacheSigner` (in `backend/gradient-sources/src/cache_key.rs`) built once
 per pass per cache - the crypt secret is read at most once per cache,
 not once per signature. `sign_narinfo_fingerprint` is now a thin
 one-shot wrapper around `CacheSigner::sign_narinfo` so existing
@@ -1295,7 +1295,7 @@ Unit tests (`cargo test -p core --lib sources::cache_key`):
   decryption error per row.
 
 After issue #132, the dedicated `hex_hash_to_nix32` helper was removed
-and `sign_missing_signatures` calls `gradient_core::nix_hash::normalize_nar_hash`
+and `sign_missing_signatures` calls `gradient_util::nix_hash::normalize_nar_hash`
 directly. The hash-format conversion path is now covered by the
 algorithm-aware test suite in `cargo test -p core --lib nix_hash` (see
 above), which exercises both `sha256:` and `blake3:` inputs.
@@ -1355,7 +1355,7 @@ Tests (`cargo test -p worker --bins reconnect`):
 and `web_db`; nothing in the type system stopped a web handler from
 reaching for `state.db` (the proto/scheduler/cache pool) or vice versa.
 The `db` field is now `worker_db: WorkerDb` and `web_db: WebDb`
-(`backend/core/src/types/db.rs`). Both newtypes forward `ConnectionTrait`
+(`backend/gradient-db/src/pool.rs`). Both newtypes forward `ConnectionTrait`
 to the inner pool so existing call sites
 (`find().one(&state.web_db)`, `state.worker_db.execute(stmt)`, …) work
 unchanged. The compile-time defense kicks in at any function boundary
@@ -1432,7 +1432,7 @@ Eliminates the prior 18 ad-hoc `reqwest::Client::new()` /
 each created a fresh TCP/TLS connection pool with inconsistent (or
 absent) timeout and redirect policy.
 
-`backend/core/src/http.rs` builds the project-wide client with sane
+`backend/gradient-util/src/http.rs` builds the project-wide client with sane
 defaults (30 s timeout, `redirect::none`, and a branded
 `Gradient/<version> (+https://github.com/wavelens/gradient)`
 user-agent so upstream cache operators can attribute traffic). The
@@ -1445,7 +1445,7 @@ and the GitHub-App helpers (`get_installation_token`, `exchange_code`)
 now take the shared `reqwest::Client` as a parameter instead of building
 their own.
 
-Unit tests in `backend/core/src/http.rs`:
+Unit tests in `backend/gradient-util/src/http.rs`:
 
 - `build_client_succeeds` - the default builder yields a usable
   `reqwest::Client`.
@@ -1465,7 +1465,7 @@ Unit tests in `backend/core/src/http.rs`:
 
 ## Graceful shutdown (`#72`)
 
-`backend/core/src/shutdown.rs` introduces a `Shutdown` primitive bundling a
+`backend/gradient-util/src/shutdown.rs` introduces a `Shutdown` primitive bundling a
 `tokio_util::sync::CancellationToken` with a `tokio_util::task::TaskTracker`.
 It replaces bare `tokio::spawn` for every long-lived background task -
 dispatch loops, the outbound worker connection loop, the cache GC and
@@ -1476,7 +1476,7 @@ SIGINT/SIGTERM handler that calls `shutdown.cancel()`, hands the token to
 `shutdown.cancel_and_drain(30s)` so in-flight cleanups, metric writes, and
 webhook deliveries finish before the process exits.
 
-Unit tests in `backend/core/src/shutdown.rs`:
+Unit tests in `backend/gradient-util/src/shutdown.rs`:
 
 - `cancel_interrupts_select_loop` - a task that `select!`s on
   `cancelled()` against a 60-second sleep returns immediately when the
@@ -1490,7 +1490,7 @@ Unit tests in `backend/core/src/shutdown.rs`:
 
 ## Shared transitive-dependents walk (`#108`)
 
-`backend/core/src/db/dependency_graph.rs` exposes
+`backend/gradient-db/src/dependency_graph.rs` exposes
 `collect_transitive_dependents`, the single canonical reverse-edge BFS over
 the `derivation_dependency` table. Both the cache-invalidation closure
 revocation in `cache::cacher::invalidate::revoke_cache_derivation_closure`
@@ -1500,7 +1500,7 @@ through it instead of carrying their own copy. The cascade also collapses
 to a single batched `derivation IS IN (...)` builds query, replacing the
 prior per-iteration full re-scan + per-build edge probe.
 
-Unit tests in `backend/core/src/db/dependency_graph.rs`:
+Unit tests in `backend/gradient-db/src/dependency_graph.rs`:
 
 - `no_dependents_returns_only_start` - a leaf derivation yields a set
   containing exactly the starting id.
@@ -1714,7 +1714,7 @@ Run with `cargo test -p scheduler --tests waiting_reason_tests`.
 
 ## Pre-build evaluation stall when no worker exists (issue #97)
 
-`backend/core/src/state_machine/eval.rs::tests` extends the evaluation
+`backend/gradient-db/src/state_machine/eval.rs::tests` extends the evaluation
 state machine to allow the scheduler to surface a "no worker connected"
 stall before any builds have been queued:
 
@@ -2260,7 +2260,7 @@ context entirely. `create_router` (`backend/web/src/lib.rs`) now wires
 `TraceLayer::make_span_with` (which opens an `http_request` span
 carrying `method`, the `MatchedPath` route, and the `x-request-id`),
 and `PropagateRequestIdLayer` (which echoes the id on the response).
-`Shutdown::spawn` (`backend/core/src/shutdown.rs`) wraps every spawned
+`Shutdown::spawn` (`backend/gradient-util/src/shutdown.rs`) wraps every spawned
 future with `.in_current_span()`, so cleanup tasks inherit the request
 span and the id is on every line they emit.
 
@@ -2388,7 +2388,7 @@ integration rows. Run with
   reserved for the auto-managed row; user-created integrations using it
   are rejected with 400.
 
-`backend/core/src/ci/integration_lookup.rs::ensure_tests`:
+`backend/gradient-ci/src/integration_lookup.rs::ensure_tests`:
 
 - `creates_both_rows_when_none_exist` - calling
   `ensure_github_app_integrations` on an org with no existing rows inserts
@@ -2653,7 +2653,7 @@ Three cases:
 
 ## Sentry DSN - operator-overridable reporting target (issue #106)
 
-Tests in `backend/core/src/types/cli/registration.rs` cover the DSN override helper:
+Tests in `backend/gradient-types/src/cli/registration.rs` cover the DSN override helper:
 
 - `effective_sentry_dsn_returns_default_when_none` - when `RegistrationArgs::sentry_dsn` is `None`, the helper returns `DEFAULT_SENTRY_DSN` (the upstream Wavelens DSN).
 - `effective_sentry_dsn_returns_override_when_some` - when an operator sets `GRADIENT_SENTRY_DSN` / `settings.sentryDsn`, the helper returns the override string, and the three Sentry init call-sites (`backend/src/main.rs`, `cache_loop`, `sign_sweep_loop`) route reports there instead.
@@ -3002,7 +3002,7 @@ Run with: `cargo test -p core --test actions_dispatch`
 - `forge_status_ignores_events_list` - `forge_status_report` always maps `build.started/completed/failed` regardless of `events`.
 - `payload_helpers_include_all_fields` - outgoing JSON payload for `send_web_request` contains `event`, `project`, `organization`, `id`, `status`.
 
-### Backend — inline unit tests (`backend/core/src/ci/actions.rs`)
+### Backend — inline unit tests (`backend/gradient-ci/src/actions.rs`)
 
 Run with: `cargo test -p core --lib ci::actions::tests`
 
@@ -3022,7 +3022,7 @@ Run with: `pnpm --dir frontend exec ng test --watch=false`
 
 ## Cache roles & permissions (issue #265)
 
-- `backend/core/src/permissions.rs` — `CachePermission` bitmask unit tests
+- `backend/gradient-db/src/permissions.rs` — `CachePermission` bitmask unit tests
 - `backend/web/src/access.rs` — `load_cache` access matrix tests
 - `backend/web/tests/cache_roles.rs` — role CRUD endpoint tests
 - `backend/web/tests/cache_members.rs` — member CRUD endpoint tests
@@ -3031,7 +3031,7 @@ Run with: `pnpm --dir frontend exec ng test --watch=false`
 
 ## Admin tasks & deep GC (issue #271)
 
-- `backend/core/src/db/admin_tasks.rs` — DB helper unit tests: insert/find/mark transitions, unique-violation detection, startup recovery `mark_all_active_failed`.
+- `backend/gradient-db/src/admin_tasks.rs` — DB helper unit tests: insert/find/mark transitions, unique-violation detection, startup recovery `mark_all_active_failed`.
 - `backend/cache/src/cacher/deep_gc.rs` — sweep unit tests: blob pass removes orphan blob, blob pass purges zombie row, log pass removes orphan log, `DeepGcReport` serialises with snake_case keys.
 
 ## Evaluation start - surface repository errors (issue #280)
@@ -3277,7 +3277,7 @@ the Nix binary-cache serving family, and build-request dispatch.
 
 ## State export endpoint (#188)
 
-`backend/core/src/state/export.rs` unit tests cover the secret-redaction pass
+`backend/gradient-state/src/export.rs` unit tests cover the secret-redaction pass
 (`redact` nulls every `*_file` key at any nesting depth) and the JSON→Nix
 renderer (string escaping for `"`, `\`, `${`, and newlines; identifier vs.
 quoted attribute keys; nested attrsets/lists; empty `{ }`/`[ ]`; and the header
@@ -3391,7 +3391,7 @@ The shared `derivation_closure_reachable` / `sum_output_sizes` helpers (lifted
 out of `projects/metrics.rs`) keep their existing coverage in
 `backend/web/src/endpoints/projects/metrics.rs` (`sum_output_sizes_*`).
 
-### Shared closure-size helper - `backend/core/src/db/closure.rs`
+### Shared closure-size helper - `backend/gradient-db/src/closure.rs`
 
 `transitive_closure_size` is the single source of truth for build-closure NAR
 size; both the web closure endpoint and the scheduler's dispatch backfill call

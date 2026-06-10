@@ -376,7 +376,7 @@ State-managed API keys are declared under `state.api_keys.<name>`:
   hex digest of the token (without the `GRAD` prefix).
 - `owned_by` (required, string): username that owns the key.
 - `permissions` (required, list of strings): permission identifiers the key
-  grants. See `gradient_core::permissions::Permission` (or
+  grants. See `gradient_db::permissions::Permission` (or
   `GET /user/keys/permissions`) for the full list.
 - `organization` (optional, string): organization name to pin the key to.
   Omit for an unscoped key.
