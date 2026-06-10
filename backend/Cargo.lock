@@ -1996,6 +1996,7 @@ dependencies = [
  "gradient-entity",
  "gradient-test-support",
  "gradient-types",
+ "gradient-util",
  "mockall",
  "ring",
  "sea-orm",
@@ -2034,6 +2035,7 @@ dependencies = [
  "gradient-migration",
  "gradient-test-support",
  "gradient-types",
+ "gradient-util",
  "harmonia-file-nar",
  "harmonia-protocol",
  "harmonia-store-content-address",
@@ -2117,6 +2119,7 @@ dependencies = [
  "gradient-scheduler",
  "gradient-test-support",
  "gradient-types",
+ "gradient-util",
  "hex",
  "password-auth",
  "reqwest 0.13.3",
@@ -2177,6 +2180,7 @@ dependencies = [
  "gradient-cache",
  "gradient-core",
  "gradient-types",
+ "gradient-util",
  "gradient-web",
  "sentry",
  "tokio",
@@ -2198,6 +2202,7 @@ dependencies = [
  "gradient-entity",
  "gradient-proto",
  "gradient-types",
+ "gradient-util",
  "gradient-web",
  "harmonia-file-nar",
  "harmonia-store-derivation",
@@ -2238,6 +2243,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "gradient-util"
+version = "1.2.0"
+dependencies = [
+ "base64",
+ "hex",
+ "reqwest 0.13.3",
+ "rustls",
+ "rustls-native-certs",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "url",
+ "webpki-roots 1.0.7",
+]
+
+[[package]]
 name = "gradient-web"
 version = "1.2.0"
 dependencies = [
@@ -2262,6 +2284,7 @@ dependencies = [
  "gradient-scheduler",
  "gradient-test-support",
  "gradient-types",
+ "gradient-util",
  "harmonia-file-nar",
  "hex",
  "hmac 0.13.0",
@@ -2313,6 +2336,7 @@ dependencies = [
  "gradient-proto",
  "gradient-test-support",
  "gradient-types",
+ "gradient-util",
  "harmonia-file-nar",
  "harmonia-protocol",
  "harmonia-store-content-address",

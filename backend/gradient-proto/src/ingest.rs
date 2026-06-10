@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_core::nix_hash::{is_nix32_hash, normalize_nar_hash};
+use gradient_util::nix_hash::{is_nix32_hash, normalize_nar_hash};
 use gradient_core::storage::nar::NarStore;
 use gradient_types::ids::{CacheId, CachedPathId, CachedPathSignatureId, OrganizationId};
 use gradient_types::*;

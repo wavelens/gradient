@@ -162,13 +162,13 @@ pub fn make_ctx() -> crate::ci::CiContext {
             log_storage: std::sync::Arc::new(NoopLog),
             email: std::sync::Arc::new(NoopEmail) as std::sync::Arc<dyn EmailSender>,
         },
-        shutdown: crate::shutdown::Shutdown::new(),
+        shutdown: gradient_util::shutdown::Shutdown::new(),
         board_events: tokio::sync::broadcast::channel(256).0,
         reactor: std::sync::Arc::new(NoReactor),
     };
     CiContext {
         db,
-        http: crate::http::build_client().expect("http client"),
+        http: gradient_util::http::build_client().expect("http client"),
         forge: crate::forge::ForgeRegistry::with_builtin(),
     }
 }

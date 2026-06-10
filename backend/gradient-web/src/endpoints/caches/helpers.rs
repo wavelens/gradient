@@ -12,7 +12,7 @@ use axum::extract::State;
 use axum::http::HeaderMap;
 use base64::Engine;
 use crate::ip_allowlist::is_allowed as ip_allowed;
-use gradient_core::nix_hash::{normalize_nar_hash, strip_hash_algo};
+use gradient_util::nix_hash::{normalize_nar_hash, strip_hash_algo};
 use gradient_core::sources::get_path_from_derivation_output;
 use gradient_types::*;
 use gradient_core::ServerState;

@@ -19,7 +19,7 @@ use std::io::Write as _;
 
 use anyhow::{Context, Result};
 use futures::StreamExt;
-use gradient_core::nix_hash::nix32_encode;
+use gradient_util::nix_hash::nix32_encode;
 use harmonia_store_path::StorePath;
 use harmonia_store_remote::DaemonStore as _;
 use gradient_proto::messages::ClientMessage;

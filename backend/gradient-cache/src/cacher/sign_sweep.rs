@@ -13,7 +13,7 @@
 //! records `cache_derivation` rows when a derivation's full closure has
 //! become cached for a given cache.
 
-use gradient_core::nix_hash::normalize_nar_hash;
+use gradient_util::nix_hash::normalize_nar_hash;
 use gradient_core::sources::CacheSigner;
 use gradient_types::*;
 use gradient_core::ServerState;

@@ -757,7 +757,7 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
 }
 
 /// Install a SIGINT/SIGTERM handler that triggers graceful shutdown.
-fn install_signal_handler(shutdown: gradient_core::shutdown::Shutdown) {
+fn install_signal_handler(shutdown: gradient_util::shutdown::Shutdown) {
     tokio::spawn(async move {
         #[cfg(unix)]
         {

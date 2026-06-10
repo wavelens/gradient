@@ -55,7 +55,7 @@ fn main() -> Result<()> {
     // Must precede the first TLS handshake - `connect_async` for `wss://` is
     // the first thing the runtime does and rustls 0.23 panics if no provider
     // is installed (see issue #232).
-    gradient_core::http::init_crypto_provider();
+    gradient_util::http::init_crypto_provider();
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async move {

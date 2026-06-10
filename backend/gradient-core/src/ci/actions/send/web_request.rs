@@ -18,7 +18,7 @@ pub(crate) async fn execute_send_web_request(
     url: &str,
     token: Option<&str>,
 ) -> Result<ExecutorOk> {
-    crate::http_validation::validate_webhook_url(url)
+    gradient_util::http_validation::validate_webhook_url(url)
         .map_err(|e| anyhow!("URL rejected: {}", e))?;
     let body = serde_json::to_string(payload).context("serializing webhook payload")?;
     let mut req = ctx

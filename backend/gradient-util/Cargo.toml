@@ -1,0 +1,31 @@
+# SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+[package]
+name = "gradient-util"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "gradient_util"
+path = "src/lib.rs"
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+base64              = { workspace = true }
+hex                 = { workspace = true }
+reqwest             = { workspace = true }
+rustls              = { workspace = true }
+rustls-native-certs = { workspace = true }
+thiserror           = { workspace = true }
+tokio               = { workspace = true, features = ["sync", "rt", "macros", "time"] }
+tokio-util          = { workspace = true, features = ["rt", "io"] }
+tracing             = { workspace = true }
+url                 = { workspace = true }
+webpki-roots        = { workspace = true }

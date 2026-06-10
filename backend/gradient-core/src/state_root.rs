@@ -19,7 +19,7 @@ use crate::ci::CiContext;
 use crate::ci::manifest_state::{ManifestStateStore, PendingCredentialsStore};
 use crate::db::{DbContext, StatusReactor, WebDb, WorkerDb};
 use crate::forge::ForgeRegistry;
-use crate::shutdown::Shutdown;
+use gradient_util::shutdown::Shutdown;
 use crate::state::{OidcGroupRoles, PendingOrgMemberships};
 use crate::storage::{EmailSender, LogStorage, NarStore, StorageCtx};
 use gradient_types::{BoardEvent, RuntimeConfig, SecretString};

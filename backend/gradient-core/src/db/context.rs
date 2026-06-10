@@ -10,7 +10,7 @@ use tokio::sync::broadcast;
 
 use super::pool::{WebDb, WorkerDb};
 use super::status_reactor::StatusReactor;
-use crate::shutdown::Shutdown;
+use gradient_util::shutdown::Shutdown;
 use crate::storage::StorageCtx;
 use gradient_types::{BoardEvent, RuntimeConfig};
 
