@@ -110,6 +110,7 @@ async fn authorize_redirect_carries_pkce_and_cookie_holds_verifier() {
         pending_org_memberships: Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: Arc::new(std::collections::HashMap::new()),
         board_events: tokio::sync::broadcast::channel(256).0,
+        forge: gradient_core::forge::ForgeRegistry::with_builtin(),
         reactor: std::sync::Arc::new(gradient_core::db::NoReactor),
     });
 
