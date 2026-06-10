@@ -5,7 +5,7 @@
  */
 
 use crate::ci::trigger::TriggerError;
-use crate::types::*;
+use gradient_types::*;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder};
 
 /// Loads the most recent evaluation for `project_id` together with all of its

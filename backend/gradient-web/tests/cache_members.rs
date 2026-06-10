@@ -9,8 +9,8 @@
 
 use gradient_entity::{cache, cache_role, cache_user, ids::*, user};
 use gradient_core::permissions::{cache_admin_mask, cache_view_mask};
-use gradient_core::types::SessionId;
-use gradient_core::types::consts::{BASE_CACHE_ROLE_ADMIN_ID, BASE_CACHE_ROLE_VIEW_ID};
+use gradient_types::SessionId;
+use gradient_types::consts::{BASE_CACHE_ROLE_ADMIN_ID, BASE_CACHE_ROLE_VIEW_ID};
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;

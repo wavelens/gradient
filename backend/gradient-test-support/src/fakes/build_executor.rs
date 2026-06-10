@@ -7,7 +7,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use gradient_core::executor::{BuildExecutionResult, BuildExecutor, ExecutedBuildOutput};
-use gradient_core::types::{MBuild, MOrganization, MServer};
+use gradient_types::{MBuild, MOrganization, MServer};
 use gradient_core::ServerState;
 use harmonia_store_derivation::derivation::BasicDerivation;
 use std::sync::{Arc, Mutex};

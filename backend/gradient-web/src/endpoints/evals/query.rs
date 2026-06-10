@@ -9,8 +9,8 @@ use crate::error::WebResult;
 use crate::helpers::ok_json;
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
-use gradient_core::types::input::vec_to_hex;
-use gradient_core::types::*;
+use gradient_types::input::vec_to_hex;
+use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::{ColumnTrait, EntityTrait, Order, QueryFilter, QueryOrder};
 use std::collections::{HashMap, HashSet};
@@ -21,7 +21,7 @@ use super::types::{
     BuildItem, BuildsQuery, EntryPointBrief, EvaluationMessageResponse, EvaluationResponse,
     EvaluationTriggerSummary, PaginatedBuilds,
 };
-use gradient_core::types::triggers::TriggerType;
+use gradient_types::triggers::TriggerType;
 
 pub async fn get_evaluation(
     state: State<Arc<ServerState>>,
@@ -91,7 +91,7 @@ pub async fn get_evaluation(
         evaluation
             .waiting_reason
             .as_ref()
-            .and_then(gradient_core::types::WaitingReason::from_json)
+            .and_then(gradient_types::WaitingReason::from_json)
     } else {
         None
     };

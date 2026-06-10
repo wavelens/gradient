@@ -16,8 +16,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::StreamExt;
-use gradient_core::types::ids::OrganizationId;
-use gradient_core::types::*;
+use gradient_types::ids::OrganizationId;
+use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use tracing::{debug, error, warn};
@@ -315,10 +315,10 @@ pub(super) async fn send_credentials_for_job(
     state: &ServerState,
     scheduler: &gradient_scheduler::Scheduler,
     worker_id: &str,
-    job: &gradient_core::types::proto::Job,
+    job: &gradient_types::proto::Job,
     org_id: OrganizationId,
 ) {
-    use gradient_core::types::proto::{FlakeTask, Job};
+    use gradient_types::proto::{FlakeTask, Job};
 
     let caps = scheduler.worker_gradient_caps(worker_id).await;
     let worker_can_fetch = caps.as_ref().map(|c| c.fetch).unwrap_or(false);
@@ -338,7 +338,7 @@ async fn send_ssh_key_credential(
     state: &ServerState,
     org_id: OrganizationId,
 ) {
-    use gradient_core::types::proto::CredentialKind;
+    use gradient_types::proto::CredentialKind;
 
     match EOrganization::find_by_id(org_id)
         .one(&state.worker_db)

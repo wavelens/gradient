@@ -7,7 +7,7 @@
 use std::fmt;
 use std::str::FromStr;
 
-use crate::types::input::InputError;
+use gradient_types::input::InputError;
 
 /// A validated, normalized repository URL.
 ///

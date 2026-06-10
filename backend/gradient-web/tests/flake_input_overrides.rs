@@ -6,7 +6,7 @@
 
 use gradient_entity::ids::*;
 use gradient_entity::project_flake_input_override;
-use gradient_core::types::SessionId;
+use gradient_types::SessionId;
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 use serde_json::Value;
 use gradient_test_support::fixtures::{org, org_id, project_id, test_date, user, user_id};
@@ -52,13 +52,13 @@ fn admin_membership() -> gradient_entity::organization_user::Model {
         ),
         organization: org_id(),
         user: user_id(),
-        role: gradient_core::types::consts::BASE_ROLE_ADMIN_ID,
+        role: gradient_types::consts::BASE_ROLE_ADMIN_ID,
     }
 }
 
 fn admin_role_row() -> gradient_entity::role::Model {
     gradient_entity::role::Model {
-        id: gradient_core::types::consts::BASE_ROLE_ADMIN_ID,
+        id: gradient_types::consts::BASE_ROLE_ADMIN_ID,
         name: "Admin".into(),
         permission: gradient_core::permissions::admin_mask(),
         ..Default::default()

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::types::*;
+use gradient_types::*;
 
 /// Returns the full `/nix/store/` path for a derivation hash-name stored without prefix.
 pub fn nix_store_path(hash_name: &str) -> String {

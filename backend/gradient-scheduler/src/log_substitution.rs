@@ -19,7 +19,7 @@ use gradient_entity::build::{ActiveModel as ABuild, BuildStatus, Column as CBuil
 use gradient_entity::derivation::Entity as EDerivation;
 use futures::StreamExt;
 use gradient_core::ServerState;
-use gradient_core::types::ids::{BuildId, DerivationId};
+use gradient_types::ids::{BuildId, DerivationId};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
 };
@@ -235,7 +235,7 @@ async fn set_log_id(state: &Arc<ServerState>, build_id: BuildId, log_id: BuildId
 mod tests {
     use super::*;
     use gradient_entity::build;
-    use gradient_core::types::ids::{EvaluationId, OrganizationId};
+    use gradient_types::ids::{EvaluationId, OrganizationId};
     use gradient_test_support::prelude::*;
     use uuid::Uuid;
     use wiremock::matchers::{method, path};
@@ -248,7 +248,7 @@ mod tests {
         log_id: Option<BuildId>,
         external_cached: bool,
     ) -> build::Model {
-        let now = gradient_core::types::now();
+        let now = gradient_types::now();
         build::Model {
             id,
             evaluation: EvaluationId::new(Uuid::now_v7()),
@@ -345,10 +345,10 @@ mod tests {
         org: OrganizationId,
         urls: &[&str],
     ) -> sea_orm::MockDatabase {
-        use gradient_core::types::ids::CacheId;
+        use gradient_types::ids::CacheId;
         let cache_id = CacheId::new(Uuid::now_v7());
         let oc_row = gradient_entity::organization_cache::Model {
-            id: gradient_core::types::ids::OrganizationCacheId::now_v7(),
+            id: gradient_types::ids::OrganizationCacheId::now_v7(),
             organization: org,
             cache: cache_id,
             mode: gradient_entity::organization_cache::CacheSubscriptionMode::ReadOnly,
@@ -356,7 +356,7 @@ mod tests {
         let upstream_rows: Vec<gradient_entity::cache_upstream::Model> = urls
             .iter()
             .map(|u| gradient_entity::cache_upstream::Model {
-                id: gradient_core::types::ids::CacheUpstreamId::now_v7(),
+                id: gradient_types::ids::CacheUpstreamId::now_v7(),
                 cache: cache_id,
                 display_name: "test-upstream".into(),
                 mode: gradient_entity::organization_cache::CacheSubscriptionMode::ReadOnly,
@@ -394,7 +394,7 @@ mod tests {
             hash,
             name,
             architecture: "x86_64-linux".to_string(),
-            created_at: gradient_core::types::now(),
+            created_at: gradient_types::now(),
             ..Default::default()
         }
     }

@@ -16,7 +16,7 @@
 use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
 use std::collections::{HashMap, HashSet};
 
-use crate::types::*;
+use gradient_types::*;
 
 /// BFS over forward `derivation_dependency` edges from `roots`; returns every
 /// reachable derivation id (roots included).

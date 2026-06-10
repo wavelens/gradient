@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::types::*;
+use gradient_types::*;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::{self, EvaluationStatus};
 use uuid::Uuid;

@@ -9,7 +9,7 @@
 //! The `cron` crate (v0.12) expects **six-field** expressions:
 //! `sec min hour dom mon dow` - not the five-field POSIX form.
 
-use crate::types::ids::IntegrationId;
+use crate::ids::IntegrationId;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;

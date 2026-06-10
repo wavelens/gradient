@@ -7,7 +7,7 @@
 use std::fmt;
 use std::str::FromStr;
 
-use crate::types::input::InputError;
+use crate::input::InputError;
 
 /// A parsed, validated evaluation wildcard.
 ///

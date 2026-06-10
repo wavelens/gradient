@@ -5,7 +5,7 @@
  */
 
 use crate::http_validation::{WebhookUrlError, validate_webhook_url};
-use crate::types::ForgeType;
+use gradient_types::ForgeType;
 use crate::forge::registry::ForgeRegistry;
 use anyhow::{Context, Result};
 use async_trait::async_trait;

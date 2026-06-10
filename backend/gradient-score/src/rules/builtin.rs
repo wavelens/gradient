@@ -148,7 +148,7 @@ impl ScoreRule for WaitTimeRule {
         _worker: &WorkerContext<'_>,
         instance: &InstanceContext,
     ) -> f64 {
-        let now = gradient_core::types::now();
+        let now = gradient_types::now();
         let waited = (now - job.ready_at).num_seconds().max(0) as f64;
         let avg = instance.wait_secs.w1h_or(self.fallback_avg_secs);
 
@@ -224,7 +224,7 @@ impl ScoreRule for RescoreWaitRule {
 mod tests {
     use super::*;
     use crate::context::{HistoryPrediction, LazyProviders, ScoredJob};
-    use gradient_core::types::ids::OrganizationId;
+    use gradient_types::ids::OrganizationId;
 
     fn build_job(arch: &'static str) -> ScoredJob<'static> {
         ScoredJob::new_build(
@@ -255,7 +255,7 @@ mod tests {
         let job = build_job("x86_64-linux");
         let archs = vec!["x86_64-linux".to_string()];
         let w = worker(&archs, false);
-        let now = gradient_core::types::now();
+        let now = gradient_types::now();
         let inst = crate::context::InstanceContext {
             missing_paths: crate::context::Windowed { w1h: 10.0, ..Default::default() },
             ..Default::default()
@@ -275,7 +275,7 @@ mod tests {
         let job = build_job("x86_64-linux");
         let archs = vec!["x86_64-linux".to_string()];
         let w = worker(&archs, false);
-        let now = gradient_core::types::now();
+        let now = gradient_types::now();
         let inst = crate::context::InstanceContext {
             missing_paths: crate::context::Windowed { w1h: 10.0, ..Default::default() },
             ..Default::default()
@@ -295,7 +295,7 @@ mod tests {
         let job = build_job("x86_64-linux");
         let archs = vec!["x86_64-linux".to_string()];
         let w = worker(&archs, false);
-        let now = gradient_core::types::now();
+        let now = gradient_types::now();
         let inst = crate::context::InstanceContext {
             nar_size_mb: crate::context::Windowed { w1h: 100.0, ..Default::default() },
             ..Default::default()
@@ -318,7 +318,7 @@ mod tests {
         let builtin = build_job("builtin");
         let archs = vec!["x86_64-linux".to_string()];
         let w = worker(&archs, false);
-        let now = gradient_core::types::now();
+        let now = gradient_types::now();
 
         let c_real = JobContext { job: &real, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0 };
         let c_builtin = JobContext { job: &builtin, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0 };
@@ -332,7 +332,7 @@ mod tests {
         let job = build_job("x86_64-linux");
         let archs = vec!["x86_64-linux".to_string()];
         let w = worker(&archs, false);
-        let now = gradient_core::types::now();
+        let now = gradient_types::now();
         // w1h=10 → base=20; dep=1 → 2.5, dep=15 → 37.5 (both below saturation)
         let inst = crate::context::InstanceContext {
             dependency_cnt: crate::context::Windowed { w1h: 10.0, ..Default::default() },
@@ -353,7 +353,7 @@ mod tests {
         let eval = eval_job(false);
         let archs = vec!["x86_64-linux".to_string()];
         let w = worker(&archs, false);
-        let now = gradient_core::types::now();
+        let now = gradient_types::now();
         let inst = crate::context::InstanceContext {
             dependency_cnt: crate::context::Windowed { w1h: 10.0, ..Default::default() },
             ..Default::default()
@@ -372,7 +372,7 @@ mod tests {
         let job = build_job("x86_64-linux");
         let archs = vec!["x86_64-linux".to_string()];
         let w = worker(&archs, false);
-        let now = gradient_core::types::now();
+        let now = gradient_types::now();
         let inst = crate::context::InstanceContext {
             dependency_cnt: crate::context::Windowed { w1h: 10.0, ..Default::default() },
             ..Default::default()
@@ -389,7 +389,7 @@ mod tests {
         let job = build_job("x86_64-linux");
         let archs = vec!["x86_64-linux".to_string()];
         let w = worker(&archs, false);
-        let now = gradient_core::types::now();
+        let now = gradient_types::now();
 
         let ctx_fresh = JobContext { job: &job, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0 };
         let ctx_mid = JobContext { job: &job, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now - chrono::Duration::seconds(60), ready_at: now - chrono::Duration::seconds(60), org_work_share: None, rescore_count: 0 };
@@ -411,7 +411,7 @@ mod tests {
         let archs: Vec<String> = vec![];
         let w = worker(&archs, false);
         let inst = crate::context::InstanceContext::default();
-        let n = gradient_core::types::now();
+        let n = gradient_types::now();
         let build = build_job("x86_64-linux");
         let eval = eval_job(false);
 
@@ -436,7 +436,7 @@ mod tests {
         let archs: Vec<String> = vec![];
         let fetch_w = worker(&archs, true);
         let eval_w = worker(&archs, false);
-        let now = gradient_core::types::now();
+        let now = gradient_types::now();
 
         let inst_full = crate::context::InstanceContext { total_workers: 4, idle_workers: 0, ..Default::default() };
         let inst_idle = crate::context::InstanceContext { total_workers: 4, idle_workers: 4, ..Default::default() };

@@ -7,7 +7,7 @@
 use super::logging::{PHASE_SUBJECT_EVALUATION, record_phase_event};
 use crate::db::DbContext;
 use crate::state_machine::EvalStateMachine;
-use crate::types::*;
+use gradient_types::*;
 use gradient_entity::evaluation::EvaluationStatus;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{Condition, ColumnTrait, EntityTrait, QueryFilter};
@@ -32,7 +32,7 @@ pub async fn update_evaluation_status(
     debug!(evaluation_id = %evaluation.id, status = ?status, "Updating evaluation status");
 
     let event_status = status;
-    let now = crate::types::now();
+    let now = gradient_types::now();
 
     let mut update = EEvaluation::update_many()
         .col_expr(CEvaluation::Status, sea_orm::sea_query::Expr::value(status))
@@ -102,7 +102,7 @@ pub async fn update_evaluation_status(
 
     let _ = ctx
         .board_events
-        .send(crate::types::BoardEvent::EvaluationStatusChanged {
+        .send(gradient_types::BoardEvent::EvaluationStatusChanged {
             project: updated_eval.project.map(|p| p.into_inner()),
             evaluation_id: updated_eval.id.into_inner(),
             status: i32::from(event_status) as i16,
@@ -163,7 +163,7 @@ pub async fn update_evaluation_status_with_error(
         level: Set(MessageLevel::Error),
         message: Set(error_message),
         source: Set(source),
-        created_at: Set(crate::types::now()),
+        created_at: Set(gradient_types::now()),
     };
     if let Err(e) = EEvaluationMessage::insert(msg).exec(&ctx.worker_db).await {
         error!(error = %e, evaluation_id = %evaluation.id, "Failed to insert evaluation_message");

@@ -4,13 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::types::{ActionType, MProjectAction, ProjectId};
+use gradient_types::{ActionType, MProjectAction, ProjectId};
 use serde_json::json;
 use uuid::Uuid;
 
 pub fn action_with(action_type: ActionType, events: Vec<&str>) -> MProjectAction {
     MProjectAction {
-        id: crate::types::ProjectActionId::now_v7(),
+        id: gradient_types::ProjectActionId::now_v7(),
         project: ProjectId::new(Uuid::nil()),
         name: "t".into(),
         action_type: action_type.to_i16(),
@@ -18,9 +18,9 @@ pub fn action_with(action_type: ActionType, events: Vec<&str>) -> MProjectAction
         events: json!(events),
         active: true,
         last_fired_at: None,
-        created_by: crate::types::UserId::new(Uuid::nil()),
-        created_at: crate::types::now(),
-        updated_at: crate::types::now(),
+        created_by: gradient_types::UserId::new(Uuid::nil()),
+        created_at: gradient_types::now(),
+        updated_at: gradient_types::now(),
     }
 }
 
@@ -36,7 +36,7 @@ pub fn make_ctx() -> crate::ci::CiContext {
     use crate::ci::CiContext;
     use crate::db::{DbContext, NoReactor, WebDb, WorkerDb};
     use crate::storage::{EmailSender, LogStorage, NarStore, StorageCtx};
-    use crate::types::RuntimeConfig;
+    use gradient_types::RuntimeConfig;
     use futures::future::BoxFuture;
     use sea_orm::{DatabaseBackend, MockDatabase};
 
@@ -128,28 +128,28 @@ pub fn make_ctx() -> crate::ci::CiContext {
         }
     }
 
-    let cli = crate::types::Cli {
-        logging: crate::types::LoggingArgs::default(),
-        server: crate::types::ServerArgs::default(),
-        database: crate::types::DatabaseArgs::default(),
-        eval: crate::types::EvalArgs::default(),
-        storage: crate::types::StorageArgs {
+    let cli = gradient_types::Cli {
+        logging: gradient_types::LoggingArgs::default(),
+        server: gradient_types::ServerArgs::default(),
+        database: gradient_types::DatabaseArgs::default(),
+        eval: gradient_types::EvalArgs::default(),
+        storage: gradient_types::StorageArgs {
             base_path: "/tmp/gradient-test".into(),
             ..Default::default()
         },
-        secrets: crate::types::SecretsArgs {
+        secrets: gradient_types::SecretsArgs {
             crypt_secret_file: "test-secret".into(),
             jwt_secret_file: "test-jwt".into(),
         },
-        limits: crate::types::LimitsArgs::default(),
-        registration: crate::types::RegistrationArgs::default(),
-        proto: crate::types::ProtoArgs::default(),
-        oidc: crate::types::OidcArgs::default(),
-        email: crate::types::EmailArgs::default(),
-        s3: crate::types::S3Args::default(),
-        github_app: crate::types::GitHubAppArgs::default(),
-        metrics: crate::types::MetricsArgs::default(),
-        network: crate::types::NetworkArgs::default(),
+        limits: gradient_types::LimitsArgs::default(),
+        registration: gradient_types::RegistrationArgs::default(),
+        proto: gradient_types::ProtoArgs::default(),
+        oidc: gradient_types::OidcArgs::default(),
+        email: gradient_types::EmailArgs::default(),
+        s3: gradient_types::S3Args::default(),
+        github_app: gradient_types::GitHubAppArgs::default(),
+        metrics: gradient_types::MetricsArgs::default(),
+        network: gradient_types::NetworkArgs::default(),
     };
     let config = std::sync::Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
     let nar_storage = NarStore::local(&config.storage.base_path).expect("nar store");

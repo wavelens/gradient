@@ -18,8 +18,8 @@ use chrono::NaiveDateTime;
 use gradient_entity::cache_upstream::CacheUpstreamKind;
 use gradient_entity::organization_cache::CacheSubscriptionMode;
 use gradient_core::sources::{format_cache_public_key, generate_signing_key};
-use gradient_core::types::input::{check_index_name, validate_display_name};
-use gradient_core::types::*;
+use gradient_types::input::{check_index_name, validate_display_name};
+use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
@@ -186,7 +186,7 @@ pub async fn put(
         private_key: Set(private_key),
         public: Set(body.public.unwrap_or(false)),
         created_by: Set(user.id),
-        created_at: Set(gradient_core::types::now()),
+        created_at: Set(gradient_types::now()),
         managed: Set(false),
         max_storage_gb: Set(max_storage_gb),
     }

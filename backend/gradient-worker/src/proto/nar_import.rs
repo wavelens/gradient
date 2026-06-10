@@ -33,7 +33,7 @@ use anyhow::{Context, Result};
 use futures::stream::{FuturesUnordered, StreamExt as _};
 use gradient_core::db::parse_drv;
 use gradient_core::executor::path_utils::nix_store_path;
-use gradient_core::types::CachedPathInfo;
+use gradient_types::CachedPathInfo;
 use harmonia_protocol::valid_path_info::{UnkeyedValidPathInfo, ValidPathInfo};
 use harmonia_store_path::{StoreDir, StorePath};
 use harmonia_store_remote::DaemonStore as _;

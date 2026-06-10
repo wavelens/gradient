@@ -18,7 +18,7 @@ pub use self::nar_path::*;
 pub use self::secret::{decrypt_secret, encrypt_secret};
 pub use self::ssh_key::{decrypt_ssh_private_key, format_public_key, generate_ssh_key};
 
-use crate::types::*;
+use gradient_types::*;
 use anyhow::Result;
 use async_trait::async_trait;
 use std::path::PathBuf;
@@ -114,7 +114,7 @@ pub enum SourceError {
     GitHashExtraction,
     #[error("Organization not found with ID: {id}")]
     OrganizationNotFound {
-        id: crate::types::ids::OrganizationId,
+        id: gradient_types::ids::OrganizationId,
     },
 }
 

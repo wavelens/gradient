@@ -28,8 +28,8 @@ use crate::permissions::{
 use gradient_core::db::{
     get_any_cache_by_name, get_any_organization_by_name, get_any_project_by_name,
 };
-use gradient_core::types::ids::{CacheId, IntegrationId, OrganizationId, UserId};
-use gradient_core::types::{
+use gradient_types::ids::{CacheId, IntegrationId, OrganizationId, UserId};
+use gradient_types::{
     CCacheUser, CIntegration, COrganizationCache, COrganizationUser, ECacheRole, ECacheUser,
     EIntegration, EOrganizationCache, EOrganizationUser, ERole, MCache, MIntegration, MOrganization,
     MOrganizationUser, MProject, MUser,
@@ -558,11 +558,11 @@ mod tests {
     use crate::authorization::ApiKeyContext;
     use gradient_core::permissions::mask_from;
     use gradient_core::storage::{EmailSender, NarStore};
-    use gradient_core::types::consts::{
+    use gradient_types::consts::{
         BASE_CACHE_ROLE_VIEW_ID, BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID,
     };
-    use gradient_core::types::ids::{OrganizationUserId, ProjectId, RoleId};
-    use gradient_core::types::{RuntimeConfig};
+    use gradient_types::ids::{OrganizationUserId, ProjectId, RoleId};
+    use gradient_types::{RuntimeConfig};
     use gradient_core::db::{WebDb, WorkerDb};
     use sea_orm::{DatabaseBackend, MockDatabase};
     use gradient_test_support::cli::test_cli;
@@ -673,7 +673,7 @@ mod tests {
             pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             http: gradient_core::http::build_client().expect("http client"),
             shutdown: gradient_core::shutdown::Shutdown::new(),
-            jwt_secret: gradient_core::types::SecretString::new("test-jwt-secret".to_string()),
+            jwt_secret: gradient_types::SecretString::new("test-jwt-secret".to_string()),
             started_at: chrono::Utc::now(),
             pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
             oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
@@ -1130,7 +1130,7 @@ mod tests {
 
     fn cache_fixture(managed: bool) -> gradient_entity::cache::Model {
         gradient_entity::cache::Model {
-            id: gradient_core::types::ids::CacheId::new(uuid!(
+            id: gradient_types::ids::CacheId::new(uuid!(
                 "a0000000-0000-0000-0000-000000000020"
             )),
             name: "test-cache".into(),
@@ -1162,20 +1162,20 @@ mod tests {
 
     fn cache_member_fixture() -> gradient_entity::cache_user::Model {
         gradient_entity::cache_user::Model {
-            id: gradient_core::types::ids::CacheUserId::new(uuid!(
+            id: gradient_types::ids::CacheUserId::new(uuid!(
                 "a0000000-0000-0000-0000-000000000030"
             )),
-            cache: gradient_core::types::ids::CacheId::new(uuid!(
+            cache: gradient_types::ids::CacheId::new(uuid!(
                 "a0000000-0000-0000-0000-000000000020"
             )),
             user: UserId::new(uuid!("a0000000-0000-0000-0000-000000000004")),
-            role: gradient_core::types::consts::BASE_CACHE_ROLE_ADMIN_ID,
+            role: gradient_types::consts::BASE_CACHE_ROLE_ADMIN_ID,
         }
     }
 
     fn cache_role_fixture() -> gradient_entity::cache_role::Model {
         gradient_entity::cache_role::Model {
-            id: gradient_core::types::consts::BASE_CACHE_ROLE_ADMIN_ID,
+            id: gradient_types::consts::BASE_CACHE_ROLE_ADMIN_ID,
             name: "Admin".into(),
             permission: crate::permissions::cache_admin_mask(),
             managed: true,
@@ -1398,11 +1398,11 @@ mod tests {
 
     fn org_cache_fixture() -> gradient_entity::organization_cache::Model {
         gradient_entity::organization_cache::Model {
-            id: gradient_core::types::ids::OrganizationCacheId::new(uuid!(
+            id: gradient_types::ids::OrganizationCacheId::new(uuid!(
                 "a0000000-0000-0000-0000-000000000040"
             )),
             organization: OrganizationId::new(uuid!("a0000000-0000-0000-0000-000000000001")),
-            cache: gradient_core::types::ids::CacheId::new(uuid!(
+            cache: gradient_types::ids::CacheId::new(uuid!(
                 "a0000000-0000-0000-0000-000000000020"
             )),
             mode: gradient_entity::organization_cache::CacheSubscriptionMode::ReadOnly,

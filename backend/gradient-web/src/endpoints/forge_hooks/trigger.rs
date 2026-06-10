@@ -13,9 +13,9 @@ use gradient_core::ci::{
     find_approval_gated_eval, parse_owner_repo, set_evaluation_source_comment, unpark_approval,
     unpark_approval_with_wildcard,
 };
-use gradient_core::types::triggers::{TriggerConfig, TriggerType};
-use gradient_core::types::wildcard::Wildcard;
-use gradient_core::types::*;
+use gradient_types::triggers::{TriggerConfig, TriggerType};
+use gradient_types::wildcard::Wildcard;
+use gradient_types::*;
 use gradient_core::ServerState;
 use gradient_scheduler::Scheduler;
 use sea_orm::ActiveValue::Set;
@@ -216,7 +216,7 @@ pub(super) async fn resolve_github_app_targets(
         let integration = EIntegration::find()
             .filter(CIntegration::Organization.eq(org.id))
             .filter(CIntegration::Kind.eq(i16::from(IntegrationKind::Inbound)))
-            .filter(CIntegration::ForgeType.eq(i16::from(gradient_core::types::ForgeType::GitHub)))
+            .filter(CIntegration::ForgeType.eq(i16::from(gradient_types::ForgeType::GitHub)))
             .one(&state.web_db)
             .await
             .ok()
@@ -626,7 +626,7 @@ fn gate_decision(
 /// show when the webhook last considered it. Best-effort: a DB error here
 /// must not derail the rest of the webhook fan-out.
 async fn touch_trigger_last_fired(state: &Arc<ServerState>, trig: &ept::Model) {
-    let now = gradient_core::types::now();
+    let now = gradient_types::now();
     let mut active: ept::ActiveModel = trig.clone().into();
     active.last_fired_at = Set(Some(now));
     active.updated_at = Set(now);
@@ -1392,7 +1392,7 @@ async fn post_wildcard_error_comment(
     repo: &str,
     pr_number: u64,
     raw_wildcard: &str,
-    parse_error: &gradient_core::types::input::InputError,
+    parse_error: &gradient_types::input::InputError,
 ) {
     let body = format!(
         "Could not parse wildcard `{}`: {}",

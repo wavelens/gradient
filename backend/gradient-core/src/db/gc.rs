@@ -16,7 +16,7 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use super::DbContext;
-use crate::types::*;
+use gradient_types::*;
 
 /// Deletes evaluations for `project_id`, retaining the most recent `keep`
 /// terminal evaluations (see [`evaluations_to_gc`]).
@@ -171,7 +171,7 @@ fn evaluations_to_gc(statuses: &[EvaluationStatus], keep: usize) -> Vec<usize> {
 pub async fn gc_orphan_derivations(ctx: &DbContext, grace_hours: i64) -> Result<()> {
     use std::collections::HashSet;
 
-    let cutoff = crate::types::now() - ChronoDuration::hours(grace_hours.max(0));
+    let cutoff = gradient_types::now() - ChronoDuration::hours(grace_hours.max(0));
 
     let rows = ctx
         .worker_db
@@ -255,7 +255,7 @@ pub async fn gc_orphan_derivations(ctx: &DbContext, grace_hours: i64) -> Result<
     if !to_delete.is_empty() {
         let _ = ctx
             .board_events
-            .send(crate::types::BoardEvent::CacheChanged);
+            .send(gradient_types::BoardEvent::CacheChanged);
     }
 
     for drv_id in drv_ids {

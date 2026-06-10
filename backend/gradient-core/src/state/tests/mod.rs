@@ -7,8 +7,8 @@
 mod fixtures;
 
 use super::{StateConfiguration, resolve_oidc_group_roles};
-use crate::types::triggers::ConcurrencyPolicy;
-use crate::types::{OrganizationId, RoleId};
+use gradient_types::triggers::ConcurrencyPolicy;
+use gradient_types::{OrganizationId, RoleId};
 use fixtures::{reporter_cfg, worker_cfg};
 use std::collections::HashMap;
 

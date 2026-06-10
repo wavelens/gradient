@@ -27,8 +27,8 @@
 
 use gradient_entity::{cache, cache_role, cache_user, ids::*, organization_cache, organization_user, role};
 use gradient_core::permissions::{admin_mask, cache_admin_mask, cache_view_mask, mask_from};
-use gradient_core::types::SessionId;
-use gradient_core::types::consts::{
+use gradient_types::SessionId;
+use gradient_types::consts::{
     BASE_CACHE_ROLE_ADMIN_ID, BASE_CACHE_ROLE_VIEW_ID, BASE_ROLE_ADMIN_ID,
 };
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};

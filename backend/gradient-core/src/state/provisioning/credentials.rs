@@ -8,7 +8,7 @@
 
 use super::DynError;
 use super::StateApplicator;
-use crate::types::input::load_secret_bytes;
+use gradient_types::input::load_secret_bytes;
 use anyhow::{Context, Result};
 use base64::{Engine, engine::general_purpose};
 use ssh_key::PrivateKey;

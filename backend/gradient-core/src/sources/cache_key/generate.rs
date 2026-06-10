@@ -13,7 +13,7 @@ use ed25519_compact::KeyPair;
 /// The public key is the last 32 bytes of the keypair, base64-encoded in plaintext.
 pub fn generate_signing_key(secret_file: &str) -> Result<(String, String), SourceError> {
     let secret =
-        crate::types::input::load_secret_bytes(secret_file).map_err(|e| SourceError::FileRead {
+        gradient_types::input::load_secret_bytes(secret_file).map_err(|e| SourceError::FileRead {
             reason: e.to_string(),
         })?;
 

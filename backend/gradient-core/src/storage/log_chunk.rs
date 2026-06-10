@@ -10,7 +10,7 @@
 
 use super::sgr::SgrState;
 use crate::storage::log::LogStorage;
-use crate::types::ids::BuildId;
+use gradient_types::ids::BuildId;
 use anyhow::Result;
 
 /// One uncompressed chunk plus the metadata persisted in `build_log_chunk`.
@@ -148,7 +148,7 @@ mod tests {
     #[tokio::test]
     async fn finalize_writes_compressed_chunks_and_descs() {
         use crate::storage::log::{FileLogStorage, LogStorage};
-        use crate::types::ids::BuildId;
+        use gradient_types::ids::BuildId;
         let dir = tempfile::tempdir().unwrap();
         let storage = FileLogStorage::new(dir.path()).await.unwrap();
         let id = BuildId::new(uuid::Uuid::new_v4());

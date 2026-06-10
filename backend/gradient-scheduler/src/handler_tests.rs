@@ -31,13 +31,13 @@ use std::sync::Arc;
 use chrono::NaiveDateTime;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
-use gradient_core::types::*;
+use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 
 use crate::jobs::{PendingBuildJob, PendingEvalJob};
 use crate::{build as build_handler, eval as eval_handler};
-use gradient_core::types::proto::{
+use gradient_types::proto::{
     BuildFailureKind, BuildMetrics, BuildOutput, BuildProduct, DerivationOutput,
     DiscoveredDerivation, FlakeJob, FlakeTask,
 };
@@ -161,7 +161,7 @@ fn make_eval_job(eval_id: EvaluationId, org_id: OrganizationId) -> PendingEvalJo
         repository: "https://example.com/repo".into(),
         job: FlakeJob {
             tasks: vec![FlakeTask::EvaluateDerivations],
-            source: gradient_core::types::proto::FlakeSource::Repository {
+            source: gradient_types::proto::FlakeSource::Repository {
                 url: "https://example.com/repo".into(),
                 commit: "abc123".into(),
             },
@@ -170,8 +170,8 @@ fn make_eval_job(eval_id: EvaluationId, org_id: OrganizationId) -> PendingEvalJo
             input_overrides: vec![],
         },
         required_paths: vec![],
-        queued_at: gradient_core::types::now(),
-        ready_at: gradient_core::types::now(),
+        queued_at: gradient_types::now(),
+        ready_at: gradient_types::now(),
         rescore_count: 0,
     }
 }
@@ -181,7 +181,7 @@ fn make_build_job(
     eval_id: EvaluationId,
     org_id: OrganizationId,
 ) -> PendingBuildJob {
-    use gradient_core::types::proto::{BuildJob, BuildTask};
+    use gradient_types::proto::{BuildJob, BuildTask};
     PendingBuildJob {
         build_id,
         evaluation_id: eval_id,
@@ -203,8 +203,8 @@ fn make_build_job(
         prefer_local_build: false,
         is_fixed_output: false,
         history: gradient_score::HistoryPrediction::default(),
-        queued_at: gradient_core::types::now(),
-        ready_at: gradient_core::types::now(),
+        queued_at: gradient_types::now(),
+        ready_at: gradient_types::now(),
         rescore_count: 0,
         pname: None,
     }
@@ -2219,7 +2219,7 @@ async fn eval_result_creates_entry_points_for_project() {
         repository: "https://example.com/repo".into(),
         job: FlakeJob {
             tasks: vec![FlakeTask::EvaluateDerivations],
-            source: gradient_core::types::proto::FlakeSource::Repository {
+            source: gradient_types::proto::FlakeSource::Repository {
                 url: "https://example.com/repo".into(),
                 commit: "abc123".into(),
             },
@@ -2228,8 +2228,8 @@ async fn eval_result_creates_entry_points_for_project() {
             input_overrides: vec![],
         },
         required_paths: vec![],
-        queued_at: gradient_core::types::now(),
-        ready_at: gradient_core::types::now(),
+        queued_at: gradient_types::now(),
+        ready_at: gradient_types::now(),
         rescore_count: 0,
     };
 
@@ -2492,7 +2492,7 @@ async fn eval_result_all_substituted_with_project_completes() {
         repository: "https://example.com/repo".into(),
         job: FlakeJob {
             tasks: vec![FlakeTask::EvaluateDerivations],
-            source: gradient_core::types::proto::FlakeSource::Repository {
+            source: gradient_types::proto::FlakeSource::Repository {
                 url: "https://example.com/repo".into(),
                 commit: "abc123".into(),
             },
@@ -2501,8 +2501,8 @@ async fn eval_result_all_substituted_with_project_completes() {
             input_overrides: vec![],
         },
         required_paths: vec![],
-        queued_at: gradient_core::types::now(),
-        ready_at: gradient_core::types::now(),
+        queued_at: gradient_types::now(),
+        ready_at: gradient_types::now(),
         rescore_count: 0,
     };
 

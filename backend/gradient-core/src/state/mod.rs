@@ -20,7 +20,7 @@ pub use provisioning::{
 };
 pub use validation::{ValidationError, ValidationResult};
 
-use crate::types::{OrganizationId, RoleId};
+use gradient_types::{OrganizationId, RoleId};
 use sea_orm::DatabaseConnection;
 use std::collections::HashMap;
 

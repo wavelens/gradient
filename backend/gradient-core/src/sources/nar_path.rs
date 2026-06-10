@@ -5,7 +5,7 @@
  */
 
 use super::SourceError;
-use crate::types::*;
+use gradient_types::*;
 use anyhow::Result;
 
 pub fn get_hash_from_url(url: String) -> Result<String, SourceError> {

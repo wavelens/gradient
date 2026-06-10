@@ -15,7 +15,7 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, State};
 use axum::response::Response;
 use axum::Extension;
-use gradient_core::types::*;
+use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use std::collections::HashSet;

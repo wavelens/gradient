@@ -8,7 +8,7 @@ use super::super::DynError;
 use super::super::StateApplicator;
 use super::super::{parse_api_key_hash, read_credential};
 use crate::state::config::*;
-use crate::types::*;
+use gradient_types::*;
 use anyhow::Result;
 use gradient_entity::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};

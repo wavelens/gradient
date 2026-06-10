@@ -6,8 +6,8 @@
 
 use super::TriggerError;
 use super::flake_snapshot::snapshot_flake_input_overrides;
-use crate::types::consts::NULL_TIME;
-use crate::types::*;
+use gradient_types::consts::NULL_TIME;
+use gradient_types::*;
 use gradient_entity::evaluation::EvaluationStatus;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
@@ -61,7 +61,7 @@ pub async fn trigger_evaluation<C: ConnectionTrait>(
     commit_hash: Vec<u8>,
     commit_message: Option<String>,
     author_name: Option<String>,
-    trigger: Option<crate::types::ids::ProjectTriggerId>,
+    trigger: Option<gradient_types::ids::ProjectTriggerId>,
     concurrent: bool,
     repository_override: Option<String>,
     wildcard_override: Option<String>,
@@ -82,7 +82,7 @@ pub async fn trigger_evaluation<C: ConnectionTrait>(
         None => None,
     };
 
-    let now = crate::types::now();
+    let now = gradient_types::now();
 
     let acommit = ACommit {
         id: Set(CommitId::now_v7()),

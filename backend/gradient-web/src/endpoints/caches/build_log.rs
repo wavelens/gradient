@@ -12,7 +12,7 @@ use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::Response;
 use gradient_entity::build::BuildStatus;
 use gradient_core::sources::parse_drv_hash_name;
-use gradient_core::types::*;
+use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use std::sync::Arc;

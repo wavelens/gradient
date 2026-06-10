@@ -10,7 +10,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
-use gradient_core::types::ids::OrganizationId;
+use gradient_types::ids::OrganizationId;
 use gradient_core::ServerState;
 use tokio::sync::Semaphore;
 use tracing::{debug, info, instrument, warn};

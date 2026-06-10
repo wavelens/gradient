@@ -14,7 +14,7 @@ use gradient_entity::ids::{
 };
 use gradient_entity::organization_cache::CacheSubscriptionMode;
 use gradient_entity::*;
-use gradient_core::types::consts::BASE_CACHE_ROLE_ADMIN_ID;
+use gradient_types::consts::BASE_CACHE_ROLE_ADMIN_ID;
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, DatabaseConnection, DbErr};
 use uuid::Uuid;
 

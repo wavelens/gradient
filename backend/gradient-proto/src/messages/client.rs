@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_core::types::proto::{
+use gradient_types::proto::{
     BuildFailureKind, CandidateScore, EvalMessageLevel, GradientCapabilities, JobKind,
     JobUpdateKind, QueryMode,
 };

@@ -245,7 +245,7 @@ mod tests {
     use super::*;
 
     fn base_cli() -> Cli {
-        use crate::types::cli::*;
+        use crate::cli::*;
         Cli {
             logging: LoggingArgs {
                 log_level: "error".into(),

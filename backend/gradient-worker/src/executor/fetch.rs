@@ -133,7 +133,7 @@ pub async fn fetch_repository(
     for msg in &warnings {
         updater
             .send_eval_message(
-                gradient_core::types::proto::EvalMessageLevel::Warning,
+                gradient_types::proto::EvalMessageLevel::Warning,
                 "fetch",
                 msg,
             )
@@ -447,8 +447,8 @@ pub struct OverrideInput {
     pub url: Option<String>,
 }
 
-impl From<&gradient_core::types::proto::FlakeInputOverride> for OverrideInput {
-    fn from(o: &gradient_core::types::proto::FlakeInputOverride) -> Self {
+impl From<&gradient_types::proto::FlakeInputOverride> for OverrideInput {
+    fn from(o: &gradient_types::proto::FlakeInputOverride) -> Self {
         Self {
             input_name: o.input_name.clone(),
             url: o.url.clone(),

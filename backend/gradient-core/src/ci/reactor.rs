@@ -20,7 +20,7 @@ use crate::ci::context::CiContext;
 use crate::ci::{ReactionKind, ReactionTarget};
 use crate::db::{DbContext, StatusReactor};
 use crate::forge::ForgeRegistry;
-use crate::types::*;
+use gradient_types::*;
 
 #[derive(Debug)]
 pub struct CiStatusReactor {

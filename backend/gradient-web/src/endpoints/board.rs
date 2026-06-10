@@ -17,8 +17,8 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
 use axum::response::Response;
 use axum::{Extension, Json};
-use gradient_core::types::ids::{AcknowledgedDerivationId, DispatchedJobId};
-use gradient_core::types::*;
+use gradient_types::ids::{AcknowledgedDerivationId, DispatchedJobId};
+use gradient_types::*;
 use gradient_core::ServerState;
 use gradient_scheduler::{BoardEvent, Scheduler};
 use sea_orm::{
@@ -683,7 +683,7 @@ pub async fn create_acknowledged(
         pname: Set(body.pname),
         note: Set(body.note),
         created_by: Set(user.id),
-        created_at: Set(gradient_core::types::now()),
+        created_at: Set(gradient_types::now()),
     };
 
     gradient_entity::acknowledged_derivation::Entity::insert(am)

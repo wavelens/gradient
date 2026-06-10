@@ -9,7 +9,7 @@
 //! bytes): per-cache via the `cached_path_signature` join, instance-wide as a
 //! global sum. Backend-agnostic (works for local FS and S3).
 
-use crate::types::ids::{CacheId, OrganizationId};
+use gradient_types::ids::{CacheId, OrganizationId};
 use gradient_entity::cache::Model as MCache;
 use gradient_entity::organization_cache::CacheSubscriptionMode;
 use sea_orm::sea_query::{Alias, SimpleExpr};

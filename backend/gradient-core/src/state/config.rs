@@ -8,7 +8,7 @@
 //! `State*` types it deserializes from the state JSON file. Validation lives in
 //! [`super::validation`]; provisioning in [`super::provisioning`].
 
-use crate::types::triggers::{ConcurrencyPolicy, TriggerType};
+use gradient_types::triggers::{ConcurrencyPolicy, TriggerType};
 use gradient_entity::organization_cache::CacheSubscriptionMode;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

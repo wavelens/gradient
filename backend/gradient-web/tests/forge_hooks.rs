@@ -19,8 +19,8 @@ use axum_test::TestServer;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_core::ci::actions::encrypt_secret_with_file as encrypt_webhook_secret;
 use gradient_core::storage::{EmailSender, NarStore};
-use gradient_core::types::ids::*;
-use gradient_core::types::triggers::TriggerConfig;
+use gradient_types::ids::*;
+use gradient_types::triggers::TriggerConfig;
 use gradient_core::ServerState;
 use gradient_core::db::{WebDb, WorkerDb};
 use hmac::{Hmac, KeyInit, Mac};
@@ -73,7 +73,7 @@ fn make_state(
         web_db: WebDb::new(db),
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config: std::sync::Arc::new(
-            gradient_core::types::RuntimeConfig::from_cli(&cli).expect("valid test config"),
+            gradient_types::RuntimeConfig::from_cli(&cli).expect("valid test config"),
         ),
         log_storage: Arc::new(NoopLogStorage),
         email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
@@ -82,7 +82,7 @@ fn make_state(
         pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         http: gradient_core::http::build_client().expect("http client"),
         shutdown: gradient_core::shutdown::Shutdown::new(),
-        jwt_secret: gradient_core::types::SecretString::new("test-jwt-secret".to_string()),
+        jwt_secret: gradient_types::SecretString::new("test-jwt-secret".to_string()),
         started_at: chrono::Utc::now(),
         pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
@@ -284,14 +284,14 @@ fn org_cache_row() -> gradient_entity::organization_cache::Model {
 
 fn worker_registration_row() -> gradient_entity::worker_registration::Model {
     gradient_entity::worker_registration::Model {
-        id: gradient_core::types::ids::WorkerRegistrationId::now_v7(),
+        id: gradient_types::ids::WorkerRegistrationId::now_v7(),
         peer_id: org_id(),
         worker_id: "00000000-0000-4000-8000-000000000001".into(),
         active: true,
         enable_fetch: true,
         enable_eval: true,
         enable_build: true,
-        created_by: Some(gradient_core::types::ids::UserId::nil()),
+        created_by: Some(gradient_types::ids::UserId::nil()),
         created_at: fixture_date(),
         ..Default::default()
     }

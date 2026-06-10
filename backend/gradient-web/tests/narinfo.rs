@@ -8,7 +8,7 @@
 
 use axum_test::TestServer;
 use gradient_core::storage::{EmailSender, NarStore};
-use gradient_core::types::ids::*;
+use gradient_types::ids::*;
 use gradient_core::ServerState;
 use gradient_core::db::{WebDb, WorkerDb};
 use sea_orm::{DatabaseBackend, MockDatabase};
@@ -174,7 +174,7 @@ async fn narinfo_served_from_db_inner() {
         web_db: WebDb::new(db),
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config: std::sync::Arc::new(
-            gradient_core::types::RuntimeConfig::from_cli(&cli).expect("valid test config"),
+            gradient_types::RuntimeConfig::from_cli(&cli).expect("valid test config"),
         ),
         log_storage: Arc::new(NoopLogStorage),
         email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
@@ -183,7 +183,7 @@ async fn narinfo_served_from_db_inner() {
         pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         http: gradient_core::http::build_client().expect("http client"),
         shutdown: gradient_core::shutdown::Shutdown::new(),
-        jwt_secret: gradient_core::types::SecretString::new("test-jwt-secret".to_string()),
+        jwt_secret: gradient_types::SecretString::new("test-jwt-secret".to_string()),
         started_at: chrono::Utc::now(),
         pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
@@ -320,7 +320,7 @@ async fn narinfo_unsigned_inner() {
         web_db: WebDb::new(db),
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config: std::sync::Arc::new(
-            gradient_core::types::RuntimeConfig::from_cli(&cli).expect("valid test config"),
+            gradient_types::RuntimeConfig::from_cli(&cli).expect("valid test config"),
         ),
         log_storage: Arc::new(NoopLogStorage),
         email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
@@ -329,7 +329,7 @@ async fn narinfo_unsigned_inner() {
         pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         http: gradient_core::http::build_client().expect("http client"),
         shutdown: gradient_core::shutdown::Shutdown::new(),
-        jwt_secret: gradient_core::types::SecretString::new("test-jwt-secret".to_string()),
+        jwt_secret: gradient_types::SecretString::new("test-jwt-secret".to_string()),
         started_at: chrono::Utc::now(),
         pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),

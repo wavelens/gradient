@@ -31,7 +31,7 @@ mod worker_lifecycle;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use gradient_core::types::*;
+use gradient_types::*;
 use gradient_core::ServerState;
 use tokio::sync::RwLock;
 
@@ -42,7 +42,7 @@ use worker_pool::WorkerPool;
 /// processing and flushed once all derivation rows are in the DB.
 type DeferredDeps = Arc<RwLock<HashMap<EvaluationId, Vec<(String, Vec<String>)>>>>;
 
-pub use gradient_core::types::BoardEvent;
+pub use gradient_types::BoardEvent;
 pub use jobs::PendingJobInfo;
 pub use worker_pool::WorkerInfo;
 

@@ -15,7 +15,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use gradient_core::types::ids::CacheId;
+use gradient_types::ids::CacheId;
 use gradient_core::ServerState;
 use tokio::sync::Semaphore;
 use tracing::{debug, info, warn};
@@ -33,7 +33,7 @@ const CACHE_SESSION_IDLE_TIMEOUT_SECS: u64 = 120;
 /// read-only cache session, `None` means it is served. Pure so the policy is
 /// unit-testable without a socket or DB.
 fn reject_reason(msg: &ClientMessage) -> Option<&'static str> {
-    use gradient_core::types::proto::QueryMode;
+    use gradient_types::proto::QueryMode;
     match msg {
         ClientMessage::CacheQuery { mode, .. } => match mode {
             QueryMode::Push => Some("Push not allowed on a read-only cache session"),
@@ -190,7 +190,7 @@ pub async fn handle_cache_socket(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_core::types::proto::QueryMode;
+    use gradient_types::proto::QueryMode;
 
     fn cache_query(mode: QueryMode) -> ClientMessage {
         ClientMessage::CacheQuery {

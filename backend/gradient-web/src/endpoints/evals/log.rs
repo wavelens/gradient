@@ -11,7 +11,7 @@ use async_stream::stream;
 use axum::Extension;
 use axum::extract::{Path, State};
 use axum_streams::StreamBodyAs;
-use gradient_core::types::*;
+use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter};
 use std::collections::HashMap;

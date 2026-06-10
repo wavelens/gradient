@@ -13,7 +13,7 @@ use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_entity::organization_cache::CacheSubscriptionMode;
 use gradient_core::permissions::CachePermission;
-use gradient_core::types::*;
+use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, QueryFilter};
@@ -244,7 +244,7 @@ async fn enqueue_backfill_signatures(
     let cp_ids: std::collections::HashSet<CachedPathId> =
         outputs.into_iter().filter_map(|o| o.cached_path).collect();
 
-    let now = gradient_core::types::now();
+    let now = gradient_types::now();
     for cp_id in cp_ids {
         let exists = ECachedPathSignature::find()
             .filter(CCachedPathSignature::CachedPath.eq(cp_id))

@@ -6,7 +6,7 @@
 
 use super::fixtures::{bid, did, make_ctx, org, run};
 use super::super::leader_election::reelect_leader;
-use crate::types::{BuildId, DerivationId, EvaluationId, OrganizationId};
+use gradient_types::{BuildId, DerivationId, EvaluationId, OrganizationId};
 use gradient_entity::build::{BuildStatus, Model as MBuild};
 use gradient_entity::derivation::Model as MDerivation;
 use sea_orm::{DatabaseBackend, MockDatabase};

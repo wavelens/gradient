@@ -13,7 +13,7 @@
 
 use chrono::{NaiveDateTime, Utc};
 
-use gradient_core::types::ProjectTriggerId;
+use gradient_types::ProjectTriggerId;
 
 /// Upper bound of the jitter added to each polling cycle, expressed as a
 /// percentage of `interval_secs`. Spreads concurrently-created triggers out
@@ -93,8 +93,8 @@ use std::time::Duration;
 use gradient_entity::project_trigger as ept;
 use gradient_core::ci::{ApplyInput, ApplyOutcome, apply_trigger};
 use gradient_core::sources::{check_project_updates, get_commit_info};
-use gradient_core::types::triggers::{TriggerConfig, TriggerType};
-use gradient_core::types::*;
+use gradient_types::triggers::{TriggerConfig, TriggerType};
+use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::{ActiveModelTrait as _, ColumnTrait, Condition, EntityTrait, QueryFilter};
 use tracing::{debug, error, info, warn};
@@ -121,7 +121,7 @@ pub async fn trigger_dispatch_loop(scheduler: Arc<Scheduler>) {
 /// One pass through all active polling+time triggers. Public for tests.
 pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
     let state = &scheduler.state;
-    let now = gradient_core::types::now();
+    let now = gradient_types::now();
 
     let triggers = ept::Entity::find()
         .filter(ept::Column::Active.eq(true))

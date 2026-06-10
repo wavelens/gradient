@@ -14,7 +14,7 @@
 
 use gradient_entity::{api, cache, cache_role, cache_user, ids::*};
 use gradient_core::permissions::{cache_admin_mask, cache_view_mask};
-use gradient_core::types::consts::BASE_CACHE_ROLE_VIEW_ID;
+use gradient_types::consts::BASE_CACHE_ROLE_VIEW_ID;
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 use sha2::{Digest, Sha256};
 use gradient_test_support::fixtures::{test_date, user, user_id};
@@ -183,7 +183,7 @@ fn cache_pinned_key_rejected_on_org_endpoint() {
 fn create_key_rejects_both_org_and_cache_pin() {
     // This uses a session JWT because API keys cannot create API keys.
     run(async {
-        let session_id = gradient_core::types::SessionId::now_v7();
+        let session_id = gradient_types::SessionId::now_v7();
         let token = gradient_test_support::web::make_token(session_id);
         let session = gradient_test_support::web::live_session(session_id);
 
@@ -213,7 +213,7 @@ fn create_key_rejects_both_org_and_cache_pin() {
 #[test]
 fn create_cache_pinned_key_cannot_exceed_member_mask() {
     run(async {
-        let session_id = gradient_core::types::SessionId::now_v7();
+        let session_id = gradient_types::SessionId::now_v7();
         let token = gradient_test_support::web::make_token(session_id);
         let session = gradient_test_support::web::live_session(session_id);
 
@@ -252,7 +252,7 @@ fn create_cache_pinned_key_cannot_exceed_member_mask() {
 fn permissions_endpoint_returns_both_catalogues() {
     run(async {
         // GET /user/keys/permissions requires authentication.
-        let session_id = gradient_core::types::SessionId::now_v7();
+        let session_id = gradient_types::SessionId::now_v7();
         let token = gradient_test_support::web::make_token(session_id);
         let session = gradient_test_support::web::live_session(session_id);
 

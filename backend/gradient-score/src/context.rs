@@ -156,14 +156,14 @@ pub enum JobKindContext<'a> {
 
 pub struct ScoredJob<'a> {
     pub job_id: &'a str,
-    pub peer_id: gradient_core::types::ids::OrganizationId,
+    pub peer_id: gradient_types::ids::OrganizationId,
     kind: JobKindContext<'a>,
 }
 
 impl<'a> ScoredJob<'a> {
     pub fn new_eval(
         job_id: &'a str,
-        peer_id: gradient_core::types::ids::OrganizationId,
+        peer_id: gradient_types::ids::OrganizationId,
         fetch_flake: bool,
     ) -> Self {
         Self { job_id, peer_id, kind: JobKindContext::Eval(EvalContext { fetch_flake }) }
@@ -172,7 +172,7 @@ impl<'a> ScoredJob<'a> {
     #[allow(clippy::too_many_arguments)]
     pub fn new_build(
         job_id: &'a str,
-        peer_id: gradient_core::types::ids::OrganizationId,
+        peer_id: gradient_types::ids::OrganizationId,
         architecture: &'a str,
         prefer_local_build: bool,
         is_fixed_output: bool,
@@ -210,7 +210,7 @@ impl<'a> ScoredJob<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_core::types::ids::OrganizationId;
+    use gradient_types::ids::OrganizationId;
 
     fn make_job() -> ScoredJob<'static> {
         ScoredJob::new_build(

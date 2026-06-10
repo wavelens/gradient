@@ -14,7 +14,7 @@ use axum::extract::{Multipart, Path, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use gradient_proto::ingest::{IngestInput, SignTargets, ingest_nar};
-use gradient_core::types::*;
+use gradient_types::*;
 use gradient_core::ServerState;
 use serde::Deserialize;
 use serde_json::json;

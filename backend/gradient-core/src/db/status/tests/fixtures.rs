@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::types::{BuildId, CacheId, DerivationId, OrganizationId};
+use gradient_types::{BuildId, CacheId, DerivationId, OrganizationId};
 use uuid::Uuid;
 
 pub fn org(n: u8) -> OrganizationId {
@@ -42,7 +42,7 @@ pub fn run<F: std::future::Future>(fut: F) -> F::Output {
 pub fn make_ctx(db: sea_orm::DatabaseConnection) -> crate::db::DbContext {
     use crate::db::{DbContext, NoReactor, WebDb, WorkerDb};
     use crate::storage::{EmailSender, LogStorage, NarStore, StorageCtx};
-    use crate::types::RuntimeConfig;
+    use gradient_types::RuntimeConfig;
     use futures::future::BoxFuture;
     use sea_orm::{DatabaseBackend, MockDatabase};
 
@@ -134,28 +134,28 @@ pub fn make_ctx(db: sea_orm::DatabaseConnection) -> crate::db::DbContext {
         }
     }
 
-    let cli = crate::types::Cli {
-        logging: crate::types::LoggingArgs::default(),
-        server: crate::types::ServerArgs::default(),
-        database: crate::types::DatabaseArgs::default(),
-        eval: crate::types::EvalArgs::default(),
-        storage: crate::types::StorageArgs {
+    let cli = gradient_types::Cli {
+        logging: gradient_types::LoggingArgs::default(),
+        server: gradient_types::ServerArgs::default(),
+        database: gradient_types::DatabaseArgs::default(),
+        eval: gradient_types::EvalArgs::default(),
+        storage: gradient_types::StorageArgs {
             base_path: "/tmp/gradient-test".into(),
             ..Default::default()
         },
-        secrets: crate::types::SecretsArgs {
+        secrets: gradient_types::SecretsArgs {
             crypt_secret_file: "test-secret".into(),
             jwt_secret_file: "test-jwt".into(),
         },
-        limits: crate::types::LimitsArgs::default(),
-        registration: crate::types::RegistrationArgs::default(),
-        proto: crate::types::ProtoArgs::default(),
-        oidc: crate::types::OidcArgs::default(),
-        email: crate::types::EmailArgs::default(),
-        s3: crate::types::S3Args::default(),
-        github_app: crate::types::GitHubAppArgs::default(),
-        metrics: crate::types::MetricsArgs::default(),
-        network: crate::types::NetworkArgs::default(),
+        limits: gradient_types::LimitsArgs::default(),
+        registration: gradient_types::RegistrationArgs::default(),
+        proto: gradient_types::ProtoArgs::default(),
+        oidc: gradient_types::OidcArgs::default(),
+        email: gradient_types::EmailArgs::default(),
+        s3: gradient_types::S3Args::default(),
+        github_app: gradient_types::GitHubAppArgs::default(),
+        metrics: gradient_types::MetricsArgs::default(),
+        network: gradient_types::NetworkArgs::default(),
     };
     let config = std::sync::Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
     let nar_storage = NarStore::local(&config.storage.base_path).expect("nar store");

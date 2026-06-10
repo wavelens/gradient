@@ -11,7 +11,7 @@
 //! non-superusers only in anonymized aggregate (see the board endpoints).
 
 use crate::error::WebError;
-use gradient_core::types::MUser;
+use gradient_types::MUser;
 use sea_orm::{ConnectionTrait, DatabaseBackend, Statement, Value};
 use uuid::Uuid;
 

@@ -8,7 +8,7 @@ use super::api_key::{ApiKeyContext, DecodedRequest};
 use axum::extract::State;
 use axum::http::StatusCode;
 use chrono::{Duration, Utc};
-use gradient_core::types::*;
+use gradient_types::*;
 use gradient_core::ServerState;
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use rand::distr::{Alphanumeric, SampleString};
@@ -139,7 +139,7 @@ pub async fn decode_jwt(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
-    let now = gradient_core::types::now();
+    let now = gradient_types::now();
     if session.revoked_at.is_some()
         || session.expires_at < now
         || session.user_id != token_data.claims.id
@@ -168,7 +168,7 @@ async fn decode_api_key(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
-    let now = gradient_core::types::now();
+    let now = gradient_types::now();
     if api_key.revoked_at.is_some() {
         return Err(StatusCode::UNAUTHORIZED);
     }

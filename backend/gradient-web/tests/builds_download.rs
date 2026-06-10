@@ -19,7 +19,7 @@ use bytes::Bytes;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_core::storage::{EmailSender, NarStore};
-use gradient_core::types::ids::*;
+use gradient_types::ids::*;
 use gradient_core::ServerState;
 use gradient_core::db::{WebDb, WorkerDb};
 use harmonia_file_nar::archive::test_data::{TestNarEvent, TestNarEvents};
@@ -239,7 +239,7 @@ fn listing_returns_products_from_db() {
                 MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
             ),
             config: std::sync::Arc::new(
-                gradient_core::types::RuntimeConfig::from_cli(&cli).expect("valid test config"),
+                gradient_types::RuntimeConfig::from_cli(&cli).expect("valid test config"),
             ),
             log_storage: Arc::new(NoopLogStorage),
             email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
@@ -248,7 +248,7 @@ fn listing_returns_products_from_db() {
             pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             http: gradient_core::http::build_client().expect("http client"),
             shutdown: gradient_core::shutdown::Shutdown::new(),
-            jwt_secret: gradient_core::types::SecretString::new("test-jwt-secret".to_string()),
+            jwt_secret: gradient_types::SecretString::new("test-jwt-secret".to_string()),
             started_at: chrono::Utc::now(),
             pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
             oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
@@ -322,7 +322,7 @@ fn download_streams_file_from_nar() {
                 MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
             ),
             config: std::sync::Arc::new(
-                gradient_core::types::RuntimeConfig::from_cli(&cli).expect("valid test config"),
+                gradient_types::RuntimeConfig::from_cli(&cli).expect("valid test config"),
             ),
             log_storage: Arc::new(NoopLogStorage),
             email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
@@ -331,7 +331,7 @@ fn download_streams_file_from_nar() {
             pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             http: gradient_core::http::build_client().expect("http client"),
             shutdown: gradient_core::shutdown::Shutdown::new(),
-            jwt_secret: gradient_core::types::SecretString::new("test-jwt-secret".to_string()),
+            jwt_secret: gradient_types::SecretString::new("test-jwt-secret".to_string()),
             started_at: chrono::Utc::now(),
             pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
             oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),

@@ -10,7 +10,7 @@
 //! tables (idempotent via `ON CONFLICT`), then cascades minute→hour→day→week
 //! over `metric_rollup` itself. Best-effort: SQL failures are logged, never
 //! propagated. Timestamps are compared in UTC to match the naive-UTC values the
-//! recording layer writes via `crate::types::now()`.
+//! recording layer writes via `gradient_types::now()`.
 
 use std::time::Duration;
 

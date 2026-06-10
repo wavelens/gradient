@@ -37,7 +37,7 @@ async fn retention_loop(ctx: DbContext) {
 
 async fn run_retention(ctx: &DbContext) {
     let cfg = &ctx.config.metrics_args;
-    let now = crate::types::now();
+    let now = gradient_types::now();
     let db = &ctx.worker_db;
 
     if cfg.metrics_retention_raw_days > 0 {

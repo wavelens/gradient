@@ -19,9 +19,9 @@ use axum::{Extension, Json};
 
 use chrono::Duration;
 use gradient_core::db::get_any_organization_by_name;
-use gradient_core::types::consts::*;
-use gradient_core::types::input::{validate_display_name, validate_username};
-use gradient_core::types::*;
+use gradient_types::consts::*;
+use gradient_types::input::{validate_display_name, validate_username};
+use gradient_types::*;
 use gradient_core::ServerState;
 use password_auth::verify_password;
 use sea_orm::ActiveValue::Set;
@@ -414,7 +414,7 @@ pub async fn post_keys(
 
     let expires_at = body
         .expires_in_days
-        .map(|days| gradient_core::types::now() + Duration::days(days as i64));
+        .map(|days| gradient_types::now() + Duration::days(days as i64));
 
     let (mask, org_pin, cache_pin) = if let Some(cache_name) = body.cache.clone() {
         let cache = load_cache(
@@ -459,7 +459,7 @@ pub async fn post_keys(
         name: Set(body.name.clone()),
         key: Set(hash_api_key(&raw_key)),
         last_used_at: Set(*NULL_TIME),
-        created_at: Set(gradient_core::types::now()),
+        created_at: Set(gradient_types::now()),
         managed: Set(false),
         expires_at: Set(expires_at),
         revoked_at: Set(None),
@@ -655,7 +655,7 @@ pub async fn post_key_revoke(
     }
 
     let mut active: AApi = api_key.into_active_model();
-    active.revoked_at = Set(Some(gradient_core::types::now()));
+    active.revoked_at = Set(Some(gradient_types::now()));
     active.update(&state.web_db).await?;
 
     audit_record(
@@ -684,7 +684,7 @@ pub async fn get_sessions(
         .all(&state.web_db)
         .await?;
 
-    let now = gradient_core::types::now();
+    let now = gradient_types::now();
     let sessions: Vec<SessionInfo> = sessions
         .into_iter()
         .filter(|s| s.expires_at >= now)
@@ -722,7 +722,7 @@ pub async fn delete_session(
     }
 
     let mut active: ASession = session.into_active_model();
-    active.revoked_at = Set(Some(gradient_core::types::now()));
+    active.revoked_at = Set(Some(gradient_types::now()));
     active.update(&state.web_db).await?;
 
     audit_record(

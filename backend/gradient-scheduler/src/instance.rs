@@ -227,7 +227,7 @@ mod tests {
             total_workers: 5,
             idle_workers: 1,
         };
-        let ic = compute_instance_context(&db, counts, gradient_core::types::now()).await;
+        let ic = compute_instance_context(&db, counts, gradient_types::now()).await;
 
         assert_eq!(ic.peak_ram_mb, windowed(100.0, 200.0, 300.0));
         assert_eq!(ic.build_time_ms.w1h, 12.0);

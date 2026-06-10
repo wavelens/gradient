@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Instant;
 
-use crate::types::ids::UserId;
+use gradient_types::ids::UserId;
 
 use crate::ci::github_app_manifest::ManifestResult;
 

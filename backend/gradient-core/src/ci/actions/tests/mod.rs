@@ -11,7 +11,7 @@ use super::payload::{forge_status_payload, render_default_body, render_subject};
 use super::report::build_ci_report_from_payload;
 use super::truncate;
 use crate::forge::reporter::CiStatus;
-use crate::types::ActionType;
+use gradient_types::ActionType;
 use fixtures::{action_with, make_ctx, run};
 use serde_json::json;
 

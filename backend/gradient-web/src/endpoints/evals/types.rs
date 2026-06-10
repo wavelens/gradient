@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_core::types::WaitingReason;
-use gradient_core::types::ids::*;
-use gradient_core::types::triggers::TriggerType;
+use gradient_types::WaitingReason;
+use gradient_types::ids::*;
+use gradient_types::triggers::TriggerType;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]

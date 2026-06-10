@@ -27,7 +27,7 @@ use std::sync::Arc;
 use chrono::NaiveDateTime;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
-use gradient_core::types::*;
+use gradient_types::*;
 use sea_orm::{DatabaseBackend, MockDatabase};
 
 use crate::{Scheduler, dispatch, trigger_dispatch};
@@ -380,7 +380,7 @@ async fn dispatch_once_skips_trigger_within_interval() {
     let org_id = OrganizationId::now_v7();
 
     // last_fired_at = now (0 seconds ago) - interval = 60 s → not due
-    let recent = gradient_core::types::now();
+    let recent = gradient_types::now();
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // 1. active polling/time triggers → one trigger, recently fired

@@ -14,7 +14,7 @@
 use axum::extract::{ConnectInfo, FromRequestParts};
 use axum::http::HeaderMap;
 use axum::http::request::Parts;
-use gradient_core::types::*;
+use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ConnectionTrait, EntityTrait};
@@ -136,7 +136,7 @@ pub async fn record<C: ConnectionTrait>(
         ip: Set(info.ip.clone()),
         user_agent: Set(info.user_agent.clone()),
         metadata: Set(metadata),
-        created_at: Set(gradient_core::types::now()),
+        created_at: Set(gradient_types::now()),
     };
     if let Err(e) = EAuditLog::insert(row).exec(db).await {
         tracing::warn!(event, error = %e, "failed to write audit_log entry");

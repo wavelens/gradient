@@ -21,10 +21,10 @@ use std::collections::HashSet;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use gradient_core::types::ids::OrganizationId;
+use gradient_types::ids::OrganizationId;
 use tokio::sync::{Notify, mpsc};
 
-use gradient_core::types::proto::GradientCapabilities;
+use gradient_types::proto::GradientCapabilities;
 
 use crate::peer_auth::PeerAuth;
 

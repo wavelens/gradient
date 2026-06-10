@@ -11,7 +11,7 @@ use crate::helpers::ok_json;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use chrono::{NaiveDateTime, Timelike};
-use gradient_core::types::*;
+use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
 use serde::Serialize;
@@ -63,7 +63,7 @@ pub struct CacheStatsResponse {
 /// Record bytes served for a NAR request into the current minute bucket.
 /// Called fire-and-forget from the NAR serving handler.
 pub async fn record_nar_traffic(state: Arc<ServerState>, cache_id: CacheId, bytes: i64) {
-    let now = gradient_core::types::now();
+    let now = gradient_types::now();
     let bucket = match now.with_second(0).and_then(|t| t.with_nanosecond(0)) {
         Some(t) => t,
         None => now,

@@ -16,7 +16,7 @@ use gradient_entity::evaluation::EvaluationStatus;
 use gradient_core::db::{
     collect_transitive_dependents, update_build_status, update_evaluation_status,
 };
-use gradient_core::types::*;
+use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
@@ -24,10 +24,10 @@ use sea_orm::{
 use tracing::{error, info, warn};
 
 use super::jobs::PendingBuildJob;
-use gradient_core::types::BuildOutputMetadata;
-use gradient_core::types::proto::BuildFailureKind;
-use gradient_core::types::proto::BuildMetrics;
-use gradient_core::types::proto::BuildOutput;
+use gradient_types::BuildOutputMetadata;
+use gradient_types::proto::BuildFailureKind;
+use gradient_types::proto::BuildMetrics;
+use gradient_types::proto::BuildOutput;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FailureOutcome {
@@ -145,7 +145,7 @@ impl<'a> BuildStateHandler<'a> {
                         name: Set(product.name.clone()),
                         path: Set(product.path.clone()),
                         size: Set(product.size.map(|s| s as i64)),
-                        created_at: Set(gradient_core::types::now()),
+                        created_at: Set(gradient_types::now()),
                     };
                     if let Err(e) = am.insert(&self.state.worker_db).await {
                         warn!(error = %e, %build_id, output_name = %output.name, "failed to insert build_product");
@@ -281,7 +281,7 @@ impl<'a> BuildStateHandler<'a> {
             oom_killed: Set(metrics.oom_killed),
             build_time_ms: Set(metrics.build_time_ms.map(|v| v as i64)),
             worker_id: Set(build.worker.clone().unwrap_or_default()),
-            created_at: Set(gradient_core::types::now()),
+            created_at: Set(gradient_types::now()),
         };
 
         if let Err(e) = metric.insert(&self.state.worker_db).await {
@@ -1087,7 +1087,7 @@ impl BuildabilityChecker {
 #[cfg(test)]
 mod retry_tests {
     use super::{FailureOutcome, decide_failure_outcome, retry_backoff_elapsed};
-    use gradient_core::types::proto::BuildFailureKind;
+    use gradient_types::proto::BuildFailureKind;
 
     #[test]
     fn permanent_is_terminal_regardless_of_attempt() {

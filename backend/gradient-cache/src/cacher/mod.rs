@@ -34,7 +34,7 @@ use tracing::{error, info};
 pub async fn cache_loop(state: Arc<ServerState>) {
     let _guard = if state.config.registration.report_errors {
         Some(sentry::init(
-            gradient_core::types::cli::effective_sentry_dsn(&state.config.registration).to_string(),
+            gradient_types::cli::effective_sentry_dsn(&state.config.registration).to_string(),
         ))
     } else {
         None
@@ -100,7 +100,7 @@ pub async fn cache_loop(state: Arc<ServerState>) {
 pub async fn sign_sweep_loop(state: Arc<ServerState>) {
     let _guard = if state.config.registration.report_errors {
         Some(sentry::init(
-            gradient_core::types::cli::effective_sentry_dsn(&state.config.registration).to_string(),
+            gradient_types::cli::effective_sentry_dsn(&state.config.registration).to_string(),
         ))
     } else {
         None

@@ -26,7 +26,7 @@ pub mod workers;
 
 use crate::error::WebResult;
 use axum::extract::{Json, State};
-use gradient_core::types::{BaseResponse};
+use gradient_types::{BaseResponse};
 use gradient_core::ServerState;
 use serde::Serialize;
 use std::sync::Arc;

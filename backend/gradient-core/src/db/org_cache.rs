@@ -7,7 +7,7 @@
 //! Organisation ↔ cache subscription helpers consumed by the trigger
 //! pipeline (no-cache gate) and the cache-create reconcile path.
 
-use crate::types::ids::OrganizationId;
+use gradient_types::ids::OrganizationId;
 use gradient_entity::organization_cache::CacheSubscriptionMode;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 

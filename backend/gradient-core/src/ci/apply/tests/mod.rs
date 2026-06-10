@@ -7,8 +7,8 @@
 mod fixtures;
 
 use super::{ApplyInput, ApplyOutcome, ApprovalInfo, apply_trigger, park_if_storage_full};
-use crate::types::triggers::TriggerType;
-use crate::types::*;
+use gradient_types::triggers::TriggerType;
+use gradient_types::*;
 use fixtures::{
     input, make_commit, make_eval, make_project_with_concurrency, make_project_with_last_eval,
     with_eval_worker, with_storage_not_full, with_writable_cache,
@@ -420,7 +420,7 @@ async fn hard_abort_populates_aborted_fields() {
 /// because the eval is no longer in `Queued` status.
 #[tokio::test]
 async fn gate_approval_parks_pr_evaluation_in_waiting_approval() {
-    use crate::types::waiting_reason::WaitingReason;
+    use gradient_types::waiting_reason::WaitingReason;
     let project = make_project_with_last_eval(None);
     let new_eval_id = EvaluationId::now_v7();
     let new_commit_id = CommitId::now_v7();
@@ -503,7 +503,7 @@ async fn gate_approval_parks_pr_evaluation_in_waiting_approval() {
 /// the row alone until the cache-create endpoint re-queues it.
 #[tokio::test]
 async fn no_writable_cache_parks_evaluation_in_waiting_no_cache() {
-    use crate::types::waiting_reason::WaitingReason;
+    use gradient_types::waiting_reason::WaitingReason;
     let project = make_project_with_last_eval(None);
     let new_eval_id = EvaluationId::now_v7();
     let new_commit_id = CommitId::now_v7();
@@ -576,7 +576,7 @@ async fn no_writable_cache_parks_evaluation_in_waiting_no_cache() {
 /// are connected, not when connected workers lack `eval`.
 #[tokio::test]
 async fn no_eval_capable_worker_parks_evaluation_in_waiting_workers() {
-    use crate::types::waiting_reason::WaitingReason;
+    use gradient_types::waiting_reason::WaitingReason;
     let project = make_project_with_last_eval(None);
     let new_eval_id = EvaluationId::now_v7();
     let new_commit_id = CommitId::now_v7();

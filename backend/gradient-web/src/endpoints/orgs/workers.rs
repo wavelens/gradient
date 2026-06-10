@@ -13,9 +13,9 @@ use chrono::NaiveDateTime;
 use gradient_entity::worker_registration::{
     self, ActiveModel as AWorkerRegistration, Entity as EWorkerRegistration,
 };
-use gradient_core::types::ids::*;
-use gradient_core::types::proto::GradientCapabilities;
-use gradient_core::types::{BaseResponse, MUser};
+use gradient_types::ids::*;
+use gradient_types::proto::GradientCapabilities;
+use gradient_types::{BaseResponse, MUser};
 use gradient_core::ServerState;
 use rand::RngExt as _;
 use gradient_scheduler::{Scheduler, WorkerInfo};
@@ -173,7 +173,7 @@ pub async fn post_org_worker(
         enable_eval: Set(body.enable_eval),
         enable_build: Set(body.enable_build),
         created_by: Set(Some(user.id)),
-        created_at: Set(gradient_core::types::now()),
+        created_at: Set(gradient_types::now()),
     };
     row.insert(&state.web_db).await?;
 

@@ -6,8 +6,8 @@
 
 use crate::db::DbContext;
 use crate::sources::SourceError;
-use crate::types::input::check_repository_url_is_ssh;
-use crate::types::*;
+use gradient_types::input::check_repository_url_is_ssh;
+use gradient_types::*;
 use sea_orm::EntityTrait;
 
 /// Bundles the server state, project reference, and (if the repository URL is

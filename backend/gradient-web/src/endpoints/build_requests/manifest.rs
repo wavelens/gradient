@@ -21,8 +21,8 @@ use axum::Extension;
 use axum::extract::{Json, State};
 use chrono::Duration;
 use gradient_core::constants::{MAX_BUILD_REQUEST_SIZE, UPLOAD_SESSION_TTL};
-use gradient_core::types::ids::UploadSessionId;
-use gradient_core::types::{
+use gradient_types::ids::UploadSessionId;
+use gradient_types::{
     ABuildRequestBlob, AUploadSession, BaseResponse, CBuildRequestBlob, EBuildRequestBlob, MUser,
     now,
 };

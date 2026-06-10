@@ -10,8 +10,8 @@ use super::super::{
     inbound_integrations_by_name, lookup_id, outbound_integrations_by_name, read_credential,
 };
 use crate::state::config::*;
-use crate::types::triggers::TriggerConfig;
-use crate::types::*;
+use gradient_types::triggers::TriggerConfig;
+use gradient_types::*;
 use anyhow::{Context, Result};
 use gradient_entity::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, Set};
@@ -333,7 +333,7 @@ pub(crate) async fn apply_project_triggers<C: ConnectionTrait>(
         existing_by_key.insert(key, row);
     }
 
-    let now = crate::types::now();
+    let now = gradient_types::now();
 
     for (key, (cfg, active)) in &desired_by_key {
         if existing_by_key.contains_key(key) {
@@ -374,7 +374,7 @@ pub(crate) fn build_trigger_config(
     inbound: &HashMap<String, IntegrationId>,
     outbound: &HashMap<String, IntegrationId>,
 ) -> anyhow::Result<TriggerConfig> {
-    use crate::types::triggers::TriggerType as TT;
+    use gradient_types::triggers::TriggerType as TT;
     let cfg = match t.trigger_type {
         TT::Polling => {
             let interval = t
@@ -565,8 +565,8 @@ pub(crate) fn build_action_config(
 mod trigger_helper_tests {
     use super::{build_trigger_config, trigger_key};
     use crate::state::StateTrigger;
-    use crate::types::IntegrationId;
-    use crate::types::triggers::{TriggerConfig, TriggerType};
+    use gradient_types::IntegrationId;
+    use gradient_types::triggers::{TriggerConfig, TriggerType};
     use std::collections::HashMap;
 
     pub(crate) fn polling_trigger(interval_secs: u64) -> StateTrigger {

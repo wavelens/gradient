@@ -44,7 +44,7 @@ pub fn decode_server_message(bytes: &[u8]) -> Result<ServerMessage, RkyvError> {
 mod tests {
     use super::*;
     use crate::messages::PROTO_VERSION;
-    use gradient_core::types::proto::GradientCapabilities;
+    use gradient_types::proto::GradientCapabilities;
     use rkyv::util::AlignedVec;
 
     /// Construct a deliberately misaligned slice that points at a

@@ -22,11 +22,11 @@ use axum::Json;
 use axum::extract::{Path, State};
 use gradient_core::nix_hash::normalize_nar_hash;
 use gradient_core::storage::source_nar::{SourceNar, materialise_source_nar};
-use gradient_core::types::ConcurrencyPolicy;
-use gradient_core::types::ids::{
+use gradient_types::ConcurrencyPolicy;
+use gradient_types::ids::{
     CachedPathId, CachedPathSignatureId, CommitId, EvaluationId, ProjectId, UploadSessionId,
 };
-use gradient_core::types::{
+use gradient_types::{
     ACachedPath, ACachedPathSignature, ACommit, AEvaluation, AProject, AUploadSession,
     BaseResponse, CCachedPath, CCachedPathSignature, COrganizationCache, CProject, ECachedPath,
     ECachedPathSignature, EOrganizationCache, EProject, EUploadSession, MUser, NULL_TIME, now,
@@ -261,7 +261,7 @@ async fn ensure_cached_path<C: ConnectionTrait>(
 async fn queue_signature_placeholders<C: ConnectionTrait>(
     tx: &C,
     cached_path: &gradient_entity::cached_path::Model,
-    org: &gradient_core::types::ids::OrganizationId,
+    org: &gradient_types::ids::OrganizationId,
 ) -> WebResult<()> {
     let org_caches = EOrganizationCache::find()
         .filter(COrganizationCache::Organization.eq(*org))
@@ -302,8 +302,8 @@ async fn queue_signature_placeholders<C: ConnectionTrait>(
 
 async fn ensure_build_request_project<C: ConnectionTrait>(
     tx: &C,
-    org_id: gradient_core::types::ids::OrganizationId,
-    user_id: gradient_core::types::ids::UserId,
+    org_id: gradient_types::ids::OrganizationId,
+    user_id: gradient_types::ids::UserId,
 ) -> WebResult<gradient_entity::project::Model> {
     if let Some(existing) = EProject::find()
         .filter(

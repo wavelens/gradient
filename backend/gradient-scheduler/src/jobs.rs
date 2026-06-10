@@ -8,10 +8,10 @@
 
 use std::collections::{HashMap, HashSet};
 
-use gradient_core::types::ids::{
+use gradient_types::ids::{
     BuildId, CommitId, DerivationId, EvaluationId, OrganizationId, ProjectId,
 };
-use gradient_core::types::proto::{
+use gradient_types::proto::{
     BuildJob, CandidateScore, FlakeJob, FlakeSource, FlakeTask, Job, JobCandidate, JobKind,
     RequiredPath,
 };
@@ -103,7 +103,7 @@ pub struct WorkerCaps {
     pub architectures: Vec<String>,
     pub system_features: Vec<String>,
     /// Full set of advertised gradient capabilities, surfaced on the dispatch view.
-    pub capabilities: gradient_core::types::proto::GradientCapabilities,
+    pub capabilities: gradient_types::proto::GradientCapabilities,
     /// Live resource view of the worker, fed into resource-aware scoring rules.
     pub metrics: Option<gradient_score::WorkerMetricsView>,
 }
@@ -687,7 +687,7 @@ impl JobTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_core::types::proto::{BuildJob, BuildTask, FlakeJob, FlakeSource, FlakeTask};
+    use gradient_types::proto::{BuildJob, BuildTask, FlakeJob, FlakeSource, FlakeTask};
 
     fn eval_job(peer: OrganizationId) -> PendingJob {
         PendingJob::Eval(PendingEvalJob {
@@ -707,8 +707,8 @@ mod tests {
                 input_overrides: vec![],
             },
             required_paths: vec![],
-            queued_at: gradient_core::types::now(),
-            ready_at: gradient_core::types::now(),
+            queued_at: gradient_types::now(),
+            ready_at: gradient_types::now(),
             rescore_count: 0,
         })
     }
@@ -735,8 +735,8 @@ mod tests {
                 input_overrides: vec![],
             },
             required_paths: vec![],
-            queued_at: gradient_core::types::now(),
-            ready_at: gradient_core::types::now(),
+            queued_at: gradient_types::now(),
+            ready_at: gradient_types::now(),
             rescore_count: 0,
         })
     }
@@ -772,8 +772,8 @@ mod tests {
             prefer_local_build: false,
             is_fixed_output: false,
             history: gradient_score::HistoryPrediction::default(),
-            queued_at: gradient_core::types::now(),
-            ready_at: gradient_core::types::now(),
+            queued_at: gradient_types::now(),
+            ready_at: gradient_types::now(),
             rescore_count: 0,
             pname: None,
         })

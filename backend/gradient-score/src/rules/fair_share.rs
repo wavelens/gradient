@@ -40,8 +40,8 @@ mod tests {
     use super::*;
     use crate::context::{HistoryPrediction, LazyProviders, ScoredJob};
     use crate::rules::builtin::WaitTimeRule;
-    use gradient_core::types::ids::OrganizationId;
-    use gradient_core::types::now;
+    use gradient_types::ids::OrganizationId;
+    use gradient_types::now;
 
     fn build_job() -> ScoredJob<'static> {
         ScoredJob::new_build(

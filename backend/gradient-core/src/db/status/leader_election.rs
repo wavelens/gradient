@@ -5,7 +5,7 @@
  */
 
 use crate::db::DbContext;
-use crate::types::*;
+use gradient_types::*;
 use gradient_entity::build::BuildStatus;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter};

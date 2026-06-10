@@ -7,7 +7,7 @@
 use super::logging::{PHASE_SUBJECT_BUILD, finalize_build_log, record_phase_event};
 use crate::db::DbContext;
 use crate::state_machine::BuildStateMachine;
-use crate::types::*;
+use gradient_types::*;
 use gradient_entity::build::BuildStatus;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, IntoActiveModel};
@@ -43,7 +43,7 @@ pub async fn update_build_status(ctx: &DbContext, build: MBuild, status: BuildSt
     let mut active_build: ABuild = build.clone().into_active_model();
 
     let event_status = status;
-    let now = crate::types::now();
+    let now = gradient_types::now();
     // When transitioning out of `Building` into a terminal state, record the
     // elapsed wall-clock time. `build.updated_at` is the timestamp of the
     // previous transition (into `Building` by `Scheduler::handle_build_status_update`).
@@ -85,7 +85,7 @@ pub async fn update_build_status(ctx: &DbContext, build: MBuild, status: BuildSt
         Ok(updated_build) => {
             let _ = ctx
                 .board_events
-                .send(crate::types::BoardEvent::BuildStatusChanged {
+                .send(gradient_types::BoardEvent::BuildStatusChanged {
                     evaluation_id: updated_build.evaluation.into_inner(),
                     build_id: updated_build.id.into_inner(),
                     status: i32::from(event_status) as i16,
@@ -96,7 +96,7 @@ pub async fn update_build_status(ctx: &DbContext, build: MBuild, status: BuildSt
             ) {
                 let _ = ctx
                     .board_events
-                    .send(crate::types::BoardEvent::CacheChanged);
+                    .send(gradient_types::BoardEvent::CacheChanged);
             }
 
             let action_ctx = ctx.clone();

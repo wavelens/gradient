@@ -7,7 +7,7 @@
 use super::context::ProjectGitContext;
 use super::remote::accept_cert;
 use crate::sources::SourceError;
-use crate::types::input::vec_to_hex;
+use gradient_types::input::vec_to_hex;
 use git2::RemoteCallbacks;
 use tracing::{debug, instrument};
 

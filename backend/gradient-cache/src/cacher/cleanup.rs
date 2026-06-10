@@ -6,7 +6,7 @@
 
 use anyhow::{Context, Result};
 use gradient_entity::build::BuildStatus;
-use gradient_core::types::*;
+use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, IntoActiveModel,
@@ -436,7 +436,7 @@ mod tests {
             pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             http: gradient_core::http::build_client().expect("http client"),
             shutdown: gradient_core::shutdown::Shutdown::new(),
-            jwt_secret: gradient_core::types::SecretString::new("test-jwt-secret".to_string()),
+            jwt_secret: gradient_types::SecretString::new("test-jwt-secret".to_string()),
             started_at: chrono::Utc::now(),
             pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
             oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
@@ -530,7 +530,7 @@ mod tests {
             pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             http: gradient_core::http::build_client().expect("http client"),
             shutdown: gradient_core::shutdown::Shutdown::new(),
-            jwt_secret: gradient_core::types::SecretString::new("test-jwt-secret".to_string()),
+            jwt_secret: gradient_types::SecretString::new("test-jwt-secret".to_string()),
             started_at: chrono::Utc::now(),
             pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
             oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
@@ -622,7 +622,7 @@ mod tests {
             pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             http: gradient_core::http::build_client().expect("http client"),
             shutdown: gradient_core::shutdown::Shutdown::new(),
-            jwt_secret: gradient_core::types::SecretString::new("test-jwt-secret".to_string()),
+            jwt_secret: gradient_types::SecretString::new("test-jwt-secret".to_string()),
             started_at: chrono::Utc::now(),
             pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
             oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
@@ -657,7 +657,7 @@ mod tests {
             pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             http: gradient_core::http::build_client().expect("http client"),
             shutdown: gradient_core::shutdown::Shutdown::new(),
-            jwt_secret: gradient_core::types::SecretString::new("test-jwt-secret".to_string()),
+            jwt_secret: gradient_types::SecretString::new("test-jwt-secret".to_string()),
             started_at: chrono::Utc::now(),
             pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
             oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
@@ -736,7 +736,7 @@ mod tests {
             pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             http: gradient_core::http::build_client().expect("http client"),
             shutdown: gradient_core::shutdown::Shutdown::new(),
-            jwt_secret: gradient_core::types::SecretString::new("test-jwt-secret".to_string()),
+            jwt_secret: gradient_types::SecretString::new("test-jwt-secret".to_string()),
             started_at: chrono::Utc::now(),
             pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
             oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),

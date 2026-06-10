@@ -10,9 +10,9 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use gradient_core::types::ids::*;
+use gradient_types::ids::*;
 
-use gradient_core::types::proto::{
+use gradient_types::proto::{
     CandidateScore, FlakeJob, FlakeTask, GradientCapabilities, JobKind,
 };
 
@@ -38,7 +38,7 @@ fn eval_job(peer: OrganizationId) -> PendingEvalJob {
         repository: "https://example.com/repo".into(),
         job: FlakeJob {
             tasks: vec![FlakeTask::EvaluateDerivations],
-            source: gradient_core::types::proto::FlakeSource::Repository {
+            source: gradient_types::proto::FlakeSource::Repository {
                 url: "https://example.com/repo".into(),
                 commit: "abc123".into(),
             },
@@ -47,8 +47,8 @@ fn eval_job(peer: OrganizationId) -> PendingEvalJob {
             input_overrides: vec![],
         },
         required_paths: vec![],
-        queued_at: gradient_core::types::now(),
-        ready_at: gradient_core::types::now(),
+        queued_at: gradient_types::now(),
+        ready_at: gradient_types::now(),
         rescore_count: 0,
     }
 }
@@ -314,7 +314,7 @@ async fn record_eval_message_drops_when_job_unknown() {
     let r = scheduler
         .record_eval_message(
             "ghost-job",
-            gradient_core::types::proto::EvalMessageLevel::Error,
+            gradient_types::proto::EvalMessageLevel::Error,
             "build-prefetch".into(),
             "nope".into(),
         )
@@ -325,7 +325,7 @@ async fn record_eval_message_drops_when_job_unknown() {
 #[tokio::test]
 async fn record_eval_message_inserts_for_active_build_job() {
     use crate::jobs::PendingBuildJob;
-    use gradient_core::types::proto::{BuildJob, BuildTask};
+    use gradient_types::proto::{BuildJob, BuildTask};
     use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
     use gradient_test_support::prelude::*;
 
@@ -366,8 +366,8 @@ async fn record_eval_message_inserts_for_active_build_job() {
                 prefer_local_build: false,
                 is_fixed_output: false,
                 history: gradient_score::HistoryPrediction::default(),
-                queued_at: gradient_core::types::now(),
-                ready_at: gradient_core::types::now(),
+                queued_at: gradient_types::now(),
+                ready_at: gradient_types::now(),
                 rescore_count: 0,
                 pname: None,
             },
@@ -389,7 +389,7 @@ async fn record_eval_message_inserts_for_active_build_job() {
     scheduler
         .record_eval_message(
             "jbuild",
-            gradient_core::types::proto::EvalMessageLevel::Error,
+            gradient_types::proto::EvalMessageLevel::Error,
             "build-prefetch".into(),
             "input prefetch failed: no nar_hash".into(),
         )
@@ -413,8 +413,8 @@ async fn fetch_only_completion_enqueues_cached_eval_followup() {
         commit: CommitId::nil(),
         wildcard: "*".into(),
         status: EvaluationStatus::Building,
-        created_at: gradient_core::types::now(),
-        updated_at: gradient_core::types::now(),
+        created_at: gradient_types::now(),
+        updated_at: gradient_types::now(),
         flake_source: Some(source_path.into()),
         ..Default::default()
     };
@@ -459,7 +459,7 @@ async fn fetch_only_completion_enqueues_cached_eval_followup() {
         other => panic!("expected an eval follow-up, got {other:?}"),
     };
     match &follow.job.source {
-        gradient_core::types::proto::FlakeSource::Cached { store_path } => {
+        gradient_types::proto::FlakeSource::Cached { store_path } => {
             assert_eq!(store_path, source_path)
         }
         other => panic!("expected Cached source, got {other:?}"),
@@ -468,7 +468,7 @@ async fn fetch_only_completion_enqueues_cached_eval_followup() {
 
 #[tokio::test]
 async fn cancel_evaluation_jobs_drops_eval_and_build_jobs() {
-    use gradient_core::types::proto::{BuildJob, BuildTask};
+    use gradient_types::proto::{BuildJob, BuildTask};
 
     let scheduler = test_scheduler();
     let peer = OrganizationId::now_v7();
@@ -485,9 +485,9 @@ async fn cancel_evaluation_jobs_drops_eval_and_build_jobs() {
                 peer_id: peer,
                 commit_id: CommitId::now_v7(),
                 repository: "https://example.com/repo".into(),
-                job: gradient_core::types::proto::FlakeJob {
-                    tasks: vec![gradient_core::types::proto::FlakeTask::EvaluateDerivations],
-                    source: gradient_core::types::proto::FlakeSource::Repository {
+                job: gradient_types::proto::FlakeJob {
+                    tasks: vec![gradient_types::proto::FlakeTask::EvaluateDerivations],
+                    source: gradient_types::proto::FlakeSource::Repository {
                         url: "https://example.com/repo".into(),
                         commit: "abc123".into(),
                     },
@@ -496,8 +496,8 @@ async fn cancel_evaluation_jobs_drops_eval_and_build_jobs() {
                     input_overrides: vec![],
                 },
                 required_paths: vec![],
-                queued_at: gradient_core::types::now(),
-                ready_at: gradient_core::types::now(),
+                queued_at: gradient_types::now(),
+                ready_at: gradient_types::now(),
                 rescore_count: 0,
             },
         )
@@ -531,8 +531,8 @@ async fn cancel_evaluation_jobs_drops_eval_and_build_jobs() {
                     prefer_local_build: false,
                     is_fixed_output: false,
                     history: gradient_score::HistoryPrediction::default(),
-                    queued_at: gradient_core::types::now(),
-                    ready_at: gradient_core::types::now(),
+                    queued_at: gradient_types::now(),
+                    ready_at: gradient_types::now(),
                     rescore_count: 0,
                     pname: None,
                 },

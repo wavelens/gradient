@@ -16,10 +16,10 @@ use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
 use chrono::Utc;
 use gradient_core::ci::{ApplyInput, ApplyOutcome, apply_trigger};
-use gradient_core::types::ForgeType;
+use gradient_types::ForgeType;
 use gradient_core::sources::resolve_head;
-use gradient_core::types::triggers::{TriggerConfig, TriggerType};
-use gradient_core::types::*;
+use gradient_types::triggers::{TriggerConfig, TriggerType};
+use gradient_types::*;
 use gradient_core::ServerState;
 use gradient_scheduler::Scheduler;
 use sea_orm::ActiveValue::Set;
@@ -409,7 +409,7 @@ pub async fn fire_now(
     // Stamp last_fired_at so the UI reflects the manual fire alongside the
     // outcome - mirrors the touch in the webhook fan-out path.
     {
-        let now = gradient_core::types::now();
+        let now = gradient_types::now();
         let mut active: gradient_entity::project_trigger::ActiveModel = row.clone().into();
         active.last_fired_at = Set(Some(now));
         active.updated_at = Set(now);

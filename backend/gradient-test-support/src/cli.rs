@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_core::types::Cli;
-use gradient_core::types::cli::*;
+use gradient_types::Cli;
+use gradient_types::cli::*;
 
 /// Single source of truth for the `Cli` struct in tests.
 /// Update only here when fields are added/removed from `Cli`.

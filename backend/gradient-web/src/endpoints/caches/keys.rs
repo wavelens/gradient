@@ -13,7 +13,7 @@ use axum::Extension;
 use axum::Json;
 use axum::extract::{Path, State};
 use gradient_core::sources::{format_cache_key, format_cache_public_key};
-use gradient_core::types::*;
+use gradient_types::*;
 use gradient_core::ServerState;
 use std::sync::Arc;
 

@@ -8,10 +8,10 @@ use super::super::DynError;
 use super::super::StateApplicator;
 use super::super::{lookup_id, read_credential};
 use crate::state::config::*;
-use crate::types::consts::{
+use gradient_types::consts::{
     BASE_CACHE_ROLE_ADMIN_ID, BASE_CACHE_ROLE_VIEW_ID, BASE_CACHE_ROLE_WRITE_ID,
 };
-use crate::types::*;
+use gradient_types::*;
 use anyhow::Result;
 use base64::{Engine, engine::general_purpose};
 use gradient_entity::organization_cache::CacheSubscriptionMode;

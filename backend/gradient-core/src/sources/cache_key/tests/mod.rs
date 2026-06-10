@@ -301,7 +301,7 @@ fn sign_narinfo_store_path_affects_signature() {
 fn sign_narinfo_short_key_fails() {
     // A decoded key shorter than ed25519 secret size must return KeyPairConversion.
     let (_f, path) = temp_secret_file();
-    let secret = crate::types::input::load_secret_bytes(&path).unwrap();
+    let secret = gradient_types::input::load_secret_bytes(&path).unwrap();
     let short_b64 = general_purpose::STANDARD.encode(b"too short");
     let enc = crypter::encrypt_with_password(secret.expose(), short_b64.as_bytes()).unwrap();
     let enc_b64 = general_purpose::STANDARD.encode(enc);

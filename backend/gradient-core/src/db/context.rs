@@ -12,7 +12,7 @@ use super::pool::{WebDb, WorkerDb};
 use super::status_reactor::StatusReactor;
 use crate::shutdown::Shutdown;
 use crate::storage::StorageCtx;
-use crate::types::{BoardEvent, RuntimeConfig};
+use gradient_types::{BoardEvent, RuntimeConfig};
 
 /// Persistence-layer slice threaded through every `db` function: the two
 /// connection pools, resolved config, storage handles, the shutdown
