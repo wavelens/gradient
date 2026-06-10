@@ -278,22 +278,26 @@ pub async fn get_evaluation_builds(
         }
     }
 
-    let page: Vec<BuildItem> = page_slice
-        .into_iter()
-        .map(|(_, _, b)| {
-            let drv = derivations
-                .get(&b.derivation)
-                .expect("derivation hydrated above");
-            BuildItem {
-                id: b.id,
-                name: drv.store_path(),
-                status: format!("{:?}", b.status.for_api()),
-                has_artefacts: has_artefacts.contains(&b.derivation),
-                updated_at: b.updated_at,
-                build_time_ms: b.build_time_ms,
-            }
-        })
-        .collect();
+    let mut page = Vec::with_capacity(page_slice.len());
+    for (_, _, b) in &page_slice {
+        let drv = derivations
+            .get(&b.derivation)
+            .expect("derivation hydrated above");
+        let build_time_ms = gradient_db::latest_attempt(&state.web_db, b.id)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|a| a.duration_ms());
+
+        page.push(BuildItem {
+            id: b.id,
+            name: drv.store_path(),
+            status: format!("{:?}", b.status.for_api()),
+            has_artefacts: has_artefacts.contains(&b.derivation),
+            updated_at: b.updated_at,
+            build_time_ms,
+        });
+    }
 
     let res = BaseResponse {
         error: false,

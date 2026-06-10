@@ -59,7 +59,7 @@ pub async fn log(
         return Err(WebError::not_found("Log"));
     };
 
-    let log_key = build.log_id.unwrap_or(build.id);
+    let log_key = gradient_db::latest_attempt_log_id(&state.web_db, build.id).await?;
     let body = state.log_storage.read(log_key).await.unwrap_or_default();
 
     Response::builder()

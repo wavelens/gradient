@@ -9,6 +9,7 @@ use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
+use gradient_db::latest_attempt_worker;
 use gradient_sources::get_path_from_derivation_output;
 use gradient_types::*;
 use gradient_core::ServerState;
@@ -70,13 +71,15 @@ pub async fn get_build(
         outputs.insert(output.name, path);
     }
 
+    let worker = latest_attempt_worker(&state.web_db, build.id).await.ok().flatten();
+
     let build_with_outputs = BuildWithOutputs {
         id: build.id,
         evaluation: build.evaluation,
         status: build.status.for_api(),
         derivation_path: derivation.store_path(),
         architecture: derivation.architecture,
-        worker: build.worker,
+        worker,
         via: build.via,
         output: outputs,
         created_at: build.created_at,

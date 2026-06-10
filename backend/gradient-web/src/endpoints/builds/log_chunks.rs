@@ -21,6 +21,7 @@ use serde::Deserialize;
 use std::sync::Arc;
 
 use super::BuildAccessContext;
+use gradient_db::latest_attempt_log_id;
 
 type ChunkRow = gradient_entity::build_log_chunk::Model;
 
@@ -44,8 +45,8 @@ pub async fn get_build_log_chunks(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(build_id): Path<BuildId>,
 ) -> WebResult<Json<BaseResponse<LogChunkIndex>>> {
-    let ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
-    let log_key = ctx.build.log_id.unwrap_or(build_id);
+    let _ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
+    let log_key = latest_attempt_log_id(&state.web_db, build_id).await?;
     let rows = load_chunk_rows(&state, log_key).await?;
 
     let chunks: Vec<LogChunkMeta> = rows
@@ -81,8 +82,8 @@ pub async fn get_build_log_chunk(
     Extension(api_key): Extension<MaybeApiKey>,
     Path((build_id, index)): Path<(BuildId, u32)>,
 ) -> Result<Response, WebError> {
-    let ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
-    let log_key = ctx.build.log_id.unwrap_or(build_id);
+    let _ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
+    let log_key = latest_attempt_log_id(&state.web_db, build_id).await?;
 
     let row = gradient_entity::build_log_chunk::Entity::find()
         .filter(gradient_entity::build_log_chunk::Column::Build.eq(log_key))
@@ -136,8 +137,8 @@ pub async fn get_build_log_lines(
     Path(build_id): Path<BuildId>,
     Query(q): Query<LineRangeQuery>,
 ) -> Result<Response, WebError> {
-    let ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
-    let log_key = ctx.build.log_id.unwrap_or(build_id);
+    let _ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
+    let log_key = latest_attempt_log_id(&state.web_db, build_id).await?;
     let rows = load_chunk_rows(&state, log_key).await?;
 
     let (start, end_opt) = parse_line_range(&q)?;
@@ -204,8 +205,8 @@ pub async fn get_build_log_search(
     Path(build_id): Path<BuildId>,
     Query(query): Query<SearchQuery>,
 ) -> Result<Response, WebError> {
-    let ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
-    let log_key = ctx.build.log_id.unwrap_or(build_id);
+    let _ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
+    let log_key = latest_attempt_log_id(&state.web_db, build_id).await?;
     let rows = load_chunk_rows(&state, log_key).await?;
     let state = Arc::clone(&state);
 

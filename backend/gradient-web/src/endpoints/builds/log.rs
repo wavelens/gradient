@@ -13,6 +13,7 @@ use axum::http::{HeaderValue, header};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use axum_streams::StreamBodyAs;
+use gradient_db::latest_attempt_log_id;
 use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::EntityTrait;
@@ -27,8 +28,8 @@ pub async fn get_build_log(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(build_id): Path<BuildId>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
-    let log_key = ctx.build.log_id.unwrap_or(build_id);
+    let _ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
+    let log_key = latest_attempt_log_id(&state.web_db, build_id).await?;
     let log = state.log_storage.read(log_key).await.unwrap_or_default();
 
     Ok(ok_json(log))
@@ -40,11 +41,11 @@ pub async fn post_build_log(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(build_id): Path<BuildId>,
 ) -> Result<Response, WebError> {
-    let ctx = BuildAccessContext::load(&state, build_id, &Some(user), api_key.as_ref()).await?;
+    let _ctx = BuildAccessContext::load(&state, build_id, &Some(user), api_key.as_ref()).await?;
 
     // Capture current log length so the stream only delivers new content,
     // avoiding duplication of what the client already received via GET.
-    let log_key = ctx.build.log_id.unwrap_or(build_id);
+    let log_key = latest_attempt_log_id(&state.web_db, build_id).await?;
     let initial_offset = state
         .log_storage
         .read(log_key)
@@ -66,7 +67,7 @@ pub async fn post_build_log(
                 Ok(None) => break,
                 Err(_) => break,
             };
-            let log_key = build.log_id.unwrap_or(build_id);
+            let log_key = gradient_db::latest_attempt_log_id(&state.web_db, build_id).await.unwrap_or(build_id);
 
             // While the build hasn't started executing yet (`Created` /
             // `Queued`), there's nothing to stream - but we must not close
