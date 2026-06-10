@@ -38,6 +38,13 @@ fn test_date() -> NaiveDateTime {
     NaiveDateTime::default()
 }
 
+/// One empty `build_attempt` SELECT result. A build has no attempt rows in
+/// these fixtures, so every `latest_attempt`/`substitute_miss_counts` call
+/// returns nothing and issues no follow-up query.
+fn no_attempts() -> Vec<gradient_entity::build_attempt::Model> {
+    Vec::new()
+}
+
 fn make_eval_queued(
     id: EvaluationId,
     commit_id: CommitId,
@@ -265,6 +272,8 @@ async fn dispatch_ready_build_enqueues_job() {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // 1. raw SQL: ready builds → [build]
         .append_query_results([vec![make_build_queued(build_id, eval_id, drv_id)]])
+        // 1a. BuildDispatchMaps::load substitute_miss_counts → empty
+        .append_query_results([no_attempts()])
         // 2. find derivation
         .append_query_results([vec![make_derivation(drv_id, org_id, drv_path)]])
         // 3. find evaluation
@@ -303,6 +312,8 @@ async fn dispatch_ready_build_skips_already_enqueued() {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // First dispatch:
         .append_query_results([vec![make_build_queued(build_id, eval_id, drv_id)]])
+        // BuildDispatchMaps::load substitute_miss_counts → empty
+        .append_query_results([no_attempts()])
         .append_query_results([vec![make_derivation(drv_id, org_id, drv_path)]])
         .append_query_results([vec![make_eval_queued(eval_id, commit_id, Some(project_id))]])
         .append_query_results([vec![make_project(project_id, org_id)]])
