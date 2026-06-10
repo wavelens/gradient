@@ -104,7 +104,7 @@ pub async fn cleanup_old_evaluations(state: Arc<ServerState>) -> Result<()> {
             continue;
         }
         if let Err(e) =
-            gradient_core::db::gc_project_evaluations(&state.db(), project.id, keep).await
+            gradient_db::gc_project_evaluations(&state.db(), project.id, keep).await
         {
             warn!(error = %e, project_id = %project.id, "Evaluation GC failed for project");
         }
@@ -388,7 +388,7 @@ async fn active_hashes(state: &Arc<ServerState>) -> Result<HashSet<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_core::db::{WebDb, WorkerDb};
+    use gradient_db::{WebDb, WorkerDb};
     use gradient_storage::{EmailSender, NarStore};
     use sea_orm::{MockDatabase, Value};
     use std::collections::BTreeMap;
@@ -442,7 +442,7 @@ mod tests {
             oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
             board_events: tokio::sync::broadcast::channel(256).0,
             forge: gradient_core::forge::ForgeRegistry::with_builtin(),
-            reactor: std::sync::Arc::new(gradient_core::db::NoReactor),
+            reactor: std::sync::Arc::new(gradient_db::NoReactor),
         })
     }
 
@@ -536,7 +536,7 @@ mod tests {
             oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
             board_events: tokio::sync::broadcast::channel(256).0,
             forge: gradient_core::forge::ForgeRegistry::with_builtin(),
-            reactor: std::sync::Arc::new(gradient_core::db::NoReactor),
+            reactor: std::sync::Arc::new(gradient_db::NoReactor),
         });
 
         cleanup_stale_cached_nars(state).await.unwrap();
@@ -628,7 +628,7 @@ mod tests {
             oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
             board_events: tokio::sync::broadcast::channel(256).0,
             forge: gradient_core::forge::ForgeRegistry::with_builtin(),
-            reactor: std::sync::Arc::new(gradient_core::db::NoReactor),
+            reactor: std::sync::Arc::new(gradient_db::NoReactor),
         });
 
         cleanup_orphaned_cache_files(Arc::clone(&state))
@@ -663,7 +663,7 @@ mod tests {
             oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
             board_events: tokio::sync::broadcast::channel(256).0,
             forge: gradient_core::forge::ForgeRegistry::with_builtin(),
-            reactor: std::sync::Arc::new(gradient_core::db::NoReactor),
+            reactor: std::sync::Arc::new(gradient_db::NoReactor),
         })
     }
 
@@ -742,7 +742,7 @@ mod tests {
             oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
             board_events: tokio::sync::broadcast::channel(256).0,
             forge: gradient_core::forge::ForgeRegistry::with_builtin(),
-            reactor: std::sync::Arc::new(gradient_core::db::NoReactor),
+            reactor: std::sync::Arc::new(gradient_db::NoReactor),
         });
 
         cleanup_stale_build_request_blobs(state).await.unwrap();

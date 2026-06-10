@@ -18,10 +18,12 @@ pub mod drv_output_spec;
 pub mod gc;
 pub mod org_cache;
 pub mod org_workers;
+pub mod permissions;
 pub mod pool;
 pub mod retention;
 pub mod rollup;
 pub mod runtime_closure;
+pub mod state_machine;
 pub mod status;
 pub mod status_reactor;
 

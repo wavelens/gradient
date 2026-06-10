@@ -68,7 +68,7 @@ fn admin_role_row() -> gradient_entity::role::Model {
     gradient_entity::role::Model {
         id: gradient_types::consts::BASE_ROLE_ADMIN_ID,
         name: "Admin".into(),
-        permission: gradient_core::permissions::admin_mask(),
+        permission: gradient_db::permissions::admin_mask(),
         ..Default::default()
     }
 }

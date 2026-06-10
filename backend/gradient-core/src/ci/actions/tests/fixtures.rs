@@ -34,7 +34,7 @@ pub fn run<F: std::future::Future>(fut: F) -> F::Output {
 
 pub fn make_ctx() -> crate::ci::CiContext {
     use crate::ci::CiContext;
-    use crate::db::{DbContext, NoReactor, WebDb, WorkerDb};
+    use gradient_db::{DbContext, NoReactor, WebDb, WorkerDb};
     use gradient_storage::{EmailSender, LogStorage, NarStore, StorageCtx};
     use gradient_types::RuntimeConfig;
     use futures::future::BoxFuture;

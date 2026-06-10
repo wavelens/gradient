@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::db::org_caches_all_full;
+use gradient_db::org_caches_all_full;
 use gradient_types::waiting_reason::WaitingReason;
 use gradient_types::*;
 use gradient_entity::evaluation::EvaluationStatus;

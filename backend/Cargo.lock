@@ -1993,6 +1993,7 @@ dependencies = [
  "chrono",
  "futures",
  "gradient-core",
+ "gradient-db",
  "gradient-entity",
  "gradient-storage",
  "gradient-test-support",
@@ -2032,6 +2033,7 @@ dependencies = [
  "futures",
  "git-url-parse",
  "git2",
+ "gradient-db",
  "gradient-entity",
  "gradient-migration",
  "gradient-storage",
@@ -2083,6 +2085,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "gradient-db"
+version = "1.2.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bytes",
+ "chrono",
+ "futures",
+ "gradient-entity",
+ "gradient-migration",
+ "gradient-storage",
+ "gradient-types",
+ "gradient-util",
+ "sea-orm",
+ "sea-orm-migration",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "gradient-entity"
 version = "1.2.0"
 dependencies = [
@@ -2117,6 +2141,7 @@ dependencies = [
  "chrono",
  "futures",
  "gradient-core",
+ "gradient-db",
  "gradient-entity",
  "gradient-scheduler",
  "gradient-storage",
@@ -2149,6 +2174,7 @@ dependencies = [
  "cron",
  "futures",
  "gradient-core",
+ "gradient-db",
  "gradient-entity",
  "gradient-score",
  "gradient-test-support",
@@ -2231,6 +2257,7 @@ dependencies = [
  "chrono",
  "futures",
  "gradient-core",
+ "gradient-db",
  "gradient-entity",
  "gradient-proto",
  "gradient-storage",
@@ -2312,6 +2339,7 @@ dependencies = [
  "governor",
  "gradient-cache",
  "gradient-core",
+ "gradient-db",
  "gradient-entity",
  "gradient-proto",
  "gradient-scheduler",
@@ -2366,6 +2394,7 @@ dependencies = [
  "futures",
  "git2",
  "gradient-core",
+ "gradient-db",
  "gradient-entity",
  "gradient-proto",
  "gradient-test-support",

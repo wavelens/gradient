@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::db::DbContext;
+use crate::DbContext;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};

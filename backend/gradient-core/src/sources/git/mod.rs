@@ -18,7 +18,7 @@ mod remote;
 mod update_check;
 mod url;
 
-use crate::db::DbContext;
+use gradient_db::DbContext;
 use crate::sources::SourceError;
 use gradient_types::input::vec_to_hex;
 use gradient_types::*;

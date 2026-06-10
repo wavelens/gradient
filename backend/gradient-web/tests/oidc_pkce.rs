@@ -16,7 +16,7 @@ use gradient_storage::{EmailSender, NarStore};
 use gradient_types::cli::OidcArgs;
 use gradient_types::{RuntimeConfig};
 use gradient_core::ServerState;
-use gradient_core::db::{WebDb, WorkerDb};
+use gradient_db::{WebDb, WorkerDb};
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 use sea_orm::{DatabaseBackend, MockDatabase};
 use serde::Deserialize;
@@ -111,7 +111,7 @@ async fn authorize_redirect_carries_pkce_and_cookie_holds_verifier() {
         oidc_group_roles: Arc::new(std::collections::HashMap::new()),
         board_events: tokio::sync::broadcast::channel(256).0,
         forge: gradient_core::forge::ForgeRegistry::with_builtin(),
-        reactor: std::sync::Arc::new(gradient_core::db::NoReactor),
+        reactor: std::sync::Arc::new(gradient_db::NoReactor),
     });
 
     let server = axum_test::TestServer::new(create_router(state));

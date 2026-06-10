@@ -6,19 +6,16 @@
 
 pub mod ci;
 pub mod constants;
-pub mod db;
 pub mod executor;
 pub mod forge;
 pub mod nix;
-pub mod permissions;
 pub mod sources;
 pub mod state;
-pub mod state_machine;
 pub mod state_root;
 
 pub use state_root::{AppState, ServerState};
 
-use db::{WebDb, WorkerDb, connect_db, connect_web_db};
+use gradient_db::{WebDb, WorkerDb, connect_db, connect_web_db};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
 };
@@ -184,7 +181,7 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
         Arc::new(local_log_storage)
     };
 
-    let reactor: Arc<dyn db::StatusReactor> =
+    let reactor: Arc<dyn gradient_db::StatusReactor> =
         Arc::new(crate::ci::CiStatusReactor::new(http.clone()));
 
     Ok(Arc::new(ServerState {

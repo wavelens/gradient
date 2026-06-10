@@ -21,7 +21,7 @@ use gradient_entity::evaluation::EvaluationStatus;
 use gradient_storage::{EmailSender, NarStore};
 use gradient_types::ids::*;
 use gradient_core::ServerState;
-use gradient_core::db::{WebDb, WorkerDb};
+use gradient_db::{WebDb, WorkerDb};
 use harmonia_file_nar::archive::test_data::{TestNarEvent, TestNarEvents};
 use harmonia_file_nar::archive::write_nar;
 use sea_orm::{DatabaseBackend, MockDatabase};
@@ -254,7 +254,7 @@ fn listing_returns_products_from_db() {
             oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
             board_events: tokio::sync::broadcast::channel(256).0,
             forge: gradient_core::forge::ForgeRegistry::with_builtin(),
-            reactor: std::sync::Arc::new(gradient_core::db::NoReactor),
+            reactor: std::sync::Arc::new(gradient_db::NoReactor),
         });
 
         let router = create_router(state);
@@ -337,7 +337,7 @@ fn download_streams_file_from_nar() {
             oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
             board_events: tokio::sync::broadcast::channel(256).0,
             forge: gradient_core::forge::ForgeRegistry::with_builtin(),
-            reactor: std::sync::Arc::new(gradient_core::db::NoReactor),
+            reactor: std::sync::Arc::new(gradient_db::NoReactor),
         });
 
         let router = create_router(state);

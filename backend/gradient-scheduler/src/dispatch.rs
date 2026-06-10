@@ -277,7 +277,7 @@ pub(crate) async fn requeue_transient_failures(scheduler: &Scheduler) -> anyhow:
         .await?;
     for build in transient {
         if retry_backoff_elapsed(build.attempt, build.updated_at, now, base) {
-            gradient_core::db::update_build_status(&state.db(), build, BuildStatus::Queued)
+            gradient_db::update_build_status(&state.db(), build, BuildStatus::Queued)
                 .await;
         }
     }
@@ -333,7 +333,7 @@ impl BuildDispatchMaps {
             .collect();
 
         let db = &state.worker_db;
-        let derivations: HashMap<DerivationId, MDerivation> = gradient_core::db::fetch_in_chunks(
+        let derivations: HashMap<DerivationId, MDerivation> = gradient_db::fetch_in_chunks(
             &drv_ids,
             |chunk| async move { EDerivation::find().filter(CDerivation::Id.is_in(chunk)).all(db).await },
         )
@@ -342,7 +342,7 @@ impl BuildDispatchMaps {
         .map(|d| (d.id, d))
         .collect();
 
-        let evaluations: HashMap<EvaluationId, MEvaluation> = gradient_core::db::fetch_in_chunks(
+        let evaluations: HashMap<EvaluationId, MEvaluation> = gradient_db::fetch_in_chunks(
             &eval_ids,
             |chunk| async move { EEvaluation::find().filter(CEvaluation::Id.is_in(chunk)).all(db).await },
         )
@@ -358,7 +358,7 @@ impl BuildDispatchMaps {
             .collect::<std::collections::HashSet<_>>()
             .into_iter()
             .collect();
-        let projects: HashMap<ProjectId, OrganizationId> = gradient_core::db::fetch_in_chunks(
+        let projects: HashMap<ProjectId, OrganizationId> = gradient_db::fetch_in_chunks(
             &project_ids,
             |chunk| async move { EProject::find().filter(CProject::Id.is_in(chunk)).all(db).await },
         )
@@ -368,7 +368,7 @@ impl BuildDispatchMaps {
         .collect();
 
         // Required features: per-derivation list of feature names.
-        let feature_edges = gradient_core::db::fetch_in_chunks(&drv_ids, |chunk| async move {
+        let feature_edges = gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
             EDerivationFeature::find()
                 .filter(CDerivationFeature::Derivation.is_in(chunk))
                 .all(db)
@@ -387,7 +387,7 @@ impl BuildDispatchMaps {
             HashMap::new()
         } else {
             let feature_ids: Vec<FeatureId> = feature_edges.iter().map(|e| e.feature).collect();
-            gradient_core::db::fetch_in_chunks(&feature_ids, |chunk| async move {
+            gradient_db::fetch_in_chunks(&feature_ids, |chunk| async move {
                 EFeature::find()
                     .filter(CFeature::Id.is_in(chunk))
                     .filter(CFeature::Kind.eq(gradient_entity::feature::FeatureKind::Feature))
@@ -403,7 +403,7 @@ impl BuildDispatchMaps {
 
         // Direct dependency edges per derivation. Used both for the scoring
         // policy's `dep_counts` and to build `direct_inputs` below.
-        let dep_edges = gradient_core::db::fetch_in_chunks(&drv_ids, |chunk| async move {
+        let dep_edges = gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
             EDerivationDependency::find()
                 .filter(CDerivationDependency::Derivation.is_in(chunk))
                 .all(db)
@@ -438,7 +438,7 @@ impl BuildDispatchMaps {
             if dep_drv_ids.is_empty() {
                 HashMap::new()
             } else {
-                let outs = gradient_core::db::fetch_in_chunks(&dep_drv_ids, |chunk| async move {
+                let outs = gradient_db::fetch_in_chunks(&dep_drv_ids, |chunk| async move {
                     EDerivationOutput::find()
                         .filter(CDerivationOutput::Derivation.is_in(chunk))
                         .all(db)
@@ -461,7 +461,7 @@ impl BuildDispatchMaps {
             .collect();
 
         let cache_info_by_hash: HashMap<String, CacheInfo> =
-            gradient_core::db::fetch_in_chunks(&output_hashes, |chunk| async move {
+            gradient_db::fetch_in_chunks(&output_hashes, |chunk| async move {
                 ECachedPath::find()
                     .filter(CCachedPath::Hash.is_in(chunk))
                     .all(db)
@@ -517,7 +517,7 @@ impl BuildDispatchMaps {
             let computed = if need.is_empty() {
                 HashMap::new()
             } else {
-                gradient_core::db::transitive_closure_sizes(&state.worker_db, &need)
+                gradient_db::transitive_closure_sizes(&state.worker_db, &need)
                     .await
                     .unwrap_or_else(|e| {
                         error!(error = %e, "failed to compute closure sizes");
@@ -709,7 +709,7 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
     // Stamp ready_at the first time a build becomes dispatchable (deps satisfied).
     let ready_ids: Vec<_> = new_builds.iter().map(|b| b.id).collect();
     let db = &state.worker_db;
-    if let Err(e) = gradient_core::db::for_each_chunk(&ready_ids, |chunk| async move {
+    if let Err(e) = gradient_db::for_each_chunk(&ready_ids, |chunk| async move {
         EBuild::update_many()
             .col_expr(CBuild::ReadyAt, sea_orm::sea_query::Expr::value(now()))
             .filter(CBuild::Id.is_in(chunk))

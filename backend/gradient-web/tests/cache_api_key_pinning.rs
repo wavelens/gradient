@@ -13,7 +13,7 @@
 //!   4. SELECT user
 
 use gradient_entity::{api, cache, cache_role, cache_user, ids::*};
-use gradient_core::permissions::{cache_admin_mask, cache_view_mask};
+use gradient_db::permissions::{cache_admin_mask, cache_view_mask};
 use gradient_types::consts::BASE_CACHE_ROLE_VIEW_ID;
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 use sha2::{Digest, Sha256};

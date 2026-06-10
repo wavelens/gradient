@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::db::DbContext;
+use crate::DbContext;
 use gradient_types::*;
 use gradient_entity::build::BuildStatus;
 use sea_orm::ActiveValue::Set;
@@ -33,7 +33,7 @@ pub(crate) async fn reelect_leader(ctx: &DbContext, leader: &MBuild) -> Result<(
 
     let follower_drv_ids: Vec<DerivationId> = all_followers.iter().map(|f| f.derivation).collect();
     let drv_org: std::collections::HashMap<DerivationId, OrganizationId> =
-        crate::db::fetch_in_chunks(&follower_drv_ids, |chunk| async move {
+        crate::fetch_in_chunks(&follower_drv_ids, |chunk| async move {
             EDerivation::find()
                 .filter(CDerivation::Id.is_in(chunk))
                 .all(&ctx.worker_db)
@@ -74,7 +74,7 @@ pub(crate) async fn reelect_leader(ctx: &DbContext, leader: &MBuild) -> Result<(
         active.update(&ctx.worker_db).await?;
 
         let same_org_remaining_ids: Vec<BuildId> = same_org.iter().skip(1).map(|f| f.id).collect();
-        crate::db::for_each_chunk(&same_org_remaining_ids, |chunk| async move {
+        crate::for_each_chunk(&same_org_remaining_ids, |chunk| async move {
             EBuild::update_many()
                 .col_expr(CBuild::Via, sea_orm::sea_query::Expr::value(new_leader.id))
                 .filter(CBuild::Id.is_in(chunk))
@@ -84,7 +84,7 @@ pub(crate) async fn reelect_leader(ctx: &DbContext, leader: &MBuild) -> Result<(
         .await?;
 
         let cross_org_ids: Vec<BuildId> = cross_org.iter().map(|f| f.id).collect();
-        crate::db::for_each_chunk(&cross_org_ids, |chunk| async move {
+        crate::for_each_chunk(&cross_org_ids, |chunk| async move {
             EBuild::update_many()
                 .col_expr(
                     CBuild::Via,
@@ -107,7 +107,7 @@ pub(crate) async fn reelect_leader(ctx: &DbContext, leader: &MBuild) -> Result<(
 
     let cross_org_ids: Vec<BuildId> = cross_org.iter().map(|f| f.id).collect();
     if !cross_org_ids.is_empty() {
-        crate::db::for_each_chunk(&cross_org_ids, |chunk| async move {
+        crate::for_each_chunk(&cross_org_ids, |chunk| async move {
             EBuild::update_many()
                 .col_expr(
                     CBuild::Via,
@@ -132,7 +132,7 @@ pub(crate) async fn reelect_leader(ctx: &DbContext, leader: &MBuild) -> Result<(
 ///
 /// First checks for an in-flight build within `inserting_org`. When no
 /// same-org candidate exists for a drv, consults cache-connected organisations
-/// via [`cache_reach::writer_orgs_reachable_from`](crate::db::cache_reach::writer_orgs_reachable_from)
+/// via [`cache_reach::writer_orgs_reachable_from`](crate::cache_reach::writer_orgs_reachable_from)
 /// and picks the most-advanced active build (tie-break: oldest `created_at`).
 ///
 /// Drvs with no active build are omitted from the result.
@@ -146,7 +146,7 @@ pub async fn find_active_leaders<C: ConnectionTrait>(
     }
 
     // ── Same-org pass ────────────────────────────────────────────────────
-    let same_org_rows = crate::db::fetch_in_chunks(drv_ids, |chunk| async move {
+    let same_org_rows = crate::fetch_in_chunks(drv_ids, |chunk| async move {
         EBuild::find()
             .filter(CBuild::Derivation.is_in(chunk))
             .filter(CBuild::Status.is_in(vec![
@@ -183,7 +183,7 @@ pub async fn find_active_leaders<C: ConnectionTrait>(
     // ── Cross-org pass ───────────────────────────────────────────────────
     use gradient_entity::derivation::{Column as CDerivation, Entity as EDerivation};
 
-    let inserting_drv_rows = crate::db::fetch_in_chunks(&unmatched, |chunk| async move {
+    let inserting_drv_rows = crate::fetch_in_chunks(&unmatched, |chunk| async move {
         EDerivation::find()
             .filter(CDerivation::Id.is_in(chunk))
             .all(db)
@@ -201,14 +201,14 @@ pub async fn find_active_leaders<C: ConnectionTrait>(
     }
 
     let mut reachable =
-        crate::db::cache_reach::writer_orgs_reachable_from(db, inserting_org).await?;
+        crate::cache_reach::writer_orgs_reachable_from(db, inserting_org).await?;
     reachable.remove(&inserting_org);
     if reachable.is_empty() {
         return Ok(out);
     }
 
     let reachable_orgs: Vec<_> = reachable.into_iter().collect();
-    let candidate_drvs = crate::db::fetch_in_chunks(&drv_hashes, |chunk| {
+    let candidate_drvs = crate::fetch_in_chunks(&drv_hashes, |chunk| {
         let reachable_orgs = reachable_orgs.clone();
         async move {
             EDerivation::find()
@@ -228,7 +228,7 @@ pub async fn find_active_leaders<C: ConnectionTrait>(
         .map(|d| (d.id, d.drv_path()))
         .collect();
 
-    let candidate_builds = crate::db::fetch_in_chunks(&candidate_drv_ids, |chunk| async move {
+    let candidate_builds = crate::fetch_in_chunks(&candidate_drv_ids, |chunk| async move {
         EBuild::find()
             .filter(CBuild::Derivation.is_in(chunk))
             .filter(CBuild::Status.is_in(vec![

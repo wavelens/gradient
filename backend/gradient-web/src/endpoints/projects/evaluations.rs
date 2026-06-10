@@ -18,7 +18,7 @@ use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use gradient_entity::build::BuildStatus;
-use gradient_core::db::get_any_organization_by_name;
+use gradient_db::get_any_organization_by_name;
 use gradient_core::sources::{check_project_updates, get_path_from_derivation_output};
 use gradient_storage::nar_extract::{ExtractError, Extracted, extract_path_from_nar_bytes};
 use gradient_types::input::vec_to_hex;
@@ -53,7 +53,7 @@ pub(super) async fn evaluations_to_summaries(
     let db = &state.web_db;
     let trigger_ids: Vec<ProjectTriggerId> = evaluations.iter().filter_map(|e| e.trigger).collect();
     let triggers: HashMap<ProjectTriggerId, TriggerType> =
-        gradient_core::db::fetch_in_chunks(&trigger_ids, |chunk| async move {
+        gradient_db::fetch_in_chunks(&trigger_ids, |chunk| async move {
             EProjectTrigger::find()
                 .filter(CProjectTrigger::Id.is_in(chunk))
                 .all(db)
@@ -74,7 +74,7 @@ pub(super) async fn evaluations_to_summaries(
     let commit_ids: Vec<CommitId> = evaluations.iter().map(|e| e.commit).collect();
 
     let commits: HashMap<CommitId, String> =
-        gradient_core::db::fetch_in_chunks(&commit_ids, |chunk| async move {
+        gradient_db::fetch_in_chunks(&commit_ids, |chunk| async move {
             ECommit::find().filter(CCommit::Id.is_in(chunk)).all(db).await
         })
         .await?
@@ -84,7 +84,7 @@ pub(super) async fn evaluations_to_summaries(
 
     let mut total_per_eval: HashMap<EvaluationId, i64> = HashMap::new();
     let mut failed_per_eval: HashMap<EvaluationId, i64> = HashMap::new();
-    let eval_builds = gradient_core::db::fetch_in_chunks(&eval_ids, |chunk| async move {
+    let eval_builds = gradient_db::fetch_in_chunks(&eval_ids, |chunk| async move {
         EBuild::find()
             .filter(CBuild::Evaluation.is_in(chunk))
             .all(db)
@@ -98,7 +98,7 @@ pub(super) async fn evaluations_to_summaries(
         }
     }
 
-    let entry_points = gradient_core::db::fetch_in_chunks(&combined_eval_ids, |chunk| async move {
+    let entry_points = gradient_db::fetch_in_chunks(&combined_eval_ids, |chunk| async move {
         EEntryPoint::find()
             .filter(CEntryPoint::Evaluation.is_in(chunk))
             .all(db)
@@ -108,7 +108,7 @@ pub(super) async fn evaluations_to_summaries(
 
     let ep_build_ids: Vec<BuildId> = entry_points.iter().map(|ep| ep.build).collect();
     let ep_build_status: HashMap<BuildId, BuildStatus> =
-        gradient_core::db::fetch_in_chunks(&ep_build_ids, |chunk| async move {
+        gradient_db::fetch_in_chunks(&ep_build_ids, |chunk| async move {
             EBuild::find().filter(CBuild::Id.is_in(chunk)).all(db).await
         })
         .await?
@@ -443,7 +443,7 @@ impl EntryPointRelatedData {
         let db = &state.web_db;
         let build_ids: Vec<BuildId> = entry_points.iter().map(|ep| ep.build).collect();
         let builds: HashMap<BuildId, MBuild> =
-            gradient_core::db::fetch_in_chunks(&build_ids, |chunk| async move {
+            gradient_db::fetch_in_chunks(&build_ids, |chunk| async move {
                 EBuild::find().filter(CBuild::Id.is_in(chunk)).all(db).await
             })
             .await?
@@ -453,7 +453,7 @@ impl EntryPointRelatedData {
 
         let drv_ids: Vec<DerivationId> = builds.values().map(|b| b.derivation).collect();
         let derivations: HashMap<DerivationId, MDerivation> =
-            gradient_core::db::fetch_in_chunks(&drv_ids, |chunk| async move {
+            gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
                 EDerivation::find().filter(CDerivation::Id.is_in(chunk)).all(db).await
             })
             .await?
@@ -472,7 +472,7 @@ impl EntryPointRelatedData {
         let has_products: HashMap<DerivationId, bool> = if completed_drv_ids.is_empty() {
             HashMap::new()
         } else {
-            let outputs = gradient_core::db::fetch_in_chunks(&completed_drv_ids, |chunk| async move {
+            let outputs = gradient_db::fetch_in_chunks(&completed_drv_ids, |chunk| async move {
                 EDerivationOutput::find()
                     .filter(CDerivationOutput::Derivation.is_in(chunk))
                     .all(db)
@@ -482,7 +482,7 @@ impl EntryPointRelatedData {
             let output_ids: Vec<DerivationOutputId> = outputs.iter().map(|o| o.id).collect();
             let mut m: HashMap<DerivationId, bool> = HashMap::new();
             if !output_ids.is_empty() {
-                let products = gradient_core::db::fetch_in_chunks(&output_ids, |chunk| async move {
+                let products = gradient_db::fetch_in_chunks(&output_ids, |chunk| async move {
                     EBuildProduct::find()
                         .filter(CBuildProduct::DerivationOutput.is_in(chunk))
                         .all(db)
@@ -567,7 +567,7 @@ async fn serve_hydra_artifact(
     }
 
     let db = &state.web_db;
-    let rows = match gradient_core::db::fetch_in_chunks(&output_ids, |chunk| async move {
+    let rows = match gradient_db::fetch_in_chunks(&output_ids, |chunk| async move {
         EBuildProduct::find()
             .filter(CBuildProduct::DerivationOutput.is_in(chunk))
             .all(db)

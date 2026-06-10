@@ -144,7 +144,7 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
         .collect();
 
     let db = &state.worker_db;
-    let projects: std::collections::HashMap<_, _> = gradient_core::db::fetch_in_chunks(
+    let projects: std::collections::HashMap<_, _> = gradient_db::fetch_in_chunks(
         &project_ids,
         |chunk| async move {
             EProject::find()

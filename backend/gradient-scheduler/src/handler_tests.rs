@@ -1753,7 +1753,7 @@ async fn abort_cascades_to_active_builds() {
         .into_connection();
 
     let state = make_state(db);
-    gradient_core::db::abort_evaluation(&state.db(), eval).await;
+    gradient_db::abort_evaluation(&state.db(), eval).await;
     // Reaching here without panic confirms the abort cascade completed.
 }
 
@@ -1769,7 +1769,7 @@ async fn abort_skips_completed_eval() {
     let eval = make_eval(eval_id, EvaluationStatus::Completed);
     // Should return immediately; the guard `evaluation.status == Completed → return`
     // prevents any DB queries.
-    gradient_core::db::abort_evaluation(&state.db(), eval).await;
+    gradient_db::abort_evaluation(&state.db(), eval).await;
 }
 
 /// `abort_evaluation` with no active builds still transitions the evaluation
@@ -1792,7 +1792,7 @@ async fn abort_no_active_builds() {
         .into_connection();
 
     let state = make_state(db);
-    gradient_core::db::abort_evaluation(&state.db(), eval).await;
+    gradient_db::abort_evaluation(&state.db(), eval).await;
 }
 
 // ── Group H: Handler behavioral gaps ─────────────────────────────────────────

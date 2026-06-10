@@ -8,7 +8,7 @@
 //! between the role-management API and the API-key endpoints. The canonical
 //! capability set lives in [`gradient_core::permissions`].
 
-pub use gradient_core::permissions::*;
+pub use gradient_db::permissions::*;
 
 use crate::error::{WebError, WebResult};
 use serde::Serialize;

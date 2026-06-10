@@ -5,7 +5,7 @@
  */
 
 use super::logging::{PHASE_SUBJECT_EVALUATION, record_phase_event};
-use crate::db::DbContext;
+use crate::DbContext;
 use crate::state_machine::EvalStateMachine;
 use gradient_types::*;
 use gradient_entity::evaluation::EvaluationStatus;

@@ -5,7 +5,7 @@
  */
 
 use anyhow::{Context, Result};
-use gradient_core::db::collect_transitive_dependents;
+use gradient_db::collect_transitive_dependents;
 use gradient_core::sources::get_hash_from_path;
 use gradient_types::*;
 use gradient_core::ServerState;

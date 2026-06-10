@@ -12,7 +12,7 @@ use crate::permissions::Permission;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_entity::organization_cache::CacheSubscriptionMode;
-use gradient_core::permissions::CachePermission;
+use gradient_db::permissions::CachePermission;
 use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::ActiveValue::Set;

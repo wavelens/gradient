@@ -29,7 +29,7 @@ impl<'a> StateApplicator<'a> {
 
             let mut perms = Vec::with_capacity(state_role.permissions.len());
             for wire in &state_role.permissions {
-                let p = crate::permissions::Permission::from_wire_name(wire).ok_or_else(|| {
+                let p = gradient_db::permissions::Permission::from_wire_name(wire).ok_or_else(|| {
                     format!(
                         "Role '{}' references unknown permission '{}'",
                         state_role.name, wire
@@ -44,7 +44,7 @@ impl<'a> StateApplicator<'a> {
                 )
                 .into());
             }
-            let mask = crate::permissions::mask_from(&perms);
+            let mask = gradient_db::permissions::mask_from(&perms);
 
             let existing = role::Entity::find()
                 .filter(role::Column::Name.eq(&state_role.name))

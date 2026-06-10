@@ -10,7 +10,7 @@ use axum_test::TestServer;
 use gradient_storage::{EmailSender, NarStore};
 use gradient_types::ids::*;
 use gradient_core::ServerState;
-use gradient_core::db::{WebDb, WorkerDb};
+use gradient_db::{WebDb, WorkerDb};
 use sea_orm::{DatabaseBackend, MockDatabase};
 use std::sync::Arc;
 use gradient_test_support::fakes::email::InMemoryEmailSender;
@@ -189,7 +189,7 @@ async fn narinfo_served_from_db_inner() {
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         board_events: tokio::sync::broadcast::channel(256).0,
         forge: gradient_core::forge::ForgeRegistry::with_builtin(),
-        reactor: std::sync::Arc::new(gradient_core::db::NoReactor),
+        reactor: std::sync::Arc::new(gradient_db::NoReactor),
     });
 
     let router = create_router(state);
@@ -335,7 +335,7 @@ async fn narinfo_unsigned_inner() {
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         board_events: tokio::sync::broadcast::channel(256).0,
         forge: gradient_core::forge::ForgeRegistry::with_builtin(),
-        reactor: std::sync::Arc::new(gradient_core::db::NoReactor),
+        reactor: std::sync::Arc::new(gradient_db::NoReactor),
     });
 
     let router = create_router(state);

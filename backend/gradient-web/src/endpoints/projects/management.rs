@@ -14,7 +14,7 @@ use crate::permissions::Permission;
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
 
-use gradient_core::db::get_any_organization_by_name;
+use gradient_db::get_any_organization_by_name;
 use gradient_core::nix::RepositoryUrl;
 use gradient_core::sources::check_project_updates;
 use gradient_types::consts::*;
@@ -137,7 +137,7 @@ pub async fn get(
     let eval_ids: Vec<EvaluationId> = raw.iter().filter_map(|p| p.last_evaluation).collect();
     let db = &state.web_db;
     let eval_status_map: HashMap<EvaluationId, gradient_entity::evaluation::EvaluationStatus> =
-        gradient_core::db::fetch_in_chunks(&eval_ids, |chunk| async move {
+        gradient_db::fetch_in_chunks(&eval_ids, |chunk| async move {
             EEvaluation::find()
                 .filter(CEvaluation::Id.is_in(chunk))
                 .all(db)

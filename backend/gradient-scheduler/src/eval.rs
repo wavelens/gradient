@@ -13,7 +13,7 @@ use anyhow::{Context, Result};
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::evaluation_message::MessageLevel;
-use gradient_core::db::{
+use gradient_db::{
     find_active_leaders, record_evaluation_message, update_build_status, update_evaluation_status,
     update_evaluation_status_with_error,
 };
@@ -191,7 +191,7 @@ impl<'a> EvalResultProcessor<'a> {
 
         let db = &self.state.worker_db;
         let org = self.organization_id;
-        gradient_core::db::fetch_in_chunks(&hashes, |chunk| async move {
+        gradient_db::fetch_in_chunks(&hashes, |chunk| async move {
             EDerivation::find()
                 .filter(CDerivation::Organization.eq(org))
                 .filter(CDerivation::Hash.is_in(chunk))
@@ -390,7 +390,7 @@ impl<'a> EvalResultProcessor<'a> {
             return out;
         }
         let db = &self.state.worker_db;
-        let prior = match gradient_core::db::fetch_in_chunks(&drv_ids, |chunk| async move {
+        let prior = match gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
             EBuild::find()
                 .filter(CBuild::Derivation.is_in(chunk))
                 .filter(CBuild::Status.is_in([BuildStatus::Completed, BuildStatus::Substituted]))
@@ -422,7 +422,7 @@ impl<'a> EvalResultProcessor<'a> {
         }
 
         let db = &self.state.worker_db;
-        let outputs = gradient_core::db::fetch_in_chunks(drv_ids, |chunk| async move {
+        let outputs = gradient_db::fetch_in_chunks(drv_ids, |chunk| async move {
             EDerivationOutput::find()
                 .filter(CDerivationOutput::Derivation.is_in(chunk))
                 .all(db)
@@ -443,7 +443,7 @@ impl<'a> EvalResultProcessor<'a> {
             .collect();
 
         let fully_cached_hashes: std::collections::HashSet<String> =
-            gradient_core::db::fetch_in_chunks(&hashes, |chunk| async move {
+            gradient_db::fetch_in_chunks(&hashes, |chunk| async move {
                 ECachedPath::find()
                     .filter(CCachedPath::Hash.is_in(chunk))
                     .all(db)
@@ -485,7 +485,7 @@ impl<'a> EvalResultProcessor<'a> {
             let Some(&drv_id) = drv_path_to_id.get(&d.drv_path) else {
                 continue;
             };
-            if let Err(e) = gradient_core::db::add_features(
+            if let Err(e) = gradient_db::add_features(
                 &self.state.db(),
                 d.required_features.clone(),
                 gradient_entity::feature::FeatureKind::Feature,
@@ -581,7 +581,7 @@ impl<'a> EvalResultProcessor<'a> {
             let gc_keep = project.keep_evaluations as usize;
             self.state.shutdown.spawn(async move {
                 if let Err(e) =
-                    gradient_core::db::gc_project_evaluations(&gc_state.db(), project_id, gc_keep).await
+                    gradient_db::gc_project_evaluations(&gc_state.db(), project_id, gc_keep).await
                 {
                     error!(error = %e, %project_id, "GC: per-project evaluation GC failed");
                 }
@@ -713,7 +713,7 @@ async fn expand_substituted_closure(
     if !spawn_inputs.is_empty() {
         let drv_ids: Vec<DerivationId> = spawn_inputs.iter().map(|(_, d)| *d).collect();
         let db = &state.worker_db;
-        let paths = match gradient_core::db::fetch_in_chunks(&drv_ids, |chunk| async move {
+        let paths = match gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
             EDerivation::find()
                 .filter(CDerivation::Id.is_in(chunk))
                 .all(db)
@@ -924,7 +924,7 @@ pub async fn flush_deferred_deps(
 
     let db = &state.worker_db;
     let drv_path_to_id: std::collections::HashMap<String, DerivationId> =
-        gradient_core::db::fetch_in_chunks(&all_hashes, |chunk| async move {
+        gradient_db::fetch_in_chunks(&all_hashes, |chunk| async move {
             EDerivation::find()
                 .filter(CDerivation::Organization.eq(organization_id))
                 .filter(CDerivation::Hash.is_in(chunk))

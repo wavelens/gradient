@@ -17,7 +17,7 @@ use tokio::sync::broadcast;
 
 use crate::ci::CiContext;
 use crate::ci::manifest_state::{ManifestStateStore, PendingCredentialsStore};
-use crate::db::{DbContext, StatusReactor, WebDb, WorkerDb};
+use gradient_db::{DbContext, StatusReactor, WebDb, WorkerDb};
 use crate::forge::ForgeRegistry;
 use gradient_util::shutdown::Shutdown;
 use crate::state::{OidcGroupRoles, PendingOrgMemberships};
@@ -64,7 +64,7 @@ pub struct AppState {
     pub board_events: broadcast::Sender<BoardEvent>,
     /// Terminal-status reaction hook: `ci` turns terminal build/eval statuses
     /// into forge events and PR-comment reactions. Tests and worker-side flows
-    /// use [`crate::db::NoReactor`].
+    /// use [`gradient_db::NoReactor`].
     pub reactor: Arc<dyn StatusReactor>,
 }
 
@@ -82,7 +82,7 @@ impl AppState {
         }
     }
 
-    /// Db slice passed into `db::*` functions.
+    /// Db slice passed into `gradient_db::*` functions.
     pub fn db(&self) -> DbContext {
         DbContext {
             worker_db: self.worker_db.clone(),

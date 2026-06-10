@@ -14,7 +14,7 @@ use axum_test::multipart::{MultipartForm, Part};
 use chrono::{Duration, Utc};
 use gradient_entity::ids::*;
 use gradient_entity::role;
-use gradient_core::permissions::PermissionMask;
+use gradient_db::permissions::PermissionMask;
 use gradient_types::SessionId;
 use gradient_types::consts::BASE_ROLE_WRITE_ID;
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
@@ -27,7 +27,7 @@ fn write_role_row() -> role::Model {
     role::Model {
         id: BASE_ROLE_WRITE_ID,
         name: "write".into(),
-        permission: gradient_core::permissions::write_mask() as PermissionMask,
+        permission: gradient_db::permissions::write_mask() as PermissionMask,
         ..Default::default()
     }
 }

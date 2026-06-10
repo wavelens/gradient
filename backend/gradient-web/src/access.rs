@@ -25,7 +25,7 @@ use crate::helpers::OptionExt;
 use crate::permissions::{
     CachePermission, Permission, PermissionMask, cache_mask_grants, mask_grants,
 };
-use gradient_core::db::{
+use gradient_db::{
     get_any_cache_by_name, get_any_organization_by_name, get_any_project_by_name,
 };
 use gradient_types::ids::{CacheId, IntegrationId, OrganizationId, UserId};
@@ -556,14 +556,14 @@ fn reject_managed_cache(cache: &MCache) -> WebResult<()> {
 mod tests {
     use super::*;
     use crate::authorization::ApiKeyContext;
-    use gradient_core::permissions::mask_from;
+    use gradient_db::permissions::mask_from;
     use gradient_storage::{EmailSender, NarStore};
     use gradient_types::consts::{
         BASE_CACHE_ROLE_VIEW_ID, BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID,
     };
     use gradient_types::ids::{OrganizationUserId, ProjectId, RoleId};
     use gradient_types::{RuntimeConfig};
-    use gradient_core::db::{WebDb, WorkerDb};
+    use gradient_db::{WebDb, WorkerDb};
     use sea_orm::{DatabaseBackend, MockDatabase};
     use gradient_test_support::cli::test_cli;
     use gradient_test_support::fakes::email::InMemoryEmailSender;
@@ -679,7 +679,7 @@ mod tests {
             oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
             board_events: tokio::sync::broadcast::channel(256).0,
             forge: gradient_core::forge::ForgeRegistry::with_builtin(),
-            reactor: std::sync::Arc::new(gradient_core::db::NoReactor),
+            reactor: std::sync::Arc::new(gradient_db::NoReactor),
         })
     }
 

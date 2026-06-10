@@ -54,7 +54,7 @@ pub async fn derivation_closure_reachable<C: sea_orm::ConnectionTrait>(
     db: &C,
     seed_drv_ids: Vec<DerivationId>,
 ) -> WebResult<HashSet<DerivationId>> {
-    Ok(gradient_core::db::transitive_closure_reachable(db, &seed_drv_ids).await?)
+    Ok(gradient_db::transitive_closure_reachable(db, &seed_drv_ids).await?)
 }
 
 /// Sum coalesced output sizes across `drv_ids`. `Some(total)` when > 0 else `None`.
@@ -62,7 +62,7 @@ pub async fn sum_output_sizes<C: sea_orm::ConnectionTrait>(
     db: &C,
     drv_ids: Vec<DerivationId>,
 ) -> WebResult<Option<i64>> {
-    let by_drv = gradient_core::db::output_sizes_by_drv(db, &drv_ids).await?;
+    let by_drv = gradient_db::output_sizes_by_drv(db, &drv_ids).await?;
     let total: i64 = by_drv.values().sum();
     Ok(if total > 0 { Some(total) } else { None })
 }
@@ -76,7 +76,7 @@ pub async fn build_closure_graph<C: sea_orm::ConnectionTrait>(
     let closure = derivation_closure_reachable(db, roots.clone()).await?;
     let all_ids: Vec<DerivationId> = closure.iter().cloned().collect();
 
-    let size_by_drv = gradient_core::db::output_sizes_by_drv(db, &all_ids).await?;
+    let size_by_drv = gradient_db::output_sizes_by_drv(db, &all_ids).await?;
     let total: i64 = size_by_drv.values().sum();
     let total_size_bytes = if total > 0 { Some(total) } else { None };
 
@@ -180,7 +180,7 @@ pub async fn build_runtime_closure_graph<C: sea_orm::ConnectionTrait>(
     db: &C,
     seed_hashes: Vec<String>,
 ) -> WebResult<ClosureGraph> {
-    let reached = gradient_core::db::runtime_closure_reachable(db, &seed_hashes).await?;
+    let reached = gradient_db::runtime_closure_reachable(db, &seed_hashes).await?;
 
     let total: i64 = reached.values().filter_map(|r| r.nar_size).sum();
     let total_size_bytes = (total > 0).then_some(total);
@@ -205,7 +205,7 @@ pub async fn build_runtime_closure_graph<C: sea_orm::ConnectionTrait>(
     let mut edges: Vec<ClosureEdge> = Vec::new();
     for row in reached.values().filter(|r| kept.contains(&r.hash)) {
         for token in row.references.clone().unwrap_or_default().split_whitespace() {
-            if let Some(dep) = gradient_core::db::parse_reference_hash(token)
+            if let Some(dep) = gradient_db::parse_reference_hash(token)
                 && dep != row.hash
                 && kept.contains(&dep)
             {
@@ -242,7 +242,7 @@ pub async fn get_build_runtime_closure(
 ) -> WebResult<Json<BaseResponse<ClosureGraph>>> {
     let ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
     let seeds =
-        gradient_core::db::output_hashes_for_drvs(&state.web_db, &[ctx.build.derivation]).await?;
+        gradient_db::output_hashes_for_drvs(&state.web_db, &[ctx.build.derivation]).await?;
     let graph = build_runtime_closure_graph(&state.web_db, seeds).await?;
     Ok(ok_json(graph))
 }
@@ -277,7 +277,7 @@ pub async fn get_eval_runtime_closure(
             .collect()
     };
 
-    let seeds = gradient_core::db::output_hashes_for_drvs(&state.web_db, &roots).await?;
+    let seeds = gradient_db::output_hashes_for_drvs(&state.web_db, &roots).await?;
     let graph = build_runtime_closure_graph(&state.web_db, seeds).await?;
     Ok(ok_json(graph))
 }

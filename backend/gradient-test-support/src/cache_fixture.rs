@@ -11,7 +11,7 @@ use gradient_storage::{EmailSender, NarStore};
 use gradient_types::ids::*;
 use gradient_types::{RuntimeConfig, SecretString};
 use gradient_core::ServerState;
-use gradient_core::db::{WebDb, WorkerDb};
+use gradient_db::{WebDb, WorkerDb};
 use harmonia_file_nar::NarByteStream;
 use sea_orm::{DatabaseBackend, MockDatabase};
 use std::sync::Arc;
@@ -167,7 +167,7 @@ pub async fn public_cache_with_narinfo() -> Arc<ServerState> {
         pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         board_events: tokio::sync::broadcast::channel(256).0,
-        reactor: std::sync::Arc::new(gradient_core::db::NoReactor),
+        reactor: std::sync::Arc::new(gradient_db::NoReactor),
     })
 }
 
@@ -214,7 +214,7 @@ pub async fn public_cache_state() -> Arc<ServerState> {
         pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         board_events: tokio::sync::broadcast::channel(256).0,
-        reactor: std::sync::Arc::new(gradient_core::db::NoReactor),
+        reactor: std::sync::Arc::new(gradient_db::NoReactor),
     })
 }
 
@@ -266,7 +266,7 @@ pub async fn public_cache_with_nar() -> Arc<ServerState> {
         pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         board_events: tokio::sync::broadcast::channel(256).0,
-        reactor: std::sync::Arc::new(gradient_core::db::NoReactor),
+        reactor: std::sync::Arc::new(gradient_db::NoReactor),
     });
 
     let compressed = synthetic_nar_zst().await;
@@ -369,7 +369,7 @@ fn make_state(
         pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         board_events: tokio::sync::broadcast::channel(256).0,
-        reactor: std::sync::Arc::new(gradient_core::db::NoReactor),
+        reactor: std::sync::Arc::new(gradient_db::NoReactor),
     })
 }
 
@@ -444,7 +444,7 @@ pub async fn private_cache_state() -> Arc<ServerState> {
         pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         board_events: tokio::sync::broadcast::channel(256).0,
-        reactor: std::sync::Arc::new(gradient_core::db::NoReactor),
+        reactor: std::sync::Arc::new(gradient_db::NoReactor),
     })
 }
 
@@ -504,7 +504,7 @@ pub async fn private_cache_with_nar() -> Arc<ServerState> {
         pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         board_events: tokio::sync::broadcast::channel(256).0,
-        reactor: std::sync::Arc::new(gradient_core::db::NoReactor),
+        reactor: std::sync::Arc::new(gradient_db::NoReactor),
     });
 
     let compressed = synthetic_nar_zst().await;

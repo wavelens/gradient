@@ -307,7 +307,7 @@ impl<'a> StateApplicator<'a> {
             let mut perms = Vec::with_capacity(entry.permissions.len());
             for wire in &entry.permissions {
                 let p =
-                    crate::permissions::CachePermission::from_wire_name(wire).ok_or_else(|| {
+                    gradient_db::permissions::CachePermission::from_wire_name(wire).ok_or_else(|| {
                         format!(
                             "Cache '{}' role '{}' references unknown permission '{}'",
                             cache_name, entry.name, wire
@@ -315,7 +315,7 @@ impl<'a> StateApplicator<'a> {
                     })?;
                 perms.push(p);
             }
-            let mask = crate::permissions::cache_mask_from(&perms);
+            let mask = gradient_db::permissions::cache_mask_from(&perms);
 
             let existing = ECacheRole::find()
                 .filter(CCacheRole::Cache.eq(cache_id))

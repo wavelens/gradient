@@ -337,7 +337,7 @@ async fn extend_with_upstream_results(
     const UPSTREAM_LOOKUP_CONCURRENCY: usize = 16;
 
     let upstream_urls =
-        match gradient_core::db::upstream_urls_for_org(&state.worker_db, org_id).await {
+        match gradient_db::upstream_urls_for_org(&state.worker_db, org_id).await {
             Ok(urls) => urls,
             Err(e) => {
                 warn!(%org_id, error = %e, "CacheQuery upstream lookup failed");
@@ -388,7 +388,7 @@ async fn extend_with_gradient_proto_results(
     result: &mut Vec<gradient_types::proto::CachedPath>,
 ) {
     let upstreams =
-        match gradient_core::db::gradient_proto_upstreams_for_org(&state.worker_db, org_id).await {
+        match gradient_db::gradient_proto_upstreams_for_org(&state.worker_db, org_id).await {
             Ok(u) => u,
             Err(e) => {
                 warn!(%org_id, error = %e, "gradient_proto upstream lookup failed");

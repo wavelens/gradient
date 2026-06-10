@@ -211,7 +211,7 @@ impl Scheduler {
             .await
         {
             Ok(Some(eval)) => {
-                gradient_core::db::update_evaluation_status(
+                gradient_db::update_evaluation_status(
                     &self.state.db(),
                     eval,
                     new_status,
@@ -274,7 +274,7 @@ impl Scheduler {
                         warn!(error = %e, %build_id, %worker_id, "failed to persist worker on build");
                     }
                 }
-                gradient_core::db::update_build_status(
+                gradient_db::update_build_status(
                     &self.state.db(),
                     build,
                     BuildStatus::Building,
@@ -521,7 +521,7 @@ impl Scheduler {
         let evaluation_id = evaluation.id;
 
         // Update DB (builds → Aborted, eval → Aborted).
-        gradient_core::db::abort_evaluation(&self.state.db(), evaluation).await;
+        gradient_db::abort_evaluation(&self.state.db(), evaluation).await;
 
         // Find active jobs for this evaluation and abort them.
         let tracker = self.job_tracker.read().await;
@@ -590,7 +590,7 @@ impl Scheduler {
             }
         };
 
-        gradient_core::db::insert_evaluation_message(
+        gradient_db::insert_evaluation_message(
             self.state.worker_db.inner(),
             evaluation_id,
             entity_level,

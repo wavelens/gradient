@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::db::DbContext;
+use gradient_db::DbContext;
 use crate::forge::ForgeRegistry;
 
 /// CI-layer slice: the full [`DbContext`], the shared outbound HTTP client used

@@ -79,7 +79,7 @@ pub async fn substitute_log(
     };
 
     let upstream_urls =
-        match gradient_core::db::upstream_urls_for_org(&state.worker_db, derivation.organization)
+        match gradient_db::upstream_urls_for_org(&state.worker_db, derivation.organization)
             .await
         {
             Ok(urls) => urls,

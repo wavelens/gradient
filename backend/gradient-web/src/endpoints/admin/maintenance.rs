@@ -12,7 +12,7 @@ use axum::http::StatusCode;
 use axum::{Extension, Json, extract::State};
 use gradient_cache::cacher::run_deep_gc;
 use gradient_entity::ids::AdminTaskId;
-use gradient_core::db::admin_tasks::{self, InsertPendingError};
+use gradient_db::admin_tasks::{self, InsertPendingError};
 use gradient_types::{AdminTaskKind, BaseResponse, MUser};
 use gradient_core::ServerState;
 use serde::Serialize;

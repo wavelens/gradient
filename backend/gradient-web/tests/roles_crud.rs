@@ -17,7 +17,7 @@
 //! insert as a no-op and short-circuits.
 
 use gradient_entity::{ids::*, organization_user, role};
-use gradient_core::permissions::{Permission, admin_mask, view_mask, write_mask};
+use gradient_db::permissions::{Permission, admin_mask, view_mask, write_mask};
 use gradient_types::SessionId;
 use gradient_types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID};
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};

@@ -63,7 +63,7 @@ pub async fn cache_loop(state: Arc<ServerState>) {
         } else {
             info!("Evaluation GC completed successfully");
         }
-        if let Err(e) = gradient_core::db::gc_orphan_derivations(
+        if let Err(e) = gradient_db::gc_orphan_derivations(
             &state.db(),
             state.config.storage.keep_orphan_derivations_hours,
         )

@@ -5,7 +5,7 @@
  */
 
 use super::logging::{PHASE_SUBJECT_BUILD, finalize_build_log, record_phase_event};
-use crate::db::DbContext;
+use crate::DbContext;
 use crate::state_machine::BuildStateMachine;
 use gradient_types::*;
 use gradient_entity::build::BuildStatus;
