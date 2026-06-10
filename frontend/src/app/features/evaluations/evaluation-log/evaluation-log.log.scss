@@ -261,10 +261,8 @@
   font-family: $font-family-mono;
   font-size: $font-size-xs;
   line-height: 1.6;
-  // Row is a plain block (not flex) so the content stays genuinely inline —
-  // a flex item would be blockified and re-introduce blank lines on copy.
-  user-select: none;
-  -webkit-user-select: none;
+  // Selectable block row yields exactly one newline per line on copy; only the
+  // gutter opts out so line numbers never reach the clipboard.
 
   &--hl {
     background: rgba(234, 179, 8, 0.18);
@@ -291,6 +289,4 @@
   color: $text-primary;
   white-space: pre-wrap;
   word-break: break-word;
-  user-select: text;
-  -webkit-user-select: text;
 }
