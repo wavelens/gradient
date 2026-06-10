@@ -165,6 +165,11 @@ pub async fn github_app_webhook(
             .await;
             WebhookResponse::empty(&event)
         }
+        "pull_request_review" => {
+            trigger::handle_pull_request_review(&state, ForgeType::GitHub, None, &body, client_ip)
+                .await;
+            WebhookResponse::empty(&event)
+        }
         other => WebhookResponse::empty(other),
     };
 
@@ -534,6 +539,22 @@ pub async fn forge_webhook(
             )
             .await;
             WebhookResponse::empty("comment")
+        }
+        WebhookEventKind::Review => {
+            let peer_ip = peer
+                .map(|p| p.ip())
+                .unwrap_or_else(|| IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+            let client_ip =
+                resolve_client_ip(&headers, peer_ip, &state.config.network.trusted_proxies);
+            trigger::handle_pull_request_review(
+                &state,
+                forge_type,
+                Some(integration_id),
+                &body,
+                client_ip,
+            )
+            .await;
+            WebhookResponse::empty("review")
         }
         WebhookEventKind::Unknown(name) => WebhookResponse::empty(&name),
     };

@@ -86,7 +86,7 @@ Posts commit status (pending / success / failure / action-required) back to the 
 
 A run that targets a wildcard other than the project default — e.g. `/gradient run packages.x86_64-linux.foo` — reports under `gradient/{project}: Evaluation: {wildcard}` so the custom run shows as its own check line instead of overwriting the default evaluation check.
 
-**Maintainer-initiated runs skip the fork-PR approval gate.** The gate only exists to hold untrusted external contributions; when the action comes from a repo writer it is not needed. The Evaluation runs immediately (no `Approval` check) when either: a maintainer issues `/gradient run` / `/gradient approve` on the PR, or a maintainer force-pushes onto the contributor's branch (the `synchronize` event's actor is verified as a repo writer via the forge API before bypassing).
+**Maintainer-initiated runs skip the fork-PR approval gate.** The gate only exists to hold untrusted external contributions; when the action comes from a repo writer it is not needed. The Evaluation runs immediately (no `Approval` check) when any of these happen: a maintainer issues `/gradient run` / `/gradient approve` on the PR, a maintainer submits an approving review through the forge's native PR-review UI (GitHub / Gitea / Forgejo `pull_request_review`), or a maintainer force-pushes onto the contributor's branch. In every case the actor is verified as a repo writer via the forge API before the gate is cleared. GitLab is the exception — it emits no webhook on merge-request approval, so use `/gradient approve` there.
 
 **Config fields:**
 

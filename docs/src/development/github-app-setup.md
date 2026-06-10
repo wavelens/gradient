@@ -43,7 +43,7 @@ Match the values Gradient expects:
 | Webhook URL | `{serveUrl}/api/v1/hooks/github` |
 | Setup URL | `{serveUrl}/admin/github-app` (optional) |
 | Permissions | `metadata: read`, `contents: read`, `pull_requests: write`, `issues: write`, `statuses: write`, `checks: write` |
-| Events | `push`, `pull_request`, `release`, `check_run`, `issue_comment` (`installation` and `installation_repositories` are delivered automatically and are not selectable) |
+| Events | `push`, `pull_request`, `release`, `check_run`, `issue_comment`, `pull_request_review` (`installation` and `installation_repositories` are delivered automatically and are not selectable) |
 
 The `issues: write` permission is what gates `issue_comment` delivery — GitHub
 routes every comment on a PR's main conversation tab through that event, so
@@ -54,6 +54,10 @@ without the permission Gradient never sees `/gradient run` or
 status, and it is also what allows Gradient to leave reactions on the
 originating comment (`👀` on receipt, `👍` / `👎` on terminal eval status,
 `😕` when a non-maintainer issues a command).
+
+`pull_request_review` lets a maintainer clear a fork-PR approval gate simply by
+submitting an approving review — Gradient verifies the reviewer is a repo writer
+and then releases the parked run, no `/gradient approve` comment needed.
 
 Then download the private key, generate a webhook secret, and configure the
 env vars as below.
