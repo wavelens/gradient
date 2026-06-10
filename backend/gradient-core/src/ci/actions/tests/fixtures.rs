@@ -35,7 +35,7 @@ pub fn run<F: std::future::Future>(fut: F) -> F::Output {
 pub fn make_ctx() -> crate::ci::CiContext {
     use crate::ci::CiContext;
     use crate::db::{DbContext, NoReactor, WebDb, WorkerDb};
-    use crate::storage::{EmailSender, LogStorage, NarStore, StorageCtx};
+    use gradient_storage::{EmailSender, LogStorage, NarStore, StorageCtx};
     use gradient_types::RuntimeConfig;
     use futures::future::BoxFuture;
     use sea_orm::{DatabaseBackend, MockDatabase};
@@ -120,8 +120,8 @@ pub fn make_ctx() -> crate::ci::CiContext {
             _: &[String],
             _: &str,
             _: &str,
-        ) -> anyhow::Result<crate::storage::email::MailDeliveryResult> {
-            Ok(crate::storage::email::MailDeliveryResult {
+        ) -> anyhow::Result<gradient_storage::email::MailDeliveryResult> {
+            Ok(gradient_storage::email::MailDeliveryResult {
                 status_code: 0,
                 server_response: String::new(),
             })

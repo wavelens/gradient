@@ -15,7 +15,6 @@ pub mod sources;
 pub mod state;
 pub mod state_machine;
 pub mod state_root;
-pub mod storage;
 
 pub use state_root::{AppState, ServerState};
 
@@ -27,9 +26,9 @@ use gradient_util::shutdown::Shutdown;
 use state::load_and_apply_state;
 use std::path::Path;
 use std::sync::Arc;
-use storage::EmailService;
-use storage::NarStore;
-use storage::{FileLogStorage, S3LogStorage};
+use gradient_storage::EmailService;
+use gradient_storage::NarStore;
+use gradient_storage::{FileLogStorage, S3LogStorage};
 use gradient_types::*;
 
 #[derive(Debug, thiserror::Error)]
@@ -128,7 +127,7 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
     let email_service = EmailService::new(cli.email_config())
         .await
         .map_err(InitError::Email)?;
-    let email: Arc<dyn storage::EmailSender> = Arc::new(email_service);
+    let email: Arc<dyn gradient_storage::EmailSender> = Arc::new(email_service);
 
     let nar_storage = if let Some(s3) = cli.s3_config() {
         let secret = match s3.secret_access_key_file.as_deref() {
@@ -174,7 +173,7 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
         store
     };
 
-    let log_storage: Arc<dyn storage::LogStorage> = if cli.s3_config().is_some() {
+    let log_storage: Arc<dyn gradient_storage::LogStorage> = if cli.s3_config().is_some() {
         tracing::info!("Log storage: S3 (with local cache)");
         Arc::new(S3LogStorage::new(
             local_log_storage,

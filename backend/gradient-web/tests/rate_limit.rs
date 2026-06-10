@@ -12,7 +12,7 @@
 //! aren't throttled at moderate burst.
 
 use axum_test::TestServer;
-use gradient_core::storage::{EmailSender, NarStore};
+use gradient_storage::{EmailSender, NarStore};
 use gradient_core::ServerState;
 use gradient_core::db::{WebDb, WorkerDb};
 use sea_orm::{DatabaseBackend, MockDatabase};

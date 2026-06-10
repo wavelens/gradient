@@ -9,7 +9,7 @@
 //! it can be rendered standalone (see [`super::sgr::SgrState`]).
 
 use super::sgr::SgrState;
-use crate::storage::log::LogStorage;
+use crate::log::LogStorage;
 use gradient_types::ids::BuildId;
 use anyhow::Result;
 
@@ -147,7 +147,7 @@ mod tests {
 
     #[tokio::test]
     async fn finalize_writes_compressed_chunks_and_descs() {
-        use crate::storage::log::{FileLogStorage, LogStorage};
+        use crate::log::{FileLogStorage, LogStorage};
         use gradient_types::ids::BuildId;
         let dir = tempfile::tempdir().unwrap();
         let storage = FileLogStorage::new(dir.path()).await.unwrap();

@@ -200,7 +200,7 @@ mod tests {
     use super::*;
     use gradient_core::db::{WebDb, WorkerDb};
     use gradient_entity::ids::{BuildRequestBlobId, OrganizationId};
-    use gradient_core::storage::{EmailSender, FileLogStorage, LogStorage, NarStore};
+    use gradient_storage::{EmailSender, FileLogStorage, LogStorage, NarStore};
     use sea_orm::{DatabaseBackend, MockDatabase};
     use std::sync::Arc;
     use gradient_test_support::fakes::email::InMemoryEmailSender;

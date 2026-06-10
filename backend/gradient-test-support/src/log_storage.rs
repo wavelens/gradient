@@ -9,7 +9,7 @@ use std::sync::Mutex;
 
 use anyhow::Result;
 use futures::future::BoxFuture;
-use gradient_core::storage::LogStorage;
+use gradient_storage::LogStorage;
 use gradient_types::ids::BuildId;
 
 /// Minimal no-op log storage for tests.
@@ -49,7 +49,7 @@ impl LogStorage for NoopLogStorage {
 /// tests can assert what would have been written to the log.
 ///
 /// `read` returns the concatenation of every append for that build (matching
-/// the on-disk semantics of [`gradient_core::storage::FileLogStorage`]).
+/// the on-disk semantics of [`gradient_storage::FileLogStorage`]).
 #[derive(Debug, Default)]
 pub struct RecordingLogStorage {
     entries: Mutex<Vec<(BuildId, String)>>,

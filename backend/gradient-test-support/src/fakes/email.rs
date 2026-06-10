@@ -6,7 +6,7 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use gradient_core::storage::{EmailSender, MailDeliveryResult};
+use gradient_storage::{EmailSender, MailDeliveryResult};
 use std::sync::Mutex;
 
 #[derive(Debug, Clone)]

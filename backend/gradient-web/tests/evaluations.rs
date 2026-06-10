@@ -30,7 +30,7 @@ use axum_test::TestServer;
 use chrono::Duration;
 use chrono::Utc;
 use gradient_entity::ids::*;
-use gradient_core::storage::{EmailSender, NarStore};
+use gradient_storage::{EmailSender, NarStore};
 use gradient_types::{RuntimeConfig, SecretString, SessionId};
 use gradient_core::ServerState;
 use gradient_core::db::{WebDb, WorkerDb};

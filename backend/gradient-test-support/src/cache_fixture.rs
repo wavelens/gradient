@@ -7,7 +7,7 @@ use crate::cli::test_cli;
 use crate::fakes::email::InMemoryEmailSender;
 use crate::log_storage::{InMemoryLogStorage, NoopLogStorage};
 use futures::TryStreamExt as _;
-use gradient_core::storage::{EmailSender, NarStore};
+use gradient_storage::{EmailSender, NarStore};
 use gradient_types::ids::*;
 use gradient_types::{RuntimeConfig, SecretString};
 use gradient_core::ServerState;
@@ -347,7 +347,7 @@ fn build_row(status: gradient_entity::build::BuildStatus) -> gradient_entity::bu
 
 fn make_state(
     db: sea_orm::DatabaseConnection,
-    log_storage: Arc<dyn gradient_core::storage::LogStorage>,
+    log_storage: Arc<dyn gradient_storage::LogStorage>,
 ) -> Arc<ServerState> {
     let cli = test_cli();
     let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));

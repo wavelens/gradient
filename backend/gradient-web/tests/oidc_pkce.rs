@@ -12,7 +12,7 @@ use axum::extract::State;
 use axum::routing::get;
 use axum::{Json, Router};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use gradient_core::storage::{EmailSender, NarStore};
+use gradient_storage::{EmailSender, NarStore};
 use gradient_types::cli::OidcArgs;
 use gradient_types::{RuntimeConfig};
 use gradient_core::ServerState;

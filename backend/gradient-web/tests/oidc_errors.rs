@@ -11,7 +11,7 @@
 //! error context via tracing; clients see only a stable, generic message.
 
 use axum_test::TestServer;
-use gradient_core::storage::{EmailSender, NarStore};
+use gradient_storage::{EmailSender, NarStore};
 use gradient_types::cli::OidcArgs;
 use gradient_types::{RuntimeConfig};
 use gradient_core::ServerState;

@@ -14,7 +14,7 @@ use axum_test::TestServer;
 use chrono::{Duration, Utc};
 use gradient_entity::{ids::*, organization_user, project, project_trigger, role, session};
 use gradient_core::permissions::admin_mask;
-use gradient_core::storage::{EmailSender, NarStore};
+use gradient_storage::{EmailSender, NarStore};
 use gradient_types::{RuntimeConfig, SecretString, SessionId};
 use gradient_core::ServerState;
 use gradient_core::db::{WebDb, WorkerDb};

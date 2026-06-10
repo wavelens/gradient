@@ -389,7 +389,7 @@ async fn active_hashes(state: &Arc<ServerState>) -> Result<HashSet<String>> {
 mod tests {
     use super::*;
     use gradient_core::db::{WebDb, WorkerDb};
-    use gradient_core::storage::{EmailSender, NarStore};
+    use gradient_storage::{EmailSender, NarStore};
     use sea_orm::{MockDatabase, Value};
     use std::collections::BTreeMap;
     use std::path::Path;

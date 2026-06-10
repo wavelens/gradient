@@ -18,7 +18,7 @@
 use axum_test::TestServer;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_core::ci::actions::encrypt_secret_with_file as encrypt_webhook_secret;
-use gradient_core::storage::{EmailSender, NarStore};
+use gradient_storage::{EmailSender, NarStore};
 use gradient_types::ids::*;
 use gradient_types::triggers::TriggerConfig;
 use gradient_core::ServerState;

@@ -21,7 +21,7 @@ use crate::db::{DbContext, StatusReactor, WebDb, WorkerDb};
 use crate::forge::ForgeRegistry;
 use gradient_util::shutdown::Shutdown;
 use crate::state::{OidcGroupRoles, PendingOrgMemberships};
-use crate::storage::{EmailSender, LogStorage, NarStore, StorageCtx};
+use gradient_storage::{EmailSender, LogStorage, NarStore, StorageCtx};
 use gradient_types::{BoardEvent, RuntimeConfig, SecretString};
 
 #[derive(Debug)]
