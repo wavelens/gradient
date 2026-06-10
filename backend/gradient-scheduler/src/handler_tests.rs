@@ -47,6 +47,13 @@ fn test_date() -> NaiveDateTime {
     NaiveDateTime::default()
 }
 
+/// One empty `build_attempt` SELECT result. Builds have no attempt rows in
+/// these fixtures, so every `latest_attempt`/`stamp_*`/`fail_latest_attempt`
+/// call returns nothing and issues no follow-up UPDATE.
+fn no_attempts() -> Vec<gradient_entity::build_attempt::Model> {
+    Vec::new()
+}
+
 /// Evaluation fixture. `project: None` prevents dispatch_evaluation_event_for_status
 /// from doing any DB queries (it returns early when project is None).
 fn make_eval(id: EvaluationId, status: EvaluationStatus) -> MEvaluation {
@@ -488,8 +495,6 @@ async fn eval_result_substituted_derivation_completes_eval() {
         }]])
         // 4b. compute_truly_substituted: load cached_path → fully cached
         .append_query_results([vec![make_fully_cached_path(cp_id, out_path)]])
-        // 4c. find_log_sources: no prior builds to inherit log from
-        .append_query_results([Vec::<MBuild>::new()])
         // 5. insert_many builds (Substituted status)
         .append_query_results([vec![make_build(
             build_id,
@@ -547,8 +552,6 @@ async fn eval_result_substitutes_when_hash_in_cached_path_without_link() {
         )]])
         // cached_path keyed by the same hash, fully uploaded.
         .append_query_results([vec![make_fully_cached_path(cp_id, out_path)]])
-        // find_log_sources: no prior builds for this drv yet.
-        .append_query_results([Vec::<MBuild>::new()])
         .append_query_results([vec![make_build(
             build_id,
             eval_id,
@@ -971,8 +974,18 @@ async fn build_failed_cascades_to_direct_dependent() {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // 1. find_by_id(buildA)
         .append_query_results([vec![build_a]])
-        // 2. update buildA → Failed (UPDATE...RETURNING)
+        // 1a. latest_attempt_log_id (worker-error log append) → none
+        .append_query_results([no_attempts()])
+        // 1b. fail_latest_attempt → none (no UPDATE)
+        .append_query_results([no_attempts()])
+        // 2. update_build_status(FailedPermanent): stamp_attempt_finished → none
+        .append_query_results([no_attempts()])
+        // 2'. update buildA → Failed (UPDATE...RETURNING)
         .append_query_results([vec![build_a_failed]])
+        // 2''. latest_attempt_worker → none
+        .append_query_results([no_attempts()])
+        // 2'''. latest_attempt_log_id (terminal finalize) → none
+        .append_query_results([no_attempts()])
         // 2a. propagate_to_followers: empty
         .append_query_results([Vec::<MBuild>::new()])
         // ── collect_transitive_dependents ──
@@ -982,8 +995,14 @@ async fn build_failed_cascades_to_direct_dependent() {
         .append_query_results([Vec::<MDerivationDependency>::new()])
         // 5. cascade: find Created/Queued builds with derivation in {B} → [buildB]
         .append_query_results([vec![build_b]])
-        // 6. update buildB → DependencyFailed
+        // 6. update_build_status(buildB → DependencyFailed): stamp_attempt_finished → none
+        .append_query_results([no_attempts()])
+        // 6'. update buildB → DependencyFailed
         .append_query_results([vec![build_b_dep_failed]])
+        // 6''. latest_attempt_worker → none
+        .append_query_results([no_attempts()])
+        // 6'''. latest_attempt_log_id (terminal finalize) → none
+        .append_query_results([no_attempts()])
         // ── check_evaluation_done ──
         // 7. find active builds → empty
         .append_query_results([Vec::<MBuild>::new()])
@@ -1029,12 +1048,22 @@ async fn build_failed_appends_worker_error_to_log() {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // 1. find_by_id(build)
         .append_query_results([vec![build]])
-        // 2. update → Failed
+        // 1a. latest_attempt_log_id (worker-error log append) → none
+        .append_query_results([no_attempts()])
+        // 1b. fail_latest_attempt → none
+        .append_query_results([no_attempts()])
+        // 2. update_build_status(FailedPermanent): stamp_attempt_finished → none
+        .append_query_results([no_attempts()])
+        // 2'. update → Failed
         .append_query_results([vec![build_failed.clone()]])
+        // 2''. latest_attempt_worker → none
+        .append_query_results([no_attempts()])
+        // 2'''. latest_attempt_log_id (terminal finalize) → none
+        .append_query_results([no_attempts()])
         // 2a. propagate_to_followers: empty
         .append_query_results([Vec::<MBuild>::new()])
-        // 3. cascade: no candidates
-        .append_query_results([Vec::<MBuild>::new()])
+        // 3. cascade: collect_transitive_dependents → no dependents
+        .append_query_results([Vec::<MDerivationDependency>::new()])
         // 4. check active → empty
         .append_query_results([Vec::<MBuild>::new()])
         // 5. find eval → Building
@@ -1086,12 +1115,22 @@ async fn build_failed_no_dependents() {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // 1. find_by_id(build)
         .append_query_results([vec![build]])
-        // 2. update → Failed
+        // 1a. latest_attempt_log_id (worker-error log append) → none
+        .append_query_results([no_attempts()])
+        // 1b. fail_latest_attempt → none
+        .append_query_results([no_attempts()])
+        // 2. update_build_status(FailedPermanent): stamp_attempt_finished → none
+        .append_query_results([no_attempts()])
+        // 2'. update → Failed
         .append_query_results([vec![build_failed.clone()]])
+        // 2''. latest_attempt_worker → none
+        .append_query_results([no_attempts()])
+        // 2'''. latest_attempt_log_id (terminal finalize) → none
+        .append_query_results([no_attempts()])
         // 2a. propagate_to_followers: empty
         .append_query_results([Vec::<MBuild>::new()])
-        // 3. cascade: find Created/Queued → empty (no candidates)
-        .append_query_results([Vec::<MBuild>::new()])
+        // 3. cascade: collect_transitive_dependents → no dependents
+        .append_query_results([Vec::<MDerivationDependency>::new()])
         // 4. check active → empty
         .append_query_results([Vec::<MBuild>::new()])
         // 5. find eval → Building
@@ -1139,8 +1178,18 @@ async fn build_failed_cascade_only_direct_dependents() {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // 1. find_by_id(buildA)
         .append_query_results([vec![build_a]])
-        // 2. update → Failed
+        // 1a. latest_attempt_log_id (worker-error log append) → none
+        .append_query_results([no_attempts()])
+        // 1b. fail_latest_attempt → none
+        .append_query_results([no_attempts()])
+        // 2. update_build_status(FailedPermanent): stamp_attempt_finished → none
+        .append_query_results([no_attempts()])
+        // 2'. update → Failed
         .append_query_results([vec![build_a_failed]])
+        // 2''. latest_attempt_worker → none
+        .append_query_results([no_attempts()])
+        // 2'''. latest_attempt_log_id (terminal finalize) → none
+        .append_query_results([no_attempts()])
         // 2a. propagate_to_followers: empty
         .append_query_results([Vec::<MBuild>::new()])
         // ── collect_transitive_dependents ──
@@ -1151,8 +1200,14 @@ async fn build_failed_cascade_only_direct_dependents() {
         // 5. cascade: find Created/Queued with derivation in {B} → [buildB]
         // (C is excluded by the derivation filter, not by a per-row dep check)
         .append_query_results([vec![build_b]])
-        // 6. update buildB → DependencyFailed
+        // 6. update_build_status(buildB → DependencyFailed): stamp_attempt_finished → none
+        .append_query_results([no_attempts()])
+        // 6'. update buildB → DependencyFailed
         .append_query_results([vec![build_b_dep_failed]])
+        // 6''. latest_attempt_worker → none
+        .append_query_results([no_attempts()])
+        // 6'''. latest_attempt_log_id (terminal finalize) → none
+        .append_query_results([no_attempts()])
         // ── check_evaluation_done ──
         // 7. check active → buildC is still Queued
         .append_query_results([vec![build_c]])
@@ -1197,12 +1252,22 @@ async fn build_failed_cascade_skips_building_status() {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // 1. find_by_id(buildA)
         .append_query_results([vec![build_a]])
-        // 2. update → Failed
+        // 1a. latest_attempt_log_id (worker-error log append) → none
+        .append_query_results([no_attempts()])
+        // 1b. fail_latest_attempt → none
+        .append_query_results([no_attempts()])
+        // 2. update_build_status(FailedPermanent): stamp_attempt_finished → none
+        .append_query_results([no_attempts()])
+        // 2'. update → Failed
         .append_query_results([vec![build_a_failed]])
+        // 2''. latest_attempt_worker → none
+        .append_query_results([no_attempts()])
+        // 2'''. latest_attempt_log_id (terminal finalize) → none
+        .append_query_results([no_attempts()])
         // 2a. propagate_to_followers: empty
         .append_query_results([Vec::<MBuild>::new()])
-        // 3. cascade: find Created/Queued → empty (buildB is Building, excluded)
-        .append_query_results([Vec::<MBuild>::new()])
+        // 3. cascade: collect_transitive_dependents → no dependents
+        .append_query_results([Vec::<MDerivationDependency>::new()])
         // 4. check active: buildB is Building → still active
         .append_query_results([vec![build_b_building]])
         // eval stays Building → no update
@@ -1317,19 +1382,17 @@ async fn build_output_with_metrics_records_one_metric_row() {
         ..Default::default()
     });
 
-    // Queries (ordered): find build, find derivation, find derivation_output,
-    // update derivation_output (RETURNING). Execs (ordered): persist
-    // build_time_ms, insert derivation_metric, delete prior build_product.
+    // Queries (ordered): find build, find derivation, latest_attempt_worker
+    // (resolves derivation_metric.worker_id → empty), find derivation_output,
+    // update derivation_output (RETURNING). Execs (ordered): insert
+    // derivation_metric, delete prior build_product.
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![build]])
         .append_query_results([vec![derivation]])
+        .append_query_results([no_attempts()])
         .append_query_results([vec![drv_out]])
         .append_query_results([vec![drv_out_updated]])
         .append_exec_results([
-            MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            },
             MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 1,
@@ -2130,8 +2193,18 @@ async fn action_not_dispatched_for_dep_failed() {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // 1. find_by_id(buildA)
         .append_query_results([vec![build_a]])
-        // 2. update buildA → Failed
+        // 1a. latest_attempt_log_id (worker-error log append) → none
+        .append_query_results([no_attempts()])
+        // 1b. fail_latest_attempt → none
+        .append_query_results([no_attempts()])
+        // 2. update_build_status(FailedPermanent): stamp_attempt_finished → none
+        .append_query_results([no_attempts()])
+        // 2'. update buildA → Failed
         .append_query_results([vec![build_a_failed.clone()]])
+        // 2''. latest_attempt_worker → none
+        .append_query_results([no_attempts()])
+        // 2'''. latest_attempt_log_id (terminal finalize) → none
+        .append_query_results([no_attempts()])
         // 2a. propagate_to_followers: empty
         .append_query_results([Vec::<MBuild>::new()])
         // 3. BFS layer 1: dep edges where Dependency=A → [B→A]
@@ -2140,8 +2213,14 @@ async fn action_not_dispatched_for_dep_failed() {
         .append_query_results([Vec::<MDerivationDependency>::new()])
         // 5. cascade: find Created/Queued with derivation in {B} → [buildB]
         .append_query_results([vec![build_b]])
-        // 6. update buildB → DependencyFailed
+        // 6. update_build_status(buildB → DependencyFailed): stamp_attempt_finished → none
+        .append_query_results([no_attempts()])
+        // 6'. update buildB → DependencyFailed
         .append_query_results([vec![build_b_dep_failed.clone()]])
+        // 6''. latest_attempt_worker → none
+        .append_query_results([no_attempts()])
+        // 6'''. latest_attempt_log_id (terminal finalize) → none
+        .append_query_results([no_attempts()])
         // 7. check active → empty
         .append_query_results([Vec::<MBuild>::new()])
         // 8. find_by_id(eval) → Building
