@@ -221,8 +221,11 @@ async fn set_log_id(state: &Arc<ServerState>, build_id: BuildId, log_id: BuildId
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_entity::build;
-    use gradient_types::ids::{EvaluationId, OrganizationId};
+    use gradient_entity::{build, build_attempt};
+    use gradient_storage::LogStorage;
+    use gradient_types::ids::{
+        BuildAttemptId, DispatchedJobId, EvaluationId, OrganizationId,
+    };
     use gradient_test_support::prelude::*;
     use uuid::Uuid;
     use wiremock::matchers::{method, path};
@@ -247,33 +250,47 @@ mod tests {
         }
     }
 
+    fn make_attempt(build: BuildId, log_id: Option<BuildId>) -> build_attempt::Model {
+        build_attempt::Model {
+            id: BuildAttemptId::new(Uuid::now_v7()),
+            build,
+            dispatched_job: DispatchedJobId::new(Uuid::now_v7()),
+            log_id,
+            created_at: gradient_types::now(),
+            ..Default::default()
+        }
+    }
+
     #[tokio::test]
-    #[ignore = "log-sub mock query flow changed (build.log_id moved to build_attempt); revisit with substitute-dispatch"]
     async fn dedup_hit_via_existing_log_id_pointer() {
         let drv = DerivationId::new(Uuid::now_v7());
         let prior_id = BuildId::new(Uuid::now_v7());
-        let _prior_log = BuildId::new(Uuid::now_v7());
+        let prior_log = BuildId::new(Uuid::now_v7());
         let new_id = BuildId::new(Uuid::now_v7());
 
         let prior = make_build(prior_id, drv, BuildStatus::Completed, false);
         let new = make_build(new_id, drv, BuildStatus::Substituted, false);
+        let new_attempt = make_attempt(new_id, None);
+        let prior_attempt = make_attempt(prior_id, Some(prior_log));
 
         let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
             .append_query_results([vec![new.clone()]])
+            .append_query_results([vec![new_attempt.clone()]])
             .append_query_results([vec![prior.clone()]])
-            .append_query_results([vec![new.clone()]])
+            .append_query_results([vec![prior_attempt.clone()]])
+            .append_query_results([vec![new_attempt.clone()]])
             .append_exec_results([sea_orm::MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 1,
             }])
-            .append_query_results([vec![new.clone()]])
-            .append_exec_results([sea_orm::MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 0,
-            }])
             .into_connection();
 
-        let state = test_state(db);
+        let (state, storage) = test_state_with_recording_storage(db);
+        storage
+            .append(prior_log, "prior log body")
+            .await
+            .expect("seed prior log");
+
         substitute_log(
             state,
             new_id,
@@ -377,45 +394,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[ignore = "log-sub mock query flow changed (build.log_id moved to build_attempt); revisit with substitute-dispatch"]
-    async fn followers_get_log_id_via_backfill() {
-        let drv_id = DerivationId::new(Uuid::now_v7());
-        let prior_id = BuildId::new(Uuid::now_v7());
-        let _prior_log = BuildId::new(Uuid::now_v7());
-        let new_id = BuildId::new(Uuid::now_v7());
-
-        let prior = make_build(prior_id, drv_id, BuildStatus::Completed, false);
-        let new = make_build(new_id, drv_id, BuildStatus::Substituted, false);
-
-        let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
-            .append_query_results([vec![new.clone()]])
-            .append_query_results([vec![prior.clone()]])
-            .append_query_results([vec![new.clone()]])
-            .append_exec_results([sea_orm::MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }])
-            .append_query_results([vec![new.clone()]])
-            .append_exec_results([sea_orm::MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 2,
-            }])
-            .into_connection();
-
-        let state = test_state(db);
-        substitute_log(
-            state,
-            new_id,
-            drv_id,
-            "/nix/store/x-test.drv".to_string(),
-            false,
-        )
-        .await
-        .expect("Ok");
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    #[ignore = "log-sub mock query flow changed (build.log_id moved to build_attempt); revisit with substitute-dispatch"]
     async fn upstream_fetch_persists_log_on_200() {
         let drv_id = DerivationId::new(Uuid::now_v7());
         let org = OrganizationId::new(Uuid::now_v7());
@@ -426,24 +404,20 @@ mod tests {
         let upstream = make_upstream_with_log(drv_basename, "hello log\n", 200).await;
 
         let build = make_build(build_id, drv_id, BuildStatus::Created, true);
+        let attempt = make_attempt(build_id, None);
         let derivation = make_derivation(drv_id, org, drv_path.clone());
 
         let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
             .append_query_results([vec![build.clone()]])
-            .append_query_results([Vec::<build::Model>::new()])
+            .append_query_results([vec![attempt.clone()]])
             .append_query_results([Vec::<build::Model>::new()])
             .append_query_results([vec![derivation]]);
         let db = seed_upstream_urls(db, org, &[&upstream.uri()]);
         let db = db
-            .append_query_results([vec![build.clone()]])
+            .append_query_results([vec![attempt.clone()]])
             .append_exec_results([sea_orm::MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 1,
-            }])
-            .append_query_results([vec![build.clone()]])
-            .append_exec_results([sea_orm::MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 0,
             }])
             .into_connection();
 
@@ -460,7 +434,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[ignore = "log-sub mock query flow changed (build.log_id moved to build_attempt); revisit with substitute-dispatch"]
     async fn first_upstream_404_second_200() {
         let drv_id = DerivationId::new(Uuid::now_v7());
         let org = OrganizationId::new(Uuid::now_v7());
@@ -472,24 +445,20 @@ mod tests {
         let u200 = make_upstream_with_log(drv_basename, "second body", 200).await;
 
         let build = make_build(build_id, drv_id, BuildStatus::Created, true);
+        let attempt = make_attempt(build_id, None);
         let derivation = make_derivation(drv_id, org, drv_path.clone());
 
         let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
             .append_query_results([vec![build.clone()]])
-            .append_query_results([Vec::<build::Model>::new()])
+            .append_query_results([vec![attempt.clone()]])
             .append_query_results([Vec::<build::Model>::new()])
             .append_query_results([vec![derivation]]);
         let db = seed_upstream_urls(db, org, &[&u404.uri(), &u200.uri()]);
         let db = db
-            .append_query_results([vec![build.clone()]])
+            .append_query_results([vec![attempt.clone()]])
             .append_exec_results([sea_orm::MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 1,
-            }])
-            .append_query_results([vec![build.clone()]])
-            .append_exec_results([sea_orm::MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 0,
             }])
             .into_connection();
 
@@ -533,7 +502,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[ignore = "log-sub mock query flow changed (build.log_id moved to build_attempt); revisit with substitute-dispatch"]
     async fn upstream_body_exceeding_cap_is_truncated() {
         let drv_id = DerivationId::new(Uuid::now_v7());
         let org = OrganizationId::new(Uuid::now_v7());
@@ -545,24 +513,20 @@ mod tests {
         let upstream = make_upstream_with_log(drv_basename, &oversize, 200).await;
 
         let build = make_build(build_id, drv_id, BuildStatus::Created, true);
+        let attempt = make_attempt(build_id, None);
         let derivation = make_derivation(drv_id, org, drv_path.clone());
 
         let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
             .append_query_results([vec![build.clone()]])
-            .append_query_results([Vec::<build::Model>::new()])
+            .append_query_results([vec![attempt.clone()]])
             .append_query_results([Vec::<build::Model>::new()])
             .append_query_results([vec![derivation]]);
         let db = seed_upstream_urls(db, org, &[&upstream.uri()]);
         let db = db
-            .append_query_results([vec![build.clone()]])
+            .append_query_results([vec![attempt.clone()]])
             .append_exec_results([sea_orm::MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 1,
-            }])
-            .append_query_results([vec![build.clone()]])
-            .append_exec_results([sea_orm::MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 0,
             }])
             .into_connection();
 
@@ -609,15 +573,17 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "idempotency now checked via build_attempt.log_id, not build.log_id; mock query sequence changed"]
     async fn idempotent_when_log_id_already_set() {
         let drv_id = DerivationId::new(Uuid::now_v7());
         let build_id = BuildId::new(Uuid::now_v7());
-        let _existing_log = BuildId::new(Uuid::now_v7());
+        let existing_log = BuildId::new(Uuid::now_v7());
         let build = make_build(build_id, drv_id, BuildStatus::Substituted, false);
+        let attempt = make_attempt(build_id, Some(existing_log));
 
+        // Build load + latest_attempt (log_id already set) -> early return, no dedup/fetch.
         let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
             .append_query_results([vec![build]])
+            .append_query_results([vec![attempt]])
             .into_connection();
 
         let state = test_state(db);
