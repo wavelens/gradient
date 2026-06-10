@@ -872,9 +872,10 @@ impl BuildabilityChecker {
         let db = &state.worker_db;
         let drv_ids: Vec<DerivationId> = builds.iter().map(|b| b.derivation).collect();
         let build_ids: Vec<BuildId> = builds.iter().map(|b| b.id).collect();
+        // A count-query failure → 0 misses → substitute-mode, same as the dispatch side.
         let substitute_misses = gradient_db::substitute_miss_counts(db, &build_ids)
             .await
-            .context("fetch substitute-miss counts")?;
+            .unwrap_or_default();
 
         let drvs = gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
             EDerivation::find().filter(CDerivation::Id.is_in(chunk)).all(db).await
