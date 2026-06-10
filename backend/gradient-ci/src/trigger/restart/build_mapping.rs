@@ -49,21 +49,13 @@ pub(super) async fn create_restart_builds<C: ConnectionTrait>(
         } else {
             leader_for_drv.get(&prev_build.derivation).copied()
         };
-        let log_id = if matches!(new_status, BuildStatus::Substituted) {
-            Some(prev_build.log_id.unwrap_or(prev_build.id))
-        } else {
-            None
-        };
         let abuild = ABuild {
             id: Set(new_build_id),
             evaluation: Set(new_eval_id),
             derivation: Set(prev_build.derivation),
             status: Set(new_status),
-            log_id: Set(log_id),
-            build_time_ms: Set(None),
-            worker: Set(None),
             via: Set(via),
-            external_cached: Set(false),
+            substitutable: Set(false),
             attempt: Set(0),
             timeout_secs: Set(prev_build.timeout_secs),
             max_silent_secs: Set(prev_build.max_silent_secs),
@@ -73,8 +65,6 @@ pub(super) async fn create_restart_builds<C: ConnectionTrait>(
             queued_at: Set((new_status == BuildStatus::Queued).then_some(now)),
             ready_at: Set(None),
             dispatched_at: Set(None),
-            build_started_at: Set(None),
-            build_finished_at: Set(None),
         };
         abuild.insert(db).await?;
         build_id_map.insert(prev_build.id, new_build_id);
