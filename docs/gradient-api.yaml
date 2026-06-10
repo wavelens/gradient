@@ -5499,7 +5499,11 @@ paths:
         `GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE`.
 
         **Handled events:**
-        - `push` - triggers an evaluation on any project whose repository URL matches.
+        - `push` / `pull_request` / `release` - trigger an evaluation on any project whose
+          repository URL matches the matching trigger.
+        - `check_run` - the "Approve and Run" action clears a fork-PR approval gate.
+        - `issue_comment` - `/gradient run` / `/gradient approve` maintainer commands.
+        - `pull_request_review` - a maintainer's approving review clears a fork-PR approval gate.
         - `installation` / `installation_repositories` - stores or clears the GitHub App
           `installation_id` on the matching Gradient organization.
         - `ping` - always returns 200.

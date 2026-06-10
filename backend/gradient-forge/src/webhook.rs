@@ -18,6 +18,10 @@ pub enum WebhookEventKind {
     PullRequest,
     Release,
     Comment,
+    /// A pull-request review submission (GitHub `pull_request_review`,
+    /// Gitea/Forgejo `pull_request_review`). Used to release an approval-gated
+    /// run when a maintainer approves the PR natively (#369).
+    Review,
     Unknown(String),
 }
 
@@ -252,6 +256,56 @@ pub struct GitLabReleasePayload {
     pub tag: Option<String>,
 }
 
+// ── GitHub PR review payload ───────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct GitHubReviewPayload {
+    pub action: String,
+    pub review: GitHubReview,
+    pub pull_request: GitHubReviewPr,
+    pub repository: GitHubRepository,
+    #[serde(default)]
+    pub sender: Option<GitHubUser>,
+}
+
+#[derive(Deserialize)]
+pub struct GitHubReview {
+    #[serde(default)]
+    pub state: Option<String>,
+    #[serde(default)]
+    pub user: Option<GitHubUser>,
+}
+
+#[derive(Deserialize)]
+pub struct GitHubReviewPr {
+    #[serde(default)]
+    pub number: Option<u64>,
+}
+
+// ── Gitea/Forgejo PR review payload ────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct GiteaReviewPayload {
+    pub action: String,
+    pub review: GiteaReview,
+    pub pull_request: GiteaReviewPr,
+    pub repository: GiteaRepository,
+    #[serde(default)]
+    pub sender: Option<GiteaUser>,
+}
+
+#[derive(Deserialize)]
+pub struct GiteaReview {
+    #[serde(rename = "type", default)]
+    pub review_type: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct GiteaReviewPr {
+    #[serde(default)]
+    pub number: Option<u64>,
+}
+
 // ── Normalised push event ──────────────────────────────────────────────────
 
 /// Forge-agnostic push event extracted from any of the supported webhook
@@ -305,6 +359,21 @@ pub struct ParsedReleaseEvent {
     pub repository_urls: Vec<String>,
     /// Tag name (e.g. "v1.2.3"), if available.
     pub tag: Option<String>,
+}
+
+/// Pull-request review submission, normalised across forges. Drives the native
+/// maintainer-approval unpark (#369): only an `approved` review by a trusted
+/// repo writer releases an approval-gated run.
+pub struct ParsedPullRequestReviewEvent {
+    /// `true` only for a freshly submitted **approving** review. Edited,
+    /// dismissed, change-request, and plain-comment reviews are `false`.
+    pub approved: bool,
+    /// Login/username of the reviewer.
+    pub reviewer: Option<String>,
+    /// PR / MR number the review targets.
+    pub pr_number: Option<u64>,
+    /// `owner/repo` slug from the payload's repository block.
+    pub repository_full_name: Option<String>,
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -696,6 +765,58 @@ impl ParsedReleaseEvent {
             commit_hash,
             repository_urls: gitlab_project_urls(&payload.project),
             tag: payload.tag,
+        })
+    }
+}
+
+// ── ParsedPullRequestReviewEvent impl ──────────────────────────────────────
+
+impl ParsedPullRequestReviewEvent {
+    pub fn from_github(body: &[u8]) -> Option<Self> {
+        let payload: GitHubReviewPayload = match serde_json::from_slice(body) {
+            Ok(p) => p,
+            Err(e) => {
+                warn!(error = %e, "Failed to parse GitHub pull_request_review payload");
+                return None;
+            }
+        };
+        let approved = payload.action == "submitted"
+            && payload
+                .review
+                .state
+                .as_deref()
+                .is_some_and(|s| s.eq_ignore_ascii_case("approved"));
+        let reviewer = payload
+            .review
+            .user
+            .and_then(|u| u.login)
+            .or_else(|| payload.sender.and_then(|s| s.login));
+        Some(Self {
+            approved,
+            reviewer,
+            pr_number: payload.pull_request.number,
+            repository_full_name: payload.repository.full_name,
+        })
+    }
+
+    pub fn from_gitea(body: &[u8]) -> Option<Self> {
+        let payload: GiteaReviewPayload = match serde_json::from_slice(body) {
+            Ok(p) => p,
+            Err(e) => {
+                warn!(error = %e, "Failed to parse Gitea/Forgejo pull_request_review payload");
+                return None;
+            }
+        };
+        // Gitea/Forgejo carry the review verdict in `review.type`
+        // (`pull_request_review_approved` / `_rejected` / `_comment`).
+        let approved = payload.action == "reviewed"
+            && payload.review.review_type.as_deref() == Some("pull_request_review_approved");
+        let reviewer = payload.sender.and_then(|s| s.username.or(s.login));
+        Some(Self {
+            approved,
+            reviewer,
+            pr_number: payload.pull_request.number,
+            repository_full_name: payload.repository.full_name,
         })
     }
 }
@@ -1135,5 +1256,75 @@ mod tests {
             "tag": "v3.1.0"
         }"#;
         assert!(ParsedReleaseEvent::from_gitlab(body.as_bytes()).is_none());
+    }
+
+    // ── PR review (#369) ──────────────────────────────────────────────────
+
+    #[test]
+    fn github_review_approved_by_maintainer() {
+        let body = r#"{
+            "action": "submitted",
+            "review": { "state": "approved", "user": { "login": "maintainer" } },
+            "pull_request": { "number": 42 },
+            "repository": { "clone_url": "x", "ssh_url": "y", "full_name": "org/repo" }
+        }"#;
+        let ev = ParsedPullRequestReviewEvent::from_github(body.as_bytes()).unwrap();
+        assert!(ev.approved);
+        assert_eq!(ev.reviewer.as_deref(), Some("maintainer"));
+        assert_eq!(ev.pr_number, Some(42));
+        assert_eq!(ev.repository_full_name.as_deref(), Some("org/repo"));
+    }
+
+    #[test]
+    fn github_review_changes_requested_is_not_approved() {
+        let body = r#"{
+            "action": "submitted",
+            "review": { "state": "changes_requested", "user": { "login": "maintainer" } },
+            "pull_request": { "number": 42 },
+            "repository": { "clone_url": "x", "ssh_url": "y", "full_name": "org/repo" }
+        }"#;
+        let ev = ParsedPullRequestReviewEvent::from_github(body.as_bytes()).unwrap();
+        assert!(!ev.approved);
+    }
+
+    #[test]
+    fn github_review_dismissed_is_not_approved() {
+        let body = r#"{
+            "action": "dismissed",
+            "review": { "state": "approved", "user": { "login": "maintainer" } },
+            "pull_request": { "number": 42 },
+            "repository": { "clone_url": "x", "ssh_url": "y", "full_name": "org/repo" }
+        }"#;
+        let ev = ParsedPullRequestReviewEvent::from_github(body.as_bytes()).unwrap();
+        assert!(!ev.approved, "only freshly submitted approvals count");
+    }
+
+    #[test]
+    fn gitea_review_approved_by_maintainer() {
+        let body = r#"{
+            "action": "reviewed",
+            "review": { "type": "pull_request_review_approved" },
+            "pull_request": { "number": 7 },
+            "repository": { "clone_url": "x", "full_name": "org/repo" },
+            "sender": { "username": "maintainer" }
+        }"#;
+        let ev = ParsedPullRequestReviewEvent::from_gitea(body.as_bytes()).unwrap();
+        assert!(ev.approved);
+        assert_eq!(ev.reviewer.as_deref(), Some("maintainer"));
+        assert_eq!(ev.pr_number, Some(7));
+        assert_eq!(ev.repository_full_name.as_deref(), Some("org/repo"));
+    }
+
+    #[test]
+    fn gitea_review_rejected_is_not_approved() {
+        let body = r#"{
+            "action": "reviewed",
+            "review": { "type": "pull_request_review_rejected" },
+            "pull_request": { "number": 7 },
+            "repository": { "clone_url": "x", "full_name": "org/repo" },
+            "sender": { "username": "maintainer" }
+        }"#;
+        let ev = ParsedPullRequestReviewEvent::from_gitea(body.as_bytes()).unwrap();
+        assert!(!ev.approved);
     }
 }

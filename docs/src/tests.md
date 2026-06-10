@@ -285,6 +285,27 @@ These can be added as further `forge_hooks.rs` tests by extending the
 `MockDatabase` chain to return an in-progress evaluation row (or error) instead
 of the empty list at the in-progress-eval query position.
 
+## Native PR-review approval unpark (#369)
+
+A maintainer's approving PR review releases an approval-gated fork-PR run, the
+same as `/gradient approve` or the GitHub "Approve and Run" check action.
+`ParsedPullRequestReviewEvent::{from_github,from_gitea}`
+(`backend/gradient-forge/src/webhook.rs`) normalises the forge payloads;
+`handle_pull_request_review`
+(`backend/gradient-web/src/endpoints/forge_hooks/trigger.rs`) verifies the
+reviewer is a repo writer before unparking. GitLab is a no-op (no webhook on
+merge-request approval).
+
+Run with: `cargo test -p gradient-forge --lib webhook`
+
+| Test name | Scenario |
+|-----------|----------|
+| `github_review_approved_by_maintainer` | GitHub `pull_request_review` `submitted`/`approved` → `approved=true`, reviewer/PR/repo extracted. |
+| `github_review_changes_requested_is_not_approved` | `changes_requested` review → `approved=false`. |
+| `github_review_dismissed_is_not_approved` | `dismissed` action even with `approved` state → `approved=false` (only fresh approvals count). |
+| `gitea_review_approved_by_maintainer` | Gitea `reviewed` + `review.type=pull_request_review_approved` → `approved=true`. |
+| `gitea_review_rejected_is_not_approved` | Gitea `pull_request_review_rejected` → `approved=false`. |
+
 ## GitHub App manifest flow
 
 Backend (`cargo test -p core --tests ci::github_app_manifest`):

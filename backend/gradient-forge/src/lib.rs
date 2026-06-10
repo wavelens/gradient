@@ -21,5 +21,6 @@ pub use provider::ForgeProvider;
 pub use registry::ForgeRegistry;
 pub use reporter::*;
 pub use webhook::{
-    ParsedPullRequestEvent, ParsedPushEvent, ParsedReleaseEvent, PushCommit, WebhookEventKind,
+    ParsedPullRequestEvent, ParsedPullRequestReviewEvent, ParsedPushEvent, ParsedReleaseEvent,
+    PushCommit, WebhookEventKind,
 };

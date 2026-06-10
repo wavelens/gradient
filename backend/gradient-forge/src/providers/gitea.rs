@@ -66,6 +66,7 @@ impl ForgeProvider for GiteaProvider {
             "pull_request" => WebhookEventKind::PullRequest,
             "release" => WebhookEventKind::Release,
             "issue_comment" | "pull_request_comment" => WebhookEventKind::Comment,
+            "pull_request_review" => WebhookEventKind::Review,
             other => WebhookEventKind::Unknown(other.to_string()),
         }
     }

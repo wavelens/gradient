@@ -17,6 +17,7 @@ use gradient_types::triggers::{TriggerConfig, TriggerType};
 use gradient_types::wildcard::Wildcard;
 use gradient_types::*;
 use gradient_core::ServerState;
+use gradient_forge::ParsedPullRequestReviewEvent;
 use gradient_scheduler::Scheduler;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
@@ -939,6 +940,129 @@ async fn sender_is_trusted(
         Err(e) => {
             warn!(error = %e, %project_id, "is_repo_writer probe failed");
             false
+        }
+    }
+}
+
+// ── Approval unpark: native forge PR review (#369) ─────────────────────────
+
+/// Find the approval-gated evaluation for `(project_id, pr_number)`, flip it
+/// back to `Queued`, and re-emit its pending CI checks. Shared low-level step
+/// of the comment, check-run-button, and native-review approval paths.
+async fn unpark_pr_approval_eval(
+    state: &Arc<ServerState>,
+    project_id: ProjectId,
+    pr_number: u64,
+) -> Option<MEvaluation> {
+    let eval = find_approval_gated_eval(&state.web_db, project_id, pr_number)
+        .await
+        .ok()
+        .flatten()?;
+    match unpark_approval(&state.web_db, eval.id).await {
+        Ok(Some(unparked)) => {
+            dispatch_approval_granted(state, &unparked).await;
+            Some(unparked)
+        }
+        Ok(None) => None,
+        Err(e) => {
+            warn!(error = %e, evaluation_id = %eval.id, "Failed to unpark approval gate via review");
+            None
+        }
+    }
+}
+
+/// Handle a `pull_request_review` webhook. A maintainer's native **approving**
+/// review releases an approval-gated run for the PR, mirroring `/gradient
+/// approve` and the GitHub "Approve and Run" check action (#369). Non-approving
+/// reviews, and reviews by non-writers, are ignored. GitLab is a no-op: it
+/// emits no webhook on merge-request approval.
+pub(super) async fn handle_pull_request_review(
+    state: &Arc<ServerState>,
+    forge: ForgeType,
+    integration_id: Option<IntegrationId>,
+    body: &[u8],
+    client_ip: std::net::IpAddr,
+) {
+    let parsed = match forge {
+        ForgeType::GitHub => ParsedPullRequestReviewEvent::from_github(body),
+        ForgeType::Gitea | ForgeType::Forgejo => ParsedPullRequestReviewEvent::from_gitea(body),
+        ForgeType::GitLab => return,
+    };
+    let Some(review) = parsed else {
+        return;
+    };
+    if !review.approved {
+        return;
+    }
+
+    let Some(pr_number) = review.pr_number else {
+        warn!("pull_request_review: approval without a PR number");
+        return;
+    };
+    let Some(reviewer) = review.reviewer else {
+        warn!(pr_number, "pull_request_review: approval without a reviewer");
+        return;
+    };
+    let Some(owner_repo) = review.repository_full_name else {
+        warn!(pr_number, "pull_request_review: approval without a repository");
+        return;
+    };
+    let Some((owner, repo)) = owner_repo.rsplit_once('/') else {
+        warn!(owner_repo, "pull_request_review: malformed repo full_name");
+        return;
+    };
+
+    let integration_ids: Vec<IntegrationId> = match integration_id {
+        Some(id) => vec![id],
+        None => {
+            let Some(installation_id) = github_installation_id_from_comment_body(body) else {
+                warn!("pull_request_review (github): no installation_id");
+                return;
+            };
+            let repo_urls = vec![
+                format!("https://github.com/{owner_repo}"),
+                format!("https://github.com/{owner_repo}.git"),
+                format!("git@github.com:{owner_repo}.git"),
+            ];
+            let targets =
+                resolve_github_app_targets(state, installation_id, &repo_urls, client_ip).await;
+            if targets.is_empty() {
+                warn!(installation_id, %owner_repo, "pull_request_review (github): no integration matched");
+                return;
+            }
+            targets
+        }
+    };
+
+    for integration_id in &integration_ids {
+        let project_ids = match active_project_ids_for_integration(state, *integration_id).await {
+            Ok(rows) => rows,
+            Err(e) => {
+                warn!(error = %e, "pull_request_review: failed to load project list");
+                continue;
+            }
+        };
+        let Some(probe_project) = first_project_with_reporter(state, &project_ids).await else {
+            continue;
+        };
+        if !sender_is_trusted(state, probe_project, owner, repo, &reviewer).await {
+            warn!(
+                %integration_id,
+                pr_number,
+                %reviewer,
+                "Ignoring PR review approval - reviewer is not a repo writer"
+            );
+            continue;
+        }
+        for project_id in &project_ids {
+            if let Some(unparked) = unpark_pr_approval_eval(state, *project_id, pr_number).await {
+                info!(
+                    evaluation_id = %unparked.id,
+                    pr_number,
+                    %reviewer,
+                    "PR approval gate cleared via native forge review"
+                );
+            }
         }
     }
 }
