@@ -87,6 +87,9 @@ pub struct PendingBuildJob {
     pub rescore_count: u32,
     /// `derivation.pname`, surfaced for the serialized dispatch view.
     pub pname: Option<String>,
+    /// True when the build's output is already available from cache; the job can
+    /// run on any worker regardless of architecture.
+    pub substitute: bool,
 }
 
 /// A connected worker's capabilities, used to gate which jobs are eligible
@@ -522,7 +525,7 @@ impl JobTracker {
                     .unwrap_or(serde_json::Value::Null),
                 instance_context: serde_json::to_value(instance)
                     .unwrap_or(serde_json::Value::Null),
-                substitute: false,
+                substitute: matches!(job, PendingJob::Build(b) if b.substitute),
                 build_context: serde_json::json!({}),
             }
         });
@@ -776,6 +779,7 @@ mod tests {
             ready_at: gradient_types::now(),
             rescore_count: 0,
             pname: None,
+            substitute: false,
         })
     }
 

@@ -207,6 +207,7 @@ fn make_build_job(
         ready_at: gradient_types::now(),
         rescore_count: 0,
         pname: None,
+        substitute: false,
     }
 }
 
