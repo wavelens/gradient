@@ -26,6 +26,7 @@ use sea_orm::{
 use tracing::{error, info, warn};
 
 use super::jobs::PendingBuildJob;
+use crate::dispatch_mode::{decide_dispatch_mode, BuildDispatchMode};
 use gradient_types::BuildOutputMetadata;
 use gradient_types::proto::BuildFailureKind;
 use gradient_types::proto::BuildMetrics;
@@ -665,7 +666,9 @@ impl<'a> BuildStateHandler<'a> {
                 ) {
                     continue;
                 }
-                let checker = BuildabilityChecker::load(self.state, &pending_builds).await?;
+                let arches: std::collections::HashSet<String> =
+                    worker_caps.iter().flat_map(|(a, _)| a.iter().cloned()).collect();
+                let checker = BuildabilityChecker::load(self.state, &pending_builds, arches).await?;
                 let target = if checker.any_buildable(&pending_builds, worker_caps) {
                     EvaluationStatus::Building
                 } else {
@@ -860,6 +863,8 @@ struct BuildabilityChecker {
     /// Maps derivation ID → list of required feature IDs.
     features_by_drv: HashMap<DerivationId, Vec<FeatureId>>,
     feature_name: HashMap<FeatureId, String>,
+    connected_architectures: std::collections::HashSet<String>,
+    deps_satisfied: std::collections::HashSet<BuildId>,
 }
 
 impl BuildabilityChecker {
@@ -868,10 +873,17 @@ impl BuildabilityChecker {
     /// [`any_buildable`].
     ///
     /// [`any_buildable`]: BuildabilityChecker::any_buildable
-    async fn load(state: &Arc<ServerState>, builds: &[MBuild]) -> Result<Self> {
+    async fn load(
+        state: &Arc<ServerState>,
+        builds: &[MBuild],
+        connected_architectures: std::collections::HashSet<String>,
+    ) -> Result<Self> {
         let db = &state.worker_db;
         let drv_ids: Vec<DerivationId> = builds.iter().map(|b| b.derivation).collect();
         let build_ids: Vec<BuildId> = builds.iter().map(|b| b.id).collect();
+        let deps_satisfied = gradient_db::builds_with_satisfied_deps(db, &build_ids)
+            .await
+            .unwrap_or_default();
         // A count-query failure → 0 misses → substitute-mode, same as the dispatch side.
         let substitute_misses = gradient_db::substitute_miss_counts(db, &build_ids)
             .await
@@ -919,37 +931,42 @@ impl BuildabilityChecker {
                 .substitute_miss_escalation_threshold as i64,
             features_by_drv,
             feature_name,
+            connected_architectures,
+            deps_satisfied,
         })
     }
 
-    /// True while `build` should still be dispatched as a substitute
-    /// (builtin / any-worker): it is substitutable and below the escalation
-    /// threshold. Once it crosses the threshold it is checked against its real
-    /// arch/features instead.
-    fn in_substitute_mode(&self, build: &MBuild) -> bool {
-        build.substitutable
-            && self.substitute_misses.get(&build.id).copied().unwrap_or(0)
-                < self.substitute_miss_escalation_threshold
-    }
-
-    /// Returns `true` if at least one build in `builds` can be satisfied by
-    /// some worker in `worker_caps`:
-    /// `(build.arch ∈ worker.architectures) ∧ (∀ required feature ∈ worker.system_features)`.
     fn any_buildable(&self, builds: &[MBuild], worker_caps: &[(Vec<String>, Vec<String>)]) -> bool {
         builds.iter().any(|b| {
-            if self.in_substitute_mode(b) {
+            if b.status == BuildStatus::Building {
                 return true;
+            }
+            if !self.deps_satisfied.contains(&b.id) {
+                return false;
             }
             let Some(drv) = self.drv_by_id.get(&b.derivation) else {
                 return false;
             };
-            let required: Vec<&str> = self.required_features_for(&b.derivation);
-            worker_caps.iter().any(|(arch, feats)| {
-                let arch_ok =
-                    drv.architecture == "builtin" || arch.iter().any(|a| a == &drv.architecture);
-                let feats_ok = required.iter().all(|f| feats.iter().any(|sf| sf == f));
-                arch_ok && feats_ok
-            })
+            let miss = self.substitute_misses.get(&b.id).copied().unwrap_or(0);
+            let arch_has_worker = self.connected_architectures.contains(&drv.architecture);
+            match decide_dispatch_mode(
+                b.substitutable,
+                miss,
+                self.substitute_miss_escalation_threshold,
+                arch_has_worker,
+            ) {
+                BuildDispatchMode::SubstituteBuiltin => true,
+                BuildDispatchMode::SubstituteStalled => false,
+                BuildDispatchMode::RealArch => {
+                    let required: Vec<&str> = self.required_features_for(&b.derivation);
+                    worker_caps.iter().any(|(arch, feats)| {
+                        let arch_ok = drv.architecture == "builtin"
+                            || arch.iter().any(|a| a == &drv.architecture);
+                        let feats_ok = required.iter().all(|f| feats.iter().any(|sf| sf == f));
+                        arch_ok && feats_ok
+                    })
+                }
+            }
         })
     }
 
@@ -979,7 +996,16 @@ impl BuildabilityChecker {
     ) -> WaitingReason {
         let mut grouped: BTreeMap<(String, Vec<String>), u32> = BTreeMap::new();
         for b in builds {
-            if self.in_substitute_mode(b) {
+            let miss = self.substitute_misses.get(&b.id).copied().unwrap_or(0);
+            let arch_has_worker = self
+                .drv_by_id
+                .get(&b.derivation)
+                .map(|d| self.connected_architectures.contains(&d.architecture))
+                .unwrap_or(false);
+            if matches!(
+                decide_dispatch_mode(b.substitutable, miss, self.substitute_miss_escalation_threshold, arch_has_worker),
+                BuildDispatchMode::SubstituteBuiltin
+            ) {
                 continue;
             }
             let Some(drv) = self.drv_by_id.get(&b.derivation) else {
@@ -1147,6 +1173,8 @@ mod waiting_reason_tests {
             substitute_miss_escalation_threshold: 2,
             features_by_drv,
             feature_name,
+            connected_architectures: std::collections::HashSet::new(),
+            deps_satisfied: std::collections::HashSet::new(),
         }
     }
 
@@ -1348,6 +1376,7 @@ mod waiting_reason_tests {
         let build = substitutable_build(d.id, eval_id);
         let mut checker = checker_with(vec![d], vec![]);
         checker.substitute_misses.insert(build.id, 1);
+        checker.deps_satisfied.insert(build.id);
 
         let caps: Vec<(Vec<String>, Vec<String>)> = vec![(vec!["x86_64-linux".into()], vec![])];
         let builds = [build];
@@ -1364,6 +1393,7 @@ mod waiting_reason_tests {
         let build = substitutable_build(d.id, eval_id);
         let mut checker = checker_with(vec![d], vec![]);
         checker.substitute_misses.insert(build.id, 2);
+        checker.deps_satisfied.insert(build.id);
 
         // No aarch64 worker: the escalated build is no longer buildable-anywhere
         // and surfaces as an unmet aarch64 requirement so the parker can park it.
@@ -1374,5 +1404,46 @@ mod waiting_reason_tests {
         let (unmet, _, _) = workers_view(&reason);
         assert_eq!(unmet.len(), 1);
         assert_eq!(unmet[0].architecture, "aarch64-linux");
+    }
+
+    #[test]
+    fn stalled_substitute_is_not_buildable_and_appears_in_unmet() {
+        let eval_id = EvaluationId::now_v7();
+        let d = drv(DerivationId::now_v7(), "i686-linux");
+        let mut b = build_for(d.id, eval_id);
+        b.substitutable = true;
+        let mut checker = checker_with(vec![d.clone()], vec![]);
+        checker.substitute_misses.insert(b.id, 2);
+        checker.deps_satisfied.insert(b.id);
+        checker.connected_architectures.insert("x86_64-linux".into());
+        let caps = vec![(vec!["x86_64-linux".to_string()], vec![])];
+        assert!(!checker.any_buildable(&[b.clone()], &caps));
+        let reason = checker.compute_waiting_reason(&[b], &caps);
+        let (unmet, _, available) = workers_view(&reason);
+        assert!(unmet.iter().any(|u| u.architecture == "i686-linux"));
+        assert_eq!(available, ["x86_64-linux"]);
+    }
+
+    #[test]
+    fn dependency_blocked_build_is_not_buildable() {
+        let eval_id = EvaluationId::now_v7();
+        let d = drv(DerivationId::now_v7(), "x86_64-linux");
+        let b = build_for(d.id, eval_id);
+        let mut checker = checker_with(vec![d], vec![]);
+        checker.connected_architectures.insert("x86_64-linux".into());
+        let caps = vec![(vec!["x86_64-linux".to_string()], vec![])];
+        assert!(!checker.any_buildable(&[b], &caps));
+    }
+
+    #[test]
+    fn substitutable_within_budget_is_buildable_anywhere() {
+        let eval_id = EvaluationId::now_v7();
+        let d = drv(DerivationId::now_v7(), "i686-linux");
+        let mut b = build_for(d.id, eval_id);
+        b.substitutable = true;
+        let mut checker = checker_with(vec![d], vec![]);
+        checker.deps_satisfied.insert(b.id);
+        let caps = vec![(vec!["x86_64-linux".to_string()], vec![])];
+        assert!(checker.any_buildable(&[b], &caps));
     }
 }
