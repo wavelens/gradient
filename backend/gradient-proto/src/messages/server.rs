@@ -124,6 +124,26 @@ pub enum ServerMessage {
         reason: String,
     },
 
+    /// Opens a pull stream for `store_path`; sent before the first `NarPush`
+    /// so the worker can size and validate its `.partial`. The server always
+    /// knows the stored object's `total_bytes`.
+    NarStreamHeader {
+        job_id: String,
+        store_path: String,
+        total_bytes: u64,
+        stream_token: String,
+    },
+
+    /// Push resume ack, sent in response to a worker's
+    /// [`super::client::ClientMessage::NarStreamHeader`]. `received_bytes` is
+    /// how many compressed bytes the server already holds in the matching
+    /// `.partial`; `0` means fresh / token mismatch / nothing on disk.
+    NarPushResume {
+        job_id: String,
+        store_path: String,
+        received_bytes: u64,
+    },
+
     /// Presigned S3 upload URL for a build output.  Worker uploads directly
     /// then confirms with [`super::client::ClientMessage::NarUploaded`].
     PresignedUpload {

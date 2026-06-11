@@ -171,9 +171,10 @@ pub async fn handle_cache_socket(
                     let job_id = job_id.clone();
                     tokio::spawn(async move {
                         let _permit = permit;
-                        if let Err(e) =
-                            super::socket::serve_nar_request(&state, &writer, &job_id, &store_path)
-                                .await
+                        if let Err(e) = super::socket::serve_nar_request(
+                            &state, &writer, &job_id, &store_path, 0, None,
+                        )
+                        .await
                         {
                             debug!(%store_path, error = %e, "cache NAR serve task failed");
                         }

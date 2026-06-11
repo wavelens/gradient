@@ -85,8 +85,10 @@ impl PartialStore {
     }
 
     /// Append `data` at `offset`. `offset` must equal the current partial
-    /// length (contiguous); a gap or overlap is an error. Writes the token
-    /// sidecar on first contact.
+    /// length (contiguous); a gap or overlap is an error. `offset == 0` always
+    /// truncates any stale prefix and starts fresh under `token` - so a sender
+    /// that restarts a transfer from the beginning (e.g. a reconnect without a
+    /// resume handshake) never trips the contiguity check.
     pub fn append(&self, key: &str, token: &str, offset: u64, data: &[u8]) -> Result<()> {
         self.ensure_parent(key)?;
         let path = self.partial_path(key);
@@ -98,9 +100,13 @@ impl PartialStore {
             .open(&path)
             .with_context(|| format!("open partial {}", path.display()))?;
 
-        let len = file.metadata().context("stat partial for append")?.len();
-        if offset != len {
-            bail!("non-contiguous partial append for {key}: offset {offset} != len {len}");
+        if offset == 0 {
+            file.set_len(0).context("truncate partial for fresh start")?;
+        } else {
+            let len = file.metadata().context("stat partial for append")?.len();
+            if offset != len {
+                bail!("non-contiguous partial append for {key}: offset {offset} != len {len}");
+            }
         }
 
         fs::write(self.token_path(key), token).context("write partial token")?;
@@ -108,6 +114,20 @@ impl PartialStore {
         file.write_all(data).context("write partial chunk")?;
         file.flush().context("flush partial")?;
         Ok(())
+    }
+
+    /// Current length of the partial regardless of token (0 if absent). Use
+    /// with [`Self::token`] when resuming a transfer whose token the caller
+    /// learned on a prior attempt.
+    pub fn staged_len(&self, key: &str) -> u64 {
+        fs::metadata(self.partial_path(key))
+            .map(|m| m.len())
+            .unwrap_or(0)
+    }
+
+    /// The `stream_token` stored alongside the partial, if any.
+    pub fn token(&self, key: &str) -> Option<String> {
+        fs::read_to_string(self.token_path(key)).ok()
     }
 
     /// Read the whole partial into memory (small/medium NARs only — prefer

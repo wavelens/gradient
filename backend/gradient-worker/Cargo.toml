@@ -28,6 +28,7 @@ gradient-util = { workspace = true }
 gradient-types = { workspace = true }
 gradient-entity = { workspace = true }
 gradient-proto = { workspace = true }
+gradient-storage = { workspace = true }
 
 anyhow                = { workspace = true }
 async-trait           = { workspace = true }

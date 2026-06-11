@@ -13,7 +13,7 @@ use std::time::Duration;
 use gradient_types::ids::OrganizationId;
 use gradient_core::ServerState;
 use tokio::sync::Semaphore;
-use tracing::{debug, info, instrument, warn};
+use tracing::{debug, error, info, instrument, warn};
 
 use crate::messages::{
     ClientMessage, FailedPeer, GradientCapabilities, PROTO_VERSION, ServerMessage,
@@ -24,7 +24,7 @@ use super::auth::{
     aggregate_enabled_caps, filter_org_peers_without_cache, has_any_registrations,
     lookup_registered_peers, negotiate_capabilities, validate_tokens,
 };
-use super::dispatch::{DispatchContext, NarBuffers};
+use super::dispatch::{DispatchContext, NarReceiveStore};
 use super::socket::{
     HANDSHAKE_TIMEOUT, JOB_OFFER_CHUNK_SIZE, ProtoSocket, ProtoWriter, recv_client_msg,
     send_server_msg,
@@ -266,7 +266,21 @@ impl ProtoSession<Registered> {
         let send_chunk_timeout = Duration::from_secs(proto_cfg.nar_send_chunk_timeout_secs);
         let (mut reader, writer) = socket.split(send_chunk_timeout);
 
-        let mut nar_buffers = NarBuffers::new(proto_cfg.max_nar_buffer_bytes);
+        let partial_root =
+            std::path::PathBuf::from(format!("{}/nar-partial", state.config.storage.base_path));
+        let partial_ttl = Duration::from_secs(proto_cfg.nar_partial_ttl_secs);
+        let max_partial_bytes = proto_cfg.max_nar_buffer_bytes as u64;
+        let mut nar = NarReceiveStore::new(partial_root, &peer_id, partial_ttl, max_partial_bytes)
+            .unwrap_or_else(|e| {
+                error!(%peer_id, error = %e, "failed to init NAR partial dir; falling back to temp");
+                NarReceiveStore::new(
+                    std::env::temp_dir().join("gradient-nar-partial"),
+                    &peer_id,
+                    partial_ttl,
+                    max_partial_bytes,
+                )
+                .expect("temp partial dir must be creatable")
+            });
         let nar_serve_semaphore = Arc::new(Semaphore::new(proto_cfg.max_concurrent_nar_serves));
 
         loop {
@@ -309,7 +323,7 @@ impl ProtoSession<Registered> {
                 peer_id: &peer_id,
                 nar_serve_semaphore: &nar_serve_semaphore,
             };
-            if !ctx.dispatch(msg, &mut nar_buffers).await {
+            if !ctx.dispatch(msg, &mut nar).await {
                 break;
             }
         }

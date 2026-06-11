@@ -138,7 +138,8 @@ async fn push_one_fetched_nar(updater: &mut JobUpdater, cp: &CachedPath, store: 
             upload_url: None,
         } => {
             if let Err(e) =
-                nar::push_direct(&updater.job_id, path, &updater.writer, Some(store)).await
+                nar::push_direct(&updater.job_id, path, &updater.writer, &updater.nar_recv, Some(store))
+                    .await
             {
                 tracing::warn!(store_path = %path, error = %e, "failed to push NAR for fetched input; continuing");
             }

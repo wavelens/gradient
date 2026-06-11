@@ -49,7 +49,16 @@ pub(super) async fn run_dispatch_loop(
     let cache_waiters: CacheWaiters = Arc::new(Mutex::new(HashMap::new()));
     let known_derivation_waiters: KnownDerivationWaiters = Arc::new(Mutex::new(HashMap::new()));
     let mut draining = false;
-    let nar_recv = crate::proto::nar_recv::NarReceiver::new();
+    let nar_recv = match gradient_storage::PartialStore::new(
+        config.nar_partial_dir(),
+        std::time::Duration::from_secs(config.nar_partial_ttl_secs),
+    ) {
+        Ok(store) => crate::proto::nar_recv::NarReceiver::with_partial_store(store),
+        Err(e) => {
+            warn!(error = %e, "failed to init NAR partial dir; downloads will not resume");
+            crate::proto::nar_recv::NarReceiver::new()
+        }
+    };
     let mut abort_senders: HashMap<String, watch::Sender<bool>> = HashMap::new();
     let mut job_kinds: HashMap<String, JobKind> = HashMap::new();
     let (done_tx, mut done_rx) = mpsc::unbounded_channel::<(String, Result<()>)>();
@@ -304,6 +313,22 @@ impl<'a> MessageHandler<'a> {
             }
             ServerMessage::Credential { kind, data } => {
                 self.on_credential(kind, data);
+            }
+            ServerMessage::NarStreamHeader {
+                job_id,
+                store_path,
+                total_bytes,
+                stream_token,
+            } => {
+                self.nar_recv
+                    .note_header(&job_id, &store_path, total_bytes, &stream_token);
+            }
+            ServerMessage::NarPushResume {
+                job_id,
+                store_path,
+                received_bytes,
+            } => {
+                self.nar_recv.resolve_push(&job_id, &store_path, received_bytes);
             }
             ServerMessage::NarPush {
                 job_id,
@@ -581,7 +606,7 @@ impl<'a> MessageHandler<'a> {
     ) {
         debug!(%job_id, %store_path, offset, is_final, bytes = data.len(), "received NAR chunk from server");
         self.nar_recv
-            .accept_chunk(&job_id, &store_path, data, is_final);
+            .accept_chunk(&job_id, &store_path, data, offset, is_final);
     }
 
     async fn on_presigned_upload(
@@ -669,6 +694,8 @@ pub(super) fn msg_kind(msg: &ServerMessage) -> &'static str {
         ServerMessage::AssignJob { .. } => "AssignJob",
         ServerMessage::AbortJob { .. } => "AbortJob",
         ServerMessage::Credential { .. } => "Credential",
+        ServerMessage::NarStreamHeader { .. } => "NarStreamHeader",
+        ServerMessage::NarPushResume { .. } => "NarPushResume",
         ServerMessage::NarPush { .. } => "NarPush",
         ServerMessage::NarUnavailable { .. } => "NarUnavailable",
         ServerMessage::NarAbort { .. } => "NarAbort",
