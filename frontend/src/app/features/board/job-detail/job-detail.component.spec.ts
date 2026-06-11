@@ -5,7 +5,8 @@
  */
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { ActivatedRoute, provideRouter } from '@angular/router';
+import { ActivatedRoute, provideRouter, RouterLink } from '@angular/router';
+import { By } from '@angular/platform-browser';
 import { EMPTY, of, throwError } from 'rxjs';
 import { BoardJobDetailComponent } from './job-detail.component';
 import { BoardService, DispatchedJobDetail, PendingJobSummary } from '@core/services/board.service';
@@ -248,11 +249,13 @@ describe('BoardJobDetailComponent - previous build attempts', () => {
   });
 
   it('each row links to the dispatched job', () => {
-    const el = setup({ getJob: () => of(WITH_ATTEMPTS) }).nativeElement as HTMLElement;
-    const section = el.querySelector('section.attempts') as HTMLElement;
-    const rows = section.querySelectorAll('tbody tr');
-    expect(rows[0].getAttribute('ng-reflect-router-link')).toContain('dj-a1');
-    expect(rows[1].getAttribute('ng-reflect-router-link')).toContain('dj-a2');
+    const fixture = setup({ getJob: () => of(WITH_ATTEMPTS) });
+    const links = fixture.debugElement
+      .query(By.css('section.attempts'))
+      .queryAll(By.directive(RouterLink));
+    const urls = links.map((l) => l.injector.get(RouterLink).urlTree?.toString());
+    expect(urls).toContain('/board/jobs/dj-a1');
+    expect(urls).toContain('/board/jobs/dj-a2');
   });
 
   it('hides the section when there is only one attempt', () => {
