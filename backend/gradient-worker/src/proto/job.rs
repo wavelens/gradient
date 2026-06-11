@@ -118,10 +118,29 @@ impl JobUpdater {
             .map(|p| self.nar_recv.register(&self.job_id, p))
             .collect();
 
-        self.writer.send(ClientMessage::NarRequest {
-            job_id: self.job_id.clone(),
-            paths: paths.clone(),
-        })?;
+        // Resume any path with a staged `.partial` from a prior interrupted
+        // transfer (issue #225); request the rest fresh in one batch. The
+        // server self-heals a stale/oversized partial by restarting from 0.
+        let mut fresh = Vec::new();
+        for p in &paths {
+            match self.nar_recv.resumable(p) {
+                (received, Some(token)) if received > 0 => {
+                    self.writer.send(ClientMessage::NarRequestResume {
+                        job_id: self.job_id.clone(),
+                        store_path: p.clone(),
+                        received_bytes: received,
+                        stream_token: token,
+                    })?;
+                }
+                _ => fresh.push(p.clone()),
+            }
+        }
+        if !fresh.is_empty() {
+            self.writer.send(ClientMessage::NarRequest {
+                job_id: self.job_id.clone(),
+                paths: fresh,
+            })?;
+        }
 
         let waits = pendings.into_iter().map(|pending| {
             let recv = self.nar_recv.clone();

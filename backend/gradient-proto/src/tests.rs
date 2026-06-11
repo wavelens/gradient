@@ -357,5 +357,58 @@ fn handshake_timeout_is_sane() {
     assert!(HANDSHAKE_TIMEOUT.as_secs() <= 60);
 }
 
+// ── Resumable NAR transfer messages (#225) ───────────────────────────────────
+
+#[test]
+fn nar_stream_header_client_roundtrip() {
+    let original = ClientMessage::NarStreamHeader {
+        job_id: "job-1".into(),
+        store_path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".into(),
+        total_bytes: Some(4096),
+        stream_token: "zstd6-fmt1-lib10506".into(),
+    };
+    let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
+    let decoded = rkyv::from_bytes::<ClientMessage, RkyvError>(&bytes).unwrap();
+    assert_eq!(decoded, original);
+}
+
+#[test]
+fn nar_request_resume_roundtrip() {
+    let original = ClientMessage::NarRequestResume {
+        job_id: "job-1".into(),
+        store_path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".into(),
+        received_bytes: 8_388_608,
+        stream_token: "zstd6-fmt1-lib10506".into(),
+    };
+    let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
+    let decoded = rkyv::from_bytes::<ClientMessage, RkyvError>(&bytes).unwrap();
+    assert_eq!(decoded, original);
+}
+
+#[test]
+fn nar_stream_header_server_roundtrip() {
+    let original = ServerMessage::NarStreamHeader {
+        job_id: "job-1".into(),
+        store_path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".into(),
+        total_bytes: 4096,
+        stream_token: "len-4096".into(),
+    };
+    let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
+    let decoded = rkyv::from_bytes::<ServerMessage, RkyvError>(&bytes).unwrap();
+    assert_eq!(decoded, original);
+}
+
+#[test]
+fn nar_push_resume_roundtrip() {
+    let original = ServerMessage::NarPushResume {
+        job_id: "job-1".into(),
+        store_path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".into(),
+        received_bytes: 8_388_608,
+    };
+    let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
+    let decoded = rkyv::from_bytes::<ServerMessage, RkyvError>(&bytes).unwrap();
+    assert_eq!(decoded, original);
+}
+
 // Full WebSocket handshake integration tests (InitConnection → InitAck) live in
 // the `web` crate's integration tests where `test-support` is available.

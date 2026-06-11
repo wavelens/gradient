@@ -74,6 +74,8 @@ pub(super) async fn serve_nar_request(
     writer: &ProtoWriter,
     job_id: &str,
     store_path: &str,
+    resume_from: u64,
+    client_token: Option<&str>,
 ) -> anyhow::Result<()> {
     let proto_cfg = &state.config.proto;
     let storage_open_timeout = Duration::from_secs(proto_cfg.nar_storage_open_timeout_secs);
@@ -88,10 +90,13 @@ pub(super) async fn serve_nar_request(
         return Err(anyhow::anyhow!(reason));
     };
 
-    let opened =
-        tokio::time::timeout(storage_open_timeout, state.nar_storage.get_stream(hash)).await;
-    let mut stream = match opened {
-        Ok(Ok(Some((_size, s)))) => s,
+    let open = |offset: u64| async move {
+        tokio::time::timeout(storage_open_timeout, state.nar_storage.get_stream_from(hash, offset))
+            .await
+    };
+
+    let (size, mut stream) = match open(resume_from).await {
+        Ok(Ok(Some((size, s)))) => (size, s),
         Ok(Ok(None)) => {
             invalidate_cached_path(state, hash, store_path).await;
             let reason = format!("NAR not found in cache for {store_path}");
@@ -115,8 +120,41 @@ pub(super) async fn serve_nar_request(
         }
     };
 
+    // The stored `.nar.zst` is immutable per hash, so the pull token is just
+    // its size. A worker resuming with a stale token (or claiming more bytes
+    // than exist) restarts from 0; the `NarStreamHeader.total_bytes` lets the
+    // worker truncate its `.partial` accordingly.
+    let server_token = format!("len-{size}");
+    let token_mismatch = client_token.is_some_and(|t| t != server_token);
+    let mut start = resume_from;
+    if resume_from > size || token_mismatch {
+        match open(0).await {
+            Ok(Ok(Some((_s, s)))) => {
+                stream = s;
+                start = 0;
+            }
+            _ => {
+                let reason = format!("failed to reopen {store_path} for fresh transfer");
+                send_nar_unavailable(writer, job_id, store_path, reason.clone()).await;
+                return Err(anyhow::anyhow!(reason));
+            }
+        }
+    }
+
+    send_server_msg(
+        writer,
+        &ServerMessage::NarStreamHeader {
+            job_id: job_id.to_owned(),
+            store_path: store_path.to_owned(),
+            total_bytes: size,
+            stream_token: server_token,
+        },
+    )
+    .await
+    .ok();
+
     let mut buf: Vec<u8> = Vec::with_capacity(NAR_PUSH_CHUNK_SIZE);
-    let mut offset: u64 = 0;
+    let mut offset: u64 = start;
     let mut total: u64 = 0;
     let mut chunks_sent: u64 = 0;
 
@@ -399,6 +437,7 @@ mod serve_nar_tests {
 
     fn variant_of(msg: &ServerMessage) -> &'static str {
         match msg {
+            ServerMessage::NarStreamHeader { .. } => "NarStreamHeader",
             ServerMessage::NarPush { .. } => "NarPush",
             ServerMessage::NarUnavailable { .. } => "NarUnavailable",
             ServerMessage::NarAbort { .. } => "NarAbort",
@@ -422,27 +461,35 @@ mod serve_nar_tests {
 
         let (writer, mut rx) = spy_writer(Duration::from_secs(5));
         let store_path = format!("/nix/store/{hash}-test-pkg");
-        serve_nar_request(&state, &writer, "job-1", &store_path)
+        serve_nar_request(&state, &writer, "job-1", &store_path, 0, None)
             .await
             .expect("serve must succeed");
 
         let mut assembled = Vec::with_capacity(payload.len());
-        let mut frames = 0u32;
+        let mut nar_push_frames = 0u32;
+        let mut saw_header = false;
         let mut saw_final = false;
         while let Ok(bytes) = rx.try_recv() {
-            let msg = decode(&bytes);
-            assert_eq!(variant_of(&msg), "NarPush", "only NarPush frames expected");
-            if let ServerMessage::NarPush { data, is_final, .. } = msg {
-                assembled.extend_from_slice(&data);
-                if is_final {
-                    saw_final = true;
+            match decode(&bytes) {
+                ServerMessage::NarStreamHeader { total_bytes, .. } => {
+                    saw_header = true;
+                    assert!(!saw_final, "header must precede chunks");
+                    assert_eq!(total_bytes as usize, payload.len());
                 }
+                ServerMessage::NarPush { data, is_final, .. } => {
+                    assembled.extend_from_slice(&data);
+                    if is_final {
+                        saw_final = true;
+                    }
+                    nar_push_frames += 1;
+                }
+                other => panic!("unexpected frame: {}", variant_of(&other)),
             }
-            frames += 1;
         }
+        assert!(saw_header, "a NarStreamHeader must precede the chunks");
         assert!(
-            frames >= 3,
-            "9 MiB / 4 MiB chunks → at least 3 frames, got {frames}"
+            nar_push_frames >= 3,
+            "9 MiB / 4 MiB chunks → at least 3 frames, got {nar_push_frames}"
         );
         assert!(saw_final, "the last frame must be is_final=true");
         assert_eq!(
@@ -464,6 +511,8 @@ mod serve_nar_tests {
             &writer,
             "job-1",
             "/nix/store/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-missing",
+            0,
+            None,
         )
         .await;
         assert!(res.is_err(), "missing path must surface as Err");

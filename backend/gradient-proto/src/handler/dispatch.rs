@@ -27,89 +27,154 @@ use super::socket::{
     send_error, send_server_msg, serve_nar_request,
 };
 
-// ── Per-session inbound NAR buffer (issue #109) ──────────────────────────────
+// ── Per-session inbound NAR receive store (issue #109, resumable #225) ────────
 
-/// Outcome of [`NarBuffers::append`].
+/// Outcome of [`NarReceiveStore::append`].
 pub(super) enum AppendOutcome {
-    /// Chunk was appended.
+    /// Chunk was staged.
     Ok,
-    /// Chunk would have exceeded the session budget. The path is now poisoned
-    /// and any partial buffer for it has been dropped - the caller must abort
-    /// the job and refuse the eventual `NarUploaded` for the same path.
+    /// Fatal: the chunk exceeded the session budget or arrived at a
+    /// non-contiguous offset. The path is now poisoned and its partial
+    /// discarded - the caller aborts the job and rejects the eventual
+    /// `NarUploaded` for the same path.
     Overflow,
     /// Chunk arrived for a path the session has already poisoned. Drop it.
     Poisoned,
 }
 
-/// Bounded buffer pool for inbound `NarPush` chunks. Tracks total queued bytes
-/// and rejects pushes that would exceed `max_bytes` so a rogue worker cannot
-/// pin unbounded RAM by opening many concurrent uploads with no `is_final`.
-///
-/// Once a path overflows the budget it is added to a per-session **poison
-/// set**. Any further chunks for that path are dropped, and the eventual
-/// `NarUploaded` for it must be rejected - otherwise the server would write a
-/// `cached_path` row with metadata for bytes that were never persisted to
-/// `nar_storage`, and downstream builds would later fail with
-/// "NAR not found in cache" for a path the DB swears is cached.
-pub(super) struct NarBuffers {
-    inner: HashMap<String, Vec<u8>>,
-    /// Paths whose upload was rejected and must not be committed.
-    poisoned: BTreeSet<String>,
-    total_bytes: usize,
-    max_bytes: usize,
+#[derive(Default)]
+struct PathState {
+    /// Sender's `stream_token`; empty for legacy pushes that skip the header.
+    token: String,
+    /// Bytes staged for this path on this session (resumed prefix + appends).
+    staged: u64,
 }
 
-impl NarBuffers {
-    pub(super) fn new(max_bytes: usize) -> Self {
-        Self {
-            inner: HashMap::new(),
-            poisoned: BTreeSet::new(),
-            total_bytes: 0,
+/// Disk-backed receiver for inbound `NarPush` chunks. Each push is staged to a
+/// `*.partial` file under `<base_path>/nar-partial/<peer_id>/<hash>` so an
+/// interrupted upload can resume from a byte offset (issue #225) and a large
+/// NAR no longer pins RAM. A per-session byte budget plus a poison set preserve
+/// the #109 protection against a rogue worker opening many un-finalized streams
+/// (the budget now bounds staged **disk**, not RAM). Keying by `peer_id` lets a
+/// reconnecting worker resume its own partial without colliding with another
+/// worker pushing the same content-addressed path.
+pub(super) struct NarReceiveStore {
+    store: gradient_storage::PartialStore,
+    peer_id: String,
+    max_bytes: u64,
+    active: HashMap<String, PathState>,
+    poisoned: BTreeSet<String>,
+}
+
+impl NarReceiveStore {
+    pub(super) fn new(
+        root: std::path::PathBuf,
+        peer_id: &str,
+        ttl: std::time::Duration,
+        max_bytes: u64,
+    ) -> anyhow::Result<Self> {
+        Ok(Self {
+            store: gradient_storage::PartialStore::new(root, ttl)?,
+            peer_id: peer_id.to_owned(),
             max_bytes,
-        }
+            active: HashMap::new(),
+            poisoned: BTreeSet::new(),
+        })
     }
 
-    /// Append `data` to the buffer for `store_path`.
-    ///
-    /// Returns:
-    /// - [`AppendOutcome::Ok`] if the chunk was appended.
-    /// - [`AppendOutcome::Overflow`] if the chunk would have exceeded the
-    ///   session budget. The path is now poisoned and any partial buffer for
-    ///   it has been dropped.
-    /// - [`AppendOutcome::Poisoned`] if the path has already been poisoned by
-    ///   a prior overflow.
-    pub(super) fn append(&mut self, store_path: &str, data: &[u8]) -> AppendOutcome {
+    fn key(&self, hash: &str) -> String {
+        format!("{}/{}", self.peer_id, hash)
+    }
+
+    /// Record the push stream's token and return how many bytes are already
+    /// staged for it (0 on token mismatch / nothing on disk). Clears any stale
+    /// poison so a fresh attempt can proceed.
+    pub(super) fn note_header(&mut self, store_path: &str, token: &str) -> u64 {
+        self.poisoned.remove(store_path);
+        let received = store_hash(store_path)
+            .and_then(|h| self.store.received_len(&self.key(h), token).ok())
+            .unwrap_or(0);
+        self.active.insert(
+            store_path.to_owned(),
+            PathState {
+                token: token.to_owned(),
+                staged: received,
+            },
+        );
+        received
+    }
+
+    /// Stage a chunk at `offset` (must be contiguous). Creates a token-less
+    /// entry for legacy pushes that skip the header.
+    pub(super) fn append(&mut self, store_path: &str, offset: u64, data: &[u8]) -> AppendOutcome {
         if self.poisoned.contains(store_path) {
             return AppendOutcome::Poisoned;
         }
-        if self.total_bytes.saturating_add(data.len()) > self.max_bytes {
-            self.discard(store_path);
-            self.poisoned.insert(store_path.to_owned());
+
+        let Some(hash) = store_hash(store_path) else {
+            return AppendOutcome::Poisoned;
+        };
+
+        self.active.entry(store_path.to_owned()).or_default();
+        let total: u64 = self.active.values().map(|s| s.staged).sum();
+        if total.saturating_add(data.len() as u64) > self.max_bytes {
+            self.poison(store_path, hash);
             return AppendOutcome::Overflow;
         }
-        self.inner
-            .entry(store_path.to_owned())
-            .or_default()
-            .extend_from_slice(data);
-        self.total_bytes += data.len();
-        AppendOutcome::Ok
+
+        let token = self.active[store_path].token.clone();
+        match self.store.append(&self.key(hash), &token, offset, data) {
+            Ok(()) => {
+                if let Some(s) = self.active.get_mut(store_path) {
+                    s.staged += data.len() as u64;
+                }
+                AppendOutcome::Ok
+            }
+            Err(e) => {
+                warn!(%store_path, error = %e, "partial append failed; poisoning path");
+                self.poison(store_path, hash);
+                AppendOutcome::Overflow
+            }
+        }
     }
 
-    /// Pop the assembled buffer for `store_path`. Returns `None` if no chunks
-    /// were ever buffered (e.g. presigned-S3 path that bypassed `NarPush`).
-    /// Poisoned paths return `None` here too - callers must check
-    /// [`Self::is_poisoned`] before treating `None` as "S3 mode, accept the
-    /// metadata".
-    pub(super) fn take(&mut self, store_path: &str) -> Option<Vec<u8>> {
-        let buf = self.inner.remove(store_path)?;
-        self.total_bytes = self.total_bytes.saturating_sub(buf.len());
-        Some(buf)
+    fn poison(&mut self, store_path: &str, hash: &str) {
+        let _ = self.store.discard(&self.key(hash));
+        self.active.remove(store_path);
+        self.poisoned.insert(store_path.to_owned());
     }
 
-    /// Drop the partial buffer for `store_path` without consuming it.
-    fn discard(&mut self, store_path: &str) {
-        if let Some(buf) = self.inner.remove(store_path) {
-            self.total_bytes = self.total_bytes.saturating_sub(buf.len());
+    /// A push stream is open for this path (direct mode). `false` means the
+    /// worker uploaded via presigned S3 and there is nothing to commit.
+    pub(super) fn is_active(&self, store_path: &str) -> bool {
+        self.active.contains_key(store_path)
+    }
+
+    /// Actual on-disk length of the staged partial (validating the token).
+    pub(super) fn committed_len(&self, store_path: &str) -> u64 {
+        let Some(hash) = store_hash(store_path) else {
+            return 0;
+        };
+        let token = self
+            .active
+            .get(store_path)
+            .map(|s| s.token.as_str())
+            .unwrap_or("");
+        self.store.received_len(&self.key(hash), token).unwrap_or(0)
+    }
+
+    /// Read the staged bytes so the caller can commit them to `nar_storage`.
+    pub(super) fn read_staged(&self, store_path: &str) -> anyhow::Result<Vec<u8>> {
+        let hash = store_hash(store_path)
+            .ok_or_else(|| anyhow::anyhow!("malformed store path {store_path}"))?;
+        self.store.read_all(&self.key(hash))
+    }
+
+    /// Drop the staged partial and per-path state after a successful commit.
+    pub(super) fn finish(&mut self, store_path: &str) {
+        self.active.remove(store_path);
+        if let Some(hash) = store_hash(store_path) {
+            let _ = self.store.discard(&self.key(hash));
         }
     }
 
@@ -118,20 +183,27 @@ impl NarBuffers {
         self.poisoned.contains(store_path)
     }
 
-    /// Forget the poison flag for `store_path`. Called after the server has
-    /// rejected the upload so a later, well-formed retry of the same path
-    /// (e.g. on a fresh job) can proceed.
+    /// Forget the poison flag and discard any partial for `store_path` so a
+    /// later, well-formed retry of the same path can proceed.
     pub(super) fn clear_poison(&mut self, store_path: &str) {
         self.poisoned.remove(store_path);
+        self.finish(store_path);
     }
 
-    pub(super) fn total_bytes(&self) -> usize {
-        self.total_bytes
-    }
-
-    pub(super) fn max_bytes(&self) -> usize {
+    pub(super) fn max_bytes(&self) -> u64 {
         self.max_bytes
     }
+}
+
+/// Extract and validate the 32-char store-hash from a `/nix/store/<hash>-name`
+/// path. Returns `None` for anything malformed.
+fn store_hash(store_path: &str) -> Option<&str> {
+    let hash = store_path
+        .strip_prefix("/nix/store/")
+        .unwrap_or(store_path)
+        .split('-')
+        .next()?;
+    (hash.len() == 32 && hash.bytes().all(|b| b.is_ascii_alphanumeric())).then_some(hash)
 }
 
 // ── Dispatch context ──────────────────────────────────────────────────────────
@@ -151,7 +223,7 @@ impl<'a> DispatchContext<'a> {
     /// Route a single `ClientMessage` to the appropriate handler.
     ///
     /// Returns `true` to continue the loop, `false` to break.
-    pub async fn dispatch(&mut self, msg: ClientMessage, nar_buffers: &mut NarBuffers) -> bool {
+    pub async fn dispatch(&mut self, msg: ClientMessage, nar: &mut NarReceiveStore) -> bool {
         // Avoid Debug-printing the entire `msg` here: variants like `NarPush`
         // carry up to 64 KiB of binary chunk data which would flood the log
         // (and the test VM's serial console). Each match arm logs the
@@ -244,6 +316,26 @@ impl<'a> DispatchContext<'a> {
                 self.on_nar_request(job_id, paths).await;
                 true
             }
+            ClientMessage::NarRequestResume {
+                job_id,
+                store_path,
+                received_bytes,
+                stream_token,
+            } => {
+                self.on_nar_request_resume(job_id, store_path, received_bytes, stream_token)
+                    .await;
+                true
+            }
+            ClientMessage::NarStreamHeader {
+                job_id,
+                store_path,
+                total_bytes,
+                stream_token,
+            } => {
+                self.on_push_stream_header(job_id, store_path, total_bytes, stream_token, nar)
+                    .await;
+                true
+            }
             ClientMessage::NarPush {
                 job_id,
                 store_path,
@@ -251,7 +343,7 @@ impl<'a> DispatchContext<'a> {
                 offset,
                 is_final,
             } => {
-                self.on_nar_push(job_id, store_path, data, offset, is_final, nar_buffers)
+                self.on_nar_push(job_id, store_path, data, offset, is_final, nar)
                     .await;
                 true
             }
@@ -274,7 +366,7 @@ impl<'a> DispatchContext<'a> {
                     nar_hash,
                     references,
                     deriver,
-                    nar_buffers,
+                    nar,
                 )
                 .await;
                 true
@@ -632,11 +724,69 @@ impl<'a> DispatchContext<'a> {
                     Ok(g) => g,
                     Err(_) => return, // semaphore closed (shutdown)
                 };
-                if let Err(e) = serve_nar_request(&state, &writer, &job_id, &store_path).await {
+                if let Err(e) = serve_nar_request(&state, &writer, &job_id, &store_path, 0, None).await
+                {
                     warn!(%peer_id, %job_id, %store_path, error = %e, "NarRequest serve failed");
                 }
             });
         }
+    }
+
+    /// Resume a previously-interrupted download from `received_bytes`. Mirrors
+    /// [`Self::on_nar_request`]'s per-path spawn, for the single resumed path.
+    async fn on_nar_request_resume(
+        &mut self,
+        job_id: String,
+        store_path: String,
+        received_bytes: u64,
+        stream_token: String,
+    ) {
+        debug!(peer_id = %self.peer_id, %job_id, %store_path, received_bytes, "NarRequestResume");
+        let state = Arc::clone(self.state);
+        let writer = self.writer.clone();
+        let permit = Arc::clone(self.nar_serve_semaphore);
+        let peer_id = self.peer_id.to_owned();
+        tokio::spawn(async move {
+            let _guard = match permit.acquire_owned().await {
+                Ok(g) => g,
+                Err(_) => return,
+            };
+            if let Err(e) = serve_nar_request(
+                &state,
+                &writer,
+                &job_id,
+                &store_path,
+                received_bytes,
+                Some(&stream_token),
+            )
+            .await
+            {
+                warn!(%peer_id, %job_id, %store_path, error = %e, "NarRequestResume serve failed");
+            }
+        });
+    }
+
+    /// Open (or resume) a push stream and tell the worker how many compressed
+    /// bytes are already staged so it can seek its regenerated zstd stream.
+    async fn on_push_stream_header(
+        &mut self,
+        job_id: String,
+        store_path: String,
+        _total_bytes: Option<u64>,
+        stream_token: String,
+        nar: &mut NarReceiveStore,
+    ) {
+        let received = nar.note_header(&store_path, &stream_token);
+        debug!(peer_id = %self.peer_id, %job_id, %store_path, received, "NarStreamHeader (push)");
+        let _ = send_server_msg(
+            self.writer,
+            &ServerMessage::NarPushResume {
+                job_id,
+                store_path,
+                received_bytes: received,
+            },
+        )
+        .await;
     }
 
     async fn on_nar_push(
@@ -646,30 +796,28 @@ impl<'a> DispatchContext<'a> {
         data: Vec<u8>,
         offset: u64,
         is_final: bool,
-        nar_buffers: &mut NarBuffers,
+        nar: &mut NarReceiveStore,
     ) {
         debug!(peer_id = %self.peer_id, %job_id, %store_path, offset, is_final, bytes = data.len(), "NarPush");
         if data.is_empty() {
             return;
         }
-        match nar_buffers.append(&store_path, &data) {
+        match nar.append(&store_path, offset, &data) {
             AppendOutcome::Ok => {}
             AppendOutcome::Overflow => {
                 let reason = format!(
-                    "session NAR upload buffer would exceed {} bytes (current {} + {} = {})",
-                    nar_buffers.max_bytes(),
-                    nar_buffers.total_bytes(),
-                    data.len(),
-                    nar_buffers.total_bytes().saturating_add(data.len()),
+                    "NAR upload for {store_path} rejected: staged-partial budget ({} bytes) \
+                     exceeded or non-contiguous offset {offset}",
+                    nar.max_bytes(),
                 );
-                warn!(peer_id = %self.peer_id, %job_id, %store_path, %reason, "session NAR upload buffer would exceed limit; poisoning path");
+                warn!(peer_id = %self.peer_id, %job_id, %store_path, %reason, "poisoning NAR path");
                 self.abort_job(&job_id, reason).await;
             }
             AppendOutcome::Poisoned => {
                 debug!(peer_id = %self.peer_id, %job_id, %store_path, "discarding NarPush chunk for poisoned path");
             }
         }
-        // The buffer is held until `on_nar_uploaded` arrives; that handler
+        // The partial is held until `on_nar_uploaded` arrives; that handler
         // commits it to `nar_storage` and records the metadata atomically so
         // we never end up with a `cached_path` row claiming bytes that
         // aren't actually stored.
@@ -677,15 +825,15 @@ impl<'a> DispatchContext<'a> {
 
     /// Apply the worker's NAR upload metadata.
     ///
-    /// For local-mode pushes (preceded by `NarPush` chunks), the buffered
-    /// bytes are popped from `nar_buffers`, validated against the reported
+    /// For direct-mode pushes (preceded by a `NarStreamHeader` + `NarPush`
+    /// chunks), the staged `*.partial` is validated against the reported
     /// `file_size`, written to `nar_storage`, and only then is
     /// `mark_nar_stored` invoked. Any failure aborts the job with
     /// [`ServerMessage::AbortJob`] so the build is marked failed and the
     /// scheduler does not advertise the path as cached.
     ///
-    /// For S3 / presigned uploads (no preceding `NarPush`), there is no
-    /// buffer to commit - the worker has already PUT the bytes directly to
+    /// For S3 / presigned uploads (no preceding push stream), there is nothing
+    /// staged to commit - the worker has already PUT the bytes directly to
     /// object storage and we just record the metadata.
     #[allow(clippy::too_many_arguments)] // mirrors the wire-protocol message fields
     async fn on_nar_uploaded(
@@ -698,58 +846,57 @@ impl<'a> DispatchContext<'a> {
         nar_hash: String,
         references: Vec<String>,
         deriver: Option<String>,
-        nar_buffers: &mut NarBuffers,
+        nar: &mut NarReceiveStore,
     ) {
         debug!(peer_id = %self.peer_id, %job_id, %store_path, %file_hash, file_size, nar_size, %nar_hash, ?deriver, "NarUploaded");
 
-        // Reject any NarUploaded for a path whose chunked transfer was
-        // rejected mid-stream. Without this guard `nar_buffers.take()` would
-        // return `None` (the buffer was discarded on overflow), the local-
-        // mode commit block would be skipped, and `mark_nar_stored` would
-        // record a `cached_path` row whose bytes never reached `nar_storage`
-        // - leaving the path "cached" in the DB and undeliverable on the
-        // next download.
-        if nar_buffers.is_poisoned(&store_path) {
-            nar_buffers.clear_poison(&store_path);
+        // Reject any NarUploaded for a path whose chunked transfer was rejected
+        // mid-stream. Without this guard `mark_nar_stored` would record a
+        // `cached_path` row whose bytes never reached `nar_storage` - leaving
+        // the path "cached" in the DB and undeliverable on the next download.
+        if nar.is_poisoned(&store_path) {
+            nar.clear_poison(&store_path);
             let reason = format!(
                 "NarUploaded for {store_path} rejected: prior NarPush chunk \
-                 exceeded the session buffer budget"
+                 exceeded the staged-partial budget or arrived out of order"
             );
             warn!(peer_id = %self.peer_id, %job_id, %store_path, %reason, "rejecting NarUploaded for poisoned path");
             self.abort_job(&job_id, reason).await;
             return;
         }
 
-        if let Some(buf) = nar_buffers.take(&store_path) {
-            if buf.len() as u64 != file_size {
+        if nar.is_active(&store_path) {
+            let Some(hash) = store_hash(&store_path) else {
+                let reason = format!("NarUploaded for malformed store path {store_path}");
+                error!(peer_id = %self.peer_id, %job_id, %store_path, %reason, "NarUploaded for malformed store path");
+                self.abort_job(&job_id, reason).await;
+                return;
+            };
+            let staged = nar.committed_len(&store_path);
+            if staged != file_size {
                 let reason = format!(
-                    "NarPush buffer size {} does not match reported file_size {}",
-                    buf.len(),
-                    file_size
+                    "staged NAR size {staged} does not match reported file_size {file_size}"
                 );
                 error!(peer_id = %self.peer_id, %job_id, %store_path, %reason, "NAR upload integrity check failed");
                 self.abort_job(&job_id, reason).await;
                 return;
             }
-            let hash = store_path
-                .strip_prefix("/nix/store/")
-                .unwrap_or(&store_path)
-                .split('-')
-                .next()
-                .unwrap_or("");
-            let valid = hash.len() == 32 && hash.bytes().all(|b| b.is_ascii_alphanumeric());
-            if !valid {
-                let reason = format!("NarUploaded for malformed store path {store_path}");
-                error!(peer_id = %self.peer_id, %job_id, %store_path, %reason, "NarUploaded for malformed store path");
-                self.abort_job(&job_id, reason).await;
-                return;
-            }
+            let buf = match nar.read_staged(&store_path) {
+                Ok(b) => b,
+                Err(e) => {
+                    let reason = format!("failed to read staged NAR: {e}");
+                    error!(peer_id = %self.peer_id, %job_id, %store_path, error = %e, "read staged NAR failed");
+                    self.abort_job(&job_id, reason).await;
+                    return;
+                }
+            };
             if let Err(e) = self.state.nar_storage.put(hash, buf).await {
                 let reason = format!("failed to write NAR to storage: {e}");
                 error!(peer_id = %self.peer_id, %job_id, %store_path, error = %e, "nar_storage.put failed");
                 self.abort_job(&job_id, reason).await;
                 return;
             }
+            nar.finish(&store_path);
             info!(peer_id = %self.peer_id, %job_id, %store_path, file_size, "NAR stored");
         }
 
@@ -877,89 +1024,114 @@ impl<'a> DispatchContext<'a> {
 }
 
 #[cfg(test)]
-mod nar_buffers_tests {
-    use super::{AppendOutcome, NarBuffers};
+mod nar_receive_store_tests {
+    use super::{AppendOutcome, NarReceiveStore};
+    use std::time::Duration;
+    use tempfile::TempDir;
 
     fn assert_ok(o: AppendOutcome) {
         assert!(matches!(o, AppendOutcome::Ok), "expected Ok");
     }
 
-    #[test]
-    fn append_below_budget_succeeds_and_tracks_total() {
-        let mut nb = NarBuffers::new(1024);
-        assert_ok(nb.append("/nix/store/a", &vec![0u8; 256]));
-        assert_ok(nb.append("/nix/store/a", &vec![1u8; 256]));
-        assert_ok(nb.append("/nix/store/b", &vec![2u8; 256]));
-        assert_eq!(nb.total_bytes(), 768);
+    fn store(max_bytes: u64) -> (TempDir, NarReceiveStore) {
+        let dir = TempDir::new().unwrap();
+        let s =
+            NarReceiveStore::new(dir.path().to_path_buf(), "peer-1", Duration::from_secs(3600), max_bytes)
+                .unwrap();
+        (dir, s)
+    }
+
+    /// A valid 32-char-hash store path keyed by a single repeated char.
+    fn path(c: char) -> String {
+        format!("/nix/store/{}-name", c.to_string().repeat(32))
     }
 
     #[test]
-    fn append_overflow_drops_partial_buffer_and_poisons_path() {
-        let mut nb = NarBuffers::new(1024);
-        assert_ok(nb.append("/nix/store/a", &vec![0u8; 1000]));
-        // Second chunk would exceed budget - overflow drops the partial
-        // buffer for /a and marks it poisoned so the eventual NarUploaded is
-        // rejected.
+    fn append_below_budget_stages_and_reads_back() {
+        let (_d, mut s) = store(1024);
+        let a = path('a');
+        assert_ok(s.append(&a, 0, &[0u8; 256]));
+        assert_ok(s.append(&a, 256, &[1u8; 256]));
+        assert_eq!(s.committed_len(&a), 512);
+        assert_eq!(s.read_staged(&a).unwrap().len(), 512);
+    }
+
+    #[test]
+    fn non_contiguous_offset_poisons_path() {
+        let (_d, mut s) = store(1024);
+        let a = path('a');
+        assert_ok(s.append(&a, 0, &[0u8; 100]));
         assert!(matches!(
-            nb.append("/nix/store/a", &[0u8; 100]),
+            s.append(&a, 999, &[0u8; 10]),
             AppendOutcome::Overflow
         ));
-        assert!(nb.is_poisoned("/nix/store/a"));
-        assert_eq!(
-            nb.total_bytes(),
-            0,
-            "overflow must release the partial buffer's bytes back to the budget"
-        );
-        // Subsequent chunks for the same path are dropped silently.
+        assert!(s.is_poisoned(&a));
+        assert!(matches!(s.append(&a, 0, &[0u8; 10]), AppendOutcome::Poisoned));
+    }
+
+    #[test]
+    fn append_overflow_poisons_path() {
+        let (_d, mut s) = store(1024);
+        let a = path('a');
+        assert_ok(s.append(&a, 0, &[0u8; 1000]));
         assert!(matches!(
-            nb.append("/nix/store/a", &[0u8; 50]),
-            AppendOutcome::Poisoned
+            s.append(&a, 1000, &[0u8; 100]),
+            AppendOutcome::Overflow
         ));
+        assert!(s.is_poisoned(&a));
+        assert!(matches!(s.append(&a, 0, &[0u8; 50]), AppendOutcome::Poisoned));
+    }
+
+    #[test]
+    fn overflow_across_keys_is_caught() {
+        let (_d, mut s) = store(800);
+        assert_ok(s.append(&path('a'), 0, &[0u8; 400]));
+        assert_ok(s.append(&path('b'), 0, &[0u8; 400]));
+        assert!(matches!(
+            s.append(&path('c'), 0, &[42u8]),
+            AppendOutcome::Overflow
+        ));
+        assert!(s.is_poisoned(&path('c')));
+    }
+
+    #[test]
+    fn note_header_reports_resumable_prefix() {
+        let (_d, mut s) = store(10_000);
+        let a = path('a');
+        s.note_header(&a, "tok-v1");
+        assert_ok(s.append(&a, 0, b"hello"));
+        // Simulated reconnect: same token resumes; a different token restarts.
+        assert_eq!(s.note_header(&a, "tok-v1"), 5);
+        assert_eq!(s.note_header(&a, "tok-v2"), 0);
+    }
+
+    #[test]
+    fn presigned_mode_has_no_active_stream() {
+        let (_d, s) = store(1024);
         assert!(
-            nb.take("/nix/store/a").is_none(),
-            "take() must not return a buffer for a poisoned path"
+            !s.is_active(&path('a')),
+            "a path with no header/push must not be treated as direct mode"
         );
-    }
-
-    #[test]
-    fn take_releases_budget() {
-        let mut nb = NarBuffers::new(1024);
-        assert_ok(nb.append("/nix/store/a", &vec![0u8; 500]));
-        assert_ok(nb.append("/nix/store/b", &vec![1u8; 500]));
-        let buf_a = nb.take("/nix/store/a").expect("a was buffered");
-        assert_eq!(buf_a.len(), 500);
-        assert_eq!(nb.total_bytes(), 500);
-        assert_ok(nb.append("/nix/store/c", &vec![2u8; 400]));
-    }
-
-    #[test]
-    fn take_missing_returns_none() {
-        let mut nb = NarBuffers::new(1024);
-        assert!(nb.take("/nix/store/missing").is_none());
-    }
-
-    #[test]
-    fn append_overflow_across_keys_is_caught() {
-        let mut nb = NarBuffers::new(800);
-        assert_ok(nb.append("/nix/store/a", &vec![0u8; 400]));
-        assert_ok(nb.append("/nix/store/b", &vec![0u8; 400]));
-        assert!(matches!(
-            nb.append("/nix/store/c", &[42u8]),
-            AppendOutcome::Overflow
-        ));
-        assert!(nb.is_poisoned("/nix/store/c"));
     }
 
     #[test]
     fn clear_poison_allows_retry() {
-        let mut nb = NarBuffers::new(100);
-        assert!(matches!(
-            nb.append("/nix/store/a", &[0u8; 200]),
-            AppendOutcome::Overflow
-        ));
-        assert!(nb.is_poisoned("/nix/store/a"));
-        nb.clear_poison("/nix/store/a");
-        assert!(!nb.is_poisoned("/nix/store/a"));
-        assert_ok(nb.append("/nix/store/a", &[0u8; 50]));
+        let (_d, mut s) = store(100);
+        let a = path('a');
+        assert!(matches!(s.append(&a, 0, &[0u8; 200]), AppendOutcome::Overflow));
+        assert!(s.is_poisoned(&a));
+        s.clear_poison(&a);
+        assert!(!s.is_poisoned(&a));
+        assert_ok(s.append(&a, 0, &[0u8; 50]));
+    }
+
+    #[test]
+    fn finish_discards_staged_partial() {
+        let (_d, mut s) = store(10_000);
+        let a = path('a');
+        assert_ok(s.append(&a, 0, b"hello"));
+        s.finish(&a);
+        assert!(!s.is_active(&a));
+        assert_eq!(s.committed_len(&a), 0);
     }
 }

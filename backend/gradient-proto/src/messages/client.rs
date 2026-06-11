@@ -151,6 +151,29 @@ pub enum ClientMessage {
         deriver: Option<String>,
     },
 
+    /// Opens a push stream for `store_path`; sent before the first `NarPush`.
+    /// The worker then waits for [`super::server::ServerMessage::NarPushResume`]
+    /// to learn how many compressed bytes the server already holds, then seeks
+    /// its regenerated zstd stream to that offset before sending chunks.
+    NarStreamHeader {
+        job_id: String,
+        store_path: String,
+        /// Known uncompressed nar_size if available, else `None` (informational).
+        total_bytes: Option<u64>,
+        /// zstd identity; a mismatch on resume forces a restart from offset 0.
+        stream_token: String,
+    },
+
+    /// Pull resume: the worker already holds `received_bytes` compressed bytes
+    /// of this path's `.nar.zst` on disk and asks the server to continue the
+    /// download from that offset instead of re-sending from 0.
+    NarRequestResume {
+        job_id: String,
+        store_path: String,
+        received_bytes: u64,
+        stream_token: String,
+    },
+
     /// Pull-based capacity signal: worker is ready to accept one job of the
     /// given kind.
     ///
@@ -235,6 +258,8 @@ impl ClientMessage {
             ClientMessage::Draining => "Draining",
             ClientMessage::LogChunk { .. } => "LogChunk",
             ClientMessage::NarRequest { .. } => "NarRequest",
+            ClientMessage::NarStreamHeader { .. } => "NarStreamHeader",
+            ClientMessage::NarRequestResume { .. } => "NarRequestResume",
             ClientMessage::NarPush { .. } => "NarPush",
             ClientMessage::NarUploaded { .. } => "NarUploaded",
             ClientMessage::RequestJob { .. } => "RequestJob",

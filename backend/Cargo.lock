@@ -2560,6 +2560,7 @@ dependencies = [
  "gradient-nix",
  "gradient-proto",
  "gradient-sources",
+ "gradient-storage",
  "gradient-test-support",
  "gradient-types",
  "gradient-util",

@@ -47,6 +47,7 @@ pub async fn compress_and_push_paths(
             &updater.job_id.clone(),
             store_path,
             &updater.writer,
+            &updater.nar_recv,
             Some(store),
         )
         .await?;
