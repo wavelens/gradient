@@ -708,6 +708,19 @@ Backend (`cargo test -p scheduler --lib jobs::tests::add_pending_does_not_requeu
   ("build aborted by server"), and the spurious failure fails the whole
   evaluation (observed flaking the `gradient-cache` NixOS VM test).
 
+## Cross-architecture substitutable-build scheduling
+
+Backend (`cargo test -p gradient-scheduler --lib dispatch_mode::tests`):
+- `decide_dispatch_mode_returns_real_arch_for_nonsubstitutable` / `decide_dispatch_mode_returns_substitute_builtin_when_cached` / `decide_dispatch_mode_escalates_stalled_substitutes` - verify `decide_dispatch_mode` returns `RealArch` / `SubstituteBuiltin` / `SubstituteStalled` for the (substitutable, miss_count, threshold, arch_has_worker) combinations.
+
+Backend (`cargo test -p gradient-db --lib build::tests`):
+- `maps_returned_rows_to_id_set` / `empty_input_returns_empty_set` - plumbing tests for `builds_with_satisfied_deps` (the SQL antijoin itself is covered end-to-end in CI).
+
+Backend (`cargo test -p gradient-scheduler --lib build::tests`):
+- `stalled_substitute_is_not_buildable_and_appears_in_unmet` - when a build's substitutable derivation has too many misses, the parker does not mark it buildable and the reason reflects the escalation.
+- `dependency_blocked_build_is_not_buildable` - a build waiting on an unsatisfied dependency is not buildable regardless of dispatch mode.
+- `substitutable_within_budget_is_buildable_anywhere` - a substitutable build under the miss threshold is buildable on any worker with the derivation's architecture.
+
 ## Org members can view subscribed caches (#327)
 
 NixOS VM (`nix/tests/gradient/state`):
