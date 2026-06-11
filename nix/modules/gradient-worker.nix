@@ -195,6 +195,18 @@ in {
         default = 32;
       };
 
+      narPartialTtlSecs = lib.mkOption {
+        description = ''
+          TTL in seconds for partially-received NAR downloads (`*.partial`)
+          staged under `<baseDir>/nar-partial`. A periodic sweep deletes
+          partials whose last write is older than this so an abandoned
+          resumable transfer can't pin disk forever (issue #225). Set to 0
+          to disable the sweep.
+        '';
+        type = lib.types.ints.unsigned;
+        default = 86400;
+      };
+
       evalWorkers = lib.mkOption {
         description = "Number of Nix evaluator subprocesses";
         type = lib.types.ints.positive;
@@ -419,6 +431,7 @@ in {
           GRADIENT_MAX_CONCURRENT_EVALUATIONS         = toString cfg.settings.maxConcurrentEvaluations;
           GRADIENT_MAX_CONCURRENT_BUILDS              = toString cfg.settings.maxConcurrentBuilds;
           GRADIENT_MAX_NIXDAEMON_CONNECTIONS          = toString cfg.settings.maxNixdaemonConnections;
+          GRADIENT_NAR_PARTIAL_TTL_SECS               = toString cfg.settings.narPartialTtlSecs;
           GRADIENT_WORKER_EVAL_WORKERS                = toString cfg.settings.evalWorkers;
           GRADIENT_MAX_EVALUATIONS_PER_WORKER         = toString cfg.settings.maxEvaluationsPerWorker;
           GRADIENT_MAX_PROTO_CONNECTIONS              = toString cfg.settings.maxProtoConnections;
