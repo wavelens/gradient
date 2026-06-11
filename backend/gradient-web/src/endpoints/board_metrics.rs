@@ -243,8 +243,9 @@ pub struct DurationsHeatmap {
     pub bands: Vec<HeatmapBand>,
 }
 
-/// 2D build-duration distribution (duration band × hour) for the Durations page,
-/// computed on demand from `build`. Org-scoped.
+/// 2D build-duration distribution (duration band × hour) for the Durations page.
+/// Build times live on the most recent `build_attempt` after the split.
+/// Org-scoped.
 pub async fn get_board_durations_heatmap(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -254,8 +255,9 @@ pub async fn get_board_durations_heatmap(
     let window = window_clause(&params);
     let mut clauses = vec![
         "b.status = 3".to_string(),
-        "b.build_time_ms IS NOT NULL".to_string(),
-        format!("b.build_finished_at >= (now() AT TIME ZONE 'UTC') - interval '{window} hours'"),
+        "ba.build_started_at IS NOT NULL".to_string(),
+        "ba.build_finished_at IS NOT NULL".to_string(),
+        format!("ba.build_finished_at >= (now() AT TIME ZONE 'UTC') - interval '{window} hours'"),
     ];
 
     if let Some(list) = scope.org_in_list() {
@@ -267,10 +269,16 @@ pub async fn get_board_durations_heatmap(
     }
 
     let sql = format!(
-        "SELECT date_trunc('hour', b.build_finished_at) AS t, \
-                width_bucket(b.build_time_ms, ARRAY[10000,30000,60000,180000,600000,1800000]) AS band, \
+        "SELECT date_trunc('hour', ba.build_finished_at) AS t, \
+                width_bucket((extract(epoch from (ba.build_finished_at - ba.build_started_at)) * 1000)::bigint, \
+                             ARRAY[10000,30000,60000,180000,600000,1800000]::bigint[]) AS band, \
                 count(*)::bigint AS c \
          FROM build b JOIN derivation d ON d.id = b.derivation \
+         JOIN LATERAL ( \
+           SELECT ba2.build_started_at, ba2.build_finished_at \
+           FROM build_attempt ba2 WHERE ba2.build = b.id \
+           ORDER BY ba2.created_at DESC LIMIT 1 \
+         ) ba ON true \
          WHERE {} GROUP BY t, band ORDER BY t",
         clauses.join(" AND ")
     );
