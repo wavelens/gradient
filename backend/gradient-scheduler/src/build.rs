@@ -26,7 +26,7 @@ use sea_orm::{
 use tracing::{error, info, warn};
 
 use super::jobs::PendingBuildJob;
-use crate::dispatch_mode::{decide_dispatch_mode, BuildDispatchMode};
+use crate::dispatch_mode::{arch_available, decide_dispatch_mode, BuildDispatchMode};
 use gradient_types::BuildOutputMetadata;
 use gradient_types::proto::BuildFailureKind;
 use gradient_types::proto::BuildMetrics;
@@ -948,7 +948,7 @@ impl BuildabilityChecker {
                 return false;
             };
             let miss = self.substitute_misses.get(&b.id).copied().unwrap_or(0);
-            let arch_has_worker = self.connected_architectures.contains(&drv.architecture);
+            let arch_has_worker = arch_available(&self.connected_architectures, &drv.architecture);
             match decide_dispatch_mode(
                 b.substitutable,
                 miss,
@@ -1000,7 +1000,7 @@ impl BuildabilityChecker {
             let arch_has_worker = self
                 .drv_by_id
                 .get(&b.derivation)
-                .map(|d| self.connected_architectures.contains(&d.architecture))
+                .map(|d| arch_available(&self.connected_architectures, &d.architecture))
                 .unwrap_or(false);
             if matches!(
                 decide_dispatch_mode(b.substitutable, miss, self.substitute_miss_escalation_threshold, arch_has_worker),

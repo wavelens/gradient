@@ -9253,6 +9253,7 @@ components:
         finished_at: { type: string, format: date-time, nullable: true }
         build_id: { type: string, format: uuid, nullable: true }
         evaluation_id: { type: string, format: uuid }
+        pname: { type: string, nullable: true }
         score_breakdown:
           type: object
           additionalProperties: true

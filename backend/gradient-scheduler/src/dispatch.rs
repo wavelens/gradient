@@ -18,7 +18,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::dispatch_mode::{decide_dispatch_mode, BuildDispatchMode};
+use crate::dispatch_mode::{arch_available, decide_dispatch_mode, BuildDispatchMode};
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_sources::get_path_from_derivation_output;
@@ -620,7 +620,7 @@ impl BuildDispatchMaps {
 
         let job_id = format!("build:{}", build.id);
         let miss_count = self.substitute_misses.get(&build.id).copied().unwrap_or(0);
-        let arch_has_worker = self.connected_architectures.contains(&derivation.architecture);
+        let arch_has_worker = arch_available(&self.connected_architectures, &derivation.architecture);
         let mode = decide_dispatch_mode(
             build.substitutable,
             miss_count,

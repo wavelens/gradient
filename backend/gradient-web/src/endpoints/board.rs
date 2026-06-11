@@ -183,6 +183,7 @@ pub struct DispatchedJobDetail {
     pub finished_at: Option<String>,
     pub build_id: Option<Uuid>,
     pub evaluation_id: Uuid,
+    pub pname: Option<String>,
     pub score_breakdown: serde_json::Value,
     pub worker_context: serde_json::Value,
     pub job_context: serde_json::Value,
@@ -221,6 +222,19 @@ pub async fn get_dispatched_job(
 
     let build_id: Option<Uuid> = this_attempt.as_ref().map(|a| a.build.into());
 
+    let pname = match build_id {
+        Some(bid) => {
+            let b = gradient_entity::build::Entity::find_by_id(gradient_types::ids::BuildId::from(bid))
+                .one(&state.web_db).await.ok().flatten();
+            match b {
+                Some(b) => gradient_entity::derivation::Entity::find_by_id(b.derivation)
+                    .one(&state.web_db).await.ok().flatten().and_then(|d| d.pname),
+                None => None,
+            }
+        }
+        None => None,
+    };
+
     let previous_attempts = match build_id {
         Some(bid) => build_attempt::Entity::find()
             .filter(build_attempt::Column::Build.eq(gradient_types::ids::BuildId::from(bid)))
@@ -252,6 +266,7 @@ pub async fn get_dispatched_job(
         finished_at: j.finished_at.map(|t| t.and_utc().to_rfc3339()),
         build_id,
         evaluation_id: j.evaluation_id.into(),
+        pname,
         score_breakdown: j.score_breakdown,
         worker_context: j.worker_context,
         job_context: j.job_context,
