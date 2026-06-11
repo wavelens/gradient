@@ -430,11 +430,11 @@ Interrupted NAR transfers resume from a byte offset instead of restarting
 from 0, in both directions. Resume rests on byte offsets, the existing
 `NarUploaded.file_size` length check, and a `stream_token` guard (no content
 hashing). Receivers stage chunks to `*.partial` files; senders stay stateless
-and seek to the requested offset. The server-side staging is synchronous
-`std::fs`, so the receiver runs every disk op on `spawn_blocking` to keep the
-async socket task (and unrelated HTTP handlers sharing the runtime) responsive
-during a push burst. End-to-end resume across a real reconnect is exercised by
-the NixOS VM suite in CI.
+and seek to the requested offset. `PartialStore` staging is synchronous
+`std::fs`, so both the server (push) and worker (pull) receivers run every disk
+op on `spawn_blocking` — otherwise the blocking I/O stalls the shared runtime and
+unrelated tasks (HTTP handlers on the server) hang during a transfer burst.
+End-to-end resume across a real reconnect is exercised by the NixOS VM suite in CI.
 
 Storage (`cargo test -p gradient-storage`):
 - `partial::tests` - `append_then_resume_reports_len`, `non_contiguous_append_errors`,
@@ -3714,7 +3714,10 @@ not exist`. `rollup::tests` (`cargo test -p gradient-db`) guard the schema
 coupling: `build_table_rollups_avoid_moved_columns` asserts no build-table
 rollup references the moved columns (counts now bucket by `build.updated_at`),
 and `duration_rollup_reads_timestamps_from_build_attempt` asserts
-`builds.duration_ms` sources start/finish from the latest `build_attempt`.
+`builds.duration_ms` sources start/finish from the latest `build_attempt`. The
+job-board durations heatmap (`board_metrics::get_board_durations_heatmap`) had
+the same stale `b.build_finished_at`/`b.build_time_ms` references and now reads
+both from the latest `build_attempt` via the same `LATERAL` join.
 
 ## Storage gate SUM decodes as BIGINT (#350)
 

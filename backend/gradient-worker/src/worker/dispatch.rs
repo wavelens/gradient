@@ -337,7 +337,8 @@ impl<'a> MessageHandler<'a> {
                 offset,
                 is_final,
             } => {
-                self.on_nar_push(job_id, store_path, data, offset, is_final);
+                self.on_nar_push(job_id, store_path, data, offset, is_final)
+                    .await;
             }
             ServerMessage::NarUnavailable {
                 job_id,
@@ -596,7 +597,7 @@ impl<'a> MessageHandler<'a> {
 
     // ── NAR transfer ──────────────────────────────────────────────────────────
 
-    fn on_nar_push(
+    async fn on_nar_push(
         self,
         job_id: String,
         store_path: String,
@@ -606,7 +607,8 @@ impl<'a> MessageHandler<'a> {
     ) {
         debug!(%job_id, %store_path, offset, is_final, bytes = data.len(), "received NAR chunk from server");
         self.nar_recv
-            .accept_chunk(&job_id, &store_path, data, offset, is_final);
+            .accept_chunk(&job_id, &store_path, data, offset, is_final)
+            .await;
     }
 
     async fn on_presigned_upload(

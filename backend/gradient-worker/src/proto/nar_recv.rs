@@ -213,7 +213,7 @@ impl NarReceiver {
 
     /// Append a `NarPush` chunk at `offset`. When `is_final` is true the
     /// assembled buffer is delivered to any registered waiter.
-    pub fn accept_chunk(
+    pub async fn accept_chunk(
         &self,
         job_id: &str,
         store_path: &str,
@@ -234,12 +234,25 @@ impl NarReceiver {
         };
 
         if !data.is_empty() {
-            match (self.partial.as_ref(), store_hash(store_path)) {
+            match (self.partial.clone(), store_hash(store_path)) {
                 (Some(store), Some(hash)) => {
-                    if let Err(e) = store.append(hash, &token, offset, &data) {
-                        // Non-fatal: drop the partial so a retry restarts cleanly.
-                        let _ = store.discard(hash);
-                        self.deliver(&key, Err(format!("partial append failed: {e}")));
+                    // Disk staging is blocking `std::fs`; run it on the blocking
+                    // pool so the dispatch task is never stalled mid-pull.
+                    let hash = hash.to_owned();
+                    let outcome = tokio::task::spawn_blocking(move || {
+                        match store.append(&hash, &token, offset, &data) {
+                            Ok(()) => Ok(()),
+                            // Non-fatal: drop the partial so a retry restarts cleanly.
+                            Err(e) => {
+                                let _ = store.discard(&hash);
+                                Err(format!("partial append failed: {e}"))
+                            }
+                        }
+                    })
+                    .await
+                    .unwrap_or_else(|e| Err(format!("partial append task panicked: {e}")));
+                    if let Err(msg) = outcome {
+                        self.deliver(&key, Err(msg));
                         return;
                     }
                 }
@@ -259,25 +272,40 @@ impl NarReceiver {
             return;
         }
 
-        let (buf, expected) = {
+        // Take the in-memory state under the lock; read/discard the on-disk
+        // partial off the runtime.
+        let (expected, started, disk, mem_buf) = {
             let mut g = self.inner.lock().unwrap();
             let expected = g.headers.remove(&key).map(|h| h.total_bytes);
-            let buf = match (self.partial.as_ref(), store_hash(store_path)) {
-                (Some(store), Some(hash)) => {
-                    let b = store.read_all(hash).unwrap_or_default();
-                    let _ = store.discard(hash);
-                    b
-                }
-                _ => g.buffers.remove(&key).unwrap_or_default(),
+            let started = g.started.remove(&key);
+            let disk = match (self.partial.clone(), store_hash(store_path)) {
+                (Some(store), Some(hash)) => Some((store, hash.to_owned())),
+                _ => None,
             };
-            if let Some(start) = g.started.remove(&key) {
-                crate::metrics::throughput::NETWORK.observe(
-                    buf.len() as f64 * 8.0 / start.elapsed().as_secs_f64().max(1e-6) / 1_000_000.0,
-                );
-            }
-
-            (buf, expected)
+            let mem_buf = match disk {
+                Some(_) => None,
+                None => Some(g.buffers.remove(&key).unwrap_or_default()),
+            };
+            (expected, started, disk, mem_buf)
         };
+
+        let buf = match (mem_buf, disk) {
+            (Some(b), _) => b,
+            (None, Some((store, hash))) => tokio::task::spawn_blocking(move || {
+                let b = store.read_all(&hash).unwrap_or_default();
+                let _ = store.discard(&hash);
+                b
+            })
+            .await
+            .unwrap_or_default(),
+            (None, None) => Vec::new(),
+        };
+
+        if let Some(start) = started {
+            crate::metrics::throughput::NETWORK.observe(
+                buf.len() as f64 * 8.0 / start.elapsed().as_secs_f64().max(1e-6) / 1_000_000.0,
+            );
+        }
 
         if let Some(total) = expected
             && buf.len() as u64 != total
@@ -367,8 +395,8 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    fn final_chunk(r: &NarReceiver, job: &str, path: &str, data: &[u8]) {
-        r.accept_chunk(job, path, data.to_vec(), 0, true);
+    async fn final_chunk(r: &NarReceiver, job: &str, path: &str, data: &[u8]) {
+        r.accept_chunk(job, path, data.to_vec(), 0, true).await;
     }
 
     #[tokio::test]
@@ -377,7 +405,7 @@ mod tests {
         let r2 = r.clone();
         let task = tokio::spawn(async move { r2.wait_for("job1", "/nix/store/aaa").await });
         tokio::task::yield_now().await;
-        final_chunk(&r, "job1", "/nix/store/aaa", b"hello world");
+        final_chunk(&r, "job1", "/nix/store/aaa", b"hello world").await;
         let bytes = task.await.unwrap().unwrap();
         assert_eq!(bytes, b"hello world");
     }
@@ -388,9 +416,9 @@ mod tests {
         let r2 = r.clone();
         let task = tokio::spawn(async move { r2.wait_for("j", "/nix/store/x").await });
         tokio::task::yield_now().await;
-        r.accept_chunk("j", "/nix/store/x", b"abc".to_vec(), 0, false);
-        r.accept_chunk("j", "/nix/store/x", b"def".to_vec(), 3, false);
-        r.accept_chunk("j", "/nix/store/x", b"ghi".to_vec(), 6, true);
+        r.accept_chunk("j", "/nix/store/x", b"abc".to_vec(), 0, false).await;
+        r.accept_chunk("j", "/nix/store/x", b"def".to_vec(), 3, false).await;
+        r.accept_chunk("j", "/nix/store/x", b"ghi".to_vec(), 6, true).await;
         let bytes = task.await.unwrap().unwrap();
         assert_eq!(bytes, b"abcdefghi");
     }
@@ -398,11 +426,11 @@ mod tests {
     #[tokio::test]
     async fn final_with_no_waiter_is_discarded() {
         let r = NarReceiver::new();
-        final_chunk(&r, "j", "/nix/store/x", b"orphan");
+        final_chunk(&r, "j", "/nix/store/x", b"orphan").await;
         let r2 = r.clone();
         let task = tokio::spawn(async move { r2.wait_for("j", "/nix/store/x").await });
         tokio::task::yield_now().await;
-        final_chunk(&r, "j", "/nix/store/x", b"second");
+        final_chunk(&r, "j", "/nix/store/x", b"second").await;
         assert_eq!(task.await.unwrap().unwrap(), b"second");
     }
 
@@ -434,7 +462,7 @@ mod tests {
         let p2 = r.register("job", "/nix/store/b");
 
         r.fail("job", "/nix/store/a", "missing".into());
-        final_chunk(&r, "job", "/nix/store/b", b"hello");
+        final_chunk(&r, "job", "/nix/store/b", b"hello").await;
 
         let r1 = r.await_pending(p1).await;
         assert!(r1.unwrap_err().to_string().contains("missing"));
@@ -453,8 +481,8 @@ mod tests {
 
         let r1 = NarReceiver::with_partial_store(store.clone());
         r1.note_header("j", &path, 9, "len-9");
-        r1.accept_chunk("j", &path, b"abc".to_vec(), 0, false);
-        r1.accept_chunk("j", &path, b"def".to_vec(), 3, false);
+        r1.accept_chunk("j", &path, b"abc".to_vec(), 0, false).await;
+        r1.accept_chunk("j", &path, b"def".to_vec(), 3, false).await;
         // Connection drops mid-transfer.
         r1.fail("j", &path, "NarAbort".into());
 
@@ -469,7 +497,7 @@ mod tests {
         let task = tokio::spawn(async move { r2c.wait_for("j", &pathc).await });
         tokio::task::yield_now().await;
         r2.note_header("j", &path, 9, "len-9");
-        r2.accept_chunk("j", &path, b"ghi".to_vec(), 6, true);
+        r2.accept_chunk("j", &path, b"ghi".to_vec(), 6, true).await;
         assert_eq!(task.await.unwrap().unwrap(), b"abcdefghi");
     }
 
