@@ -17,6 +17,7 @@ export interface DispatchedJobSummary {
   dispatched_at: string;
   build_id: string | null;
   evaluation_id: string;
+  pname: string | null;
 }
 
 export interface DispatchedJobsResponse {
@@ -31,6 +32,7 @@ export interface PendingJobSummary {
   build_id: string | null;
   queued_at: string;
   dependency_count: number;
+  pname: string | null;
 }
 
 export interface PendingJobsResponse {

@@ -10,7 +10,7 @@ import { of, EMPTY } from 'rxjs';
 import { BoardLiveJobsComponent } from './live-jobs.component';
 import { BoardService } from '@core/services/board.service';
 import { BoardLiveService } from '@core/services/board-live.service';
-import { PendingJobSummary } from '@core/services/board.service';
+import { DispatchedJobSummary, PendingJobSummary } from '@core/services/board.service';
 
 const PENDING: PendingJobSummary = {
   kind: 1,
@@ -19,6 +19,7 @@ const PENDING: PendingJobSummary = {
   build_id: 'b1',
   queued_at: '2026-06-08T00:00:00Z',
   dependency_count: 3,
+  pname: null,
 };
 
 function setup(): ComponentFixture<BoardLiveJobsComponent> {
@@ -43,6 +44,59 @@ function setup(): ComponentFixture<BoardLiveJobsComponent> {
   fixture.detectChanges();
   return fixture;
 }
+
+const DISPATCHED: DispatchedJobSummary = {
+  id: 'd1abc123-0000-0000-0000-000000000001',
+  kind: 1,
+  organization: 'o1',
+  worker_id: 'worker-1',
+  score: 42.0,
+  dispatched_at: '2026-06-08T00:00:00Z',
+  build_id: 'b1',
+  evaluation_id: 'e1abc123',
+  pname: 'hello',
+};
+
+function setupWithDispatched(dispatched: DispatchedJobSummary[]): ComponentFixture<BoardLiveJobsComponent> {
+  TestBed.configureTestingModule({
+    imports: [BoardLiveJobsComponent],
+    providers: [
+      provideRouter([]),
+      {
+        provide: BoardService,
+        useValue: {
+          getDispatchedJobs: () => of({ jobs: dispatched, other_running: 0 }),
+          getPendingJobs: () => of({ jobs: [], other_pending: 0 }),
+        },
+      },
+      {
+        provide: BoardLiveService,
+        useValue: { connect: () => EMPTY },
+      },
+    ],
+  });
+  const fixture = TestBed.createComponent(BoardLiveJobsComponent);
+  fixture.detectChanges();
+  return fixture;
+}
+
+describe('BoardLiveJobsComponent - dispatched pname column', () => {
+  beforeEach(() => sessionStorage.clear());
+
+  it('renders pname in the Derivation column for a dispatched build job', () => {
+    const fixture = setupWithDispatched([DISPATCHED]);
+    fixture.detectChanges();
+    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(text).toContain('hello');
+  });
+
+  it('renders — when pname is null', () => {
+    const fixture = setupWithDispatched([{ ...DISPATCHED, pname: null }]);
+    fixture.detectChanges();
+    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(text).toContain('—');
+  });
+});
 
 describe('BoardLiveJobsComponent - pending view toggle', () => {
   beforeEach(() => sessionStorage.clear());

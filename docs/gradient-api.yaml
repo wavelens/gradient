@@ -5719,7 +5719,7 @@ paths:
     get:
       tags: [board]
       summary: Live dispatched jobs
-      description: In-flight dispatched jobs visible to the caller; out-of-scope jobs collapse to an aggregate `other_running` count.
+      description: In-flight dispatched jobs visible to the caller; out-of-scope jobs collapse to an aggregate `other_running` count. Each summary includes `pname` (nullable string) from the build's derivation.
       operationId: getBoardDispatchedJobs
       responses:
         '200':
@@ -5729,7 +5729,7 @@ paths:
     get:
       tags: [board]
       summary: Pending (undispatched) jobs
-      description: Queued jobs not yet dispatched to a worker, visible to the caller; out-of-scope jobs collapse to an aggregate `other_pending` count.
+      description: Queued jobs not yet dispatched to a worker, visible to the caller; out-of-scope jobs collapse to an aggregate `other_pending` count. Each build-kind summary includes `pname` (nullable string); eval-kind summaries have `pname` null.
       operationId: getBoardPendingJobs
       responses:
         '200':
