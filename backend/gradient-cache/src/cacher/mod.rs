@@ -92,6 +92,19 @@ pub async fn cache_loop(state: Arc<ServerState>) {
         if let Err(e) = cleanup_expired_upload_sessions(Arc::clone(&state)).await {
             error!(error = ?e, "Upload-session GC failed");
         }
+        if state.config.proto.nar_partial_ttl_secs > 0 {
+            let root = format!("{}/nar-partial", state.config.storage.base_path);
+            match gradient_storage::PartialStore::new(
+                root,
+                Duration::from_secs(state.config.proto.nar_partial_ttl_secs),
+            )
+            .and_then(|store| store.gc())
+            {
+                Ok(n) if n > 0 => info!(removed = n, "Stale NAR partials swept"),
+                Ok(_) => {}
+                Err(e) => error!(error = ?e, "NAR partial GC failed"),
+            }
+        }
     }
 }
 

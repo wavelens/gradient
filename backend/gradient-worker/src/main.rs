@@ -71,6 +71,37 @@ fn main() -> Result<()> {
         let shutdown = CancellationToken::new();
         install_signal_handler(shutdown.clone());
 
+        // Periodic sweep of stale resumable-download `*.partial` files (#225).
+        if config.nar_partial_ttl_secs > 0 {
+            let gc_config = config.clone();
+            let gc_shutdown = shutdown.clone();
+            tokio::spawn(async move {
+                let ttl = std::time::Duration::from_secs(gc_config.nar_partial_ttl_secs);
+                let store = match gradient_storage::PartialStore::new(gc_config.nar_partial_dir(), ttl)
+                {
+                    Ok(s) => s,
+                    Err(e) => {
+                        warn!(error = %e, "NAR partial GC: open failed");
+                        return;
+                    }
+                };
+                let period =
+                    std::time::Duration::from_secs((gc_config.nar_partial_ttl_secs / 4).clamp(60, 3600));
+                let mut tick = tokio::time::interval(period);
+                loop {
+                    tokio::select! {
+                        _ = gc_shutdown.cancelled() => return,
+                        _ = tick.tick() => {}
+                    }
+                    match store.gc() {
+                        Ok(n) if n > 0 => info!(removed = n, "swept stale NAR partials"),
+                        Ok(_) => {}
+                        Err(e) => warn!(error = %e, "NAR partial GC failed"),
+                    }
+                }
+            });
+        }
+
         // Start the listener for incoming server connections if discoverable.
         if config.discoverable {
             let listener_config = config.clone();
