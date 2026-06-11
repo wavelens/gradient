@@ -13,6 +13,13 @@
   [draggable]="false"
   [resizable]="false"
 >
+  @if (error()) {
+    <div class="dialog-error">
+      <span class="material-symbols-outlined">error</span>
+      {{ error() }}
+    </div>
+  }
+
   <div class="form-group">
     <label for="action-name">Name</label>
     <input pInputText id="action-name" [ngModel]="name()" (ngModelChange)="name.set($event)" class="w-full" />

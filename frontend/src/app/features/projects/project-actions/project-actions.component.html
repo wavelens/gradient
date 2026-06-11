@@ -141,6 +141,7 @@
 <app-action-form
   mode="create"
   [open]="showCreateDialog()"
+  [error]="error()"
   [outboundIntegrations]="outboundIntegrations()"
   (saved)="onCreateSaved($event)"
   (closed)="showCreateDialog.set(false)"
@@ -149,6 +150,7 @@
 <app-action-form
   mode="edit"
   [open]="showEditDialog()"
+  [error]="error()"
   [existing]="editingAction()"
   [outboundIntegrations]="outboundIntegrations()"
   (saved)="onEditSaved($event)"
