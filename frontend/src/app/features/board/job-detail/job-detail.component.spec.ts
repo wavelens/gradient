@@ -21,6 +21,7 @@ const DETAIL: DispatchedJobDetail = {
   dispatched_at: '2026-06-08T00:01:00Z',
   build_id: null,
   evaluation_id: 'e1',
+  pname: null,
   queued_at: '2026-06-08T00:00:00Z',
   finished_at: null,
   score_breakdown: { rules: { wait: 3.5, missing: -1.2 }, total: 12.5 },
@@ -106,6 +107,7 @@ const PENDING: PendingJobSummary = {
   build_id: 'b9',
   queued_at: '2026-06-08T00:00:00Z',
   dependency_count: 3,
+  pname: null,
 };
 
 function setup(board: Partial<BoardService> = {}, id = 'job-1'): ComponentFixture<BoardJobDetailComponent> {

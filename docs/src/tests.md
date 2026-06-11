@@ -711,7 +711,7 @@ Backend (`cargo test -p scheduler --lib jobs::tests::add_pending_does_not_requeu
 ## Cross-architecture substitutable-build scheduling
 
 Backend (`cargo test -p gradient-scheduler --lib dispatch_mode::tests`):
-- `decide_dispatch_mode_returns_real_arch_for_nonsubstitutable` / `decide_dispatch_mode_returns_substitute_builtin_when_cached` / `decide_dispatch_mode_escalates_stalled_substitutes` - verify `decide_dispatch_mode` returns `RealArch` / `SubstituteBuiltin` / `SubstituteStalled` for the (substitutable, miss_count, threshold, arch_has_worker) combinations.
+- `non_substitutable_is_real_arch` / `substitutable_under_threshold_is_builtin` / `escalates_only_when_arch_worker_present` / `stalls_when_budget_spent_and_no_arch_worker` / `arch_available_builtin_always_true` - verify `decide_dispatch_mode` and `arch_available` for the (substitutable, miss_count, threshold, arch_has_worker) combinations.
 
 Backend (`cargo test -p gradient-db --lib build::tests`):
 - `maps_returned_rows_to_id_set` / `empty_input_returns_empty_set` - plumbing tests for `builds_with_satisfied_deps` (the SQL antijoin itself is covered end-to-end in CI).

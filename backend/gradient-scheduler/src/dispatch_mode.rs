@@ -17,6 +17,10 @@ pub(crate) enum BuildDispatchMode {
 /// - substitutable, under the miss budget → `SubstituteBuiltin` (builtin, any worker)
 /// - substitutable, budget spent, a worker for its arch IS connected → `RealArch` (escalate)
 /// - substitutable, budget spent, NO worker for its arch → `SubstituteStalled`
+pub(crate) fn arch_available(connected: &std::collections::HashSet<String>, arch: &str) -> bool {
+    arch == "builtin" || connected.contains(arch)
+}
+
 pub(crate) fn decide_dispatch_mode(
     substitutable: bool,
     miss_count: i64,
@@ -59,5 +63,16 @@ mod tests {
     fn stalls_when_budget_spent_and_no_arch_worker() {
         assert_eq!(decide_dispatch_mode(true, 2, 2, false), BuildDispatchMode::SubstituteStalled);
         assert_eq!(decide_dispatch_mode(true, 9, 2, false), BuildDispatchMode::SubstituteStalled);
+    }
+
+    #[test]
+    fn arch_available_builtin_always_true() {
+        let empty = std::collections::HashSet::new();
+        assert!(arch_available(&empty, "builtin"));
+        let mut connected = std::collections::HashSet::new();
+        connected.insert("x86_64-linux".to_string());
+        assert!(arch_available(&connected, "builtin"));
+        assert!(arch_available(&connected, "x86_64-linux"));
+        assert!(!arch_available(&connected, "aarch64-linux"));
     }
 }
