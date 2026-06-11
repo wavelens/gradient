@@ -5719,21 +5719,43 @@ paths:
     get:
       tags: [board]
       summary: Live dispatched jobs
-      description: In-flight dispatched jobs visible to the caller; out-of-scope jobs collapse to an aggregate `other_running` count. Each summary includes `pname` (nullable string) from the build's derivation.
+      description: In-flight dispatched jobs visible to the caller; out-of-scope jobs collapse to an aggregate `other_running` count.
       operationId: getBoardDispatchedJobs
       responses:
         '200':
           description: Dispatched jobs plus other_running count
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobs:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DispatchedJobSummary'
+                  other_running:
+                    type: integer
 
   /board/jobs/pending:
     get:
       tags: [board]
       summary: Pending (undispatched) jobs
-      description: Queued jobs not yet dispatched to a worker, visible to the caller; out-of-scope jobs collapse to an aggregate `other_pending` count. Each build-kind summary includes `pname` (nullable string); eval-kind summaries have `pname` null.
+      description: Queued jobs not yet dispatched to a worker, visible to the caller; out-of-scope jobs collapse to an aggregate `other_pending` count.
       operationId: getBoardPendingJobs
       responses:
         '200':
           description: Pending jobs plus other_pending count
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobs:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PendingJobSummary'
+                  other_pending:
+                    type: integer
 
   /board/jobs/expensive:
     get:
@@ -9243,3 +9265,29 @@ components:
           nullable: true
           description: Runner-up candidates, superuser-only.
           items: { type: object, additionalProperties: true }
+
+    DispatchedJobSummary:
+      type: object
+      description: Summary of a single in-flight dispatched job.
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: integer }
+        organization: { type: string, format: uuid }
+        worker_id: { type: string }
+        score: { type: number }
+        dispatched_at: { type: string, format: date-time }
+        build_id: { type: string, format: uuid, nullable: true }
+        evaluation_id: { type: string, format: uuid }
+        pname: { type: string, nullable: true }
+
+    PendingJobSummary:
+      type: object
+      description: Summary of a single queued but not-yet-dispatched job.
+      properties:
+        kind: { type: integer }
+        organization: { type: string, format: uuid }
+        evaluation_id: { type: string, format: uuid }
+        build_id: { type: string, format: uuid, nullable: true }
+        queued_at: { type: string, format: date-time }
+        dependency_count: { type: integer }
+        pname: { type: string, nullable: true }
