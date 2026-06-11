@@ -53,6 +53,7 @@ export class ActionFormComponent implements OnChanges {
   existing = input<Action | null>(null);
   outboundIntegrations = input<IntegrationOption[]>([]);
   open = input<boolean>(false);
+  error = input<string | null>(null);
 
   saved = output<CreateActionRequest | UpdateActionRequest>();
   closed = output<void>();
