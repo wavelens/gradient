@@ -114,6 +114,13 @@ export interface DispatchedJobDetail extends DispatchedJobSummary {
   job_context: JobContextView;
   instance_context: InstanceContextView | null;
   candidates: unknown | null;
+  previous_attempts: {
+    dispatched_job_id: string;
+    substitute: boolean;
+    outcome: number;
+    reason: number | null;
+    created_at: string;
+  }[];
 }
 
 export interface BoardWorker {
