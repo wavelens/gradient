@@ -179,7 +179,7 @@ export class ActionFormComponent implements OnChanges {
   onSubmit(): void {
     const config = this.buildConfig();
     const events =
-      this.type() === 'forge_status_report' ? [...FORGE_STATUS_EVENTS] : this.events();
+      this.type() === 'forge_status_report' ? [] : this.events();
     if (this.mode() === 'create') {
       const req: CreateActionRequest = {
         name: this.name().trim(),
