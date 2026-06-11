@@ -180,6 +180,26 @@ interface RuleRow {
           </table>
         </section>
       }
+
+      @if (j.previous_attempts.length > 1) {
+        <section class="attempts">
+          <h2>Previous Build Attempts</h2>
+          <table class="rules">
+            <thead><tr><th>#</th><th>Mode</th><th>Outcome</th><th>When</th><th></th></tr></thead>
+            <tbody>
+              @for (a of j.previous_attempts; track a.dispatched_job_id; let i = $index) {
+                <tr class="clickable" [routerLink]="['/board/jobs', a.dispatched_job_id]">
+                  <td>{{ i + 1 }}</td>
+                  <td>{{ a.substitute ? 'substitute' : 'build' }}</td>
+                  <td class="mono">{{ attemptOutcome(a.outcome) }}</td>
+                  <td>{{ a.created_at | date: 'medium' }}</td>
+                  <td>&rsaquo;</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </section>
+      }
     } @else if (pending(); as p) {
       <header class="head">
         <div>
@@ -287,6 +307,8 @@ interface RuleRow {
       .drv-row.clickable:hover { background: #2d333b; border-color: #444c56; }
       .drv-row .pname { color: #d6dade; }
       .drv-row .path { color: #818181; font-size: 0.8rem; word-break: break-all; }
+      tbody tr.clickable { cursor: pointer; transition: background 0.1s; }
+      tbody tr.clickable:hover { background: #2d333b; }
     `,
   ],
 })
@@ -373,6 +395,10 @@ export class BoardJobDetailComponent implements OnInit {
 
   capabilityList(c: GradientCapabilities): string {
     return BoardJobDetailComponent.WORKER_CAPS.filter((k) => c[k]).join(', ');
+  }
+
+  attemptOutcome(o: number): string {
+    return ['running', 'built', 'substituted', 'failed', 'aborted'][o] ?? String(o);
   }
 
   instanceWindows(inst: InstanceContextView): { name: string; w: Windowed }[] {

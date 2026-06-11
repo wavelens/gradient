@@ -80,6 +80,7 @@ const DETAIL: DispatchedJobDetail = {
     idle_workers: 2,
   },
   candidates: null,
+  previous_attempts: [],
 };
 
 const EVAL_DETAIL: DispatchedJobDetail = {
@@ -211,5 +212,55 @@ describe('BoardJobDetailComponent - pending fallback', () => {
       'missing',
     ).nativeElement as HTMLElement;
     expect(el.textContent).toContain('Job not found');
+  });
+});
+
+describe('BoardJobDetailComponent - previous build attempts', () => {
+  const WITH_ATTEMPTS: DispatchedJobDetail = {
+    ...DETAIL,
+    previous_attempts: [
+      { dispatched_job_id: 'dj-a1', substitute: false, outcome: 3, reason: 5, created_at: '2026-06-08T00:00:00Z' },
+      { dispatched_job_id: 'dj-a2', substitute: true,  outcome: 2, reason: null, created_at: '2026-06-08T00:01:00Z' },
+    ],
+  };
+
+  it('renders the Previous Build Attempts section when there are multiple attempts', () => {
+    const el = setup({ getJob: () => of(WITH_ATTEMPTS) }).nativeElement as HTMLElement;
+    expect(el.textContent).toContain('Previous Build Attempts');
+  });
+
+  it('renders one row per attempt', () => {
+    const el = setup({ getJob: () => of(WITH_ATTEMPTS) }).nativeElement as HTMLElement;
+    const section = el.querySelector('section.attempts') as HTMLElement;
+    const rows = section.querySelectorAll('tbody tr');
+    expect(rows.length).toBe(2);
+  });
+
+  it('shows mode and outcome labels for each attempt', () => {
+    const el = setup({ getJob: () => of(WITH_ATTEMPTS) }).nativeElement as HTMLElement;
+    const section = el.querySelector('section.attempts') as HTMLElement;
+    expect(section.textContent).toContain('build');
+    expect(section.textContent).toContain('failed');
+    expect(section.textContent).toContain('substitute');
+    expect(section.textContent).toContain('substituted');
+  });
+
+  it('each row links to the dispatched job', () => {
+    const el = setup({ getJob: () => of(WITH_ATTEMPTS) }).nativeElement as HTMLElement;
+    const section = el.querySelector('section.attempts') as HTMLElement;
+    const rows = section.querySelectorAll('tbody tr');
+    expect(rows[0].getAttribute('ng-reflect-router-link')).toContain('dj-a1');
+    expect(rows[1].getAttribute('ng-reflect-router-link')).toContain('dj-a2');
+  });
+
+  it('hides the section when there is only one attempt', () => {
+    const singleAttempt: DispatchedJobDetail = {
+      ...DETAIL,
+      previous_attempts: [
+        { dispatched_job_id: 'dj-a1', substitute: false, outcome: 1, reason: null, created_at: '2026-06-08T00:00:00Z' },
+      ],
+    };
+    const el = setup({ getJob: () => of(singleAttempt) }).nativeElement as HTMLElement;
+    expect(el.textContent).not.toContain('Previous Build Attempts');
   });
 });

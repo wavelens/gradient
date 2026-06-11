@@ -9265,6 +9265,20 @@ components:
           nullable: true
           description: Runner-up candidates, superuser-only.
           items: { type: object, additionalProperties: true }
+        previous_attempts:
+          type: array
+          description: All build attempts for the same build, ordered by creation time ascending.
+          items: { $ref: '#/components/schemas/AttemptSummary' }
+
+    AttemptSummary:
+      type: object
+      description: Summary of a single build attempt.
+      properties:
+        dispatched_job_id: { type: string, format: uuid }
+        substitute: { type: boolean }
+        outcome: { type: integer }
+        reason: { type: integer, nullable: true }
+        created_at: { type: string, format: date-time }
 
     DispatchedJobSummary:
       type: object

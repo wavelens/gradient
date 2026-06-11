@@ -162,6 +162,15 @@ pub async fn get_dispatched_jobs(
 }
 
 #[derive(Serialize)]
+pub struct AttemptSummary {
+    pub dispatched_job_id: Uuid,
+    pub substitute: bool,
+    pub outcome: i32,
+    pub reason: Option<i32>,
+    pub created_at: String,
+}
+
+#[derive(Serialize)]
 pub struct DispatchedJobDetail {
     pub id: Uuid,
     pub kind: i16,
@@ -178,8 +187,8 @@ pub struct DispatchedJobDetail {
     pub worker_context: serde_json::Value,
     pub job_context: serde_json::Value,
     pub instance_context: serde_json::Value,
-    /// Runner-up candidates, superuser-only.
     pub candidates: Option<serde_json::Value>,
+    pub previous_attempts: Vec<AttemptSummary>,
 }
 
 pub async fn get_dispatched_job(
@@ -203,13 +212,33 @@ pub async fn get_dispatched_job(
         .map(|o| o.name)
         .unwrap_or_default();
 
-    let build_id = build_attempt::Entity::find()
+    let this_attempt = build_attempt::Entity::find()
         .filter(build_attempt::Column::DispatchedJob.eq(j.id))
         .one(&state.web_db)
         .await
         .ok()
-        .flatten()
-        .map(|a| a.build.into());
+        .flatten();
+
+    let build_id: Option<Uuid> = this_attempt.as_ref().map(|a| a.build.into());
+
+    let previous_attempts = match build_id {
+        Some(bid) => build_attempt::Entity::find()
+            .filter(build_attempt::Column::Build.eq(gradient_types::ids::BuildId::from(bid)))
+            .order_by_asc(build_attempt::Column::CreatedAt)
+            .all(&state.web_db)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|a| AttemptSummary {
+                dispatched_job_id: a.dispatched_job.into(),
+                substitute: a.substitute,
+                outcome: i32::from(a.outcome),
+                reason: a.reason.map(i32::from),
+                created_at: a.created_at.and_utc().to_rfc3339(),
+            })
+            .collect(),
+        None => Vec::new(),
+    };
 
     Ok(ok_json(DispatchedJobDetail {
         id: j.id.into(),
@@ -228,6 +257,7 @@ pub async fn get_dispatched_job(
         job_context: j.job_context,
         instance_context: j.instance_context.unwrap_or(serde_json::Value::Null),
         candidates: if scope.is_all() { j.candidates } else { None },
+        previous_attempts,
     }))
 }
 
