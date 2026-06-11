@@ -188,6 +188,47 @@ impl NarStore {
         }
     }
 
+    /// Range variant of [`Self::get_stream`]: streams the stored object from
+    /// `offset` to the end. The returned size is the FULL object size (so the
+    /// caller can compare it against a worker's reported `received_bytes`).
+    /// `offset == 0` is equivalent to [`Self::get_stream`]; an `offset` at or
+    /// past the end yields an empty stream with the real size.
+    pub async fn get_stream_from(
+        &self,
+        hash: &str,
+        offset: u64,
+    ) -> Result<Option<(u64, BoxStream<'static, Result<Bytes>>)>> {
+        use object_store::{GetOptions, GetRange};
+
+        let head = match self.inner.head(&self.object_path(hash)).await {
+            Ok(h) => h,
+            Err(object_store::Error::NotFound { .. }) => return Ok(None),
+            Err(e) => return Err(e).context("Failed to head NAR for range stream"),
+        };
+        let size = head.size;
+
+        if offset >= size {
+            let empty: BoxStream<'static, Result<Bytes>> = futures::stream::empty().boxed();
+            return Ok(Some((size, empty)));
+        }
+
+        let opts = GetOptions {
+            range: Some(GetRange::Offset(offset)),
+            ..Default::default()
+        };
+        match self.inner.get_opts(&self.object_path(hash), opts).await {
+            Ok(result) => {
+                let stream = result
+                    .into_stream()
+                    .map(|chunk| chunk.context("NAR range stream chunk read failed"))
+                    .boxed();
+                Ok(Some((size, stream)))
+            }
+            Err(object_store::Error::NotFound { .. }) => Ok(None),
+            Err(e) => Err(e).context("Failed to open NAR range stream"),
+        }
+    }
+
     pub async fn delete(&self, hash: &str) -> Result<()> {
         match self.inner.delete(&self.object_path(hash)).await {
             Ok(_) | Err(object_store::Error::NotFound { .. }) => Ok(()),
@@ -410,5 +451,46 @@ mod tests {
         let (_d, store) = local_store();
         let r = store.get_stream("does-not-exist").await.expect("Ok");
         assert!(r.is_none());
+    }
+
+    #[tokio::test]
+    async fn get_stream_from_returns_suffix() {
+        let (_d, store) = local_store();
+        let payload: Vec<u8> = (0u32..1024).flat_map(|i| i.to_le_bytes()).collect();
+        store.put("def456", payload.clone()).await.expect("put");
+
+        let (size, mut stream) = store
+            .get_stream_from("def456", 100)
+            .await
+            .expect("get_stream_from")
+            .expect("Some");
+        assert_eq!(size as usize, payload.len(), "size is the FULL object size");
+
+        let mut assembled = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            assembled.extend_from_slice(&chunk.expect("chunk"));
+        }
+        assert_eq!(assembled, payload[100..]);
+    }
+
+    #[tokio::test]
+    async fn get_stream_from_zero_equals_full() {
+        let (_d, store) = local_store();
+        store.put("ghi789", b"abcdef".to_vec()).await.unwrap();
+        let (_size, mut stream) = store.get_stream_from("ghi789", 0).await.unwrap().unwrap();
+        let mut buf = Vec::new();
+        while let Some(c) = stream.next().await {
+            buf.extend_from_slice(&c.unwrap());
+        }
+        assert_eq!(buf, b"abcdef");
+    }
+
+    #[tokio::test]
+    async fn get_stream_from_past_end_is_empty() {
+        let (_d, store) = local_store();
+        store.put("jkl012", b"abc".to_vec()).await.unwrap();
+        let (size, mut stream) = store.get_stream_from("jkl012", 99).await.unwrap().unwrap();
+        assert_eq!(size, 3);
+        assert!(stream.next().await.is_none());
     }
 }
