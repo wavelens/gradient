@@ -155,16 +155,18 @@ impl<'a> BuildStateHandler<'a> {
 
                 // Insert new product rows.
                 for product in &output.products {
-                    let am = ABuildProduct {
-                        id: Set(BuildProductId::now_v7()),
-                        derivation_output: Set(row_id),
-                        file_type: Set(product.file_type.clone()),
-                        subtype: Set(product.subtype.clone()),
-                        name: Set(product.name.clone()),
-                        path: Set(product.path.clone()),
-                        size: Set(product.size.map(|s| s as i64)),
-                        created_at: Set(gradient_types::now()),
-                    };
+                    let am = MBuildProduct {
+                        id: BuildProductId::now_v7(),
+                        derivation_output: row_id,
+                        file_type: product.file_type.clone(),
+                        subtype: product.subtype.clone(),
+                        name: product.name.clone(),
+                        path: product.path.clone(),
+                        size: product.size.map(|s| s as i64),
+                        created_at: gradient_types::now(),
+                    }
+                    .into_active_model();
+
                     if let Err(e) = am.insert(&self.state.worker_db).await {
                         warn!(error = %e, %build_id, output_name = %output.name, "failed to insert build_product");
                     }
@@ -270,26 +272,27 @@ impl<'a> BuildStateHandler<'a> {
             }
         };
 
-        let metric = ADerivationMetric {
-            id: Set(DerivationMetricId::now_v7()),
-            derivation: Set(derivation_id),
-            pname: Set(pname),
-            closure_size: Set(closure_size),
-            peak_ram_mb: Set(metrics.peak_ram_mb.map(|v| v as i64)),
-            cpu_time_ms: Set(metrics.cpu_time_ms.map(|v| v as i64)),
-            avg_cpu_pct: Set(metrics.avg_cpu_pct.map(|v| v as f64)),
-            disk_read_bytes: Set(metrics.disk_read_bytes.map(|v| v as i64)),
-            disk_write_bytes: Set(metrics.disk_write_bytes.map(|v| v as i64)),
-            peak_network_mbps: Set(metrics.peak_network_mbps.map(|v| v as f64)),
-            oom_killed: Set(metrics.oom_killed),
-            build_time_ms: Set(metrics.build_time_ms.map(|v| v as i64)),
-            worker_id: Set(gradient_db::latest_attempt_worker(&self.state.worker_db, build.id)
+        let metric = MDerivationMetric {
+            id: DerivationMetricId::now_v7(),
+            derivation: derivation_id,
+            pname,
+            closure_size,
+            peak_ram_mb: metrics.peak_ram_mb.map(|v| v as i64),
+            cpu_time_ms: metrics.cpu_time_ms.map(|v| v as i64),
+            avg_cpu_pct: metrics.avg_cpu_pct.map(|v| v as f64),
+            disk_read_bytes: metrics.disk_read_bytes.map(|v| v as i64),
+            disk_write_bytes: metrics.disk_write_bytes.map(|v| v as i64),
+            peak_network_mbps: metrics.peak_network_mbps.map(|v| v as f64),
+            oom_killed: metrics.oom_killed,
+            build_time_ms: metrics.build_time_ms.map(|v| v as i64),
+            worker_id: gradient_db::latest_attempt_worker(&self.state.worker_db, build.id)
                 .await
                 .ok()
                 .flatten()
-                .unwrap_or_default()),
-            created_at: Set(gradient_types::now()),
-        };
+                .unwrap_or_default(),
+            created_at: gradient_types::now(),
+        }
+        .into_active_model();
 
         if let Err(e) = metric.insert(&self.state.worker_db).await {
             warn!(%derivation_id, error = %e, "failed to record derivation_metric");

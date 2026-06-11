@@ -11,7 +11,7 @@ use crate::config::*;
 use gradient_types::*;
 use anyhow::Result;
 use gradient_entity::*;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
 use std::collections::HashMap;
 
 impl<'a> StateApplicator<'a> {
@@ -84,21 +84,20 @@ impl<'a> StateApplicator<'a> {
                 api_key.update(self.db).await?;
                 tracing::info!(name = %state_api_key.name, "Updated managed API key");
             } else {
-                let api_key_model = api::ActiveModel {
-                    id: Set(ApiId::now_v7()),
-                    owned_by: Set(owned_by_id),
-                    name: Set(state_api_key.name.clone()),
-                    key: Set(key_hash),
-                    last_used_at: Set(now),
-                    created_at: Set(now),
-                    managed: Set(true),
-                    expires_at: Set(None),
-                    revoked_at: Set(None),
-                    permission: Set(mask),
-                    organization: Set(pinned_org),
-                    cache: Set(None),
-                    allowed_ips: Set(None),
-                };
+                let api_key_model = api::Model {
+                    id: ApiId::now_v7(),
+                    owned_by: owned_by_id,
+                    name: state_api_key.name.clone(),
+                    key: key_hash,
+                    last_used_at: now,
+                    created_at: now,
+                    managed: true,
+                    permission: mask,
+                    organization: pinned_org,
+                    ..Default::default()
+                }
+                .into_active_model();
+
                 api_key_model.insert(self.db).await?;
                 tracing::info!(name = %state_api_key.name, "Created managed API key");
             }

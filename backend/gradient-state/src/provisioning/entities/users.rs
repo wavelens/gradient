@@ -11,7 +11,7 @@ use crate::config::*;
 use gradient_types::*;
 use anyhow::Result;
 use gradient_entity::*;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
 use std::collections::HashMap;
 
 impl<'a> StateApplicator<'a> {
@@ -54,22 +54,21 @@ impl<'a> StateApplicator<'a> {
                 user.update(self.db).await?;
                 tracing::info!(username = %state_user.username, "Updated managed user");
             } else {
-                let user = user::ActiveModel {
-                    id: Set(UserId::now_v7()),
-                    username: Set(state_user.username.clone()),
-                    name: Set(state_user.name.clone()),
-                    email: Set(state_user.email.clone()),
-                    password: Set(password_hash),
-                    last_login_at: Set(now),
-                    created_at: Set(now),
-                    email_verified: Set(state_user.email_verified),
-                    email_verification_token: Set(None),
-                    email_verification_token_expires: Set(None),
-                    managed: Set(true),
-                    superuser: Set(state_user.superuser),
-                    oidc_issuer: Set(None),
-                    oidc_subject: Set(None),
-                };
+                let user = user::Model {
+                    id: UserId::now_v7(),
+                    username: state_user.username.clone(),
+                    name: state_user.name.clone(),
+                    email: state_user.email.clone(),
+                    password: password_hash,
+                    last_login_at: now,
+                    created_at: now,
+                    email_verified: state_user.email_verified,
+                    managed: true,
+                    superuser: state_user.superuser,
+                    ..Default::default()
+                }
+                .into_active_model();
+
                 user.insert(self.db).await?;
                 tracing::info!(username = %state_user.username, "Created managed user");
             }

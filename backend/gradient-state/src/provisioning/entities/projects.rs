@@ -14,7 +14,9 @@ use gradient_types::triggers::TriggerConfig;
 use gradient_types::*;
 use anyhow::{Context, Result};
 use gradient_entity::*;
-use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter, Set,
+};
 use std::collections::{HashMap, HashSet};
 
 impl<'a> StateApplicator<'a> {
@@ -62,25 +64,26 @@ impl<'a> StateApplicator<'a> {
                         format!("Project '{}' vanished after update", state_project.name)
                     })?
             } else {
-                let proj = project::ActiveModel {
-                    id: Set(ProjectId::now_v7()),
-                    organization: Set(org_id),
-                    name: Set(state_project.name.clone()),
-                    active: Set(state_project.active),
-                    display_name: Set(state_project.display_name.clone()),
-                    description: Set(state_project.description.clone().unwrap_or_default()),
-                    repository: Set(state_project.repository.clone()),
-                    wildcard: Set(state_project.wildcard.clone()),
-                    force_evaluation: Set(false),
-                    created_by: Set(created_by_id),
-                    last_evaluation: Set(None),
-                    last_check_at: Set(now),
-                    created_at: Set(now),
-                    managed: Set(true),
-                    keep_evaluations: Set(state_project.keep_evaluations),
-                    concurrency: Set(i16::from(state_project.concurrency)),
-                    sign_cache: Set(state_project.sign_cache),
-                };
+                let proj = project::Model {
+                    id: ProjectId::now_v7(),
+                    organization: org_id,
+                    name: state_project.name.clone(),
+                    active: state_project.active,
+                    display_name: state_project.display_name.clone(),
+                    description: state_project.description.clone().unwrap_or_default(),
+                    repository: state_project.repository.clone(),
+                    wildcard: state_project.wildcard.clone(),
+                    created_by: created_by_id,
+                    last_check_at: now,
+                    created_at: now,
+                    managed: true,
+                    keep_evaluations: state_project.keep_evaluations,
+                    concurrency: i16::from(state_project.concurrency),
+                    sign_cache: state_project.sign_cache,
+                    ..Default::default()
+                }
+                .into_active_model();
+
                 let inserted = proj.insert(self.db).await?;
                 tracing::info!(name = %state_project.name, "Created managed project");
                 inserted
@@ -198,19 +201,21 @@ impl<'a> StateApplicator<'a> {
                     );
                 }
                 None => {
-                    let am = AProjectAction {
-                        id: Set(ProjectActionId::now_v7()),
-                        project: Set(project_id),
-                        name: Set(action.name.clone()),
-                        action_type: Set(action_type_i16),
-                        config: Set(cfg_json),
-                        events: Set(events_json),
-                        active: Set(action.active),
-                        last_fired_at: Set(None),
-                        created_by: Set(created_by),
-                        created_at: Set(now),
-                        updated_at: Set(now),
-                    };
+                    let am = MProjectAction {
+                        id: ProjectActionId::now_v7(),
+                        project: project_id,
+                        name: action.name.clone(),
+                        action_type: action_type_i16,
+                        config: cfg_json,
+                        events: events_json,
+                        active: action.active,
+                        created_by,
+                        created_at: now,
+                        updated_at: now,
+                        ..Default::default()
+                    }
+                    .into_active_model();
+
                     am.insert(self.db).await?;
                     tracing::info!(
                         project = %project_name,
@@ -270,14 +275,15 @@ impl<'a> StateApplicator<'a> {
             let desired_url: Option<String> = if o.keep_url { None } else { o.url.clone() };
             match existing_map.get(name) {
                 None => {
-                    pfio::ActiveModel {
-                        id: Set(gradient_entity::ids::FlakeInputOverrideId::now_v7()),
-                        project: Set(project_id),
-                        input_name: Set(name.clone()),
-                        url: Set(desired_url),
-                        created_at: Set(now),
-                        updated_at: Set(now),
+                    pfio::Model {
+                        id: gradient_entity::ids::FlakeInputOverrideId::now_v7(),
+                        project: project_id,
+                        input_name: name.clone(),
+                        url: desired_url,
+                        created_at: now,
+                        updated_at: now,
                     }
+                    .into_active_model()
                     .insert(self.db)
                     .await?;
                 }
@@ -339,16 +345,17 @@ pub(crate) async fn apply_project_triggers<C: ConnectionTrait>(
         if existing_by_key.contains_key(key) {
             continue;
         }
-        AProjectTrigger {
-            id: Set(ProjectTriggerId::now_v7()),
-            project: Set(project.id),
-            trigger_type: Set(i16::from(cfg.trigger_type())),
-            config: Set(cfg.to_db_json()),
-            active: Set(*active),
-            last_fired_at: Set(None),
-            created_at: Set(now),
-            updated_at: Set(now),
+        MProjectTrigger {
+            id: ProjectTriggerId::now_v7(),
+            project: project.id,
+            trigger_type: i16::from(cfg.trigger_type()),
+            config: cfg.to_db_json(),
+            active: *active,
+            created_at: now,
+            updated_at: now,
+            ..Default::default()
         }
+        .into_active_model()
         .insert(db)
         .await?;
     }

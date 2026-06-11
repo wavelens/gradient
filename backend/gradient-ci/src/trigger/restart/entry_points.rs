@@ -7,8 +7,9 @@
 use crate::trigger::TriggerError;
 use gradient_types::*;
 use chrono::NaiveDateTime;
-use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter,
+};
 use std::collections::HashMap;
 
 /// Copies the previous evaluation's entry points onto `new_eval_id`, remapping
@@ -28,15 +29,17 @@ pub(super) async fn copy_entry_points<C: ConnectionTrait>(
 
     for prev_ep in prev_entry_points {
         if let Some(&new_build_id) = build_id_map.get(&prev_ep.build) {
-            let aep = AEntryPoint {
-                id: Set(EntryPointId::now_v7()),
-                project: Set(prev_ep.project),
-                evaluation: Set(new_eval_id),
-                build: Set(new_build_id),
-                eval: Set(prev_ep.eval),
-                created_at: Set(now),
-                repo_check_id: Set(None),
-            };
+            let aep = MEntryPoint {
+                id: EntryPointId::now_v7(),
+                project: prev_ep.project,
+                evaluation: new_eval_id,
+                build: new_build_id,
+                eval: prev_ep.eval,
+                created_at: now,
+                ..Default::default()
+            }
+            .into_active_model();
+
             aep.insert(db).await?;
         }
     }

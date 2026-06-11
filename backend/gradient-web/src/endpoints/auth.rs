@@ -110,22 +110,20 @@ pub async fn post_basic_register(
         (true, None, None)
     };
 
-    let user = AUser {
-        id: Set(UserId::now_v7()),
-        username: Set(body.username.clone()),
-        name: Set(body.name.clone()),
-        email: Set(body.email.clone()),
-        password: Set(Some(generate_hash(body.password.clone()))),
-        last_login_at: Set(*NULL_TIME),
-        created_at: Set(gradient_types::now()),
-        email_verified: Set(email_verified),
-        email_verification_token: Set(verification_token.clone()),
-        email_verification_token_expires: Set(verification_expires),
-        managed: Set(false),
-        superuser: Set(false),
-        oidc_issuer: Set(None),
-        oidc_subject: Set(None),
-    };
+    let user = MUser {
+        id: UserId::now_v7(),
+        username: body.username.clone(),
+        name: body.name.clone(),
+        email: body.email.clone(),
+        password: Some(generate_hash(body.password.clone())),
+        last_login_at: *NULL_TIME,
+        created_at: gradient_types::now(),
+        email_verified,
+        email_verification_token: verification_token.clone(),
+        email_verification_token_expires: verification_expires,
+        ..Default::default()
+    }
+    .into_active_model();
 
     let user = user
         .insert(&state.web_db)
@@ -796,19 +794,18 @@ pub async fn post_cli_device_start(
     let now = gradient_types::now();
     let expires_at = now + Duration::minutes(CLI_DEVICE_LIFETIME_MINUTES);
 
-    let row = ACliDeviceAuthorization {
-        id: Set(CliDeviceAuthorizationId::now_v7()),
-        device_code_hash: Set(hash_device_code(&device_code)),
-        user_code: Set(user_code.clone()),
-        user_id: Set(None),
-        token: Set(None),
-        denied_at: Set(None),
-        authorized_at: Set(None),
-        created_at: Set(now),
-        expires_at: Set(expires_at),
-        user_agent: Set(info.user_agent.clone()),
-        ip: Set(info.ip.clone()),
-    };
+    let row = MCliDeviceAuthorization {
+        id: CliDeviceAuthorizationId::now_v7(),
+        device_code_hash: hash_device_code(&device_code),
+        user_code: user_code.clone(),
+        created_at: now,
+        expires_at,
+        user_agent: info.user_agent.clone(),
+        ip: info.ip.clone(),
+        ..Default::default()
+    }
+    .into_active_model();
+
     row.insert(&state.web_db).await?;
 
     audit_record(

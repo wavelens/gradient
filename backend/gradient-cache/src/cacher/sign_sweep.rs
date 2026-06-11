@@ -255,13 +255,15 @@ async fn try_record_cache_derivation(
         return Ok(());
     }
 
-    let row = ACacheDerivation {
-        id: Set(CacheDerivationId::now_v7()),
-        cache: Set(cache_id),
-        derivation: Set(derivation_id),
-        cached_at: Set(now),
-        last_fetched_at: Set(None),
-    };
+    let row = MCacheDerivation {
+        id: CacheDerivationId::now_v7(),
+        cache: cache_id,
+        derivation: derivation_id,
+        cached_at: now,
+        ..Default::default()
+    }
+    .into_active_model();
+
     row.insert(&state.worker_db).await?;
     Ok(())
 }

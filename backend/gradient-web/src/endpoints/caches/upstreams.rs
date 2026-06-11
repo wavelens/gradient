@@ -206,18 +206,16 @@ pub async fn put_cache_upstream(
                 ));
             }
             let name = display_name.unwrap_or_else(|| upstream.display_name.clone());
-            ACacheUpstream {
-                id: Set(CacheUpstreamId::now_v7()),
-                cache: Set(cache.id),
-                display_name: Set(name),
-                mode: Set(mode.unwrap_or(CacheSubscriptionMode::ReadWrite)),
-                kind: Set(CacheUpstreamKind::Internal),
-                upstream_cache: Set(Some(upstream.id)),
-                url: Set(None),
-                public_key: Set(None),
-                remote_cache_name: Set(None),
-                api_key: Set(None),
+            MCacheUpstream {
+                id: CacheUpstreamId::now_v7(),
+                cache: cache.id,
+                display_name: name,
+                mode: mode.unwrap_or(CacheSubscriptionMode::ReadWrite),
+                kind: CacheUpstreamKind::Internal,
+                upstream_cache: Some(upstream.id),
+                ..Default::default()
             }
+            .into_active_model()
         }
         AddUpstreamRequest::Http {
             display_name,
@@ -225,18 +223,17 @@ pub async fn put_cache_upstream(
             public_key,
         } => {
             validate_http(&url, &public_key)?;
-            ACacheUpstream {
-                id: Set(CacheUpstreamId::now_v7()),
-                cache: Set(cache.id),
-                display_name: Set(display_name),
-                mode: Set(CacheSubscriptionMode::ReadOnly),
-                kind: Set(CacheUpstreamKind::Http),
-                upstream_cache: Set(None),
-                url: Set(Some(url.trim().to_string())),
-                public_key: Set(Some(public_key)),
-                remote_cache_name: Set(None),
-                api_key: Set(None),
+            MCacheUpstream {
+                id: CacheUpstreamId::now_v7(),
+                cache: cache.id,
+                display_name,
+                mode: CacheSubscriptionMode::ReadOnly,
+                kind: CacheUpstreamKind::Http,
+                url: Some(url.trim().to_string()),
+                public_key: Some(public_key),
+                ..Default::default()
             }
+            .into_active_model()
         }
         AddUpstreamRequest::GradientProto {
             url,
@@ -256,18 +253,18 @@ pub async fn put_cache_upstream(
                 ),
                 _ => None,
             };
-            ACacheUpstream {
-                id: Set(CacheUpstreamId::now_v7()),
-                cache: Set(cache.id),
-                display_name: Set(display_name),
-                mode: Set(mode.unwrap_or(CacheSubscriptionMode::ReadOnly)),
-                kind: Set(CacheUpstreamKind::GradientProto),
-                upstream_cache: Set(None),
-                url: Set(Some(url.trim().to_string())),
-                public_key: Set(None),
-                remote_cache_name: Set(Some(remote_cache.trim().to_string())),
-                api_key: Set(api_key_enc),
+            MCacheUpstream {
+                id: CacheUpstreamId::now_v7(),
+                cache: cache.id,
+                display_name,
+                mode: mode.unwrap_or(CacheSubscriptionMode::ReadOnly),
+                kind: CacheUpstreamKind::GradientProto,
+                url: Some(url.trim().to_string()),
+                remote_cache_name: Some(remote_cache.trim().to_string()),
+                api_key: api_key_enc,
+                ..Default::default()
             }
+            .into_active_model()
         }
     };
 

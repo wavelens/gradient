@@ -23,12 +23,14 @@ use chrono::Duration;
 use gradient_types::constants::{MAX_BUILD_REQUEST_SIZE, UPLOAD_SESSION_TTL};
 use gradient_types::ids::UploadSessionId;
 use gradient_types::{
-    ABuildRequestBlob, AUploadSession, BaseResponse, CBuildRequestBlob, EBuildRequestBlob, MUser,
+    ABuildRequestBlob, BaseResponse, CBuildRequestBlob, EBuildRequestBlob, MUploadSession, MUser,
     now,
 };
 use gradient_core::ServerState;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, QueryFilter};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -142,16 +144,17 @@ pub async fn post_manifest(
         + Duration::from_std(UPLOAD_SESSION_TTL)
             .map_err(|e| WebError::internal(format!("Invalid UPLOAD_SESSION_TTL: {}", e)))?;
 
-    AUploadSession {
-        id: Set(session_id),
-        organization: Set(org.id),
-        manifest: Set(manifest_value),
-        missing: Set(missing_value),
-        total_size: Set(total),
-        created_at: Set(now_ts),
-        expires_at: Set(expires_at),
-        dispatched_at: Set(None),
+    MUploadSession {
+        id: session_id,
+        organization: org.id,
+        manifest: manifest_value,
+        missing: missing_value,
+        total_size: total,
+        created_at: now_ts,
+        expires_at,
+        ..Default::default()
     }
+    .into_active_model()
     .insert(&state.web_db)
     .await?;
 

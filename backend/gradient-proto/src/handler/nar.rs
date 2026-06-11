@@ -71,13 +71,15 @@ async fn upsert_cache_metric(
             am.update(&state.worker_db).await?;
         }
         None => {
-            let am = ACacheMetric {
-                id: Set(CacheMetricId::now_v7()),
-                cache: Set(cache_id),
-                bucket_time: Set(bucket),
-                bytes_sent: Set(bytes),
-                nar_count: Set(1),
-            };
+            let am = MCacheMetric {
+                id: CacheMetricId::now_v7(),
+                cache: cache_id,
+                bucket_time: bucket,
+                bytes_sent: bytes,
+                nar_count: 1,
+            }
+            .into_active_model();
+
             am.insert(&state.worker_db).await?;
         }
     }

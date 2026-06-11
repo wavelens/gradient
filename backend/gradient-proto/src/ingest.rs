@@ -107,20 +107,22 @@ async fn upsert_and_sign<C: ConnectionTrait>(
             (id, false)
         }
         None => {
-            let am = ACachedPath {
-                id: Set(CachedPathId::now_v7()),
-                store_path: Set(input.store_path.to_owned()),
-                hash: Set(hash.to_owned()),
-                package: Set(package.to_owned()),
-                file_hash: Set(Some(normalize_nar_hash(input.file_hash))),
-                file_size: Set(Some(input.file_size)),
-                nar_size: Set(Some(input.nar_size)),
-                nar_hash: Set(Some(normalize_nar_hash(input.nar_hash))),
-                references: Set(references_str),
-                ca: Set(None),
-                deriver: Set(input.deriver.map(str::to_owned)),
-                created_at: Set(ts),
-            };
+            let am = MCachedPath {
+                id: CachedPathId::now_v7(),
+                store_path: input.store_path.to_owned(),
+                hash: hash.to_owned(),
+                package: package.to_owned(),
+                file_hash: Some(normalize_nar_hash(input.file_hash)),
+                file_size: Some(input.file_size),
+                nar_size: Some(input.nar_size),
+                nar_hash: Some(normalize_nar_hash(input.nar_hash)),
+                references: references_str,
+                deriver: input.deriver.map(str::to_owned),
+                created_at: ts,
+                ..Default::default()
+            }
+            .into_active_model();
+
             match am.insert(db).await {
                 Ok(row) => (row.id, true),
                 Err(e) => {
@@ -153,14 +155,15 @@ async fn upsert_and_sign<C: ConnectionTrait>(
     if !cache_ids.is_empty() {
         let rows: Vec<ACachedPathSignature> = cache_ids
             .into_iter()
-            .map(|cid| ACachedPathSignature {
-                id: Set(CachedPathSignatureId::now_v7()),
-                cached_path: Set(cached_path_id),
-                cache: Set(cid),
-                signature: Set(None),
-                created_at: Set(ts),
-                last_fetched_at: Set(None),
-                fetch_count: Set(0),
+            .map(|cid| {
+                MCachedPathSignature {
+                    id: CachedPathSignatureId::now_v7(),
+                    cached_path: cached_path_id,
+                    cache: cid,
+                    created_at: ts,
+                    ..Default::default()
+                }
+                .into_active_model()
             })
             .collect();
 

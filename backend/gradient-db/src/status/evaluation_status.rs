@@ -9,8 +9,7 @@ use crate::DbContext;
 use crate::state_machine::EvalStateMachine;
 use gradient_types::*;
 use gradient_entity::evaluation::EvaluationStatus;
-use sea_orm::ActiveValue::Set;
-use sea_orm::{Condition, ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::{Condition, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
 use tracing::{debug, error, warn};
 
 pub async fn update_evaluation_status(
@@ -157,14 +156,16 @@ pub async fn update_evaluation_status_with_error(
 
     debug!(evaluation_id = %evaluation.id, status = ?status, error = %error_message, ?source, "Updating evaluation status with error");
 
-    let msg = AEvaluationMessage {
-        id: Set(EvaluationMessageId::now_v7()),
-        evaluation: Set(evaluation.id),
-        level: Set(MessageLevel::Error),
-        message: Set(error_message),
-        source: Set(source),
-        created_at: Set(gradient_types::now()),
-    };
+    let msg = MEvaluationMessage {
+        id: EvaluationMessageId::now_v7(),
+        evaluation: evaluation.id,
+        level: MessageLevel::Error,
+        message: error_message,
+        source,
+        created_at: gradient_types::now(),
+    }
+    .into_active_model();
+
     if let Err(e) = EEvaluationMessage::insert(msg).exec(&ctx.worker_db).await {
         error!(error = %e, evaluation_id = %evaluation.id, "Failed to insert evaluation_message");
     }

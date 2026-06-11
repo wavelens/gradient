@@ -17,7 +17,8 @@ use jsonwebtoken::{
 };
 use rand::RngExt as _;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
+    TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -109,12 +110,13 @@ async fn apply_oidc_group_grants<C: sea_orm::ConnectionTrait>(
                     .context("update org role from OIDC group")?;
             }
             None => {
-                AOrganizationUser {
-                    id: Set(OrganizationUserId::now_v7()),
-                    organization: Set(org_id),
-                    user: Set(user_id),
-                    role: Set(role_id),
+                MOrganizationUser {
+                    id: OrganizationUserId::now_v7(),
+                    organization: org_id,
+                    user: user_id,
+                    role: role_id,
                 }
+                .into_active_model()
                 .insert(tx)
                 .await
                 .context("insert org membership from OIDC group")?;
@@ -472,22 +474,19 @@ async fn create_or_update_user(
         return Ok(user);
     }
 
-    let user = AUser {
-        id: Set(UserId::now_v7()),
-        username: Set(login_name),
-        name: Set(display_name),
-        email: Set(email),
-        password: Set(None),
-        last_login_at: Set(gradient_types::now()),
-        created_at: Set(gradient_types::now()),
-        email_verified: Set(true),
-        email_verification_token: Set(None),
-        email_verification_token_expires: Set(None),
-        managed: Set(false),
-        superuser: Set(false),
-        oidc_issuer: Set(Some(claims.iss)),
-        oidc_subject: Set(Some(claims.sub)),
+    let user = MUser {
+        id: UserId::now_v7(),
+        username: login_name,
+        name: display_name,
+        email,
+        last_login_at: gradient_types::now(),
+        created_at: gradient_types::now(),
+        email_verified: true,
+        oidc_issuer: Some(claims.iss),
+        oidc_subject: Some(claims.sub),
+        ..Default::default()
     }
+    .into_active_model()
     .insert(&tx)
     .await
     .context("Failed to create user")?;

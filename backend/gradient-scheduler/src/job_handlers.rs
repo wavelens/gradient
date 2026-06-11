@@ -13,7 +13,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use gradient_entity::build::BuildStatus;
 use sea_orm::EntityTrait;
-use sea_orm::{ColumnTrait, QueryFilter, Set};
+use sea_orm::{ColumnTrait, IntoActiveModel, QueryFilter};
 use tracing::{debug, error, info, warn};
 
 use gradient_exec::strip_nix_store_prefix;
@@ -695,25 +695,26 @@ impl Scheduler {
 async fn persist_dispatched_job(state: &Arc<ServerState>, worker_id: &str, rec: DispatchRecord) {
     let now = now();
     let dispatched_job_id = gradient_entity::ids::DispatchedJobId::now_v7();
-    let row = gradient_entity::dispatched_job::ActiveModel {
-        id: Set(dispatched_job_id),
-        kind: Set(rec.kind),
-        evaluation_id: Set(rec.evaluation_id),
-        organization: Set(rec.organization),
-        project: Set(rec.project),
-        worker_id: Set(worker_id.to_owned()),
-        score: Set(rec.score),
-        queued_at: Set(rec.queued_at),
-        ready_at: Set(Some(rec.ready_at)),
-        dispatched_at: Set(now),
-        finished_at: Set(None),
-        score_breakdown: Set(rec.score_breakdown),
-        worker_context: Set(rec.worker_context),
-        job_context: Set(rec.job_context),
-        instance_context: Set(Some(rec.instance_context.clone())),
-        candidates: Set(None),
-        created_at: Set(now),
-    };
+    let row = gradient_entity::dispatched_job::Model {
+        id: dispatched_job_id,
+        kind: rec.kind,
+        evaluation_id: rec.evaluation_id,
+        organization: rec.organization,
+        project: rec.project,
+        worker_id: worker_id.to_owned(),
+        score: rec.score,
+        queued_at: rec.queued_at,
+        ready_at: Some(rec.ready_at),
+        dispatched_at: now,
+        score_breakdown: rec.score_breakdown,
+        worker_context: rec.worker_context,
+        job_context: rec.job_context,
+        instance_context: Some(rec.instance_context.clone()),
+        created_at: now,
+        ..Default::default()
+    }
+    .into_active_model();
+
     if let Err(e) = gradient_entity::dispatched_job::Entity::insert(row)
         .exec(&state.worker_db)
         .await

@@ -6,7 +6,7 @@
 
 use chrono::NaiveDateTime;
 use gradient_entity::build_attempt::{
-    ActiveModel, AttemptFailureReason, AttemptOutcome, Column, Entity, Model,
+    AttemptFailureReason, AttemptOutcome, Column, Entity, Model,
 };
 use gradient_entity::ids::{BuildAttemptId, BuildId, DispatchedJobId};
 use sea_orm::ActiveValue::Set;
@@ -23,16 +23,17 @@ pub async fn open_attempt<C: ConnectionTrait>(
     substitute: bool,
     build_context: serde_json::Value,
 ) -> Result<Model, DbErr> {
-    ActiveModel {
-        id: Set(BuildAttemptId::now_v7()),
-        build: Set(build),
-        dispatched_job: Set(dispatched_job),
-        substitute: Set(substitute),
-        outcome: Set(AttemptOutcome::Running),
-        build_context: Set(build_context),
-        created_at: Set(gradient_types::now()),
+    Model {
+        id: BuildAttemptId::now_v7(),
+        build,
+        dispatched_job,
+        substitute,
+        outcome: AttemptOutcome::Running,
+        build_context,
+        created_at: gradient_types::now(),
         ..Default::default()
     }
+    .into_active_model()
     .insert(db)
     .await
 }

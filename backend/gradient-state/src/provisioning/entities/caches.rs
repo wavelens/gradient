@@ -16,7 +16,7 @@ use anyhow::Result;
 use base64::{Engine, engine::general_purpose};
 use gradient_entity::organization_cache::CacheSubscriptionMode;
 use gradient_entity::*;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
 use std::collections::{HashMap, HashSet};
 
 impl<'a> StateApplicator<'a> {
@@ -87,22 +87,24 @@ impl<'a> StateApplicator<'a> {
                 existing.id
             } else {
                 let cache_id = CacheId::now_v7();
-                let cache_model = cache::ActiveModel {
-                    id: Set(cache_id),
-                    name: Set(state_cache.name.clone()),
-                    display_name: Set(state_cache.display_name.clone()),
-                    description: Set(state_cache.description.clone().unwrap_or_default()),
-                    active: Set(state_cache.active),
-                    priority: Set(state_cache.priority),
-                    local_priority: Set(state_cache.local_priority),
-                    public_key: Set(public_key),
-                    private_key: Set(encrypted_signing_key),
-                    public: Set(state_cache.public),
-                    created_by: Set(created_by_id),
-                    created_at: Set(now),
-                    managed: Set(true),
-                    max_storage_gb: Set(state_cache.max_storage_gb),
-                };
+                let cache_model = cache::Model {
+                    id: cache_id,
+                    name: state_cache.name.clone(),
+                    display_name: state_cache.display_name.clone(),
+                    description: state_cache.description.clone().unwrap_or_default(),
+                    active: state_cache.active,
+                    priority: state_cache.priority,
+                    local_priority: state_cache.local_priority,
+                    public_key,
+                    private_key: encrypted_signing_key,
+                    public: state_cache.public,
+                    created_by: created_by_id,
+                    created_at: now,
+                    managed: true,
+                    max_storage_gb: state_cache.max_storage_gb,
+                }
+                .into_active_model();
+
                 cache_model.insert(self.db).await?;
                 tracing::info!(name = %state_cache.name, "Created managed cache");
                 cache_id
@@ -126,12 +128,14 @@ impl<'a> StateApplicator<'a> {
                     .await?;
 
                 if existing_association.is_none() {
-                    let org_cache_model = organization_cache::ActiveModel {
-                        id: Set(OrganizationCacheId::now_v7()),
-                        organization: Set(org_id),
-                        cache: Set(cache_id),
-                        mode: Set(organization_cache::CacheSubscriptionMode::ReadWrite),
-                    };
+                    let org_cache_model = organization_cache::Model {
+                        id: OrganizationCacheId::now_v7(),
+                        organization: org_id,
+                        cache: cache_id,
+                        mode: organization_cache::CacheSubscriptionMode::ReadWrite,
+                    }
+                    .into_active_model();
+
                     org_cache_model.insert(self.db).await?;
                     tracing::info!(
                         organization = %org_name,
@@ -191,12 +195,14 @@ impl<'a> StateApplicator<'a> {
         if existing.is_some() {
             return Ok(());
         }
-        let active = ACacheUser {
-            id: Set(CacheUserId::now_v7()),
-            cache: Set(cache_id),
-            user: Set(created_by_id),
-            role: Set(BASE_CACHE_ROLE_ADMIN_ID),
-        };
+        let active = MCacheUser {
+            id: CacheUserId::now_v7(),
+            cache: cache_id,
+            user: created_by_id,
+            role: BASE_CACHE_ROLE_ADMIN_ID,
+        }
+        .into_active_model();
+
         active.insert(self.db).await?;
         tracing::info!(
             cache = %cache_name,
@@ -243,36 +249,34 @@ impl<'a> StateApplicator<'a> {
                     let name = display_name
                         .clone()
                         .unwrap_or_else(|| upstream_cache_name.clone());
-                    ACacheUpstream {
-                        id: Set(CacheUpstreamId::now_v7()),
-                        cache: Set(cache_id),
-                        display_name: Set(name),
-                        mode: Set(mode.clone()),
-                        kind: Set(cache_upstream::CacheUpstreamKind::Internal),
-                        upstream_cache: Set(Some(upstream_id)),
-                        url: Set(None),
-                        public_key: Set(None),
-                        remote_cache_name: Set(None),
-                        api_key: Set(None),
+                    MCacheUpstream {
+                        id: CacheUpstreamId::now_v7(),
+                        cache: cache_id,
+                        display_name: name,
+                        mode: mode.clone(),
+                        kind: cache_upstream::CacheUpstreamKind::Internal,
+                        upstream_cache: Some(upstream_id),
+                        ..Default::default()
                     }
+                    .into_active_model()
                 }
                 StateUpstream::External {
                     display_name,
                     url,
                     public_key,
-                } => ACacheUpstream {
-                    id: Set(CacheUpstreamId::now_v7()),
-                    cache: Set(cache_id),
-                    display_name: Set(display_name.clone()),
-                    mode: Set(CacheSubscriptionMode::ReadOnly),
-                    kind: Set(cache_upstream::CacheUpstreamKind::Http),
-                    upstream_cache: Set(None),
-                    url: Set(Some(url.clone())),
-                    public_key: Set(Some(public_key.clone())),
-                    remote_cache_name: Set(None),
-                    api_key: Set(None),
-                },
+                } => MCacheUpstream {
+                    id: CacheUpstreamId::now_v7(),
+                    cache: cache_id,
+                    display_name: display_name.clone(),
+                    mode: CacheSubscriptionMode::ReadOnly,
+                    kind: cache_upstream::CacheUpstreamKind::Http,
+                    url: Some(url.clone()),
+                    public_key: Some(public_key.clone()),
+                    ..Default::default()
+                }
+                .into_active_model(),
             };
+
             record.insert(self.db).await?;
         }
 
@@ -330,13 +334,15 @@ impl<'a> StateApplicator<'a> {
                 active.update(self.db).await?;
                 tracing::info!(cache = %cache_name, role = %entry.name, "Updated managed cache role");
             } else {
-                let active = ACacheRole {
-                    id: Set(RoleId::now_v7()),
-                    name: Set(entry.name.clone()),
-                    cache: Set(Some(cache_id)),
-                    permission: Set(mask),
-                    managed: Set(true),
-                };
+                let active = MCacheRole {
+                    id: RoleId::now_v7(),
+                    name: entry.name.clone(),
+                    cache: Some(cache_id),
+                    permission: mask,
+                    managed: true,
+                }
+                .into_active_model();
+
                 active.insert(self.db).await?;
                 tracing::info!(cache = %cache_name, role = %entry.name, "Created managed cache role");
             }
@@ -386,12 +392,14 @@ impl<'a> StateApplicator<'a> {
                     tracing::info!(cache = %cache_name, user = %entry.user, "Updated cache member role");
                 }
             } else {
-                let active = ACacheUser {
-                    id: Set(CacheUserId::now_v7()),
-                    cache: Set(cache_id),
-                    user: Set(user_id),
-                    role: Set(role_id),
-                };
+                let active = MCacheUser {
+                    id: CacheUserId::now_v7(),
+                    cache: cache_id,
+                    user: user_id,
+                    role: role_id,
+                }
+                .into_active_model();
+
                 active.insert(self.db).await?;
                 tracing::info!(cache = %cache_name, user = %entry.user, "Added cache member");
             }

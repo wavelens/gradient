@@ -8,11 +8,11 @@ use super::send::{execute_forge_status_report, execute_send_mail, execute_send_w
 use super::{MAX_BODY_BYTES, truncate};
 use crate::context::CiContext;
 use gradient_types::{
-    AProjectActionDelivery, ActionConfig, MProjectAction, ProjectActionDeliveryId,
+    ActionConfig, MProjectAction, MProjectActionDelivery, ProjectActionDeliveryId,
 };
 use anyhow::{Context, Result};
 use sea_orm::ActiveValue::Set;
-use sea_orm::ActiveModelTrait;
+use sea_orm::{ActiveModelTrait, IntoActiveModel};
 use serde_json::Value as JsonValue;
 use std::time::Instant;
 use tracing::warn;
@@ -67,18 +67,20 @@ pub async fn execute_action(
     };
 
     let action_id = action.id;
-    let delivery = AProjectActionDelivery {
-        id: Set(ProjectActionDeliveryId::now_v7()),
-        action_id: Set(action_id),
-        event: Set(event.to_string()),
-        request_body: Set(request_body),
-        response_status: Set(response_status),
-        response_body: Set(response_body.map(|s| truncate(s, MAX_BODY_BYTES))),
-        error_message: Set(error_message),
-        success: Set(success),
-        duration_ms: Set(duration_ms),
-        delivered_at: Set(gradient_types::now()),
-    };
+    let delivery = MProjectActionDelivery {
+        id: ProjectActionDeliveryId::now_v7(),
+        action_id,
+        event: event.to_string(),
+        request_body,
+        response_status,
+        response_body: response_body.map(|s| truncate(s, MAX_BODY_BYTES)),
+        error_message,
+        success,
+        duration_ms,
+        delivered_at: gradient_types::now(),
+    }
+    .into_active_model();
+
     if let Err(e) = delivery.insert(&ctx.db.worker_db).await {
         warn!(error = %e, %action_id, "Failed to record action delivery");
     }

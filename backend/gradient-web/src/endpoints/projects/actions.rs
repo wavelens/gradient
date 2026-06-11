@@ -25,7 +25,8 @@ use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, Order, QueryFilter, QueryOrder, QuerySelect,
+    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, Order, QueryFilter, QueryOrder,
+    QuerySelect,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -262,22 +263,22 @@ pub async fn create_action(
     };
 
     let now = Utc::now().naive_utc();
-    let am =
-        AProjectAction {
-            id: Set(ProjectActionId::now_v7()),
-            project: Set(proj.id),
-            name: Set(body.name),
-            action_type: Set(stored_config.action_type().to_i16()),
-            config: Set(serde_json::to_value(&stored_config)
-                .map_err(|e| WebError::internal(e.to_string()))?),
-            events: Set(serde_json::to_value(&body.events)
-                .map_err(|e| WebError::internal(e.to_string()))?),
-            active: Set(body.active),
-            last_fired_at: Set(None),
-            created_by: Set(user.id),
-            created_at: Set(now),
-            updated_at: Set(now),
-        };
+    let am = MProjectAction {
+        id: ProjectActionId::now_v7(),
+        project: proj.id,
+        name: body.name,
+        action_type: stored_config.action_type().to_i16(),
+        config: serde_json::to_value(&stored_config)
+            .map_err(|e| WebError::internal(e.to_string()))?,
+        events: serde_json::to_value(&body.events).map_err(|e| WebError::internal(e.to_string()))?,
+        active: body.active,
+        created_by: user.id,
+        created_at: now,
+        updated_at: now,
+        ..Default::default()
+    }
+    .into_active_model();
+
     let m = am
         .insert(&state.web_db)
         .await

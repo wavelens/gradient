@@ -11,7 +11,7 @@ use crate::config::*;
 use gradient_types::*;
 use anyhow::Result;
 use gradient_entity::*;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
 use std::collections::HashMap;
 
 impl<'a> StateApplicator<'a> {
@@ -62,13 +62,15 @@ impl<'a> StateApplicator<'a> {
                 id
             } else {
                 let id = RoleId::now_v7();
-                let active = role::ActiveModel {
-                    id: Set(id),
-                    name: Set(state_role.name.clone()),
-                    organization: Set(Some(org_id)),
-                    permission: Set(mask),
-                    managed: Set(true),
-                };
+                let active = role::Model {
+                    id,
+                    name: state_role.name.clone(),
+                    organization: Some(org_id),
+                    permission: mask,
+                    managed: true,
+                }
+                .into_active_model();
+
                 active.insert(self.db).await?;
                 tracing::info!(name = %state_role.name, "Created managed role");
                 id

@@ -6,8 +6,7 @@
 
 use crate::DbContext;
 use gradient_types::*;
-use sea_orm::ActiveValue::Set;
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter};
 use tracing::{error, warn};
 
 /// Compress a finalized build log into zstd chunks, persist the chunk index,
@@ -51,7 +50,7 @@ async fn replace_log_chunk_index(
     log_id: gradient_entity::ids::BuildId,
     descs: &[gradient_storage::log_chunk::StoredChunkDesc],
 ) -> Result<(), sea_orm::DbErr> {
-    use gradient_entity::build_log_chunk::{ActiveModel, Column, Entity};
+    use gradient_entity::build_log_chunk::{ActiveModel, Column, Entity, Model};
     Entity::delete_many()
         .filter(Column::Build.eq(log_id))
         .exec(db)
@@ -62,16 +61,19 @@ async fn replace_log_chunk_index(
     let rows: Vec<ActiveModel> = descs
         .iter()
         .enumerate()
-        .map(|(i, d)| ActiveModel {
-            id: Set(gradient_entity::ids::BuildLogChunkId::now_v7()),
-            build: Set(log_id),
-            chunk_index: Set(i as i32),
-            byte_start: Set(d.byte_start as i64),
-            byte_len: Set(d.byte_len as i32),
-            line_start: Set(d.line_start as i64),
-            line_count: Set(d.line_count as i32),
-            compressed_size: Set(d.compressed_size as i32),
-            color_prefix: Set(d.color_prefix.clone()),
+        .map(|(i, d)| {
+            Model {
+                id: gradient_entity::ids::BuildLogChunkId::now_v7(),
+                build: log_id,
+                chunk_index: i as i32,
+                byte_start: d.byte_start as i64,
+                byte_len: d.byte_len as i32,
+                line_start: d.line_start as i64,
+                line_count: d.line_count as i32,
+                compressed_size: d.compressed_size as i32,
+                color_prefix: d.color_prefix.clone(),
+            }
+            .into_active_model()
         })
         .collect();
     Entity::insert_many(rows).exec(db).await?;
@@ -92,16 +94,16 @@ pub async fn record_phase_event(
     worker_id: Option<String>,
     at: chrono::NaiveDateTime,
 ) {
-    let ev = gradient_entity::phase_event::ActiveModel {
-        id: Set(gradient_entity::ids::PhaseEventId::now_v7()),
-        subject_kind: Set(subject_kind),
-        subject_id: Set(subject_id),
-        phase: Set(phase),
-        event: Set(0),
-        at: Set(at),
-        worker_id: Set(worker_id),
-        detail: Set(None),
-    };
+    let ev = gradient_entity::phase_event::Model {
+        id: gradient_entity::ids::PhaseEventId::now_v7(),
+        subject_kind,
+        subject_id,
+        phase,
+        at,
+        worker_id,
+        ..Default::default()
+    }
+    .into_active_model();
     if let Err(e) = gradient_entity::phase_event::Entity::insert(ev)
         .exec(db)
         .await
@@ -118,14 +120,16 @@ pub async fn insert_evaluation_message<C: ConnectionTrait>(
     message: String,
     source: Option<String>,
 ) -> Result<(), sea_orm::DbErr> {
-    let msg = AEvaluationMessage {
-        id: Set(EvaluationMessageId::now_v7()),
-        evaluation: Set(evaluation_id),
-        level: Set(level),
-        message: Set(message),
-        source: Set(source),
-        created_at: Set(gradient_types::now()),
-    };
+    let msg = MEvaluationMessage {
+        id: EvaluationMessageId::now_v7(),
+        evaluation: evaluation_id,
+        level,
+        message,
+        source,
+        created_at: gradient_types::now(),
+    }
+    .into_active_model();
+
     EEvaluationMessage::insert(msg).exec(db).await?;
     Ok(())
 }

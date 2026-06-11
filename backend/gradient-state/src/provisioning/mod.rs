@@ -18,8 +18,8 @@ use crate::config::StateConfiguration;
 use gradient_types::*;
 use gradient_entity::*;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter,
-    Set,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait,
+    IntoActiveModel, QueryFilter, Set,
 };
 use std::collections::HashMap;
 
@@ -133,12 +133,13 @@ pub async fn apply_pending_org_memberships<C: ConnectionTrait>(
                 applied += 1;
             }
             None => {
-                organization_user::ActiveModel {
-                    id: Set(OrganizationUserId::now_v7()),
-                    organization: Set(entry.organization),
-                    user: Set(user_id),
-                    role: Set(entry.role),
+                organization_user::Model {
+                    id: OrganizationUserId::now_v7(),
+                    organization: entry.organization,
+                    user: user_id,
+                    role: entry.role,
                 }
+                .into_active_model()
                 .insert(db)
                 .await?;
                 applied += 1;

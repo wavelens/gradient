@@ -17,8 +17,8 @@ use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, JoinType, PaginatorTrait, QueryFilter,
-    QuerySelect, RelationTrait,
+    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, JoinType,
+    PaginatorTrait, QueryFilter, QuerySelect, RelationTrait,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -159,12 +159,13 @@ pub async fn post_cache_member(
         .await?
         .or_not_found("Role")?;
 
-    ACacheUser {
-        id: Set(CacheUserId::now_v7()),
-        cache: Set(cache.id),
-        user: Set(target_user.id),
-        role: Set(role.id),
+    MCacheUser {
+        id: CacheUserId::now_v7(),
+        cache: cache.id,
+        user: target_user.id,
+        role: role.id,
     }
+    .into_active_model()
     .insert(&state.web_db)
     .await?;
 

@@ -11,7 +11,7 @@ use crate::config::*;
 use gradient_types::*;
 use anyhow::Result;
 use gradient_entity::*;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
 use std::collections::HashMap;
 
 impl<'a> StateApplicator<'a> {
@@ -67,21 +67,23 @@ impl<'a> StateApplicator<'a> {
                         "Updated worker registration"
                     );
                 } else {
-                    let reg = worker_registration::ActiveModel {
-                        id: Set(WorkerRegistrationId::now_v7()),
-                        peer_id: Set(peer_id),
-                        worker_id: Set(state_worker.worker_id.clone()),
-                        token_hash: Set(token_hash.clone()),
-                        managed: Set(true),
-                        url: Set(url.clone()),
-                        display_name: Set(state_worker.display_name.clone()),
-                        active: Set(true),
-                        enable_fetch: Set(state_worker.enable_fetch),
-                        enable_eval: Set(state_worker.enable_eval),
-                        enable_build: Set(state_worker.enable_build),
-                        created_by: Set(Some(created_by_id)),
-                        created_at: Set(now()),
-                    };
+                    let reg = worker_registration::Model {
+                        id: WorkerRegistrationId::now_v7(),
+                        peer_id,
+                        worker_id: state_worker.worker_id.clone(),
+                        token_hash: token_hash.clone(),
+                        managed: true,
+                        url: url.clone(),
+                        display_name: state_worker.display_name.clone(),
+                        active: true,
+                        enable_fetch: state_worker.enable_fetch,
+                        enable_eval: state_worker.enable_eval,
+                        enable_build: state_worker.enable_build,
+                        created_by: Some(created_by_id),
+                        created_at: now(),
+                    }
+                    .into_active_model();
+
                     reg.insert(self.db).await?;
                     tracing::info!(
                         worker_id = %state_worker.worker_id,
