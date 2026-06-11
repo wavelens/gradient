@@ -5,6 +5,7 @@
  */
 
 pub mod admin_tasks;
+pub mod build;
 pub mod build_attempt;
 pub mod cache_reach;
 pub mod cache_storage;
@@ -29,6 +30,7 @@ pub mod state_machine;
 pub mod status;
 pub mod status_reactor;
 
+pub use self::build::builds_with_satisfied_deps;
 pub use self::build_attempt::*;
 pub use self::cache_reach::*;
 pub use self::cache_storage::{
