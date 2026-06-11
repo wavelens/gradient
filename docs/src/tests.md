@@ -424,6 +424,43 @@ Backend (`cargo test -p worker --bins proto::nar::tests`):
 - `upload_presigned_fails_when_path_meta_unavailable` - same contract for
   the S3 / presigned-PUT branch.
 
+## Resumable NAR transfers (#225)
+
+Interrupted NAR transfers resume from a byte offset instead of restarting
+from 0, in both directions. Resume rests on byte offsets, the existing
+`NarUploaded.file_size` length check, and a `stream_token` guard (no content
+hashing). Receivers stage chunks to `*.partial` files; senders stay stateless
+and seek to the requested offset. End-to-end resume across a real reconnect is
+exercised by the NixOS VM suite in CI.
+
+Storage (`cargo test -p gradient-storage`):
+- `partial::tests` - `append_then_resume_reports_len`, `non_contiguous_append_errors`,
+  `token_mismatch_truncates_to_zero`, `discard_is_idempotent`,
+  `namespaced_key_creates_subdir`, `total_bytes_sums_partials`, `gc_zero_ttl_disabled`
+  cover the on-disk `PartialStore` (contiguous append, offset-0 restart, token guard,
+  GC).
+- `nar::tests::get_stream_from_*` - `NarStore::get_stream_from` returns the suffix from
+  an offset, equals the full object at 0, and yields an empty stream past the end.
+
+Proto (`cargo test -p gradient-proto`):
+- `tests::nar_stream_header_client_roundtrip` / `nar_request_resume_roundtrip` /
+  `nar_stream_header_server_roundtrip` / `nar_push_resume_roundtrip` - rkyv
+  round-trip of the four additive resume messages.
+- `handler::socket::serve_nar_tests::serve_streams_full_payload_in_chunks` - the
+  server now emits a leading `NarStreamHeader` before the `NarPush` chunks.
+- `handler::dispatch::nar_receive_store_tests` - the disk-backed push receiver:
+  contiguous append, non-contiguous/overflow poisoning, cross-key budget,
+  `note_header` resumable prefix + token mismatch, presigned-mode detection,
+  poison-clear retry, and `finish` discard.
+
+Worker (`cargo test -p gradient-worker`):
+- `proto::nar_recv::tests::partial_store_resumes_across_reconnect` - a fresh
+  receiver over the same partial root resumes a download from the staged prefix.
+- `proto::nar_recv::tests::push_resume_gate_*` - the push-resume gate resolves
+  with the server offset and defaults to 0 when the server never answers.
+- `proto::nar::tests::trim_for_resume_skips_trims_and_passes` - the push-sender
+  skips/trims regenerated compressed parts to resume from an offset.
+
 ## Worker prefetch - re-derive `.drv` references from content
 
 When `prefetch_inputs` fetches a `.drv` during the closure walk, it harvests

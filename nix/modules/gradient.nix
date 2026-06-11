@@ -628,14 +628,26 @@ in {
 
         maxNarBufferBytes = lib.mkOption {
           description = ''
-            Maximum bytes a single proto session may hold in its inbound
-            NAR upload buffers (open `NarPush` streams that haven't been
-            finalised). Without this cap a rogue worker could open many
-            streams without finalising them and pin unbounded RAM on the
-            server (issue #109).
+            Maximum total bytes the server may hold across open `*.partial`
+            NAR upload files (un-finalised `NarPush` streams staged under
+            `<baseDir>/nar-partial`). Without this cap a rogue worker could
+            open many streams without finalising them and fill the disk
+            (issue #109).
           '';
           type = lib.types.ints.positive;
           default = 10 * 1024 * 1024 * 1024;
+        };
+
+        narPartialTtlSecs = lib.mkOption {
+          description = ''
+            TTL in seconds for partially-received NAR uploads (`*.partial`)
+            staged under `<baseDir>/nar-partial`. A periodic sweep deletes
+            partials whose last write is older than this so an abandoned
+            resumable transfer can't pin disk forever (issue #225). Set to 0
+            to disable the sweep.
+          '';
+          type = lib.types.ints.unsigned;
+          default = 86400;
         };
 
         allowAnonymousCache = lib.mkOption {
@@ -789,6 +801,7 @@ in {
         GRADIENT_NAR_SEND_CHUNK_TIMEOUT_SECS = toString cfg.settings.narSendChunkTimeoutSecs;
         GRADIENT_MAX_CONCURRENT_NAR_SERVES = toString cfg.settings.maxConcurrentNarServes;
         GRADIENT_MAX_NAR_BUFFER_BYTES = toString cfg.settings.maxNarBufferBytes;
+        GRADIENT_NAR_PARTIAL_TTL_SECS = toString cfg.settings.narPartialTtlSecs;
         GRADIENT_PROTO_ALLOW_ANONYMOUS_CACHE = lib.boolToString cfg.settings.allowAnonymousCache;
         GRADIENT_PROTO_ANON_MAX_CONNECTIONS_PER_IP = toString cfg.settings.anonMaxConnectionsPerIp;
         GRADIENT_PROTO_ANON_RATE_PER_SECOND = toString cfg.settings.anonRatePerSecond;
