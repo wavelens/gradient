@@ -9,8 +9,8 @@ use gradient_entity::ids::BuildId;
 use sea_orm::{ConnectionTrait, DbBackend, DbErr, EntityTrait, Statement};
 
 /// Returns the subset of `build_ids` whose every dependency has a `Completed`(3)
-/// or `Substituted`(7) build in the same evaluation. Mirrors the dispatcher's
-/// readiness antijoin in `gradient-scheduler`.
+/// or `Substituted`(7) build in the same evaluation. Antijoin mirrors
+/// `gradient-scheduler/src/dispatch.rs:680`; behavioral correctness is covered by end-to-end CI.
 pub async fn builds_with_satisfied_deps<C: ConnectionTrait>(
     db: &C,
     build_ids: &[BuildId],
@@ -73,41 +73,21 @@ mod tests {
         assert!(result.is_empty());
     }
 
+    // MockDatabase replays preconfigured rows without executing SQL, so this only
+    // verifies that returned rows are mapped to the correct BuildId set.
     #[tokio::test]
-    async fn unsatisfied_dep_excluded() {
-        let parent_id = BuildId::now_v7();
+    async fn maps_returned_rows_to_id_set() {
+        let id_a = BuildId::now_v7();
+        let id_b = BuildId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([Vec::<MBuild>::new()])
+            .append_query_results([vec![
+                build_row(id_a, BuildStatus::Queued),
+                build_row(id_b, BuildStatus::Queued),
+            ]])
             .into_connection();
 
-        let result = builds_with_satisfied_deps(&db, &[parent_id]).await.unwrap();
-        assert!(!result.contains(&parent_id));
-    }
-
-    #[tokio::test]
-    async fn satisfied_dep_included() {
-        let parent_id = BuildId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![build_row(parent_id, BuildStatus::Queued)]])
-            .into_connection();
-
-        let result = builds_with_satisfied_deps(&db, &[parent_id]).await.unwrap();
-        assert!(result.contains(&parent_id));
-    }
-
-    #[tokio::test]
-    async fn dep_substituted_then_included() {
-        let parent_id = BuildId::now_v7();
-        let dep_id = BuildId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([Vec::<MBuild>::new()])
-            .append_query_results([vec![build_row(parent_id, BuildStatus::Queued)]])
-            .into_connection();
-
-        let result_before = builds_with_satisfied_deps(&db, &[parent_id]).await.unwrap();
-        assert!(!result_before.contains(&parent_id), "dep not yet ready");
-
-        let result_after = builds_with_satisfied_deps(&db, &[dep_id, parent_id]).await.unwrap();
-        assert!(result_after.contains(&parent_id), "dep now Substituted → parent ready");
+        let result = builds_with_satisfied_deps(&db, &[id_a, id_b]).await.unwrap();
+        assert!(result.contains(&id_a));
+        assert!(result.contains(&id_b));
     }
 }
