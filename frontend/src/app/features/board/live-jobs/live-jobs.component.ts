@@ -58,19 +58,20 @@ type StatusFilter = 'all' | 'pending' | 'dispatched';
 
       <table class="jobs">
         <thead>
-          <tr><th>Kind</th><th>Worker</th><th>Score</th><th>Dispatched</th><th></th></tr>
+          <tr><th>Kind</th><th>Worker</th><th>Derivation</th><th>Score</th><th>Dispatched</th><th></th></tr>
         </thead>
         <tbody>
           @for (j of filteredJobs(); track j.id) {
             <tr [class.live]="isLive(j)" [class.clickable]="canInspect(j)" (click)="inspect(j)">
               <td>{{ j.kind === 1 ? 'build' : 'eval' }}</td>
               <td class="mono">{{ j.worker_id }}</td>
+              <td class="mono">{{ j.pname ?? '—' }}</td>
               <td>{{ j.score | number: '1.1-1' }}</td>
               <td>{{ j.dispatched_at | date: 'HH:mm:ss' }}</td>
               <td>{{ canInspect(j) ? '›' : '' }}</td>
             </tr>
           } @empty {
-            <tr><td colspan="5" class="muted">No matching dispatched jobs.</td></tr>
+            <tr><td colspan="6" class="muted">No matching dispatched jobs.</td></tr>
           }
         </tbody>
       </table>
@@ -82,17 +83,18 @@ type StatusFilter = 'all' | 'pending' | 'dispatched';
         @if (otherPending() > 0) { <span class="muted">+ {{ otherPending() }} hidden.</span> }
       </div>
       <table class="jobs">
-        <thead><tr><th>Kind</th><th>Evaluation</th><th>Deps</th><th>Queued</th></tr></thead>
+        <thead><tr><th>Kind</th><th>Evaluation</th><th>Derivation</th><th>Deps</th><th>Queued</th></tr></thead>
         <tbody>
           @for (p of pendingJobs(); track p.evaluation_id + (p.build_id ?? '')) {
             <tr class="clickable" [routerLink]="['/board/jobs', p.evaluation_id]">
               <td>{{ p.kind === 1 ? 'build' : 'eval' }}</td>
               <td class="mono">{{ p.evaluation_id.slice(0, 8) }}</td>
+              <td class="mono">{{ p.pname ?? '—' }}</td>
               <td>{{ p.dependency_count }}</td>
               <td>{{ p.queued_at | date: 'HH:mm:ss' }}</td>
             </tr>
           } @empty {
-            <tr><td colspan="4" class="muted">No pending jobs.</td></tr>
+            <tr><td colspan="5" class="muted">No pending jobs.</td></tr>
           }
         </tbody>
       </table>
@@ -191,6 +193,7 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
                 dispatched_at: new Date().toISOString(),
                 build_id: ev.build_id ?? null,
                 evaluation_id: ev.evaluation_id ?? '',
+                pname: null,
               },
               ...list,
             ].slice(0, 200)

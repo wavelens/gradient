@@ -273,6 +273,7 @@ pub struct PendingJobInfo {
     pub organization: OrganizationId,
     pub queued_at: chrono::NaiveDateTime,
     pub dependency_count: u32,
+    pub pname: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -648,9 +649,9 @@ impl JobTracker {
         self.pending
             .values()
             .map(|job| {
-                let (kind, build_id) = match job {
-                    PendingJob::Build(b) => (1i16, Some(b.build_id)),
-                    PendingJob::Eval(_) => (0i16, None),
+                let (kind, build_id, pname) = match job {
+                    PendingJob::Build(b) => (1i16, Some(b.build_id), b.pname.clone()),
+                    PendingJob::Eval(_) => (0i16, None, None),
                 };
                 PendingJobInfo {
                     kind,
@@ -659,6 +660,7 @@ impl JobTracker {
                     organization: job.peer_id(),
                     queued_at: job.queued_at(),
                     dependency_count: job.dependency_count(),
+                    pname,
                 }
             })
             .collect()

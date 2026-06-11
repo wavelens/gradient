@@ -40,6 +40,7 @@ pub struct DispatchedJobSummary {
     pub dispatched_at: String,
     pub build_id: Option<Uuid>,
     pub evaluation_id: Uuid,
+    pub pname: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -57,6 +58,7 @@ pub struct PendingJobSummary {
     pub build_id: Option<Uuid>,
     pub queued_at: String,
     pub dependency_count: u32,
+    pub pname: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -85,6 +87,7 @@ pub async fn get_pending_jobs(
                 build_id: j.build_id.map(Into::into),
                 queued_at: j.queued_at.and_utc().to_rfc3339(),
                 dependency_count: j.dependency_count,
+                pname: j.pname.clone(),
             });
         } else {
             other_pending += 1;
@@ -110,13 +113,34 @@ pub async fn get_dispatched_jobs(
     let mut other_running = 0u64;
     for j in open {
         if scope.allows(&Uuid::from(j.organization)) {
-            let build_id = build_attempt::Entity::find()
+            let attempt = build_attempt::Entity::find()
                 .filter(build_attempt::Column::DispatchedJob.eq(j.id))
                 .one(&state.web_db)
                 .await
                 .ok()
-                .flatten()
-                .map(|a| a.build.into());
+                .flatten();
+
+            let build_id = attempt.as_ref().map(|a| a.build.into());
+
+            let pname = match attempt.as_ref() {
+                Some(a) => {
+                    let b = gradient_entity::build::Entity::find_by_id(a.build)
+                        .one(&state.web_db)
+                        .await
+                        .ok()
+                        .flatten();
+                    match b {
+                        Some(b) => gradient_entity::derivation::Entity::find_by_id(b.derivation)
+                            .one(&state.web_db)
+                            .await
+                            .ok()
+                            .flatten()
+                            .and_then(|d| d.pname),
+                        None => None,
+                    }
+                }
+                None => None,
+            };
 
             jobs.push(DispatchedJobSummary {
                 id: j.id.into(),
@@ -127,6 +151,7 @@ pub async fn get_dispatched_jobs(
                 dispatched_at: j.dispatched_at.and_utc().to_rfc3339(),
                 build_id,
                 evaluation_id: j.evaluation_id.into(),
+                pname,
             });
         } else {
             other_running += 1;
