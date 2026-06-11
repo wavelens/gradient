@@ -99,6 +99,13 @@ pub struct WorkerConfig {
     #[arg(long, env = "GRADIENT_MAX_NIXDAEMON_CONNECTIONS", default_value_t = 32)]
     pub max_nixdaemon_connections: usize,
 
+    /// TTL in seconds for partially-received NAR downloads (`*.partial`) staged
+    /// under `<data_dir>/nar-partial`. A periodic sweep deletes partials whose
+    /// last write is older than this so an abandoned resume can't pin disk
+    /// forever. Default 86400 (24 h). Set to 0 to disable the sweep.
+    #[arg(long, env = "GRADIENT_NAR_PARTIAL_TTL_SECS", default_value_t = 86400)]
+    pub nar_partial_ttl_secs: u64,
+
     // ── Logging ───────────────────────────────────────────────────────────────
     #[arg(long, env = "GRADIENT_LOG_LEVEL", default_value = "info")]
     pub log_level: String,
@@ -321,6 +328,13 @@ impl WorkerConfig {
         result
     }
 
+    /// Directory under which partially-received NAR downloads are staged for
+    /// resume. A subdirectory of `data_dir` so the existing `StateDirectory`
+    /// covers it.
+    pub fn nar_partial_dir(&self) -> std::path::PathBuf {
+        std::path::Path::new(&self.data_dir).join("nar-partial")
+    }
+
     /// Build the `GradientCapabilities` struct from the CLI flags.
     pub fn capabilities(&self) -> GradientCapabilities {
         GradientCapabilities {
@@ -356,6 +370,7 @@ mod tests {
             max_concurrent_evaluations: 1,
             max_concurrent_builds: 1,
             max_nixdaemon_connections: 4,
+            nar_partial_ttl_secs: 86400,
             log_level: "info".to_owned(),
             eval_log_level: None,
             build_log_level: None,
@@ -441,6 +456,7 @@ mod tests {
             max_concurrent_evaluations: 1,
             max_concurrent_builds: 1,
             max_nixdaemon_connections: 4,
+            nar_partial_ttl_secs: 86400,
             log_level: "info".to_owned(),
             eval_log_level: None,
             build_log_level: None,
@@ -510,6 +526,7 @@ mod tests {
             max_concurrent_evaluations: 1,
             max_concurrent_builds: 1,
             max_nixdaemon_connections: 4,
+            nar_partial_ttl_secs: 86400,
             log_level: "info".to_owned(),
             eval_log_level: None,
             build_log_level: None,

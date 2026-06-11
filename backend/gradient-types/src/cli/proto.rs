@@ -89,16 +89,24 @@ pub struct ProtoArgs {
     #[arg(long, env = "GRADIENT_MAX_CONCURRENT_NAR_SERVES", default_value_t = 8)]
     pub max_concurrent_nar_serves: usize,
 
-    /// Maximum bytes a single proto session may hold in its inbound NAR
-    /// upload buffers (open `NarPush` streams with no `is_final` yet). A
-    /// rogue worker that opens many streams without finalizing them would
-    /// otherwise pin unbounded RAM. (See issue #109.)
+    /// Maximum total bytes the server may hold across open `*.partial` NAR
+    /// upload files (un-finalized `NarPush` streams staged under
+    /// `<base_path>/nar-partial`). A rogue worker opening many streams without
+    /// finalizing them would otherwise fill the disk; overflow aborts the
+    /// offending path with `NarAbort`. (See issue #109.)
     #[arg(
         long,
         env = "GRADIENT_MAX_NAR_BUFFER_BYTES",
         default_value_t = 10 * 1024 * 1024 * 1024
     )]
     pub max_nar_buffer_bytes: usize,
+
+    /// TTL in seconds for partially-received NAR uploads (`*.partial`) staged
+    /// under `<base_path>/nar-partial`. A periodic sweep deletes partials whose
+    /// last write is older than this so an abandoned resume can't pin disk
+    /// forever. Default 86400 (24 h). Set to 0 to disable the sweep.
+    #[arg(long, env = "GRADIENT_NAR_PARTIAL_TTL_SECS", default_value_t = 86400)]
+    pub nar_partial_ttl_secs: u64,
 }
 
 impl Default for ProtoArgs {
@@ -117,6 +125,7 @@ impl Default for ProtoArgs {
             nar_send_chunk_timeout_secs: 30,
             max_concurrent_nar_serves: 8,
             max_nar_buffer_bytes: 10 * 1024 * 1024 * 1024,
+            nar_partial_ttl_secs: 86400,
         }
     }
 }
