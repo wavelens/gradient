@@ -430,8 +430,11 @@ Interrupted NAR transfers resume from a byte offset instead of restarting
 from 0, in both directions. Resume rests on byte offsets, the existing
 `NarUploaded.file_size` length check, and a `stream_token` guard (no content
 hashing). Receivers stage chunks to `*.partial` files; senders stay stateless
-and seek to the requested offset. End-to-end resume across a real reconnect is
-exercised by the NixOS VM suite in CI.
+and seek to the requested offset. The server-side staging is synchronous
+`std::fs`, so the receiver runs every disk op on `spawn_blocking` to keep the
+async socket task (and unrelated HTTP handlers sharing the runtime) responsive
+during a push burst. End-to-end resume across a real reconnect is exercised by
+the NixOS VM suite in CI.
 
 Storage (`cargo test -p gradient-storage`):
 - `partial::tests` - `append_then_resume_reports_len`, `non_contiguous_append_errors`,
@@ -448,10 +451,11 @@ Proto (`cargo test -p gradient-proto`):
   round-trip of the four additive resume messages.
 - `handler::socket::serve_nar_tests::serve_streams_full_payload_in_chunks` - the
   server now emits a leading `NarStreamHeader` before the `NarPush` chunks.
-- `handler::dispatch::nar_receive_store_tests` - the disk-backed push receiver:
-  contiguous append, non-contiguous/overflow poisoning, cross-key budget,
-  `note_header` resumable prefix + token mismatch, presigned-mode detection,
-  poison-clear retry, and `finish` discard.
+- `handler::dispatch::nar_receive_store_tests` - the disk-backed push receiver
+  (now `async`, offloading disk ops to `spawn_blocking`): contiguous append,
+  non-contiguous/overflow poisoning, cross-key budget, `note_header` resumable
+  prefix + token mismatch, presigned-mode detection, poison-clear retry, and
+  `finish` discard.
 
 Worker (`cargo test -p gradient-worker`):
 - `proto::nar_recv::tests::partial_store_resumes_across_reconnect` - a fresh
@@ -3701,6 +3705,16 @@ Integration coverage to run in CI (DB-backed `axum_test` / `MockDatabase`):
 
 Frontend specs (vitest, run in isolation): `board.service`, `board-live.service`
 reconnect, `metric-chart`, and the live-jobs scoring-breakdown drawer.
+
+## Rollup references build_attempt timestamps
+
+The Build/BuildAttempt split moved `build_started_at`/`build_finished_at` to
+`build_attempt`, so the rollup queries spammed `column b.build_finished_at does
+not exist`. `rollup::tests` (`cargo test -p gradient-db`) guard the schema
+coupling: `build_table_rollups_avoid_moved_columns` asserts no build-table
+rollup references the moved columns (counts now bucket by `build.updated_at`),
+and `duration_rollup_reads_timestamps_from_build_attempt` asserts
+`builds.duration_ms` sources start/finish from the latest `build_attempt`.
 
 ## Storage gate SUM decodes as BIGINT (#350)
 

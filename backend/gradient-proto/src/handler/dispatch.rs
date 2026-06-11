@@ -89,11 +89,17 @@ impl NarReceiveStore {
     /// Record the push stream's token and return how many bytes are already
     /// staged for it (0 on token mismatch / nothing on disk). Clears any stale
     /// poison so a fresh attempt can proceed.
-    pub(super) fn note_header(&mut self, store_path: &str, token: &str) -> u64 {
+    pub(super) async fn note_header(&mut self, store_path: &str, token: &str) -> u64 {
         self.poisoned.remove(store_path);
-        let received = store_hash(store_path)
-            .and_then(|h| self.store.received_len(&self.key(h), token).ok())
-            .unwrap_or(0);
+        let received = match store_hash(store_path) {
+            Some(h) => {
+                let (store, key, token) = (self.store.clone(), self.key(h), token.to_owned());
+                tokio::task::spawn_blocking(move || store.received_len(&key, &token).unwrap_or(0))
+                    .await
+                    .unwrap_or(0)
+            }
+            None => 0,
+        };
         self.active.insert(
             store_path.to_owned(),
             PathState {
@@ -105,8 +111,14 @@ impl NarReceiveStore {
     }
 
     /// Stage a chunk at `offset` (must be contiguous). Creates a token-less
-    /// entry for legacy pushes that skip the header.
-    pub(super) fn append(&mut self, store_path: &str, offset: u64, data: &[u8]) -> AppendOutcome {
+    /// entry for legacy pushes that skip the header. The blocking disk write
+    /// runs on the blocking pool so the async socket task is never stalled.
+    pub(super) async fn append(
+        &mut self,
+        store_path: &str,
+        offset: u64,
+        data: &[u8],
+    ) -> AppendOutcome {
         if self.poisoned.contains(store_path) {
             return AppendOutcome::Poisoned;
         }
@@ -118,28 +130,36 @@ impl NarReceiveStore {
         self.active.entry(store_path.to_owned()).or_default();
         let total: u64 = self.active.values().map(|s| s.staged).sum();
         if total.saturating_add(data.len() as u64) > self.max_bytes {
-            self.poison(store_path, hash);
+            self.poison(store_path, hash).await;
             return AppendOutcome::Overflow;
         }
 
         let token = self.active[store_path].token.clone();
-        match self.store.append(&self.key(hash), &token, offset, data) {
-            Ok(()) => {
+        let (store, key, data) = (self.store.clone(), self.key(hash), data.to_vec());
+        let len = data.len() as u64;
+        match tokio::task::spawn_blocking(move || store.append(&key, &token, offset, &data)).await {
+            Ok(Ok(())) => {
                 if let Some(s) = self.active.get_mut(store_path) {
-                    s.staged += data.len() as u64;
+                    s.staged += len;
                 }
                 AppendOutcome::Ok
             }
-            Err(e) => {
+            Ok(Err(e)) => {
                 warn!(%store_path, error = %e, "partial append failed; poisoning path");
-                self.poison(store_path, hash);
+                self.poison(store_path, hash).await;
+                AppendOutcome::Overflow
+            }
+            Err(e) => {
+                warn!(%store_path, error = %e, "partial append task panicked; poisoning path");
+                self.poison(store_path, hash).await;
                 AppendOutcome::Overflow
             }
         }
     }
 
-    fn poison(&mut self, store_path: &str, hash: &str) {
-        let _ = self.store.discard(&self.key(hash));
+    async fn poison(&mut self, store_path: &str, hash: &str) {
+        let (store, key) = (self.store.clone(), self.key(hash));
+        let _ = tokio::task::spawn_blocking(move || store.discard(&key)).await;
         self.active.remove(store_path);
         self.poisoned.insert(store_path.to_owned());
     }
@@ -151,30 +171,37 @@ impl NarReceiveStore {
     }
 
     /// Actual on-disk length of the staged partial (validating the token).
-    pub(super) fn committed_len(&self, store_path: &str) -> u64 {
+    pub(super) async fn committed_len(&self, store_path: &str) -> u64 {
         let Some(hash) = store_hash(store_path) else {
             return 0;
         };
         let token = self
             .active
             .get(store_path)
-            .map(|s| s.token.as_str())
-            .unwrap_or("");
-        self.store.received_len(&self.key(hash), token).unwrap_or(0)
+            .map(|s| s.token.clone())
+            .unwrap_or_default();
+        let (store, key) = (self.store.clone(), self.key(hash));
+        tokio::task::spawn_blocking(move || store.received_len(&key, &token).unwrap_or(0))
+            .await
+            .unwrap_or(0)
     }
 
     /// Read the staged bytes so the caller can commit them to `nar_storage`.
-    pub(super) fn read_staged(&self, store_path: &str) -> anyhow::Result<Vec<u8>> {
+    pub(super) async fn read_staged(&self, store_path: &str) -> anyhow::Result<Vec<u8>> {
         let hash = store_hash(store_path)
             .ok_or_else(|| anyhow::anyhow!("malformed store path {store_path}"))?;
-        self.store.read_all(&self.key(hash))
+        let (store, key) = (self.store.clone(), self.key(hash));
+        tokio::task::spawn_blocking(move || store.read_all(&key))
+            .await
+            .map_err(|e| anyhow::anyhow!("read staged NAR task panicked: {e}"))?
     }
 
     /// Drop the staged partial and per-path state after a successful commit.
-    pub(super) fn finish(&mut self, store_path: &str) {
+    pub(super) async fn finish(&mut self, store_path: &str) {
         self.active.remove(store_path);
         if let Some(hash) = store_hash(store_path) {
-            let _ = self.store.discard(&self.key(hash));
+            let (store, key) = (self.store.clone(), self.key(hash));
+            let _ = tokio::task::spawn_blocking(move || store.discard(&key)).await;
         }
     }
 
@@ -185,9 +212,9 @@ impl NarReceiveStore {
 
     /// Forget the poison flag and discard any partial for `store_path` so a
     /// later, well-formed retry of the same path can proceed.
-    pub(super) fn clear_poison(&mut self, store_path: &str) {
+    pub(super) async fn clear_poison(&mut self, store_path: &str) {
         self.poisoned.remove(store_path);
-        self.finish(store_path);
+        self.finish(store_path).await;
     }
 
     pub(super) fn max_bytes(&self) -> u64 {
@@ -776,7 +803,7 @@ impl<'a> DispatchContext<'a> {
         stream_token: String,
         nar: &mut NarReceiveStore,
     ) {
-        let received = nar.note_header(&store_path, &stream_token);
+        let received = nar.note_header(&store_path, &stream_token).await;
         debug!(peer_id = %self.peer_id, %job_id, %store_path, received, "NarStreamHeader (push)");
         let _ = send_server_msg(
             self.writer,
@@ -802,7 +829,7 @@ impl<'a> DispatchContext<'a> {
         if data.is_empty() {
             return;
         }
-        match nar.append(&store_path, offset, &data) {
+        match nar.append(&store_path, offset, &data).await {
             AppendOutcome::Ok => {}
             AppendOutcome::Overflow => {
                 let reason = format!(
@@ -855,7 +882,7 @@ impl<'a> DispatchContext<'a> {
         // `cached_path` row whose bytes never reached `nar_storage` - leaving
         // the path "cached" in the DB and undeliverable on the next download.
         if nar.is_poisoned(&store_path) {
-            nar.clear_poison(&store_path);
+            nar.clear_poison(&store_path).await;
             let reason = format!(
                 "NarUploaded for {store_path} rejected: prior NarPush chunk \
                  exceeded the staged-partial budget or arrived out of order"
@@ -872,7 +899,7 @@ impl<'a> DispatchContext<'a> {
                 self.abort_job(&job_id, reason).await;
                 return;
             };
-            let staged = nar.committed_len(&store_path);
+            let staged = nar.committed_len(&store_path).await;
             if staged != file_size {
                 let reason = format!(
                     "staged NAR size {staged} does not match reported file_size {file_size}"
@@ -881,7 +908,7 @@ impl<'a> DispatchContext<'a> {
                 self.abort_job(&job_id, reason).await;
                 return;
             }
-            let buf = match nar.read_staged(&store_path) {
+            let buf = match nar.read_staged(&store_path).await {
                 Ok(b) => b,
                 Err(e) => {
                     let reason = format!("failed to read staged NAR: {e}");
@@ -896,7 +923,7 @@ impl<'a> DispatchContext<'a> {
                 self.abort_job(&job_id, reason).await;
                 return;
             }
-            nar.finish(&store_path);
+            nar.finish(&store_path).await;
             info!(peer_id = %self.peer_id, %job_id, %store_path, file_size, "NAR stored");
         }
 
@@ -1046,63 +1073,69 @@ mod nar_receive_store_tests {
         format!("/nix/store/{}-name", c.to_string().repeat(32))
     }
 
-    #[test]
-    fn append_below_budget_stages_and_reads_back() {
+    #[tokio::test]
+    async fn append_below_budget_stages_and_reads_back() {
         let (_d, mut s) = store(1024);
         let a = path('a');
-        assert_ok(s.append(&a, 0, &[0u8; 256]));
-        assert_ok(s.append(&a, 256, &[1u8; 256]));
-        assert_eq!(s.committed_len(&a), 512);
-        assert_eq!(s.read_staged(&a).unwrap().len(), 512);
+        assert_ok(s.append(&a, 0, &[0u8; 256]).await);
+        assert_ok(s.append(&a, 256, &[1u8; 256]).await);
+        assert_eq!(s.committed_len(&a).await, 512);
+        assert_eq!(s.read_staged(&a).await.unwrap().len(), 512);
     }
 
-    #[test]
-    fn non_contiguous_offset_poisons_path() {
+    #[tokio::test]
+    async fn non_contiguous_offset_poisons_path() {
         let (_d, mut s) = store(1024);
         let a = path('a');
-        assert_ok(s.append(&a, 0, &[0u8; 100]));
+        assert_ok(s.append(&a, 0, &[0u8; 100]).await);
         assert!(matches!(
-            s.append(&a, 999, &[0u8; 10]),
+            s.append(&a, 999, &[0u8; 10]).await,
             AppendOutcome::Overflow
         ));
         assert!(s.is_poisoned(&a));
-        assert!(matches!(s.append(&a, 0, &[0u8; 10]), AppendOutcome::Poisoned));
+        assert!(matches!(
+            s.append(&a, 0, &[0u8; 10]).await,
+            AppendOutcome::Poisoned
+        ));
     }
 
-    #[test]
-    fn append_overflow_poisons_path() {
+    #[tokio::test]
+    async fn append_overflow_poisons_path() {
         let (_d, mut s) = store(1024);
         let a = path('a');
-        assert_ok(s.append(&a, 0, &[0u8; 1000]));
+        assert_ok(s.append(&a, 0, &[0u8; 1000]).await);
         assert!(matches!(
-            s.append(&a, 1000, &[0u8; 100]),
+            s.append(&a, 1000, &[0u8; 100]).await,
             AppendOutcome::Overflow
         ));
         assert!(s.is_poisoned(&a));
-        assert!(matches!(s.append(&a, 0, &[0u8; 50]), AppendOutcome::Poisoned));
+        assert!(matches!(
+            s.append(&a, 0, &[0u8; 50]).await,
+            AppendOutcome::Poisoned
+        ));
     }
 
-    #[test]
-    fn overflow_across_keys_is_caught() {
+    #[tokio::test]
+    async fn overflow_across_keys_is_caught() {
         let (_d, mut s) = store(800);
-        assert_ok(s.append(&path('a'), 0, &[0u8; 400]));
-        assert_ok(s.append(&path('b'), 0, &[0u8; 400]));
+        assert_ok(s.append(&path('a'), 0, &[0u8; 400]).await);
+        assert_ok(s.append(&path('b'), 0, &[0u8; 400]).await);
         assert!(matches!(
-            s.append(&path('c'), 0, &[42u8]),
+            s.append(&path('c'), 0, &[42u8]).await,
             AppendOutcome::Overflow
         ));
         assert!(s.is_poisoned(&path('c')));
     }
 
-    #[test]
-    fn note_header_reports_resumable_prefix() {
+    #[tokio::test]
+    async fn note_header_reports_resumable_prefix() {
         let (_d, mut s) = store(10_000);
         let a = path('a');
-        s.note_header(&a, "tok-v1");
-        assert_ok(s.append(&a, 0, b"hello"));
+        s.note_header(&a, "tok-v1").await;
+        assert_ok(s.append(&a, 0, b"hello").await);
         // Simulated reconnect: same token resumes; a different token restarts.
-        assert_eq!(s.note_header(&a, "tok-v1"), 5);
-        assert_eq!(s.note_header(&a, "tok-v2"), 0);
+        assert_eq!(s.note_header(&a, "tok-v1").await, 5);
+        assert_eq!(s.note_header(&a, "tok-v2").await, 0);
     }
 
     #[test]
@@ -1114,24 +1147,27 @@ mod nar_receive_store_tests {
         );
     }
 
-    #[test]
-    fn clear_poison_allows_retry() {
+    #[tokio::test]
+    async fn clear_poison_allows_retry() {
         let (_d, mut s) = store(100);
         let a = path('a');
-        assert!(matches!(s.append(&a, 0, &[0u8; 200]), AppendOutcome::Overflow));
+        assert!(matches!(
+            s.append(&a, 0, &[0u8; 200]).await,
+            AppendOutcome::Overflow
+        ));
         assert!(s.is_poisoned(&a));
-        s.clear_poison(&a);
+        s.clear_poison(&a).await;
         assert!(!s.is_poisoned(&a));
-        assert_ok(s.append(&a, 0, &[0u8; 50]));
+        assert_ok(s.append(&a, 0, &[0u8; 50]).await);
     }
 
-    #[test]
-    fn finish_discards_staged_partial() {
+    #[tokio::test]
+    async fn finish_discards_staged_partial() {
         let (_d, mut s) = store(10_000);
         let a = path('a');
-        assert_ok(s.append(&a, 0, b"hello"));
-        s.finish(&a);
+        assert_ok(s.append(&a, 0, b"hello").await);
+        s.finish(&a).await;
         assert!(!s.is_active(&a));
-        assert_eq!(s.committed_len(&a), 0);
+        assert_eq!(s.committed_len(&a).await, 0);
     }
 }
