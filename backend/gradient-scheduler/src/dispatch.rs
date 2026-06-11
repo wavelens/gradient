@@ -18,6 +18,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::dispatch_mode::{decide_dispatch_mode, BuildDispatchMode};
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_sources::get_path_from_derivation_output;
@@ -313,6 +314,8 @@ struct BuildDispatchMaps {
     /// build_id → consecutive `SubstituteUnavailable` miss count. Absent ⇒ 0.
     substitute_misses: HashMap<BuildId, i64>,
     substitute_miss_escalation_threshold: i64,
+    connected_architectures: HashSet<String>,
+    build_retry_backoff_secs: u64,
     default_timeout_secs: Option<u64>,
     default_max_silent_secs: Option<u64>,
 }
@@ -323,6 +326,7 @@ impl BuildDispatchMaps {
         state: &Arc<ServerState>,
         builds: &[MBuild],
         uses_history: bool,
+        connected_architectures: HashSet<String>,
     ) -> anyhow::Result<Self> {
         let default_timeout_secs = nonzero(state.config.eval.build_default_timeout_secs);
         let default_max_silent_secs = nonzero(state.config.eval.build_default_max_silent_secs);
@@ -572,6 +576,8 @@ impl BuildDispatchMaps {
                 .config
                 .eval
                 .substitute_miss_escalation_threshold as i64,
+            connected_architectures,
+            build_retry_backoff_secs: state.config.eval.build_retry_backoff_secs,
             default_timeout_secs,
             default_max_silent_secs,
         })
@@ -613,11 +619,31 @@ impl BuildDispatchMaps {
         })?;
 
         let job_id = format!("build:{}", build.id);
-        // Substitute-mode only while the build hasn't exhausted its substitute
-        // attempts. After repeated misses it escalates to a real arch-bound
-        // build so an arch worker takes it (or the parker parks the eval).
         let miss_count = self.substitute_misses.get(&build.id).copied().unwrap_or(0);
-        let substitute = build.substitutable && miss_count < self.substitute_miss_escalation_threshold;
+        let arch_has_worker = self.connected_architectures.contains(&derivation.architecture);
+        let mode = decide_dispatch_mode(
+            build.substitutable,
+            miss_count,
+            self.substitute_miss_escalation_threshold,
+            arch_has_worker,
+        );
+
+        if mode == BuildDispatchMode::SubstituteStalled
+            && !crate::build::retry_backoff_elapsed(
+                miss_count as i32,
+                build.updated_at,
+                now(),
+                self.build_retry_backoff_secs,
+            )
+        {
+            debug!(build_id = %build.id, "substitute stalled (no arch worker); backing off re-probe");
+            return None;
+        }
+
+        let substitute = matches!(
+            mode,
+            BuildDispatchMode::SubstituteBuiltin | BuildDispatchMode::SubstituteStalled
+        );
         // Placeholder; the real value is set per-assignment in
         // `job_handlers::apply_sign_flag` based on the receiving worker's
         // `sign` capability.
@@ -747,8 +773,22 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
         error!(error = %e, "failed to stamp build ready_at");
     }
 
-    let maps =
-        BuildDispatchMaps::load(state, &new_builds, scheduler.policy.uses_history()).await?;
+    let connected_architectures: HashSet<String> = scheduler
+        .worker_pool
+        .read()
+        .await
+        .all_workers()
+        .into_iter()
+        .flat_map(|w| w.architectures)
+        .collect();
+
+    let maps = BuildDispatchMaps::load(
+        state,
+        &new_builds,
+        scheduler.policy.uses_history(),
+        connected_architectures,
+    )
+    .await?;
 
     let mut enqueued = 0usize;
     for build in new_builds {
@@ -797,6 +837,17 @@ async fn organization_id_for_eval(
             error!(error = %e, %project_id, "failed to load project for eval");
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod dispatch_mode_tests {
+    use crate::dispatch_mode::{decide_dispatch_mode, BuildDispatchMode};
+
+    #[test]
+    fn stalled_substitute_stays_builtin() {
+        assert_eq!(decide_dispatch_mode(true, 2, 2, false), BuildDispatchMode::SubstituteStalled);
+        assert_eq!(decide_dispatch_mode(true, 2, 2, true), BuildDispatchMode::RealArch);
     }
 }
 
