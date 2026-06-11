@@ -22,8 +22,8 @@ use gradient_types::*;
 use gradient_core::ServerState;
 use gradient_scheduler::{BoardEvent, Scheduler};
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, QueryFilter, QueryOrder,
-    QuerySelect, Set, Statement,
+    ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, IntoActiveModel, QueryFilter,
+    QueryOrder, QuerySelect, Statement,
 };
 use gradient_entity::build_attempt;
 use serde::{Deserialize, Serialize};
@@ -782,14 +782,15 @@ pub async fn create_acknowledged(
 ) -> WebResult<Json<BaseResponse<Uuid>>> {
     require_superuser(&user)?;
     let id = AcknowledgedDerivationId::now_v7();
-    let am = gradient_entity::acknowledged_derivation::ActiveModel {
-        id: Set(id),
-        derivation: Set(body.derivation.map(Into::into)),
-        pname: Set(body.pname),
-        note: Set(body.note),
-        created_by: Set(user.id),
-        created_at: Set(gradient_types::now()),
-    };
+    let am = gradient_entity::acknowledged_derivation::Model {
+        id,
+        derivation: body.derivation.map(Into::into),
+        pname: body.pname,
+        note: body.note,
+        created_by: user.id,
+        created_at: gradient_types::now(),
+    }
+    .into_active_model();
 
     gradient_entity::acknowledged_derivation::Entity::insert(am)
         .exec(&state.web_db)

@@ -27,16 +27,17 @@ use gradient_types::ids::{
     CachedPathId, CachedPathSignatureId, CommitId, EvaluationId, ProjectId, UploadSessionId,
 };
 use gradient_types::{
-    ACachedPath, ACachedPathSignature, ACommit, AEvaluation, AProject, AUploadSession,
-    BaseResponse, CCachedPath, CCachedPathSignature, COrganizationCache, CProject, ECachedPath,
-    ECachedPathSignature, EOrganizationCache, EProject, EUploadSession, MUser, NULL_TIME, now,
+    ACachedPathSignature, AUploadSession, BaseResponse, CCachedPath, CCachedPathSignature,
+    COrganizationCache, CProject, ECachedPath, ECachedPathSignature, EOrganizationCache, EProject,
+    EUploadSession, MCachedPath, MCachedPathSignature, MCommit, MEvaluation, MProject, MUser,
+    NULL_TIME, now,
 };
 use gradient_core::ServerState;
 use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, QueryFilter,
-    RuntimeErr, TransactionTrait, sqlx,
+    ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
+    QueryFilter, RuntimeErr, TransactionTrait, sqlx,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -135,40 +136,30 @@ pub async fn post_dispatch(
         .filter(|t| !t.is_empty())
         .unwrap_or_else(|| project.wildcard.clone());
 
-    let commit = ACommit {
-        id: Set(CommitId::now_v7()),
-        message: Set(format!("Build request {}", session.id)),
-        hash: Set(vec![0; 20]),
-        author: Set(Some(user.id)),
-        author_name: Set(user.name.clone()),
+    let commit = MCommit {
+        id: CommitId::now_v7(),
+        message: format!("Build request {}", session.id),
+        hash: vec![0; 20],
+        author: Some(user.id),
+        author_name: user.name.clone(),
     }
+    .into_active_model()
     .insert(&tx)
     .await?;
 
     let now_ts = now();
-    let evaluation = AEvaluation {
-        id: Set(EvaluationId::now_v7()),
-        project: Set(Some(project.id)),
-        repository: Set(nar.store_path.clone()),
-        commit: Set(commit.id),
-        wildcard: Set(target),
-        status: Set(gradient_entity::evaluation::EvaluationStatus::Queued),
-        previous: Set(None),
-        next: Set(None),
-        created_at: Set(now_ts),
-        updated_at: Set(now_ts),
-        flake_source: Set(None),
-        check_run_ids: Set(None),
-        waiting_reason: Set(None),
-        trigger: Set(None),
-        concurrent: Set(false),
-        source_comment: Set(None),
-        fetch_started_at: Set(None),
-        eval_flake_started_at: Set(None),
-        eval_drv_started_at: Set(None),
-        building_started_at: Set(None),
-        finished_at: Set(None),
+    let evaluation = MEvaluation {
+        id: EvaluationId::now_v7(),
+        project: Some(project.id),
+        repository: nar.store_path.clone(),
+        commit: commit.id,
+        wildcard: target,
+        status: gradient_entity::evaluation::EvaluationStatus::Queued,
+        created_at: now_ts,
+        updated_at: now_ts,
+        ..Default::default()
     }
+    .into_active_model()
     .insert(&tx)
     .await?;
 
@@ -232,20 +223,19 @@ async fn ensure_cached_path<C: ConnectionTrait>(
     }
 
     let normalised_hash = normalize_nar_hash(&nar.nar_hash_sri);
-    let row = ACachedPath {
-        id: Set(CachedPathId::now_v7()),
-        store_path: Set(nar.store_path.clone()),
-        hash: Set(nar.store_hash.clone()),
-        package: Set("source".to_string()),
-        file_hash: Set(Some(normalised_hash.clone())),
-        file_size: Set(Some(nar.nar_size as i64)),
-        nar_size: Set(Some(nar.nar_size as i64)),
-        nar_hash: Set(Some(normalised_hash)),
-        references: Set(None),
-        ca: Set(None),
-        deriver: Set(None),
-        created_at: Set(now()),
-    };
+    let row = MCachedPath {
+        id: CachedPathId::now_v7(),
+        store_path: nar.store_path.clone(),
+        hash: nar.store_hash.clone(),
+        package: "source".to_string(),
+        file_hash: Some(normalised_hash.clone()),
+        file_size: Some(nar.nar_size as i64),
+        nar_size: Some(nar.nar_size as i64),
+        nar_hash: Some(normalised_hash),
+        created_at: now(),
+        ..Default::default()
+    }
+    .into_active_model();
 
     match row.insert(tx).await {
         Ok(model) => Ok(model),
@@ -274,14 +264,15 @@ async fn queue_signature_placeholders<C: ConnectionTrait>(
     let now_ts = now();
     let rows: Vec<ACachedPathSignature> = org_caches
         .into_iter()
-        .map(|oc| ACachedPathSignature {
-            id: Set(CachedPathSignatureId::now_v7()),
-            cached_path: Set(cached_path.id),
-            cache: Set(oc.cache),
-            signature: Set(None),
-            created_at: Set(now_ts),
-            last_fetched_at: Set(None),
-            fetch_count: Set(0),
+        .map(|oc| {
+            MCachedPathSignature {
+                id: CachedPathSignatureId::now_v7(),
+                cached_path: cached_path.id,
+                cache: oc.cache,
+                created_at: now_ts,
+                ..Default::default()
+            }
+            .into_active_model()
         })
         .collect();
 
@@ -317,25 +308,25 @@ async fn ensure_build_request_project<C: ConnectionTrait>(
         return Ok(existing);
     }
 
-    let project = AProject {
-        id: Set(ProjectId::now_v7()),
-        organization: Set(org_id),
-        name: Set(BUILD_REQUEST_PROJECT_NAME.to_string()),
-        active: Set(true),
-        display_name: Set("Build Requests".to_string()),
-        description: Set("Server-managed project for `gradient build` submissions.".to_string()),
-        repository: Set(BUILD_REQUEST_PROJECT_NAME.to_string()),
-        wildcard: Set("*".to_string()),
-        last_evaluation: Set(None),
-        last_check_at: Set(*NULL_TIME),
-        force_evaluation: Set(false),
-        created_by: Set(user_id),
-        created_at: Set(now()),
-        managed: Set(true),
-        keep_evaluations: Set(30),
-        concurrency: Set(i16::from(ConcurrencyPolicy::SoftAbort)),
-        sign_cache: Set(true),
-    };
+    let project = MProject {
+        id: ProjectId::now_v7(),
+        organization: org_id,
+        name: BUILD_REQUEST_PROJECT_NAME.to_string(),
+        active: true,
+        display_name: "Build Requests".to_string(),
+        description: "Server-managed project for `gradient build` submissions.".to_string(),
+        repository: BUILD_REQUEST_PROJECT_NAME.to_string(),
+        wildcard: "*".to_string(),
+        last_check_at: *NULL_TIME,
+        created_by: user_id,
+        created_at: now(),
+        managed: true,
+        keep_evaluations: 30,
+        concurrency: i16::from(ConcurrencyPolicy::SoftAbort),
+        sign_cache: true,
+        ..Default::default()
+    }
+    .into_active_model();
 
     match project.insert(tx).await {
         Ok(row) => Ok(row),

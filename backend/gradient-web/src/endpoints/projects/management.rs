@@ -25,7 +25,8 @@ use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
+    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, PaginatorTrait,
+    QueryFilter, QueryOrder,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -241,27 +242,24 @@ pub async fn put(
         .map_err(|e| WebError::bad_request(e.to_string()))?
         .to_string();
 
-    let project = AProject {
-        id: Set(ProjectId::now_v7()),
-        organization: Set(organization.id),
-        name: Set(body.name.clone()),
-        active: Set(true),
-        display_name: Set(body.display_name.trim().to_string()),
-        description: Set(body.description.trim().to_string()),
-        repository: Set(body.repository.clone()),
-        wildcard: Set(wildcard),
-        last_evaluation: Set(None),
-        last_check_at: Set(*NULL_TIME),
-        force_evaluation: Set(false),
-        created_by: Set(user.id),
-        created_at: Set(gradient_types::now()),
-        managed: Set(false),
-        keep_evaluations: Set(30),
-        concurrency: Set(i16::from(
-            body.concurrency.unwrap_or(ConcurrencyPolicy::SoftAbort),
-        )),
-        sign_cache: Set(body.sign_cache.unwrap_or(true)),
-    };
+    let project = MProject {
+        id: ProjectId::now_v7(),
+        organization: organization.id,
+        name: body.name.clone(),
+        active: true,
+        display_name: body.display_name.trim().to_string(),
+        description: body.description.trim().to_string(),
+        repository: body.repository.clone(),
+        wildcard,
+        last_check_at: *NULL_TIME,
+        created_by: user.id,
+        created_at: gradient_types::now(),
+        keep_evaluations: 30,
+        concurrency: i16::from(body.concurrency.unwrap_or(ConcurrencyPolicy::SoftAbort)),
+        sign_cache: body.sign_cache.unwrap_or(true),
+        ..Default::default()
+    }
+    .into_active_model();
 
     let project = project.insert(&state.web_db).await?;
 
@@ -270,16 +268,17 @@ pub async fn put(
         interval_secs: 300,
         branch: None,
     };
-    AProjectTrigger {
-        id: Set(ProjectTriggerId::now_v7()),
-        project: Set(project.id),
-        trigger_type: Set(i16::from(TriggerType::Polling)),
-        config: Set(default_cfg.to_db_json()),
-        active: Set(true),
-        last_fired_at: Set(None),
-        created_at: Set(now),
-        updated_at: Set(now),
+    MProjectTrigger {
+        id: ProjectTriggerId::now_v7(),
+        project: project.id,
+        trigger_type: i16::from(TriggerType::Polling),
+        config: default_cfg.to_db_json(),
+        active: true,
+        created_at: now,
+        updated_at: now,
+        ..Default::default()
     }
+    .into_active_model()
     .insert(&state.web_db)
     .await?;
 

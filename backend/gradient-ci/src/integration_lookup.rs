@@ -13,8 +13,9 @@
 
 use gradient_types::*;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
-use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter,
+};
 use tracing::warn;
 
 /// Numeric encoding of `integration.kind`.
@@ -64,20 +65,18 @@ pub async fn ensure_github_app_integrations<C: ConnectionTrait>(
             );
             continue;
         }
-        AIntegration {
-            id: Set(IntegrationId::now_v7()),
-            organization: Set(org_id),
-            name: Set(GITHUB_APP_INTEGRATION_NAME.into()),
-            display_name: Set(GITHUB_APP_INTEGRATION_DISPLAY_NAME.into()),
-            kind: Set(i16::from(kind)),
-            forge_type: Set(i16::from(ForgeType::GitHub)),
-            secret: Set(None),
-            endpoint_url: Set(None),
-            access_token: Set(None),
-            allowed_ips: Set(None),
-            created_by: Set(creator),
-            created_at: Set(chrono::Utc::now().naive_utc()),
+        MIntegration {
+            id: IntegrationId::now_v7(),
+            organization: org_id,
+            name: GITHUB_APP_INTEGRATION_NAME.into(),
+            display_name: GITHUB_APP_INTEGRATION_DISPLAY_NAME.into(),
+            kind: i16::from(kind),
+            forge_type: i16::from(ForgeType::GitHub),
+            created_by: creator,
+            created_at: chrono::Utc::now().naive_utc(),
+            ..Default::default()
         }
+        .into_active_model()
         .insert(db)
         .await?;
     }

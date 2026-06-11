@@ -12,6 +12,7 @@ use base64::Engine as _;
 use chrono::NaiveDateTime;
 use gradient_entity::worker_registration::{
     self, ActiveModel as AWorkerRegistration, Entity as EWorkerRegistration,
+    Model as MWorkerRegistration,
 };
 use gradient_types::ids::*;
 use gradient_types::proto::GradientCapabilities;
@@ -21,8 +22,8 @@ use rand::RngExt as _;
 use gradient_scheduler::{Scheduler, WorkerInfo};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
-    QuerySelect,
+    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter,
+    QueryOrder, QuerySelect,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -160,21 +161,23 @@ pub async fn post_org_worker(
 
     let token_hash = password_auth::generate_hash(&token);
 
-    let row = AWorkerRegistration {
-        id: Set(WorkerRegistrationId::now_v7()),
-        peer_id: Set(org.id),
-        worker_id: Set(worker_id_str.clone()),
-        token_hash: Set(token_hash),
-        managed: Set(false),
-        url: Set(body.url),
-        display_name: Set(body.display_name.trim().to_string()),
-        active: Set(true),
-        enable_fetch: Set(body.enable_fetch),
-        enable_eval: Set(body.enable_eval),
-        enable_build: Set(body.enable_build),
-        created_by: Set(Some(user.id)),
-        created_at: Set(gradient_types::now()),
-    };
+    let row = MWorkerRegistration {
+        id: WorkerRegistrationId::now_v7(),
+        peer_id: org.id,
+        worker_id: worker_id_str.clone(),
+        token_hash,
+        url: body.url,
+        display_name: body.display_name.trim().to_string(),
+        active: true,
+        enable_fetch: body.enable_fetch,
+        enable_eval: body.enable_eval,
+        enable_build: body.enable_build,
+        created_by: Some(user.id),
+        created_at: gradient_types::now(),
+        ..Default::default()
+    }
+    .into_active_model();
+
     row.insert(&state.web_db).await?;
 
     // Trigger re-auth if the worker is already connected, so it picks up

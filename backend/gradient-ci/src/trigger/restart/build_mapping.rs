@@ -9,8 +9,7 @@ use crate::trigger::TriggerError;
 use gradient_types::*;
 use chrono::NaiveDateTime;
 use gradient_entity::build::BuildStatus;
-use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ConnectionTrait};
+use sea_orm::{ActiveModelTrait, ConnectionTrait, IntoActiveModel};
 use std::collections::HashMap;
 
 /// Inserts the restart's builds, mapping each previous build's status through
@@ -49,23 +48,22 @@ pub(super) async fn create_restart_builds<C: ConnectionTrait>(
         } else {
             leader_for_drv.get(&prev_build.derivation).copied()
         };
-        let abuild = ABuild {
-            id: Set(new_build_id),
-            evaluation: Set(new_eval_id),
-            derivation: Set(prev_build.derivation),
-            status: Set(new_status),
-            via: Set(via),
-            substitutable: Set(false),
-            attempt: Set(0),
-            timeout_secs: Set(prev_build.timeout_secs),
-            max_silent_secs: Set(prev_build.max_silent_secs),
-            prefer_local_build: Set(prev_build.prefer_local_build),
-            created_at: Set(now),
-            updated_at: Set(now),
-            queued_at: Set((new_status == BuildStatus::Queued).then_some(now)),
-            ready_at: Set(None),
-            dispatched_at: Set(None),
-        };
+        let abuild = MBuild {
+            id: new_build_id,
+            evaluation: new_eval_id,
+            derivation: prev_build.derivation,
+            status: new_status,
+            via,
+            timeout_secs: prev_build.timeout_secs,
+            max_silent_secs: prev_build.max_silent_secs,
+            prefer_local_build: prev_build.prefer_local_build,
+            created_at: now,
+            updated_at: now,
+            queued_at: (new_status == BuildStatus::Queued).then_some(now),
+            ..Default::default()
+        }
+        .into_active_model();
+
         abuild.insert(db).await?;
         build_id_map.insert(prev_build.id, new_build_id);
     }

@@ -16,8 +16,7 @@ use axum::http::HeaderMap;
 use axum::http::request::Parts;
 use gradient_types::*;
 use gradient_core::ServerState;
-use sea_orm::ActiveValue::Set;
-use sea_orm::{ConnectionTrait, EntityTrait};
+use sea_orm::{ConnectionTrait, EntityTrait, IntoActiveModel};
 use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
@@ -129,15 +128,17 @@ pub async fn record<C: ConnectionTrait>(
         "security event",
     );
 
-    let row = AAuditLog {
-        id: Set(AuditLogId::now_v7()),
-        user_id: Set(user_id),
-        event: Set(event.to_string()),
-        ip: Set(info.ip.clone()),
-        user_agent: Set(info.user_agent.clone()),
-        metadata: Set(metadata),
-        created_at: Set(gradient_types::now()),
-    };
+    let row = MAuditLog {
+        id: AuditLogId::now_v7(),
+        user_id,
+        event: event.to_string(),
+        ip: info.ip.clone(),
+        user_agent: info.user_agent.clone(),
+        metadata,
+        created_at: gradient_types::now(),
+    }
+    .into_active_model();
+
     if let Err(e) = EAuditLog::insert(row).exec(db).await {
         tracing::warn!(event, error = %e, "failed to write audit_log entry");
     }

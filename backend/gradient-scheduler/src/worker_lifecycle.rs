@@ -29,23 +29,23 @@ pub(crate) async fn record_worker_sample(
     let Some(org) = info.organization else {
         return;
     };
-    let sample = gradient_entity::worker_sample::ActiveModel {
-        id: Set(gradient_entity::ids::WorkerSampleId::now_v7()),
-        worker_id: Set(info.id.clone()),
-        organization: Set(org),
-        at: Set(gradient_types::now()),
-        cpu_usage_pct: Set(Some(info.cpu_usage_pct)),
-        ram_free_mb: Set(Some(info.ram_free_mb as i64)),
-        ram_total_mb: Set(Some(info.ram_total_mb as i64)),
-        disk_speed_mbps: Set(info.disk_speed_mbps),
-        network_speed_mbps: Set(info.network_speed_mbps),
-        assigned_jobs: Set(info.assigned_job_count as i32),
-        max_concurrent_builds: Set(info.max_concurrent_builds as i32),
-        state: Set(i16::from(info.draining)),
-        capabilities: Set(
-            serde_json::to_value(&info.capabilities).unwrap_or(serde_json::Value::Null)
-        ),
-    };
+    let sample = gradient_entity::worker_sample::Model {
+        id: gradient_entity::ids::WorkerSampleId::now_v7(),
+        worker_id: info.id.clone(),
+        organization: org,
+        at: gradient_types::now(),
+        cpu_usage_pct: Some(info.cpu_usage_pct),
+        ram_free_mb: Some(info.ram_free_mb as i64),
+        ram_total_mb: Some(info.ram_total_mb as i64),
+        disk_speed_mbps: info.disk_speed_mbps,
+        network_speed_mbps: info.network_speed_mbps,
+        assigned_jobs: info.assigned_job_count as i32,
+        max_concurrent_builds: info.max_concurrent_builds as i32,
+        state: i16::from(info.draining),
+        capabilities: serde_json::to_value(&info.capabilities).unwrap_or(serde_json::Value::Null),
+    }
+    .into_active_model();
+
     if let Err(e) = gradient_entity::worker_sample::Entity::insert(sample).exec(db).await {
         warn!(error = %e, worker_id = %info.id, "failed to insert worker_sample");
     }
@@ -91,16 +91,17 @@ impl Scheduler {
             .write()
             .await
             .set_worker_org(peer_id, reg.peer_id);
-        let conn = gradient_entity::worker_connection::ActiveModel {
-            id: Set(gradient_entity::ids::WorkerConnectionId::now_v7()),
-            worker_id: Set(peer_id.to_string()),
-            organization: Set(reg.peer_id),
-            display_name: Set(reg.display_name),
-            connected_at: Set(gradient_types::now()),
-            disconnected_at: Set(None),
-            capabilities: Set(capabilities),
-            reason: Set(None),
-        };
+        let conn = gradient_entity::worker_connection::Model {
+            id: gradient_entity::ids::WorkerConnectionId::now_v7(),
+            worker_id: peer_id.to_string(),
+            organization: reg.peer_id,
+            display_name: reg.display_name,
+            connected_at: gradient_types::now(),
+            capabilities,
+            ..Default::default()
+        }
+        .into_active_model();
+
         if let Err(e) = gradient_entity::worker_connection::Entity::insert(conn)
             .exec(&self.state.worker_db)
             .await

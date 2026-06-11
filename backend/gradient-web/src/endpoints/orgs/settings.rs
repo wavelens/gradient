@@ -16,7 +16,7 @@ use gradient_db::permissions::CachePermission;
 use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, QueryFilter};
+use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -173,12 +173,13 @@ pub async fn post_organization_subscribe_cache(
         CacheSubscriptionMode::ReadWrite | CacheSubscriptionMode::WriteOnly
     );
 
-    AOrganizationCache {
-        id: Set(OrganizationCacheId::now_v7()),
-        organization: Set(org.id),
-        cache: Set(cache.id),
-        mode: Set(mode),
+    MOrganizationCache {
+        id: OrganizationCacheId::now_v7(),
+        organization: org.id,
+        cache: cache.id,
+        mode,
     }
+    .into_active_model()
     .insert(&state.web_db)
     .await?;
 
@@ -256,15 +257,15 @@ async fn enqueue_backfill_signatures(
         if exists {
             continue;
         }
-        let am = ACachedPathSignature {
-            id: Set(CachedPathSignatureId::now_v7()),
-            cached_path: Set(cp_id),
-            cache: Set(cache_id),
-            signature: Set(None),
-            created_at: Set(now),
-            last_fetched_at: Set(None),
-            fetch_count: Set(0),
-        };
+        let am = MCachedPathSignature {
+            id: CachedPathSignatureId::now_v7(),
+            cached_path: cp_id,
+            cache: cache_id,
+            created_at: now,
+            ..Default::default()
+        }
+        .into_active_model();
+
         if let Err(e) = am.insert(&state.web_db).await {
             tracing::warn!(cached_path = %cp_id, cache = %cache_id, error = %e, "backfill: placeholder insert failed");
         }

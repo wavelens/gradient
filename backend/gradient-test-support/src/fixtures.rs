@@ -15,7 +15,7 @@ use gradient_entity::ids::{
 use gradient_entity::organization_cache::CacheSubscriptionMode;
 use gradient_entity::*;
 use gradient_types::consts::BASE_CACHE_ROLE_ADMIN_ID;
-use sea_orm::{ActiveModelTrait, ActiveValue::Set, DatabaseConnection, DbErr};
+use sea_orm::{ActiveModelTrait, DatabaseConnection, DbErr, IntoActiveModel};
 use uuid::Uuid;
 
 pub fn org_id() -> OrganizationId {
@@ -164,12 +164,13 @@ pub async fn insert_cache_creator_admin(
     cache_id: CacheId,
     user_id: UserId,
 ) -> Result<(), DbErr> {
-    cache_user::ActiveModel {
-        id: Set(CacheUserId::now_v7()),
-        cache: Set(cache_id),
-        user: Set(user_id),
-        role: Set(BASE_CACHE_ROLE_ADMIN_ID),
+    cache_user::Model {
+        id: CacheUserId::now_v7(),
+        cache: cache_id,
+        user: user_id,
+        role: BASE_CACHE_ROLE_ADMIN_ID,
     }
+    .into_active_model()
     .insert(db)
     .await?;
     Ok(())

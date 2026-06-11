@@ -20,8 +20,8 @@ use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, JoinType, PaginatorTrait, QueryFilter, QueryOrder,
-    QuerySelect, TransactionTrait,
+    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, JoinType, PaginatorTrait,
+    QueryFilter, QueryOrder, QuerySelect, TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -250,30 +250,31 @@ pub async fn put(
 
     let tx = state.web_db.inner().begin().await?;
 
-    let organization = AOrganization {
-        id: Set(OrganizationId::now_v7()),
-        name: Set(body.name.clone()),
-        display_name: Set(body.display_name.trim().to_string()),
-        description: Set(body.description.trim().to_string()),
-        public_key: Set(public_key),
-        private_key: Set(private_key),
-        public: Set(body.public.unwrap_or(false)),
-        hide_build_requests: Set(body.hide_build_requests.unwrap_or(false)),
-        created_by: Set(user.id),
-        created_at: Set(gradient_types::now()),
-        managed: Set(false),
-        github_installation_id: Set(None),
+    let organization = MOrganization {
+        id: OrganizationId::now_v7(),
+        name: body.name.clone(),
+        display_name: body.display_name.trim().to_string(),
+        description: body.description.trim().to_string(),
+        public_key,
+        private_key,
+        public: body.public.unwrap_or(false),
+        hide_build_requests: body.hide_build_requests.unwrap_or(false),
+        created_by: user.id,
+        created_at: gradient_types::now(),
+        ..Default::default()
     }
+    .into_active_model()
     .insert(&tx)
     .await
     .map_err(|e| WebError::from_db_err(e, "Organization Name"))?;
 
-    AOrganizationUser {
-        id: Set(OrganizationUserId::now_v7()),
-        organization: Set(organization.id),
-        user: Set(user.id),
-        role: Set(BASE_ROLE_ADMIN_ID),
+    MOrganizationUser {
+        id: OrganizationUserId::now_v7(),
+        organization: organization.id,
+        user: user.id,
+        role: BASE_ROLE_ADMIN_ID,
     }
+    .into_active_model()
     .insert(&tx)
     .await?;
 

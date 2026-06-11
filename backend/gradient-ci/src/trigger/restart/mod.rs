@@ -15,7 +15,7 @@ use gradient_types::*;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ConnectionTrait};
+use sea_orm::{ActiveModelTrait, ConnectionTrait, IntoActiveModel};
 
 /// Status mapping applied to each previous build when restarting.
 ///
@@ -67,29 +67,21 @@ pub async fn trigger_restart_builds<C: ConnectionTrait>(
     };
 
     let new_eval_id = EvaluationId::now_v7();
-    let aevaluation = AEvaluation {
-        id: Set(new_eval_id),
-        project: Set(Some(project.id)),
-        repository: Set(prev_eval.repository.clone()),
-        commit: Set(prev_eval.commit),
-        wildcard: Set(prev_eval.wildcard.clone()),
-        status: Set(initial_status),
-        previous: Set(Some(prev_eval.id)),
-        next: Set(None),
-        created_at: Set(now),
-        updated_at: Set(now),
-        flake_source: Set(prev_eval.flake_source.clone()),
-        check_run_ids: Set(None),
-        waiting_reason: Set(None),
-        trigger: Set(None),
-        concurrent: Set(false),
-        source_comment: Set(None),
-        fetch_started_at: Set(None),
-        eval_flake_started_at: Set(None),
-        eval_drv_started_at: Set(None),
-        building_started_at: Set(None),
-        finished_at: Set(None),
-    };
+    let aevaluation = MEvaluation {
+        id: new_eval_id,
+        project: Some(project.id),
+        repository: prev_eval.repository.clone(),
+        commit: prev_eval.commit,
+        wildcard: prev_eval.wildcard.clone(),
+        status: initial_status,
+        previous: Some(prev_eval.id),
+        created_at: now,
+        updated_at: now,
+        flake_source: prev_eval.flake_source.clone(),
+        ..Default::default()
+    }
+    .into_active_model();
+
     let new_eval = aevaluation.insert(db).await?;
 
     snapshot_flake_input_overrides(db, project.id, new_eval.id).await?;

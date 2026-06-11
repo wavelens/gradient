@@ -11,7 +11,8 @@ use gradient_types::*;
 use gradient_entity::evaluation::EvaluationStatus;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, EntityTrait, QueryFilter,
+    ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, EntityTrait, IntoActiveModel,
+    QueryFilter,
 };
 
 /// Rejects with [`TriggerError::AlreadyInProgress`] when `project` already has a
@@ -84,38 +85,34 @@ pub async fn trigger_evaluation<C: ConnectionTrait>(
 
     let now = gradient_types::now();
 
-    let acommit = ACommit {
-        id: Set(CommitId::now_v7()),
-        message: Set(commit_message.unwrap_or_default()),
-        hash: Set(commit_hash),
-        author: Set(None),
-        author_name: Set(author_name.unwrap_or_default()),
-    };
+    let acommit = MCommit {
+        id: CommitId::now_v7(),
+        message: commit_message.unwrap_or_default(),
+        hash: commit_hash,
+        author_name: author_name.unwrap_or_default(),
+        ..Default::default()
+    }
+    .into_active_model();
+
     let commit = acommit.insert(db).await?;
 
-    let aevaluation = AEvaluation {
-        id: Set(EvaluationId::now_v7()),
-        project: Set(Some(project.id)),
-        repository: Set(repository_override.unwrap_or_else(|| project.repository.clone())),
-        commit: Set(commit.id),
-        wildcard: Set(wildcard_override.unwrap_or_else(|| project.wildcard.clone())),
-        status: Set(EvaluationStatus::Queued),
-        previous: Set(previous),
-        next: Set(None),
-        created_at: Set(now),
-        updated_at: Set(now),
-        flake_source: Set(None),
-        check_run_ids: Set(None),
-        waiting_reason: Set(None),
-        trigger: Set(trigger),
-        concurrent: Set(concurrent),
-        source_comment: Set(source_comment),
-        fetch_started_at: Set(None),
-        eval_flake_started_at: Set(None),
-        eval_drv_started_at: Set(None),
-        building_started_at: Set(None),
-        finished_at: Set(None),
-    };
+    let aevaluation = MEvaluation {
+        id: EvaluationId::now_v7(),
+        project: Some(project.id),
+        repository: repository_override.unwrap_or_else(|| project.repository.clone()),
+        commit: commit.id,
+        wildcard: wildcard_override.unwrap_or_else(|| project.wildcard.clone()),
+        status: EvaluationStatus::Queued,
+        previous,
+        created_at: now,
+        updated_at: now,
+        trigger,
+        concurrent,
+        source_comment,
+        ..Default::default()
+    }
+    .into_active_model();
+
     let evaluation = aevaluation.insert(db).await?;
 
     snapshot_flake_input_overrides(db, project.id, evaluation.id).await?;

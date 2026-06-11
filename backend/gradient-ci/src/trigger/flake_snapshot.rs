@@ -5,8 +5,9 @@
  */
 
 use gradient_types::*;
-use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter,
+};
 
 pub(super) async fn snapshot_flake_input_overrides<C: ConnectionTrait>(
     txn: &C,
@@ -19,12 +20,14 @@ pub(super) async fn snapshot_flake_input_overrides<C: ConnectionTrait>(
         .await?;
 
     for r in rows {
-        let am = AEvaluationFlakeInputOverride {
-            id: Set(EvaluationFlakeInputOverrideId::now_v7()),
-            evaluation: Set(evaluation_id),
-            input_name: Set(r.input_name),
-            url: Set(r.url),
-        };
+        let am = MEvaluationFlakeInputOverride {
+            id: EvaluationFlakeInputOverrideId::now_v7(),
+            evaluation: evaluation_id,
+            input_name: r.input_name,
+            url: r.url,
+        }
+        .into_active_model();
+
         am.insert(txn).await?;
     }
     Ok(())

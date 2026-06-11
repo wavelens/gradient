@@ -197,13 +197,14 @@ pub async fn post_organization_role(
         return Err(WebError::already_exists("Role Name"));
     }
 
-    let role = ARole {
-        id: Set(RoleId::now_v7()),
-        name: Set(body.name.clone()),
-        organization: Set(Some(org.id)),
-        permission: Set(mask),
-        managed: Set(false),
+    let role = MRole {
+        id: RoleId::now_v7(),
+        name: body.name.clone(),
+        organization: Some(org.id),
+        permission: mask,
+        ..Default::default()
     }
+    .into_active_model()
     .insert(&state.web_db)
     .await?;
 

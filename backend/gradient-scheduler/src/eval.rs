@@ -21,7 +21,7 @@ use gradient_exec::strip_nix_store_prefix;
 use gradient_sources::{get_hash_from_path, parse_drv_hash_name};
 use gradient_types::*;
 use gradient_core::ServerState;
-use sea_orm::{ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
 use tracing::{debug, error, info};
 
 use super::build::check_evaluation_done;
@@ -62,34 +62,31 @@ impl DerivationInsertBatch {
             drv_path_to_id.insert(d.drv_path.clone(), id);
             let (drv_hash, drv_name) = parse_drv_hash_name(&d.drv_path)
                 .unwrap_or_else(|_| ("unknown".to_owned(), d.drv_path.clone()));
-            new_derivations.push(ADerivation {
-                id: Set(id),
-                organization: Set(organization_id),
-                hash: Set(drv_hash),
-                name: Set(drv_name),
-                architecture: Set(d.architecture.clone()),
-                pname: Set(d.pname.clone()),
-                prefer_local_build: Set(d.prefer_local_build),
-                is_fixed_output: Set(d.is_fixed_output),
-                allow_substitutes: Set(d.allow_substitutes),
-                created_at: Set(now),
+            new_derivations.push(MDerivation {
+                id,
+                organization: organization_id,
+                hash: drv_hash,
+                name: drv_name,
+                architecture: d.architecture.clone(),
+                pname: d.pname.clone(),
+                prefer_local_build: d.prefer_local_build,
+                is_fixed_output: d.is_fixed_output,
+                allow_substitutes: d.allow_substitutes,
+                created_at: now,
                 ..Default::default()
-            });
+            }.into_active_model());
             for output in &d.outputs {
                 let (hash, package) = get_hash_from_path(output.path.clone())
                     .unwrap_or_else(|_| ("unknown".to_owned(), output.name.clone()));
-                new_outputs.push(ADerivationOutput {
-                    id: Set(DerivationOutputId::now_v7()),
-                    derivation: Set(id),
-                    name: Set(output.name.clone()),
-                    hash: Set(hash),
-                    package: Set(package),
-                    ca: Set(None),
-                    nar_size: Set(None),
-                    is_cached: Set(false),
-                    cached_path: Set(None),
-                    created_at: Set(now),
-                });
+                new_outputs.push(MDerivationOutput {
+                    id: DerivationOutputId::now_v7(),
+                    derivation: id,
+                    name: output.name.clone(),
+                    hash,
+                    package,
+                    created_at: now,
+                    ..Default::default()
+                }.into_active_model());
             }
         }
 
@@ -269,23 +266,21 @@ impl<'a> EvalResultProcessor<'a> {
                 spawn_inputs.push((build_id, drv_id, d.drv_path.clone()));
             }
 
-            builds.push(ABuild {
-                id: Set(build_id),
-                evaluation: Set(self.evaluation_id),
-                derivation: Set(drv_id),
-                status: Set(status),
-                via: Set(via),
-                substitutable: Set(substitutable),
-                attempt: Set(0),
-                timeout_secs: Set(d.timeout_secs.map(|v| v as i64)),
-                max_silent_secs: Set(d.max_silent_secs.map(|v| v as i64)),
-                prefer_local_build: Set(d.prefer_local_build),
-                created_at: Set(now),
-                updated_at: Set(now),
-                queued_at: Set(matches!(status, BuildStatus::Queued).then_some(now)),
-                ready_at: Set(None),
-                dispatched_at: Set(None),
-            });
+            builds.push(MBuild {
+                id: build_id,
+                evaluation: self.evaluation_id,
+                derivation: drv_id,
+                status,
+                via,
+                substitutable,
+                timeout_secs: d.timeout_secs.map(|v| v as i64),
+                max_silent_secs: d.max_silent_secs.map(|v| v as i64),
+                prefer_local_build: d.prefer_local_build,
+                created_at: now,
+                updated_at: now,
+                queued_at: matches!(status, BuildStatus::Queued).then_some(now),
+                ..Default::default()
+            }.into_active_model());
         }
 
         if !builds.is_empty() {
@@ -499,15 +494,15 @@ impl<'a> EvalResultProcessor<'a> {
             if let Some(&drv_id) = drv_path_to_id.get(&d.drv_path)
                 && let Some(&build_id) = drv_id_to_build.get(&drv_id)
             {
-                active_entry_points.push(AEntryPoint {
-                    id: Set(EntryPointId::now_v7()),
-                    project: Set(project_id),
-                    evaluation: Set(self.evaluation_id),
-                    build: Set(build_id),
-                    eval: Set(d.attr.clone()),
-                    created_at: Set(now),
-                    repo_check_id: Set(None),
-                });
+                active_entry_points.push(MEntryPoint {
+                    id: EntryPointId::now_v7(),
+                    project: project_id,
+                    evaluation: self.evaluation_id,
+                    build: build_id,
+                    eval: d.attr.clone(),
+                    created_at: now,
+                    ..Default::default()
+                }.into_active_model());
             }
         }
 
@@ -626,23 +621,17 @@ async fn expand_substituted_closure(
         if matches!(status, BuildStatus::Substituted) {
             spawn_inputs.push((build_id, drv_id));
         }
-        builds.push(ABuild {
-            id: Set(build_id),
-            evaluation: Set(evaluation_id),
-            derivation: Set(drv_id),
-            status: Set(status),
-            via: Set(None),
-            substitutable: Set(substitutable),
-            attempt: Set(0),
-            timeout_secs: Set(None),
-            max_silent_secs: Set(None),
-            prefer_local_build: Set(false),
-            created_at: Set(now),
-            updated_at: Set(now),
-            queued_at: Set(matches!(status, BuildStatus::Queued).then_some(now)),
-            ready_at: Set(None),
-            dispatched_at: Set(None),
-        });
+        builds.push(MBuild {
+            id: build_id,
+            evaluation: evaluation_id,
+            derivation: drv_id,
+            status,
+            substitutable,
+            created_at: now,
+            updated_at: now,
+            queued_at: matches!(status, BuildStatus::Queued).then_some(now),
+            ..Default::default()
+        }.into_active_model());
     }
 
     let count = builds.len();
@@ -891,11 +880,11 @@ pub async fn flush_deferred_deps(
         };
         for dep in deps {
             if let Some(&dep_id) = drv_path_to_id.get(dep) {
-                edges.push(ADerivationDependency {
-                    id: Set(DerivationDependencyId::now_v7()),
-                    derivation: Set(src_id),
-                    dependency: Set(dep_id),
-                });
+                edges.push(MDerivationDependency {
+                    id: DerivationDependencyId::now_v7(),
+                    derivation: src_id,
+                    dependency: dep_id,
+                }.into_active_model());
             } else {
                 unresolved += 1;
             }

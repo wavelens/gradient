@@ -20,11 +20,11 @@ use axum::Json;
 use axum::extract::{Multipart, Path, State};
 use gradient_types::ids::{BuildRequestBlobId, UploadSessionId};
 use gradient_types::{
-    ABuildRequestBlob, AUploadSession, BaseResponse, EUploadSession, MUser, now,
+    AUploadSession, BaseResponse, EUploadSession, MBuildRequestBlob, MUser, now,
 };
 use gradient_core::ServerState;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, DbErr, EntityTrait, RuntimeErr, sqlx};
+use sea_orm::{ActiveModelTrait, DbErr, EntityTrait, IntoActiveModel, RuntimeErr, sqlx};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -115,14 +115,15 @@ pub async fn post_blobs(
             .map_err(|e| WebError::internal(format!("Failed to persist blob: {}", e)))?;
 
         let now_ts = now();
-        let insert_result = ABuildRequestBlob {
-            id: Set(BuildRequestBlobId::now_v7()),
-            organization: Set(session.organization),
-            hash: Set(hash_bytes.clone()),
-            size: Set(size),
-            created_at: Set(now_ts),
-            last_used_at: Set(now_ts),
+        let insert_result = MBuildRequestBlob {
+            id: BuildRequestBlobId::now_v7(),
+            organization: session.organization,
+            hash: hash_bytes.clone(),
+            size,
+            created_at: now_ts,
+            last_used_at: now_ts,
         }
+        .into_active_model()
         .insert(&state.web_db)
         .await;
 

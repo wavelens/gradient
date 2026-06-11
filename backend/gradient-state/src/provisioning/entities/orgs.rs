@@ -12,7 +12,7 @@ use gradient_types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WR
 use gradient_types::*;
 use anyhow::Result;
 use gradient_entity::*;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
 use std::collections::{HashMap, HashSet};
 
 impl<'a> StateApplicator<'a> {
@@ -87,20 +87,22 @@ impl<'a> StateApplicator<'a> {
                 org_id
             } else {
                 let org_id = declared_id.unwrap_or_else(OrganizationId::now_v7);
-                let org = organization::ActiveModel {
-                    id: Set(org_id),
-                    name: Set(state_org.name.clone()),
-                    display_name: Set(state_org.display_name.clone()),
-                    description: Set(state_org.description.clone().unwrap_or_default()),
-                    public_key: Set(public_key),
-                    private_key: Set(encrypted_private_key),
-                    public: Set(state_org.public),
-                    hide_build_requests: Set(state_org.hide_build_requests),
-                    created_by: Set(created_by_id),
-                    created_at: Set(now),
-                    managed: Set(true),
-                    github_installation_id: Set(state_org.github_installation_id),
-                };
+                let org = organization::Model {
+                    id: org_id,
+                    name: state_org.name.clone(),
+                    display_name: state_org.display_name.clone(),
+                    description: state_org.description.clone().unwrap_or_default(),
+                    public_key,
+                    private_key: encrypted_private_key,
+                    public: state_org.public,
+                    hide_build_requests: state_org.hide_build_requests,
+                    created_by: created_by_id,
+                    created_at: now,
+                    managed: true,
+                    github_installation_id: state_org.github_installation_id,
+                }
+                .into_active_model();
+
                 org.insert(self.db).await?;
                 tracing::info!(name = %state_org.name, "Created managed organization");
                 org_id
@@ -151,12 +153,13 @@ impl<'a> StateApplicator<'a> {
                     .await?;
 
                 if existing.is_none() {
-                    organization_user::ActiveModel {
-                        id: Set(OrganizationUserId::now_v7()),
-                        organization: Set(org_id),
-                        user: Set(created_by_id),
-                        role: Set(BASE_ROLE_ADMIN_ID),
+                    organization_user::Model {
+                        id: OrganizationUserId::now_v7(),
+                        organization: org_id,
+                        user: created_by_id,
+                        role: BASE_ROLE_ADMIN_ID,
                     }
+                    .into_active_model()
                     .insert(self.db)
                     .await?;
                     tracing::info!(
@@ -244,12 +247,13 @@ impl<'a> StateApplicator<'a> {
                             );
                         }
                     } else {
-                        organization_user::ActiveModel {
-                            id: Set(OrganizationUserId::now_v7()),
-                            organization: Set(org_id),
-                            user: Set(user_id),
-                            role: Set(role_id),
+                        organization_user::Model {
+                            id: OrganizationUserId::now_v7(),
+                            organization: org_id,
+                            user: user_id,
+                            role: role_id,
                         }
+                        .into_active_model()
                         .insert(self.db)
                         .await?;
                         tracing::info!(

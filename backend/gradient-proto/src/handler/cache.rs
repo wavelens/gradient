@@ -11,7 +11,7 @@ use gradient_types::ids::{CacheId, CachedPathId, CachedPathSignatureId, Organiza
 use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::sea_query::OnConflict;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
 use tracing::{error, warn};
 
 async fn build_local_cache_map(
@@ -108,14 +108,15 @@ async fn ensure_push_signatures(
     let rows: Vec<ACachedPathSignature> = cached_path_rows
         .iter()
         .flat_map(|cp| {
-            org_caches.iter().map(move |oc| ACachedPathSignature {
-                id: sea_orm::ActiveValue::Set(CachedPathSignatureId::now_v7()),
-                cached_path: sea_orm::ActiveValue::Set(cp.id),
-                cache: sea_orm::ActiveValue::Set(oc.cache),
-                signature: sea_orm::ActiveValue::Set(None),
-                created_at: sea_orm::ActiveValue::Set(now),
-                last_fetched_at: sea_orm::ActiveValue::Set(None),
-                fetch_count: sea_orm::ActiveValue::Set(0),
+            org_caches.iter().map(move |oc| {
+                MCachedPathSignature {
+                    id: CachedPathSignatureId::now_v7(),
+                    cached_path: cp.id,
+                    cache: oc.cache,
+                    created_at: now,
+                    ..Default::default()
+                }
+                .into_active_model()
             })
         })
         .collect();

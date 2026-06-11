@@ -453,21 +453,22 @@ pub async fn post_keys(
 
     let allowed_ips = normalize_allowed_ips(body.allowed_ips.clone())?;
     let raw_key = generate_api_key();
-    let api_key = AApi {
-        id: Set(ApiId::now_v7()),
-        owned_by: Set(user.id),
-        name: Set(body.name.clone()),
-        key: Set(hash_api_key(&raw_key)),
-        last_used_at: Set(*NULL_TIME),
-        created_at: Set(gradient_types::now()),
-        managed: Set(false),
-        expires_at: Set(expires_at),
-        revoked_at: Set(None),
-        permission: Set(mask),
-        organization: Set(org_pin),
-        cache: Set(cache_pin),
-        allowed_ips: Set(allowed_ips),
-    };
+    let api_key = MApi {
+        id: ApiId::now_v7(),
+        owned_by: user.id,
+        name: body.name.clone(),
+        key: hash_api_key(&raw_key),
+        last_used_at: *NULL_TIME,
+        created_at: gradient_types::now(),
+        expires_at,
+        permission: mask,
+        organization: org_pin,
+        cache: cache_pin,
+        allowed_ips,
+        ..Default::default()
+    }
+    .into_active_model();
+
     let inserted = api_key.insert(&state.web_db).await?;
 
     audit_record(

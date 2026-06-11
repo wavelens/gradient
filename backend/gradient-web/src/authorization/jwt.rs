@@ -12,7 +12,9 @@ use gradient_types::*;
 use gradient_core::ServerState;
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use rand::distr::{Alphanumeric, SampleString};
-use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::{
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
@@ -84,17 +86,19 @@ pub async fn create_session_and_token(
     let expires_at = now + lifetime;
 
     let session_id = SessionId::now_v7();
-    let session = ASession {
-        id: Set(session_id),
-        user_id: Set(user_id),
-        created_at: Set(now.naive_utc()),
-        expires_at: Set(expires_at.naive_utc()),
-        last_used_at: Set(now.naive_utc()),
-        revoked_at: Set(None),
-        user_agent: Set(user_agent),
-        ip: Set(ip),
-        remember_me: Set(remember_me),
-    };
+    let session = MSession {
+        id: session_id,
+        user_id,
+        created_at: now.naive_utc(),
+        expires_at: expires_at.naive_utc(),
+        last_used_at: now.naive_utc(),
+        user_agent,
+        ip,
+        remember_me,
+        ..Default::default()
+    }
+    .into_active_model();
+
     session
         .insert(&state.web_db)
         .await

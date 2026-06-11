@@ -10,8 +10,8 @@ use gradient_entity::evaluation::EvaluationStatus;
 use gradient_migration::Migrator;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectOptions, ConnectionTrait, Database,
-    DatabaseBackend, DatabaseConnection, DbErr, EntityTrait, QueryFilter, QuerySelect, Statement,
-    Value,
+    DatabaseBackend, DatabaseConnection, DbErr, EntityTrait, IntoActiveModel, QueryFilter,
+    QuerySelect, Statement, Value,
 };
 use sea_orm_migration::prelude::*;
 use std::time::Duration;
@@ -231,13 +231,13 @@ async fn seed_builtin_role(
 ) -> Result<(), DbErr> {
     match ERole::find_by_id(role_id).one(db).await? {
         None => {
-            ARole {
-                id: Set(role_id),
-                name: Set(name.to_string()),
-                organization: Set(None),
-                permission: Set(permission),
-                managed: Set(false),
+            MRole {
+                id: role_id,
+                name: name.to_string(),
+                permission,
+                ..Default::default()
             }
+            .into_active_model()
             .insert(db)
             .await?;
         }
@@ -260,13 +260,13 @@ async fn seed_builtin_cache_role(
 ) -> Result<(), DbErr> {
     match ECacheRole::find_by_id(role_id).one(db).await? {
         None => {
-            ACacheRole {
-                id: Set(role_id),
-                name: Set(name.to_string()),
-                cache: Set(None),
-                permission: Set(permission),
-                managed: Set(false),
+            MCacheRole {
+                id: role_id,
+                name: name.to_string(),
+                permission,
+                ..Default::default()
             }
+            .into_active_model()
             .insert(db)
             .await?;
         }
@@ -298,11 +298,12 @@ pub async fn add_features(
         let feature = if let Some(f) = feature {
             f
         } else {
-            let afeature = AFeature {
-                id: Set(FeatureId::now_v7()),
-                name: Set(f),
-                kind: Set(kind.clone()),
-            };
+            let afeature = MFeature {
+                id: FeatureId::now_v7(),
+                name: f,
+                kind: kind.clone(),
+            }
+            .into_active_model();
 
             afeature
                 .insert(&ctx.worker_db)
@@ -311,11 +312,12 @@ pub async fn add_features(
         };
 
         if let Some(d_id) = derivation_id {
-            let aderivation_feature = ADerivationFeature {
-                id: Set(DerivationFeatureId::now_v7()),
-                derivation: Set(d_id),
-                feature: Set(feature.id),
-            };
+            let aderivation_feature = MDerivationFeature {
+                id: DerivationFeatureId::now_v7(),
+                derivation: d_id,
+                feature: feature.id,
+            }
+            .into_active_model();
 
             // `derivation_feature` has a UNIQUE (derivation, feature) index;
             // re-discovering an already-known edge during a fresh evaluation

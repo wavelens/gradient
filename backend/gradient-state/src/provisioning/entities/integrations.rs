@@ -14,7 +14,7 @@ use crate::config::*;
 use gradient_types::*;
 use anyhow::Result;
 use gradient_entity::*;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
 use std::collections::HashMap;
 
 impl<'a> StateApplicator<'a> {
@@ -119,20 +119,22 @@ impl<'a> StateApplicator<'a> {
                 active.update(self.db).await?;
                 tracing::info!(name = %state_int.name, "Updated managed integration");
             } else {
-                let row = integration::ActiveModel {
-                    id: Set(IntegrationId::now_v7()),
-                    organization: Set(org_id),
-                    name: Set(state_int.name.clone()),
-                    display_name: Set(display_name),
-                    kind: Set(i16::from(kind)),
-                    forge_type: Set(i16::from(forge)),
-                    secret: Set(encrypted_secret),
-                    endpoint_url: Set(endpoint),
-                    access_token: Set(encrypted_token),
-                    allowed_ips: Set(None),
-                    created_by: Set(created_by_id),
-                    created_at: Set(now()),
-                };
+                let row = integration::Model {
+                    id: IntegrationId::now_v7(),
+                    organization: org_id,
+                    name: state_int.name.clone(),
+                    display_name,
+                    kind: i16::from(kind),
+                    forge_type: i16::from(forge),
+                    secret: encrypted_secret,
+                    endpoint_url: endpoint,
+                    access_token: encrypted_token,
+                    created_by: created_by_id,
+                    created_at: now(),
+                    ..Default::default()
+                }
+                .into_active_model();
+
                 row.insert(self.db).await?;
                 tracing::info!(name = %state_int.name, "Created managed integration");
             }

@@ -172,13 +172,14 @@ pub async fn post_cache_role(
         return Err(WebError::already_exists("Role Name"));
     }
 
-    let role = ACacheRole {
-        id: Set(RoleId::now_v7()),
-        name: Set(body.name.clone()),
-        cache: Set(Some(cache.id)),
-        permission: Set(mask),
-        managed: Set(false),
+    let role = MCacheRole {
+        id: RoleId::now_v7(),
+        name: body.name.clone(),
+        cache: Some(cache.id),
+        permission: mask,
+        ..Default::default()
     }
+    .into_active_model()
     .insert(&state.web_db)
     .await?;
 

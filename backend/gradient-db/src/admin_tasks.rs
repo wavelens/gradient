@@ -28,17 +28,16 @@ pub async fn insert_pending<C: ConnectionTrait>(
     kind: AdminTaskKind,
     created_by: Option<UserId>,
 ) -> std::result::Result<MAdminTask, InsertPendingError> {
-    let model = AAdminTask {
-        id: Set(AdminTaskId::now_v7()),
-        kind: Set(kind),
-        status: Set(AdminTaskStatus::Pending),
-        created_at: Set(now()),
-        started_at: Set(None),
-        finished_at: Set(None),
-        progress: Set(None),
-        error: Set(None),
-        created_by: Set(created_by),
-    };
+    let model = MAdminTask {
+        id: AdminTaskId::now_v7(),
+        kind,
+        status: AdminTaskStatus::Pending,
+        created_at: now(),
+        created_by,
+        ..Default::default()
+    }
+    .into_active_model();
+
     match model.insert(conn).await {
         Ok(m) => Ok(m),
         Err(DbErr::Exec(e)) if is_unique_violation(&e.to_string()) => {

@@ -23,7 +23,8 @@ use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, QueryFilter, TransactionTrait,
+    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter,
+    TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -174,49 +175,50 @@ pub async fn put(
 
     let tx = state.web_db.inner().begin().await?;
 
-    let cache = ACache {
-        id: Set(CacheId::now_v7()),
-        name: Set(body.name.clone()),
-        active: Set(true),
-        display_name: Set(body.display_name.trim().to_string()),
-        description: Set(body.description.trim().to_string()),
-        priority: Set(body.priority),
-        local_priority: Set(body.local_priority),
-        public_key: Set(public_key),
-        private_key: Set(private_key),
-        public: Set(body.public.unwrap_or(false)),
-        created_by: Set(user.id),
-        created_at: Set(gradient_types::now()),
-        managed: Set(false),
-        max_storage_gb: Set(max_storage_gb),
+    let cache = MCache {
+        id: CacheId::now_v7(),
+        name: body.name.clone(),
+        active: true,
+        display_name: body.display_name.trim().to_string(),
+        description: body.description.trim().to_string(),
+        priority: body.priority,
+        local_priority: body.local_priority,
+        public_key,
+        private_key,
+        public: body.public.unwrap_or(false),
+        created_by: user.id,
+        created_at: gradient_types::now(),
+        max_storage_gb,
+        ..Default::default()
     }
+    .into_active_model()
     .insert(&tx)
     .await
     .map_err(|e| WebError::from_db_err(e, "Cache Name"))?;
 
-    ACacheUpstream {
-        id: Set(CacheUpstreamId::now_v7()),
-        cache: Set(cache.id),
-        display_name: Set("cache.nixos.org".to_string()),
-        mode: Set(CacheSubscriptionMode::ReadOnly),
-        kind: Set(CacheUpstreamKind::Http),
-        upstream_cache: Set(None),
-        url: Set(Some("https://cache.nixos.org".to_string())),
-        public_key: Set(Some(
+    MCacheUpstream {
+        id: CacheUpstreamId::now_v7(),
+        cache: cache.id,
+        display_name: "cache.nixos.org".to_string(),
+        mode: CacheSubscriptionMode::ReadOnly,
+        kind: CacheUpstreamKind::Http,
+        url: Some("https://cache.nixos.org".to_string()),
+        public_key: Some(
             "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=".to_string(),
-        )),
-        remote_cache_name: Set(None),
-        api_key: Set(None),
+        ),
+        ..Default::default()
     }
+    .into_active_model()
     .insert(&tx)
     .await?;
 
-    ACacheUser {
-        id: Set(CacheUserId::now_v7()),
-        cache: Set(cache.id),
-        user: Set(user.id),
-        role: Set(BASE_CACHE_ROLE_ADMIN_ID),
+    MCacheUser {
+        id: CacheUserId::now_v7(),
+        cache: cache.id,
+        user: user.id,
+        role: BASE_CACHE_ROLE_ADMIN_ID,
     }
+    .into_active_model()
     .insert(&tx)
     .await?;
 

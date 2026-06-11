@@ -16,8 +16,8 @@ use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, JoinType, QueryFilter, QuerySelect,
-    RelationTrait,
+    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, JoinType, QueryFilter,
+    QuerySelect, RelationTrait,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -159,12 +159,13 @@ pub async fn post_organization_users(
         .await?
         .or_not_found("Role")?;
 
-    AOrganizationUser {
-        id: Set(OrganizationUserId::now_v7()),
-        organization: Set(organization.id),
-        user: Set(target_user.id),
-        role: Set(role.id),
+    MOrganizationUser {
+        id: OrganizationUserId::now_v7(),
+        organization: organization.id,
+        user: target_user.id,
+        role: role.id,
     }
+    .into_active_model()
     .insert(&state.web_db)
     .await?;
 

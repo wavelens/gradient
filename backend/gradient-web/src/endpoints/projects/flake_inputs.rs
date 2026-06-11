@@ -16,7 +16,9 @@ use chrono::Utc;
 use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, QueryOrder,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -163,14 +165,15 @@ pub async fn create(
     }
 
     let now = Utc::now().naive_utc();
-    let row = AProjectFlakeInputOverride {
-        id: Set(FlakeInputOverrideId::now_v7()),
-        project: Set(proj.id),
-        input_name: Set(body.input_name),
-        url: Set(body.url),
-        created_at: Set(now),
-        updated_at: Set(now),
+    let row = MProjectFlakeInputOverride {
+        id: FlakeInputOverrideId::now_v7(),
+        project: proj.id,
+        input_name: body.input_name,
+        url: body.url,
+        created_at: now,
+        updated_at: now,
     }
+    .into_active_model()
     .insert(&state.web_db)
     .await?;
 

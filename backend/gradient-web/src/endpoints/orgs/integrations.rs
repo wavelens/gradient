@@ -332,20 +332,21 @@ pub async fn put_integration(
 
     let allowed_ips = normalize_allowed_ips(body.allowed_ips.clone())?
         .and_then(|v| if v.is_empty() { None } else { Some(v) });
-    let integration = AIntegration {
-        id: Set(IntegrationId::now_v7()),
-        organization: Set(org.id),
-        name: Set(body.name),
-        display_name: Set(display_name),
-        kind: Set(i16::from(kind)),
-        forge_type: Set(i16::from(forge)),
-        secret: Set(encrypted_secret),
-        endpoint_url: Set(endpoint_url),
-        access_token: Set(encrypted_token),
-        allowed_ips: Set(allowed_ips),
-        created_by: Set(user.id),
-        created_at: Set(gradient_types::now()),
-    };
+    let integration = MIntegration {
+        id: IntegrationId::now_v7(),
+        organization: org.id,
+        name: body.name,
+        display_name,
+        kind: i16::from(kind),
+        forge_type: i16::from(forge),
+        secret: encrypted_secret,
+        endpoint_url,
+        access_token: encrypted_token,
+        allowed_ips,
+        created_by: user.id,
+        created_at: gradient_types::now(),
+    }
+    .into_active_model();
 
     let integration = integration.insert(&state.web_db).await?;
 

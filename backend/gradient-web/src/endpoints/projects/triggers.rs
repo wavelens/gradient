@@ -23,7 +23,9 @@ use gradient_types::*;
 use gradient_core::ServerState;
 use gradient_scheduler::Scheduler;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -210,16 +212,17 @@ pub async fn create(
     let trigger_type = body.config.trigger_type();
     let config_json = body.config.to_db_json();
 
-    let row = AProjectTrigger {
-        id: Set(ProjectTriggerId::now_v7()),
-        project: Set(proj.id),
-        trigger_type: Set(i16::from(trigger_type)),
-        config: Set(config_json),
-        active: Set(body.active),
-        last_fired_at: Set(None),
-        created_at: Set(now),
-        updated_at: Set(now),
+    let row = MProjectTrigger {
+        id: ProjectTriggerId::now_v7(),
+        project: proj.id,
+        trigger_type: i16::from(trigger_type),
+        config: config_json,
+        active: body.active,
+        created_at: now,
+        updated_at: now,
+        ..Default::default()
     }
+    .into_active_model()
     .insert(&state.web_db)
     .await?;
 
