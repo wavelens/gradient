@@ -3813,3 +3813,11 @@ found".
 Frontend (`board/live-jobs/live-jobs.component.spec.ts`) - the view/filter
 selection round-trips through `sessionStorage`: a persisted `pending` view is
 restored on load and switching the tab writes it back.
+
+## Minor frontend & job board fixes (#375)
+
+Frontend tests documenting UI improvements to the action form, live jobs list, and job detail page:
+
+- `action-form.component.spec.ts` - `forge_status_report` actions submit an empty `events` array; submit errors render inside the action dialog.
+- `live-jobs.component.spec.ts` - dispatched/pending job rows show the derivation `pname`.
+- `job-detail.component.spec.ts` - the "Previous Build Attempts" section renders only when a build has more than one attempt, one linked row per attempt.
