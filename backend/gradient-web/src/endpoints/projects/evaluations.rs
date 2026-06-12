@@ -6,7 +6,7 @@
 
 use super::{
     BuildStatusCounts, EntryPointSummary, EvaluationSummary, EvaluationTriggerSummary,
-    ProjectDetailsResponse,
+    ProjectDetailsResponse, QueueSummary,
 };
 use crate::access::{Caller, ProjectAccess, has_permission, is_org_member, load_project};
 use crate::authorization::{MaybeApiKey, MaybeUser};
@@ -247,6 +247,7 @@ pub async fn get_project_evaluations(
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Extension(api_key): Extension<MaybeApiKey>,
     Path((organization, project)): Path<(String, String)>,
+    Query(params): Query<EvaluationsQuery>,
 ) -> WebResult<Json<BaseResponse<Vec<EvaluationSummary>>>> {
     let (_organization, project) = load_project(
         &state,
@@ -258,10 +259,11 @@ pub async fn get_project_evaluations(
     )
     .await?;
 
+    let limit = params.limit.unwrap_or(project.keep_evaluations as u64);
     let evaluations = EEvaluation::find()
         .filter(CEvaluation::Project.eq(project.id))
         .order_by_desc(CEvaluation::CreatedAt)
-        .limit(project.keep_evaluations as u64)
+        .limit(limit)
         .all(&state.web_db)
         .await?;
 
@@ -287,15 +289,17 @@ pub async fn get_project_details(
     )
     .await?;
 
-    // Get last 5 evaluations for this project
     let evaluations = EEvaluation::find()
         .filter(CEvaluation::Project.eq(project.id))
         .order_by_desc(CEvaluation::CreatedAt)
-        .limit(5)
+        .limit(10)
         .all(&state.web_db)
         .await?;
 
     let evaluation_summaries = evaluations_to_summaries(&state.0, evaluations).await?;
+
+    let (building, queued) =
+        gradient_db::project_queue_summary(&state.web_db, project.id).await?;
 
     let (can_edit, can_trigger) = match &maybe_user {
         Some(user) => (
@@ -329,6 +333,8 @@ pub async fn get_project_details(
         active: project.active,
         created_at: project.created_at,
         keep_evaluations: project.keep_evaluations,
+        last_check_at: project.last_check_at,
+        queue: QueueSummary { building, queued },
         last_evaluations: evaluation_summaries,
         can_edit,
         can_trigger,
@@ -341,6 +347,11 @@ pub async fn get_project_details(
     };
 
     Ok(Json(res))
+}
+
+#[derive(Deserialize, Debug, Default)]
+pub struct EvaluationsQuery {
+    pub limit: Option<u64>,
 }
 
 #[derive(Deserialize, Debug)]
