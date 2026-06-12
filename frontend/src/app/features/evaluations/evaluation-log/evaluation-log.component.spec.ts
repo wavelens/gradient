@@ -24,15 +24,72 @@ function setup(): { fixture: ComponentFixture<EvaluationLogComponent>; cmp: Eval
   return { fixture, cmp: fixture.componentInstance };
 }
 
+type Internals = {
+  appendStreamedLines: (lines: string[]) => void;
+  loadWindow: (buildId: string, start: number, end: number, mode: 'replace' | 'append' | 'prepend') => Promise<void>;
+  convertAnsiToHtml: (text: string) => string;
+  logLines: string[];
+  MAX_WINDOW: number;
+  LINE_PX: number;
+};
+
 describe('EvaluationLogComponent', () => {
   // #341: the live line-count must update on the streaming (Building) render
   // path, identical to chunked (Completed) builds.
   describe('line count', () => {
-    it('renderLog sets logLineCount from logLines', () => {
+    it('appendStreamedLines sets logLineCount from logLines', () => {
       const { cmp } = setup();
-      (cmp as unknown as { logLines: string[] }).logLines = ['a', 'b', 'c'];
-      (cmp as unknown as { renderLog: () => void }).renderLog();
+      (cmp as unknown as Internals).appendStreamedLines(['a', 'b', 'c']);
       expect(cmp.logLineCount()).toBe(3);
+    });
+  });
+
+  // Streaming logs render through the same virtualized window as chunked logs:
+  // per-tick cost must stay O(new lines), never O(total lines).
+  describe('streaming virtualization', () => {
+    it('converts only the newly streamed lines, not the whole log', () => {
+      const { cmp } = setup();
+      const c = cmp as unknown as Internals;
+      c.appendStreamedLines(Array.from({ length: 100 }, (_, i) => `line ${i}`));
+      const spy = vi.spyOn(c, 'convertAnsiToHtml');
+      c.appendStreamedLines(['a', 'b', 'c']);
+      expect(spy).toHaveBeenCalledTimes(3);
+      expect(cmp.logLineCount()).toBe(103);
+      expect(cmp.windowLines().length).toBe(103);
+      expect(cmp.windowLines()[102].n).toBe(103);
+    });
+
+    it('caps the rendered window at MAX_WINDOW, accounting for trimmed lines in the top spacer', () => {
+      const { cmp } = setup();
+      const c = cmp as unknown as Internals;
+      c.appendStreamedLines(Array.from({ length: c.MAX_WINDOW + 500 }, (_, i) => `l${i}`));
+      expect(cmp.windowLines().length).toBe(c.MAX_WINDOW);
+      expect(cmp.windowLines()[0].n).toBe(501);
+      expect(cmp.topSpacerPx()).toBe(500 * c.LINE_PX);
+      expect(cmp.logLineCount()).toBe(c.MAX_WINDOW + 500);
+    });
+
+    it('keeps the window pinned while scrolled up: new lines only grow the bottom spacer', () => {
+      const { cmp } = setup();
+      const c = cmp as unknown as Internals;
+      c.appendStreamedLines(['a', 'b']);
+      cmp.autoScroll.set(false);
+      c.appendStreamedLines(['c', 'd', 'e']);
+      expect(cmp.windowLines().length).toBe(2);
+      expect(cmp.bottomSpacerPx()).toBe(3 * c.LINE_PX);
+      expect(cmp.logLineCount()).toBe(5);
+    });
+
+    it('pages older lines from in-memory log when scrolled up during streaming', async () => {
+      const { cmp } = setup();
+      const c = cmp as unknown as Internals;
+      c.logLines = Array.from({ length: 2000 }, (_, i) => `l${i + 1}`);
+      await c.loadWindow('b1', 1001, 2000, 'replace');
+      expect(cmp.windowLines()[0].n).toBe(1001);
+      await c.loadWindow('b1', 201, 1000, 'prepend');
+      expect(cmp.windowLines()[0].n).toBe(201);
+      expect(cmp.windowLines().length).toBe(1800);
+      expect(cmp.topSpacerPx()).toBe(200 * c.LINE_PX);
     });
   });
 

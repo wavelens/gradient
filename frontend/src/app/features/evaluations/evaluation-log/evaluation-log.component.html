@@ -314,7 +314,7 @@
               </div>
             }
             <div class="log-container" #logContainer (scroll)="onLogScroll($event)">
-              @if (chunkedMode()) {
+              @if (logLineCount() > 0) {
                 <div class="log-spacer" [style.height.px]="topSpacerPx()"></div>
                 <div class="log-lines">
                   @for (ln of windowLines(); track ln.n) {
@@ -329,8 +329,6 @@
                   }
                 </div>
                 <div class="log-spacer" [style.height.px]="bottomSpacerPx()"></div>
-              } @else if (logHtml().toString()) {
-                <pre class="log-output" [innerHTML]="logHtml()"></pre>
               } @else {
                 <div class="no-log-hint">
                   <span class="material-symbols-outlined">article</span>

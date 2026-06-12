@@ -69,7 +69,6 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   messages = signal<(EvaluationMessage & { renderedHtml: SafeHtml })[]>([]);
   selectedBuildId = signal<string | null>(null);
   selectedSection = signal<'messages' | null>(null);
-  logHtml = signal<SafeHtml>('');
   logLineCount = signal(0);
   logLoading = signal(true);
   aborting = signal(false);
@@ -123,7 +122,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private totalBuilds = 0;
   private loadingMore = false;
 
-  // ── Chunked log viewing (completed builds) ──────────────────────────────────
+  // ── Virtualized log window (streaming from memory, completed via chunk API) ──
   chunkedMode = signal(false);
   windowLines = signal<{ n: number; html: SafeHtml }[]>([]);
   topSpacerPx = signal(0);
@@ -143,8 +142,8 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private readonly MIN_SEARCH_LEN = 3;
   private readonly SEARCH_DEBOUNCE_MS = 300;
   private chunkIndex: LogChunkIndex | null = null;
+  private logSource: 'memory' | 'chunks' = 'memory';
   private windowStart = 1;
-  private windowText: string[] = [];
   private loadingWindow = false;
   private pendingDeepLink: number | null = null;
   private readonly LINE_PX = 18;
@@ -356,9 +355,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
         // Queued → Building: reload logs for the newly started build
         if (prevSelected?.status === 'Queued' && newSelected?.status === 'Building') {
-          this.logLines = [];
           this.pendingLogLines = [];
-          this.logHtml.set('');
           this.logLoading.set(true);
           this.fetchInitialLogs(newSelected.id);
         }
@@ -477,8 +474,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.selectedSection.set('messages');
     this.selectedBuildId.set(null);
     this.stopActiveStream();
-    this.logLines = [];
-    this.logHtml.set('');
+    this.resetLogState();
     this.router.navigate([], {
       relativeTo: this.route,
       queryParams: { build: null, eval: 1 },
@@ -530,9 +526,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.userPickedBuild = isUserAction;
     this.autoFollowBuilding = false;
     this.stopActiveStream();
-    this.logLines = [];
-    this.logHtml.set('');
-    this.logLineCount.set(0);
+    this.resetLogState();
     this.selectedBuildId.set(build.id);
     this.autoScroll.set(true);
     this.showScrollBtn.set(false);
@@ -549,7 +543,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   }
 
   private async fetchInitialLogs(buildId: string): Promise<void> {
-    this.resetChunkedState();
+    this.resetLogState();
     const selected = this.builds().find(b => b.id === buildId);
     const terminal = selected && !['Queued', 'Building', 'Created'].includes(selected.status);
     if (terminal && (await this.fetchChunkedLog(buildId))) {
@@ -571,7 +565,8 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
           // Trim a single trailing empty string produced by a final newline
           if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
           this.logLines = lines;
-          this.renderLog();
+          this.logLineCount.set(lines.length);
+          await this.showTailOrDeepLink(buildId);
         }
       }
     } catch {
@@ -635,13 +630,14 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.stopLogDrainTimer();
   }
 
-  // ── Chunked log viewing ─────────────────────────────────────────────────────
+  // ── Virtualized log window ──────────────────────────────────────────────────
 
-  private resetChunkedState(): void {
+  private resetLogState(): void {
     this.chunkedMode.set(false);
     this.chunkIndex = null;
+    this.logSource = 'memory';
+    this.logLines = [];
     this.logLineCount.set(0);
-    this.windowText = [];
     this.windowStart = 1;
     this.windowLines.set([]);
     this.topSpacerPx.set(0);
@@ -670,22 +666,31 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     if (!index || index.total_chunks === 0 || index.total_lines === 0) return false;
 
     this.chunkIndex = index;
+    this.logSource = 'chunks';
     this.chunkedMode.set(true);
     this.logLineCount.set(index.total_lines);
-
-    const target = this.pendingDeepLink;
-    this.pendingDeepLink = null;
-    if (target && target <= index.total_lines) {
-      await this.jumpToLine(buildId, target);
-    } else {
-      const start = Math.max(1, index.total_lines - this.WINDOW_PAGE + 1);
-      await this.loadWindow(buildId, start, index.total_lines, 'replace');
-      this.scrollToBottomIfAuto();
-    }
+    await this.showTailOrDeepLink(buildId);
     return true;
   }
 
-  private async fetchLines(buildId: string, start: number, end: number): Promise<string[]> {
+  private async showTailOrDeepLink(buildId: string): Promise<void> {
+    const total = this.totalLines();
+    const target = this.pendingDeepLink;
+    this.pendingDeepLink = null;
+    if (target && target <= total) {
+      await this.jumpToLine(buildId, target);
+    } else {
+      await this.loadWindow(buildId, Math.max(1, total - this.WINDOW_PAGE + 1), total, 'replace');
+      this.scrollToBottomIfAuto();
+    }
+  }
+
+  private totalLines(): number {
+    return this.logSource === 'chunks' ? this.chunkIndex?.total_lines ?? 0 : this.logLines.length;
+  }
+
+  private async getLines(buildId: string, start: number, end: number): Promise<string[]> {
+    if (this.logSource === 'memory') return this.logLines.slice(start - 1, end);
     const res = await fetch(
       `${environment.apiUrl}/builds/${buildId}/log/lines?start=${start}&end=${end}`,
       { method: 'GET', credentials: 'include' },
@@ -697,6 +702,13 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     return lines;
   }
 
+  private renderLines(lines: string[], startLine: number): { n: number; html: SafeHtml }[] {
+    return lines.map((text, i) => ({
+      n: startLine + i,
+      html: this.sanitizer.bypassSecurityTrustHtml(this.convertAnsiToHtml(text)),
+    }));
+  }
+
   private async loadWindow(
     buildId: string,
     start: number,
@@ -706,46 +718,40 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     if (this.loadingWindow) return;
     this.loadingWindow = true;
     try {
-      const lines = await this.fetchLines(buildId, start, end);
+      const rendered = this.renderLines(await this.getLines(buildId, start, end), start);
       if (mode === 'replace') {
         this.windowStart = start;
-        this.windowText = lines;
+        this.windowLines.set(rendered);
       } else if (mode === 'append') {
-        this.windowText = this.windowText.concat(lines);
-        if (this.windowText.length > this.MAX_WINDOW) {
-          const drop = this.windowText.length - this.MAX_WINDOW;
-          this.windowText = this.windowText.slice(drop);
+        let next = [...this.windowLines(), ...rendered];
+        const drop = next.length - this.MAX_WINDOW;
+        if (drop > 0) {
+          next = next.slice(drop);
           this.windowStart += drop;
         }
+        this.windowLines.set(next);
       } else {
-        this.windowText = lines.concat(this.windowText);
+        let next = [...rendered, ...this.windowLines()];
         this.windowStart = start;
-        if (this.windowText.length > this.MAX_WINDOW) {
-          this.windowText = this.windowText.slice(0, this.MAX_WINDOW);
-        }
+        if (next.length > this.MAX_WINDOW) next = next.slice(0, this.MAX_WINDOW);
+        this.windowLines.set(next);
       }
-      this.renderWindow();
+      this.updateSpacers();
     } finally {
       this.loadingWindow = false;
     }
   }
 
-  private renderWindow(): void {
-    const total = this.chunkIndex?.total_lines ?? this.windowText.length;
-    const rendered = this.windowText.map((text, i) => ({
-      n: this.windowStart + i,
-      html: this.sanitizer.bypassSecurityTrustHtml(this.convertAnsiToHtml(text)),
-    }));
-    this.windowLines.set(rendered);
-    const before = this.windowStart - 1;
-    const after = Math.max(0, total - (this.windowStart - 1 + this.windowText.length));
-    this.topSpacerPx.set(before * this.LINE_PX);
+  private updateSpacers(): void {
+    const total = this.totalLines();
+    const after = Math.max(0, total - (this.windowStart - 1 + this.windowLines().length));
+    this.topSpacerPx.set((this.windowStart - 1) * this.LINE_PX);
     this.bottomSpacerPx.set(after * this.LINE_PX);
     this.cdr.detectChanges();
   }
 
   private async jumpToLine(buildId: string, line: number): Promise<void> {
-    const total = this.chunkIndex?.total_lines ?? 0;
+    const total = this.totalLines();
     const { start, end } = windowAround(total, line, this.WINDOW_PAGE);
     await this.loadWindow(buildId, start, end, 'replace');
     this.highlightLine.set(line);
@@ -942,9 +948,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       const count = this.pendingLogLines.length > 30
         ? Math.ceil(this.pendingLogLines.length / 8)
         : 1;
-      this.logLines.push(...this.pendingLogLines.splice(0, count));
-      this.renderLog();
-      this.scrollToBottomIfAuto();
+      this.appendStreamedLines(this.pendingLogLines.splice(0, count));
     }, 80);
   }
 
@@ -958,11 +962,37 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private flushPendingLogs(): void {
     this.stopLogDrainTimer();
     if (this.pendingLogLines.length > 0) {
-      this.logLines.push(...this.pendingLogLines);
-      this.pendingLogLines = [];
-      this.renderLog();
-      this.scrollToBottomIfAuto();
+      this.appendStreamedLines(this.pendingLogLines.splice(0));
     }
+  }
+
+  /// Streaming hot path - strictly O(new lines) per drain tick. While
+  /// auto-scrolling the window stays pinned to the tail; otherwise only the
+  /// bottom spacer grows so the scrollbar stays truthful without re-rendering.
+  private appendStreamedLines(lines: string[]): void {
+    const prevTotal = this.logLines.length;
+    const atTail = this.windowStart + this.windowLines().length - 1 === prevTotal;
+    this.logLines.push(...lines);
+    this.logLineCount.set(this.logLines.length);
+
+    if (this.autoScroll()) {
+      if (atTail) {
+        let next = [...this.windowLines(), ...this.renderLines(lines, prevTotal + 1)];
+        const drop = next.length - this.MAX_WINDOW;
+        if (drop > 0) {
+          next = next.slice(drop);
+          this.windowStart += drop;
+        }
+        this.windowLines.set(next);
+      } else {
+        // Window drifted off the tail (user paged up, then re-enabled follow)
+        const total = this.logLines.length;
+        void this.loadWindow(this.selectedBuildId() ?? '', Math.max(1, total - this.WINDOW_PAGE + 1), total, 'replace');
+      }
+    }
+
+    this.updateSpacers();
+    this.scrollToBottomIfAuto();
   }
 
   // ── Log parsing & rendering ─────────────────────────────────────────────────
@@ -1054,13 +1084,6 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     return result + '</span>'.repeat(openSpans);
   }
 
-  private renderLog(): void {
-    const html = this.logLines.map(l => this.convertAnsiToHtml(l)).join('\n');
-    this.logHtml.set(this.sanitizer.bypassSecurityTrustHtml(html));
-    this.logLineCount.set(this.logLines.length);
-    this.cdr.detectChanges();
-  }
-
   // ── Scroll management ───────────────────────────────────────────────────────
 
   onBuildsViewportScroll(event: Event): void {
@@ -1076,23 +1099,27 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
     this.autoScroll.set(atBottom);
     this.showScrollBtn.set(!atBottom);
-    if (this.chunkedMode()) this.maybePageChunked(el);
+    this.maybePageLog(el);
   }
 
-  private maybePageChunked(el: HTMLElement): void {
-    if (this.loadingWindow || !this.chunkIndex) return;
+  private maybePageLog(el: HTMLElement): void {
+    if (this.loadingWindow) return;
     const buildId = this.selectedBuildId();
     if (!buildId) return;
-    const total = this.chunkIndex.total_lines;
-    const windowEnd = this.windowStart + this.windowText.length - 1;
+    const total = this.totalLines();
+    if (total === 0) return;
+    const windowCount = this.windowLines().length;
+    const windowEnd = this.windowStart + windowCount - 1;
 
     // Fast scrollbar drag: the viewport jumped into a spacer region with no
     // rendered lines. Burst-load a fresh window centred on the new position
     // instead of crawling one page at a time from an edge.
-    if (this.windowText.length > 0) {
+    if (windowCount > 0) {
       const loadedTopPx = this.topSpacerPx();
-      const loadedBottomPx = loadedTopPx + this.windowText.length * this.LINE_PX;
-      if (el.scrollTop + el.clientHeight < loadedTopPx || el.scrollTop > loadedBottomPx) {
+      const loadedBottomPx = loadedTopPx + windowCount * this.LINE_PX;
+      const outsideAbove = el.scrollTop + el.clientHeight < loadedTopPx && this.windowStart > 1;
+      const outsideBelow = el.scrollTop > loadedBottomPx && windowEnd < total;
+      if (outsideAbove || outsideBelow) {
         const centerLine = Math.min(
           total,
           Math.max(1, Math.round((el.scrollTop + el.clientHeight / 2) / this.LINE_PX)),
@@ -1122,11 +1149,16 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
   scrollToBottom(): void {
     const el = this.logContainerRef?.nativeElement;
-    if (el) {
-      el.scrollTop = el.scrollHeight;
-      this.autoScroll.set(true);
-      this.showScrollBtn.set(false);
+    if (!el) return;
+    const buildId = this.selectedBuildId();
+    const total = this.totalLines();
+    if (buildId && this.windowStart + this.windowLines().length - 1 < total) {
+      void this.loadWindow(buildId, Math.max(1, total - this.WINDOW_PAGE + 1), total, 'replace')
+        .then(() => { el.scrollTop = el.scrollHeight; });
     }
+    el.scrollTop = el.scrollHeight;
+    this.autoScroll.set(true);
+    this.showScrollBtn.set(false);
   }
 
   private scrollToBottomIfAuto(): void {
@@ -1285,8 +1317,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.selectedBuildId.set(null);
     this.selectedSection.set(null);
     this.messages.set([]);
-    this.logLines = [];
-    this.logHtml.set('');
+    this.resetLogState();
     this.isInitialBuildsLoad = true;
     this.totalBuilds = 0;
     this.loadingMore = false;
