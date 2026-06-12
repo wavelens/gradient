@@ -142,13 +142,10 @@ pub(super) async fn evaluations_to_summaries(
     Ok(out)
 }
 
-/// First line of `s`, trimmed, truncated to `max` chars; `None` when empty.
+/// First non-blank line of `s`, trimmed, truncated to `max` chars; `None` when
+/// `s` has no non-blank line.
 fn first_line_truncated(s: &str, max: usize) -> Option<String> {
-    let line = s.lines().next().unwrap_or("").trim();
-    if line.is_empty() {
-        return None;
-    }
-
+    let line = s.lines().find(|l| !l.trim().is_empty())?.trim();
     Some(line.chars().take(max).collect())
 }
 
