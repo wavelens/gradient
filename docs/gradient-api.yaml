@@ -1778,6 +1778,14 @@ paths:
         - {}
         - cookieAuth: []
         - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: Max evaluations to return, newest first. Defaults to the project's keep_evaluations.
+          schema:
+            type: integer
+            minimum: 1
       responses:
         '200':
           description: List of evaluation summaries
@@ -7184,19 +7192,54 @@ components:
 
     EntryPointSummary:
       type: object
-      required: [build_id, name]
+      required: [id, build_id, derivation_path, eval, build_status, has_artefacts, architecture, deps, created_at]
       properties:
-        build_id:
+        id: { type: string, format: uuid }
+        build_id: { type: string, format: uuid }
+        derivation_path: { type: string }
+        eval:
           type: string
-          format: uuid
-          description: UUID of the root build
-        name:
+          description: Nix attribute path of the entry point
+        build_status:
+          $ref: '#/components/schemas/BuildStatus'
+        has_artefacts: { type: boolean }
+        architecture:
           type: string
-          description: Human-readable derivation name
+          description: Nix system string, e.g. x86_64-linux
+        build_time_ms:
+          type: integer
+          nullable: true
+          description: Wall time of the entry point's own build (latest attempt)
+        deps:
+          $ref: '#/components/schemas/BuildStatusCounts'
+        created_at: { type: string, format: date-time }
+
+    BuildStatusCounts:
+      type: object
+      required: [completed, failed, building, queued, substituted, aborted]
+      description: >-
+        Four-segment build-status rollup shared by every segmented bar.
+        completed=Completed; failed=FailedPermanent|FailedTimeout|DependencyFailed;
+        building=Building; queued=Queued|Created|FailedTransient.
+        substituted and aborted are reported separately and excluded from bars and from total_builds.
+      properties:
+        completed: { type: integer }
+        failed: { type: integer }
+        building: { type: integer }
+        queued: { type: integer }
+        substituted: { type: integer }
+        aborted: { type: integer }
+
+    QueueSummary:
+      type: object
+      required: [building, queued]
+      properties:
+        building: { type: integer }
+        queued: { type: integer }
 
     EvaluationSummary:
       type: object
-      required: [id, commit, status, total_builds, failed_builds, completed_entry_points, failed_entry_points, created_at, updated_at]
+      required: [id, commit, status, total_builds, builds, errors, warnings, created_at, updated_at]
       properties:
         id:
           type: string
@@ -7204,24 +7247,31 @@ components:
         commit:
           type: string
           description: Hex-encoded commit hash
+        commit_message:
+          type: string
+          nullable: true
+          description: First non-blank line of the commit message, truncated to 100 chars; null when the message is blank
         status:
           $ref: '#/components/schemas/EvaluationStatus'
+        trigger:
+          allOf:
+            - $ref: '#/components/schemas/EvaluationTriggerSummary'
+          nullable: true
+        triggered_by:
+          type: string
+          nullable: true
+          description: Display name of the user who manually started the evaluation; null for trigger-driven runs
         total_builds:
           type: integer
-          description: Total number of builds in this evaluation
-        failed_builds:
+          description: Sum of the four bar segments (excludes substituted and aborted)
+        builds:
+          $ref: '#/components/schemas/BuildStatusCounts'
+        errors:
           type: integer
-          description: Number of failed builds
-        completed_entry_points:
+          description: Count of evaluation messages with level Error
+        warnings:
           type: integer
-          description: Number of entry points with Completed build status
-        failed_entry_points:
-          type: integer
-          description: Number of entry points with FailedPermanent or FailedTimeout build status
-        entry_point_diff:
-          type: integer
-          nullable: true
-          description: Difference in entry point count compared to the previous evaluation (null if no previous evaluation)
+          description: Count of evaluation messages with level Warning
         created_at:
           type: string
           format: date-time
@@ -7245,6 +7295,8 @@ components:
         - can_edit
         - can_trigger
         - managed
+        - last_check_at
+        - queue
       properties:
         id:
           type: string
@@ -7280,6 +7332,12 @@ components:
         managed:
           type: boolean
           description: True when the project is managed by declarative Nix state and cannot be edited via the UI.
+        last_check_at:
+          type: string
+          format: date-time
+          description: Timestamp of the most recent check event for this project
+        queue:
+          $ref: '#/components/schemas/QueueSummary'
 
     ProjectMetricsResponse:
       type: object
@@ -7429,6 +7487,10 @@ components:
             - $ref: '#/components/schemas/EvaluationTriggerSummary'
           nullable: true
           description: The trigger that initiated this evaluation, or null if started manually.
+        triggered_by:
+          type: string
+          nullable: true
+          description: Display name of the user who manually started this evaluation; null otherwise.
         previous:
           type: string
           format: uuid
