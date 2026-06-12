@@ -26,6 +26,7 @@ use gradient_types::ids::*;
 
 // ── Shared types ─────────────────────────────────────────────────────────────
 
+use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::triggers::ConcurrencyPolicy;
 use gradient_types::{ProjectTriggerId, TriggerType};
@@ -110,4 +111,99 @@ pub struct ProjectDetailsResponse {
     pub can_edit: bool,
     pub can_trigger: bool,
     pub managed: bool,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum BarSegment {
+    Completed,
+    Failed,
+    Building,
+    Queued,
+    Substituted,
+    Aborted,
+}
+
+pub fn bar_segment(status: BuildStatus) -> BarSegment {
+    use BuildStatus::*;
+    match status {
+        Completed => BarSegment::Completed,
+        FailedPermanent | FailedTimeout | DependencyFailed => BarSegment::Failed,
+        Building => BarSegment::Building,
+        Queued | Created | FailedTransient => BarSegment::Queued,
+        Substituted => BarSegment::Substituted,
+        Aborted => BarSegment::Aborted,
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Default, Clone, Copy)]
+pub struct BuildStatusCounts {
+    pub completed: i64,
+    pub failed: i64,
+    pub building: i64,
+    pub queued: i64,
+    pub substituted: i64,
+    pub aborted: i64,
+}
+
+impl BuildStatusCounts {
+    pub fn add(&mut self, status: BuildStatus, n: i64) {
+        match bar_segment(status) {
+            BarSegment::Completed => self.completed += n,
+            BarSegment::Failed => self.failed += n,
+            BarSegment::Building => self.building += n,
+            BarSegment::Queued => self.queued += n,
+            BarSegment::Substituted => self.substituted += n,
+            BarSegment::Aborted => self.aborted += n,
+        }
+    }
+
+    /// Sum of the four drawn segments; excludes `substituted` and `aborted`.
+    pub fn total(&self) -> i64 {
+        self.completed + self.failed + self.building + self.queued
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Default, Clone, Copy)]
+pub struct QueueSummary {
+    pub building: i64,
+    pub queued: i64,
+}
+
+#[cfg(test)]
+mod rollup_tests {
+    use super::{BarSegment, BuildStatusCounts, bar_segment};
+    use gradient_entity::build::BuildStatus;
+
+    #[test]
+    fn segment_mapping_matches_spec() {
+        use BuildStatus::*;
+        assert_eq!(bar_segment(Completed), BarSegment::Completed);
+        for s in [FailedPermanent, FailedTimeout, DependencyFailed] {
+            assert_eq!(bar_segment(s), BarSegment::Failed);
+        }
+        assert_eq!(bar_segment(Building), BarSegment::Building);
+        for s in [Queued, Created, FailedTransient] {
+            assert_eq!(bar_segment(s), BarSegment::Queued);
+        }
+        assert_eq!(bar_segment(Substituted), BarSegment::Substituted);
+        assert_eq!(bar_segment(Aborted), BarSegment::Aborted);
+    }
+
+    #[test]
+    fn total_excludes_substituted_and_aborted() {
+        let mut c = BuildStatusCounts::default();
+        c.add(BuildStatus::Completed, 3);
+        c.add(BuildStatus::FailedPermanent, 2);
+        c.add(BuildStatus::Building, 1);
+        c.add(BuildStatus::Queued, 4);
+        c.add(BuildStatus::Substituted, 9000);
+        c.add(BuildStatus::Aborted, 5);
+        assert_eq!(c.completed, 3);
+        assert_eq!(c.failed, 2);
+        assert_eq!(c.building, 1);
+        assert_eq!(c.queued, 4);
+        assert_eq!(c.substituted, 9000);
+        assert_eq!(c.aborted, 5);
+        assert_eq!(c.total(), 10);
+    }
 }
