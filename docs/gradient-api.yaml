@@ -7335,7 +7335,8 @@ components:
         last_check_at:
           type: string
           format: date-time
-          description: Timestamp of the most recent check event for this project
+          nullable: true
+          description: Timestamp of the most recent repository check; null while a re-check is pending
         queue:
           $ref: '#/components/schemas/QueueSummary'
 
