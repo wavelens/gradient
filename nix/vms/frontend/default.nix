@@ -4,71 +4,57 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-{ pkgs, lib, ... }: {
+{ pkgs, lib, ... }: let
+  # Same fixture secrets the integration tests use; admin password is "admin_password".
+  adminPwHash = pkgs.writeText "admin-pw-hash" "$argon2id$v=19$m=4096,t=3,p=1$c29tZXNhbHQxMjM0NQ$hIKBEy9SOWlnAlcwUv2PLPBdsMkKhVlCyjTxaWIK+v4";
+  orgSshKey = pkgs.writeText "org-ssh-key" ''
+    -----BEGIN OPENSSH PRIVATE KEY-----
+    b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
+    QyNTUxOQAAACDle/PUDDuuI9h8+ViFyHMQjqARSRhLJcYKnay7MrflOgAAAJALQNCyC0DQ
+    sgAAAAtzc2gtZWQyNTUxOQAAACDle/PUDDuuI9h8+ViFyHMQjqARSRhLJcYKnay7MrflOg
+    AAAEAROowXB/e8+691yZgfHOASTPVyIM2Hx7U9RpmAtUda++V789QMO64j2Hz5WIXIcxCO
+    oBFJGEslxgqdrLsyt+U6AAAABm5vbmFtZQECAwQFBgc=
+    -----END OPENSSH PRIVATE KEY-----
+  '';
+  workerToken = pkgs.writeText "worker-token" "C9ve6tvVONhtbRzFks56HQlYQotlRmXel/5NFLk/HjbSFGc+IZjCGfxegW2NKpY5";
+  cacheSigningKey = pkgs.writeText "cache-signing-key" "22yRW7p/hxuPRWJh9pcfGH0oXPk2MFUuG0wIA1rfq1BvDbvMqzMZS+er/BE8ucbxNSG5KZ8B0ELO4TJal8mZlw==";
+in {
   name = "development-frontend";
   testScript = { nodes, ... }: ''
     start_all()
     server.wait_for_unit("gradient-server.service")
     server.wait_for_unit("git-daemon.service")
+    server.wait_for_open_port(3000)
+    server.wait_for_unit("nginx.service")
 
     server.succeed("${lib.getExe pkgs.curl} http://gradient.local/api/v1/health -i --fail")
 
-    server.succeed("""
-        ${lib.getExe pkgs.curl} \
-        -X POST \
-        -H "Content-Type: application/json" \
-        -d '{"username": "tes", "name": "Test User", "email": "test@localhost.local", "password": "Gradient123!"}' \
-        http://gradient.local/api/v1/auth/basic/register
-    """)
-
-    token = server.succeed("""
-      ${lib.getExe pkgs.curl} \
-        -X POST \
-        -H "Content-Type: application/json" \
-        -d '{"loginname": "tes", "password": "Gradient123!"}' \
-        http://gradient.local/api/v1/auth/basic/login \
-        | ${lib.getExe pkgs.jq} -rj '.message'
-    """)
-
-    print(f"Got Token: {token}")
-
-    server.succeed("${lib.getExe pkgs.gradient-cli} config Server http://gradient.local")
-    server.succeed("${lib.getExe pkgs.gradient-cli} config AuthToken ACCESS_TOKEN".replace("ACCESS_TOKEN", token))
-    server.succeed("${lib.getExe pkgs.gradient-cli} organization create --name testorg --display-name MyOrganization --description 'My Test Organization'")
-
-    print("=== Adding Server ===")
-    org_pub_key = server.succeed("${lib.getExe pkgs.gradient-cli} organization ssh show")[12:].strip()
-    print(f"Got Organization Public Key: {org_pub_key}")
-
-    server.succeed(f"echo '{org_pub_key}' > /home/builder/.ssh/authorized_keys")
-    server.succeed("chown builder:users /home/builder/.ssh/authorized_keys")
-    server.succeed("chmod 600 /home/builder/.ssh/authorized_keys")
-
-    server.succeed("${lib.getExe pkgs.gradient-cli} server create --name testserver --display-name MyServer --host localhost --port 22 --ssh-user builder --architectures x86_64-linux --features big-parallel")
-
-    # Configure git
     server.succeed("${lib.getExe pkgs.git} config --global --add safe.directory '*'")
     server.succeed("${lib.getExe pkgs.git} config --global init.defaultBranch main")
     server.succeed("${lib.getExe pkgs.git} config --global user.email 'nixos@localhost'")
     server.succeed("${lib.getExe pkgs.git} config --global user.name 'NixOS test'")
 
-    # Initialize git repository
     server.succeed("${lib.getExe pkgs.git} init /var/lib/git/test")
     server.succeed("cp /var/lib/git/{,test/}flake.nix")
     server.succeed("chown git:git -R /var/lib/git/test")
     server.succeed("${lib.getExe pkgs.git} -C /var/lib/git/test add flake.nix")
     server.succeed("${lib.getExe pkgs.git} -C /var/lib/git/test commit -m 'Initial commit'")
-    server.succeed("${lib.getExe pkgs.gradient-cli} project create --name testproject --display-name MyProject --description 'Just a test' --repository git://server/test --evaluation-wildcard packages.*.buildWait5Sec,packages.*.deployment")
+
+    server.wait_for_unit("gradient-worker.service")
+
+    print("Dev environment ready: frontend proxy target http://localhost:3000")
+    print("Login: admin / admin_password")
   '';
 
-    interactive = {
-      sshBackdoor.enable = true;
-      nodes.server.virtualisation.graphics = false;
-    };
+  interactive = {
+    sshBackdoor.enable = true;
+    nodes.server.virtualisation.graphics = false;
+  };
 
   nodes.server = { config, pkgs, lib, ... }: {
     imports = [
       ../../modules/gradient.nix
+      ../../modules/gradient-worker.nix
     ];
 
     networking.hosts = {
@@ -77,34 +63,45 @@
 
     networking.firewall.enable = false;
     documentation.enable = false;
-    virtualisation.forwardPorts = [
-      {
-        from = "host";
-        host.port = 2222;
-        guest.port = 22;
-      }
-      {
-        from = "host";
-        host.port = 3000;
-        guest.port = 80;
-      }
-    ];
+    virtualisation = {
+      cores = 4;
+      memorySize = 4096;
+      diskSize = 4096;
+      writableStore = true;
+      forwardPorts = [
+        {
+          from = "host";
+          host.port = 2222;
+          guest.port = 22;
+        }
+        {
+          from = "host";
+          host.port = 3000;
+          guest.port = 80;
+        }
+      ];
+    };
 
     nix.settings = {
       substituters = lib.mkForce [ ];
-      trusted-users = [ "builder" ];
+      max-jobs = lib.mkForce 4;
     };
 
-    users.users.builder = {
-      isNormalUser = true;
-      group = "users";
-    };
-
+    # Pre-seed a deterministic worker UUID so the server state config
+    # can register it before the worker boots.
     systemd.tmpfiles.rules = [
-      "d /home/builder/.ssh 0700 builder users"
       "d /var/lib/git 0755 git git"
       "L+ /var/lib/git/flake.nix 0755 git git - ${./flake_repository.nix}"
+      "d /var/lib/gradient-worker 0755 gradient-worker gradient-worker"
+      "f /var/lib/gradient-worker/worker-id 0644 gradient-worker gradient-worker - a0000000-0000-0000-0000-000000000001"
     ];
+
+    environment.etc."gradient/secrets/worker_peers" = {
+      mode = "0600";
+      user = "gradient-worker";
+      group = "gradient-worker";
+      text = "*:C9ve6tvVONhtbRzFks56HQlYQotlRmXel/5NFLk/HjbSFGc+IZjCGfxegW2NKpY5";
+    };
 
     security.pam.services.sshd.allowNullPassword = true;
     services = {
@@ -114,8 +111,70 @@
         useTls = false;
         configurePostgres = true;
         domain = "gradient.local";
+        # The frontend is served by `pnpm run serve` on the host; the VM only provides the API.
+        frontend.enable = false;
+        proto.public = true;
         jwtSecretFile = toString (pkgs.writeText "jwtSecret" "b68a8eaa8ebcff23ebaba1bd74ecb8a2eb7ba959570ff8842f148207524c7b8d731d7a1998584105e951599221f9dcd20e41223be17275ca70ab6f7e6ecafa8d4f8905623866edb2b344bd15de52ccece395b3546e2f00644eb2679cf7bdaa156fd75cc5f47c34448cba19d903e68015b1ad3c8e9d04862de0a2c525b6676779012919fa9551c4746f9323ab207aedae86c28ada67c901cae821eef97b69ca4ebe1260de31add34d8265f17d9c547e3bbabe284d9cadcc22063ee625b104592403368090642a41967f8ada5791cb09703d0762a3175d0fe06ec37822e9e41d0a623a6349901749673735fdb94f2c268ac08a24216efb058feced6e785f34185a");
         cryptSecretFile = toString (pkgs.writeText "cryptSecret" "aW52YWxpZC1pbnZhbGlkLWludmFsaWQK");
+
+        state = {
+          users.admin = {
+            email = "admin@gradient.local";
+            password_file = toString adminPwHash;
+            email_verified = true;
+            superuser = true;
+          };
+
+          organizations.testorg = {
+            display_name = "MyOrganization";
+            description = "My Test Organization";
+            private_key_file = toString orgSshKey;
+            public = true;
+            created_by = "admin";
+          };
+
+          projects.testproject = {
+            organization = "testorg";
+            display_name = "MyProject";
+            description = "Just a test";
+            repository = "git://server/test";
+            wildcard = "packages.*.buildWait5Sec,packages.*.deployment";
+            keep_evaluations = 10;
+            created_by = "admin";
+            triggers = [
+              {
+                type = "polling";
+                config = { interval_secs = 30; };
+              }
+            ];
+          };
+
+          caches.testcache = {
+            display_name = "MyCache";
+            signing_key_file = toString cacheSigningKey;
+            organizations = [ "testorg" ];
+            public = true;
+            created_by = "admin";
+          };
+
+          workers.devworker = {
+            worker_id = "a0000000-0000-0000-0000-000000000001";
+            organizations = [ "testorg" ];
+            token_file = toString workerToken;
+            display_name = "Dev Worker";
+            created_by = "admin";
+          };
+        };
+
+        worker = {
+          enable = true;
+          serverUrl = "ws://gradient.local/proto";
+          peersFile = "/etc/gradient/secrets/worker_peers";
+          capabilities = {
+            eval = true;
+            build = true;
+          };
+        };
       };
 
       postgresql = {
@@ -150,13 +209,14 @@
         settings = {
           PermitRootLogin = "yes";
           PermitEmptyPasswords = "yes";
-          # rust lib ssh2 requires one of the following Message Authentication Codes:
-          # hmac-sha2-256,hmac-sha2-512,hmac-sha1,hmac-sha1-96,hmac-md5,hmac-md5-96,hmac-ripemd160,hmac-ripemd160@openssh.com
-          Macs = [
-            "hmac-sha2-512"
-          ];
         };
       };
     };
+
+    # Allow git-daemon (runs as nobody) to access repos owned by other users.
+    environment.etc."gitconfig".text = ''
+      [safe]
+        directory = *
+    '';
   };
 }
