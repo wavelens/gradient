@@ -210,6 +210,14 @@ mod tests {
     }
 
     #[test]
+    fn project_channel_forwards_build_transitions_for_seeded_evals() {
+        let project = Uuid::from_u128(7);
+        let eval = Uuid::from_u128(8);
+        let mut known = HashSet::from([eval]);
+        assert!(project_frame(&build_changed(eval), project, &mut known).is_some());
+    }
+
+    #[test]
     fn cache_changed_serializes_as_a_tagged_ping() {
         assert_eq!(frame(&BoardEvent::CacheChanged).unwrap(), r#"{"type":"cache_changed"}"#);
     }
