@@ -108,7 +108,7 @@
               <div class="evaluation-content">
                 <div class="evaluation-header">
                   <h3>
-                    <a [routerLink]="['/organization', orgName, 'log', ep.evaluation_id]" [queryParams]="{ build: ep.build_id }">
+                    <a [routerLink]="['/organization', orgName, 'log', ep.id]" [queryParams]="{ build: ep.build_id }">
                       {{ getDerivationName(ep.derivation_path) }}
                     </a>
                   </h3>
@@ -126,7 +126,7 @@
                   </a>
                   <a
                     [routerLink]="['/organization', orgName, 'graph', ep.build_id]"
-                    [queryParams]="{ evalId: ep.evaluation_id, project: projectName }"
+                    [queryParams]="{ evalId: ep.id, project: projectName }"
                     class="graph-icon-link"
                     title="View dependency graph"
                   >
@@ -155,8 +155,8 @@
                 <span class="evaluation-date text-secondary">
                   {{ ep.created_at + 'Z' | date: 'MMM d, y HH:mm' }}
                 </span>
-                <span class="status-badge" [class]="getStatusClass(ep.evaluation_status)">
-                  {{ getStatusLabel(ep.evaluation_status) }}
+                <span class="status-badge" [class]="getBuildStatusClass(ep.build_status)">
+                  {{ formatBuildStatus(ep.build_status) }}
                 </span>
               </div>
             </div>
@@ -202,24 +202,13 @@
                     <span class="material-symbols-outlined">construction</span>
                     {{ evaluation.total_builds }}
                   </span>
-                  <span class="build-stat" [class.success]="evaluation.completed_entry_points > 0" title="Completed entry points">
+                  <span class="build-stat" [class.success]="evaluation.builds.completed > 0" title="Completed builds">
                     <span class="material-symbols-outlined">check_circle</span>
-                    {{ evaluation.completed_entry_points }}
+                    {{ evaluation.builds.completed }}
                   </span>
-                  <span class="build-stat" [class.error]="evaluation.failed_entry_points > 0" title="Failed entry points">
+                  <span class="build-stat" [class.error]="evaluation.builds.failed > 0" title="Failed builds">
                     <span class="material-symbols-outlined">error</span>
-                    {{ evaluation.failed_entry_points }}
-                  </span>
-                  <span
-                    class="build-stat"
-                    [class.ep-diff-pos]="evaluation.entry_point_diff !== null && evaluation.entry_point_diff > 0"
-                    [class.ep-diff-neg]="evaluation.entry_point_diff !== null && evaluation.entry_point_diff < 0"
-                    title="Entry point change compared to previous evaluation"
-                  >
-                    <span class="material-symbols-outlined">
-                      {{ evaluation.entry_point_diff === null ? 'remove' : evaluation.entry_point_diff > 0 ? 'trending_up' : evaluation.entry_point_diff < 0 ? 'trending_down' : 'trending_flat' }}
-                    </span>
-                    {{ evaluation.entry_point_diff !== null ? (evaluation.entry_point_diff > 0 ? '+' : '') + evaluation.entry_point_diff : '-' }}
+                    {{ evaluation.builds.failed }}
                   </span>
                   <span class="build-stat" [class.running]="isRunningStatus(evaluation.status)" title="Evaluation duration">
                     <span class="material-symbols-outlined">timer</span>
