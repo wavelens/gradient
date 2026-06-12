@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Records which user manually started an evaluation (NULL for trigger-driven).
+//! Records which user manually started an evaluation.
 
 use sea_orm_migration::prelude::*;
 
