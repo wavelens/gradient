@@ -185,6 +185,21 @@ describe('ProjectDetailComponent - evaluation selection', () => {
     component.select(component.evaluations()[1]);
     expect(spy).toHaveBeenCalledWith(component.orgName, component.projectName, component.evaluations()[1].id);
   });
+
+  it('preserves an explicit non-newest selection across a live refetch', () => {
+    const e2 = evalSummary('e2', 'Completed');
+    const { fixture } = setup(
+      { managed: false, canEdit: true, canTrigger: true },
+      { extraEvals: [e2] },
+    );
+    const component = fixture.componentInstance;
+
+    component.select(component.evaluations()[1]);
+    expect(component.selected()?.id).toBe(component.evaluations()[1].id);
+
+    component.loadProjectData(false);
+    expect(component.selected()?.id).toBe(component.evaluations()[1].id);
+  });
 });
 
 describe('ProjectDetailComponent - abort modal', () => {
