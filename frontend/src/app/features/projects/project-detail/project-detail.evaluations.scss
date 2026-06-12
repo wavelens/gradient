@@ -18,8 +18,7 @@
 
 .pp-head { display: flex; justify-content: space-between; align-items: center; padding-top: 26px; margin-bottom: 18px; }
 .breadcrumb { color: #818181; font-size: 13px; a { color: #abb0b4; text-decoration: none; } .sep { margin: 0 6px; } b { color: #abb0b4; font-weight: 500; } }
-h1 { font-size: 20px; display: flex; align-items: center; gap: 10px; }
-.live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); box-shadow: 0 0 6px var(--success); }
+h1 { font-size: $font-size-xxl; margin: 0; }
 .head-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
 .project-info { margin-bottom: 20px; }
@@ -34,58 +33,56 @@ h1 { font-size: 20px; display: flex; align-items: center; gap: 10px; }
   &.queue { color: var(--running); border-color: color-mix(in srgb, var(--running) 32%, transparent); }
 }
 
-.strip-wrap { position: relative; overflow-x: auto; overflow-y: hidden; z-index: 5; scrollbar-width: none; &::-webkit-scrollbar { display: none; } }
-.eval-strip { display: flex; gap: 10px; align-items: stretch; }
+// 2px bottom padding gives the selected tab's 1px cover shadow room to paint
+// (overflow clips at the padding box); the panel pulls back up underneath so
+// its top border sits exactly at the tab's bottom edge.
+.strip-wrap { position: relative; overflow-x: auto; overflow-y: hidden; z-index: 5; padding-bottom: 3px; scrollbar-width: none; &::-webkit-scrollbar { display: none; } }
+.eval-strip { display: flex; gap: 10px; align-items: flex-start; }
 .eval-card {
   border: 1px solid #2d333b; border-radius: 10px;
-  padding: 10px 14px 10px 17px; min-width: 200px; position: relative; flex-shrink: 0; cursor: pointer;
-  .rail { position: absolute; left: 0; top: 0; bottom: 0; width: 3.5px; border-radius: 10px 0 0 10px; }
+  // Status rail as a thick left border: it tapers cleanly around the corner
+  // radius and ends flush at the panel surface.
+  border-left: 4px solid var(--rail-c, var(--queued));
+  padding: 10px 14px 10px 14px; min-width: 200px; position: relative; flex-shrink: 0; cursor: pointer;
+  // padding-bottom is intentionally not transitioned: animating the tab height
+  // would make the strip's max height dip mid-switch and bounce the panel.
+  transition: border-color .22s ease, border-radius .22s ease;
   .si { width: 20px; height: 20px; border-radius: 5px; font-size: 13px; display: inline-flex; align-items: center; justify-content: center; }
   .l1 { display: flex; align-items: center; gap: 8px; }
   .ev-title { font-weight: 650; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 195px; }
   .l2 { color: #818181; font-size: 11.5px; margin-top: 4px; display: flex; gap: 10px; }
-  &.selected { background: var(--panel); border-bottom-color: var(--panel); border-radius: 10px 10px 0 0; padding-bottom: 28px; margin-bottom: -17px; .rail { border-radius: 10px 0 0 0; } }
+  // Browser-tab fillets: concave quarter-circles melting the selected tab into
+  // the panel surface. The 1px stroke continues the tab outline and meets the
+  // panel's top border tangentially at the curve's foot.
+  &::before, &::after {
+    content: ''; position: absolute; bottom: -3px; width: 7px; height: 9px;
+    opacity: 0; pointer-events: none; transition: opacity .22s ease;
+  }
+  &::before { left: -7px; background: radial-gradient(circle at top left, transparent 6.75px, #2d333b 6.75px, #2d333b 7.5px, var(--panel) 7.5px); }
+  &::after { right: -7px; background: radial-gradient(circle at top right, transparent 6.75px, #2d333b 6.75px, #2d333b 7.5px, var(--panel) 7.5px); }
+  &.selected {
+    background-color: var(--panel);
+    border-bottom-color: var(--panel); border-radius: 10px 10px 0 0;
+    padding-bottom: 19px;
+    // A 1px shadow hugging the tab's outline hides the panel's border-top beneath it.
+    box-shadow: 0 1px 0 0 var(--panel);
+    &::before, &::after { opacity: 1; }
+  }
 }
 
-.panel { background: var(--panel); border-top: 1px solid rgba(255,255,255,.07); padding-top: 24px; padding-bottom: 34px; position: relative; z-index: 1; min-height: 560px; }
+.panel { background: var(--panel); border-top: 1px solid rgba(255,255,255,.07); margin-top: -3px; padding-top: 24px; padding-bottom: 34px; position: relative; z-index: 1; min-height: 560px; }
+.panel-body { animation: panel-in .24s ease; }
+@keyframes panel-in { from { opacity: 0; transform: translateY(8px); } }
 .panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
-.panel-title { display: flex; align-items: flex-start; gap: 12px; }
+.panel-title { display: flex; align-items: center; gap: 12px; }
 .s-ico { width: 34px; height: 34px; border-radius: 9px; display: inline-flex; align-items: center; justify-content: center; font-size: 19px; flex-shrink: 0; }
-.panel-title h2 { font-size: 17.5px; }
+.panel-title h2 { font-size: 17.5px; margin: 0; }
 .panel-title .sub { color: #818181; font-size: 12.5px; margin-top: 2px; }
 .panel-actions { display: flex; gap: 8px; align-items: center; }
 
 .bar-line { display: flex; align-items: center; gap: 16px; margin-top: 16px; color: #abb0b4; font-size: 13px; flex-wrap: wrap; b { color: #fff; } }
+.bar-line .dur { display: inline-flex; align-items: center; gap: 5px; .material-symbols-outlined { font-size: 17px; color: #818181; } }
 .eval-bar { width: 460px; max-width: 50vw; --segbar-h: 9px; }
 .msg-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; border: 1px solid; border-radius: 12px; padding: 1.5px 10px; text-decoration: none;
   &.warn { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 32%, transparent); }
   &.error { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 32%, transparent); } }
-
-.pkg-label { margin: 32px 0 10px; h3 { font-size: 14.5px; } }
-.pkg-list { display: flex; flex-direction: column; gap: 8px; }
-.pkg {
-  background: var(--card); border: 1px solid rgba(255,255,255,.07); border-radius: 9px;
-  padding: 10px 14px 10px 16px; position: relative; display: flex; align-items: center; gap: 12px; cursor: pointer;
-  &:hover { border-color: rgba(255,255,255,.14); }
-  .rail { position: absolute; left: 0; top: 0; bottom: 0; width: 3.5px; border-radius: 9px 0 0 9px; }
-  .si { width: 24px; height: 24px; border-radius: 6px; font-size: 15px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
-  .pkg-name { font-weight: 600; font-size: 13.5px; width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .chip-arch { border: 1px solid rgba(255,255,255,.07); border-radius: 9px; padding: 0 8px; font-size: 10.5px; color: #abb0b4; flex-shrink: 0; }
-  .pkg-bar { width: 360px; --segbar-h: 7px; }
-  .pkg-time { color: #818181; font-size: 12px; margin-left: auto; white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; .arte { font-size: 15px; } }
-  .kebab { color: #818181; padding-left: 12px; border: none; border-left: 1px solid rgba(255,255,255,.07); background: none; cursor: pointer; }
-}
-
-.rail, .si {
-  &.ok { color: var(--success); background: color-mix(in srgb, var(--success) 14%, transparent); }
-  &.err { color: var(--danger); background: color-mix(in srgb, var(--danger) 14%, transparent); }
-  &.run { color: var(--running); background: color-mix(in srgb, var(--running) 14%, transparent); }
-  &.warn { color: var(--warning); background: color-mix(in srgb, var(--warning) 14%, transparent); }
-  &.muted { color: #818181; background: rgba(255,255,255,.06); }
-}
-.rail.ok { background: var(--success); } .rail.err { background: var(--danger); }
-.rail.run { background: var(--running); } .rail.warn { background: var(--warning); } .rail.muted { background: var(--queued); }
-
-.overlay { position: fixed; inset: 0; z-index: 100; background: rgba(2,4,8,.62); display: flex; align-items: center; justify-content: center; }
-.modal { width: 400px; background: #161b22; border: 1px solid rgba(255,255,255,.07); border-radius: 12px; padding: 22px 24px; box-shadow: 0 18px 50px rgba(0,0,0,.7);
-  h4 { font-size: 15.5px; margin-bottom: 8px; } p { color: #abb0b4; font-size: 13.5px; margin-bottom: 18px; } .row { display: flex; gap: 8px; justify-content: flex-end; } }

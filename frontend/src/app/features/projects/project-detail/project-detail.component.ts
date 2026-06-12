@@ -6,10 +6,11 @@
 
 import { Component, OnInit, OnDestroy, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ActivatedRoute, RouterModule } from '@angular/router';
+import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { interval, Subscription } from 'rxjs';
 import { auditTime } from 'rxjs/operators';
 import { ButtonModule } from 'primeng/button';
+import { DialogModule } from 'primeng/dialog';
 import { MenuModule } from 'primeng/menu';
 import { MenuItem } from 'primeng/api';
 import { LiveService } from '@core/services/live.service';
@@ -20,7 +21,7 @@ import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/load
 import { EmptyStateComponent } from '@shared/components/empty-state/empty-state.component';
 import { AccessService, WritableDirective } from '@shared/access';
 import { injectProjectAccess } from '@core/resolvers/inject-access';
-import { ProjectDetail, EvaluationSummary, EvaluationStatus, EntryPointSummary, BuildStatus } from '@core/models';
+import { ProjectDetail, EvaluationSummary, EvaluationStatus, EntryPointSummary, BuildStatus, BuildStatusCounts } from '@core/models';
 import { formatEvaluationDuration, isRunningEvaluationStatus, parseUtcTimestamp } from '@shared/evaluation';
 import { SegmentedBarComponent } from './segmented-bar/segmented-bar.component';
 
@@ -28,15 +29,20 @@ import { SegmentedBarComponent } from './segmented-bar/segmented-bar.component';
   selector: 'app-project-detail',
   standalone: true,
   imports: [
-    CommonModule, RouterModule, ButtonModule, MenuModule,
+    CommonModule, RouterModule, ButtonModule, DialogModule, MenuModule,
     LoadingSpinnerComponent, EmptyStateComponent, WritableDirective,
     SegmentedBarComponent,
   ],
   templateUrl: './project-detail.component.html',
-  styleUrls: ['./project-detail.component.scss', './project-detail.evaluations.scss'],
+  styleUrls: [
+    './project-detail.component.scss',
+    './project-detail.evaluations.scss',
+    './project-detail.packages.scss',
+  ],
 })
 export class ProjectDetailComponent implements OnInit, OnDestroy {
   private route = inject(ActivatedRoute);
+  private router = inject(Router);
   protected authService = inject(AuthService);
   private orgsService = inject(OrganizationsService);
   private projectsService = inject(ProjectsService);
@@ -68,10 +74,17 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
     const list = this.evaluations();
     return list.find(e => e.id === id) ?? list[0] ?? null;
   });
+  // Single-item keyed list: @for tracked by id recreates the panel DOM on
+  // selection change, retriggering its CSS enter animation.
+  selectedList = computed<EvaluationSummary[]>(() => {
+    const s = this.selected();
+    return s ? [s] : [];
+  });
 
   ngOnInit(): void {
     this.orgName = this.route.snapshot.paramMap.get('org') || '';
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
+    this.selectedId.set(this.route.snapshot.queryParamMap.get('eval'));
     this.orgsService.getOrganization(this.orgName).subscribe({
       next: (org) => this.orgDisplayName.set(org.display_name),
       error: () => {},
@@ -96,10 +109,9 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
           this.starting.set(false);
         }
         if (!this.selectedId() && project.last_evaluations.length) {
-          this.select(project.last_evaluations[0]);
-        } else {
-          this.loadEntryPoints(this.selected()?.id);
+          this.selectedId.set(project.last_evaluations[0].id);
         }
+        this.loadEntryPoints(this.selected()?.id);
       },
       error: (error) => {
         console.error('Failed to load project:', error);
@@ -111,6 +123,13 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   select(evaluation: EvaluationSummary): void {
     this.selectedId.set(evaluation.id);
     this.loadEntryPoints(evaluation.id);
+    // Keep the selection in the URL so navigating away and back restores it.
+    this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { eval: evaluation.id },
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+    });
   }
 
   private loadEntryPoints(evaluationId?: string): void {
@@ -276,8 +295,26 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
     menu.toggle(event);
   }
 
-  depsTotal(ep: EntryPointSummary): number {
-    const d = ep.deps;
-    return d.completed + d.failed + d.building + d.queued + d.substituted + d.aborted;
+  doneCount(c: BuildStatusCounts): number {
+    return c.completed + c.failed + c.substituted + c.aborted;
+  }
+
+  totalCount(c: BuildStatusCounts): number {
+    return this.doneCount(c) + c.building + c.queued;
+  }
+
+  /// Dep-closure counts plus the entry point's own build, so a package with
+  /// few or no deps still shows its own progress in the bar.
+  barCounts(ep: EntryPointSummary): BuildStatusCounts {
+    const c = { ...ep.deps };
+    switch (ep.build_status) {
+      case 'Completed': c.completed++; break;
+      case 'Substituted': c.substituted++; break;
+      case 'FailedPermanent': case 'FailedTransient': case 'FailedTimeout': c.failed++; break;
+      case 'Aborted': case 'DependencyFailed': c.aborted++; break;
+      case 'Building': c.building++; break;
+      default: c.queued++;
+    }
+    return c;
   }
 }

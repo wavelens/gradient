@@ -1,0 +1,47 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+.pkg-label { margin: 32px 0 10px; h3 { font-size: 14.5px; } }
+.pkg-list { display: flex; flex-direction: column; gap: 8px; }
+.pkg {
+  background-color: var(--card);
+  border: 1px solid rgba(255,255,255,.07); border-radius: 9px;
+  border-left: 4px solid var(--rail-c, var(--queued));
+  padding: 10px 14px 10px 13px; position: relative; display: flex; align-items: center; gap: 12px; cursor: pointer;
+  animation: pkg-in .28s ease backwards;
+  &:hover { border-color: rgba(255,255,255,.14); border-left-color: var(--rail-c, var(--queued)); }
+  .si { width: 24px; height: 24px; border-radius: 6px; font-size: 15px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .pkg-name { font-weight: 600; font-size: 13.5px; width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chip-arch { border: 1px solid rgba(255,255,255,.07); border-radius: 9px; padding: 0 8px; font-size: 10.5px; color: #abb0b4; flex-shrink: 0; }
+  .pkg-deps { color: #5d636b; font-size: 11px; white-space: nowrap; flex-shrink: 0; }
+  .pkg-bar { width: 360px; --segbar-h: 7px; }
+  .pkg-time { color: #818181; font-size: 12px; margin-left: auto; white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; .arte { font-size: 15px; } }
+  .kebab { color: #818181; padding-left: 12px; border: none; border-left: 1px solid rgba(255,255,255,.07); background: none; cursor: pointer; }
+}
+
+@keyframes pkg-in { from { opacity: 0; transform: translateY(6px); } }
+
+.si, .s-ico {
+  transition: background .35s ease, color .35s ease;
+  &.ok { color: var(--success); background: color-mix(in srgb, var(--success) 14%, transparent); }
+  &.err { color: var(--danger); background: color-mix(in srgb, var(--danger) 14%, transparent); }
+  &.run { color: var(--running); background: color-mix(in srgb, var(--running) 14%, transparent); }
+  &.warn { color: var(--warning); background: color-mix(in srgb, var(--warning) 14%, transparent); }
+  &.muted { color: #818181; background: rgba(255,255,255,.06); }
+}
+
+.eval-card, .pkg {
+  &.ok { --rail-c: var(--success); }
+  &.err { --rail-c: var(--danger); }
+  &.run { --rail-c: var(--running); }
+  &.warn { --rail-c: var(--warning); }
+  &.muted { --rail-c: var(--queued); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .eval-card, .eval-card::before, .eval-card::after, .si, .s-ico { transition: none; }
+  .panel-body, .pkg { animation: none; }
+}
