@@ -278,6 +278,6 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
 
   depsTotal(ep: EntryPointSummary): number {
     const d = ep.deps;
-    return d.completed + d.failed + d.building + d.queued + d.substituted;
+    return d.completed + d.failed + d.building + d.queued + d.substituted + d.aborted;
   }
 }
