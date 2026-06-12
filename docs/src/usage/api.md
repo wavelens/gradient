@@ -252,6 +252,7 @@ Set `GRADIENT_WORKER_PEERS_FILE` (or the NixOS `peersFile` option) to this path.
 | `PUT` | `/projects/{org}` | Create project |
 | `GET/PATCH/DELETE` | `/projects/{org}/{project}` | Get / update / delete |
 | `GET` | `/projects/{org}/{project}/details` | Aggregated project data |
+| `GET` | `/projects/{org}/{project}/evaluations` | List recent evaluations (optional `?limit=`) |
 | `GET` | `/projects/{org}/{project}/entry-points` | Root builds |
 | `POST` | `/projects/{org}/{project}/check-repository` | Test repo access |
 | `POST` | `/projects/{org}/{project}/evaluate` | Trigger evaluation |

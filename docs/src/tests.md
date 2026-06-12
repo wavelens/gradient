@@ -3895,3 +3895,11 @@ Frontend (`evaluation-log/evaluation-log.component.spec.ts`,
   spacer and the line count.
 - scrolling up during streaming pages older lines from the in-memory log
   (`loadWindow` prepend) with correct numbering and spacer heights.
+
+## Project page redesign — status rollups & dependency counts (#295)
+
+- `backend/gradient-web/src/endpoints/projects/mod.rs::rollup_tests` — `bar_segment` maps every `BuildStatus` to the correct segment, and `BuildStatusCounts::total()` excludes `Substituted`/`Aborted`.
+- `backend/gradient-web/src/endpoints/projects/evaluations.rs::tests::first_line_truncated_takes_first_line_and_caps_length` — commit-message first non-blank line extraction and 100-char cap.
+- `backend/gradient-web/src/endpoints/live.rs::tests::project_channel_forwards_build_transitions_for_seeded_evals` — the project live channel forwards build transitions for evaluations seeded at upgrade, so segmented bars/queue move while builds run.
+- Frontend `segmented-bar.component.spec.ts` — segment widths are proportional to the four-segment total (substituted/aborted excluded) and the empty state renders a single grey track.
+- SQL helpers in `gradient-db/src/project_board.rs` (grouped counts, queue summary, dependency-closure CTE) are covered end-to-end by CI; no local DB unit harness exists.
