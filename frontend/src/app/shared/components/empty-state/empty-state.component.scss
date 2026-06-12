@@ -14,6 +14,11 @@
   border-radius: $border-radius-md;
 }
 
+:host(.flat) .empty-state {
+  background-color: transparent;
+  border: none;
+}
+
 .empty-icon {
   margin-bottom: $spacing-lg;
 

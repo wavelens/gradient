@@ -83,7 +83,7 @@ export interface ProjectDetail {
   created_at: string;
   keep_evaluations: number;
   last_evaluations: EvaluationSummary[];
-  last_check_at: string;
+  last_check_at: string | null;
   queue: QueueSummary;
   can_edit: boolean;
   can_trigger: boolean;

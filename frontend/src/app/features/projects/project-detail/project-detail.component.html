@@ -13,7 +13,7 @@
         <a [routerLink]="['/organization', orgName]">{{ orgDisplayName() || orgName }}</a>
         <span class="sep">/</span><b>{{ proj.display_name }}</b>
       </div>
-      <h1>{{ proj.display_name }} @if (proj.active) { <span class="live-dot"></span> }</h1>
+      <h1>{{ proj.display_name }}</h1>
     </div>
     <div class="head-actions">
       @if (authService.isAuthenticated()) {
@@ -51,7 +51,9 @@
         } @else { {{ proj.repository }} }
       </span>
       <span class="chip mono" [title]="proj.wildcard">{{ proj.wildcard }}</span>
-      <span class="chip">checked {{ proj.last_check_at + 'Z' | date: 'MMM d, HH:mm' }}</span>
+      @if (proj.last_check_at) {
+        <span class="chip">checked {{ proj.last_check_at + 'Z' | date: 'MMM d, HH:mm' }}</span>
+      }
       <span class="chip">created {{ proj.created_at + 'Z' | date: 'MMM d, y' }}</span>
       @if (proj.queue.building + proj.queue.queued > 0) {
         <span class="chip queue">{{ proj.queue.building }} building · {{ proj.queue.queued }} queued</span>
@@ -63,8 +65,7 @@
     <div class="strip-wrap pad">
       <div class="eval-strip">
         @for (e of evaluations(); track e.id) {
-          <div class="eval-card" [class.selected]="selected()?.id === e.id" (click)="select(e)">
-            <span class="rail {{ statusClass(e.status) }}"></span>
+          <div class="eval-card {{ statusClass(e.status) }}" [class.selected]="selected()?.id === e.id" (click)="select(e)">
             <div class="l1">
               <span class="si {{ statusClass(e.status) }} material-symbols-outlined">{{ statusIcon(e.status) }}</span>
               <span class="ev-title" [class.mono]="!e.commit_message">{{ evalTitle(e) }}</span>
@@ -76,20 +77,24 @@
     </div>
 
     <div class="panel pad">
-      @if (selected(); as sel) {
-        <div class="panel-head">
-          <div class="panel-title">
-            <span class="s-ico {{ statusClass(sel.status) }} material-symbols-outlined">{{ statusIcon(sel.status) }}</span>
+      @for (sel of selectedList(); track sel.id) {
+        <div class="panel-body">
+          <div class="panel-head">
             <div>
-              <h2>{{ evalTitle(sel) }}</h2>
-              <div class="sub">
-                <span class="mono">{{ sel.commit.substring(0, 8) }}</span> ·
-                {{ triggerLabel(sel) }} · started {{ sel.created_at + 'Z' | date: 'MMM d, HH:mm' }}
+              <div class="panel-title">
+                <span class="s-ico {{ statusClass(sel.status) }} material-symbols-outlined">{{ statusIcon(sel.status) }}</span>
+                <div>
+                  <h2>{{ evalTitle(sel) }}</h2>
+                  <div class="sub">
+                    <span class="mono">{{ sel.commit.substring(0, 8) }}</span> ·
+                    {{ triggerLabel(sel) }} · started {{ sel.created_at + 'Z' | date: 'MMM d, HH:mm' }}
+                  </div>
+                </div>
               </div>
               <div class="bar-line">
                 <app-segmented-bar class="eval-bar" [counts]="sel.builds" />
-                <span><b>{{ sel.total_builds }}</b> builds</span>
-                <span>⏱ <b>{{ evalDuration(sel) }}</b></span>
+                <span><b>{{ doneCount(sel.builds) }} / {{ totalCount(sel.builds) }}</b> builds</span>
+                <span class="dur"><span class="material-symbols-outlined">timer</span> <b>{{ evalDuration(sel) }}</b></span>
                 @if (sel.errors > 0) {
                   <a class="msg-chip error" [routerLink]="['/organization', orgName, 'log', sel.id]" [queryParams]="{ eval: 1 }">
                     {{ sel.errors }} {{ sel.errors === 1 ? 'error' : 'errors' }}
@@ -102,44 +107,45 @@
                 }
               </div>
             </div>
+            <div class="panel-actions">
+              <button pButton size="small" label="Eval log" icon="pi pi-file" severity="secondary"
+                      [routerLink]="['/organization', orgName, 'log', sel.id]"></button>
+              <button pButton size="small" icon="pi pi-ellipsis-v" severity="secondary"
+                      (click)="panelMenu.toggle($event)" aria-label="More"></button>
+              <p-menu #panelMenu [model]="panelMenuModel()" [popup]="true" appendTo="body" />
+              @if (isRunning(sel.status)) {
+                <button *appWritable="triggerAccess()" pButton size="small" label="Abort" icon="pi pi-times"
+                        severity="danger" (click)="abortTarget.set(sel.id)"></button>
+              }
+            </div>
           </div>
-          <div class="panel-actions">
-            <button pButton size="small" label="Eval log" icon="pi pi-file" severity="secondary"
-                    [routerLink]="['/organization', orgName, 'log', sel.id]"></button>
-            <button pButton size="small" icon="pi pi-ellipsis-v" severity="secondary"
-                    (click)="panelMenu.toggle($event)" aria-label="More"></button>
-            <p-menu #panelMenu [model]="panelMenuModel()" [popup]="true" appendTo="body" />
-            @if (isRunning(sel.status)) {
-              <button *appWritable="triggerAccess()" pButton size="small" label="Abort" icon="pi pi-times"
-                      severity="danger" (click)="abortTarget.set(sel.id)"></button>
-            }
-          </div>
+  
+          <div class="pkg-label"><h3>Packages</h3></div>
+          @if (entryPoints().length > 0) {
+            <div class="pkg-list">
+              @for (ep of entryPoints(); track ep.id) {
+                <div class="pkg {{ buildStatusClass(ep.build_status) }}" [style.animation-delay.ms]="$index * 18"
+                     [routerLink]="['/organization', orgName, 'log', sel.id]" [queryParams]="{ build: ep.build_id }">
+                  <span class="si {{ buildStatusClass(ep.build_status) }} material-symbols-outlined">{{ buildStatusIcon(ep.build_status) }}</span>
+                  <span class="pkg-name" [title]="ep.derivation_path">{{ getDerivationName(ep.derivation_path) }}</span>
+                  <span class="chip-arch mono">{{ ep.architecture }}</span>
+                  <app-segmented-bar class="pkg-bar" [counts]="barCounts(ep)" />
+                  <span class="pkg-deps">{{ doneCount(barCounts(ep)) }} / {{ totalCount(barCounts(ep)) }} deps</span>
+                  <span class="pkg-time">
+                    @if (ep.build_time_ms != null) { {{ formatDurationMs(ep.build_time_ms) }} }
+                    @if (ep.has_artefacts) { <span class="material-symbols-outlined arte">inventory_2</span> }
+                  </span>
+                  <button type="button" class="kebab material-symbols-outlined"
+                          (click)="openPkgMenu($event, ep, sel.id, pkgMenu)">more_vert</button>
+                </div>
+              }
+            </div>
+          } @else {
+            <app-empty-state flat icon="package_2" title="No packages"
+              message="This evaluation produced no entry-point builds." />
+          }
+          <p-menu #pkgMenu [model]="pkgMenuModel()" [popup]="true" appendTo="body" />
         </div>
-
-        <div class="pkg-label"><h3>Packages</h3></div>
-        @if (entryPoints().length > 0) {
-          <div class="pkg-list">
-            @for (ep of entryPoints(); track ep.id) {
-              <div class="pkg" [routerLink]="['/organization', orgName, 'log', sel.id]" [queryParams]="{ build: ep.build_id }">
-                <span class="rail {{ buildStatusClass(ep.build_status) }}"></span>
-                <span class="si {{ buildStatusClass(ep.build_status) }} material-symbols-outlined">{{ buildStatusIcon(ep.build_status) }}</span>
-                <span class="pkg-name" [title]="ep.derivation_path">{{ getDerivationName(ep.derivation_path) }}</span>
-                <span class="chip-arch mono">{{ ep.architecture }}</span>
-                <app-segmented-bar class="pkg-bar" [counts]="ep.deps" />
-                <span class="pkg-time">
-                  {{ depsTotal(ep) }} deps@if (ep.build_time_ms != null) { · {{ formatDurationMs(ep.build_time_ms) }} }
-                  @if (ep.has_artefacts) { · <span class="material-symbols-outlined arte">inventory_2</span> }
-                </span>
-                <button type="button" class="kebab material-symbols-outlined"
-                        (click)="openPkgMenu($event, ep, sel.id, pkgMenu)">more_vert</button>
-              </div>
-            }
-          </div>
-        } @else {
-          <app-empty-state icon="package_2" title="No packages"
-            message="This evaluation produced no entry-point builds." />
-        }
-        <p-menu #pkgMenu [model]="pkgMenuModel()" [popup]="true" appendTo="body" />
       }
     </div>
   } @else {
@@ -151,16 +157,19 @@
     </div>
   }
 
-  @if (abortTarget()) {
-    <div class="overlay" (click)="abortTarget.set(null)">
-      <div class="modal" (click)="$event.stopPropagation()">
-        <h4>Abort evaluation</h4>
-        <p>Do you really want to abort the eval?</p>
-        <div class="row">
-          <button pButton size="small" label="Cancel" severity="secondary" (click)="abortTarget.set(null)"></button>
-          <button pButton size="small" label="Abort" severity="danger" (click)="confirmAbort()"></button>
-        </div>
-      </div>
-    </div>
-  }
+  <p-dialog
+    header="Abort evaluation"
+    [visible]="abortTarget() !== null"
+    (visibleChange)="!$event && abortTarget.set(null)"
+    [modal]="true"
+    [style]="{ width: '400px' }"
+    [draggable]="false"
+    [resizable]="false"
+  >
+    <p>Do you really want to abort the eval?</p>
+    <ng-template pTemplate="footer">
+      <button pButton label="Cancel" severity="secondary" (click)="abortTarget.set(null)"></button>
+      <button pButton label="Abort" severity="danger" (click)="confirmAbort()"></button>
+    </ng-template>
+  </p-dialog>
 }

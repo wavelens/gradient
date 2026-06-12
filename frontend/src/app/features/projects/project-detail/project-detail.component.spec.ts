@@ -5,7 +5,7 @@
  */
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
+import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { vi } from 'vitest';
@@ -15,7 +15,7 @@ import { ProjectsService } from '@core/services/projects.service';
 import { OrganizationsService } from '@core/services/organizations.service';
 import { AuthService } from '@core/services/auth.service';
 import { AccessState } from '@core/models/access.model';
-import { BuildStatusCounts, EvaluationSummary } from '@core/models/project.model';
+import { BuildStatusCounts, EntryPointSummary, EvaluationSummary } from '@core/models/project.model';
 
 function zeroCounts(): BuildStatusCounts {
   return { completed: 0, failed: 0, building: 0, queued: 0, substituted: 0, aborted: 0 };
@@ -40,7 +40,10 @@ function evalSummary(id: string, status: EvaluationSummary['status'] = 'Building
 
 function activatedRouteStub(access: AccessState): ActivatedRoute {
   return {
-    snapshot: { paramMap: convertToParamMap({ org: 'acme', project: 'demo' }) },
+    snapshot: {
+      paramMap: convertToParamMap({ org: 'acme', project: 'demo' }),
+      queryParamMap: convertToParamMap({}),
+    },
     data: of({}),
     parent: { data: of({ projectAccess: { project: {}, access } }) },
   } as unknown as ActivatedRoute;
@@ -200,6 +203,33 @@ describe('ProjectDetailComponent - evaluation selection', () => {
     component.loadProjectData(false);
     expect(component.selected()?.id).toBe(component.evaluations()[1].id);
   });
+
+  it('persists an explicit selection in the eval query param', () => {
+    const e2 = evalSummary('e2', 'Completed');
+    const { fixture } = setup(
+      { managed: false, canEdit: true, canTrigger: true },
+      { extraEvals: [e2] },
+    );
+    const component = fixture.componentInstance;
+    const router = TestBed.inject(Router);
+    const spy = vi.spyOn(router, 'navigate').mockResolvedValue(true);
+    component.select(component.evaluations()[1]);
+    expect(spy).toHaveBeenCalledWith([], expect.objectContaining({
+      queryParams: { eval: 'e2' },
+      replaceUrl: true,
+    }));
+  });
+
+  it('barCounts folds the entry point own build into its dep counts', () => {
+    const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true });
+    const component = fixture.componentInstance;
+    const deps = { completed: 2, failed: 0, building: 0, queued: 0, substituted: 1, aborted: 0 };
+    const ep = { deps, build_status: 'Completed' } as unknown as EntryPointSummary;
+    expect(component.barCounts(ep).completed).toBe(3);
+    expect(component.totalCount(component.barCounts(ep))).toBe(4);
+    const sub = { deps: { ...deps, completed: 0, substituted: 0 }, build_status: 'Substituted' } as unknown as EntryPointSummary;
+    expect(component.barCounts(sub).substituted).toBe(1);
+  });
 });
 
 describe('ProjectDetailComponent - abort modal', () => {
@@ -208,7 +238,7 @@ describe('ProjectDetailComponent - abort modal', () => {
     const spy = vi.spyOn(projectsService, 'abortEvaluation');
     fixture.componentInstance.abortTarget.set('e1');
     fixture.detectChanges();
-    expect(fixture.nativeElement.querySelector('.overlay')).toBeTruthy();
+    expect(document.querySelector('.p-dialog')).toBeTruthy();
     expect(spy).not.toHaveBeenCalled();
   });
 
