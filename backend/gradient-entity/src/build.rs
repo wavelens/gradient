@@ -19,6 +19,7 @@ use crate::ids::{BuildId, DerivationId, EvaluationId};
     Default,
     PartialEq,
     Eq,
+    Hash,
     DeriveActiveEnum,
     EnumIter,
     Deserialize,

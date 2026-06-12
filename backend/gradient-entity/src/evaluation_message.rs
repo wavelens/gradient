@@ -11,7 +11,9 @@ use serde::{Deserialize, Serialize};
 use crate::ids::{EvaluationId, EvaluationMessageId};
 
 /// Severity level of an evaluation message, matching Nix's verbosity levels.
-#[derive(Debug, Clone, Default, PartialEq, Eq, DeriveActiveEnum, EnumIter, Deserialize, Serialize)]
+#[derive(
+    Debug, Clone, Default, PartialEq, Eq, Hash, DeriveActiveEnum, EnumIter, Deserialize, Serialize,
+)]
 #[sea_orm(rs_type = "i32", db_type = "Integer")]
 pub enum MessageLevel {
     #[default]
