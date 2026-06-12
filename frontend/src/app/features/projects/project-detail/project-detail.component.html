@@ -106,6 +106,9 @@
           <div class="panel-actions">
             <button pButton size="small" label="Eval log" icon="pi pi-file" severity="secondary"
                     [routerLink]="['/organization', orgName, 'log', sel.id]"></button>
+            <button pButton size="small" icon="pi pi-ellipsis-v" severity="secondary"
+                    (click)="panelMenu.toggle($event)" aria-label="More"></button>
+            <p-menu #panelMenu [model]="panelMenuModel()" [popup]="true" appendTo="body" />
             @if (isRunning(sel.status)) {
               <button *appWritable="triggerAccess()" pButton size="small" label="Abort" icon="pi pi-times"
                       severity="danger" (click)="abortTarget.set(sel.id)"></button>
@@ -127,7 +130,8 @@
                   {{ depsTotal(ep) }} deps@if (ep.build_time_ms != null) { · {{ formatDurationMs(ep.build_time_ms) }} }
                   @if (ep.has_artefacts) { · <span class="material-symbols-outlined arte">inventory_2</span> }
                 </span>
-                <span class="kebab material-symbols-outlined" (click)="$event.stopPropagation()">more_vert</span>
+                <button type="button" class="kebab material-symbols-outlined"
+                        (click)="openPkgMenu($event, ep, sel.id, pkgMenu)">more_vert</button>
               </div>
             }
           </div>
@@ -135,6 +139,7 @@
           <app-empty-state icon="package_2" title="No packages"
             message="This evaluation produced no entry-point builds." />
         }
+        <p-menu #pkgMenu [model]="pkgMenuModel()" [popup]="true" appendTo="body" />
       }
     </div>
   } @else {

@@ -10,6 +10,8 @@ import { ActivatedRoute, RouterModule } from '@angular/router';
 import { interval, Subscription } from 'rxjs';
 import { auditTime } from 'rxjs/operators';
 import { ButtonModule } from 'primeng/button';
+import { MenuModule } from 'primeng/menu';
+import { MenuItem } from 'primeng/api';
 import { LiveService } from '@core/services/live.service';
 import { AuthService } from '@core/services/auth.service';
 import { OrganizationsService } from '@core/services/organizations.service';
@@ -26,7 +28,7 @@ import { SegmentedBarComponent } from './segmented-bar/segmented-bar.component';
   selector: 'app-project-detail',
   standalone: true,
   imports: [
-    CommonModule, RouterModule, ButtonModule,
+    CommonModule, RouterModule, ButtonModule, MenuModule,
     LoadingSpinnerComponent, EmptyStateComponent, WritableDirective,
     SegmentedBarComponent,
   ],
@@ -238,6 +240,40 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
       case 'Building': return 'sync';
       default: return 'schedule';
     }
+  }
+
+  pkgMenuModel = signal<MenuItem[]>([]);
+
+  panelMenuModel = computed<MenuItem[]>(() => [
+    { label: 'Metrics', icon: 'pi pi-chart-line',
+      routerLink: ['/organization', this.orgName, 'project', this.projectName, 'metrics'] },
+  ]);
+
+  private buildPkgMenu(ep: EntryPointSummary, evalId: string): MenuItem[] {
+    const canArtefacts = (ep.build_status === 'Completed' || ep.build_status === 'Substituted') && ep.has_artefacts;
+    return [
+      {
+        label: 'Artefacts', icon: 'pi pi-download', disabled: !canArtefacts,
+        routerLink: canArtefacts ? ['/organization', this.orgName, 'artefacts', ep.build_id] : undefined,
+        queryParams: canArtefacts ? { project: this.projectName } : undefined,
+      },
+      {
+        label: 'Dependency graph', icon: 'pi pi-sitemap',
+        routerLink: ['/organization', this.orgName, 'graph', ep.build_id],
+        queryParams: { evalId: evalId, project: this.projectName },
+      },
+      {
+        label: 'Entry-point metrics', icon: 'pi pi-chart-line',
+        routerLink: ['/organization', this.orgName, 'project', this.projectName, 'entry-point-metrics'],
+        queryParams: { eval: ep.eval },
+      },
+    ];
+  }
+
+  openPkgMenu(event: Event, ep: EntryPointSummary, evalId: string, menu: { toggle: (e: Event) => void }): void {
+    event.stopPropagation();
+    this.pkgMenuModel.set(this.buildPkgMenu(ep, evalId));
+    menu.toggle(event);
   }
 
   depsTotal(ep: EntryPointSummary): number {
