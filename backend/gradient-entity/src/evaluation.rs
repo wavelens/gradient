@@ -135,7 +135,8 @@ pub enum Relation {
     #[sea_orm(
         belongs_to = "super::user::Entity",
         from = "Column::StartedBy",
-        to = "super::user::Column::Id"
+        to = "super::user::Column::Id",
+        on_delete = "SetNull"
     )]
     StartedBy,
 }
