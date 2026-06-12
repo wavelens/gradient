@@ -96,10 +96,14 @@ pub async fn get_evaluation(
         None
     };
 
-    // Resolve `evaluation.trigger -> project_trigger.trigger_type` so the eval
-    // log page can render the correct "Via" badge. `None` here means the run
-    // was started manually (API / UI), not by a project trigger - the frontend
-    // renders that as "Manual".
+    let triggered_by = match evaluation.started_by {
+        Some(uid) => EUser::find_by_id(uid)
+            .one(&state.web_db)
+            .await?
+            .map(|u| u.name),
+        None => None,
+    };
+
     let trigger = if let Some(trigger_id) = evaluation.trigger {
         EProjectTrigger::find_by_id(trigger_id)
             .one(&state.web_db)
@@ -134,6 +138,7 @@ pub async fn get_evaluation(
             warning_count,
             entry_points,
             trigger,
+            triggered_by,
             waiting_reason,
         },
     };

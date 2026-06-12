@@ -67,6 +67,7 @@ pub async fn trigger_evaluation<C: ConnectionTrait>(
     repository_override: Option<String>,
     wildcard_override: Option<String>,
     source_comment: Option<serde_json::Value>,
+    started_by: Option<gradient_types::ids::UserId>,
 ) -> Result<MEvaluation, TriggerError> {
     if !concurrent {
         ensure_no_active_evaluation(db, project.id).await?;
@@ -109,6 +110,7 @@ pub async fn trigger_evaluation<C: ConnectionTrait>(
         trigger,
         concurrent,
         source_comment,
+        started_by,
         ..Default::default()
     }
     .into_active_model();
