@@ -85,13 +85,14 @@ pub struct EvaluationTriggerSummary {
 pub struct EvaluationSummary {
     pub id: EvaluationId,
     pub commit: String,
+    pub commit_message: Option<String>,
     pub status: EvaluationStatus,
     pub trigger: Option<EvaluationTriggerSummary>,
+    pub triggered_by: Option<String>,
     pub total_builds: i64,
-    pub failed_builds: i64,
-    pub completed_entry_points: i64,
-    pub failed_entry_points: i64,
-    pub entry_point_diff: Option<i64>,
+    pub builds: BuildStatusCounts,
+    pub errors: i64,
+    pub warnings: i64,
     pub created_at: chrono::NaiveDateTime,
     pub updated_at: chrono::NaiveDateTime,
 }

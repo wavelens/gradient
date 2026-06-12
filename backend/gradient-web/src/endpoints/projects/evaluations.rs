@@ -5,7 +5,8 @@
  */
 
 use super::{
-    EntryPointSummary, EvaluationSummary, EvaluationTriggerSummary, ProjectDetailsResponse,
+    BuildStatusCounts, EntryPointSummary, EvaluationSummary, EvaluationTriggerSummary,
+    ProjectDetailsResponse,
 };
 use crate::access::{Caller, ProjectAccess, has_permission, is_org_member, load_project};
 use crate::authorization::{MaybeApiKey, MaybeUser};
@@ -18,6 +19,7 @@ use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use gradient_entity::build::BuildStatus;
+use gradient_entity::evaluation_message::MessageLevel;
 use gradient_db::get_any_organization_by_name;
 use gradient_sources::{check_project_updates, get_path_from_derivation_output};
 use gradient_storage::nar_extract::{ExtractError, Extracted, extract_path_from_nar_bytes};
@@ -37,9 +39,9 @@ pub struct EvaluateRequest {
     pub mode: Option<String>,
 }
 
-/// Builds one [`EvaluationSummary`] per evaluation using a fixed number of DB
-/// round-trips regardless of input size (commits, builds, entry_points,
-/// entry-point builds - 4 queries total).
+/// Builds one [`EvaluationSummary`] per evaluation using grouped DB rollups
+/// (status counts, message counts) plus chunked lookups for triggers, commits,
+/// and the triggering user — a fixed number of round-trips regardless of size.
 pub(super) async fn evaluations_to_summaries(
     state: &Arc<ServerState>,
     evaluations: Vec<MEvaluation>,
@@ -48,10 +50,11 @@ pub(super) async fn evaluations_to_summaries(
         return Ok(Vec::new());
     }
 
+    let db = &state.web_db;
     let eval_ids: Vec<EvaluationId> = evaluations.iter().map(|e| e.id).collect();
 
-    let db = &state.web_db;
-    let trigger_ids: Vec<ProjectTriggerId> = evaluations.iter().filter_map(|e| e.trigger).collect();
+    let trigger_ids: Vec<ProjectTriggerId> =
+        evaluations.iter().filter_map(|e| e.trigger).collect();
     let triggers: HashMap<ProjectTriggerId, TriggerType> =
         gradient_db::fetch_in_chunks(&trigger_ids, |chunk| async move {
             EProjectTrigger::find()
@@ -61,98 +64,55 @@ pub(super) async fn evaluations_to_summaries(
         })
         .await?
         .into_iter()
-        .filter_map(|t| {
-            TriggerType::try_from(t.trigger_type)
-                .ok()
-                .map(|tt| (t.id, tt))
-        })
+        .filter_map(|t| TriggerType::try_from(t.trigger_type).ok().map(|tt| (t.id, tt)))
         .collect();
 
-    let prev_ids: Vec<EvaluationId> = evaluations.iter().filter_map(|e| e.previous).collect();
-    let mut combined_eval_ids: Vec<EvaluationId> = eval_ids.clone();
-    combined_eval_ids.extend(prev_ids.iter().copied());
     let commit_ids: Vec<CommitId> = evaluations.iter().map(|e| e.commit).collect();
-
-    let commits: HashMap<CommitId, String> =
+    let commits: HashMap<CommitId, MCommit> =
         gradient_db::fetch_in_chunks(&commit_ids, |chunk| async move {
             ECommit::find().filter(CCommit::Id.is_in(chunk)).all(db).await
         })
         .await?
         .into_iter()
-        .map(|c| (c.id, vec_to_hex(&c.hash)))
+        .map(|c| (c.id, c))
         .collect();
 
-    let mut total_per_eval: HashMap<EvaluationId, i64> = HashMap::new();
-    let mut failed_per_eval: HashMap<EvaluationId, i64> = HashMap::new();
-    let eval_builds = gradient_db::fetch_in_chunks(&eval_ids, |chunk| async move {
-        EBuild::find()
-            .filter(CBuild::Evaluation.is_in(chunk))
-            .all(db)
-            .await
-    })
-    .await?;
-    for build in eval_builds {
-        *total_per_eval.entry(build.evaluation).or_insert(0) += 1;
-        if matches!(build.status, BuildStatus::FailedPermanent | BuildStatus::FailedTimeout) {
-            *failed_per_eval.entry(build.evaluation).or_insert(0) += 1;
-        }
-    }
-
-    let entry_points = gradient_db::fetch_in_chunks(&combined_eval_ids, |chunk| async move {
-        EEntryPoint::find()
-            .filter(CEntryPoint::Evaluation.is_in(chunk))
-            .all(db)
-            .await
-    })
-    .await?;
-
-    let ep_build_ids: Vec<BuildId> = entry_points.iter().map(|ep| ep.build).collect();
-    let ep_build_status: HashMap<BuildId, BuildStatus> =
-        gradient_db::fetch_in_chunks(&ep_build_ids, |chunk| async move {
-            EBuild::find().filter(CBuild::Id.is_in(chunk)).all(db).await
+    let user_ids: Vec<UserId> = evaluations.iter().filter_map(|e| e.started_by).collect();
+    let user_names: HashMap<UserId, String> =
+        gradient_db::fetch_in_chunks(&user_ids, |chunk| async move {
+            EUser::find().filter(CUser::Id.is_in(chunk)).all(db).await
         })
         .await?
         .into_iter()
-        .map(|b| (b.id, b.status))
+        .map(|u| (u.id, u.name))
         .collect();
 
-    let mut eps_per_eval: HashMap<EvaluationId, Vec<BuildId>> = HashMap::new();
-    for ep in &entry_points {
-        eps_per_eval
-            .entry(ep.evaluation)
-            .or_default()
-            .push(ep.build);
-    }
+    let status_counts =
+        gradient_db::build_status_counts_by_evaluation(db, &eval_ids).await?;
+    let message_counts = gradient_db::evaluation_message_counts(db, &eval_ids).await?;
 
     let mut out = Vec::with_capacity(evaluations.len());
     for evaluation in evaluations {
-        let commit_hash = commits.get(&evaluation.commit).cloned().unwrap_or_default();
-        let total_builds = *total_per_eval.get(&evaluation.id).unwrap_or(&0);
-        let failed_builds = *failed_per_eval.get(&evaluation.id).unwrap_or(&0);
+        let commit = commits.get(&evaluation.commit);
+        let commit_hash = commit.map(|c| vec_to_hex(&c.hash)).unwrap_or_default();
+        let commit_message = commit.and_then(|c| first_line_truncated(&c.message, 100));
 
-        let ep_builds: &[BuildId] = eps_per_eval
-            .get(&evaluation.id)
-            .map(Vec::as_slice)
-            .unwrap_or(&[]);
-        let total_entry_points = ep_builds.len() as i64;
-        let mut completed_entry_points = 0i64;
-        let mut failed_entry_points = 0i64;
-        for build_id in ep_builds {
-            match ep_build_status.get(build_id) {
-                Some(BuildStatus::Completed) | Some(BuildStatus::Substituted) => {
-                    completed_entry_points += 1;
-                }
-                Some(BuildStatus::FailedPermanent) | Some(BuildStatus::FailedTimeout) => {
-                    failed_entry_points += 1
-                }
-                _ => {}
+        let mut builds = BuildStatusCounts::default();
+        if let Some(per_status) = status_counts.get(&evaluation.id) {
+            for (status, n) in per_status {
+                builds.add(*status, *n);
             }
         }
 
-        let entry_point_diff = evaluation.previous.map(|prev_id| {
-            let prev_count = eps_per_eval.get(&prev_id).map(|v| v.len()).unwrap_or(0) as i64;
-            total_entry_points - prev_count
-        });
+        let msgs = message_counts.get(&evaluation.id);
+        let errors = msgs
+            .and_then(|m| m.get(&MessageLevel::Error))
+            .copied()
+            .unwrap_or(0);
+        let warnings = msgs
+            .and_then(|m| m.get(&MessageLevel::Warning))
+            .copied()
+            .unwrap_or(0);
 
         let trigger = evaluation.trigger.and_then(|tid| {
             triggers.get(&tid).map(|&tt| EvaluationTriggerSummary {
@@ -160,22 +120,36 @@ pub(super) async fn evaluations_to_summaries(
                 trigger_type: tt,
             })
         });
+        let triggered_by = evaluation
+            .started_by
+            .and_then(|uid| user_names.get(&uid).cloned());
 
         out.push(EvaluationSummary {
             id: evaluation.id,
             commit: commit_hash,
+            commit_message,
             status: evaluation.status,
             trigger,
-            total_builds,
-            failed_builds,
-            completed_entry_points,
-            failed_entry_points,
-            entry_point_diff,
+            triggered_by,
+            total_builds: builds.total(),
+            builds,
+            errors,
+            warnings,
             created_at: evaluation.created_at,
             updated_at: evaluation.updated_at,
         });
     }
     Ok(out)
+}
+
+/// First line of `s`, trimmed, truncated to `max` chars; `None` when empty.
+fn first_line_truncated(s: &str, max: usize) -> Option<String> {
+    let line = s.lines().next().unwrap_or("").trim();
+    if line.is_empty() {
+        return None;
+    }
+
+    Some(line.chars().take(max).collect())
 }
 
 pub async fn post_project_evaluate(
@@ -770,5 +744,20 @@ pub async fn get_entry_point_download(
     match serve_hydra_artifact(&state, build_outputs, &params.filename).await? {
         Some(response) => Ok(response),
         None => Err(WebError::not_found("File")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn first_line_truncated_takes_first_line_and_caps_length() {
+        assert_eq!(super::first_line_truncated("", 100), None);
+        assert_eq!(super::first_line_truncated("   \n x", 100).as_deref(), Some("x"));
+        assert_eq!(
+            super::first_line_truncated("hello world\nsecond", 100).as_deref(),
+            Some("hello world")
+        );
+        let long: String = "a".repeat(250);
+        assert_eq!(super::first_line_truncated(&long, 100).unwrap().chars().count(), 100);
     }
 }
