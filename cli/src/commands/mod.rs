@@ -1,7 +1,7 @@
 /*
- * spdx-filecopyrighttext: 2025 wavelens ug <info@wavelens.io>
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
  *
- * spdx-license-identifier: agpl-3.0-only
+ * SPDX-License-Identifier: AGPL-3.0-only
  */
 
 pub mod attr_spec;
