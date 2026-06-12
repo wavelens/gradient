@@ -73,7 +73,7 @@ h1 { font-size: 20px; display: flex; align-items: center; gap: 10px; }
   .chip-arch { border: 1px solid rgba(255,255,255,.07); border-radius: 9px; padding: 0 8px; font-size: 10.5px; color: #abb0b4; flex-shrink: 0; }
   .pkg-bar { width: 360px; --segbar-h: 7px; }
   .pkg-time { color: #818181; font-size: 12px; margin-left: auto; white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; .arte { font-size: 15px; } }
-  .kebab { color: #818181; padding-left: 12px; border-left: 1px solid rgba(255,255,255,.07); }
+  .kebab { color: #818181; padding-left: 12px; border: none; border-left: 1px solid rgba(255,255,255,.07); background: none; cursor: pointer; }
 }
 
 .rail, .si {
