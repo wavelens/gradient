@@ -12,8 +12,9 @@ pub mod metrics;
 pub mod triggers;
 
 pub use self::evaluations::{
-    EntryPointDownloadQuery, EntryPointsQuery, EvaluateRequest, get_entry_point_download,
-    get_project_details, get_project_entry_points, get_project_evaluations, post_project_evaluate,
+    EntryPointDownloadQuery, EntryPointsQuery, EvaluateRequest, EvaluationsQuery,
+    get_entry_point_download, get_project_details, get_project_entry_points,
+    get_project_evaluations, post_project_evaluate,
 };
 pub use self::management::{
     MakeProjectRequest, PatchProjectRequest, TransferOwnershipRequest, delete_project,
@@ -108,6 +109,8 @@ pub struct ProjectDetailsResponse {
     pub active: bool,
     pub created_at: chrono::NaiveDateTime,
     pub keep_evaluations: i32,
+    pub last_check_at: chrono::NaiveDateTime,
+    pub queue: QueueSummary,
     pub last_evaluations: Vec<EvaluationSummary>,
     pub can_edit: bool,
     pub can_trigger: bool,
