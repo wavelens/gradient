@@ -7,7 +7,7 @@
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { ApiService } from './api.service';
-import { Project, ProjectDetail, EntryPointSummary, Paginated } from '@core/models';
+import { Project, ProjectDetail, EntryPointSummary, EvaluationSummary, Paginated } from '@core/models';
 
 @Injectable({ providedIn: 'root' })
 export class ProjectsService {
@@ -59,6 +59,11 @@ export class ProjectsService {
       ? `projects/${organization}/${project}/entry-points?evaluation_id=${evaluationId}`
       : `projects/${organization}/${project}/entry-points`;
     return this.api.get<EntryPointSummary[]>(url);
+  }
+
+  getEvaluations(organization: string, project: string, limit?: number): Observable<EvaluationSummary[]> {
+    const q = limit ? `?limit=${limit}` : '';
+    return this.api.get<EvaluationSummary[]>(`projects/${organization}/${project}/evaluations${q}`);
   }
 
   startEvaluation(organization: string, project: string): Observable<string> {

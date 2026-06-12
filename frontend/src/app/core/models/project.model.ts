@@ -30,18 +30,33 @@ export interface Project {
   can_trigger: boolean;
 }
 
+export interface BuildStatusCounts {
+  completed: number;
+  failed: number;
+  building: number;
+  queued: number;
+  substituted: number;
+  aborted: number;
+}
+
+export interface QueueSummary {
+  building: number;
+  queued: number;
+}
+
 export interface EvaluationSummary {
   id: string;
   commit: string;
+  commit_message: string | null;
   status: EvaluationStatus;
+  trigger: { id: string; type: TriggerType } | null;
+  triggered_by: string | null;
   total_builds: number;
-  failed_builds: number;
-  completed_entry_points: number;
-  failed_entry_points: number;
-  entry_point_diff: number | null;
+  builds: BuildStatusCounts;
+  errors: number;
+  warnings: number;
   created_at: string;
   updated_at: string;
-  trigger: { id: string; type: TriggerType } | null;
 }
 
 export interface EntryPointSummary {
@@ -52,8 +67,8 @@ export interface EntryPointSummary {
   build_status: BuildStatus;
   has_artefacts: boolean;
   architecture: Architecture;
-  evaluation_id: string;
-  evaluation_status: EvaluationStatus;
+  build_time_ms: number | null;
+  deps: BuildStatusCounts;
   created_at: string;
 }
 
@@ -68,6 +83,8 @@ export interface ProjectDetail {
   created_at: string;
   keep_evaluations: number;
   last_evaluations: EvaluationSummary[];
+  last_check_at: string;
+  queue: QueueSummary;
   can_edit: boolean;
   can_trigger: boolean;
   managed: boolean;
