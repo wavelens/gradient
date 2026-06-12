@@ -125,6 +125,7 @@ pub async fn apply_trigger<C: ConnectionTrait>(
         input.repository_override,
         input.wildcard_override,
         input.source_comment,
+        None,
     )
     .await
     {

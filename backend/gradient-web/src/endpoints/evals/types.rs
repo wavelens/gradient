@@ -62,6 +62,9 @@ pub struct EvaluationResponse {
     /// list endpoint so the eval-log "Via" badge can render the same labels
     /// without falling back to "Manual" for trigger-fired runs.
     pub trigger: Option<EvaluationTriggerSummary>,
+    /// Display name of the user who manually started this evaluation; `null`
+    /// for trigger-driven and pre-migration runs.
+    pub triggered_by: Option<String>,
     /// Populated only when `status == Waiting`. Explains which
     /// `(architecture, required_features)` combos no connected worker can
     /// satisfy, alongside the architectures the connected pool *does* offer.

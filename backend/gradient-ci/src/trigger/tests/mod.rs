@@ -43,7 +43,7 @@ async fn trigger_creates_queued_eval() {
         .into_connection();
 
     let result =
-        trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None, false, None, None, None).await;
+        trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None, false, None, None, None, None).await;
     assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
     assert_eq!(result.unwrap().status, EvaluationStatus::Queued);
 }
@@ -82,7 +82,7 @@ async fn trigger_drops_dangling_last_evaluation_pointer() {
         .into_connection();
 
     let result =
-        trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None, false, None, None, None).await;
+        trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None, false, None, None, None, None).await;
     assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
 }
 
@@ -97,7 +97,7 @@ async fn trigger_already_in_progress() {
         .into_connection();
 
     let result =
-        trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None, false, None, None, None).await;
+        trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None, false, None, None, None, None).await;
     assert!(matches!(result, Err(TriggerError::AlreadyInProgress)));
 }
 
@@ -117,7 +117,7 @@ async fn trigger_each_active_status_blocks() {
             .append_query_results([vec![make_eval(EvaluationId::now_v7(), status)]])
             .into_connection();
         let result =
-            trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None, false, None, None, None)
+            trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None, false, None, None, None, None)
                 .await;
         assert!(
             matches!(result, Err(TriggerError::AlreadyInProgress)),
@@ -185,7 +185,7 @@ async fn trigger_terminal_does_not_block() {
         .into_connection();
 
     let result =
-        trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None, false, None, None, None).await;
+        trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None, false, None, None, None, None).await;
     assert!(result.is_ok(), "terminal eval should not block new trigger");
 }
 
@@ -224,6 +224,7 @@ async fn trigger_records_trigger_id() {
         None,
         Some(trig),
         false,
+        None,
         None,
         None,
         None,

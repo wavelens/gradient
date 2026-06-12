@@ -210,6 +210,7 @@ pub async fn post_project_evaluate(
         None,
         None,
         None,
+        Some(user.id),
     )
     .await
     .map_err(|e| match e {
