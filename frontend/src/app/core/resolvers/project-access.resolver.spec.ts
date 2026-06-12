@@ -41,6 +41,8 @@ describe('projectAccessResolver', () => {
     created_at: '',
     keep_evaluations: 5,
     last_evaluations: [],
+    last_check_at: '',
+    queue: { building: 0, queued: 0 },
     can_edit: true,
     can_trigger: true,
     managed: false,

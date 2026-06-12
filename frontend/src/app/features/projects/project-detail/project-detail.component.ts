@@ -227,21 +227,15 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   }
 
   effectiveEntryStatusClass(ep: EntryPointSummary): string {
-    return ep.evaluation_status === 'Waiting'
-      ? this.getStatusClass(ep.evaluation_status)
-      : this.getBuildStatusClass(ep.build_status);
+    return this.getBuildStatusClass(ep.build_status);
   }
 
   effectiveEntryStatusIcon(ep: EntryPointSummary): string {
-    return ep.evaluation_status === 'Waiting'
-      ? this.getStatusIcon(ep.evaluation_status)
-      : this.getBuildStatusIcon(ep.build_status);
+    return this.getBuildStatusIcon(ep.build_status);
   }
 
   effectiveEntryStatusLabel(ep: EntryPointSummary): string {
-    return ep.evaluation_status === 'Waiting'
-      ? this.getStatusLabel(ep.evaluation_status)
-      : this.formatBuildStatus(ep.build_status);
+    return this.formatBuildStatus(ep.build_status);
   }
 
   getEvaluationDuration(evaluation: EvaluationSummary): string {
