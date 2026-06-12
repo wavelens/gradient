@@ -4,246 +4,158 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<div class="container">
-  @if (loading()) {
-    <app-loading-spinner message="Loading project..." />
-  } @else if (project(); as proj) {
-    <!-- Project Header -->
-    <div class="page-header">
-      <div>
-        <div class="breadcrumb">
-          <a [routerLink]="['/organization', orgName]" class="breadcrumb-link">{{ orgDisplayName() || orgName }}</a>
-          <span class="breadcrumb-separator">/</span>
-          <span class="breadcrumb-current">{{ proj.display_name }}</span>
-        </div>
-        <h1>{{ proj.display_name }}</h1>
-        <p class="text-secondary">{{ proj.description || 'No description' }}</p>
+@if (loading()) {
+  <app-loading-spinner message="Loading project..." />
+} @else if (project(); as proj) {
+  <div class="pp-head pad">
+    <div>
+      <div class="breadcrumb">
+        <a [routerLink]="['/organization', orgName]">{{ orgDisplayName() || orgName }}</a>
+        <span class="sep">/</span><b>{{ proj.display_name }}</b>
       </div>
-      <div class="header-actions">
-        @if (authService.isAuthenticated()) {
-          <button
-            *appWritable="triggerAccess()"
-            pButton
-            label="Start Evaluation"
-            icon="pi pi-play"
-            (click)="startEvaluation()"
-            [loading]="starting()"
-            [disabled]="starting()"
-          ></button>
-          <button
-            *appWritable="triggerAccess()"
-            pButton
-            label="Restart Failed Builds"
-            icon="pi pi-refresh"
-            severity="secondary"
-            (click)="restartFailedBuilds()"
-            [disabled]="starting()"
-          ></button>
-          @if (proj.name !== 'build-request') {
-            <button
-              pButton
-              label="Settings"
-              icon="pi pi-cog"
-              severity="secondary"
-              [routerLink]="['/organization', orgName, 'project', projectName, 'settings']"
-            ></button>
-          }
+      <h1>{{ proj.display_name }} @if (proj.active) { <span class="live-dot"></span> }</h1>
+    </div>
+    <div class="head-actions">
+      @if (authService.isAuthenticated()) {
+        <button *appWritable="triggerAccess()" pButton label="Start Evaluation" icon="pi pi-play"
+                (click)="startEvaluation()" [loading]="starting()" [disabled]="starting()"></button>
+        <button *appWritable="triggerAccess()" pButton label="Restart Failed Builds" icon="pi pi-refresh"
+                severity="secondary" (click)="restartFailedBuilds()" [disabled]="starting()"></button>
+        @if (proj.name !== 'build-request') {
+          <button pButton label="Settings" icon="pi pi-cog" severity="secondary"
+                  [routerLink]="['/organization', orgName, 'project', projectName, 'settings']"></button>
         }
-        <button
-          pButton
-          label="Metrics"
-          icon="pi pi-chart-line"
-          severity="secondary"
-          [routerLink]="['/organization', orgName, 'project', projectName, 'metrics']"
-        ></button>
-      </div>
-      @if (errorMessage(); as msg) {
-        <div class="evaluation-error" role="alert">
-          <span class="material-symbols-outlined">error</span>
-          <span class="evaluation-error__text">{{ msg }}</span>
-          <button
-            type="button"
-            class="evaluation-error__dismiss"
-            aria-label="Dismiss error"
-            (click)="dismissError()"
-          >
-            <span class="material-symbols-outlined">close</span>
-          </button>
-        </div>
       }
-      <div class="project-meta">
-        <span class="meta-item">
-          <span class="material-symbols-outlined">link</span>
-          @if (proj.repository.startsWith('http://') || proj.repository.startsWith('https://')) {
-            <a [href]="proj.repository" target="_blank" rel="noopener noreferrer">{{ proj.repository }}</a>
-          } @else {
-            {{ proj.repository }}
-          }
-        </span>
-        <span class="meta-item">
-          <span class="material-symbols-outlined">category</span>
-          <span class="meta-truncate" [title]="proj.wildcard">{{ proj.wildcard }}</span>
-        </span>
-        <span class="status-badge" [class.active]="proj.active" [class.inactive]="!proj.active">
-          {{ proj.active ? 'Active' : 'Inactive' }}
-        </span>
+      <button pButton label="Metrics" icon="pi pi-chart-line" severity="secondary"
+              [routerLink]="['/organization', orgName, 'project', projectName, 'metrics']"></button>
+    </div>
+  </div>
+
+  @if (errorMessage(); as msg) {
+    <div class="pad"><div class="evaluation-error" role="alert">
+      <span class="material-symbols-outlined">error</span>
+      <span class="evaluation-error__text">{{ msg }}</span>
+      <button type="button" class="evaluation-error__dismiss" aria-label="Dismiss error" (click)="dismissError()">
+        <span class="material-symbols-outlined">close</span>
+      </button>
+    </div></div>
+  }
+
+  <div class="pad project-info">
+    <p class="desc">{{ proj.description || 'No description' }}</p>
+    <div class="meta-chips">
+      <span class="chip">
+        <span class="material-symbols-outlined">link</span>
+        @if (proj.repository.startsWith('http')) {
+          <a [href]="proj.repository" target="_blank" rel="noopener noreferrer">{{ proj.repository }}</a>
+        } @else { {{ proj.repository }} }
+      </span>
+      <span class="chip mono" [title]="proj.wildcard">{{ proj.wildcard }}</span>
+      <span class="chip">checked {{ proj.last_check_at + 'Z' | date: 'MMM d, HH:mm' }}</span>
+      <span class="chip">created {{ proj.created_at + 'Z' | date: 'MMM d, y' }}</span>
+      @if (proj.queue.building + proj.queue.queued > 0) {
+        <span class="chip queue">{{ proj.queue.building }} building · {{ proj.queue.queued }} queued</span>
+      }
+    </div>
+  </div>
+
+  @if (evaluations().length > 0) {
+    <div class="strip-wrap pad">
+      <div class="eval-strip">
+        @for (e of evaluations(); track e.id) {
+          <div class="eval-card" [class.selected]="selected()?.id === e.id" (click)="select(e)">
+            <span class="rail {{ statusClass(e.status) }}"></span>
+            <div class="l1">
+              <span class="si {{ statusClass(e.status) }} material-symbols-outlined">{{ statusIcon(e.status) }}</span>
+              <span class="ev-title" [class.mono]="!e.commit_message">{{ evalTitle(e) }}</span>
+            </div>
+            <div class="l2"><span>{{ triggerLabel(e) }}</span><span>{{ evalDuration(e) }}</span></div>
+          </div>
+        }
       </div>
     </div>
 
-    <!-- Current Builds -->
-    @if (entryPoints().length > 0) {
-      <div class="section">
-        <h2>Current Builds</h2>
-        <div class="evaluations-list">
-          @for (ep of entryPoints(); track ep.id) {
-            <div class="evaluation-card">
-              <div class="evaluation-status">
-                <span
-                  class="status-icon material-symbols-outlined"
-                  [class]="effectiveEntryStatusClass(ep)"
-                >
-                  {{ effectiveEntryStatusIcon(ep) }}
-                </span>
+    <div class="panel pad">
+      @if (selected(); as sel) {
+        <div class="panel-head">
+          <div class="panel-title">
+            <span class="s-ico {{ statusClass(sel.status) }} material-symbols-outlined">{{ statusIcon(sel.status) }}</span>
+            <div>
+              <h2>{{ evalTitle(sel) }}</h2>
+              <div class="sub">
+                <span class="mono">{{ sel.commit.substring(0, 8) }}</span> ·
+                {{ triggerLabel(sel) }} · started {{ sel.created_at + 'Z' | date: 'MMM d, HH:mm' }}
               </div>
-              <div class="evaluation-content">
-                <div class="evaluation-header">
-                  <h3>
-                    <a [routerLink]="['/organization', orgName, 'log', ep.id]" [queryParams]="{ build: ep.build_id }">
-                      {{ getDerivationName(ep.derivation_path) }}
-                    </a>
-                  </h3>
-                  <span class="status-badge" [class]="effectiveEntryStatusClass(ep)">
-                    {{ effectiveEntryStatusLabel(ep) }}
-                  </span>
-                  <a
-                    [class.graph-icon-link]="true"
-                    [class.disabled]="(ep.build_status !== 'Completed' && ep.build_status !== 'Substituted') || !ep.has_artefacts"
-                    [routerLink]="(ep.build_status === 'Completed' || ep.build_status === 'Substituted') && ep.has_artefacts ? ['/organization', orgName, 'artefacts', ep.build_id] : null"
-                    [queryParams]="{ project: projectName }"
-                    title="View build artefacts"
-                  >
-                    <span class="material-symbols-outlined">download</span>
+              <div class="bar-line">
+                <app-segmented-bar class="eval-bar" [counts]="sel.builds" />
+                <span><b>{{ sel.total_builds }}</b> builds</span>
+                <span>⏱ <b>{{ evalDuration(sel) }}</b></span>
+                @if (sel.errors > 0) {
+                  <a class="msg-chip error" [routerLink]="['/organization', orgName, 'log', sel.id]" [queryParams]="{ eval: 1 }">
+                    {{ sel.errors }} {{ sel.errors === 1 ? 'error' : 'errors' }}
                   </a>
-                  <a
-                    [routerLink]="['/organization', orgName, 'graph', ep.build_id]"
-                    [queryParams]="{ evalId: ep.id, project: projectName }"
-                    class="graph-icon-link"
-                    title="View dependency graph"
-                  >
-                    <span class="material-symbols-outlined">account_tree</span>
-                  </a>
-                  <a
-                    [routerLink]="['/organization', orgName, 'project', projectName, 'entry-point-metrics']"
-                    [queryParams]="{ eval: ep.eval }"
-                    class="graph-icon-link"
-                    title="View entry point metrics"
-                  >
-                    <i class="pi pi-chart-line"></i>
-                  </a>
-                </div>
-                @if (ep.architecture) {
-                  <div class="build-stats">
-                    <span class="build-stat">
-                      <span class="material-symbols-outlined">memory</span>
-                      {{ formatArchitecture(ep.architecture) }}
-                    </span>
-                  </div>
                 }
-                <p class="derivation-path text-secondary">{{ ep.derivation_path }}</p>
-              </div>
-              <div class="evaluation-actions">
-                <span class="evaluation-date text-secondary">
-                  {{ ep.created_at + 'Z' | date: 'MMM d, y HH:mm' }}
-                </span>
-                <span class="status-badge" [class]="getBuildStatusClass(ep.build_status)">
-                  {{ formatBuildStatus(ep.build_status) }}
-                </span>
+                @if (sel.warnings > 0) {
+                  <a class="msg-chip warn" [routerLink]="['/organization', orgName, 'log', sel.id]" [queryParams]="{ eval: 1 }">
+                    {{ sel.warnings }} {{ sel.warnings === 1 ? 'warning' : 'warnings' }}
+                  </a>
+                }
               </div>
             </div>
-          }
+          </div>
+          <div class="panel-actions">
+            <button pButton size="small" label="Eval log" icon="pi pi-file" severity="secondary"
+                    [routerLink]="['/organization', orgName, 'log', sel.id]"></button>
+            @if (isRunning(sel.status)) {
+              <button *appWritable="triggerAccess()" pButton size="small" label="Abort" icon="pi pi-times"
+                      severity="danger" (click)="abortTarget.set(sel.id)"></button>
+            }
+          </div>
         </div>
-      </div>
-    }
 
-    <!-- Recent Evaluations -->
-    <div class="section">
-      <h2>Recent Evaluations</h2>
-      @if (proj.last_evaluations && proj.last_evaluations.length > 0) {
-        <div class="evaluations-list">
-          @for (evaluation of proj.last_evaluations; track evaluation.id) {
-            <div class="evaluation-card">
-              <div class="evaluation-status">
-                <span
-                  class="status-icon material-symbols-outlined"
-                  [class]="getStatusClass(evaluation.status)"
-                >
-                  {{ getStatusIcon(evaluation.status) }}
+        <div class="pkg-label"><h3>Packages</h3></div>
+        @if (entryPoints().length > 0) {
+          <div class="pkg-list">
+            @for (ep of entryPoints(); track ep.id) {
+              <div class="pkg" [routerLink]="['/organization', orgName, 'log', sel.id]" [queryParams]="{ build: ep.build_id }">
+                <span class="rail {{ buildStatusClass(ep.build_status) }}"></span>
+                <span class="si {{ buildStatusClass(ep.build_status) }} material-symbols-outlined">{{ buildStatusIcon(ep.build_status) }}</span>
+                <span class="pkg-name" [title]="ep.derivation_path">{{ getDerivationName(ep.derivation_path) }}</span>
+                <span class="chip-arch mono">{{ ep.architecture }}</span>
+                <app-segmented-bar class="pkg-bar" [counts]="ep.deps" />
+                <span class="pkg-time">
+                  {{ depsTotal(ep) }} deps@if (ep.build_time_ms != null) { · {{ formatDurationMs(ep.build_time_ms) }} }
+                  @if (ep.has_artefacts) { · <span class="material-symbols-outlined arte">inventory_2</span> }
                 </span>
+                <span class="kebab material-symbols-outlined" (click)="$event.stopPropagation()">more_vert</span>
               </div>
-              <div class="evaluation-content">
-                <div class="evaluation-header">
-                  <h3>
-                    <a
-                      [routerLink]="['/organization', orgName, 'log', evaluation.id]"
-                      [queryParams]="evaluation.status === 'Failed' && evaluation.total_builds === 0 ? { eval: 1 } : null"
-                    >
-                      Evaluation {{ evaluation.commit.substring(0, 8) }}
-                    </a>
-                  </h3>
-                  <span class="status-badge" [class]="getStatusClass(evaluation.status)">
-                    {{ getStatusLabel(evaluation.status) }}
-                  </span>
-                  <span class="trigger-badge">
-                    {{ getTriggerLabel(evaluation.trigger?.type ?? null) }}
-                  </span>
-                </div>
-                <div class="build-stats build-stats--grid">
-                  <span class="build-stat" title="Total builds in this evaluation">
-                    <span class="material-symbols-outlined">construction</span>
-                    {{ evaluation.total_builds }}
-                  </span>
-                  <span class="build-stat" [class.success]="evaluation.builds.completed > 0" title="Completed builds">
-                    <span class="material-symbols-outlined">check_circle</span>
-                    {{ evaluation.builds.completed }}
-                  </span>
-                  <span class="build-stat" [class.error]="evaluation.builds.failed > 0" title="Failed builds">
-                    <span class="material-symbols-outlined">error</span>
-                    {{ evaluation.builds.failed }}
-                  </span>
-                  <span class="build-stat" [class.running]="isRunningStatus(evaluation.status)" title="Evaluation duration">
-                    <span class="material-symbols-outlined">timer</span>
-                    {{ getEvaluationDuration(evaluation) }}
-                  </span>
-                </div>
-              </div>
-              <div class="evaluation-actions">
-                <span class="evaluation-date text-secondary">
-                  {{ evaluation.created_at + 'Z' | date: 'MMM d, y HH:mm' }}
-                </span>
-                @if (isRunningStatus(evaluation.status)) {
-                  <button
-                    *appWritable="triggerAccess()"
-                    pButton
-                    label="Abort"
-                    icon="pi pi-times"
-                    severity="danger"
-                    size="small"
-                    (click)="abortEvaluation(evaluation.id)"
-                  ></button>
-                }
-              </div>
-            </div>
-          }
-        </div>
-      } @else {
-        <app-empty-state
-          icon="assessment"
-          title="No evaluations yet"
-          [message]="access().canTrigger ? 'Start your first evaluation to begin building' : 'No evaluations have been run yet'"
-          [actionLabel]="access().canTrigger ? 'Start Evaluation' : ''"
-          (actionClick)="access().canTrigger && startEvaluation()"
-        />
+            }
+          </div>
+        } @else {
+          <app-empty-state icon="package_2" title="No packages"
+            message="This evaluation produced no entry-point builds." />
+        }
       }
+    </div>
+  } @else {
+    <div class="pad">
+      <app-empty-state icon="assessment" title="No evaluations yet"
+        [message]="access().canTrigger ? 'Start your first evaluation to begin building' : 'No evaluations have been run yet'"
+        [actionLabel]="access().canTrigger ? 'Start Evaluation' : ''"
+        (actionClick)="access().canTrigger && startEvaluation()" />
     </div>
   }
-</div>
+
+  @if (abortTarget()) {
+    <div class="overlay" (click)="abortTarget.set(null)">
+      <div class="modal" (click)="$event.stopPropagation()">
+        <h4>Abort evaluation</h4>
+        <p>Do you really want to abort the eval?</p>
+        <div class="row">
+          <button pButton size="small" label="Cancel" severity="secondary" (click)="abortTarget.set(null)"></button>
+          <button pButton size="small" label="Abort" severity="danger" (click)="confirmAbort()"></button>
+        </div>
+      </div>
+    </div>
+  }
+}

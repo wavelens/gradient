@@ -18,19 +18,17 @@ import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/load
 import { EmptyStateComponent } from '@shared/components/empty-state/empty-state.component';
 import { AccessService, WritableDirective } from '@shared/access';
 import { injectProjectAccess } from '@core/resolvers/inject-access';
-import { ProjectDetail, EvaluationSummary, EvaluationStatus, EntryPointSummary, BuildStatus, TriggerType } from '@core/models';
+import { ProjectDetail, EvaluationSummary, EvaluationStatus, EntryPointSummary, BuildStatus } from '@core/models';
 import { formatEvaluationDuration, isRunningEvaluationStatus, parseUtcTimestamp } from '@shared/evaluation';
+import { SegmentedBarComponent } from './segmented-bar/segmented-bar.component';
 
 @Component({
   selector: 'app-project-detail',
   standalone: true,
   imports: [
-    CommonModule,
-    RouterModule,
-    ButtonModule,
-    LoadingSpinnerComponent,
-    EmptyStateComponent,
-    WritableDirective,
+    CommonModule, RouterModule, ButtonModule,
+    LoadingSpinnerComponent, EmptyStateComponent, WritableDirective,
+    SegmentedBarComponent,
   ],
   templateUrl: './project-detail.component.html',
   styleUrls: ['./project-detail.component.scss', './project-detail.evaluations.scss'],
@@ -44,15 +42,15 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   private live = inject(LiveService);
 
   access = injectProjectAccess();
-  /// Access projection for trigger-style actions (Start / Restart / Abort).
-  /// Driven by Permission::TriggerEvaluation and not gated by `managed`.
   triggerAccess = computed(() => this.accessService.triggerAccess(this.access()));
 
   loading = signal(true);
   project = signal<ProjectDetail | null>(null);
   entryPoints = signal<EntryPointSummary[]>([]);
+  selectedId = signal<string | null>(null);
   starting = signal(false);
   errorMessage = signal<string | null>(null);
+  abortTarget = signal<string | null>(null);
   tick = signal(Date.now());
 
   orgName = '';
@@ -61,6 +59,13 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
 
   private liveSub?: Subscription;
   private tickSubscription?: Subscription;
+
+  evaluations = computed(() => this.project()?.last_evaluations ?? []);
+  selected = computed<EvaluationSummary | null>(() => {
+    const id = this.selectedId();
+    const list = this.evaluations();
+    return list.find(e => e.id === id) ?? list[0] ?? null;
+  });
 
   ngOnInit(): void {
     this.orgName = this.route.snapshot.paramMap.get('org') || '';
@@ -75,7 +80,8 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
-    this.stopLiveUpdates();
+    this.liveSub?.unsubscribe();
+    this.tickSubscription?.unsubscribe();
   }
 
   loadProjectData(showLoading = true): void {
@@ -84,8 +90,14 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
       next: (project) => {
         this.project.set(project);
         if (showLoading) this.loading.set(false);
-        this.onProjectDataLoaded();
-        this.loadEntryPoints(project);
+        if (this.starting() && project.last_evaluations.some(e => this.isRunning(e.status))) {
+          this.starting.set(false);
+        }
+        if (!this.selectedId() && project.last_evaluations.length) {
+          this.select(project.last_evaluations[0]);
+        } else {
+          this.loadEntryPoints(this.selected()?.id);
+        }
       },
       error: (error) => {
         console.error('Failed to load project:', error);
@@ -94,31 +106,16 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
     });
   }
 
-  private readonly buildStatusOrder: Record<string, number> = {
-    Building: 0,
-    Queued: 1,
-    FailedPermanent: 2,
-    FailedTimeout: 2,
-    FailedTransient: 2,
-    Aborted: 3,
-    Completed: 4,
-    Substituted: 4,
-  };
+  select(evaluation: EvaluationSummary): void {
+    this.selectedId.set(evaluation.id);
+    this.loadEntryPoints(evaluation.id);
+  }
 
-  private readonly statusesWithBuilds = new Set<EvaluationStatus>(['Building', 'Waiting', 'Completed', 'Failed', 'Aborted']);
-
-  loadEntryPoints(project?: ProjectDetail): void {
-    // When the newest eval is Queued/Evaluating it has no builds yet - fall back to
-    // the most recent evaluation that actually has entry points.
-    const evalWithBuilds = project?.last_evaluations?.find(e => this.statusesWithBuilds.has(e.status));
-    this.projectsService.getEntryPoints(this.orgName, this.projectName, evalWithBuilds?.id).subscribe({
+  private loadEntryPoints(evaluationId?: string): void {
+    if (!evaluationId) { this.entryPoints.set([]); return; }
+    this.projectsService.getEntryPoints(this.orgName, this.projectName, evaluationId).subscribe({
       next: (eps) => this.entryPoints.set(
-        [...eps].sort((a, b) => {
-          const oa = this.buildStatusOrder[a.build_status] ?? 99;
-          const ob = this.buildStatusOrder[b.build_status] ?? 99;
-          if (oa !== ob) return oa - ob;
-          return this.getDerivationName(a.derivation_path).localeCompare(this.getDerivationName(b.derivation_path));
-        })
+        [...eps].sort((a, b) => this.getDerivationName(a.derivation_path).localeCompare(this.getDerivationName(b.derivation_path))),
       ),
       error: (error) => console.error('Failed to load entry points:', error),
     });
@@ -128,12 +125,8 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
     this.starting.set(true);
     this.errorMessage.set(null);
     this.projectsService.startEvaluation(this.orgName, this.projectName).subscribe({
-      next: () => {
-        // Keep starting=true; polling will clear it once the evaluation appears
-        this.loadProjectData(false);
-      },
+      next: () => this.loadProjectData(false),
       error: (error) => {
-        console.error('Failed to start evaluation:', error);
         this.errorMessage.set(error?.message || 'Failed to start evaluation.');
         this.starting.set(false);
       },
@@ -144,151 +137,53 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
     this.starting.set(true);
     this.errorMessage.set(null);
     this.projectsService.restartFailedBuilds(this.orgName, this.projectName).subscribe({
-      next: () => {
-        this.loadProjectData(false);
-      },
+      next: () => this.loadProjectData(false),
       error: (error) => {
-        console.error('Failed to restart failed builds:', error);
         this.errorMessage.set(error?.message || 'Failed to restart failed builds.');
         this.starting.set(false);
       },
     });
   }
 
-  dismissError(): void {
-    this.errorMessage.set(null);
-  }
-
-  abortEvaluation(evaluationId: string): void {
-    this.projectsService.abortEvaluation(this.orgName, this.projectName, evaluationId).subscribe({
-      next: () => {
-        this.loadProjectData(false);
-      },
-      error: (error) => {
-        console.error('Failed to abort evaluation:', error);
-      },
+  confirmAbort(): void {
+    const id = this.abortTarget();
+    this.abortTarget.set(null);
+    if (!id) return;
+    this.projectsService.abortEvaluation(this.orgName, this.projectName, id).subscribe({
+      next: () => this.loadProjectData(false),
+      error: (error) => console.error('Failed to abort evaluation:', error),
     });
   }
 
-  startLiveUpdates(): void {
+  dismissError(): void { this.errorMessage.set(null); }
+
+  private startLiveUpdates(): void {
     this.liveSub = this.live
       .connect(`/projects/${this.orgName}/${this.projectName}/live`)
       .pipe(auditTime(500))
       .subscribe(() => this.loadProjectData(false));
   }
 
-  onProjectDataLoaded(): void {
-    if (this.starting()) {
-      const hasRunning = this.project()?.last_evaluations?.some(e => this.isRunningStatus(e.status)) ?? false;
-      if (hasRunning) {
-        this.starting.set(false);
-      }
-    }
-  }
+  isRunning(status: EvaluationStatus): boolean { return isRunningEvaluationStatus(status); }
 
-  stopLiveUpdates(): void {
-    this.liveSub?.unsubscribe();
-    this.tickSubscription?.unsubscribe();
-  }
-
-  isRunningStatus(status: EvaluationStatus): boolean {
-    return isRunningEvaluationStatus(status);
-  }
-
-  isBuildRunning(status: BuildStatus): boolean {
-    return status === 'Queued' || status === 'Building';
-  }
-
-  formatBuildStatus(status: BuildStatus): string {
-    if (status === 'DependencyFailed') return 'Dependency Failed';
-    if (status === 'FailedPermanent' || status === 'FailedTransient' || status === 'FailedTimeout') return 'Failed';
-    return status;
-  }
-
-  getBuildStatusClass(status: BuildStatus): string {
-    switch (status) {
-      case 'Completed': case 'Substituted': return 'status-success';
-      case 'FailedPermanent': case 'FailedTransient': case 'FailedTimeout': return 'status-danger';
-      case 'Aborted': case 'DependencyFailed': return 'status-secondary';
-      case 'Queued': case 'Building': return 'status-running';
-      default: return '';
-    }
-  }
-
-  getBuildStatusIcon(status: BuildStatus): string {
-    switch (status) {
-      case 'Completed': case 'Substituted': return 'check_circle';
-      case 'FailedPermanent': case 'FailedTransient': case 'FailedTimeout': return 'error';
-      case 'Aborted': case 'DependencyFailed': return 'cancel';
-      case 'Queued': return 'schedule';
-      case 'Building': return 'sync';
-      default: return 'help';
-    }
-  }
-
-  effectiveEntryStatusClass(ep: EntryPointSummary): string {
-    return this.getBuildStatusClass(ep.build_status);
-  }
-
-  effectiveEntryStatusIcon(ep: EntryPointSummary): string {
-    return this.getBuildStatusIcon(ep.build_status);
-  }
-
-  effectiveEntryStatusLabel(ep: EntryPointSummary): string {
-    return this.formatBuildStatus(ep.build_status);
-  }
-
-  getEvaluationDuration(evaluation: EvaluationSummary): string {
+  evalDuration(evaluation: EvaluationSummary): string {
     const start = parseUtcTimestamp(evaluation.created_at);
-    const end = this.isRunningStatus(evaluation.status)
-      ? this.tick()
-      : parseUtcTimestamp(evaluation.updated_at);
+    const end = this.isRunning(evaluation.status) ? this.tick() : parseUtcTimestamp(evaluation.updated_at);
     return formatEvaluationDuration(end - start);
   }
 
-  formatArchitecture(arch: string | undefined): string {
-    if (!arch) return '';
-    return arch
-      .replace('X86_64Linux', 'x86_64-linux')
-      .replace('Aarch64Linux', 'aarch64-linux')
-      .replace('X86_64Darwin', 'x86_64-darwin')
-      .replace('Aarch64Darwin', 'aarch64-darwin')
-      .replace('BUILTIN', 'builtin');
+  formatDurationMs(ms: number | null): string {
+    if (ms == null) return '';
+    return formatEvaluationDuration(ms);
   }
 
-  getDerivationName(path: string): string {
-    const parts = path.split('/').pop() ?? path;
-    // Strip the nix store hash prefix and .drv extension (e.g. "abc123xyz-name.drv" -> "name")
-    const match = parts.match(/^[a-z0-9]+-(.+?)(?:\.drv)?$/);
-    return match ? match[1] : parts;
+  evalTitle(e: EvaluationSummary): string {
+    return e.commit_message ?? e.commit.substring(0, 8);
   }
 
-  getStatusClass(status: EvaluationStatus): string {
-    switch (status) {
-      case 'Completed': return 'status-success';
-      case 'Failed': return 'status-danger';
-      case 'Aborted': return 'status-secondary';
-      case 'Waiting': return 'status-warning';
-      case 'Queued': case 'Fetching': case 'EvaluatingFlake': case 'EvaluatingDerivation': case 'Building': return 'status-running';
-      default: return '';
-    }
-  }
-
-  getStatusIcon(status: EvaluationStatus): string {
-    switch (status) {
-      case 'Completed': return 'check_circle';
-      case 'Failed': return 'error';
-      case 'Aborted': return 'cancel';
-      case 'Queued': return 'schedule';
-      case 'Waiting': return 'pause_circle';
-      case 'Fetching': return 'cloud_download';
-      case 'EvaluatingFlake': case 'EvaluatingDerivation': case 'Building': return 'sync';
-      default: return 'help';
-    }
-  }
-
-  getTriggerLabel(type: TriggerType | null): string {
-    switch (type) {
+  triggerLabel(e: EvaluationSummary): string {
+    if (e.triggered_by) return e.triggered_by;
+    switch (e.trigger?.type) {
       case 'polling': return 'Polling';
       case 'reporter_push': return 'Push';
       case 'reporter_pull_request': return 'PR';
@@ -297,11 +192,56 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
     }
   }
 
-  getStatusLabel(status: EvaluationStatus): string {
+  getDerivationName(path: string): string {
+    const parts = path.split('/').pop() ?? path;
+    const match = parts.match(/^[a-z0-9]+-(.+?)(?:\.drv)?$/);
+    return match ? match[1] : parts;
+  }
+
+  statusClass(status: EvaluationStatus): string {
     switch (status) {
-      case 'Fetching': return 'Fetching';
-      case 'EvaluatingFlake': case 'EvaluatingDerivation': return 'Evaluating';
-      default: return status;
+      case 'Completed': return 'ok';
+      case 'Failed': return 'err';
+      case 'Aborted': return 'muted';
+      case 'Waiting': return 'warn';
+      default: return 'run';
     }
+  }
+
+  statusIcon(status: EvaluationStatus): string {
+    switch (status) {
+      case 'Completed': return 'check_circle';
+      case 'Failed': return 'error';
+      case 'Aborted': return 'cancel';
+      case 'Waiting': return 'pause_circle';
+      case 'Fetching': return 'cloud_download';
+      case 'Queued': return 'schedule';
+      default: return 'sync';
+    }
+  }
+
+  buildStatusClass(status: BuildStatus): string {
+    switch (status) {
+      case 'Completed': case 'Substituted': return 'ok';
+      case 'FailedPermanent': case 'FailedTransient': case 'FailedTimeout': return 'err';
+      case 'Aborted': case 'DependencyFailed': return 'muted';
+      case 'Building': return 'run';
+      default: return 'warn';
+    }
+  }
+
+  buildStatusIcon(status: BuildStatus): string {
+    switch (status) {
+      case 'Completed': case 'Substituted': return 'check_circle';
+      case 'FailedPermanent': case 'FailedTransient': case 'FailedTimeout': return 'error';
+      case 'Aborted': case 'DependencyFailed': return 'cancel';
+      case 'Building': return 'sync';
+      default: return 'schedule';
+    }
+  }
+
+  depsTotal(ep: EntryPointSummary): number {
+    const d = ep.deps;
+    return d.completed + d.failed + d.building + d.queued + d.substituted;
   }
 }
