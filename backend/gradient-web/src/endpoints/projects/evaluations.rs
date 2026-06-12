@@ -404,7 +404,7 @@ pub async fn get_project_entry_points(
     }
 
     let data = EntryPointRelatedData::load(&state, &entry_points).await?;
-    let summaries = data.build_summaries(&entry_points, &evaluation);
+    let summaries = data.build_summaries(&entry_points);
 
     Ok(ok_json(summaries))
 }
@@ -417,8 +417,9 @@ pub async fn get_project_entry_points(
 struct EntryPointRelatedData {
     builds: HashMap<BuildId, MBuild>,
     derivations: HashMap<DerivationId, MDerivation>,
-    /// Derivation IDs that have at least one `build_product` row.
     has_products: HashMap<DerivationId, bool>,
+    build_time_ms: HashMap<BuildId, Option<i64>>,
+    deps: HashMap<EntryPointId, BuildStatusCounts>,
 }
 
 impl EntryPointRelatedData {
@@ -482,19 +483,53 @@ impl EntryPointRelatedData {
             m
         };
 
+        let build_time_ms: HashMap<BuildId, Option<i64>> = {
+            let ids: Vec<BuildId> = entry_points.iter().map(|ep| ep.build).collect();
+            let attempts = gradient_db::fetch_in_chunks(&ids, |chunk| async move {
+                EBuildAttempt::find()
+                    .filter(CBuildAttempt::Build.is_in(chunk))
+                    .order_by_desc(CBuildAttempt::CreatedAt)
+                    .all(db)
+                    .await
+            })
+            .await?;
+            let mut latest: HashMap<BuildId, MBuildAttempt> = HashMap::new();
+            for a in attempts {
+                latest.entry(a.build).or_insert(a);
+            }
+            latest.into_iter().map(|(b, a)| (b, a.duration_ms())).collect()
+        };
+
+        let seeds: Vec<(EntryPointId, uuid::Uuid)> = entry_points
+            .iter()
+            .filter_map(|ep| {
+                let build = builds.get(&ep.build)?;
+                Some((ep.id, build.derivation.into_inner()))
+            })
+            .collect();
+        let eval_id = entry_points[0].evaluation;
+        let raw = gradient_db::entry_point_dep_counts(db, eval_id, &seeds).await?;
+        let deps: HashMap<EntryPointId, BuildStatusCounts> = raw
+            .into_iter()
+            .map(|(ep, per_status)| {
+                let mut c = BuildStatusCounts::default();
+                for (status, n) in per_status {
+                    c.add(status, n);
+                }
+                (ep, c)
+            })
+            .collect();
+
         Ok(Self {
             builds,
             derivations,
             has_products,
+            build_time_ms,
+            deps,
         })
     }
 
-    /// Assemble summary records for `entry_points` using pre-loaded data.
-    fn build_summaries(
-        &self,
-        entry_points: &[MEntryPoint],
-        evaluation: &MEvaluation,
-    ) -> Vec<EntryPointSummary> {
+    fn build_summaries(&self, entry_points: &[MEntryPoint]) -> Vec<EntryPointSummary> {
         let mut summaries = Vec::new();
         for ep in entry_points {
             let Some(build) = self.builds.get(&ep.build) else {
@@ -511,8 +546,8 @@ impl EntryPointRelatedData {
                 build_status: build.status.for_api(),
                 has_artefacts: *self.has_products.get(&build.derivation).unwrap_or(&false),
                 architecture: drv.architecture.clone(),
-                evaluation_id: evaluation.id,
-                evaluation_status: evaluation.status,
+                build_time_ms: self.build_time_ms.get(&build.id).copied().flatten(),
+                deps: self.deps.get(&ep.id).copied().unwrap_or_default(),
                 created_at: ep.created_at,
             });
         }

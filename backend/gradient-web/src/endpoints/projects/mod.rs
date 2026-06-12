@@ -70,8 +70,8 @@ pub struct EntryPointSummary {
     pub build_status: gradient_entity::build::BuildStatus,
     pub has_artefacts: bool,
     pub architecture: gradient_entity::server::Architecture,
-    pub evaluation_id: EvaluationId,
-    pub evaluation_status: EvaluationStatus,
+    pub build_time_ms: Option<i64>,
+    pub deps: BuildStatusCounts,
     pub created_at: chrono::NaiveDateTime,
 }
 
