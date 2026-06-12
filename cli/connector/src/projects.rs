@@ -53,16 +53,27 @@ pub struct ProjectDetails {
     pub managed: bool,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct BuildStatusCounts {
+    pub completed: i64,
+    pub failed: i64,
+    pub building: i64,
+    pub queued: i64,
+    pub substituted: i64,
+    pub aborted: i64,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct EvaluationSummary {
     pub id: String,
     pub commit: String,
+    pub commit_message: Option<String>,
     pub status: String,
+    pub triggered_by: Option<String>,
     pub total_builds: i64,
-    pub failed_builds: i64,
-    pub completed_entry_points: i64,
-    pub failed_entry_points: i64,
-    pub entry_point_diff: Option<i64>,
+    pub builds: BuildStatusCounts,
+    pub errors: i64,
+    pub warnings: i64,
     pub created_at: String,
     pub updated_at: String,
 }
