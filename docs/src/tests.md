@@ -3875,3 +3875,23 @@ Frontend tests documenting UI improvements to the action form, live jobs list, a
 - `action-form.component.spec.ts` - `forge_status_report` actions submit an empty `events` array; submit errors render inside the action dialog.
 - `live-jobs.component.spec.ts` - dispatched/pending job rows show the derivation `pname`.
 - `job-detail.component.spec.ts` - the "Previous Build Attempts" section renders only when a build has more than one attempt, one linked row per attempt.
+
+## Virtualized live log streaming
+
+The evaluation-log page renders streaming (Building) logs through the same
+virtualized window as chunked (Completed) logs, sourced from memory instead of
+the chunk API. Each drain tick converts and mounts only the newly received
+lines - previously the entire log was ANSI-converted and re-parsed into one
+`innerHTML` every 80 ms, which saturated the main thread on high line counts.
+
+Frontend (`evaluation-log/evaluation-log.component.spec.ts`,
+`pnpm -C frontend exec ng test --include '**/evaluation-log/*.spec.ts' --watch=false`):
+- `appendStreamedLines` updates `logLineCount` (live count on building builds).
+- only newly streamed lines run through `convertAnsiToHtml`; the window keeps
+  appending with stable line numbers.
+- the rendered window is capped at `MAX_WINDOW` lines, with trimmed lines
+  represented by the top spacer.
+- with auto-scroll off the window stays pinned: new lines only grow the bottom
+  spacer and the line count.
+- scrolling up during streaming pages older lines from the in-memory log
+  (`loadWindow` prepend) with correct numbering and spacer heights.

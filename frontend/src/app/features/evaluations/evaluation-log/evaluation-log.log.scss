@@ -179,16 +179,6 @@
   padding: $spacing-md $spacing-lg;
 }
 
-.log-output {
-  margin: 0;
-  font-family: $font-family-mono;
-  font-size: $font-size-xs;
-  line-height: 1.7;
-  white-space: pre-wrap;
-  word-break: break-word;
-  color: $text-primary;
-}
-
 .scroll-btn {
   position: absolute;
   bottom: $spacing-md;
