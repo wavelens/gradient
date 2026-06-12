@@ -153,7 +153,8 @@
         name = "buildWait5Sec";
         system = "x86_64-linux";
         builder = "/bin/sh";
-        args = [ "-c" "echo \"Hello World!\" > $out" ];
+        # The sandbox /bin/sh is bash without a sleep binary; spin on SECONDS instead.
+        args = [ "-c" "while [ $SECONDS -lt 5 ]; do :; done; echo \"Hello World!\" > $out" ];
       };
 
     in {

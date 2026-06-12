@@ -41,6 +41,10 @@ pnpm install
 pnpm run serve
 ```
 
+The frontend VM provisions a superuser `admin` (password `admin_password`),
+an organization, a project, and an in-VM worker via declarative state, so
+evaluations and builds run end-to-end against `pnpm run serve`.
+
 ## Integration Tests
 
 NixOS VM tests:
