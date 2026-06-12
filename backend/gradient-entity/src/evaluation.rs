@@ -9,7 +9,7 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{CommitId, EvaluationId, ProjectId, ProjectTriggerId};
+use crate::ids::{CommitId, EvaluationId, ProjectId, ProjectTriggerId, UserId};
 
 #[repr(i32)]
 #[derive(
@@ -90,6 +90,7 @@ pub struct Model {
     pub check_run_ids: Option<Json>,
     pub waiting_reason: Option<serde_json::Value>,
     pub trigger: Option<ProjectTriggerId>,
+    pub started_by: Option<UserId>,
     pub concurrent: bool,
     pub source_comment: Option<serde_json::Value>,
     pub fetch_started_at: Option<NaiveDateTime>,
@@ -131,6 +132,12 @@ pub enum Relation {
         to = "super::project_trigger::Column::Id"
     )]
     Trigger,
+    #[sea_orm(
+        belongs_to = "super::user::Entity",
+        from = "Column::StartedBy",
+        to = "super::user::Column::Id"
+    )]
+    StartedBy,
 }
 
 impl ActiveModelBehavior for ActiveModel {}
