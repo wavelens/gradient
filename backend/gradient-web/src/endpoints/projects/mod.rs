@@ -109,7 +109,7 @@ pub struct ProjectDetailsResponse {
     pub active: bool,
     pub created_at: chrono::NaiveDateTime,
     pub keep_evaluations: i32,
-    pub last_check_at: chrono::NaiveDateTime,
+    pub last_check_at: Option<chrono::NaiveDateTime>,
     pub queue: QueueSummary,
     pub last_evaluations: Vec<EvaluationSummary>,
     pub can_edit: bool,

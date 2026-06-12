@@ -21,7 +21,7 @@ use axum::{Extension, Json};
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation_message::MessageLevel;
 use gradient_db::get_any_organization_by_name;
-use gradient_sources::{check_project_updates, get_path_from_derivation_output};
+use gradient_sources::{check_project_updates, get_commit_info, get_path_from_derivation_output};
 use gradient_storage::nar_extract::{ExtractError, Extracted, extract_path_from_nar_bytes};
 use gradient_types::input::vec_to_hex;
 use gradient_types::*;
@@ -142,6 +142,12 @@ pub(super) async fn evaluations_to_summaries(
     Ok(out)
 }
 
+/// `last_check_at` uses `NULL_TIME` as a "re-check immediately" sentinel;
+/// surface that as `None` instead of an epoch timestamp.
+fn checked_at(t: chrono::NaiveDateTime) -> Option<chrono::NaiveDateTime> {
+    (t != *gradient_types::NULL_TIME).then_some(t)
+}
+
 /// First non-blank line of `s`, trimmed, truncated to `max` chars; `None` when
 /// `s` has no non-blank line.
 fn first_line_truncated(s: &str, max: usize) -> Option<String> {
@@ -199,12 +205,16 @@ pub async fn post_project_evaluate(
                 )
             })?;
 
+    let (commit_message, _email, author_name) = get_commit_info(&state.db(), &project, &commit_hash)
+        .await
+        .unwrap_or_else(|_| (String::new(), None, String::new()));
+
     let eval = gradient_ci::trigger_evaluation(
         &state.web_db,
         &project,
         commit_hash,
-        None,
-        None,
+        Some(commit_message),
+        Some(author_name),
         None,
         false,
         None,
@@ -334,7 +344,7 @@ pub async fn get_project_details(
         active: project.active,
         created_at: project.created_at,
         keep_evaluations: project.keep_evaluations,
-        last_check_at: project.last_check_at,
+        last_check_at: checked_at(project.last_check_at),
         queue: QueueSummary { building, queued },
         last_evaluations: evaluation_summaries,
         can_edit,
@@ -793,6 +803,16 @@ pub async fn get_entry_point_download(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn checked_at_maps_null_time_sentinel_to_none() {
+        assert_eq!(super::checked_at(*gradient_types::NULL_TIME), None);
+        let t = chrono::NaiveDate::from_ymd_opt(2026, 6, 13)
+            .unwrap()
+            .and_hms_opt(12, 0, 0)
+            .unwrap();
+        assert_eq!(super::checked_at(t), Some(t));
+    }
+
     #[test]
     fn first_line_truncated_takes_first_line_and_caps_length() {
         assert_eq!(super::first_line_truncated("", 100), None);
