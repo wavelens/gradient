@@ -1731,3 +1731,13 @@ authentication flow that workers use to connect to the server:
 - Tests `POST /api/v1/orgs/{org}/workers` returns a valid 64-character base64 token
 - Tests `GET /api/v1/orgs/{org}/workers` lists the registered worker
 - Tests `DELETE /api/v1/orgs/{org}/workers/{id}` removes the registration
+
+**`gradient-eval`** - Cursor-driven flake discovery/resolution (single node, drives
+the `--eval-worker` subprocess directly over its line-delimited JSON protocol against
+a committed fixture flake):
+- Trailing `*` recovers one level (`packages.x86_64-linux.*` finds `hello`, `cowsay`,
+  and `nested.inner`); `#` is non-recursive (only `hello`, `cowsay`); an exact-path
+  `!` exclusion drops `cowsay`.
+- `resolve` returns `hello`'s `.drv`; a `throw`-ing `boom` attribute isolates as a
+  per-item error without aborting the batch (#139).
+- The on-disk eval cache (`eval-cache-v6/*.sqlite`) is populated, confirming warmth.
