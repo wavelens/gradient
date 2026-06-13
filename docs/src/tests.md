@@ -492,6 +492,21 @@ Proto (`cargo test -p gradient-proto`):
   (contiguous append + finish, non-contiguous reject, over-budget reject,
   chunk-needs-open-stream, single-active fingerprint resolution, token roundtrip).
 
+## Eval-cache eviction sweep (#386)
+
+A periodic server-side sweep bounds `eval_cache_store` by age and total size:
+rows older than `GRADIENT_EVAL_CACHE_MAX_AGE_DAYS` are evicted first, then -
+oldest-`updated_at` first - enough additional rows to bring the surviving total
+`size_bytes` at or under `GRADIENT_EVAL_CACHE_MAX_TOTAL_BYTES`. The pure
+`select_evictions` selector is unit-tested with fixed `NaiveDateTime`s (no wall
+clock); the DB/storage loop mirrors the proven sign-sweep and is covered by E2E.
+
+Cache (`cargo test -p gradient-cache`):
+- `cacher::eval_cache_sweep::tests` - `select_evictions`: empty input → empty;
+  under-budget + all fresh → empty; an over-age row evicted regardless of size;
+  over-cap evicts oldest-`updated_at` until under cap; age + size combine
+  without double-counting an id.
+
 ## Worker prefetch - re-derive `.drv` references from content
 
 When `prefetch_inputs` fetches a `.drv` during the closure walk, it harvests
