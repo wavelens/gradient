@@ -114,7 +114,7 @@ const MINUTE_WINDOW: &str = "15 minutes";
 /// `sum` = bytes served. Source is the already-minute-bucketed `cache_metric`.
 const CACHE_TRAFFIC_SQL: &str = "INSERT INTO metric_rollup \
     (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
-    SELECT gen_random_uuid(), 'cache.bytes_sent', 0, cm.bucket_time, \
+    SELECT uuidv7(), 'cache.bytes_sent', 0, cm.bucket_time, \
            jsonb_build_object('cache', cm.cache::text), hashtextextended(cm.cache::text, 0), \
            sum(cm.nar_count)::bigint, sum(cm.bytes_sent), \
            min(cm.bytes_sent), max(cm.bytes_sent), sum(power(cm.bytes_sent, 2)), NULL \
@@ -129,7 +129,7 @@ const CACHE_TRAFFIC_SQL: &str = "INSERT INTO metric_rollup \
 /// packages added, `sum` = compressed bytes added.
 const CACHE_STORAGE_SQL: &str = "INSERT INTO metric_rollup \
     (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
-    SELECT gen_random_uuid(), 'cache.bytes_added', 0, date_trunc('minute', cps.created_at), \
+    SELECT uuidv7(), 'cache.bytes_added', 0, date_trunc('minute', cps.created_at), \
            jsonb_build_object('cache', cps.cache::text), hashtextextended(cps.cache::text, 0), \
            count(*)::bigint, sum(coalesce(cp.file_size, 0)), 0, 0, 0, NULL \
     FROM cached_path_signature cps JOIN cached_path cp ON cp.id = cps.cached_path \
@@ -200,7 +200,7 @@ fn build_count_sql(m: &BuildCount) -> String {
     format!(
         "INSERT INTO metric_rollup \
          (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
-         SELECT gen_random_uuid(), '{name}', 0, date_trunc('minute', b.{col}), \
+         SELECT uuidv7(), '{name}', 0, date_trunc('minute', b.{col}), \
                 jsonb_build_object('org', d.organization::text), \
                 hashtextextended(d.organization::text, 0), \
                 count(*)::bigint, 0, 0, 0, 0, NULL \
@@ -226,7 +226,7 @@ fn build_duration_sql(m: &BuildDuration) -> String {
     format!(
         "INSERT INTO metric_rollup \
          (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
-         SELECT gen_random_uuid(), '{name}', 0, date_trunc('minute', b.{end}), \
+         SELECT uuidv7(), '{name}', 0, date_trunc('minute', b.{end}), \
                 jsonb_build_object('org', d.organization::text), \
                 hashtextextended(d.organization::text, 0), \
                 count(*)::bigint, sum({ms}), min({ms}), max({ms}), sum(power({ms}, 2)), NULL \
@@ -255,7 +255,7 @@ fn build_duration_attempt_sql() -> String {
     format!(
         "INSERT INTO metric_rollup \
          (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
-         SELECT gen_random_uuid(), 'builds.duration_ms', 0, date_trunc('minute', ba.build_finished_at), \
+         SELECT uuidv7(), 'builds.duration_ms', 0, date_trunc('minute', ba.build_finished_at), \
                 jsonb_build_object('org', d.organization::text), \
                 hashtextextended(d.organization::text, 0), \
                 count(*)::bigint, sum({ms}), min({ms}), max({ms}), sum(power({ms}, 2)), NULL \
@@ -281,7 +281,7 @@ fn eval_count_sql(m: &EvalCount) -> String {
     format!(
         "INSERT INTO metric_rollup \
          (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
-         SELECT gen_random_uuid(), '{name}', 0, date_trunc('minute', e.finished_at), \
+         SELECT uuidv7(), '{name}', 0, date_trunc('minute', e.finished_at), \
                 jsonb_build_object('org', p.organization::text), \
                 hashtextextended(p.organization::text, 0), \
                 count(*)::bigint, 0, 0, 0, 0, NULL \
@@ -302,7 +302,7 @@ fn cascade_sql(target: i16, source: i16, unit: &str, window: &str) -> String {
     format!(
         "INSERT INTO metric_rollup \
          (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
-         SELECT gen_random_uuid(), metric, {target}, date_trunc('{unit}', bucket_start), \
+         SELECT uuidv7(), metric, {target}, date_trunc('{unit}', bucket_start), \
                 scope, scope_hash, \
                 sum(count)::bigint, sum(sum), min(min), max(max), sum(sum_sq), NULL \
          FROM metric_rollup \
