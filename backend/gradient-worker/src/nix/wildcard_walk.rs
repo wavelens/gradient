@@ -7,10 +7,11 @@
 //! Pure wildcard-pattern traversal over a flake's output attr tree.
 //!
 //! Reproduces the segment semantics of the retired `eval.nix` resolver:
-//! `*` (one level; trailing `*` recovers the collapsed second level), `#`
-//! (non-recursive derivations at one depth), literal (exact), exclusions
-//! (exact-path), and consecutive-`*` collapse. Abstracted over [`WalkNode`]
-//! so it unit-tests with a stub tree.
+//! `*` (one level; trailing `*` recovers the collapsed second level, but stops
+//! at opaque typed attrsets), `#` (recurses on non-last, derivations at one
+//! depth when trailing), literal (exact), exclusions (exact-path), and
+//! consecutive-`*` collapse. Abstracted over [`WalkNode`] so it unit-tests with
+//! a stub tree.
 
 use anyhow::Result;
 
@@ -22,6 +23,9 @@ pub(crate) trait WalkNode: Sized {
     fn child(&self, name: &str) -> Result<Option<Self>>;
     /// Whether this node is a derivation.
     fn is_derivation(&self) -> Result<bool>;
+    /// Whether this node is an opaque typed attrset (e.g. a NixOS option) that
+    /// is not a derivation — `*` traversal must not descend into it.
+    fn is_opaque(&self) -> Result<bool>;
 }
 
 /// Drop a `*` segment immediately following another `*` (`packages.*.*` == `packages.*`).
@@ -40,15 +44,30 @@ pub(crate) fn collapse_stars(segs: &[String]) -> Vec<String> {
 
 /// Parse one wildcard string into (is_exclude, segments). Mirrors the worker's
 /// pattern format: `.`-separated segments, optional leading `!` = exclude.
-/// (Quoted segments containing `.` are not split — keep it simple: split on `.`;
-/// the server-side `Wildcard` validator already rejects malformed patterns.)
+/// Double-quoted spans keep an inner `.` within one segment (the quotes are
+/// stripped), e.g. `pkgs."python3.12".*` → `["pkgs", "python3.12", "*"]`.
 pub(crate) fn parse_pattern(pat: &str) -> (bool, Vec<String>) {
     let (exclude, body) = match pat.strip_prefix('!') {
         Some(rest) => (true, rest),
         None => (false, pat),
     };
 
-    (exclude, body.split('.').map(|s| s.to_string()).collect())
+    let mut segs = Vec::new();
+    let mut cur = String::new();
+    let mut in_quotes = false;
+    for c in body.chars() {
+        match c {
+            '"' => in_quotes = !in_quotes,
+            '.' if !in_quotes => {
+                segs.push(std::mem::take(&mut cur));
+            }
+            _ => cur.push(c),
+        }
+    }
+
+    segs.push(cur);
+
+    (exclude, segs)
 }
 
 /// Walk `node` matching `segs`, pushing full dotted attr paths of matched
@@ -71,6 +90,8 @@ fn walk<N: WalkNode>(node: &N, path: &[String], segs: &[String], out: &mut Vec<S
                 if rest.is_empty() {
                     if child.is_derivation()? {
                         out.push(p.join("."));
+                    } else if child.is_opaque()? {
+                        continue;
                     } else {
                         for sub in child.child_names()? {
                             let Some(gc) = child.child(&sub)? else {
@@ -84,21 +105,27 @@ fn walk<N: WalkNode>(node: &N, path: &[String], segs: &[String], out: &mut Vec<S
                             }
                         }
                     }
+                } else if child.is_opaque()? {
+                    continue;
                 } else {
                     walk(&child, &p, rest, out)?;
                 }
             }
         }
-        Some((seg, _rest)) if seg == "#" => {
+        Some((seg, rest)) if seg == "#" => {
             for name in node.child_names()? {
                 let Some(child) = node.child(&name)? else {
                     continue;
                 };
+                let mut p = path.to_vec();
+                p.push(name);
 
-                if child.is_derivation()? {
-                    let mut p = path.to_vec();
-                    p.push(name);
-                    out.push(p.join("."));
+                if rest.is_empty() {
+                    if child.is_derivation()? {
+                        out.push(p.join("."));
+                    }
+                } else {
+                    walk(&child, &p, rest, out)?;
                 }
             }
         }
@@ -139,6 +166,23 @@ pub(crate) fn discover<N: WalkNode>(
     Ok(out)
 }
 
+/// Discover from raw wildcard strings: parse each into include/exclude segment
+/// lists, then run [`discover`].
+pub(crate) fn discover_patterns<N: WalkNode>(root: &N, wildcards: &[String]) -> Result<Vec<String>> {
+    let mut includes = Vec::new();
+    let mut excludes = Vec::new();
+    for w in wildcards {
+        let (exclude, segs) = parse_pattern(w);
+        if exclude {
+            excludes.push(segs)
+        } else {
+            includes.push(segs)
+        }
+    }
+
+    discover(root, &includes, &excludes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -146,6 +190,7 @@ mod tests {
 
     struct StubNode {
         derivation: bool,
+        opaque: bool,
         children: BTreeMap<String, StubNode>,
     }
 
@@ -153,6 +198,7 @@ mod tests {
         fn drv() -> Self {
             StubNode {
                 derivation: true,
+                opaque: false,
                 children: BTreeMap::new(),
             }
         }
@@ -160,7 +206,15 @@ mod tests {
         fn set(children: Vec<(&str, StubNode)>) -> Self {
             StubNode {
                 derivation: false,
+                opaque: false,
                 children: children.into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
+            }
+        }
+
+        fn opaque(children: Vec<(&str, StubNode)>) -> Self {
+            StubNode {
+                opaque: true,
+                ..StubNode::set(children)
             }
         }
     }
@@ -176,6 +230,10 @@ mod tests {
 
         fn is_derivation(&self) -> Result<bool> {
             Ok(self.derivation)
+        }
+
+        fn is_opaque(&self) -> Result<bool> {
+            Ok(self.opaque)
         }
     }
 
@@ -223,6 +281,15 @@ mod tests {
     #[test]
     fn parse_pattern_include_wildcard() {
         assert_eq!(parse_pattern("packages.*"), (false, segs(&["packages", "*"])));
+    }
+
+    #[test]
+    fn parse_pattern_quoted_segment() {
+        assert_eq!(
+            parse_pattern(r#"packages.x86_64-linux."python3.12".*"#),
+            (false, segs(&["packages", "x86_64-linux", "python3.12", "*"]))
+        );
+        assert_eq!(parse_pattern(r#"!a."b.c""#), (true, segs(&["a", "b.c"])));
     }
 
     #[test]
@@ -284,5 +351,61 @@ mod tests {
         let root = tree();
         let got = discover(&&root, &[segs(&["checks", "*"])], &[]).unwrap();
         assert_eq!(got, vec!["checks.x86_64-linux.test"]);
+    }
+
+    #[test]
+    fn discover_hash_non_last_recurses() {
+        let root = StubNode::set(vec![(
+            "top",
+            StubNode::set(vec![
+                ("x", StubNode::set(vec![("leaf", StubNode::drv())])),
+                ("y", StubNode::set(vec![("leaf", StubNode::drv())])),
+            ]),
+        )]);
+        let got = discover(&&root, &[segs(&["top", "#", "leaf"])], &[]).unwrap();
+        assert_eq!(got, vec!["top.x.leaf", "top.y.leaf"]);
+    }
+
+    #[test]
+    fn discover_hash_terminal_non_recursive() {
+        let root = StubNode::set(vec![(
+            "top",
+            StubNode::set(vec![
+                ("a", StubNode::drv()),
+                ("nested", StubNode::set(vec![("inner", StubNode::drv())])),
+            ]),
+        )]);
+        let got = discover(&&root, &[segs(&["top", "#"])], &[]).unwrap();
+        assert_eq!(got, vec!["top.a"]);
+    }
+
+    #[test]
+    fn discover_star_non_last_stops_at_opaque() {
+        let root = StubNode::set(vec![(
+            "packages",
+            StubNode::opaque(vec![("hello", StubNode::drv())]),
+        )]);
+        let got = discover(&&root, &[segs(&["packages", "*", "hello"])], &[]).unwrap();
+        assert_eq!(got, Vec::<String>::new());
+    }
+
+    #[test]
+    fn discover_trailing_star_stops_at_opaque() {
+        let root = StubNode::set(vec![(
+            "top",
+            StubNode::set(vec![
+                ("realset", StubNode::set(vec![("a", StubNode::drv())])),
+                ("optset", StubNode::opaque(vec![("b", StubNode::drv())])),
+            ]),
+        )]);
+        let got = discover(&&root, &[segs(&["top", "*", "*"])], &[]).unwrap();
+        assert_eq!(got, vec!["top.realset.a"]);
+    }
+
+    #[test]
+    fn discover_trailing_star_emits_derivation_child() {
+        let root = StubNode::set(vec![("top", StubNode::set(vec![("d", StubNode::drv())]))]);
+        let got = discover(&&root, &[segs(&["top", "*"])], &[]).unwrap();
+        assert_eq!(got, vec!["top.d"]);
     }
 }
