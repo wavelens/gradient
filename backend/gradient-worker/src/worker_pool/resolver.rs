@@ -36,9 +36,9 @@ pub struct WorkerPoolResolver {
 }
 
 impl WorkerPoolResolver {
-    pub fn new(workers: usize, max_evaluations_per_worker: usize) -> Self {
+    pub fn new(workers: usize, fork_workers: usize, max_eval_rss: u64) -> Self {
         Self {
-            pool: Arc::new(EvalWorkerPool::new(workers, max_evaluations_per_worker)),
+            pool: Arc::new(EvalWorkerPool::new(workers, fork_workers, max_eval_rss)),
         }
     }
 

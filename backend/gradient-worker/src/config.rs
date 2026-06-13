@@ -7,6 +7,13 @@
 use clap::Parser;
 use gradient_types::proto::GradientCapabilities;
 
+/// Default number of warm fork children: host parallelism capped at 8.
+fn default_fork_workers() -> usize {
+    std::thread::available_parallelism()
+        .map(|n| n.get().min(8))
+        .unwrap_or(4)
+}
+
 /// CLI arguments and environment variables for `gradient-worker`.
 #[derive(Parser, Debug, Clone)]
 #[command(name = "gradient-worker", about = "Gradient build worker")]
@@ -75,11 +82,13 @@ pub struct WorkerConfig {
     #[arg(long, env = "GRADIENT_WORKER_EVAL_WORKERS", default_value_t = 1)]
     pub eval_workers: usize,
 
-    /// Recycle an eval-worker subprocess after serving this many list/resolve/attr_names
-    /// calls. Nix's Boehm GC never releases memory back to the OS; recycling is the
-    /// only way to bound memory usage. Set to 0 to disable recycling.
-    #[arg(long, env = "GRADIENT_MAX_EVALUATIONS_PER_WORKER", default_value_t = 1)]
-    pub max_evals_per_worker: usize,
+    /// Number of warm fork children the eval subprocess runs in parallel.
+    #[arg(long, env = "GRADIENT_EVAL_FORK_WORKERS", default_value_t = default_fork_workers())]
+    pub eval_fork_workers: usize,
+
+    /// Kill + re-fork an eval child once its RSS exceeds this many bytes.
+    #[arg(long, env = "GRADIENT_MAX_EVAL_RSS", default_value_t = 2 * 1024 * 1024 * 1024)]
+    pub max_eval_rss: u64,
 
     /// Maximum number of simultaneous evaluations.
     /// Defaults to `eval_workers` (one eval job per evaluator subprocess).
@@ -366,7 +375,8 @@ mod tests {
             gcroots_dir: String::new(),
             eval_worker: false,
             eval_workers: 1,
-            max_evals_per_worker: 1,
+            eval_fork_workers: 2,
+            max_eval_rss: 2 * 1024 * 1024 * 1024,
             max_concurrent_evaluations: 1,
             max_concurrent_builds: 1,
             max_nixdaemon_connections: 4,
@@ -400,6 +410,13 @@ mod tests {
     const TOK63: &str = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
     /// 65 `x` characters - one too long.
     const TOK65: &str = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
+
+    #[test]
+    fn eval_fork_defaults() {
+        let cli = config_with_peers("");
+        assert!(cli.eval_fork_workers >= 1);
+        assert_eq!(cli.max_eval_rss, 2 * 1024 * 1024 * 1024);
+    }
 
     // ── peer_tokens() ─────────────────────────────────────────────────────────
 
@@ -452,7 +469,8 @@ mod tests {
             gcroots_dir: String::new(),
             eval_worker: false,
             eval_workers: 1,
-            max_evals_per_worker: 1,
+            eval_fork_workers: 2,
+            max_eval_rss: 2 * 1024 * 1024 * 1024,
             max_concurrent_evaluations: 1,
             max_concurrent_builds: 1,
             max_nixdaemon_connections: 4,
@@ -522,7 +540,8 @@ mod tests {
             gcroots_dir: String::new(),
             eval_worker: false,
             eval_workers: 1,
-            max_evals_per_worker: 1,
+            eval_fork_workers: 2,
+            max_eval_rss: 2 * 1024 * 1024 * 1024,
             max_concurrent_evaluations: 1,
             max_concurrent_builds: 1,
             max_nixdaemon_connections: 4,

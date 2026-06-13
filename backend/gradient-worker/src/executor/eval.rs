@@ -61,9 +61,9 @@ pub struct WorkerEvaluator {
 
 impl WorkerEvaluator {
     /// Create a new evaluator with a pool of `eval_workers` subprocesses.
-    pub fn new(eval_workers: usize, max_evals_per_worker: usize) -> Self {
+    pub fn new(eval_workers: usize, fork_workers: usize, max_eval_rss: u64) -> Self {
         Self {
-            resolver: Arc::new(WorkerPoolResolver::new(eval_workers, max_evals_per_worker)),
+            resolver: Arc::new(WorkerPoolResolver::new(eval_workers, fork_workers, max_eval_rss)),
         }
     }
 
