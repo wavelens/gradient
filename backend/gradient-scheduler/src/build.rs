@@ -432,12 +432,31 @@ impl<'a> BuildStateHandler<'a> {
             let now = gradient_types::now();
             for follower in followers {
                 let follower_id = follower.id;
+                let (old_status, evaluation, derivation) =
+                    (follower.status, follower.evaluation, follower.derivation);
                 let mut active: ABuild = follower.into_active_model();
                 active.status = Set(BuildStatus::Queued);
                 active.via = Set(None);
                 active.updated_at = Set(now);
                 if let Err(e) = active.update(&self.state.worker_db).await {
                     error!(error = %e, %follower_id, "failed to release follower for re-dispatch");
+                    continue;
+                }
+
+                // This force-set bypasses `update_build_status`, so maintain the
+                // dependency-closure counts directly (#383).
+                if old_status != BuildStatus::Queued {
+                    let state = Arc::clone(self.state);
+                    self.state.shutdown.spawn(async move {
+                        let _ = gradient_db::apply_dep_count_delta(
+                            &state.worker_db,
+                            evaluation,
+                            derivation,
+                            i32::from(old_status),
+                            i32::from(BuildStatus::Queued),
+                        )
+                        .await;
+                    });
                 }
             }
 

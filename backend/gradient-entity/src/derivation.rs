@@ -24,6 +24,7 @@ pub struct Model {
     pub is_fixed_output: bool,
     pub allow_substitutes: bool,
     pub closure_size: Option<i64>,
+    pub dep_closure_count: Option<i64>,
     pub created_at: NaiveDateTime,
 }
 

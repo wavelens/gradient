@@ -76,6 +76,27 @@ pub async fn update_build_status(ctx: &DbContext, build: MBuild, status: BuildSt
                     build_id: updated_build.id.into_inner(),
                     status: i32::from(event_status) as i16,
                 });
+
+            // Shift this build one unit from its old to its new status across
+            // every entry point whose closure contains it (#383). Spawned like
+            // the other side-effects; atomic per-row, so concurrent deltas are
+            // safe, and restart reconciliation heals any task lost to a crash.
+            let dep_ctx = ctx.clone();
+            let (dep_eval, dep_drv) = (updated_build.evaluation, updated_build.derivation);
+            let (old_status, new_status) = (i32::from(build.status), i32::from(event_status));
+            ctx.shutdown.spawn(async move {
+                if let Err(e) = crate::dep_closure::apply_dep_count_delta(
+                    &dep_ctx.worker_db,
+                    dep_eval,
+                    dep_drv,
+                    old_status,
+                    new_status,
+                )
+                .await
+                {
+                    error!(error = %e, "failed to update entry-point dep counts");
+                }
+            });
             if matches!(
                 updated_build.status,
                 BuildStatus::Completed | BuildStatus::Substituted

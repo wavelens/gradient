@@ -7222,6 +7222,13 @@ components:
           description: Wall time of the entry point's own build (latest attempt)
         deps:
           $ref: '#/components/schemas/BuildStatusCounts'
+        deps_total:
+          type: integer
+          nullable: true
+          description: >-
+            Total build-time dependency-closure size, cached on the derivation
+            (content-addressed, reused across evals). null for evals predating
+            the cache.
         created_at: { type: string, format: date-time }
 
     BuildStatusCounts:

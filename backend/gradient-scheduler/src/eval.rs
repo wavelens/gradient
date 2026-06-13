@@ -797,6 +797,13 @@ pub async fn handle_eval_job_completed(
         error!(error = %e, %evaluation_id, "expand_substituted_closure failed (non-fatal)");
     }
 
+    // The build graph is now complete: materialise each entry point's closure
+    // and seed the per-entry-point dependency counts before any build
+    // transitions, so promotion and dispatch maintain them incrementally (#383).
+    if let Err(e) = gradient_db::seed_entry_point_dep_counts(&state.worker_db, evaluation_id).await {
+        error!(error = %e, %evaluation_id, "seed_entry_point_dep_counts failed (non-fatal)");
+    }
+
     // The worker is done sending batches, so the evaluation's build set is
     // now final. Promote every `Created` build to `Queued` so the dispatcher
     // can pick them up, then move the evaluation into `Building`.

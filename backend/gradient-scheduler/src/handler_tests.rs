@@ -1555,6 +1555,8 @@ async fn eval_job_completed_no_active_builds_completes_eval() {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // 1. find Created builds → empty
         .append_query_results([Vec::<MBuild>::new()])
+        // seed_entry_point_dep_counts: no entry points (#383)
+        .append_query_results([Vec::<MEntryPoint>::new()])
         // 2. find_by_id(eval) → EvaluatingDerivation
         .append_query_results([vec![make_eval(
             eval_id,
@@ -1603,6 +1605,8 @@ async fn eval_job_completed_with_failed_build_marks_eval_failed() {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // 1. find Created builds → empty
         .append_query_results([Vec::<MBuild>::new()])
+        // seed_entry_point_dep_counts: no entry points (#383)
+        .append_query_results([Vec::<MEntryPoint>::new()])
         // 2. find_by_id(eval) → EvaluatingDerivation
         .append_query_results([vec![make_eval(
             eval_id,
@@ -1656,6 +1660,8 @@ async fn eval_job_completed_with_eval_errors_marks_eval_failed() {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // 1. find Created builds (to promote to Queued) → none
         .append_query_results([Vec::<MBuild>::new()])
+        // seed_entry_point_dep_counts: no entry points (#383)
+        .append_query_results([Vec::<MEntryPoint>::new()])
         // 2. find_by_id(eval) → EvaluatingDerivation
         .append_query_results([vec![make_eval(
             eval_id,
@@ -1705,6 +1711,8 @@ async fn eval_job_completed_active_builds_remain_noop() {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // 1. find Created builds (to promote to Queued) → none
         .append_query_results([Vec::<MBuild>::new()])
+        // seed_entry_point_dep_counts: no entry points (#383)
+        .append_query_results([Vec::<MEntryPoint>::new()])
         // 2. find_by_id(eval) → still in EvaluatingDerivation
         .append_query_results([vec![make_eval(
             eval_id,

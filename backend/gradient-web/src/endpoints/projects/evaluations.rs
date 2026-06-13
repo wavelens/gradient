@@ -518,15 +518,22 @@ impl EntryPointRelatedData {
             attempts.into_iter().map(|a| (a.build, a.duration_ms())).collect()
         };
 
-        let seeds: Vec<(EntryPointId, uuid::Uuid)> = entry_points
-            .iter()
-            .filter_map(|ep| {
-                let build = builds.get(&ep.build)?;
-                Some((ep.id, build.derivation.into_inner()))
-            })
-            .collect();
-        let eval_id = entry_points[0].evaluation;
-        let raw = gradient_db::entry_point_dep_counts(db, eval_id, &seeds).await?;
+        // Read the incrementally-maintained per-entry-point counts (#383). Evals
+        // predating that machinery have no rows; fall back to the live closure
+        // CTE so they still render correctly.
+        let entry_point_ids: Vec<EntryPointId> = entry_points.iter().map(|ep| ep.id).collect();
+        let mut raw = gradient_db::load_entry_point_dep_counts(db, &entry_point_ids).await?;
+        if raw.is_empty() {
+            let seeds: Vec<(EntryPointId, uuid::Uuid)> = entry_points
+                .iter()
+                .filter_map(|ep| {
+                    let build = builds.get(&ep.build)?;
+                    Some((ep.id, build.derivation.into_inner()))
+                })
+                .collect();
+            let eval_id = entry_points[0].evaluation;
+            raw = gradient_db::entry_point_dep_counts(db, eval_id, &seeds).await?;
+        }
         let deps: HashMap<EntryPointId, BuildStatusCounts> = raw
             .into_iter()
             .map(|(ep, per_status)| {
@@ -566,6 +573,7 @@ impl EntryPointRelatedData {
                 architecture: drv.architecture.clone(),
                 build_time_ms: self.build_time_ms.get(&build.id).copied().flatten(),
                 deps: self.deps.get(&ep.id).copied().unwrap_or_default(),
+                deps_total: drv.dep_closure_count,
                 created_at: ep.created_at,
             });
         }
