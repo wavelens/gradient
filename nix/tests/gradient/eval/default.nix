@@ -71,12 +71,15 @@
       b64 = base64.b64encode(payload.encode()).decode()
       machine.succeed(f"echo {b64} | base64 -d > /root/reqs.jsonl")
 
-      machine.succeed(
-          "HOME=/root GRADIENT_WORKER_SERVER_URL=ws://dummy/proto GRADIENT_EVAL_WORKER=1 "
-          "${worker} < /root/reqs.jsonl > /root/out.jsonl 2> /root/eval.log"
+      # `--eval-worker` is a flag (clap SetTrue); the env form GRADIENT_EVAL_WORKER=1
+      # is rejected by clap's bool parser. Mirror the production spawn (pool.rs).
+      status, _ = machine.execute(
+          "HOME=/root GRADIENT_WORKER_SERVER_URL=ws://dummy/proto "
+          "${worker} --eval-worker < /root/reqs.jsonl > /root/out.jsonl 2> /root/eval.log"
       )
-      print(machine.succeed("cat /root/out.jsonl"))
-      print(machine.succeed("tail -n 40 /root/eval.log || true"))
+      print(machine.succeed("cat /root/out.jsonl || true"))
+      print(machine.succeed("cat /root/eval.log || true"))
+      assert status == 0, f"eval-worker exited {status}; see eval.log above"
 
       responses = [json.loads(l) for l in machine.succeed("cat /root/out.jsonl").splitlines() if l.strip()]
       assert len(responses) == 4, f"expected 4 responses, got {len(responses)}: {responses}"
