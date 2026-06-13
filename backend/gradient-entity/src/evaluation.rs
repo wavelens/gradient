@@ -72,6 +72,32 @@ impl EvaluationStatus {
     ];
 }
 
+#[repr(i32)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    DeriveActiveEnum,
+    EnumIter,
+    Deserialize,
+    Serialize,
+    IntoPrimitive,
+    TryFromPrimitive,
+)]
+#[sea_orm(rs_type = "i32", db_type = "Integer")]
+pub enum EvalCacheStatus {
+    #[default]
+    #[sea_orm(num_value = 0)]
+    None = 0,
+    #[sea_orm(num_value = 1)]
+    Miss = 1,
+    #[sea_orm(num_value = 2)]
+    Hit = 2,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "evaluation")]
 pub struct Model {
@@ -82,6 +108,7 @@ pub struct Model {
     pub commit: CommitId,
     pub wildcard: String,
     pub status: EvaluationStatus,
+    pub cache_status: EvalCacheStatus,
     pub previous: Option<EvaluationId>,
     pub next: Option<EvaluationId>,
     pub created_at: NaiveDateTime,

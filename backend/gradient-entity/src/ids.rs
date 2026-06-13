@@ -106,6 +106,7 @@ id_newtype!(DerivationOutputSignatureId);
 id_newtype!(EntryPointId);
 id_newtype!(EntryPointDepCountId);
 id_newtype!(EntryPointMessageId);
+id_newtype!(EvalCacheStoreId);
 id_newtype!(EvaluationId);
 id_newtype!(EvaluationFlakeInputOverrideId);
 id_newtype!(EvaluationMessageId);
