@@ -36,13 +36,13 @@ pub struct EvalWorker {
 
 impl EvalWorker {
     /// Spawn a new worker by re-execing the current binary with `--eval-worker`.
-    pub(super) async fn spawn(fork_workers: usize, max_eval_rss: u64) -> Result<Self> {
+    /// The subprocess is single-threaded and does not fork; pool size is the
+    /// eval concurrency and RSS is bounded parent-side (see [`Self::rss_bytes`]).
+    pub(super) async fn spawn() -> Result<Self> {
         let exe = std::env::current_exe().context("locating current executable")?;
         trace!(exe = %exe.display(), "spawning eval worker subprocess");
         let mut command = Command::new(&exe);
         command.arg("--eval-worker");
-        command.env("GRADIENT_EVAL_FORK_WORKERS", fork_workers.to_string());
-        command.env("GRADIENT_MAX_EVAL_RSS", max_eval_rss.to_string());
 
         // Match the Nix CLI: bump the subprocess's stack to 64 MiB so libnix's
         // libstdc++ std::regex DFS executor (used by `builtins.match` /
@@ -237,6 +237,32 @@ impl EvalWorker {
             _ => anyhow::bail!("eval worker: unexpected response to Resolve"),
         }
     }
+
+    /// Resident set size of the subprocess in bytes, read from
+    /// `/proc/<pid>/statm` (field 2 = resident pages × 4 KiB). Returns 0 if
+    /// the pid is gone or the read fails so the pool never panics on it.
+    #[cfg(target_os = "linux")]
+    pub(super) fn rss_bytes(&self) -> u64 {
+        let Some(pid) = self.child.id() else {
+            return 0;
+        };
+
+        let Ok(statm) = std::fs::read_to_string(format!("/proc/{pid}/statm")) else {
+            return 0;
+        };
+
+        statm
+            .split_whitespace()
+            .nth(1)
+            .and_then(|pages| pages.parse::<u64>().ok())
+            .map(|pages| pages * 4096)
+            .unwrap_or(0)
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    pub(super) fn rss_bytes(&self) -> u64 {
+        0
+    }
 }
 
 impl std::fmt::Debug for EvalWorker {
@@ -256,11 +282,8 @@ pub struct EvalWorkerPool {
     idle: Arc<Mutex<Vec<EvalWorker>>>,
     semaphore: Arc<Semaphore>,
     max: usize,
-    /// Number of warm fork children each eval subprocess runs in parallel,
-    /// forwarded to the subprocess via `GRADIENT_EVAL_FORK_WORKERS`.
-    fork_workers: usize,
-    /// RSS ceiling (bytes) above which a fork child is recycled, forwarded
-    /// to the subprocess via `GRADIENT_MAX_EVAL_RSS`.
+    /// RSS ceiling (bytes) above which a released worker is discarded so the
+    /// next `acquire` spawns a fresh subprocess (parent-side recycling).
     max_eval_rss: u64,
     /// Set by [`EvalWorkerPool::shutdown`]. Causes `PooledEvalWorker::drop`
     /// to gracefully shut its worker down instead of returning it to the
@@ -269,13 +292,12 @@ pub struct EvalWorkerPool {
 }
 
 impl EvalWorkerPool {
-    pub fn new(max: usize, fork_workers: usize, max_eval_rss: u64) -> Self {
+    pub fn new(max: usize, max_eval_rss: u64) -> Self {
         let max = max.max(1);
         Self {
             idle: Arc::new(Mutex::new(Vec::new())),
             semaphore: Arc::new(Semaphore::new(max)),
             max,
-            fork_workers,
             max_eval_rss,
             shutting_down: Arc::new(AtomicBool::new(false)),
         }
@@ -283,6 +305,10 @@ impl EvalWorkerPool {
 
     pub fn max(&self) -> usize {
         self.max
+    }
+
+    pub fn max_eval_rss(&self) -> u64 {
+        self.max_eval_rss
     }
 
     /// Acquire a worker, blocking until one is available. Reuses an idle
@@ -296,7 +322,7 @@ impl EvalWorkerPool {
         let worker = self.idle.lock().unwrap().pop();
         let worker = match worker {
             Some(w) => w,
-            None => EvalWorker::spawn(self.fork_workers, self.max_eval_rss)
+            None => EvalWorker::spawn()
                 .await
                 .context("spawning fresh eval worker")?,
         };
@@ -468,7 +494,7 @@ mod tests {
 
     #[tokio::test]
     async fn shutdown_with_no_idle_workers_returns_immediately() {
-        let pool = EvalWorkerPool::new(2, 2, 2 * 1024 * 1024 * 1024);
+        let pool = EvalWorkerPool::new(2, 2 * 1024 * 1024 * 1024);
         tokio::time::timeout(Duration::from_secs(1), pool.shutdown())
             .await
             .expect("shutdown should not hang on empty pool");
@@ -478,7 +504,7 @@ mod tests {
 
     #[tokio::test]
     async fn shutdown_drains_idle_workers_gracefully() {
-        let pool = EvalWorkerPool::new(2, 2, 2 * 1024 * 1024 * 1024);
+        let pool = EvalWorkerPool::new(2, 2 * 1024 * 1024 * 1024);
         pool.push_for_test(fake_worker());
         pool.push_for_test(fake_worker());
         assert_eq!(pool.idle_count(), 2);
@@ -493,7 +519,7 @@ mod tests {
 
     #[tokio::test]
     async fn acquire_after_shutdown_errors() {
-        let pool = EvalWorkerPool::new(2, 2, 2 * 1024 * 1024 * 1024);
+        let pool = EvalWorkerPool::new(2, 2 * 1024 * 1024 * 1024);
         pool.shutdown().await;
         match pool.acquire().await {
             Ok(_) => panic!("acquire after shutdown must fail"),
@@ -506,7 +532,7 @@ mod tests {
 
     #[tokio::test]
     async fn inflight_worker_shuts_down_gracefully_on_pool_shutdown() {
-        let pool = Arc::new(EvalWorkerPool::new(1, 2, 2 * 1024 * 1024 * 1024));
+        let pool = Arc::new(EvalWorkerPool::new(1, 2 * 1024 * 1024 * 1024));
         pool.push_for_test(fake_worker());
 
         let pooled = pool.acquire().await.expect("acquire");

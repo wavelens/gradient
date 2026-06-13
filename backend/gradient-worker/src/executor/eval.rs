@@ -60,10 +60,11 @@ pub struct WorkerEvaluator {
 }
 
 impl WorkerEvaluator {
-    /// Create a new evaluator with a pool of `eval_workers` subprocesses.
-    pub fn new(eval_workers: usize, fork_workers: usize, max_eval_rss: u64) -> Self {
+    /// Create a new evaluator. `fork_workers` (env `GRADIENT_EVAL_FORK_WORKERS`)
+    /// is the pool size and thus the eval concurrency; `eval_workers` is legacy.
+    pub fn new(_eval_workers: usize, fork_workers: usize, max_eval_rss: u64) -> Self {
         Self {
-            resolver: Arc::new(WorkerPoolResolver::new(eval_workers, fork_workers, max_eval_rss)),
+            resolver: Arc::new(WorkerPoolResolver::new(fork_workers, max_eval_rss)),
         }
     }
 

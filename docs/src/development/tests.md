@@ -1345,6 +1345,15 @@ Pure traversal driving the cursor-backed flake discovery (replaces the retired
 | `quote_if_needed_dotted` | `python3.12` → quoted |
 | `nix_store_path_absolute_unchanged` | Already-absolute path → returned as-is |
 | `nix_store_path_bare_prefixed` | Bare name → `/nix/store/` prefix added |
+| `no_crash_resolves_all_in_one_call` | No subprocess crash → one batch call, every attr resolves |
+| `single_crasher_among_healthy_isolates_one_error` | Crash bisection isolates the one bad attr to a per-attr error; the rest resolve (#139) |
+| `two_crashers_isolate_independently` | Two crashers each isolate to their own per-attr error; healthy attrs resolve |
+| `transient_crash_succeeds_on_retry` | A single-attr chunk that crashes once succeeds on the one retry (no per-attr error) |
+
+The crash-isolation policy (`resolve_chunk`) is driven through an injected
+`resolve_once` stub so the bisection state machine is exercised without real
+eval subprocesses. RSS recycling is parent-side via `EvalWorker::rss_bytes`
+(reads `/proc/<pid>/statm`).
 
 ---
 
