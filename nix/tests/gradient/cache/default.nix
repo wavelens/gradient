@@ -296,10 +296,14 @@ in {
       server.sleep(5)
       builder.wait_for_unit("gradient-worker.service")
 
-      builder.sleep(10)
-      auth_logs = builder.succeed("journalctl -u gradient-worker --no-pager -n 100")
-      assert "handshake successful" in auth_logs, \
-          f"Worker did not authenticate successfully: {auth_logs[-500:]}"
+      # On a fresh DB the server applies its full migration set before binding
+      # :3000, so the worker (capped exponential reconnect backoff) can take well
+      # over a minute to authenticate. Wait for the handshake instead of asserting
+      # once after a fixed sleep, which races the slow cold start.
+      builder.wait_until_succeeds(
+          "journalctl -u gradient-worker --no-pager | grep -q 'handshake successful'",
+          timeout=180,
+      )
       banner("Worker authenticated via state-managed registration")
 
       # ── Phase 2: seed the test git repository ─────────────────────────────
