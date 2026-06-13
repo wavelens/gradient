@@ -5877,9 +5877,12 @@ paths:
       tags: [projects]
       summary: Project live updates (WebSocket)
       description: |-
-        Upgrades to a WebSocket emitting `evaluation_status_changed` and
-        `build_status_changed` events for this project, so the project page
-        refetches on change instead of polling. Requires read access.
+        Upgrades to a WebSocket emitting `evaluation_status_changed`,
+        `build_status_changed` and `evaluation_progress` events for this project,
+        so the project page refetches on change instead of polling.
+        `evaluation_progress` fires as builds and entry-points are persisted
+        during the evaluation phase, before any build changes status, so the
+        build/dependency totals grow live. Requires read access.
       operationId: projectLive
       parameters:
         - { name: organization, in: path, required: true, schema: { type: string } }
@@ -5893,8 +5896,11 @@ paths:
       tags: [evals]
       summary: Evaluation live updates (WebSocket)
       description: |-
-        Upgrades to a WebSocket emitting `evaluation_status_changed` and
-        `build_status_changed` events for this evaluation. Requires read access.
+        Upgrades to a WebSocket emitting `evaluation_status_changed`,
+        `build_status_changed` and `evaluation_progress` events for this
+        evaluation. `evaluation_progress` fires as builds and entry-points are
+        persisted during the evaluation phase so the build list grows live.
+        Requires read access.
       operationId: evaluationLive
       parameters:
         - { name: evaluation, in: path, required: true, schema: { type: string, format: uuid } }

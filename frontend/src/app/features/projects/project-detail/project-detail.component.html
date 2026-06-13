@@ -50,7 +50,7 @@
           <a [href]="proj.repository" target="_blank" rel="noopener noreferrer">{{ proj.repository }}</a>
         } @else { {{ proj.repository }} }
       </span>
-      <span class="chip mono" [title]="proj.wildcard">{{ proj.wildcard }}</span>
+      <span class="chip mono" [title]="proj.wildcard">{{ truncate(proj.wildcard) }}</span>
       @if (proj.last_check_at) {
         <span class="chip">checked {{ proj.last_check_at + 'Z' | date: 'MMM d, HH:mm' }}</span>
       }
@@ -108,8 +108,6 @@
               </div>
             </div>
             <div class="panel-actions">
-              <button pButton size="small" label="Eval log" icon="pi pi-file" severity="secondary"
-                      [routerLink]="['/organization', orgName, 'log', sel.id]"></button>
               <button pButton size="small" icon="pi pi-ellipsis-v" severity="secondary"
                       (click)="panelMenu.toggle($event)" aria-label="More"></button>
               <p-menu #panelMenu [model]="panelMenuModel()" [popup]="true" appendTo="body" />

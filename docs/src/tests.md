@@ -3905,3 +3905,19 @@ Frontend (`evaluation-log/evaluation-log.component.spec.ts`,
 - Frontend `project-detail.component.spec.ts` — explicit eval selection is persisted in the `eval` query param (back-navigation restores it) and `barCounts` folds the entry point's own build status into its dep-closure counts.
 - `backend/gradient-web/src/endpoints/projects/evaluations.rs::tests::checked_at_maps_null_time_sentinel_to_none` — `last_check_at` epoch sentinel (re-check pending) serialises as `null`, not 1970.
 - SQL helpers in `gradient-db/src/project_board.rs` (grouped counts, queue summary, dependency-closure CTE) are covered end-to-end by CI; no local DB unit harness exists.
+
+## Live evaluation progress (#295)
+
+Build/dependency totals now grow live during evaluation: the backend was silent
+while the evaluator inserted build rows (no status change), so the project and
+evaluation pages stayed frozen until the eval phase finished.
+
+- `backend/gradient-web/src/endpoints/live.rs::tests::eval_channel_matches_only_its_evaluation`
+  and `project_channel_forwards_progress_and_learns_its_eval` assert the new
+  `evaluation_progress` frame is forwarded on the `/evals/{id}/live` and
+  `/projects/{org}/{project}/live` channels (and learnt into the project
+  channel's known-eval set), while a progress ping for another evaluation /
+  project is dropped.
+- `backend/gradient-scheduler/src/eval.rs::handle_eval_result` emits
+  `BoardEvent::EvaluationProgress` after each batch of builds/entry-points is
+  persisted, so the silent insert phase no longer leaves the UI frozen.

@@ -49,6 +49,14 @@ pub enum BoardEvent {
         build_id: Uuid,
         status: i16,
     },
+    /// New builds/entry-points were persisted for an in-progress evaluation. A
+    /// content-free ping (subscribers refetch their own scope) that lets the
+    /// live UI grow the build/dependency totals during the evaluation phase,
+    /// before any build reaches a status change.
+    EvaluationProgress {
+        project: Option<Uuid>,
+        evaluation_id: Uuid,
+    },
     /// Cache contents or stats changed (build cached, NAR deleted, GC). A
     /// content-free ping: subscribers refetch their own scope-filtered view.
     CacheChanged,

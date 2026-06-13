@@ -12,6 +12,7 @@ export interface LiveEvent {
   type:
     | 'evaluation_status_changed'
     | 'build_status_changed'
+    | 'evaluation_progress'
     | 'cache_changed'
     | string;
   project?: string | null;
