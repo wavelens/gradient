@@ -473,6 +473,25 @@ Worker (`cargo test -p gradient-worker`):
 - `proto::nar::tests::trim_for_resume_skips_trims_and_passes` - the push-sender
   skips/trims regenerated compressed parts to resume from an offset.
 
+## Fleet eval-cache pull/push handlers (#386)
+
+The server serves a flake's eval-cache SQLite blob by `fingerprint`, mirroring
+the NAR transfer: a pull returns `Miss`, a presigned-S3 GET URL, or an inline
+`EvalCacheChunk` stream; a push grants `Skip` (size-guarded so a stale-small
+blob never clobbers a larger one), a presigned PUT, or an inline upload. Blobs
+live under `eval-cache/<fingerprint>` in object storage; an `eval_cache_store`
+row indexes them and is upserted on the unique `fingerprint` index. Every
+handler is best-effort: any error logs and sends the safe negative response.
+
+Proto (`cargo test -p gradient-proto`):
+- `handler::eval_cache::tests` - pure decision helpers and inline staging:
+  `should_accept_push` size-guard (accept when no row / strictly larger, skip
+  when equal-or-smaller), `pull_outcome` selection (Miss / Presigned / Inline),
+  `push_mode` selection (Skip / Presigned / Inline), `storage_key` namespacing,
+  deterministic `stream_token`, and the in-memory `EvalCacheReceiveStore`
+  (contiguous append + finish, non-contiguous reject, over-budget reject,
+  chunk-needs-open-stream, single-active fingerprint resolution, token roundtrip).
+
 ## Worker prefetch - re-derive `.drv` references from content
 
 When `prefetch_inputs` fetches a `.drv` during the closure walk, it harvests

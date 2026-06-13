@@ -296,6 +296,95 @@ impl NarStore {
         Ok(Some(url.to_string()))
     }
 
+    /// Object-store path for a fleet-shared eval-cache blob keyed by flake
+    /// fingerprint. Namespaced under `eval-cache/` so it never collides with the
+    /// `nars/` NAR layout (#386).
+    fn eval_cache_path(&self, fingerprint: &str) -> Path {
+        Path::from(format!("{}eval-cache/{}", self.prefix, fingerprint))
+    }
+
+    pub async fn put_eval_cache(&self, fingerprint: &str, data: Vec<u8>) -> Result<()> {
+        self.inner
+            .put(&self.eval_cache_path(fingerprint), PutPayload::from(data))
+            .await
+            .context("Failed to upload eval-cache blob")?;
+        Ok(())
+    }
+
+    pub async fn get_eval_cache(&self, fingerprint: &str) -> Result<Option<Vec<u8>>> {
+        match self.inner.get(&self.eval_cache_path(fingerprint)).await {
+            Ok(result) => Ok(Some(
+                result
+                    .bytes()
+                    .await
+                    .context("Failed to read eval-cache bytes")?
+                    .to_vec(),
+            )),
+            Err(object_store::Error::NotFound { .. }) => Ok(None),
+            Err(e) => Err(e).context("Failed to get eval-cache blob"),
+        }
+    }
+
+    /// Streaming counterpart to [`Self::get_eval_cache`]; mirrors
+    /// [`Self::get_stream`] so the inline pull path never buffers the whole blob.
+    pub async fn get_eval_cache_stream(
+        &self,
+        fingerprint: &str,
+    ) -> Result<Option<(u64, BoxStream<'static, Result<Bytes>>)>> {
+        match self.inner.get(&self.eval_cache_path(fingerprint)).await {
+            Ok(result) => {
+                let size = result.meta.size;
+                let stream = result
+                    .into_stream()
+                    .map(|chunk| chunk.context("eval-cache stream chunk read failed"))
+                    .boxed();
+                Ok(Some((size, stream)))
+            }
+            Err(object_store::Error::NotFound { .. }) => Ok(None),
+            Err(e) => Err(e).context("Failed to open eval-cache stream"),
+        }
+    }
+
+    /// Presigned GET URL for an eval-cache blob; `None` for local-disk stores.
+    pub async fn presigned_eval_cache_get_url(
+        &self,
+        fingerprint: &str,
+        expires_in: std::time::Duration,
+    ) -> Result<Option<String>> {
+        use object_store::signer::Signer as _;
+
+        let Some(signer) = &self.s3_signer else {
+            return Ok(None);
+        };
+
+        let url = signer
+            .signed_url(reqwest::Method::GET, &self.eval_cache_path(fingerprint), expires_in)
+            .await
+            .context("failed to generate presigned eval-cache GET URL")?;
+
+        Ok(Some(url.to_string()))
+    }
+
+    /// Presigned PUT URL for an eval-cache blob; `None` for local-disk stores.
+    pub async fn presigned_eval_cache_put_url(
+        &self,
+        fingerprint: &str,
+        expires_in: std::time::Duration,
+    ) -> Result<Option<String>> {
+        use object_store::signer::Signer as _;
+
+        let Some(signer) = &self.s3_signer else {
+            return Ok(None);
+        };
+
+        let url = signer
+            .signed_url(reqwest::Method::PUT, &self.eval_cache_path(fingerprint), expires_in)
+            .await
+            .context("failed to generate presigned eval-cache PUT URL")?;
+
+        Ok(Some(url.to_string()))
+    }
+
     /// Object-store path for a build-request blob keyed by org + BLAKE3 hash.
     /// Layout: `<prefix>build-request-blobs/<org-uuid>/<hh>/<full-hex>`.
     fn blob_path(&self, org: uuid::Uuid, hash: &[u8; 32]) -> Path {

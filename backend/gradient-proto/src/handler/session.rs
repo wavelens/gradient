@@ -25,6 +25,7 @@ use super::auth::{
     lookup_registered_peers, negotiate_capabilities, validate_tokens,
 };
 use super::dispatch::{DispatchContext, NarReceiveStore};
+use super::eval_cache::EvalCacheReceiveStore;
 use super::socket::{
     HANDSHAKE_TIMEOUT, JOB_OFFER_CHUNK_SIZE, ProtoSocket, ProtoWriter, recv_client_msg,
     send_server_msg,
@@ -282,6 +283,7 @@ impl ProtoSession<Registered> {
                 .expect("temp partial dir must be creatable")
             });
         let nar_serve_semaphore = Arc::new(Semaphore::new(proto_cfg.max_concurrent_nar_serves));
+        let mut eval_cache = EvalCacheReceiveStore::new(max_partial_bytes);
 
         loop {
             let msg = tokio::select! {
@@ -323,7 +325,7 @@ impl ProtoSession<Registered> {
                 peer_id: &peer_id,
                 nar_serve_semaphore: &nar_serve_semaphore,
             };
-            if !ctx.dispatch(msg, &mut nar).await {
+            if !ctx.dispatch(msg, &mut nar, &mut eval_cache).await {
                 break;
             }
         }
