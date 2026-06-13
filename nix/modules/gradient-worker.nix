@@ -225,6 +225,18 @@ in {
         default = 2147483648;
       };
 
+      evalCacheDir = lib.mkOption {
+        description = "Eval-cache directory exported to eval workers as NIX_CACHE_HOME. When null, resolves to {baseDir}/eval-cache.";
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+      };
+
+      evalCacheShare = lib.mkOption {
+        description = "Enable fleet eval-cache sharing (pull/push of <fingerprint>.sqlite blobs across workers).";
+        type = lib.types.bool;
+        default = true;
+      };
+
       maxProtoConnections = lib.mkOption {
         description = "Maximum number of simultaneous proto WebSocket connections";
         type = lib.types.ints.positive;
@@ -438,6 +450,7 @@ in {
           GRADIENT_WORKER_EVAL_WORKERS                = toString cfg.settings.evalWorkers;
           GRADIENT_EVAL_FORK_WORKERS                  = toString cfg.settings.evalForkWorkers;
           GRADIENT_MAX_EVAL_RSS                       = toString cfg.settings.maxEvalRss;
+          GRADIENT_EVAL_CACHE_SHARE                   = lib.boolToString cfg.settings.evalCacheShare;
           GRADIENT_MAX_PROTO_CONNECTIONS              = toString cfg.settings.maxProtoConnections;
           GRADIENT_WORKER_GCROOTS_DIR                 = cfg.settings.gcrootsDir;
           GRADIENT_WORKER_BUILD_METRICS               = lib.boolToString cfg.settings.buildMetrics;
@@ -452,6 +465,8 @@ in {
           GRADIENT_WORKER_SYSTEM_FEATURES = lib.concatStringsSep "," cfg.settings.systemFeatures;
         } // lib.optionalAttrs (cfg.settings.cpuCoreScore != null) {
           GRADIENT_WORKER_CPU_CORE_SCORE = toString cfg.settings.cpuCoreScore;
+        } // lib.optionalAttrs (cfg.settings.evalCacheDir != null) {
+          GRADIENT_EVAL_CACHE_DIR = cfg.settings.evalCacheDir;
         } // {
           GRADIENT_WORKER_CAPABILITY_FEDERATE         = lib.boolToString cfg.capabilities.federate;
           GRADIENT_WORKER_CAPABILITY_FETCH            = lib.boolToString cfg.capabilities.fetch;

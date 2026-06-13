@@ -37,6 +37,11 @@ pub enum EvalRequest {
         repository: String,
         attrs: Vec<String>,
     },
+    /// Return `repository`'s eval-cache fingerprint without evaluating it.
+    /// `None` in the response for mutable/dirty flakes.
+    Fingerprint {
+        repository: String,
+    },
     /// Ask the worker to exit cleanly. Parent uses this on graceful shutdown.
     Shutdown,
 }
@@ -54,6 +59,9 @@ pub enum EvalResponse {
         items: Vec<ResolvedItem>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         warnings: Vec<String>,
+    },
+    FingerprintOk {
+        fingerprint: Option<String>,
     },
     Err {
         message: String,
@@ -215,11 +223,31 @@ pub fn run_eval_worker() -> std::io::Result<()> {
                     warnings: all_warnings,
                 }
             }
+            EvalRequest::Fingerprint { repository } => {
+                let Some(ev) = evaluator.as_ref() else {
+                    write_response(
+                        &mut writer,
+                        &EvalResponse::Err {
+                            message: "evaluator not initialized".to_string(),
+                        },
+                    )?;
+                    continue;
+                };
+                match ev.fingerprint(&repository) {
+                    Ok(fingerprint) => EvalResponse::FingerprintOk { fingerprint },
+                    Err(e) => EvalResponse::Err {
+                        message: format!("{:#}", e),
+                    },
+                }
+            }
         };
 
         let kind = match &resp {
             EvalResponse::ListOk { attrs, .. } => format!("ListOk({} attrs)", attrs.len()),
             EvalResponse::ResolveOk { items, .. } => format!("ResolveOk({} items)", items.len()),
+            EvalResponse::FingerprintOk { fingerprint } => {
+                format!("FingerprintOk({})", fingerprint.is_some())
+            }
             EvalResponse::Err { message } => format!("Err({message})"),
         };
         trace!(%kind, "eval worker sending response");
@@ -356,6 +384,9 @@ mod tests {
                 repository: "github:nixos/nixpkgs".into(),
                 attrs: vec!["packages.x86_64-linux.hello".into()],
             },
+            EvalRequest::Fingerprint {
+                repository: "github:nixos/nixpkgs".into(),
+            },
             EvalRequest::Shutdown,
         ];
 
@@ -386,6 +417,9 @@ mod tests {
                     error: None,
                 }],
                 warnings: vec![],
+            },
+            EvalResponse::FingerprintOk {
+                fingerprint: Some("deadbeef".into()),
             },
             EvalResponse::Err {
                 message: "something went wrong".into(),

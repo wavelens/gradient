@@ -350,6 +350,8 @@ The token must be the 48-byte random secret returned by the registration API (ge
 | `settings.cpuCoreScore` | `null` | Override the advertised single-core speed score (higher is faster, `GRADIENT_WORKER_CPU_CORE_SCORE`). When null, the worker benchmarks the host at startup |
 | `settings.evalForkWorkers` | `4` | Number of parallel eval subprocesses in the pool; this is the eval concurrency (`GRADIENT_EVAL_FORK_WORKERS`) |
 | `settings.maxEvalRss` | `2147483648` (2 GiB) | Recycle an eval subprocess (parent-side) once its RSS exceeds this many bytes, so the next acquire spawns a fresh one (`GRADIENT_MAX_EVAL_RSS`) |
+| `settings.evalCacheDir` | `null` | Eval-cache directory exported to eval workers as `NIX_CACHE_HOME`. When null, resolves to `{baseDir}/eval-cache` (`GRADIENT_EVAL_CACHE_DIR`) |
+| `settings.evalCacheShare` | `true` | Enable fleet eval-cache sharing (pull/push of `<fingerprint>.sqlite` blobs across workers, issue #386) (`GRADIENT_EVAL_CACHE_SHARE`) |
 | `settings.maxNixdaemonConnections` | `32` | Worker's local nix-daemon connection pool size. Each in-flight NAR import holds one connection; size for `maxConcurrentBuilds * 8` plus headroom |
 | `settings.narPartialTtlSecs` | `86400` (24 h) | TTL in seconds for partially-received NAR downloads (`*.partial`) staged under `<baseDir>/nar-partial`. A periodic sweep deletes partials older than this so an abandoned resumable transfer can't pin disk forever (issue #225). `0` disables the sweep. (`GRADIENT_NAR_PARTIAL_TTL_SECS`) |
 | `settings.maxProtoConnections` | `16` | Max simultaneous WebSocket connections (for discoverable mode) |

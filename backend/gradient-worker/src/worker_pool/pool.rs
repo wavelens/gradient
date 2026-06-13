@@ -38,11 +38,15 @@ impl EvalWorker {
     /// Spawn a new worker by re-execing the current binary with `--eval-worker`.
     /// The subprocess is single-threaded and does not fork; pool size is the
     /// eval concurrency and RSS is bounded parent-side (see [`Self::rss_bytes`]).
-    pub(super) async fn spawn() -> Result<Self> {
+    ///
+    /// `eval_cache_dir` is exported as `NIX_CACHE_HOME` so parent and worker
+    /// agree on where Nix's `eval-cache-v6/<fingerprint>.sqlite` lives.
+    pub(super) async fn spawn(eval_cache_dir: &str) -> Result<Self> {
         let exe = std::env::current_exe().context("locating current executable")?;
         trace!(exe = %exe.display(), "spawning eval worker subprocess");
         let mut command = Command::new(&exe);
         command.arg("--eval-worker");
+        command.env("NIX_CACHE_HOME", eval_cache_dir);
 
         // Match the Nix CLI: bump the subprocess's stack to 64 MiB so libnix's
         // libstdc++ std::regex DFS executor (used by `builtins.match` /
@@ -189,6 +193,18 @@ impl EvalWorker {
         }
     }
 
+    pub(super) async fn fingerprint(&mut self, repository: String) -> Result<Option<String>> {
+        self.evaluations_served += 1;
+        match self
+            .request(&EvalRequest::Fingerprint { repository })
+            .await?
+        {
+            EvalResponse::FingerprintOk { fingerprint } => Ok(fingerprint),
+            EvalResponse::Err { message } => Err(anyhow::anyhow!("eval worker: {}", message)),
+            _ => anyhow::bail!("eval worker: unexpected response to Fingerprint"),
+        }
+    }
+
     /// Send a `Shutdown` request and wait briefly for the child to exit.
     /// Used when the parent is recycling a still-healthy worker so the
     /// subprocess can run libnix's atexit handlers (flush eval-cache
@@ -285,6 +301,9 @@ pub struct EvalWorkerPool {
     /// RSS ceiling (bytes) above which a released worker is discarded so the
     /// next `acquire` spawns a fresh subprocess (parent-side recycling).
     max_eval_rss: u64,
+    /// Exported as `NIX_CACHE_HOME` for every spawned worker so the on-disk
+    /// eval cache lands where the parent expects it.
+    eval_cache_dir: String,
     /// Set by [`EvalWorkerPool::shutdown`]. Causes `PooledEvalWorker::drop`
     /// to gracefully shut its worker down instead of returning it to the
     /// (now-closed) idle vec.
@@ -292,13 +311,14 @@ pub struct EvalWorkerPool {
 }
 
 impl EvalWorkerPool {
-    pub fn new(max: usize, max_eval_rss: u64) -> Self {
+    pub fn new(max: usize, max_eval_rss: u64, eval_cache_dir: String) -> Self {
         let max = max.max(1);
         Self {
             idle: Arc::new(Mutex::new(Vec::new())),
             semaphore: Arc::new(Semaphore::new(max)),
             max,
             max_eval_rss,
+            eval_cache_dir,
             shutting_down: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -322,7 +342,7 @@ impl EvalWorkerPool {
         let worker = self.idle.lock().unwrap().pop();
         let worker = match worker {
             Some(w) => w,
-            None => EvalWorker::spawn()
+            None => EvalWorker::spawn(&self.eval_cache_dir)
                 .await
                 .context("spawning fresh eval worker")?,
         };
@@ -494,7 +514,7 @@ mod tests {
 
     #[tokio::test]
     async fn shutdown_with_no_idle_workers_returns_immediately() {
-        let pool = EvalWorkerPool::new(2, 2 * 1024 * 1024 * 1024);
+        let pool = EvalWorkerPool::new(2, 2 * 1024 * 1024 * 1024, String::new());
         tokio::time::timeout(Duration::from_secs(1), pool.shutdown())
             .await
             .expect("shutdown should not hang on empty pool");
@@ -504,7 +524,7 @@ mod tests {
 
     #[tokio::test]
     async fn shutdown_drains_idle_workers_gracefully() {
-        let pool = EvalWorkerPool::new(2, 2 * 1024 * 1024 * 1024);
+        let pool = EvalWorkerPool::new(2, 2 * 1024 * 1024 * 1024, String::new());
         pool.push_for_test(fake_worker());
         pool.push_for_test(fake_worker());
         assert_eq!(pool.idle_count(), 2);
@@ -519,7 +539,7 @@ mod tests {
 
     #[tokio::test]
     async fn acquire_after_shutdown_errors() {
-        let pool = EvalWorkerPool::new(2, 2 * 1024 * 1024 * 1024);
+        let pool = EvalWorkerPool::new(2, 2 * 1024 * 1024 * 1024, String::new());
         pool.shutdown().await;
         match pool.acquire().await {
             Ok(_) => panic!("acquire after shutdown must fail"),
@@ -532,7 +552,7 @@ mod tests {
 
     #[tokio::test]
     async fn inflight_worker_shuts_down_gracefully_on_pool_shutdown() {
-        let pool = Arc::new(EvalWorkerPool::new(1, 2 * 1024 * 1024 * 1024));
+        let pool = Arc::new(EvalWorkerPool::new(1, 2 * 1024 * 1024 * 1024, String::new()));
         pool.push_for_test(fake_worker());
 
         let pooled = pool.acquire().await.expect("acquire");
