@@ -14,7 +14,7 @@ pub use client::ClientMessage;
 pub use gradient_types::proto::{
     BuildFailureKind, BuildJob, BuildMetrics, BuildOutput, BuildProduct, BuildTask, CacheInfo,
     CachedPath, CandidateScore, CredentialKind, DerivationOutput, DiscoveredDerivation,
-    EvalMessageLevel, FlakeInputOverride,
+    EvalCachePullOutcome, EvalCachePushMode, EvalMessageLevel, FlakeInputOverride,
     FlakeJob, FlakeSource, FlakeTask, GradientCapabilities, Job, JobCandidate, JobKind,
     JobUpdateKind, QueryMode, RequiredPath,
 };
