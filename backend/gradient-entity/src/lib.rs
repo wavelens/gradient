@@ -33,6 +33,7 @@ pub mod derivation_output;
 pub mod entry_point;
 pub mod entry_point_dep_count;
 pub mod entry_point_message;
+pub mod eval_cache_store;
 pub mod evaluation;
 pub mod evaluation_flake_input_override;
 pub mod evaluation_message;
