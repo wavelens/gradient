@@ -28,7 +28,7 @@ use nix_bindings::{Context, EvalState, EvalStateBuilder, Store};
 /// and must be called from a blocking context (e.g. `tokio::task::spawn_blocking`).
 pub struct NixEvaluator {
     ctx: Arc<Context>,
-    _store: Arc<Store>,
+    store: Arc<Store>,
     flake_settings: FlakeSettings,
     fetch_settings: FetchersSettings,
     state: EvalState,
@@ -60,7 +60,7 @@ impl NixEvaluator {
 
         Ok(NixEvaluator {
             ctx,
-            _store: store,
+            store,
             flake_settings,
             fetch_settings,
             state,
@@ -75,6 +75,19 @@ impl NixEvaluator {
             &self.fetch_settings,
             &self.flake_settings,
             &self.state,
+            flake_ref,
+        )
+    }
+
+    /// Lock `flake_ref` and return its eval-cache fingerprint without
+    /// evaluating or creating the on-disk eval cache. `None` for mutable flakes.
+    pub(crate) fn fingerprint(&self, flake_ref: &str) -> Result<Option<String>> {
+        crate::nix::flake_walk::fingerprint(
+            &self.ctx,
+            &self.fetch_settings,
+            &self.flake_settings,
+            &self.state,
+            &self.store,
             flake_ref,
         )
     }

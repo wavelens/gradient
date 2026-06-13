@@ -91,6 +91,16 @@ pub struct WorkerConfig {
     #[arg(long, env = "GRADIENT_MAX_EVAL_RSS", default_value_t = 2 * 1024 * 1024 * 1024)]
     pub max_eval_rss: u64,
 
+    /// Directory holding the Nix eval cache (exported to eval workers as
+    /// `NIX_CACHE_HOME`). When unset, resolves to `{data_dir}/eval-cache`.
+    #[arg(long, env = "GRADIENT_EVAL_CACHE_DIR")]
+    pub eval_cache_dir: Option<String>,
+
+    /// Master switch for fleet eval-cache sharing (pull/push of
+    /// `<fingerprint>.sqlite` blobs across workers).
+    #[arg(long, env = "GRADIENT_EVAL_CACHE_SHARE", default_value_t = true)]
+    pub eval_cache_share: bool,
+
     /// Maximum number of simultaneous evaluations.
     /// Defaults to `eval_workers` (one eval job per evaluator subprocess).
     #[arg(long, env = "GRADIENT_MAX_CONCURRENT_EVALUATIONS", default_value_t = 1)]
@@ -345,6 +355,14 @@ impl WorkerConfig {
         std::path::Path::new(&self.data_dir).join("nar-partial")
     }
 
+    /// Resolved eval-cache directory: the configured override or, by default,
+    /// `{data_dir}/eval-cache`.
+    pub fn eval_cache_dir(&self) -> String {
+        self.eval_cache_dir
+            .clone()
+            .unwrap_or_else(|| format!("{}/eval-cache", self.data_dir))
+    }
+
     /// Build the `GradientCapabilities` struct from the CLI flags.
     pub fn capabilities(&self) -> GradientCapabilities {
         GradientCapabilities {
@@ -378,6 +396,8 @@ mod tests {
             eval_workers: 1,
             eval_fork_workers: 2,
             max_eval_rss: 2 * 1024 * 1024 * 1024,
+            eval_cache_dir: None,
+            eval_cache_share: true,
             max_concurrent_evaluations: 1,
             max_concurrent_builds: 1,
             max_nixdaemon_connections: 4,
@@ -472,6 +492,8 @@ mod tests {
             eval_workers: 1,
             eval_fork_workers: 2,
             max_eval_rss: 2 * 1024 * 1024 * 1024,
+            eval_cache_dir: None,
+            eval_cache_share: true,
             max_concurrent_evaluations: 1,
             max_concurrent_builds: 1,
             max_nixdaemon_connections: 4,
@@ -543,6 +565,8 @@ mod tests {
             eval_workers: 1,
             eval_fork_workers: 2,
             max_eval_rss: 2 * 1024 * 1024 * 1024,
+            eval_cache_dir: None,
+            eval_cache_share: true,
             max_concurrent_evaluations: 1,
             max_concurrent_builds: 1,
             max_nixdaemon_connections: 4,

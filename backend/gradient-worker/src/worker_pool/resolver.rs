@@ -35,6 +35,7 @@ fn nix_store_path(hash_name: &str) -> String {
 #[derive(Debug)]
 pub struct WorkerPoolResolver {
     pool: Arc<EvalWorkerPool>,
+    eval_cache_dir: String,
 }
 
 /// One resolved attr keyed by its index in the original request.
@@ -126,16 +127,42 @@ fn resolve_chunk<'a>(
 }
 
 impl WorkerPoolResolver {
-    pub fn new(pool_size: usize, max_eval_rss: u64) -> Self {
+    pub fn new(pool_size: usize, max_eval_rss: u64, eval_cache_dir: String) -> Self {
         Self {
-            pool: Arc::new(EvalWorkerPool::new(pool_size, max_eval_rss)),
+            pool: Arc::new(EvalWorkerPool::new(
+                pool_size,
+                max_eval_rss,
+                eval_cache_dir.clone(),
+            )),
+            eval_cache_dir,
         }
+    }
+
+    /// On-disk eval-cache directory shared by every worker (set as
+    /// `NIX_CACHE_HOME`). The executor stages/reads `<fingerprint>.sqlite`
+    /// blobs under `<eval_cache_dir>/eval-cache-v6/`.
+    pub fn eval_cache_dir(&self) -> &str {
+        &self.eval_cache_dir
     }
 
     /// Gracefully shut every idle eval-worker subprocess down. See
     /// [`EvalWorkerPool::shutdown`] for the contract.
     pub async fn shutdown(&self) {
         self.pool.shutdown().await;
+    }
+
+    /// Return `repository`'s eval-cache fingerprint without evaluating it.
+    /// `None` for mutable/dirty flakes. Mirrors [`Self::list_flake_derivations`]:
+    /// a dead worker is marked so it gets discarded instead of reused.
+    pub async fn fingerprint(&self, repository: String) -> Result<Option<String>> {
+        let mut worker = self.pool.acquire().await?;
+        match worker.fingerprint(repository).await {
+            Ok(v) => Ok(v),
+            Err(e) => {
+                worker.mark_dead();
+                Err(e)
+            }
+        }
     }
 
     /// Resolve `attrs` on one fresh worker. `Ok` means the subprocess lived

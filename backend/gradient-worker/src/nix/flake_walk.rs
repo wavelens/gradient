@@ -21,7 +21,7 @@ use nix_bindings::flake::{
     FetchersSettings, FlakeReference, FlakeReferenceParseFlags, FlakeSettings, LockFlags,
     LockedFlake,
 };
-use nix_bindings::{Context, EvalState};
+use nix_bindings::{Context, EvalState, Store};
 
 use crate::nix::wildcard_walk::{self, WalkNode};
 
@@ -40,12 +40,7 @@ impl<'a> FlakeWalker<'a> {
         state: &'a EvalState,
         flake_ref: &str,
     ) -> Result<Self> {
-        let parse_flags = FlakeReferenceParseFlags::new(ctx, flake)?;
-        let (reference, _frag) = FlakeReference::parse(ctx, fetch, flake, &parse_flags, flake_ref)
-            .with_context(|| format!("parsing flake reference '{flake_ref}'"))?;
-        let lock_flags = LockFlags::new(ctx, flake)?;
-        let locked = LockedFlake::lock(ctx, fetch, flake, state, &lock_flags, &reference)
-            .with_context(|| format!("locking flake '{flake_ref}'"))?;
+        let locked = lock_flake(ctx, fetch, flake, state, flake_ref)?;
         let cache = EvalCache::open(ctx, state, &locked)?;
 
         Ok(FlakeWalker {
@@ -83,6 +78,39 @@ impl<'a> FlakeWalker<'a> {
 
         Ok((strip_nix_store_prefix(&drv), vec![]))
     }
+}
+
+/// Parse and lock `flake_ref`, returning the [`LockedFlake`] without opening
+/// its eval cache. Shared by [`FlakeWalker::open`] and [`fingerprint`].
+fn lock_flake(
+    ctx: &Arc<Context>,
+    fetch: &FetchersSettings,
+    flake: &FlakeSettings,
+    state: &EvalState,
+    flake_ref: &str,
+) -> Result<LockedFlake> {
+    let parse_flags = FlakeReferenceParseFlags::new(ctx, flake)?;
+    let (reference, _frag) = FlakeReference::parse(ctx, fetch, flake, &parse_flags, flake_ref)
+        .with_context(|| format!("parsing flake reference '{flake_ref}'"))?;
+    let lock_flags = LockFlags::new(ctx, flake)?;
+
+    LockedFlake::lock(ctx, fetch, flake, state, &lock_flags, &reference)
+        .with_context(|| format!("locking flake '{flake_ref}'"))
+}
+
+/// Lock `flake_ref` and return its eval-cache fingerprint without opening (and
+/// thus creating) the on-disk eval cache. `None` for mutable/dirty flakes.
+pub(crate) fn fingerprint(
+    ctx: &Arc<Context>,
+    fetch: &FetchersSettings,
+    flake: &FlakeSettings,
+    state: &EvalState,
+    store: &Store,
+    flake_ref: &str,
+) -> Result<Option<String>> {
+    let locked = lock_flake(ctx, fetch, flake, state, flake_ref)?;
+
+    Ok(locked.fingerprint(store, fetch)?)
 }
 
 /// An eval-cache cursor adapted to the pure [`WalkNode`] traversal.

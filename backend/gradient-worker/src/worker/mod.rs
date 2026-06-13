@@ -247,8 +247,12 @@ impl Worker<Connected> {
 
     async fn build_executor(config: &WorkerConfig) -> Result<(JobExecutor, JobScorer)> {
         let store = LocalNixStore::connect(config.max_nixdaemon_connections)?;
-        let evaluator =
-            WorkerEvaluator::new(config.eval_workers, config.eval_fork_workers, config.max_eval_rss);
+        let evaluator = WorkerEvaluator::new(
+            config.eval_workers,
+            config.eval_fork_workers,
+            config.max_eval_rss,
+            config.eval_cache_dir(),
+        );
         let gcroots = crate::nix::gcroots::GcRootKeeper::new(
             &config.gcroots_dir,
             std::sync::Arc::new(store.clone()),
