@@ -144,6 +144,7 @@ mod m20260610_000001_create_build_attempt;
 mod m20260610_000002_backfill_build_attempt;
 mod m20260610_000003_slim_build_and_dispatched_job;
 mod m20260612_000001_add_started_by_to_evaluation;
+mod m20260613_000001_add_dep_closure_counts;
 
 pub struct Migrator;
 
@@ -289,6 +290,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260610_000002_backfill_build_attempt::Migration),
             Box::new(m20260610_000003_slim_build_and_dispatched_job::Migration),
             Box::new(m20260612_000001_add_started_by_to_evaluation::Migration),
+            Box::new(m20260613_000001_add_dep_closure_counts::Migration),
         ]
     }
 }

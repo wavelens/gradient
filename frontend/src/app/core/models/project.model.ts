@@ -69,6 +69,7 @@ export interface EntryPointSummary {
   architecture: Architecture;
   build_time_ms: number | null;
   deps: BuildStatusCounts;
+  deps_total: number | null;
   created_at: string;
 }
 

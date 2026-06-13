@@ -72,6 +72,10 @@ pub struct EntryPointSummary {
     pub architecture: gradient_entity::server::Architecture,
     pub build_time_ms: Option<i64>,
     pub deps: BuildStatusCounts,
+    /// Total build-time dependency-closure size of this entry point, cached on
+    /// the derivation (content-addressed, reused across evals). `null` for evals
+    /// predating the cache.
+    pub deps_total: Option<i64>,
     pub created_at: chrono::NaiveDateTime,
 }
 

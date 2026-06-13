@@ -3929,3 +3929,24 @@ build whose stored log the `/builds/{id}/log*` endpoints serve: a `Substituted`
 build has no log of its own, so it falls back to the most recent prior build of
 the same derivation that does (chunked or inline). Read-side, DB-dependent;
 covered end-to-end by CI, no local DB unit harness.
+
+## Entry-point dependency-closure counts (#383)
+
+Replaces the per-request recursive closure CTE (`entry_point_dep_counts`) with an
+incrementally-maintained cache: a derivation's build-time closure is materialised
+once into `derivation_closure` (content-addressed, size cached on
+`derivation.dep_closure_count`), and each entry point's per-status histogram is
+kept in `entry_point_dep_count`, seeded at eval-completion and updated on every
+build status transition.
+
+- `backend/gradient-db/src/dep_closure.rs::tests::load_groups_rows_by_entry_point_and_status`
+  and `load_returns_empty_when_no_counts_maintained` cover the read assembly and
+  the empty-result signal that drives the web fallback (`MockDatabase`).
+- `backend/gradient-scheduler/src/handler_tests.rs` Group E
+  (`eval_job_completed_*`) gains a `seed_entry_point_dep_counts` no-entry-points
+  query in each `handle_eval_job_completed` mock sequence.
+- SQL-level behaviour — closure materialisation, the `apply_dep_count_delta`
+  old→new shift, the delete-then-reinsert `init`, and the read-path maintained vs
+  CTE-fallback branch — is DB-dependent and covered end-to-end by CI (no local
+  Postgres unit harness; counts are atomic per-row, deltas are spawned, and
+  restart reconciliation recomputes in-flight evals).
