@@ -1308,38 +1308,27 @@ Unit tests for `resolve_effective_hash_db`, which maps the file-hash embedded in
 
 ---
 
-## `worker::nix_eval` - Nix String Escaping
+## `worker::wildcard_walk` - Flake Output Wildcard Traversal
+
+Pure traversal driving the cursor-backed flake discovery (replaces the retired
+`eval.nix`); unit-tested against a stub attr tree.
 
 | Test | What it checks |
 |------|---------------|
-| `escape_nix_str_plain` | Plain string → unchanged |
-| `escape_nix_str_backslash` | `\` → `\\` |
-| `escape_nix_str_double_quote` | `"` → `\"` |
-| `escape_nix_str_both` | Mixed → correct ordering of escapes |
-| `escape_nix_str_empty` | Empty string → empty string |
-
----
-
-## `worker::flake` - Flake Attribute Path Utilities
-
-| Test | What it checks |
-|------|---------------|
-| `split_attr_path_simple` | `packages.x86_64-linux.hello` → 3 segments |
-| `split_attr_path_quoted_dot` | `packages."python3.12"` preserves quoted segment with dot |
-| `split_attr_path_wildcard` | `*.*` → `["*", "*"]` |
-| `split_attr_path_single_segment` | Single segment returned as-is |
-| `pattern_to_nix_list_simple` | `a.b` → `[ "a" "b" ]` |
-| `pattern_to_nix_list_unquotes_inner` | Quoted `"python3.12"` segment → outer quotes stripped in output |
-| `pattern_to_nix_list_collapses_consecutive_wildcards` | `*.*` → `[ "*" ]` (single wildcard) |
-| `pattern_to_nix_list_wildcard_then_name` | `packages.*.hello` → `[ "packages" "*" "hello" ]` |
-| `build_wildcard_nix_expr_include_only` | No `!` prefix → `include` non-empty, `exclude` empty |
-| `build_wildcard_nix_expr_exclude_only` | All `!` prefix → `include` empty, `exclude` non-empty |
-| `build_wildcard_nix_expr_mixed` | Mix → both `include` and `exclude` non-empty |
-| `partition_forwards_exact_exclusion_alongside_hash_include` | Regression: `packages.X.#,!packages.X.Y` keeps the exclusion in the eval-bound stream instead of silently dropping it |
-| `partition_filters_literal_include_named_in_exclusion` | Literal-only inputs: an `!path` exclusion removes a matching literal include from the bypass list, and `eval.nix` is not called |
-| `partition_pure_literal_passthrough` | Literal-only input with no exclusions returns the include as-is and skips `eval.nix` |
-| `partition_mixed_literal_and_wildcard_includes_with_exclusion` | Literal include bypasses `eval.nix`; wildcard include + exclusion both travel to `eval.nix` together |
-| `partition_preserves_input_order_for_eval_patterns` | Eval-bound patterns retain their input order |
+| `parse_pattern_exclude` | `!a.b.c` → `(exclude, ["a","b","c"])` |
+| `parse_pattern_include_wildcard` | `packages.*` → `(include, ["packages","*"])` |
+| `parse_pattern_quoted_segment` | Quoted `"python3.12"` keeps its inner dot in one segment |
+| `collapse_consecutive_stars` | `packages.*.*` → `packages.*` |
+| `discover_double_star_recovers_one_level` | Trailing `*` descends one extra level |
+| `discover_hash_non_recursive` | `#` matches one depth, no extra descent |
+| `discover_literal` | Exact path resolves to itself |
+| `discover_with_exclude` | Exact-path exclusion drops the matching result |
+| `discover_checks_star` | `checks.*` collects leaf derivations |
+| `discover_hash_non_last_recurses` | `#` mid-pattern recurses on the next segment |
+| `discover_hash_terminal_non_recursive` | Trailing `#` keeps only derivations at that depth |
+| `discover_star_non_last_stops_at_opaque` | `*` skips opaque typed attrsets mid-pattern |
+| `discover_trailing_star_stops_at_opaque` | Trailing `*` does not descend into opaque attrsets |
+| `discover_trailing_star_emits_derivation_child` | Trailing `*` emits a derivation child directly |
 
 ---
 

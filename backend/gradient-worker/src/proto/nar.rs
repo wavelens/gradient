@@ -64,7 +64,7 @@ fn trim_for_resume(
 
 /// Normalise a store path so it always carries the `/nix/store/` prefix.
 ///
-/// Some upstream sources (e.g. eval-worker `get_derivation_path`) return drv
+/// Some upstream sources (e.g. eval-worker `FlakeWalker::resolve`) return drv
 /// paths as bare hash-name strings. NarByteStream needs the absolute filesystem
 /// path, and the server stores `cached_path.store_path` verbatim - both must
 /// see the canonical `/nix/store/<hash>-<name>` form.

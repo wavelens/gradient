@@ -7,12 +7,10 @@
 //! Nix-specific functionality: evaluation subprocesses, flake parsing, store interaction.
 
 pub mod eval_worker;
-pub mod flake;
+pub(crate) mod flake_walk;
 pub mod gcroots;
 pub mod log;
 pub mod nix_eval;
 pub mod store;
 
-// Consumed by the warm-fork resolver (L3); allow dead_code until then.
-#[allow(dead_code)]
 pub(crate) mod wildcard_walk;

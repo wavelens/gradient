@@ -27,7 +27,7 @@ fn nix_store_path(hash_name: &str) -> String {
 /// `DerivationResolver` impl that drives an [`EvalWorkerPool`].
 ///
 /// `list_flake_derivations` is dispatched to a single worker (the wildcard
-/// `*` is recursive in eval.nix, so one call discovers all depths).
+/// `*` is recursive in the cursor walk, so one call discovers all depths).
 /// `resolve_derivation_paths` splits attrs across the pool for parallelism.
 /// `get_derivation` and `get_features` parse `.drv` files directly from disk.
 #[derive(Debug)]
