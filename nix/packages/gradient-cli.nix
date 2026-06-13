@@ -8,15 +8,13 @@
 , craneLib
 , git
 , installShellFiles
-, nixVersions
+, nixVersion
 , openssl
 , pkg-config
 , stdenv
 , cargoFeatures ? [ ]
 }:
 let
-  nixVersion = nixVersions.nix_2_34;
-
   src = craneLib.cleanCargoSource ../../cli;
 
   # harmonia (git dep) ships crates whose Cargo.toml points at a README.md that

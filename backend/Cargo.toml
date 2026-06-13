@@ -135,7 +135,7 @@ harmonia-utils-io              = { git = "https://github.com/nix-community/harmo
 harmonia-utils-signature       = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
 
 # Nix bindings
-nix-bindings = { git = "https://github.com/NotAShelf/nix-bindings", default-features = false }
+nix-bindings = { git = "https://github.com/DerDennisOP/nix-bindings", branch = "feat/optimized-eval-capi", default-features = false }
 
 # Shared utilities promoted from member crates
 git-url-parse = { version = "0.6" } # defaults: re-exports the `url` crate
