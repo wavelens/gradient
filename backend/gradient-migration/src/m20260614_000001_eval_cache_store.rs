@@ -29,8 +29,7 @@ impl MigrationTrait for Migration {
                     .col(
                         ColumnDef::new(EvalCacheStore::Fingerprint)
                             .string()
-                            .not_null()
-                            .unique_key(),
+                            .not_null(),
                     )
                     .col(ColumnDef::new(EvalCacheStore::StoragePath).text().not_null())
                     .col(
