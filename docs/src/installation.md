@@ -5,7 +5,7 @@ Gradient is distributed as a NixOS module. The recommended way to install it is 
 ## Prerequisites
 
 - NixOS with flakes enabled
-- PostgreSQL (can be configured automatically)
+- PostgreSQL 18 or newer (can be configured automatically); the server refuses to start against older versions
 - An NGINX reverse proxy (can be configured automatically)
 
 ## Adding Gradient to Your Flake
