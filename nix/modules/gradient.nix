@@ -403,6 +403,24 @@ in {
           default = 0;
         };
 
+        evalCacheMaxTotalBytes = lib.mkOption {
+          description = "Total byte cap for fleet-shared eval-cache blobs. The eviction sweep drops oldest-updated rows until the surviving total is at or under this.";
+          type = lib.types.ints.unsigned;
+          default = 10 * 1024 * 1024 * 1024;
+        };
+
+        evalCacheMaxAgeDays = lib.mkOption {
+          description = "Max age in days for an eval-cache blob; older blobs are evicted by the sweep regardless of the size cap.";
+          type = lib.types.ints.unsigned;
+          default = 30;
+        };
+
+        evalCacheSweepIntervalSecs = lib.mkOption {
+          description = "Interval in seconds between eval-cache eviction sweeps.";
+          type = lib.types.ints.positive;
+          default = 3600;
+        };
+
         metricsRollupIntervalSecs = lib.mkOption {
           description = "Interval in seconds between metric rollup-aggregator passes.";
           type = lib.types.ints.positive;
@@ -772,6 +790,9 @@ in {
         GRADIENT_KEEP_EVALUATIONS = toString cfg.settings.keepEvaluations;
         GRADIENT_LOG_CHUNK_BYTES = toString cfg.settings.logChunkBytes;
         GRADIENT_MAX_STORAGE_GB = toString cfg.settings.maxStorageGb;
+        GRADIENT_EVAL_CACHE_MAX_TOTAL_BYTES = toString cfg.settings.evalCacheMaxTotalBytes;
+        GRADIENT_EVAL_CACHE_MAX_AGE_DAYS = toString cfg.settings.evalCacheMaxAgeDays;
+        GRADIENT_EVAL_CACHE_SWEEP_INTERVAL_SECS = toString cfg.settings.evalCacheSweepIntervalSecs;
         GRADIENT_METRICS_ROLLUP_INTERVAL = toString cfg.settings.metricsRollupIntervalSecs;
         GRADIENT_METRICS_RETENTION_RAW_DAYS = toString cfg.settings.metricsRetentionRawDays;
         GRADIENT_METRICS_RETENTION_ROLLUP_DAYS = toString cfg.settings.metricsRetentionRollupDays;

@@ -13,10 +13,12 @@
 
 mod cleanup;
 mod deep_gc;
+mod eval_cache_sweep;
 mod invalidate;
 mod sign_sweep;
 
 pub use self::deep_gc::{DeepGcReport, run_deep_gc};
+pub use self::eval_cache_sweep::{eval_cache_sweep_loop, evict_eval_cache};
 
 pub use self::cleanup::{
     CleanupReport, cleanup_expired_upload_sessions, cleanup_old_evaluations,

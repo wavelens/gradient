@@ -385,6 +385,13 @@ impl NarStore {
         Ok(Some(url.to_string()))
     }
 
+    pub async fn delete_eval_cache(&self, fingerprint: &str) -> Result<()> {
+        match self.inner.delete(&self.eval_cache_path(fingerprint)).await {
+            Ok(_) | Err(object_store::Error::NotFound { .. }) => Ok(()),
+            Err(e) => Err(e).context("Failed to delete eval-cache blob"),
+        }
+    }
+
     /// Object-store path for a build-request blob keyed by org + BLAKE3 hash.
     /// Layout: `<prefix>build-request-blobs/<org-uuid>/<hh>/<full-hex>`.
     fn blob_path(&self, org: uuid::Uuid, hash: &[u8; 32]) -> Path {

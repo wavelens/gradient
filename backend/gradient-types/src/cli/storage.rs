@@ -50,6 +50,26 @@ pub struct StorageArgs {
     /// (default) disables the instance-wide limit; per-cache limits still apply.
     #[arg(long, env = "GRADIENT_MAX_STORAGE_GB", default_value_t = 0)]
     pub max_storage_gb: i32,
+    /// Total byte cap for the fleet-shared eval-cache blobs. The periodic
+    /// eviction sweep drops the oldest-`updated_at` rows until the surviving
+    /// total is at or under this. Defaults to 10 GiB.
+    #[arg(
+        long,
+        env = "GRADIENT_EVAL_CACHE_MAX_TOTAL_BYTES",
+        default_value_t = 10 * 1024 * 1024 * 1024
+    )]
+    pub eval_cache_max_total_bytes: u64,
+    /// Max age in days for an eval-cache blob; older blobs are evicted by the
+    /// sweep regardless of the size cap. Defaults to 30.
+    #[arg(long, env = "GRADIENT_EVAL_CACHE_MAX_AGE_DAYS", default_value_t = 30)]
+    pub eval_cache_max_age_days: u64,
+    /// Interval in seconds between eval-cache eviction sweeps. Defaults to 3600.
+    #[arg(
+        long,
+        env = "GRADIENT_EVAL_CACHE_SWEEP_INTERVAL_SECS",
+        default_value_t = 3600
+    )]
+    pub eval_cache_sweep_interval_secs: u64,
 }
 
 impl Default for StorageArgs {
@@ -65,6 +85,9 @@ impl Default for StorageArgs {
             keep_orphan_derivations_hours: 24,
             log_chunk_bytes: 262144,
             max_storage_gb: 0,
+            eval_cache_max_total_bytes: 10 * 1024 * 1024 * 1024,
+            eval_cache_max_age_days: 30,
+            eval_cache_sweep_interval_secs: 3600,
         }
     }
 }
