@@ -48,7 +48,7 @@ harmonia-utils-hash            = { workspace = true }
 harmonia-utils-signature       = { workspace = true }
 hex                   = { workspace = true }
 libc                  = { workspace = true }
-nix-bindings          = { workspace = true }
+nix-bindings          = { workspace = true, features = ["flake"] }
 reqwest               = { workspace = true }
 rkyv                  = { workspace = true }
 serde                 = { workspace = true }

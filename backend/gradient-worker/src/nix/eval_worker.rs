@@ -20,8 +20,7 @@ use serde::{Deserialize, Serialize};
 use std::io::{BufRead, Write};
 use tracing::{error, trace};
 
-use crate::nix::flake::{discover_derivations, get_derivation_path};
-use crate::nix::nix_eval::{NixEvaluator, escape_nix_str};
+use crate::nix::nix_eval::NixEvaluator;
 
 /// Request from parent → worker. One JSON object per line on the worker's stdin.
 #[derive(Debug, Serialize, Deserialize)]
@@ -38,9 +37,6 @@ pub enum EvalRequest {
         repository: String,
         attrs: Vec<String>,
     },
-    /// Query the attribute names of a single path inside a flake. Used by the
-    /// parent to fan out wildcard expansion across workers in parallel.
-    AttrNames { repository: String, path: String },
     /// Ask the worker to exit cleanly. Parent uses this on graceful shutdown.
     Shutdown,
 }
@@ -56,11 +52,6 @@ pub enum EvalResponse {
     },
     ResolveOk {
         items: Vec<ResolvedItem>,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        warnings: Vec<String>,
-    },
-    AttrNamesOk {
-        keys: Vec<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         warnings: Vec<String>,
     },
@@ -157,8 +148,9 @@ pub fn run_eval_worker() -> std::io::Result<()> {
                     )?;
                     continue;
                 };
-                let (result, warnings) =
-                    capture_warnings_during(|| discover_derivations(ev, &repository, &wildcards));
+                let (result, warnings) = capture_warnings_during(|| {
+                    ev.walker(&repository).and_then(|w| w.discover(&wildcards))
+                });
                 match result {
                     Ok(attrs) => EvalResponse::ListOk { attrs, warnings },
                     Err(e) => EvalResponse::Err {
@@ -179,56 +171,48 @@ pub fn run_eval_worker() -> std::io::Result<()> {
 
                 let mut all_warnings = Vec::new();
                 let mut items = Vec::with_capacity(attrs.len());
-                for attr in attrs {
-                    let (result, warnings) =
-                        capture_warnings_during(|| get_derivation_path(ev, &repository, &attr));
-                    all_warnings.extend(warnings);
-                    match result {
-                        Ok((drv, references)) => items.push(ResolvedItem {
-                            attr,
-                            drv_path: Some(drv),
-                            references,
-                            error: None,
-                        }),
-                        Err(e) => items.push(ResolvedItem {
-                            attr,
-                            drv_path: None,
-                            references: vec![],
-                            error: Some(format!("{:#}", e)),
-                        }),
+                let (walker, build_warnings) = capture_warnings_during(|| ev.walker(&repository));
+                all_warnings.extend(build_warnings);
+
+                match walker {
+                    Ok(walker) => {
+                        for attr in attrs {
+                            let (result, warnings) =
+                                capture_warnings_during(|| walker.resolve(&attr));
+                            all_warnings.extend(warnings);
+                            match result {
+                                Ok((drv, references)) => items.push(ResolvedItem {
+                                    attr,
+                                    drv_path: Some(drv),
+                                    references,
+                                    error: None,
+                                }),
+                                Err(e) => items.push(ResolvedItem {
+                                    attr,
+                                    drv_path: None,
+                                    references: vec![],
+                                    error: Some(format!("{:#}", e)),
+                                }),
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let msg = format!("{:#}", e);
+                        for attr in attrs {
+                            items.push(ResolvedItem {
+                                attr,
+                                drv_path: None,
+                                references: vec![],
+                                error: Some(msg.clone()),
+                            });
+                        }
                     }
                 }
+
                 all_warnings.dedup();
                 EvalResponse::ResolveOk {
                     items,
                     warnings: all_warnings,
-                }
-            }
-            EvalRequest::AttrNames { repository, path } => {
-                let Some(ev) = evaluator.as_ref() else {
-                    write_response(
-                        &mut writer,
-                        &EvalResponse::Err {
-                            message: "evaluator not initialized".to_string(),
-                        },
-                    )?;
-                    continue;
-                };
-                let expr = if path.is_empty() {
-                    format!("(builtins.getFlake \"{}\")", escape_nix_str(&repository))
-                } else {
-                    format!(
-                        "(builtins.getFlake \"{}\").{}",
-                        escape_nix_str(&repository),
-                        path
-                    )
-                };
-                let (result, warnings) = capture_warnings_during(|| ev.attr_names(&expr));
-                match result {
-                    Ok(keys) => EvalResponse::AttrNamesOk { keys, warnings },
-                    Err(e) => EvalResponse::Err {
-                        message: format!("{:#}", e),
-                    },
                 }
             }
         };
@@ -236,7 +220,6 @@ pub fn run_eval_worker() -> std::io::Result<()> {
         let kind = match &resp {
             EvalResponse::ListOk { attrs, .. } => format!("ListOk({} attrs)", attrs.len()),
             EvalResponse::ResolveOk { items, .. } => format!("ResolveOk({} items)", items.len()),
-            EvalResponse::AttrNamesOk { keys, .. } => format!("AttrNamesOk({} keys)", keys.len()),
             EvalResponse::Err { message } => format!("Err({message})"),
         };
         trace!(%kind, "eval worker sending response");
@@ -373,10 +356,6 @@ mod tests {
                 repository: "github:nixos/nixpkgs".into(),
                 attrs: vec!["packages.x86_64-linux.hello".into()],
             },
-            EvalRequest::AttrNames {
-                repository: "github:nixos/nixpkgs".into(),
-                path: "packages".into(),
-            },
             EvalRequest::Shutdown,
         ];
 
@@ -406,10 +385,6 @@ mod tests {
                     references: vec![],
                     error: None,
                 }],
-                warnings: vec![],
-            },
-            EvalResponse::AttrNamesOk {
-                keys: vec!["x86_64-linux".into()],
                 warnings: vec![],
             },
             EvalResponse::Err {
