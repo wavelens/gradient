@@ -3781,16 +3781,16 @@ dependencies = [
 
 [[package]]
 name = "nix-bindings"
-version = "0.2347.1"
-source = "git+https://github.com/NotAShelf/nix-bindings#499f3a1cd020e06d9d81741ffc66b705d3456475"
+version = "0.2347.2"
+source = "git+https://github.com/DerDennisOP/nix-bindings?branch=feat%2Foptimized-eval-capi#5a45d9f627c6560b333e9e69dc16c8c2dac842f4"
 dependencies = [
  "nix-bindings-sys",
 ]
 
 [[package]]
 name = "nix-bindings-sys"
-version = "0.2347.1"
-source = "git+https://github.com/NotAShelf/nix-bindings#499f3a1cd020e06d9d81741ffc66b705d3456475"
+version = "0.2347.2"
+source = "git+https://github.com/DerDennisOP/nix-bindings?branch=feat%2Foptimized-eval-capi#5a45d9f627c6560b333e9e69dc16c8c2dac842f4"
 dependencies = [
  "bindgen",
  "cc",

@@ -10,7 +10,7 @@
 , glibc
 , installShellFiles
 , llvmPackages
-, nixVersions
+, nixVersion
 , openssl
 , pkg-config
 , pkgs
@@ -18,7 +18,6 @@
 }:
 let
   testStore = import ../scripts/store.nix { inherit pkgs; };
-  nixVersion = nixVersions.nix_2_34;
 
   unfilteredRoot = ../../backend;
 

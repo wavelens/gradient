@@ -11,16 +11,20 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
     crane.url = "github:ipetkov/crane";
+    nix = {
+      url = "github:DerDennisOP/nix/feat/optimized-eval-capi";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, crane, ... }@inputs: flake-utils.lib.eachDefaultSystem (system: let
+  outputs = { self, nixpkgs, flake-utils, crane, nix, ... }@inputs: flake-utils.lib.eachDefaultSystem (system: let
     pkgs = import nixpkgs {
       inherit system;
       overlays = map (v: self.overlays.${v}) (builtins.attrNames self.overlays);
       config = { allowUnfree = true; };
     };
 
-    nixVersion = pkgs.nixVersions.nix_2_34;
+    nixVersion = inputs.nix.packages.${system}.default;
     craneLib = crane.mkLib pkgs;
 
     rustEnv = with pkgs.rustPackages; [
@@ -32,9 +36,9 @@
     apps = import ./nix/vms { inherit inputs system pkgs; };
     packages = rec {
       store = pkgs.callPackage ./nix/scripts/store.nix { };
-      gradient = pkgs.callPackage ./nix/packages/gradient.nix { inherit craneLib; };
+      gradient = pkgs.callPackage ./nix/packages/gradient.nix { inherit craneLib nixVersion; };
       gradient-frontend = pkgs.callPackage ./nix/packages/gradient-frontend.nix { };
-      gradient-cli = pkgs.callPackage ./nix/packages/gradient-cli.nix { inherit craneLib; };
+      gradient-cli = pkgs.callPackage ./nix/packages/gradient-cli.nix { inherit craneLib nixVersion; };
       default = gradient;
     };
 
@@ -96,6 +100,7 @@
     };
   }) // {
     overlays = {
+      nix = final: prev: { inherit (nix.packages.${final.stdenv.hostPlatform.system}) nix; };
       gradient = final: prev: { inherit (self.packages.${final.stdenv.hostPlatform.system}) gradient; };
       gradient-frontend = final: prev: { inherit (self.packages.${final.stdenv.hostPlatform.system}) gradient-frontend; };
       gradient-cli = final: prev: { inherit (self.packages.${final.stdenv.hostPlatform.system}) gradient-cli; };
