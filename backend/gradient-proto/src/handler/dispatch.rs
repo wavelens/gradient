@@ -21,6 +21,10 @@ use gradient_scheduler::Scheduler;
 
 use super::auth::{lookup_registered_peers, validate_tokens};
 use super::cache::handle_cache_query;
+use super::eval_cache::{
+    EvalCacheReceiveStore, handle_eval_cache_chunk, handle_eval_cache_pull, handle_eval_cache_push,
+    handle_eval_cache_push_done,
+};
 use super::nar::{NarUploadRecord, mark_nar_stored, record_nar_push_metric};
 use super::socket::{
     JOB_OFFER_CHUNK_SIZE, ProtoWriter, push_pending_candidates, send_credentials_for_job,
@@ -250,7 +254,12 @@ impl<'a> DispatchContext<'a> {
     /// Route a single `ClientMessage` to the appropriate handler.
     ///
     /// Returns `true` to continue the loop, `false` to break.
-    pub async fn dispatch(&mut self, msg: ClientMessage, nar: &mut NarReceiveStore) -> bool {
+    pub async fn dispatch(
+        &mut self,
+        msg: ClientMessage,
+        nar: &mut NarReceiveStore,
+        eval_cache: &mut EvalCacheReceiveStore,
+    ) -> bool {
         // Avoid Debug-printing the entire `msg` here: variants like `NarPush`
         // carry up to 64 KiB of binary chunk data which would flood the log
         // (and the test VM's serial console). Each match arm logs the
@@ -396,6 +405,44 @@ impl<'a> DispatchContext<'a> {
                     nar,
                 )
                 .await;
+                true
+            }
+            ClientMessage::EvalCachePull { job_id, fingerprint } => {
+                handle_eval_cache_pull(self.state, self.writer, job_id, fingerprint).await;
+                true
+            }
+            ClientMessage::EvalCachePush {
+                job_id,
+                fingerprint,
+                size_bytes,
+            } => {
+                handle_eval_cache_push(
+                    self.state,
+                    self.writer,
+                    eval_cache,
+                    job_id,
+                    fingerprint,
+                    size_bytes,
+                )
+                .await;
+                true
+            }
+            ClientMessage::EvalCacheChunk {
+                job_id,
+                data,
+                offset,
+                is_final,
+            } => {
+                handle_eval_cache_chunk(self.state, eval_cache, &job_id, data, offset, is_final)
+                    .await;
+                true
+            }
+            ClientMessage::EvalCachePushDone {
+                job_id: _,
+                fingerprint,
+                size_bytes,
+            } => {
+                handle_eval_cache_push_done(self.state, fingerprint, size_bytes).await;
                 true
             }
             ClientMessage::CacheQuery {
