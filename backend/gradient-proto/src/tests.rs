@@ -5,9 +5,9 @@
  */
 
 use crate::messages::{
-    BuildMetrics, BuildOutput, CachedPath, ClientMessage, FlakeInputOverride, FlakeJob,
-    FlakeSource, FlakeTask, GradientCapabilities, Job, JobCandidate, JobUpdateKind, PROTO_VERSION,
-    QueryMode, RequiredPath, ServerMessage,
+    BuildMetrics, BuildOutput, CachedPath, ClientMessage, EvalCachePullOutcome, EvalCachePushMode,
+    FlakeInputOverride, FlakeJob, FlakeSource, FlakeTask, GradientCapabilities, Job, JobCandidate,
+    JobUpdateKind, PROTO_VERSION, QueryMode, RequiredPath, ServerMessage,
 };
 use rkyv::rancor::Error as RkyvError;
 
@@ -404,6 +404,144 @@ fn nar_push_resume_roundtrip() {
         job_id: "job-1".into(),
         store_path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".into(),
         received_bytes: 8_388_608,
+    };
+    let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
+    let decoded = rkyv::from_bytes::<ServerMessage, RkyvError>(&bytes).unwrap();
+    assert_eq!(decoded, original);
+}
+
+// ── Eval-cache transfer messages (#386 L3) ───────────────────────────────────
+
+#[test]
+fn eval_cache_pull_roundtrip() {
+    let original = ClientMessage::EvalCachePull {
+        job_id: "job-1".into(),
+        fingerprint: "blake3:deadbeef".into(),
+    };
+    let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
+    let decoded = rkyv::from_bytes::<ClientMessage, RkyvError>(&bytes).unwrap();
+    assert_eq!(decoded, original);
+}
+
+#[test]
+fn eval_cache_push_roundtrip() {
+    let original = ClientMessage::EvalCachePush {
+        job_id: "job-1".into(),
+        fingerprint: "blake3:deadbeef".into(),
+        size_bytes: 1_048_576,
+    };
+    let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
+    let decoded = rkyv::from_bytes::<ClientMessage, RkyvError>(&bytes).unwrap();
+    assert_eq!(decoded, original);
+}
+
+#[test]
+fn eval_cache_push_done_roundtrip() {
+    let original = ClientMessage::EvalCachePushDone {
+        job_id: "job-1".into(),
+        fingerprint: "blake3:deadbeef".into(),
+        size_bytes: 1_048_576,
+    };
+    let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
+    let decoded = rkyv::from_bytes::<ClientMessage, RkyvError>(&bytes).unwrap();
+    assert_eq!(decoded, original);
+}
+
+#[test]
+fn eval_cache_chunk_client_roundtrip() {
+    let original = ClientMessage::EvalCacheChunk {
+        job_id: "job-1".into(),
+        data: vec![1, 2, 3, 4],
+        offset: 8_388_608,
+        is_final: true,
+    };
+    let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
+    let decoded = rkyv::from_bytes::<ClientMessage, RkyvError>(&bytes).unwrap();
+    assert_eq!(decoded, original);
+}
+
+#[test]
+fn eval_cache_pull_result_miss_roundtrip() {
+    let original = ServerMessage::EvalCachePullResult {
+        job_id: "job-1".into(),
+        outcome: EvalCachePullOutcome::Miss,
+    };
+    let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
+    let decoded = rkyv::from_bytes::<ServerMessage, RkyvError>(&bytes).unwrap();
+    assert_eq!(decoded, original);
+}
+
+#[test]
+fn eval_cache_pull_result_presigned_roundtrip() {
+    let original = ServerMessage::EvalCachePullResult {
+        job_id: "job-1".into(),
+        outcome: EvalCachePullOutcome::Presigned {
+            url: "https://s3.example.com/eval-cache/de/deadbeef.sqlite".into(),
+        },
+    };
+    let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
+    let decoded = rkyv::from_bytes::<ServerMessage, RkyvError>(&bytes).unwrap();
+    assert_eq!(decoded, original);
+}
+
+#[test]
+fn eval_cache_pull_result_inline_roundtrip() {
+    let original = ServerMessage::EvalCachePullResult {
+        job_id: "job-1".into(),
+        outcome: EvalCachePullOutcome::Inline {
+            total_bytes: 1_048_576,
+            stream_token: "evalcache-deadbeef".into(),
+        },
+    };
+    let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
+    let decoded = rkyv::from_bytes::<ServerMessage, RkyvError>(&bytes).unwrap();
+    assert_eq!(decoded, original);
+}
+
+#[test]
+fn eval_cache_chunk_server_roundtrip() {
+    let original = ServerMessage::EvalCacheChunk {
+        job_id: "job-1".into(),
+        data: vec![9, 8, 7],
+        offset: 0,
+        is_final: false,
+    };
+    let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
+    let decoded = rkyv::from_bytes::<ServerMessage, RkyvError>(&bytes).unwrap();
+    assert_eq!(decoded, original);
+}
+
+#[test]
+fn eval_cache_push_grant_skip_roundtrip() {
+    let original = ServerMessage::EvalCachePushGrant {
+        job_id: "job-1".into(),
+        mode: EvalCachePushMode::Skip,
+    };
+    let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
+    let decoded = rkyv::from_bytes::<ServerMessage, RkyvError>(&bytes).unwrap();
+    assert_eq!(decoded, original);
+}
+
+#[test]
+fn eval_cache_push_grant_presigned_roundtrip() {
+    let original = ServerMessage::EvalCachePushGrant {
+        job_id: "job-1".into(),
+        mode: EvalCachePushMode::Presigned {
+            url: "https://s3.example.com/eval-cache/de/deadbeef.sqlite?put".into(),
+        },
+    };
+    let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
+    let decoded = rkyv::from_bytes::<ServerMessage, RkyvError>(&bytes).unwrap();
+    assert_eq!(decoded, original);
+}
+
+#[test]
+fn eval_cache_push_grant_inline_roundtrip() {
+    let original = ServerMessage::EvalCachePushGrant {
+        job_id: "job-1".into(),
+        mode: EvalCachePushMode::Inline {
+            stream_token: "evalcache-deadbeef".into(),
+        },
     };
     let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
     let decoded = rkyv::from_bytes::<ServerMessage, RkyvError>(&bytes).unwrap();

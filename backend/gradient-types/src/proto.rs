@@ -189,6 +189,42 @@ pub struct CacheInfo {
     pub nar_size: u64,
 }
 
+/// Result of an eval-cache pull request (`EvalCachePull`).
+///
+/// Mirrors the NAR pull modes: the server either has no cached blob for the
+/// fingerprint (`Miss`), serves it via a presigned S3 GET URL (`Presigned` -
+/// the worker does the HTTP transfer itself), or streams the blob inline over
+/// the proto channel as `EvalCacheChunk` frames (`Inline`, local-FS fallback).
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[rkyv(derive(Debug, PartialEq))]
+pub enum EvalCachePullOutcome {
+    /// No cached eval-cache blob for this fingerprint.
+    Miss,
+    /// Presigned S3 GET URL; the worker downloads the blob directly.
+    Presigned { url: String },
+    /// The server will stream the blob inline as `EvalCacheChunk` frames.
+    /// `stream_token` guards the chunk stream like the NAR transfer token.
+    Inline { total_bytes: u64, stream_token: String },
+}
+
+/// Result of an eval-cache push grant (`EvalCachePushGrant`).
+///
+/// Mirrors the NAR push modes: the server already holds the blob (`Skip`),
+/// grants a presigned S3 PUT URL (`Presigned` - the worker uploads then sends
+/// `EvalCachePushDone`), or accepts an inline upload of `EvalCacheChunk` frames
+/// (`Inline`, local-FS fallback).
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[rkyv(derive(Debug, PartialEq))]
+pub enum EvalCachePushMode {
+    /// Server already has this fingerprint; the worker uploads nothing.
+    Skip,
+    /// Presigned S3 PUT URL; the worker uploads then sends `EvalCachePushDone`.
+    Presigned { url: String },
+    /// The worker should stream the blob inline as `EvalCacheChunk` frames.
+    /// `stream_token` guards the chunk stream like the NAR transfer token.
+    Inline { stream_token: String },
+}
+
 /// Query mode for [`CacheQuery`].
 ///
 /// Controls what the server returns in [`CacheStatus`] beyond the basic

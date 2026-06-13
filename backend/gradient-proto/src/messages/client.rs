@@ -174,6 +174,35 @@ pub enum ClientMessage {
         stream_token: String,
     },
 
+    /// Request the eval-cache SQLite blob for `fingerprint`.  The server
+    /// answers with [`super::server::ServerMessage::EvalCachePullResult`].
+    EvalCachePull { job_id: String, fingerprint: String },
+
+    /// Announce an eval-cache blob the worker wants to upload.  The server
+    /// answers with [`super::server::ServerMessage::EvalCachePushGrant`]
+    /// granting a presigned PUT, an inline stream, or `Skip`.
+    EvalCachePush {
+        job_id: String,
+        fingerprint: String,
+        size_bytes: u64,
+    },
+
+    /// One chunk of an eval-cache blob being pushed inline (local-FS fallback).
+    EvalCacheChunk {
+        job_id: String,
+        data: Vec<u8>,
+        offset: u64,
+        is_final: bool,
+    },
+
+    /// Confirms a presigned eval-cache PUT completed so the server can record
+    /// the blob for `fingerprint`.
+    EvalCachePushDone {
+        job_id: String,
+        fingerprint: String,
+        size_bytes: u64,
+    },
+
     /// Pull-based capacity signal: worker is ready to accept one job of the
     /// given kind.
     ///
@@ -262,6 +291,10 @@ impl ClientMessage {
             ClientMessage::NarRequestResume { .. } => "NarRequestResume",
             ClientMessage::NarPush { .. } => "NarPush",
             ClientMessage::NarUploaded { .. } => "NarUploaded",
+            ClientMessage::EvalCachePull { .. } => "EvalCachePull",
+            ClientMessage::EvalCachePush { .. } => "EvalCachePush",
+            ClientMessage::EvalCacheChunk { .. } => "EvalCacheChunk",
+            ClientMessage::EvalCachePushDone { .. } => "EvalCachePushDone",
             ClientMessage::RequestJob { .. } => "RequestJob",
             ClientMessage::RequestAllCandidates => "RequestAllCandidates",
             ClientMessage::CacheQuery { .. } => "CacheQuery",

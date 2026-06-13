@@ -5,7 +5,8 @@
  */
 
 use gradient_types::proto::{
-    CachedPath, CredentialKind, GradientCapabilities, Job, JobCandidate,
+    CachedPath, CredentialKind, EvalCachePullOutcome, EvalCachePushMode, GradientCapabilities, Job,
+    JobCandidate,
 };
 use rkyv::{Archive, Deserialize, Serialize};
 
@@ -142,6 +143,30 @@ pub enum ServerMessage {
         job_id: String,
         store_path: String,
         received_bytes: u64,
+    },
+
+    /// Result of a [`super::client::ClientMessage::EvalCachePull`].  The
+    /// `outcome` carries a miss, a presigned GET URL, or an inline-stream
+    /// header; inline blobs then arrive as [`ServerMessage::EvalCacheChunk`].
+    EvalCachePullResult {
+        job_id: String,
+        outcome: EvalCachePullOutcome,
+    },
+
+    /// One chunk of an eval-cache blob being streamed inline to the worker
+    /// (local-FS fallback for [`EvalCachePullOutcome::Inline`]).
+    EvalCacheChunk {
+        job_id: String,
+        data: Vec<u8>,
+        offset: u64,
+        is_final: bool,
+    },
+
+    /// Response to a [`super::client::ClientMessage::EvalCachePush`] granting
+    /// a presigned PUT, an inline upload, or `Skip` when the blob is known.
+    EvalCachePushGrant {
+        job_id: String,
+        mode: EvalCachePushMode,
     },
 
     /// Presigned S3 upload URL for a build output.  Worker uploads directly
