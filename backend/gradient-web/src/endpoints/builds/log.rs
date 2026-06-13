@@ -28,8 +28,8 @@ pub async fn get_build_log(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(build_id): Path<BuildId>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let _ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
-    let log_key = latest_attempt_log_id(&state.web_db, build_id).await?;
+    let ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
+    let log_key = super::effective_log_id(&state, &ctx.build).await;
     let log = state.log_storage.read(log_key).await.unwrap_or_default();
 
     Ok(ok_json(log))
