@@ -284,6 +284,9 @@ Set `GRADIENT_WORKER_PEERS_FILE` (or the NixOS `peersFile` option) to this path.
 | `GET` | `/builds/{id}/downloads` | List artefacts |
 | `GET` | `/builds/{id}/download/{filename}` | Download artefact |
 
+The `/log*` endpoints fall back to the most recent prior build of the same
+derivation for a `Substituted` build (which has no log of its own).
+
 ### Caches
 
 | Method | Path | Description |

@@ -32,9 +32,11 @@ use crate::access::is_org_member;
 use crate::authorization::ApiKeyContext;
 use crate::error::{WebError, WebResult};
 use crate::helpers::OptionExt;
+use gradient_db::latest_attempt_log_id;
+use gradient_entity::build::BuildStatus;
 use gradient_types::*;
 use gradient_core::ServerState;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use std::sync::Arc;
 
 /// Resolved access context for a build.
@@ -176,4 +178,49 @@ async fn follower_orgs_accessible(
         }
     }
     Ok(false)
+}
+
+/// The build whose stored log should be served for `build`.
+///
+/// A `Substituted` (or cache-completed) build produces no log of its own, so
+/// fall back to the most recent prior build of the same derivation that has one
+/// - the build that originally produced those outputs.
+pub(super) async fn effective_log_id(state: &Arc<ServerState>, build: &MBuild) -> BuildId {
+    let own = latest_attempt_log_id(&state.web_db, build.id)
+        .await
+        .unwrap_or(build.id);
+    if log_has_content(state, own).await {
+        return own;
+    }
+    if matches!(build.status, BuildStatus::Substituted | BuildStatus::Completed) {
+        let siblings = EBuild::find()
+            .filter(CBuild::Derivation.eq(build.derivation))
+            .filter(CBuild::Id.ne(build.id))
+            .filter(CBuild::Status.is_in([BuildStatus::Completed, BuildStatus::Substituted]))
+            .order_by_desc(CBuild::CreatedAt)
+            .limit(8)
+            .all(&state.web_db)
+            .await
+            .unwrap_or_default();
+        for sib in siblings {
+            let key = latest_attempt_log_id(&state.web_db, sib.id)
+                .await
+                .unwrap_or(sib.id);
+            if log_has_content(state, key).await {
+                return key;
+            }
+        }
+    }
+    own
+}
+
+/// A log exists either as finalized zstd chunks or an in-progress inline blob.
+async fn log_has_content(state: &Arc<ServerState>, log_key: BuildId) -> bool {
+    let has_chunk = gradient_entity::build_log_chunk::Entity::find()
+        .filter(gradient_entity::build_log_chunk::Column::Build.eq(log_key))
+        .one(&state.web_db)
+        .await
+        .map(|r| r.is_some())
+        .unwrap_or(false);
+    has_chunk || matches!(state.log_storage.read(log_key).await, Ok(b) if !b.is_empty())
 }

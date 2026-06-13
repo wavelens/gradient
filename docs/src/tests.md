@@ -3921,3 +3921,11 @@ evaluation pages stayed frozen until the eval phase finished.
 - `backend/gradient-scheduler/src/eval.rs::handle_eval_result` emits
   `BoardEvent::EvaluationProgress` after each batch of builds/entry-points is
   persisted, so the silent insert phase no longer leaves the UI frozen.
+
+## Substituted-build log fallback
+
+`backend/gradient-web/src/endpoints/builds/mod.rs::effective_log_id` resolves the
+build whose stored log the `/builds/{id}/log*` endpoints serve: a `Substituted`
+build has no log of its own, so it falls back to the most recent prior build of
+the same derivation that does (chunked or inline). Read-side, DB-dependent;
+covered end-to-end by CI, no local DB unit harness.

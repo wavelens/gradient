@@ -3275,6 +3275,10 @@ paths:
       description: |-
         Returns the complete build log as a single string. Empty string if no log is available yet.
 
+        A `Substituted` build (its outputs came from a cache) has no log of its
+        own, so the log of the most recent prior build of the same derivation is
+        returned instead. The chunk/lines endpoints fall back the same way.
+
         **Access:** Accessible to members of the build's organization. Additionally, when this build is the leader of a follower build in a cache-connected organization, members of that follower organization are granted read access. See `docs/src/scheduler.md#cross-cache-deduplication`.
       operationId: getBuildLog
       responses:
