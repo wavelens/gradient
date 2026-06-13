@@ -381,12 +381,17 @@ mod tests {
 
     #[test]
     fn discover_star_non_last_stops_at_opaque() {
+        // `*` iterates an opaque child (sysA) and a normal child (sysB); the
+        // opaque one must not be descended, so only sysB's leaf is emitted.
         let root = StubNode::set(vec![(
             "packages",
-            StubNode::opaque(vec![("hello", StubNode::drv())]),
+            StubNode::set(vec![
+                ("sysA", StubNode::opaque(vec![("hello", StubNode::drv())])),
+                ("sysB", StubNode::set(vec![("hello", StubNode::drv())])),
+            ]),
         )]);
         let got = discover(&&root, &[segs(&["packages", "*", "hello"])], &[]).unwrap();
-        assert_eq!(got, Vec::<String>::new());
+        assert_eq!(got, vec!["packages.sysB.hello"]);
     }
 
     #[test]
