@@ -7,7 +7,7 @@
 use clap::Parser;
 use gradient_types::proto::GradientCapabilities;
 
-/// Default number of warm fork children: host parallelism capped at 8.
+/// Default eval-pool size: host parallelism capped at 8.
 fn default_fork_workers() -> usize {
     std::thread::available_parallelism()
         .map(|n| n.get().min(8))
@@ -82,11 +82,12 @@ pub struct WorkerConfig {
     #[arg(long, env = "GRADIENT_WORKER_EVAL_WORKERS", default_value_t = 1)]
     pub eval_workers: usize,
 
-    /// Number of warm fork children the eval subprocess runs in parallel.
+    /// Number of parallel eval subprocesses in the pool (the eval concurrency).
     #[arg(long, env = "GRADIENT_EVAL_FORK_WORKERS", default_value_t = default_fork_workers())]
     pub eval_fork_workers: usize,
 
-    /// Kill + re-fork an eval child once its RSS exceeds this many bytes.
+    /// Recycle an eval subprocess (parent-side) once its RSS exceeds this many
+    /// bytes, so the next acquire spawns a fresh one.
     #[arg(long, env = "GRADIENT_MAX_EVAL_RSS", default_value_t = 2 * 1024 * 1024 * 1024)]
     pub max_eval_rss: u64,
 

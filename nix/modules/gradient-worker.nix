@@ -214,13 +214,13 @@ in {
       };
 
       evalForkWorkers = lib.mkOption {
-        description = "Number of warm fork children the eval subprocess runs in parallel.";
+        description = "Number of parallel eval subprocesses in the pool (the eval concurrency).";
         type = lib.types.ints.positive;
         default = 4;
       };
 
       maxEvalRss = lib.mkOption {
-        description = "Kill + re-fork an eval child once its RSS exceeds this many bytes.";
+        description = "Recycle an eval subprocess (parent-side) once its RSS exceeds this many bytes.";
         type = lib.types.ints.positive;
         default = 2147483648;
       };
