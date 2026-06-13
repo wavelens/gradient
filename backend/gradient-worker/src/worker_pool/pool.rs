@@ -36,11 +36,13 @@ pub struct EvalWorker {
 
 impl EvalWorker {
     /// Spawn a new worker by re-execing the current binary with `--eval-worker`.
-    pub(super) async fn spawn() -> Result<Self> {
+    pub(super) async fn spawn(fork_workers: usize, max_eval_rss: u64) -> Result<Self> {
         let exe = std::env::current_exe().context("locating current executable")?;
         trace!(exe = %exe.display(), "spawning eval worker subprocess");
         let mut command = Command::new(&exe);
         command.arg("--eval-worker");
+        command.env("GRADIENT_EVAL_FORK_WORKERS", fork_workers.to_string());
+        command.env("GRADIENT_MAX_EVAL_RSS", max_eval_rss.to_string());
 
         // Match the Nix CLI: bump the subprocess's stack to 64 MiB so libnix's
         // libstdc++ std::regex DFS executor (used by `builtins.match` /
@@ -254,13 +256,12 @@ pub struct EvalWorkerPool {
     idle: Arc<Mutex<Vec<EvalWorker>>>,
     semaphore: Arc<Semaphore>,
     max: usize,
-    /// Recycle an `EvalWorker` subprocess after it has served this many
-    /// `list` / `resolve` calls. Nix's Boehm GC never shrinks the
-    /// process heap, so long-lived workers grow monotonically; killing
-    /// and respawning the subprocess is the only reliable way to
-    /// release evaluation memory back to the OS. `0` disables
-    /// recycling.
-    max_evaluations_per_worker: usize,
+    /// Number of warm fork children each eval subprocess runs in parallel,
+    /// forwarded to the subprocess via `GRADIENT_EVAL_FORK_WORKERS`.
+    fork_workers: usize,
+    /// RSS ceiling (bytes) above which a fork child is recycled, forwarded
+    /// to the subprocess via `GRADIENT_MAX_EVAL_RSS`.
+    max_eval_rss: u64,
     /// Set by [`EvalWorkerPool::shutdown`]. Causes `PooledEvalWorker::drop`
     /// to gracefully shut its worker down instead of returning it to the
     /// (now-closed) idle vec.
@@ -268,13 +269,14 @@ pub struct EvalWorkerPool {
 }
 
 impl EvalWorkerPool {
-    pub fn new(max: usize, max_evaluations_per_worker: usize) -> Self {
+    pub fn new(max: usize, fork_workers: usize, max_eval_rss: u64) -> Self {
         let max = max.max(1);
         Self {
             idle: Arc::new(Mutex::new(Vec::new())),
             semaphore: Arc::new(Semaphore::new(max)),
             max,
-            max_evaluations_per_worker,
+            fork_workers,
+            max_eval_rss,
             shutting_down: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -294,7 +296,7 @@ impl EvalWorkerPool {
         let worker = self.idle.lock().unwrap().pop();
         let worker = match worker {
             Some(w) => w,
-            None => EvalWorker::spawn()
+            None => EvalWorker::spawn(self.fork_workers, self.max_eval_rss)
                 .await
                 .context("spawning fresh eval worker")?,
         };
@@ -303,7 +305,7 @@ impl EvalWorkerPool {
             worker: Some(worker),
             idle: Arc::clone(&self.idle),
             healthy: true,
-            max_evaluations_per_worker: self.max_evaluations_per_worker,
+            recycle_after: 0,
             shutting_down: Arc::clone(&self.shutting_down),
             _permit: permit,
         })
@@ -369,7 +371,7 @@ pub struct PooledEvalWorker {
     worker: Option<EvalWorker>,
     idle: Arc<Mutex<Vec<EvalWorker>>>,
     healthy: bool,
-    max_evaluations_per_worker: usize,
+    recycle_after: usize,
     shutting_down: Arc<AtomicBool>,
     _permit: OwnedSemaphorePermit,
 }
@@ -415,10 +417,9 @@ impl Drop for PooledEvalWorker {
                 return;
             }
 
-            // Recycle after the configured eval count to reclaim
-            // Boehm-GC memory held by the subprocess.
-            let overused = self.max_evaluations_per_worker > 0
-                && worker.evaluations_served >= self.max_evaluations_per_worker;
+            // recycle disabled; RSS-based reclamation lands in a later task
+            let overused = self.recycle_after > 0
+                && worker.evaluations_served >= self.recycle_after;
             if overused {
                 debug!(
                     evaluations = worker.evaluations_served,
@@ -467,7 +468,7 @@ mod tests {
 
     #[tokio::test]
     async fn shutdown_with_no_idle_workers_returns_immediately() {
-        let pool = EvalWorkerPool::new(2, 0);
+        let pool = EvalWorkerPool::new(2, 2, 2 * 1024 * 1024 * 1024);
         tokio::time::timeout(Duration::from_secs(1), pool.shutdown())
             .await
             .expect("shutdown should not hang on empty pool");
@@ -477,7 +478,7 @@ mod tests {
 
     #[tokio::test]
     async fn shutdown_drains_idle_workers_gracefully() {
-        let pool = EvalWorkerPool::new(2, 0);
+        let pool = EvalWorkerPool::new(2, 2, 2 * 1024 * 1024 * 1024);
         pool.push_for_test(fake_worker());
         pool.push_for_test(fake_worker());
         assert_eq!(pool.idle_count(), 2);
@@ -492,7 +493,7 @@ mod tests {
 
     #[tokio::test]
     async fn acquire_after_shutdown_errors() {
-        let pool = EvalWorkerPool::new(2, 0);
+        let pool = EvalWorkerPool::new(2, 2, 2 * 1024 * 1024 * 1024);
         pool.shutdown().await;
         match pool.acquire().await {
             Ok(_) => panic!("acquire after shutdown must fail"),
@@ -505,7 +506,7 @@ mod tests {
 
     #[tokio::test]
     async fn inflight_worker_shuts_down_gracefully_on_pool_shutdown() {
-        let pool = Arc::new(EvalWorkerPool::new(1, 0));
+        let pool = Arc::new(EvalWorkerPool::new(1, 2, 2 * 1024 * 1024 * 1024));
         pool.push_for_test(fake_worker());
 
         let pooled = pool.acquire().await.expect("acquire");

@@ -213,13 +213,16 @@ in {
         default = 8;
       };
 
-      maxEvaluationsPerWorker = lib.mkOption {
-        description = ''
-          Recycle an eval-worker subprocess after it has served this many
-          list/resolve calls. Set to 0 to disable recycling.
-        '';
-        type = lib.types.ints.unsigned;
-        default = 1;
+      evalForkWorkers = lib.mkOption {
+        description = "Number of warm fork children the eval subprocess runs in parallel.";
+        type = lib.types.ints.positive;
+        default = 4;
+      };
+
+      maxEvalRss = lib.mkOption {
+        description = "Kill + re-fork an eval child once its RSS exceeds this many bytes.";
+        type = lib.types.ints.positive;
+        default = 2147483648;
       };
 
       maxProtoConnections = lib.mkOption {
@@ -433,7 +436,8 @@ in {
           GRADIENT_MAX_NIXDAEMON_CONNECTIONS          = toString cfg.settings.maxNixdaemonConnections;
           GRADIENT_NAR_PARTIAL_TTL_SECS               = toString cfg.settings.narPartialTtlSecs;
           GRADIENT_WORKER_EVAL_WORKERS                = toString cfg.settings.evalWorkers;
-          GRADIENT_MAX_EVALUATIONS_PER_WORKER         = toString cfg.settings.maxEvaluationsPerWorker;
+          GRADIENT_EVAL_FORK_WORKERS                  = toString cfg.settings.evalForkWorkers;
+          GRADIENT_MAX_EVAL_RSS                       = toString cfg.settings.maxEvalRss;
           GRADIENT_MAX_PROTO_CONNECTIONS              = toString cfg.settings.maxProtoConnections;
           GRADIENT_WORKER_GCROOTS_DIR                 = cfg.settings.gcrootsDir;
           GRADIENT_WORKER_BUILD_METRICS               = lib.boolToString cfg.settings.buildMetrics;
