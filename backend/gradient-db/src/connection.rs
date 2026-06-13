@@ -62,6 +62,32 @@ fn make_connect_options(
     Ok(opt)
 }
 
+const MIN_SERVER_VERSION_NUM: i32 = 180_000;
+
+fn require_supported_pg_version(server_version_num: i32) -> Result<()> {
+    if server_version_num < MIN_SERVER_VERSION_NUM {
+        anyhow::bail!(
+            "Gradient requires PostgreSQL 18 or newer (uuidv7); connected server is {}.{}",
+            server_version_num / 10_000,
+            server_version_num % 10_000,
+        );
+    }
+
+    Ok(())
+}
+
+async fn server_version_num(db: &DatabaseConnection) -> Result<i32> {
+    db.query_one(Statement::from_string(
+        DatabaseBackend::Postgres,
+        "SELECT current_setting('server_version_num')::int4 AS v",
+    ))
+    .await
+    .context("Failed to query PostgreSQL server version")?
+    .context("PostgreSQL returned no server_version_num")?
+    .try_get::<i32>("", "v")
+    .context("Failed to read server_version_num")
+}
+
 pub async fn connect_db(cli: &Cli) -> Result<DatabaseConnection> {
     let db = Database::connect(make_connect_options(
         cli,
@@ -70,6 +96,7 @@ pub async fn connect_db(cli: &Cli) -> Result<DatabaseConnection> {
     )?)
     .await
     .context("Failed to connect to database")?;
+    require_supported_pg_version(server_version_num(&db).await?)?;
     Migrator::install(&db)
         .await
         .context("Failed to install seaql_migrations table")?;
@@ -433,6 +460,29 @@ pub async fn get_any_cache_by_name(ctx: &DbContext, name: String) -> Result<Opti
         .one(&ctx.web_db)
         .await
         .context("Failed to query cache")
+}
+
+#[cfg(test)]
+mod pg_version_tests {
+    use super::require_supported_pg_version;
+
+    #[test]
+    fn rejects_postgres_below_18() {
+        let err = require_supported_pg_version(170_004).unwrap_err().to_string();
+        assert!(err.contains("PostgreSQL 18"), "{err}");
+        assert!(err.contains("17.4"), "{err}");
+    }
+
+    #[test]
+    fn rejects_one_below_the_minimum() {
+        assert!(require_supported_pg_version(179_999).is_err());
+    }
+
+    #[test]
+    fn accepts_postgres_18_and_newer() {
+        assert!(require_supported_pg_version(180_000).is_ok());
+        assert!(require_supported_pg_version(190_002).is_ok());
+    }
 }
 
 #[cfg(test)]

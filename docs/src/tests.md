@@ -2,6 +2,14 @@
 
 This page tracks notable tests added to Gradient and where they live.
 
+## PostgreSQL minimum-version guard (#387)
+
+`connect_db` reads `server_version_num` at startup and aborts before running
+migrations when the server is older than PostgreSQL 18, which the metric/stats
+rollups require (`uuidv7()`). `backend/gradient-db/src/connection.rs::pg_version_tests`
+covers the pure decision: `170_004`/`179_999` are rejected (with a `17.4`-style
+detected-version message) and `180_000`+ are accepted.
+
 ## OIDC - CSRF cookie, ID-token verification, identity binding
 
 Tests in `backend/web/src/authorization/oidc.rs` cover the security
