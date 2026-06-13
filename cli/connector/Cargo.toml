@@ -14,7 +14,7 @@ path = "src/lib.rs"
 bytes = "1"
 futures = "0.3"
 reqwest = { version = "0.13", features = ["json", "multipart", "query"] }
-reqwest-streams = { version = "0.16", features=["json"] }
+reqwest-streams = { version = "0.17", features=["json"] }
 rustls = { version = "0.23", default-features = false, features = ["std", "aws-lc-rs", "tls12"] }
 rustls-native-certs = "0.8"
 serde = { version = "1.0", features = ["derive"] }

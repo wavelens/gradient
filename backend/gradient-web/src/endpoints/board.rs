@@ -729,6 +729,7 @@ fn mask_event(ev: &BoardEvent, scope: &MetricsScope) -> Option<String> {
         // Resource-scoped events are served by the per-resource /live channels.
         BoardEvent::EvaluationStatusChanged { .. }
         | BoardEvent::BuildStatusChanged { .. }
+        | BoardEvent::EvaluationProgress { .. }
         | BoardEvent::CacheChanged => false,
     };
 

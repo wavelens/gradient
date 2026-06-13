@@ -98,6 +98,10 @@ fn project_frame(ev: &BoardEvent, project_id: Uuid, known: &mut HashSet<Uuid>) -
             project: Some(p),
             evaluation_id,
             ..
+        }
+        | BoardEvent::EvaluationProgress {
+            project: Some(p),
+            evaluation_id,
         } if *p == project_id => {
             known.insert(*evaluation_id);
             frame(ev)
@@ -143,6 +147,7 @@ fn eval_frame(ev: &BoardEvent, eval_id: Uuid) -> Option<String> {
     match ev {
         BoardEvent::EvaluationStatusChanged { evaluation_id, .. }
         | BoardEvent::BuildStatusChanged { evaluation_id, .. }
+        | BoardEvent::EvaluationProgress { evaluation_id, .. }
             if *evaluation_id == eval_id =>
         {
             frame(ev)
@@ -181,6 +186,12 @@ mod tests {
             status: 2,
         }
     }
+    fn progress(eval: Uuid, project: Option<Uuid>) -> BoardEvent {
+        BoardEvent::EvaluationProgress {
+            project,
+            evaluation_id: eval,
+        }
+    }
 
     #[test]
     fn eval_channel_matches_only_its_evaluation() {
@@ -188,6 +199,8 @@ mod tests {
         let other = Uuid::from_u128(2);
         assert!(eval_frame(&eval_changed(me, None), me).is_some());
         assert!(eval_frame(&build_changed(me), me).is_some());
+        assert!(eval_frame(&progress(me, None), me).is_some());
+        assert!(eval_frame(&progress(other, None), me).is_none());
         assert!(eval_frame(&build_changed(other), me).is_none());
         assert!(eval_frame(&BoardEvent::CacheChanged, me).is_none());
     }
@@ -215,6 +228,20 @@ mod tests {
         let eval = Uuid::from_u128(8);
         let mut known = HashSet::from([eval]);
         assert!(project_frame(&build_changed(eval), project, &mut known).is_some());
+    }
+
+    #[test]
+    fn project_channel_forwards_progress_and_learns_its_eval() {
+        let project = Uuid::from_u128(7);
+        let eval = Uuid::from_u128(8);
+        let mut known = HashSet::new();
+
+        // A progress ping for our project is forwarded and remembers the eval,
+        // so subsequent build events for it flow even before any status change.
+        assert!(project_frame(&progress(eval, Some(project)), project, &mut known).is_some());
+        assert!(project_frame(&build_changed(eval), project, &mut known).is_some());
+        // Another project's progress is ignored.
+        assert!(project_frame(&progress(eval, Some(Uuid::from_u128(5))), project, &mut HashSet::new()).is_none());
     }
 
     #[test]

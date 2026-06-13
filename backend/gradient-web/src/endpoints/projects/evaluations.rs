@@ -26,7 +26,10 @@ use gradient_storage::nar_extract::{ExtractError, Extracted, extract_path_from_n
 use gradient_types::input::vec_to_hex;
 use gradient_types::*;
 use gradient_core::ServerState;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
+use sea_orm::{
+    ColumnTrait, DbBackend, EntityTrait, FromQueryResult, QueryFilter, QueryOrder, QuerySelect,
+    Statement,
+};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -495,19 +498,24 @@ impl EntryPointRelatedData {
 
         let build_time_ms: HashMap<BuildId, Option<i64>> = {
             let ids: Vec<BuildId> = entry_points.iter().map(|ep| ep.build).collect();
+            // Latest attempt per build via DISTINCT ON, so the list never loads
+            // every historical attempt just to keep the newest one.
             let attempts = gradient_db::fetch_in_chunks(&ids, |chunk| async move {
-                EBuildAttempt::find()
-                    .filter(CBuildAttempt::Build.is_in(chunk))
-                    .order_by_desc(CBuildAttempt::CreatedAt)
+                let in_list = chunk
+                    .iter()
+                    .map(|id| format!("'{}'", id.into_inner()))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let sql = format!(
+                    "SELECT DISTINCT ON (build) * FROM build_attempt \
+                     WHERE build IN ({in_list}) ORDER BY build, created_at DESC"
+                );
+                MBuildAttempt::find_by_statement(Statement::from_string(DbBackend::Postgres, sql))
                     .all(db)
                     .await
             })
             .await?;
-            let mut latest: HashMap<BuildId, MBuildAttempt> = HashMap::new();
-            for a in attempts {
-                latest.entry(a.build).or_insert(a);
-            }
-            latest.into_iter().map(|(b, a)| (b, a.duration_ms())).collect()
+            attempts.into_iter().map(|a| (a.build, a.duration_ms())).collect()
         };
 
         let seeds: Vec<(EntryPointId, uuid::Uuid)> = entry_points

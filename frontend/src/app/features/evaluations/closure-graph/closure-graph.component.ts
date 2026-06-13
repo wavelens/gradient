@@ -8,7 +8,7 @@ import {
   Component, OnInit, OnDestroy, inject, signal, computed,
   ViewChild, ElementRef, NgZone, ChangeDetectorRef,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { CommonModule, Location } from '@angular/common';
 import { ActivatedRoute, Router } from '@angular/router';
 import { ButtonModule } from 'primeng/button';
 import { EvaluationsService, ClosureGraph } from '@core/services/evaluations.service';
@@ -35,6 +35,7 @@ type LaidLink = { source: LaidNode; target: LaidNode; width?: number; value: num
 export class ClosureGraphComponent implements OnInit, OnDestroy {
   private route = inject(ActivatedRoute);
   private router = inject(Router);
+  private location = inject(Location);
   private evalService = inject(EvaluationsService);
   private zone = inject(NgZone);
   private cdr = inject(ChangeDetectorRef);
@@ -283,6 +284,12 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
   }
 
   goBack(): void {
-    this.router.navigate(['/organization', this.orgName]);
+    // Return to wherever the user came from; fall back to the org overview when
+    // the closure page was opened directly (no in-app history to pop).
+    if (history.length > 1) {
+      this.location.back();
+    } else {
+      this.router.navigate(['/organization', this.orgName]);
+    }
   }
 }

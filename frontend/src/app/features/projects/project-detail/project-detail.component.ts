@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, OnDestroy, computed, inject, signal } from '@angular/core';
+import { Component, OnInit, OnDestroy, ElementRef, HostListener, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { interval, Subscription } from 'rxjs';
@@ -43,6 +43,7 @@ import { SegmentedBarComponent } from './segmented-bar/segmented-bar.component';
 export class ProjectDetailComponent implements OnInit, OnDestroy {
   private route = inject(ActivatedRoute);
   private router = inject(Router);
+  private host = inject(ElementRef);
   protected authService = inject(AuthService);
   private orgsService = inject(OrganizationsService);
   private projectsService = inject(ProjectsService);
@@ -67,6 +68,14 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
 
   private liveSub?: Subscription;
   private tickSubscription?: Subscription;
+
+  // Content signatures + a throttle so a running evaluation's rapid live pings
+  // don't re-render the cards or re-run the expensive entry-point query.
+  private projectSig = '';
+  private entryPointsEvalId?: string;
+  private entryPointsSig = '';
+  private lastEntryPointsFetch = 0;
+  private readonly ENTRY_POINTS_LIVE_INTERVAL_MS = 4000;
 
   evaluations = computed(() => this.project()?.last_evaluations ?? []);
   selected = computed<EvaluationSummary | null>(() => {
@@ -99,11 +108,15 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
     this.tickSubscription?.unsubscribe();
   }
 
-  loadProjectData(showLoading = true): void {
+  loadProjectData(showLoading = true, live = false): void {
     if (showLoading) this.loading.set(true);
     this.projectsService.getProject(this.orgName, this.projectName).subscribe({
       next: (project) => {
-        this.project.set(project);
+        const sig = this.projectSignature(project);
+        if (sig !== this.projectSig) {
+          this.projectSig = sig;
+          this.project.set(project);
+        }
         if (showLoading) this.loading.set(false);
         if (this.starting() && project.last_evaluations.some(e => this.isRunning(e.status))) {
           this.starting.set(false);
@@ -111,13 +124,31 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
         if (!this.selectedId() && project.last_evaluations.length) {
           this.selectedId.set(project.last_evaluations[0].id);
         }
-        this.loadEntryPoints(this.selected()?.id);
+        // The entry-point query (dep-closure CTE) is expensive; on live pings
+        // throttle it so a running evaluation's rapid status stream doesn't
+        // hammer the backend. The cheap summary above keeps headline counts live.
+        if (!live || Date.now() - this.lastEntryPointsFetch >= this.ENTRY_POINTS_LIVE_INTERVAL_MS) {
+          this.loadEntryPoints(this.selected()?.id);
+        }
       },
       error: (error) => {
         console.error('Failed to load project:', error);
         if (showLoading) this.loading.set(false);
       },
     });
+  }
+
+  /// Fields whose change should re-render the header / eval strip / panel.
+  private projectSignature(p: ProjectDetail): string {
+    const evals = (p.last_evaluations ?? [])
+      .map(e => `${e.id}:${e.status}:${e.errors}:${e.warnings}:${e.updated_at}:${JSON.stringify(e.builds)}`)
+      .join('|');
+    return [p.active, p.can_edit, p.can_trigger, p.display_name, p.description, p.repository,
+      p.wildcard, p.last_check_at, JSON.stringify(p.queue), evals].join('§');
+  }
+
+  truncate(value: string, max = 42): string {
+    return value.length > max ? value.slice(0, max) + '…' : value;
   }
 
   select(evaluation: EvaluationSummary): void {
@@ -133,11 +164,24 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   }
 
   private loadEntryPoints(evaluationId?: string): void {
-    if (!evaluationId) { this.entryPoints.set([]); return; }
+    if (!evaluationId) {
+      this.entryPoints.set([]);
+      this.entryPointsEvalId = undefined;
+      this.entryPointsSig = '';
+      return;
+    }
+    this.lastEntryPointsFetch = Date.now();
     this.projectsService.getEntryPoints(this.orgName, this.projectName, evaluationId).subscribe({
-      next: (eps) => this.entryPoints.set(
-        [...eps].sort((a, b) => this.getDerivationName(a.derivation_path).localeCompare(this.getDerivationName(b.derivation_path))),
-      ),
+      next: (eps) => {
+        const sorted = [...eps].sort((a, b) =>
+          this.getDerivationName(a.derivation_path).localeCompare(this.getDerivationName(b.derivation_path)));
+        // Skip the re-render (and its enter animation) when nothing changed.
+        const sig = sorted.map(e => `${e.id}:${e.build_status}:${e.build_time_ms}:${e.has_artefacts}:${JSON.stringify(e.deps)}`).join('|');
+        if (evaluationId === this.entryPointsEvalId && sig === this.entryPointsSig) return;
+        this.entryPointsEvalId = evaluationId;
+        this.entryPointsSig = sig;
+        this.entryPoints.set(sorted);
+      },
       error: (error) => console.error('Failed to load entry points:', error),
     });
   }
@@ -182,7 +226,26 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
     this.liveSub = this.live
       .connect(`/projects/${this.orgName}/${this.projectName}/live`)
       .pipe(auditTime(500))
-      .subscribe(() => this.loadProjectData(false));
+      .subscribe(() => this.loadProjectData(false, true));
+  }
+
+  /// Left/right arrows step through the evaluation strip.
+  @HostListener('document:keydown', ['$event'])
+  onKeydown(e: KeyboardEvent): void {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    const target = e.target as HTMLElement | null;
+    if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+    const list = this.evaluations();
+    if (!list.length) return;
+    const cur = this.selected();
+    const idx = cur ? list.findIndex(x => x.id === cur.id) : 0;
+    const next = e.key === 'ArrowLeft' ? idx - 1 : idx + 1;
+    if (next < 0 || next >= list.length) return;
+    e.preventDefault();
+    this.select(list[next]);
+    requestAnimationFrame(() =>
+      this.host.nativeElement.querySelector('.eval-card.selected')
+        ?.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: 'smooth' }));
   }
 
   isRunning(status: EvaluationStatus): boolean { return isRunningEvaluationStatus(status); }

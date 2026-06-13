@@ -769,6 +769,15 @@ pub async fn handle_eval_result(
         tracing::warn!(error = %e, "failed to dispatch build.substituted events");
     }
 
+    // Builds and entry-points are inserted directly (no status transition), so
+    // the live channels would otherwise stay silent for the whole evaluation
+    // phase. Ping subscribers so the project/eval pages refetch and grow their
+    // build totals as each batch lands.
+    let _ = state.board_events.send(BoardEvent::EvaluationProgress {
+        project: job.project_id.map(|p| p.into_inner()),
+        evaluation_id: evaluation_id.into_inner(),
+    });
+
     debug!(
         %evaluation_id,
         new_derivations = derivations.len(),
