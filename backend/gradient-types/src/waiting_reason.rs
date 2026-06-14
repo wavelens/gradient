@@ -10,9 +10,13 @@
 //! trigger pipeline, returned by `GET /evals/{evaluation}`, rendered by the
 //! frontend's waiting panel.
 //!
-//! Three reasons:
+//! Reasons:
 //! - `Workers` - no connected worker can satisfy the pending builds' arch /
-//!   required-feature combo (legacy reason; persisted under JSON `kind=workers`).
+//!   required-feature combo (build phase; persisted under JSON `kind=workers`).
+//! - `EvalWorkers` - the evaluation is still in a pre-build phase (`Fetching`
+//!   needs a fetch-capable worker; `Queued`/`EvaluatingFlake`/
+//!   `EvaluatingDerivation` need an eval-capable worker) and no connected
+//!   worker provides that capability.
 //! - `Approval` - pull-request evaluation from a contributor who is not a
 //!   forge writer on the repo, gated until a maintainer approves.
 //! - `NoCache` - the project's organisation has no active cache configured,
@@ -22,6 +26,16 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Pre-build capability a stalled evaluation is waiting for a worker to provide.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EvalCapability {
+    /// `Fetching` evaluations need a worker advertising the `fetch` capability.
+    Fetch,
+    /// `Queued`/`EvaluatingFlake`/`EvaluatingDerivation` need an `eval` worker.
+    Eval,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WaitingReason {
@@ -29,6 +43,13 @@ pub enum WaitingReason {
         unmet: Vec<UnmetRequirement>,
         connected_workers: u32,
         available_architectures: Vec<String>,
+    },
+    /// Pre-build stall: no connected worker provides `capability`.
+    /// `connected_workers` is the total connected pool size (may be > 0 when
+    /// only build-only workers are online and an eval/fetch worker is missing).
+    EvalWorkers {
+        capability: EvalCapability,
+        connected_workers: u32,
     },
     Approval {
         pr_number: u64,
@@ -87,6 +108,13 @@ impl WaitingReason {
             pr_author: pr_author.into(),
         }
     }
+
+    pub fn eval_workers(capability: EvalCapability, connected_workers: u32) -> Self {
+        Self::EvalWorkers {
+            capability,
+            connected_workers,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -133,6 +161,18 @@ mod tests {
         let v = r.to_json();
         assert_eq!(v["kind"], "cache_storage_full");
         assert_eq!(WaitingReason::from_json(&v).unwrap(), r);
+    }
+
+    #[test]
+    fn eval_workers_round_trip_carries_capability() {
+        for (cap, expected) in [(EvalCapability::Fetch, "fetch"), (EvalCapability::Eval, "eval")] {
+            let r = WaitingReason::eval_workers(cap, 2);
+            let v = r.to_json();
+            assert_eq!(v["kind"], "eval_workers");
+            assert_eq!(v["capability"], expected);
+            assert_eq!(v["connected_workers"], 2);
+            assert_eq!(WaitingReason::from_json(&v).unwrap(), r);
+        }
     }
 
     /// Legacy rows persisted before the `kind` tag existed must still
