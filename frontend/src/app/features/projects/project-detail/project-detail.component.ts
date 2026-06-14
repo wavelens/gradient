@@ -56,6 +56,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   loading = signal(true);
   project = signal<ProjectDetail | null>(null);
   entryPoints = signal<EntryPointSummary[]>([]);
+  entryPointsLoading = signal(false);
   selectedId = signal<string | null>(null);
   starting = signal(false);
   errorMessage = signal<string | null>(null);
@@ -152,6 +153,13 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   }
 
   select(evaluation: EvaluationSummary): void {
+    if (this.selectedId() !== evaluation.id) {
+      // Drop the previous evaluation's packages immediately so the panel shows a
+      // loading state, not stale data, during the (slow) entry-point fetch.
+      this.entryPoints.set([]);
+      this.entryPointsEvalId = undefined;
+      this.entryPointsSig = '';
+    }
     this.selectedId.set(evaluation.id);
     this.loadEntryPoints(evaluation.id);
     // Keep the selection in the URL so navigating away and back restores it.
@@ -168,11 +176,17 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
       this.entryPoints.set([]);
       this.entryPointsEvalId = undefined;
       this.entryPointsSig = '';
+      this.entryPointsLoading.set(false);
       return;
     }
     this.lastEntryPointsFetch = Date.now();
+    if (evaluationId !== this.entryPointsEvalId) this.entryPointsLoading.set(true);
     this.projectsService.getEntryPoints(this.orgName, this.projectName, evaluationId).subscribe({
       next: (eps) => {
+        // Drop out-of-order responses: only apply the fetch for the still-selected
+        // evaluation, so a slow earlier request can't clobber a newer selection.
+        if (this.selectedId() !== evaluationId) return;
+        this.entryPointsLoading.set(false);
         const sorted = [...eps].sort((a, b) =>
           this.getDerivationName(a.derivation_path).localeCompare(this.getDerivationName(b.derivation_path)));
         // Skip the re-render (and its enter animation) when nothing changed.
@@ -182,7 +196,10 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
         this.entryPointsSig = sig;
         this.entryPoints.set(sorted);
       },
-      error: (error) => console.error('Failed to load entry points:', error),
+      error: (error) => {
+        if (this.selectedId() === evaluationId) this.entryPointsLoading.set(false);
+        console.error('Failed to load entry points:', error);
+      },
     });
   }
 

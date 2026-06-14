@@ -119,7 +119,9 @@
           </div>
   
           <div class="pkg-label"><h3>Packages</h3></div>
-          @if (entryPoints().length > 0) {
+          @if (entryPointsLoading() && entryPoints().length === 0) {
+            <app-loading-spinner message="Loading packages..." />
+          } @else if (entryPoints().length > 0) {
             <div class="pkg-list">
               @for (ep of entryPoints(); track ep.id) {
                 <div class="pkg {{ buildStatusClass(ep.build_status) }}" [style.animation-delay.ms]="$index * 18"
