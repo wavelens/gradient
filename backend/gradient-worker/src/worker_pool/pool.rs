@@ -174,6 +174,25 @@ impl EvalWorker {
             .context("parsing eval worker response")
     }
 
+    pub(super) async fn plan(
+        &mut self,
+        repository: String,
+        wildcards: Vec<String>,
+    ) -> Result<Vec<String>> {
+        self.evaluations_served += 1;
+        match self
+            .request(&EvalRequest::Plan {
+                repository,
+                wildcards,
+            })
+            .await?
+        {
+            EvalResponse::PlanOk { sub_patterns } => Ok(sub_patterns),
+            EvalResponse::Err { message } => Err(anyhow::anyhow!("eval worker: {}", message)),
+            _ => anyhow::bail!("eval worker: unexpected response to Plan"),
+        }
+    }
+
     pub(super) async fn list(
         &mut self,
         repository: String,
@@ -287,6 +306,17 @@ impl std::fmt::Debug for EvalWorker {
             .field("pid", &self.child.id())
             .finish()
     }
+}
+
+/// Eval-pool size that keeps `size * max_eval_rss` within `ram_budget` (the
+/// no-OOM invariant), capped at the configured `fork_workers` and floored at 1
+/// so even a tiny host still evaluates — one shard at a time, slower, but it
+/// completes. Lowering `max_eval_rss` therefore trades parallelism for a smaller
+/// footprint, never the ability to finish.
+pub fn budgeted_pool_size(fork_workers: usize, max_eval_rss: u64, ram_budget: u64) -> usize {
+    let mem_bound = (ram_budget / max_eval_rss.max(1)).max(1) as usize;
+
+    fork_workers.min(mem_bound).max(1)
 }
 
 /// Pool of [`EvalWorker`]s.
@@ -510,6 +540,20 @@ mod tests {
     /// JSON line then drops stdin).
     fn fake_worker() -> EvalWorker {
         EvalWorker::from_command(Command::new("cat")).expect("spawn cat")
+    }
+
+    const GIB: u64 = 1024 * 1024 * 1024;
+
+    #[test]
+    fn budgeted_pool_size_caps_by_memory() {
+        // 8 GiB box, 2 GiB cap, 75% budget (6 GiB) -> 3 shards, capped at cores.
+        assert_eq!(budgeted_pool_size(16, 2 * GIB, 6 * GIB), 3);
+        // Plenty of RAM -> the configured worker count wins.
+        assert_eq!(budgeted_pool_size(8, 2 * GIB, 256 * GIB), 8);
+        // Cap >= budget -> still one worker (slower, but never zero).
+        assert_eq!(budgeted_pool_size(16, 8 * GIB, 6 * GIB), 1);
+        // Degenerate cap never divides by zero.
+        assert_eq!(budgeted_pool_size(4, 0, 6 * GIB), 4);
     }
 
     #[tokio::test]
