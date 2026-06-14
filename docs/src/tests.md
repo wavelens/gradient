@@ -492,6 +492,14 @@ Proto (`cargo test -p gradient-proto`):
   (contiguous append + finish, non-contiguous reject, over-budget reject,
   chunk-needs-open-stream, single-active fingerprint resolution, token roundtrip).
 
+NixOS VM (`nix/tests/gradient/cache`):
+- Phase 5b asserts the worker's on-disk eval cache
+  (`/var/lib/gradient-worker/eval-cache/eval-cache-v6/*.sqlite`) grew past the
+  4096-byte empty SQLite header after an evaluation. Regression guard for the
+  cache being read/pushed while the eval worker is still alive, before nix
+  commits the `AttrDb` transaction, which left every pushed blob empty and every
+  flake re-evaluating cold.
+
 ## Eval-cache eviction sweep (#386)
 
 A periodic server-side sweep bounds `eval_cache_store` by age and total size:
@@ -3992,3 +4000,46 @@ build status transition.
   CTE-fallback branch — is DB-dependent and covered end-to-end by CI (no local
   Postgres unit harness; counts are atomic per-row, deltas are spawned, and
   restart reconciliation recomputes in-flight evals).
+
+## Pre-build Waiting state for missing fetch/eval workers (#381)
+
+The scheduler parks an evaluation in `Waiting` while it cannot make progress and
+names the missing capability: a `Fetching` eval needs a `fetch`-capable worker,
+`Queued`/`EvaluatingFlake`/`EvaluatingDerivation` need an `eval`-capable one. The
+park happens even when the eval has already batched some build rows (the previous
+build-phase reconciler skipped that case), and recovers to `Queued` once the
+capability returns. The reason is the `eval_workers` `WaitingReason` variant.
+
+- `backend/gradient-types/src/waiting_reason.rs::tests::eval_workers_round_trip_carries_capability`
+  - JSON round-trips the `fetch`/`eval` variants under `kind == "eval_workers"`.
+- `backend/gradient-scheduler/src/build.rs` waiting-reason tests:
+  - `pre_build_target_queued_no_eval_worker_stalls_to_eval_waiting` and
+    `pre_build_target_fetching_no_fetch_worker_stalls_to_fetch_waiting` - the
+    capability split (an eval-only pool still strands a `Fetching` eval).
+  - `pre_build_target_active_pre_build_with_capability_left_alone` and
+    `pre_build_target_ignores_waiting` - no-op while progressing / for `Waiting`.
+  - `eval_recovery_unparks_to_queued_when_capability_returns` and
+    `eval_recovery_refreshes_reason_while_capability_absent` - the `Waiting`
+    recovery decision.
+- `frontend/.../evaluation-log.component.spec.ts` `eval_workers waiting reason`
+  block - titles/messages for the fetch, eval, and full-cache stalls.
+- The full DB-driven reconcile sweep (build-phase buildability + status
+  transitions) is covered end-to-end by CI (no local Postgres unit harness).
+
+## Chunked cache upload (#390)
+
+`gradient cache upload` splits each NAR into 32 MiB chunks so no single request
+exceeds the bundled reverse proxy's 100 MiB body limit (which previously 413'd
+large NARs). Chunks stage to a server-side `.partial` (reusing the `#225`
+`PartialStore`) keyed by the 32-char store hash, then a finalize request
+validates and ingests the staged NAR.
+
+- `backend/gradient-web/src/endpoints/caches/upload.rs::tests` -
+  `accepts_a_normal_store_basename` / `rejects_traversal_and_separators` cover the
+  staging-key path-traversal guard.
+- `cli/src/commands/cache_upload.rs::tests::extracts_hash_from_full_path_and_name_with_specials`
+  - the URL-safe store-hash key extraction (handles `+` in store names).
+- `PartialStore` staging semantics (contiguous append, offset-0 restart) are
+  already covered under *Resumable NAR transfers (#225)*.
+- The chunk→finalize→ingest round trip is DB- and storage-dependent and covered
+  end-to-end by CI (no local Postgres unit harness).

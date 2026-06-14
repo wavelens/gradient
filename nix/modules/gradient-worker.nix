@@ -52,7 +52,7 @@ in {
         extraConfig = lib.mkOption {
           description = ''
             Additional lines of configuration passed to
-            `services.caddy.virtualHosts.<name>.extraConfig` 
+            `services.caddy.virtualHosts.<name>.extraConfig`
             after the reverse proxy setup.
           '';
           type = lib.types.lines;
@@ -214,9 +214,9 @@ in {
       };
 
       evalForkWorkers = lib.mkOption {
-        description = "Number of parallel eval subprocesses in the pool (the eval concurrency).";
-        type = lib.types.ints.positive;
-        default = 4;
+        description = "Number of parallel eval subprocesses in the pool (the eval concurrency). When null, the worker auto-sizes to the host core count (capped). Each worker may hold up to maxEvalRss of resident memory.";
+        type = lib.types.nullOr lib.types.ints.positive;
+        default = null;
       };
 
       maxEvalRss = lib.mkOption {
@@ -448,7 +448,6 @@ in {
           GRADIENT_MAX_NIXDAEMON_CONNECTIONS          = toString cfg.settings.maxNixdaemonConnections;
           GRADIENT_NAR_PARTIAL_TTL_SECS               = toString cfg.settings.narPartialTtlSecs;
           GRADIENT_WORKER_EVAL_WORKERS                = toString cfg.settings.evalWorkers;
-          GRADIENT_EVAL_FORK_WORKERS                  = toString cfg.settings.evalForkWorkers;
           GRADIENT_MAX_EVAL_RSS                       = toString cfg.settings.maxEvalRss;
           GRADIENT_EVAL_CACHE_SHARE                   = lib.boolToString cfg.settings.evalCacheShare;
           GRADIENT_MAX_PROTO_CONNECTIONS              = toString cfg.settings.maxProtoConnections;
@@ -467,6 +466,8 @@ in {
           GRADIENT_WORKER_CPU_CORE_SCORE = toString cfg.settings.cpuCoreScore;
         } // lib.optionalAttrs (cfg.settings.evalCacheDir != null) {
           GRADIENT_EVAL_CACHE_DIR = cfg.settings.evalCacheDir;
+        } // lib.optionalAttrs (cfg.settings.evalForkWorkers != null) {
+          GRADIENT_EVAL_FORK_WORKERS = toString cfg.settings.evalForkWorkers;
         } // {
           GRADIENT_WORKER_CAPABILITY_FEDERATE         = lib.boolToString cfg.capabilities.federate;
           GRADIENT_WORKER_CAPABILITY_FETCH            = lib.boolToString cfg.capabilities.fetch;

@@ -7,10 +7,11 @@
 use clap::Parser;
 use gradient_types::proto::GradientCapabilities;
 
-/// Default eval-pool size: host parallelism capped at 8.
+/// Default eval-pool size: host parallelism capped at 16. Each worker may hold
+/// up to `max_eval_rss` resident, so the cap bounds eval memory on big hosts.
 fn default_fork_workers() -> usize {
     std::thread::available_parallelism()
-        .map(|n| n.get().min(8))
+        .map(|n| n.get().min(16))
         .unwrap_or(4)
 }
 

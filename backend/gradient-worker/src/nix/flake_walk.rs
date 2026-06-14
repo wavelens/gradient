@@ -78,6 +78,13 @@ impl<'a> FlakeWalker<'a> {
 
         Ok((strip_nix_store_prefix(&drv), vec![]))
     }
+
+    /// Persist eval-cache entries written during this walk to the on-disk
+    /// `.sqlite` (checkpointing the WAL), so a concurrent reader of the file
+    /// and the fleet-share push see them instead of an empty header.
+    pub(crate) fn commit_cache(&self) -> Result<()> {
+        self.cache.commit().context("committing eval cache")
+    }
 }
 
 /// Parse and lock `flake_ref`, returning the [`LockedFlake`] without opening

@@ -348,7 +348,7 @@ The token must be the 48-byte random secret returned by the registration API (ge
 | `settings.evalWorkers` | `1` | Number of evaluator subprocesses |
 | `settings.maxConcurrentEvaluations` | `1` | Parallel evaluations |
 | `settings.cpuCoreScore` | `null` | Override the advertised single-core speed score (higher is faster, `GRADIENT_WORKER_CPU_CORE_SCORE`). When null, the worker benchmarks the host at startup |
-| `settings.evalForkWorkers` | `4` | Number of parallel eval subprocesses in the pool; this is the eval concurrency (`GRADIENT_EVAL_FORK_WORKERS`) |
+| `settings.evalForkWorkers` | `null` | Number of parallel eval subprocesses in the pool (the eval concurrency). When null, auto-sizes to the host core count capped at 16; each worker may hold up to `maxEvalRss` resident (`GRADIENT_EVAL_FORK_WORKERS`) |
 | `settings.maxEvalRss` | `2147483648` (2 GiB) | Recycle an eval subprocess (parent-side) once its RSS exceeds this many bytes, so the next acquire spawns a fresh one (`GRADIENT_MAX_EVAL_RSS`) |
 | `settings.evalCacheDir` | `null` | Eval-cache directory exported to eval workers as `NIX_CACHE_HOME`. When null, resolves to `{baseDir}/eval-cache` (`GRADIENT_EVAL_CACHE_DIR`) |
 | `settings.evalCacheShare` | `true` | Enable fleet eval-cache sharing (pull/push of `<fingerprint>.sqlite` blobs across workers, issue #386) (`GRADIENT_EVAL_CACHE_SHARE`) |
