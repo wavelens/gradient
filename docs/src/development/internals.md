@@ -69,6 +69,8 @@ evaluation:  Queued → Fetching → EvaluatingFlake → EvaluatingDerivation �
 
 `Substituted` is distinct from `Completed`: it means the derivation was already in the local Nix store at evaluation time and never ran on a builder.
 
+Builds promote `Created → Queued` incrementally (#392): as soon as a derivation's full set of direct dependency edges is in the DB — which may happen mid-walk — its build is queued, and the dispatcher (which gates on dependencies, not evaluation status) may start it while later derivations still evaluate. The evaluation row stays in `EvaluatingDerivation` until the walk finishes, then moves to `Building`.
+
 ---
 
 ## Build Dispatcher

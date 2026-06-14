@@ -2,6 +2,19 @@
 
 This page tracks notable tests added to Gradient and where they live.
 
+## Incremental Created → Queued promotion (#392)
+
+`backend/gradient-scheduler/src/edge_readiness.rs` unit-tests the pure
+`EdgeReadiness` tracker that decides when a derivation's full direct-dependency
+edge set is in the DB so its build can be queued mid-evaluation: leaves promote
+in the same batch, a parent promotes only once its last dependency row appears
+(in any discovery order), a diamond graph reports each node exactly once with the
+complete edge set, re-observing a seen derivation is a no-op, and unresolved
+sources drain at eval end. The DB wiring (`write_edges_and_promote`) reuses the
+proven `flush_deferred_deps` query and the `update_build_status` promotion loop,
+so it is covered by the existing `handle_eval_job_completed` handler tests plus
+E2E CI rather than a new MockDatabase sequence.
+
 ## PostgreSQL minimum-version guard (#387)
 
 `connect_db` reads `server_version_num` at startup and aborts before running
