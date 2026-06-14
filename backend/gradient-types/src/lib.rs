@@ -49,7 +49,7 @@ pub use self::log_api::{LogChunkIndex, LogChunkMeta, LogSearchDone, LogSearchHit
 pub use self::nix_cache::*;
 pub use self::secret::{SecretBytes, SecretString};
 pub use self::triggers::{ConcurrencyPolicy, TriggerConfig, TriggerConfigError, TriggerType};
-pub use self::waiting_reason::{UnmetRequirement, WaitingReason};
+pub use self::waiting_reason::{EvalCapability, UnmetRequirement, WaitingReason};
 pub use self::wildcard::*;
 
 use chrono::NaiveDateTime;

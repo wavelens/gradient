@@ -255,17 +255,18 @@ impl Scheduler {
     }
 
     /// Snapshot every connected worker's `(architectures, system_features)`
-    /// plus the count of those with the `eval` capability, then reconcile
-    /// each in-flight evaluation's `Building`/`Waiting` status. See
+    /// plus the counts of those advertising the `eval` and `fetch`
+    /// capabilities, then reconcile each in-flight evaluation's status. See
     /// [`build::reconcile_waiting_state`].
     pub async fn reconcile_waiting_state(&self) -> Result<()> {
         let workers = self.worker_pool.read().await.all_workers();
         let eval_capable = workers.iter().filter(|w| w.capabilities.eval).count();
+        let fetch_capable = workers.iter().filter(|w| w.capabilities.fetch).count();
         let caps: Vec<(Vec<String>, Vec<String>)> = workers
             .into_iter()
             .map(|w| (w.architectures, w.system_features))
             .collect();
-        build::reconcile_waiting_state(&self.state, &caps, eval_capable).await
+        build::reconcile_waiting_state(&self.state, &caps, eval_capable, fetch_capable).await
     }
 
     /// Snapshot of every connected worker for the Job Board (includes the
