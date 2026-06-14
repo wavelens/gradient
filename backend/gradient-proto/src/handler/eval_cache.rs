@@ -180,10 +180,10 @@ pub(super) async fn handle_eval_cache_pull(
     )
     .await;
 
-    if inline {
-        if let Err(e) = stream_blob_inline(state, writer, &job_id, &key).await {
-            warn!(%fingerprint, error = %e, "inline eval-cache stream failed");
-        }
+    if inline
+        && let Err(e) = stream_blob_inline(state, writer, &job_id, &key).await
+    {
+        warn!(%fingerprint, error = %e, "inline eval-cache stream failed");
     }
 }
 
