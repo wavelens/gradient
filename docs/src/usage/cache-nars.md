@@ -65,6 +65,10 @@ The server enforces a maximum upload size per NAR. The default is 512 MiB
 and is controlled by the `GRADIENT_MAX_NAR_UPLOAD_SIZE` environment variable
 on the server.
 
+The bundled reverse proxy (nginx/Caddy) caps each HTTP request body at 100 MiB.
+NARs larger than that still upload because the CLI splits them across multiple
+chunked requests (see below); no single request exceeds the cap.
+
 ### Backend endpoint
 
 `POST /api/v1/caches/{cache}/nars` — multipart form with a `narinfo` JSON
