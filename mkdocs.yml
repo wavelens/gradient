@@ -30,6 +30,7 @@ nav:
   - Development:
     - Architecture: development/architecture.md
     - Internals: development/internals.md
+    - Eval Worker Setup: development/eval-worker.md
     - Migrations: migrations.md
     - Proto: development/proto.md
     - Scheduler Scoring: development/scheduler-scoring.md
