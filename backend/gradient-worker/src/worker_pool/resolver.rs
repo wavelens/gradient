@@ -311,9 +311,11 @@ mod tests {
     /// the worker crashes. `crash_if` returns true when the batch should die.
     /// `calls` is borrowed by the returned futures, tying their lifetime to the
     /// stub so it coerces to `&ResolveOnce<'_>` cleanly.
+    type CrashIf = Box<dyn Fn(&[String], usize) -> bool + Sync>;
+
     struct Stub {
         calls: Mutex<usize>,
-        crash_if: Box<dyn Fn(&[String], usize) -> bool + Sync>,
+        crash_if: CrashIf,
     }
 
     impl Stub {
@@ -321,26 +323,6 @@ mod tests {
             Self {
                 calls: Mutex::new(0),
                 crash_if: Box::new(crash_if),
-            }
-        }
-
-        fn resolve_once(&self) -> impl Fn(Vec<String>) -> BoxFuture<'_, Result<Vec<ResolvedItem>>> + Sync {
-            // The future borrows `self`, tying its lifetime to the stub so it
-            // coerces to `&ResolveOnce<'_>` (a non-`'static` `&dyn Fn`).
-            move |attrs: Vec<String>| {
-                Box::pin(async move {
-                    let prior = {
-                        let mut n = self.calls.lock().unwrap();
-                        let prior = *n;
-                        *n += 1;
-                        prior
-                    };
-                    if (self.crash_if)(&attrs, prior) {
-                        anyhow::bail!("worker crashed");
-                    }
-
-                    Ok(attrs.iter().map(|a| ok_item(a)).collect())
-                })
             }
         }
 
@@ -356,36 +338,58 @@ mod tests {
     }
 
     /// Drive the pure core over a chunk built from `attrs` (index = position).
-    async fn run(stub: &Stub, attrs: &[&str]) -> Vec<(String, bool)> {
-        let resolve_once = stub.resolve_once();
+    /// Owns the stub so the closure and its futures share one scope (mirroring
+    /// the production block); returns the result plus the stub's call count.
+    async fn run(stub: Stub, attrs: &[&str]) -> (Vec<(String, bool)>, usize) {
         let chunk: Vec<(usize, String)> = attrs
             .iter()
             .enumerate()
             .map(|(i, a)| (i, a.to_string()))
             .collect();
-        let mut out = resolve_chunk(&resolve_once, chunk, 0).await.unwrap();
+
+        let mut out = {
+            let stub = &stub;
+            let resolve_once = move |attrs: Vec<String>| -> BoxFuture<'_, Result<Vec<ResolvedItem>>> {
+                Box::pin(async move {
+                    let prior = {
+                        let mut n = stub.calls.lock().unwrap();
+                        let prior = *n;
+                        *n += 1;
+                        prior
+                    };
+                    if (stub.crash_if)(&attrs, prior) {
+                        anyhow::bail!("worker crashed");
+                    }
+
+                    Ok(attrs.iter().map(|a| ok_item(a)).collect())
+                })
+            };
+            resolve_chunk(&resolve_once, chunk, 0).await.unwrap()
+        };
         out.sort_by_key(|(idx, _)| *idx);
-        out.into_iter()
+
+        let result = out
+            .into_iter()
             .map(|(_, (attr, r))| (attr, r.is_ok()))
-            .collect()
+            .collect();
+
+        (result, stub.calls())
     }
 
     #[tokio::test]
     async fn no_crash_resolves_all_in_one_call() {
-        let stub = crashes_on(&[]);
-        let out = run(&stub, &["a", "b", "c"]).await;
+        let (out, calls) = run(crashes_on(&[]), &["a", "b", "c"]).await;
         assert_eq!(out, vec![
             ("a".into(), true),
             ("b".into(), true),
             ("c".into(), true),
         ]);
-        assert_eq!(stub.calls(), 1, "no crash → single batch call");
+        assert_eq!(calls, 1, "no crash → single batch call");
     }
 
     #[tokio::test]
     async fn single_crasher_among_healthy_isolates_one_error() {
-        let stub = crashes_on(&["b"]);
-        let out = run(&stub, &["a", "b", "c", "d"]).await;
+        let (out, _) = run(crashes_on(&["b"]), &["a", "b", "c", "d"]).await;
         let map: std::collections::HashMap<_, _> = out.into_iter().collect();
         assert!(!map["b"], "the crasher resolves to an error");
         assert!(map["a"] && map["c"] && map["d"], "the rest still resolve");
@@ -393,8 +397,7 @@ mod tests {
 
     #[tokio::test]
     async fn two_crashers_isolate_independently() {
-        let stub = crashes_on(&["b", "d"]);
-        let out = run(&stub, &["a", "b", "c", "d", "e"]).await;
+        let (out, _) = run(crashes_on(&["b", "d"]), &["a", "b", "c", "d", "e"]).await;
         let map: std::collections::HashMap<_, _> = out.into_iter().collect();
         assert!(!map["b"] && !map["d"], "both crashers error");
         assert!(map["a"] && map["c"] && map["e"], "the rest resolve");
@@ -404,9 +407,8 @@ mod tests {
     async fn transient_crash_succeeds_on_retry() {
         // A single-attr chunk crashes on the first call (attempt 0) and resolves
         // on the one retry (attempt 1) - no per-attr error is recorded.
-        let stub = Stub::new(|_attrs, call| call == 0);
-        let out = run(&stub, &["a"]).await;
+        let (out, calls) = run(Stub::new(|_attrs, call| call == 0), &["a"]).await;
         assert_eq!(out, vec![("a".into(), true)]);
-        assert_eq!(stub.calls(), 2, "one crash + one successful retry");
+        assert_eq!(calls, 2, "one crash + one successful retry");
     }
 }
