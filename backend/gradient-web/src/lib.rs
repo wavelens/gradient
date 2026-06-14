@@ -18,6 +18,7 @@ pub mod ip_allowlist;
 pub mod metrics_scope;
 pub mod otlp;
 pub mod permissions;
+pub mod scim;
 
 use axum::body::Body;
 use axum::extract::{DefaultBodyLimit, MatchedPath};
