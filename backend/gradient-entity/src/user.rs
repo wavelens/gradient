@@ -29,6 +29,9 @@ pub struct Model {
     pub superuser: bool,
     pub oidc_issuer: Option<String>,
     pub oidc_subject: Option<String>,
+    pub active: bool,
+    #[sea_orm(unique, indexed)]
+    pub scim_external_id: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
