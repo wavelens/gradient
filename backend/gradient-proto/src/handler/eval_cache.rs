@@ -94,7 +94,6 @@ fn push_mode(
 
 #[derive(Default)]
 struct StagedBlob {
-    token: String,
     bytes: Vec<u8>,
 }
 
@@ -115,14 +114,8 @@ impl EvalCacheReceiveStore {
         }
     }
 
-    fn open(&mut self, fingerprint: &str, token: &str) {
-        self.active.insert(
-            fingerprint.to_owned(),
-            StagedBlob {
-                token: token.to_owned(),
-                ..Default::default()
-            },
-        );
+    fn open(&mut self, fingerprint: &str) {
+        self.active.insert(fingerprint.to_owned(), StagedBlob::default());
     }
 
     /// Append a contiguous chunk for `fingerprint`. Returns `false` (and drops
@@ -142,10 +135,6 @@ impl EvalCacheReceiveStore {
 
         blob.bytes.extend_from_slice(data);
         true
-    }
-
-    fn token(&self, fingerprint: &str) -> Option<&str> {
-        self.active.get(fingerprint).map(|b| b.token.as_str())
     }
 
     fn finish(&mut self, fingerprint: &str) -> Option<Vec<u8>> {
@@ -226,8 +215,8 @@ pub(super) async fn handle_eval_cache_push(
     let token = stream_token(&fingerprint);
     let mode = push_mode(existing, size_bytes, presigned, || token.clone());
 
-    if let EvalCachePushMode::Inline { stream_token } = &mode {
-        eval_cache.open(&fingerprint, stream_token);
+    if let EvalCachePushMode::Inline { .. } = &mode {
+        eval_cache.open(&fingerprint);
     }
 
     let _ = send_server_msg(
@@ -536,7 +525,7 @@ mod tests {
     #[test]
     fn staging_appends_contiguous_and_finishes() {
         let mut s = EvalCacheReceiveStore::new(1024);
-        s.open("fp", "tok");
+        s.open("fp");
         assert!(s.append("fp", 0, &[1, 2, 3]));
         assert!(s.append("fp", 3, &[4, 5]));
         assert_eq!(s.finish("fp"), Some(vec![1, 2, 3, 4, 5]));
@@ -545,7 +534,7 @@ mod tests {
     #[test]
     fn staging_rejects_non_contiguous_offset() {
         let mut s = EvalCacheReceiveStore::new(1024);
-        s.open("fp", "tok");
+        s.open("fp");
         assert!(s.append("fp", 0, &[1, 2, 3]));
         assert!(!s.append("fp", 99, &[4]));
         assert!(s.finish("fp").is_none());
@@ -554,7 +543,7 @@ mod tests {
     #[test]
     fn staging_rejects_over_budget() {
         let mut s = EvalCacheReceiveStore::new(4);
-        s.open("fp", "tok");
+        s.open("fp");
         assert!(!s.append("fp", 0, &[0u8; 5]));
     }
 
@@ -568,16 +557,9 @@ mod tests {
     fn fingerprint_for_chunk_resolves_single_active() {
         let mut s = EvalCacheReceiveStore::new(1024);
         assert!(fingerprint_for_chunk(&s).is_none());
-        s.open("fp", "tok");
+        s.open("fp");
         assert_eq!(fingerprint_for_chunk(&s).as_deref(), Some("fp"));
-        s.open("fp2", "tok2");
+        s.open("fp2");
         assert!(fingerprint_for_chunk(&s).is_none(), "ambiguous when 2 active");
-    }
-
-    #[test]
-    fn staging_token_roundtrips() {
-        let mut s = EvalCacheReceiveStore::new(1024);
-        s.open("fp", "tok-v1");
-        assert_eq!(s.token("fp"), Some("tok-v1"));
     }
 }
