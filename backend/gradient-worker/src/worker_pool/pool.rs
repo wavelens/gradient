@@ -224,6 +224,15 @@ impl EvalWorker {
         }
     }
 
+    pub(super) async fn checkpoint(&mut self, repository: String) -> Result<()> {
+        self.evaluations_served += 1;
+        match self.request(&EvalRequest::Checkpoint { repository }).await? {
+            EvalResponse::CheckpointOk => Ok(()),
+            EvalResponse::Err { message } => Err(anyhow::anyhow!("eval worker: {}", message)),
+            _ => anyhow::bail!("eval worker: unexpected response to Checkpoint"),
+        }
+    }
+
     /// Send a `Shutdown` request and wait briefly for the child to exit.
     /// Used when the parent is recycling a still-healthy worker so the
     /// subprocess can run libnix's atexit handlers (flush eval-cache

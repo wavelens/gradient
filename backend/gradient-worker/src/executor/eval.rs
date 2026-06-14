@@ -50,15 +50,6 @@ const DRV_READ_CONCURRENCY: usize = 64;
 /// leaving headroom for the OS, the parent worker, and a concurrent build.
 const EVAL_RAM_SHARE: f64 = 0.75;
 
-/// Max eval-workers allowed to touch the shared eval-cache SQLite at once.
-/// Pinned to 1: concurrent writers deadlock on the WAL — a committing worker
-/// holds the write lock (byte 120) while its checkpoint needs read-slot 0
-/// (byte 123) that the other shard readers hold, and they in turn wait for the
-/// write lock. Sharding still bounds memory by discovering systems sequentially
-/// with per-shard recycle. Raise once the eval-cache tolerates concurrent
-/// writers (nix fork: open the eval-cache with `wal_autocheckpoint=0` and run a
-/// single end-of-eval checkpoint).
-const MAX_EVAL_CACHE_CONCURRENCY: usize = 1;
 
 /// Total physical RAM in bytes, or a 4 GiB fallback if it cannot be read.
 fn total_memory_bytes() -> u64 {
@@ -97,22 +88,20 @@ impl WorkerEvaluator {
         eval_cache_dir: String,
         eval_cache_share: bool,
     ) -> Self {
-        // Pool size is bounded two ways: by host RAM (`pool_size * max_eval_rss`
-        // within a fraction of memory, so a many-system flake never OOMs) and by
-        // `MAX_EVAL_CACHE_CONCURRENCY` (currently 1, because concurrent workers
-        // deadlock on the shared eval-cache WAL). The cache bound dominates today
-        // so eval runs one shard at a time; sharding still bounds memory via
-        // sequential per-shard recycle, and L3 fleet-share stays intact.
+        // Size the pool so `pool_size * max_eval_rss` stays within a fraction of
+        // host RAM: a flake with many systems then evaluates in parallel without
+        // OOM, falling back to fewer shards (down to one) on a small host. Shards
+        // share one eval-cache safely because per-shard commits only append to
+        // the WAL (no checkpoint); the single end-of-eval checkpoint folds it in.
         let ram_budget = (total_memory_bytes() as f64 * EVAL_RAM_SHARE) as u64;
-        let pool_size = budgeted_pool_size(fork_workers, max_eval_rss, ram_budget)
-            .min(MAX_EVAL_CACHE_CONCURRENCY);
+        let pool_size = budgeted_pool_size(fork_workers, max_eval_rss, ram_budget);
         if pool_size < fork_workers {
             info!(
                 fork_workers,
                 pool_size,
                 max_eval_rss,
                 ram_budget,
-                "eval pool serialized (shared eval-cache); memory bounded by sequential shards"
+                "eval pool sized down to fit the memory budget"
             );
         }
 
@@ -226,6 +215,16 @@ pub async fn evaluate_derivations(
         abort,
     )
     .await?;
+
+    // Fold the shared eval-cache WAL into the main `.sqlite` once, now that all
+    // shards have committed and no worker is reading it, so the pushed blob is
+    // complete (per-shard commits only append to the WAL to avoid the concurrent
+    // checkpoint deadlock). Best-effort: a stale-but-readable WAL is acceptable.
+    if cache_path.is_some()
+        && let Err(e) = evaluator.resolver.checkpoint_cache(repo.clone()).await
+    {
+        warn!(error = %e, "eval-cache checkpoint failed; pushing as-is");
+    }
 
     if let (Some(fp), Some(path)) = (fingerprint.as_ref(), cache_path.as_ref())
         && let Ok(bytes) = tokio::fs::read(path).await

@@ -98,11 +98,19 @@ impl<'a> FlakeWalker<'a> {
         Ok((strip_nix_store_prefix(&drv), vec![]))
     }
 
-    /// Persist eval-cache entries written during this walk to the on-disk
-    /// `.sqlite` (checkpointing the WAL), so a concurrent reader of the file
-    /// and the fleet-share push see them instead of an empty header.
+    /// Commit eval-cache entries written during this walk to the WAL (no
+    /// checkpoint), so concurrent shard workers don't deadlock on the WAL
+    /// read-slot locks. The writes are durable; [`Self::checkpoint_cache`]
+    /// folds them into the main `.sqlite` once at end-of-eval.
     pub(crate) fn commit_cache(&self) -> Result<()> {
         self.cache.commit().context("committing eval cache")
+    }
+
+    /// Fold the WAL into the main `.sqlite` (truncate checkpoint) so the
+    /// fleet-share push sees every shard's writes. Call once after all shards
+    /// finish, with no concurrent eval-cache readers.
+    pub(crate) fn checkpoint_cache(&self) -> Result<()> {
+        self.cache.checkpoint().context("checkpointing eval cache")
     }
 }
 

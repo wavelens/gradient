@@ -49,6 +49,11 @@ pub enum EvalRequest {
     Fingerprint {
         repository: String,
     },
+    /// Fold the eval-cache WAL into the main `.sqlite` (truncate checkpoint).
+    /// Run once after all shards finish, before the fleet-share push.
+    Checkpoint {
+        repository: String,
+    },
     /// Ask the worker to exit cleanly. Parent uses this on graceful shutdown.
     Shutdown,
 }
@@ -73,6 +78,7 @@ pub enum EvalResponse {
     FingerprintOk {
         fingerprint: Option<String>,
     },
+    CheckpointOk,
     Err {
         message: String,
     },
@@ -283,6 +289,26 @@ pub fn run_eval_worker() -> std::io::Result<()> {
                     },
                 }
             }
+            EvalRequest::Checkpoint { repository } => {
+                let Some(ev) = evaluator.as_ref() else {
+                    write_response(
+                        &mut writer,
+                        &EvalResponse::Err {
+                            message: "evaluator not initialized".to_string(),
+                        },
+                    )?;
+                    continue;
+                };
+                let result = (|| -> anyhow::Result<()> {
+                    ev.walker(&repository)?.checkpoint_cache()
+                })();
+                match result {
+                    Ok(()) => EvalResponse::CheckpointOk,
+                    Err(e) => EvalResponse::Err {
+                        message: format!("{:#}", e),
+                    },
+                }
+            }
         };
 
         let kind = match &resp {
@@ -292,6 +318,7 @@ pub fn run_eval_worker() -> std::io::Result<()> {
             EvalResponse::FingerprintOk { fingerprint } => {
                 format!("FingerprintOk({})", fingerprint.is_some())
             }
+            EvalResponse::CheckpointOk => "CheckpointOk".to_string(),
             EvalResponse::Err { message } => format!("Err({message})"),
         };
         trace!(%kind, "eval worker sending response");
@@ -435,6 +462,9 @@ mod tests {
             EvalRequest::Fingerprint {
                 repository: "github:nixos/nixpkgs".into(),
             },
+            EvalRequest::Checkpoint {
+                repository: "github:nixos/nixpkgs".into(),
+            },
             EvalRequest::Shutdown,
         ];
 
@@ -472,6 +502,7 @@ mod tests {
             EvalResponse::FingerprintOk {
                 fingerprint: Some("deadbeef".into()),
             },
+            EvalResponse::CheckpointOk,
             EvalResponse::Err {
                 message: "something went wrong".into(),
             },

@@ -170,6 +170,21 @@ impl WorkerPoolResolver {
         }
     }
 
+    /// Fold the eval-cache WAL into the main `.sqlite` once, after all shards
+    /// have committed, so the fleet-share push ships a complete cache. Best-effort
+    /// in spirit (the caller ignores failures), but a crashed worker is marked
+    /// dead so it is not reused.
+    pub async fn checkpoint_cache(&self, repository: String) -> Result<()> {
+        let mut worker = self.pool.acquire().await?;
+        match worker.checkpoint(repository).await {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                worker.mark_dead();
+                Err(e)
+            }
+        }
+    }
+
     /// Discover one shard on a pooled worker, retrying once on a fresh worker
     /// if the subprocess crashes (a transient stack/OOM death). A shard that
     /// crashes twice propagates the error, failing the whole listing — matching
