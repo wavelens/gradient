@@ -10,13 +10,23 @@ use tempfile::TempDir;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
+const STORE_PATH: &str = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-x";
+const STORE_HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
 #[tokio::test]
 async fn upload_nar_file_with_narinfo_succeeds() {
     let server = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .and(path(format!("/api/v1/caches/mycache/nars/{STORE_HASH}/chunk")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "error": false, "message": {"received": 3}
+        })))
+        .mount(&server)
+        .await;
     Mock::given(method("POST"))
-        .and(path("/api/v1/caches/mycache/nars"))
+        .and(path(format!("/api/v1/caches/mycache/nars/{STORE_HASH}/finalize")))
         .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
-            "error": false, "message": {"store_path": "/nix/store/aa-x", "created": true}
+            "error": false, "message": {"store_path": STORE_PATH, "created": true}
         })))
         .mount(&server)
         .await;
@@ -36,7 +46,7 @@ async fn upload_nar_file_with_narinfo_succeeds() {
     fs::write(&nar, b"abc").unwrap();
     fs::write(
         &narinfo,
-        "StorePath: /nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-x\nFileHash: sha256:a\nFileSize: 3\nNarHash: sha256:b\nNarSize: 3\nReferences: \n",
+        format!("StorePath: {STORE_PATH}\nFileHash: sha256:a\nFileSize: 3\nNarHash: sha256:b\nNarSize: 3\nReferences: \n"),
     )
     .unwrap();
 
