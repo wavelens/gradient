@@ -156,7 +156,7 @@ pub fn run_eval_worker() -> std::io::Result<()> {
                     )?;
                     continue;
                 };
-                let (result, warnings) = capture_warnings_during(|| {
+                let (result, warnings) = capture_warnings_during(|| -> anyhow::Result<Vec<String>> {
                     let walker = ev.walker(&repository)?;
                     let attrs = walker.discover(&wildcards)?;
                     let _ = walker.commit_cache();
