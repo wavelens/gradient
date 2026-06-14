@@ -936,6 +936,90 @@ pub async fn flush_deferred_deps(
     Ok(())
 }
 
+/// Promote every `Created` build in `evaluation_id` whose derivation is one of
+/// `ready_paths` to `Queued`. Mirrors the bulk-promote loop in
+/// [`handle_eval_job_completed`], scoped to one batch's ready set. Returns the
+/// count promoted.
+async fn promote_ready_builds(
+    state: &Arc<ServerState>,
+    evaluation_id: EvaluationId,
+    organization_id: OrganizationId,
+    ready_paths: &[String],
+) -> Result<usize> {
+    if ready_paths.is_empty() {
+        return Ok(0);
+    }
+
+    let hashes: Vec<String> = ready_paths
+        .iter()
+        .filter_map(|p| parse_drv_hash_name(p).ok().map(|(h, _)| h))
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+
+    let db = &state.worker_db;
+    let drv_ids: Vec<DerivationId> = gradient_db::fetch_in_chunks(&hashes, |chunk| async move {
+        EDerivation::find()
+            .filter(CDerivation::Organization.eq(organization_id))
+            .filter(CDerivation::Hash.is_in(chunk))
+            .all(db)
+            .await
+    })
+    .await
+    .context("promote_ready_builds: query derivations")?
+    .into_iter()
+    .map(|d| d.id)
+    .collect();
+    if drv_ids.is_empty() {
+        return Ok(0);
+    }
+
+    let created: Vec<MBuild> = gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
+        EBuild::find()
+            .filter(CBuild::Evaluation.eq(evaluation_id))
+            .filter(CBuild::Derivation.is_in(chunk))
+            .filter(CBuild::Status.eq(BuildStatus::Created))
+            .all(db)
+            .await
+    })
+    .await
+    .context("promote_ready_builds: query builds")?;
+
+    let n = created.len();
+    for build in created {
+        update_build_status(&state.db(), build, BuildStatus::Queued).await;
+    }
+
+    Ok(n)
+}
+
+/// Per-batch incremental promotion (#392). Given the derivations that became
+/// edge-complete this batch (`ready` = `(drv_path, dependencies)`), write their
+/// dependency edges (reusing [`flush_deferred_deps`]) and promote their builds
+/// `Created → Queued`. Returns the number of builds promoted.
+pub async fn write_edges_and_promote(
+    state: &Arc<ServerState>,
+    evaluation_id: EvaluationId,
+    organization_id: OrganizationId,
+    ready: Vec<(String, Vec<String>)>,
+) -> Result<usize> {
+    if ready.is_empty() {
+        return Ok(0);
+    }
+
+    let edges: Vec<(String, Vec<String>)> = ready
+        .iter()
+        .filter(|(_, deps)| !deps.is_empty())
+        .cloned()
+        .collect();
+    if !edges.is_empty() {
+        flush_deferred_deps(state, evaluation_id, organization_id, edges).await?;
+    }
+
+    let promote: Vec<String> = ready.into_iter().map(|(p, _)| p).collect();
+    promote_ready_builds(state, evaluation_id, organization_id, &promote).await
+}
+
 pub async fn handle_eval_job_failed(
     state: &Arc<ServerState>,
     evaluation_id: EvaluationId,
