@@ -971,7 +971,7 @@ impl<'a> DispatchContext<'a> {
                 return;
             }
             nar.finish(&store_path).await;
-            info!(peer_id = %self.peer_id, %job_id, %store_path, file_size, "NAR stored");
+            debug!(peer_id = %self.peer_id, %job_id, %store_path, file_size, "NAR stored");
         }
 
         let file_size_i64 = file_size as i64;

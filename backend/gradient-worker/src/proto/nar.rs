@@ -24,7 +24,7 @@ use harmonia_store_path::StorePath;
 use harmonia_store_remote::DaemonStore as _;
 use gradient_proto::messages::ClientMessage;
 use sha2::{Digest, Sha256};
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 use crate::connection::ProtoWriter;
 use crate::nix::store::{LocalNixStore, strip_store_prefix};
@@ -289,7 +289,7 @@ pub async fn push_direct(
         deriver: meta.deriver,
     })?;
 
-    info!(
+    debug!(
         store_path,
         compressed_bytes = produced,
         resumed_from = resume_from,
@@ -345,7 +345,7 @@ pub async fn upload_presigned(
     let file_hash = format!("sha256:{}", nix32_encode(&Sha256::digest(&compressed)));
     let nar_hash = format!("sha256:{}", nix32_encode(&nar_hasher.finalize()));
 
-    info!(
+    debug!(
         store_path,
         file_size, nar_size, "uploading NAR to presigned URL"
     );
@@ -387,7 +387,7 @@ pub async fn upload_presigned(
         deriver: meta.deriver,
     })?;
 
-    info!(
+    debug!(
         store_path,
         file_size, nar_size, "presigned NAR upload complete"
     );

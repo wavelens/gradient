@@ -42,7 +42,7 @@ use harmonia_utils_hash::{Hash, HashView as _};
 use harmonia_utils_signature::Signature;
 use gradient_proto::messages::{BuildTask, CachedPath, EvalMessageLevel, QueryMode};
 use sha2::{Digest as _, Sha256};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, warn};
 
 use crate::nix::store::LocalNixStore;
 use crate::proto::job::JobUpdater;
@@ -493,7 +493,7 @@ impl<'a> InputPrefetcher<'a> {
     ) -> Result<()> {
         const MAX_ITERATIONS: usize = 1024;
 
-        info!(
+        debug!(
             build_id = %self.build_id,
             missing = initial_missing.len(),
             "prefetching missing paths from server cache (closure-expanding)"
@@ -605,7 +605,7 @@ impl<'a> InputPrefetcher<'a> {
         );
 
         let imported = self.import_all(all_results).await?;
-        info!(build_id = %self.build_id, imported, "prefetch complete");
+        debug!(build_id = %self.build_id, imported, "prefetch complete");
 
         Ok(())
     }

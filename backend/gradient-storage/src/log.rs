@@ -86,20 +86,62 @@ impl FileLogStorage {
     pub async fn new(base_path: &Path) -> Result<Self> {
         let logs_dir = base_path.join("logs");
         fs::create_dir_all(&logs_dir).await?;
-        Ok(Self { logs_dir })
+        let storage = Self { logs_dir };
+        storage.shard_existing_logs().await?;
+        Ok(storage)
+    }
+
+    /// Two-char shard derived from the final UUID byte (e.g. `…8814fe` → `fe`),
+    /// fanning logs across 256 subfolders instead of one flat directory.
+    fn shard(build_id: BuildId) -> String {
+        format!("{:02x}", build_id.into_inner().as_bytes()[15])
+    }
+
+    fn shard_dir(&self, build_id: BuildId) -> PathBuf {
+        self.logs_dir.join(Self::shard(build_id))
     }
 
     pub fn log_path(&self, build_id: BuildId) -> PathBuf {
-        self.logs_dir.join(format!("{}.log", build_id))
+        self.shard_dir(build_id).join(format!("{}.log", build_id))
     }
 
     fn chunk_dir(&self, build_id: BuildId) -> PathBuf {
-        self.logs_dir.join(build_id.to_string())
+        self.shard_dir(build_id).join(build_id.to_string())
     }
 
     fn chunk_path(&self, build_id: BuildId, index: u32) -> PathBuf {
         self.chunk_dir(build_id)
             .join(format!("chunk_{:08}.zst", index))
+    }
+
+    /// One-time idempotent relocation of pre-sharding flat entries
+    /// (`<uuid>.log` files and bare `<uuid>` chunk dirs) into their shard
+    /// subfolder. Already-sharded two-char dirs fail the UUID parse and are skipped.
+    async fn shard_existing_logs(&self) -> Result<()> {
+        let mut flat: Vec<(BuildId, String)> = Vec::new();
+        let mut entries = fs::read_dir(&self.logs_dir).await?;
+        while let Some(entry) = entries.next_entry().await? {
+            let name = entry.file_name();
+            let Some(s) = name.to_str() else { continue };
+            let stem = s.strip_suffix(".log").unwrap_or(s);
+            if let Ok(id) = stem.parse::<uuid::Uuid>() {
+                flat.push((BuildId::new(id), s.to_owned()));
+            }
+        }
+
+        for (build_id, name) in flat {
+            let dest = self.shard_dir(build_id);
+            if let Err(e) = async {
+                fs::create_dir_all(&dest).await?;
+                fs::rename(self.logs_dir.join(&name), dest.join(&name)).await
+            }
+            .await
+            {
+                warn!(error = %e, entry = %name, "failed to relocate log into shard subfolder");
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -107,6 +149,7 @@ impl LogStorage for FileLogStorage {
     fn append<'a>(&'a self, build_id: BuildId, text: &'a str) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             let path = self.log_path(build_id);
+            fs::create_dir_all(self.shard_dir(build_id)).await?;
             let mut file = OpenOptions::new()
                 .create(true)
                 .append(true)
@@ -146,19 +189,26 @@ impl LogStorage for FileLogStorage {
     fn list_logs<'a>(&'a self) -> BoxFuture<'a, Result<Vec<BuildId>>> {
         Box::pin(async move {
             let mut out = Vec::new();
-            let mut entries = match fs::read_dir(&self.logs_dir).await {
+            let mut shards = match fs::read_dir(&self.logs_dir).await {
                 Ok(e) => e,
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(out),
                 Err(e) => return Err(e.into()),
             };
-            while let Some(entry) = entries.next_entry().await? {
-                let name = entry.file_name();
-                let Some(s) = name.to_str() else { continue };
-                let Some(stem) = s.strip_suffix(".log") else {
+            while let Some(shard) = shards.next_entry().await? {
+                if !shard.file_type().await?.is_dir() {
                     continue;
-                };
-                if let Ok(id) = stem.parse::<uuid::Uuid>() {
-                    out.push(BuildId::new(id));
+                }
+
+                let mut entries = fs::read_dir(shard.path()).await?;
+                while let Some(entry) = entries.next_entry().await? {
+                    let name = entry.file_name();
+                    let Some(s) = name.to_str() else { continue };
+                    let Some(stem) = s.strip_suffix(".log") else {
+                        continue;
+                    };
+                    if let Ok(id) = stem.parse::<uuid::Uuid>() {
+                        out.push(BuildId::new(id));
+                    }
                 }
             }
             Ok(out)
@@ -403,5 +453,49 @@ mod chunk_tests {
         assert_eq!(storage.read_chunk(id, 1).await.unwrap(), b"world");
         storage.delete_chunks(id).await.unwrap();
         assert!(storage.read_chunk(id, 0).await.is_err());
+    }
+}
+
+#[cfg(test)]
+mod shard_tests {
+    use super::*;
+    use gradient_types::ids::BuildId;
+
+    const SAMPLE: &str = "019e884e-6430-7d83-86a1-3d0e6d8814fe";
+
+    fn sample_id() -> BuildId {
+        BuildId::new(SAMPLE.parse().unwrap())
+    }
+
+    #[tokio::test]
+    async fn log_lives_in_two_char_shard_subfolder() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = FileLogStorage::new(dir.path()).await.unwrap();
+        let id = sample_id();
+        storage.append(id, "hello").await.unwrap();
+
+        let expected = dir.path().join("logs").join("fe").join(format!("{SAMPLE}.log"));
+        assert!(expected.exists(), "log not sharded to logs/fe/{SAMPLE}.log");
+        assert_eq!(storage.read(id).await.unwrap(), "hello");
+        assert_eq!(storage.list_logs().await.unwrap(), vec![id]);
+    }
+
+    #[tokio::test]
+    async fn startup_migration_relocates_flat_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let logs = dir.path().join("logs");
+        let chunk_dir = logs.join(SAMPLE);
+        fs::create_dir_all(&chunk_dir).await.unwrap();
+        fs::write(logs.join(format!("{SAMPLE}.log")), "legacy").await.unwrap();
+        fs::write(chunk_dir.join("chunk_00000000.zst"), b"z").await.unwrap();
+
+        let storage = FileLogStorage::new(dir.path()).await.unwrap();
+        let id = sample_id();
+
+        assert!(!logs.join(format!("{SAMPLE}.log")).exists());
+        assert!(logs.join("fe").join(format!("{SAMPLE}.log")).exists());
+        assert!(logs.join("fe").join(SAMPLE).join("chunk_00000000.zst").exists());
+        assert_eq!(storage.read(id).await.unwrap(), "legacy");
+        assert_eq!(storage.list_logs().await.unwrap(), vec![id]);
     }
 }

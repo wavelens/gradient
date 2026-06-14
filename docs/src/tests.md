@@ -452,6 +452,12 @@ Storage (`cargo test -p gradient-storage`):
   GC).
 - `nar::tests::get_stream_from_*` - `NarStore::get_stream_from` returns the suffix from
   an offset, equals the full object at 0, and yields an empty stream past the end.
+- `log::shard_tests::log_lives_in_two_char_shard_subfolder` - `FileLogStorage` writes
+  to `logs/<last-2-hex>/<uuid>.log` (e.g. `…8814fe` → `logs/fe/`) and `read`/`list_logs`
+  resolve through the shard.
+- `log::shard_tests::startup_migration_relocates_flat_entries` - constructing
+  `FileLogStorage` relocates pre-sharding flat `<uuid>.log` files and `<uuid>` chunk
+  dirs into their shard subfolder.
 
 Proto (`cargo test -p gradient-proto`):
 - `tests::nar_stream_header_client_roundtrip` / `nar_request_resume_roundtrip` /
