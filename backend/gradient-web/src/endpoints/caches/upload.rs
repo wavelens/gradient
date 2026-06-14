@@ -175,23 +175,6 @@ fn require_safe_hash(store_hash: &str) -> WebResult<()> {
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::require_safe_hash;
-
-    #[test]
-    fn accepts_a_normal_store_basename() {
-        assert!(require_safe_hash("bnq5n76hrfr50l5s2hbbg9vw32fvcrbc-linux-rpi-6.12.75").is_ok());
-    }
-
-    #[test]
-    fn rejects_traversal_and_separators() {
-        for bad in ["", "../etc/passwd", "a/b", "..", "x/.."] {
-            assert!(require_safe_hash(bad).is_err(), "{bad:?} must be rejected");
-        }
-    }
-}
-
 /// `PUT /caches/{cache}/nars/{store_hash}/chunk?offset=N` - append one NAR slice
 /// to the staged `.partial`. `offset` must equal the bytes already received
 /// (`0` starts fresh); a mismatch returns `409` with the authoritative
@@ -228,26 +211,24 @@ pub async fn nar_chunk(
 
     let store = upload_partial_store(&state)?;
     let key = format!("{}/{store_hash}", cache.id);
-    // A fresh upload sweeps abandoned partials (best-effort) and truncates any
-    // stale prefix for this key, so a re-run after a failure restarts cleanly.
+    // A fresh upload sweeps abandoned partials (best-effort); the `offset == 0`
+    // append then truncates any stale prefix so a re-run restarts cleanly.
     if offset == 0 {
         let _ = store.gc();
     }
 
-    let received = store.received_len(&key, &store_hash)?;
-    if offset != received {
-        return Ok((
-            StatusCode::CONFLICT,
-            ok_json(json!({ "received": received })),
-        ));
-    }
+    // `received` is authoritative: when the caller's `offset` is contiguous we
+    // append and advance it; otherwise we append nothing and report the current
+    // length so the caller resyncs and resends from there.
+    let staged = store.received_len(&key, &store_hash)?;
+    let received = if offset == 0 || offset == staged {
+        store.append(&key, &store_hash, offset, &body)?;
+        offset + body.len() as u64
+    } else {
+        staged
+    };
 
-    store.append(&key, &store_hash, offset, &body)?;
-
-    Ok((
-        StatusCode::OK,
-        ok_json(json!({ "received": offset + body.len() as u64 })),
-    ))
+    Ok((StatusCode::OK, ok_json(json!({ "received": received }))))
 }
 
 /// `POST /caches/{cache}/nars/{store_hash}/finalize` - validate the fully staged
@@ -328,4 +309,21 @@ pub async fn nar_finalize(
             "created": outcome.created,
         })),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::require_safe_hash;
+
+    #[test]
+    fn accepts_a_normal_store_basename() {
+        assert!(require_safe_hash("bnq5n76hrfr50l5s2hbbg9vw32fvcrbc-linux-rpi-6.12.75").is_ok());
+    }
+
+    #[test]
+    fn rejects_traversal_and_separators() {
+        for bad in ["", "../etc/passwd", "a/b", "..", "x/.."] {
+            assert!(require_safe_hash(bad).is_err(), "{bad:?} must be rejected");
+        }
+    }
 }
