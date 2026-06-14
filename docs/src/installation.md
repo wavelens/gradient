@@ -62,6 +62,40 @@ The server does **not** start a worker automatically. Add a co-located worker to
 
 All available options are searchable at the [Options Search](https://wavelens.github.io/gradient-search).
 
+## TLS configuration
+
+Two independent settings control TLS, and conflating them is a common source of
+broken logins:
+
+- `services.gradient.useTls` (default `true`) controls how Gradient itself
+  behaves: it emits `https://` URLs (the OIDC redirect URL, `GRADIENT_SERVE_URL`)
+  and marks session cookies `Secure`. Set it to `false` **only** for a genuinely
+  plaintext-HTTP deployment — turning it off so that nginx stops managing
+  certificates will also stop your browser from sending the secure session
+  cookie, breaking login.
+- When `reverseProxy.nginx.enable = true`, Gradient sets the nginx vhost's
+  `enableACME` and `forceSSL` to `useTls`, so nginx terminates TLS and obtains a
+  certificate itself.
+
+If TLS is terminated by an upstream proxy (Traefik, Cloudflare, a load balancer)
+that forwards plain HTTP to nginx, keep `useTls = true` so Gradient still emits
+`https://` URLs and secure cookies, and disable nginx's own certificate handling:
+
+```nix
+{
+  services.gradient = {
+    useTls = true;            # emit https URLs + secure cookies
+    reverseProxy.nginx.enable = true;  # still let nginx serve static files
+  };
+
+  # The upstream proxy already terminates TLS; don't let nginx fight it.
+  services.nginx.virtualHosts."gradient.example.com" = {
+    enableACME = lib.mkForce false;
+    forceSSL = lib.mkForce false;
+  };
+}
+```
+
 ## Binary Cache (Optional)
 
 Add the public cache to avoid rebuilding Gradient from source:
