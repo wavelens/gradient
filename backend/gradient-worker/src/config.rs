@@ -87,9 +87,11 @@ pub struct WorkerConfig {
     #[arg(long, env = "GRADIENT_EVAL_FORK_WORKERS", default_value_t = default_fork_workers())]
     pub eval_fork_workers: usize,
 
-    /// Recycle an eval subprocess (parent-side) once its RSS exceeds this many
-    /// bytes, so the next acquire spawns a fresh one.
-    #[arg(long, env = "GRADIENT_MAX_EVAL_RSS", default_value_t = 2 * 1024 * 1024 * 1024)]
+    /// Safety cap on an eval subprocess's resident memory: once its RSS exceeds
+    /// this many bytes it is recycled (parent-side) so the next acquire spawns a
+    /// fresh one. Keep it above a typical eval's Boehm-GC heap (default 8 GiB) so
+    /// it bounds runaway growth without recycling warm workers mid-evaluation.
+    #[arg(long, env = "GRADIENT_MAX_EVAL_RSS", default_value_t = 8 * 1024 * 1024 * 1024)]
     pub max_eval_rss: u64,
 
     /// Directory holding the Nix eval cache (exported to eval workers as
@@ -396,7 +398,7 @@ mod tests {
             eval_worker: false,
             eval_workers: 1,
             eval_fork_workers: 2,
-            max_eval_rss: 2 * 1024 * 1024 * 1024,
+            max_eval_rss: 8 * 1024 * 1024 * 1024,
             eval_cache_dir: None,
             eval_cache_share: true,
             max_concurrent_evaluations: 1,
@@ -437,7 +439,7 @@ mod tests {
     fn eval_fork_defaults() {
         let cli = config_with_peers("");
         assert!(cli.eval_fork_workers >= 1);
-        assert_eq!(cli.max_eval_rss, 2 * 1024 * 1024 * 1024);
+        assert_eq!(cli.max_eval_rss, 8 * 1024 * 1024 * 1024);
     }
 
     // ── peer_tokens() ─────────────────────────────────────────────────────────
@@ -492,7 +494,7 @@ mod tests {
             eval_worker: false,
             eval_workers: 1,
             eval_fork_workers: 2,
-            max_eval_rss: 2 * 1024 * 1024 * 1024,
+            max_eval_rss: 8 * 1024 * 1024 * 1024,
             eval_cache_dir: None,
             eval_cache_share: true,
             max_concurrent_evaluations: 1,
@@ -565,7 +567,7 @@ mod tests {
             eval_worker: false,
             eval_workers: 1,
             eval_fork_workers: 2,
-            max_eval_rss: 2 * 1024 * 1024 * 1024,
+            max_eval_rss: 8 * 1024 * 1024 * 1024,
             eval_cache_dir: None,
             eval_cache_share: true,
             max_concurrent_evaluations: 1,

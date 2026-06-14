@@ -4061,3 +4061,27 @@ validates and ingests the staged NAR.
 - The build-list latest-attempt batching, the dep-count backfill, and the
   `source_comment` PR-number persistence are DB-dependent and covered end-to-end
   by CI (no local Postgres unit harness).
+
+## Memory-budgeted sharded evaluation (#386)
+
+A flake's discovery used to run as one giant single-worker `discover()` over
+every system at once, which on a large/many-system flake exceeds the RAM budget
+and never completes. Discovery is now split into one shard per system, fanned
+across a pool whose size keeps `pool_size * max_eval_rss` within a fraction of
+host RAM.
+
+- `backend/gradient-worker/src/nix/wildcard_walk.rs`:
+  - `plan_*` tests assert the per-system split mirrors `walk`'s
+    `*`/`#`/opaque/recover-one-level branches, and `assert_split_equivalent`
+    proves the union of `discover` over the shards equals one-pass `discover` for
+    trailing-`*`, non-trailing, `#`, opaque-skip, top-level and multi-include
+    patterns.
+  - `segments_to_pattern_quotes_dotted_segments_only` round-trips a shard's
+    segments (quoting only dotted names) back through `parse_pattern`.
+- `backend/gradient-worker/src/worker_pool/pool.rs::budgeted_pool_size_caps_by_memory`
+  covers the no-OOM pool sizing: capped by `ram_budget / max_eval_rss`, floored
+  at 1 (a tiny host still evaluates, one shard at a time), and divide-by-zero
+  safe.
+- The sharded `list_flake_derivations` fan-out, per-shard RSS recycle, and the
+  `EVAL_RAM_SHARE`-of-host-RAM pool sizing are exercised end-to-end by the
+  `gradient-eval` VM test (no local libnix harness).

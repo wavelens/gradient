@@ -17,7 +17,7 @@ use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::worker_pool::WorkerPoolResolver;
+use crate::worker_pool::{WorkerPoolResolver, budgeted_pool_size};
 use anyhow::{Context, Result};
 use futures::stream::{FuturesUnordered, StreamExt as _};
 use gradient_db::parse_drv;
@@ -46,6 +46,20 @@ fn is_aborted(abort: &mut watch::Receiver<bool>) -> bool {
 /// (network FS, slow disks). Cap kept low to avoid open-fd / kernel pressure.
 const DRV_READ_CONCURRENCY: usize = 64;
 
+/// Fraction of host RAM the eval pool may occupy (`pool_size * max_eval_rss`),
+/// leaving headroom for the OS, the parent worker, and a concurrent build.
+const EVAL_RAM_SHARE: f64 = 0.75;
+
+/// Total physical RAM in bytes, or a 4 GiB fallback if it cannot be read.
+fn total_memory_bytes() -> u64 {
+    use sysinfo::{MemoryRefreshKind, RefreshKind, System};
+    let sys = System::new_with_specifics(
+        RefreshKind::nothing().with_memory(MemoryRefreshKind::nothing().with_ram()),
+    );
+    let total = sys.total_memory();
+    if total == 0 { 4 * 1024 * 1024 * 1024 } else { total }
+}
+
 use gradient_proto::messages::QueryMode;
 
 use crate::proto::job::JobUpdater;
@@ -73,9 +87,25 @@ impl WorkerEvaluator {
         eval_cache_dir: String,
         eval_cache_share: bool,
     ) -> Self {
+        // Size the pool so `pool_size * max_eval_rss` stays within a fraction of
+        // host RAM: a flake with many systems then evaluates without OOM, falling
+        // back to fewer concurrent shards (down to one) on a small host instead
+        // of being killed. `max_eval_rss` is the per-shard working-set budget.
+        let ram_budget = (total_memory_bytes() as f64 * EVAL_RAM_SHARE) as u64;
+        let pool_size = budgeted_pool_size(fork_workers, max_eval_rss, ram_budget);
+        if pool_size < fork_workers {
+            info!(
+                fork_workers,
+                pool_size,
+                max_eval_rss,
+                ram_budget,
+                "eval pool sized down to fit the memory budget"
+            );
+        }
+
         Self {
             resolver: Arc::new(WorkerPoolResolver::new(
-                fork_workers,
+                pool_size,
                 max_eval_rss,
                 eval_cache_dir,
             )),

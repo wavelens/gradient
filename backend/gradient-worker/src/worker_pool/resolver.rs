@@ -71,6 +71,11 @@ type ResolveOnce<'a> = dyn Fn(Vec<String>) -> BoxFuture<'a, Result<Vec<ResolvedI
 /// Crashes tolerated for a single attr before it becomes a per-attr error.
 const MAX_CRASH_ATTEMPTS: u32 = 2;
 
+/// Upper bound on attrs resolved in a single worker call, so one batch's
+/// eval-heap growth stays small relative to `max_eval_rss` (the worker's heap
+/// persists across batches and is recycled once it crosses the cap).
+const MAX_RESOLVE_BATCH: usize = 64;
+
 /// Pure crash-isolation policy. Resolves `chunk` via `resolve_once`; an `Err`
 /// (subprocess crash, never a per-attr eval failure) is recovered by bisection:
 /// split a multi-attr chunk in half so the crasher is isolated in `O(log n)`
@@ -165,6 +170,46 @@ impl WorkerPoolResolver {
         }
     }
 
+    /// Discover one shard on a pooled worker, retrying once on a fresh worker
+    /// if the subprocess crashes (a transient stack/OOM death). A shard that
+    /// crashes twice propagates the error, failing the whole listing — matching
+    /// the single-worker behaviour this replaces.
+    async fn list_shard(
+        &self,
+        repository: &str,
+        wildcards: Vec<String>,
+    ) -> Result<(Vec<String>, Vec<String>)> {
+        match self.list_once(repository, wildcards.clone()).await {
+            Ok(v) => Ok(v),
+            Err(_crash) => self.list_once(repository, wildcards).await,
+        }
+    }
+
+    /// Discover one shard on a single worker. An over-RSS worker is discarded
+    /// after a successful call so its eval heap is reclaimed before the next
+    /// shard (progress is already durable in the eval cache); a crash marks the
+    /// worker dead. Mirrors [`Self::resolve_once`].
+    async fn list_once(
+        &self,
+        repository: &str,
+        wildcards: Vec<String>,
+    ) -> Result<(Vec<String>, Vec<String>)> {
+        let mut worker = self.pool.acquire().await?;
+        match worker.list(repository.to_string(), wildcards).await {
+            Ok(v) => {
+                if worker.rss_bytes() > self.pool.max_eval_rss() {
+                    worker.mark_dead();
+                }
+
+                Ok(v)
+            }
+            Err(e) => {
+                worker.mark_dead();
+                Err(e)
+            }
+        }
+    }
+
     /// Resolve `attrs` on one fresh worker. `Ok` means the subprocess lived
     /// (per-attr eval errors ride inside the items); `Err` means it crashed.
     /// An over-RSS worker is discarded after a successful call so the next
@@ -198,14 +243,80 @@ impl DerivationResolver for WorkerPoolResolver {
         repository: String,
         wildcards: Vec<String>,
     ) -> Result<(Vec<String>, Vec<String>)> {
-        let mut worker = self.pool.acquire().await?;
-        match worker.list(repository, wildcards).await {
-            Ok(v) => Ok(v),
-            Err(e) => {
-                worker.mark_dead();
-                Err(e)
+        // Plan the split on one worker (cheap: forces only the prefix attrset),
+        // then discover each shard separately. A single giant discovery of the
+        // whole flake is the call that blows past the RAM budget and never
+        // returns; one shard per system keeps each worker within budget and lets
+        // discovery advance (and persist) system-by-system.
+        let shards = {
+            let mut worker = self.pool.acquire().await?;
+            match worker.plan(repository.clone(), wildcards.clone()).await {
+                Ok(v) => v,
+                Err(e) => {
+                    worker.mark_dead();
+                    return Err(e);
+                }
+            }
+        };
+
+        tracing::info!(
+            shards = shards.len(),
+            pool = self.pool.max(),
+            "discovery split into per-system shards"
+        );
+
+        // Nothing to fan out (a wildcard-free or single-child pattern): one pass.
+        if shards.len() <= 1 {
+            return self.list_shard(&repository, wildcards).await;
+        }
+
+        // Exact-path exclusions ride every shard; the final dedup mops up any
+        // cross-shard overlap.
+        let excludes: Vec<String> = wildcards
+            .iter()
+            .filter(|w| w.starts_with('!'))
+            .cloned()
+            .collect();
+
+        let queue: std::sync::Mutex<std::collections::VecDeque<String>> =
+            std::sync::Mutex::new(shards.into_iter().collect());
+        let attrs = std::sync::Mutex::new(Vec::<String>::new());
+        let warnings = std::sync::Mutex::new(Vec::<String>::new());
+        {
+            let repo = repository.as_str();
+            let (queue, attrs, warnings, excludes) = (&queue, &attrs, &warnings, &excludes);
+            let mut tasks: FuturesUnordered<_> = (0..self.pool.max())
+                .map(|_| async move {
+                    loop {
+                        let shard = queue.lock().unwrap().pop_front();
+                        let Some(shard) = shard else { break };
+
+                        let mut pattern = Vec::with_capacity(1 + excludes.len());
+                        pattern.push(shard);
+                        pattern.extend_from_slice(excludes);
+
+                        let (a, w) = self.list_shard(repo, pattern).await?;
+                        attrs.lock().unwrap().extend(a);
+                        warnings.lock().unwrap().extend(w);
+                    }
+
+                    Ok::<(), anyhow::Error>(())
+                })
+                .collect();
+
+            while let Some(drained) = tasks.next().await {
+                drained?;
             }
         }
+
+        let mut attrs = attrs.into_inner().unwrap();
+        attrs.sort_unstable();
+        attrs.dedup();
+        let mut warnings = warnings.into_inner().unwrap();
+        warnings.sort_unstable();
+        warnings.dedup();
+
+        Ok((attrs, warnings))
     }
 
     async fn resolve_derivation_paths(
@@ -221,9 +332,16 @@ impl DerivationResolver for WorkerPoolResolver {
         // each pooled worker pull the next as soon as it is free. A slow attr on
         // one worker no longer leaves the others idle the way the old static
         // round-robin partition did. ~4 batches per worker leaves enough slack to
-        // steal without paying a walker rebuild per attr.
+        // steal without paying a walker rebuild per attr, but the size is capped
+        // so one batch's eval-heap growth cannot blow a worker far past
+        // `max_eval_rss` before the post-call recycle check sees it (the heap is
+        // persistent across batches, so the cap bounds the per-call overshoot,
+        // not the base cost).
         let n_workers = self.pool.max().min(attrs.len());
-        let batch_size = attrs.len().div_ceil(n_workers * 4).max(1);
+        let batch_size = attrs
+            .len()
+            .div_ceil(n_workers * 4)
+            .clamp(1, MAX_RESOLVE_BATCH);
         let queue: std::sync::Mutex<std::collections::VecDeque<Vec<(usize, String)>>> =
             std::sync::Mutex::new(
                 attrs

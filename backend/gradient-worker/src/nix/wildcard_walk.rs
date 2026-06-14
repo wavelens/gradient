@@ -183,6 +183,105 @@ pub(crate) fn discover_patterns<N: WalkNode>(root: &N, wildcards: &[String]) -> 
     discover(root, &includes, &excludes)
 }
 
+/// Split `includes` into disjoint sub-patterns for memory-bounded, parallel
+/// discovery: descend each pattern's literal prefix, then expand its **first**
+/// wildcard into one concrete shard per matched child — mirroring [`walk`]'s
+/// `*`/`#`/opaque/recover-one-level branch logic so the union of `discover` over
+/// the shards equals `discover` over the original pattern. Forcing past the first
+/// wildcard is left to each shard's worker, so a `system`-level wildcard yields
+/// one shard per system, each sized to a single eval-worker's RAM budget. A
+/// wildcard-free pattern yields itself unchanged.
+pub(crate) fn plan_shards<N: WalkNode>(root: &N, includes: &[Vec<String>]) -> Result<Vec<Vec<String>>> {
+    let mut shards = Vec::new();
+    for inc in includes {
+        let segs = collapse_stars(inc);
+        plan_one(root, &[], &segs, &mut shards)?;
+    }
+
+    Ok(shards)
+}
+
+/// One include's split. Recurses through literal segments; at the first wildcard
+/// emits a shard per matched child instead of recursing into it.
+fn plan_one<N: WalkNode>(
+    node: &N,
+    path: &[String],
+    segs: &[String],
+    out: &mut Vec<Vec<String>>,
+) -> Result<()> {
+    match segs.split_first() {
+        None => out.push(path.to_vec()),
+        Some((seg, rest)) if seg == "*" => {
+            for name in node.child_names()? {
+                let Some(child) = node.child(&name)? else {
+                    continue;
+                };
+                let mut p = path.to_vec();
+                p.push(name);
+
+                if rest.is_empty() {
+                    if child.is_derivation()? {
+                        out.push(p);
+                    } else if child.is_opaque()? {
+                        continue;
+                    } else {
+                        p.push("#".to_string());
+                        out.push(p);
+                    }
+                } else if child.is_opaque()? {
+                    continue;
+                } else {
+                    p.extend_from_slice(rest);
+                    out.push(p);
+                }
+            }
+        }
+        Some((seg, rest)) if seg == "#" => {
+            for name in node.child_names()? {
+                let Some(child) = node.child(&name)? else {
+                    continue;
+                };
+                let mut p = path.to_vec();
+                p.push(name);
+
+                if rest.is_empty() {
+                    if child.is_derivation()? {
+                        out.push(p);
+                    }
+                } else {
+                    p.extend_from_slice(rest);
+                    out.push(p);
+                }
+            }
+        }
+        Some((seg, rest)) => {
+            if let Some(child) = node.child(seg)? {
+                let mut p = path.to_vec();
+                p.push(seg.clone());
+                plan_one(&child, &p, rest, out)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Render shard segments back to a pattern string for the wire: `*`/`#` stay
+/// bare; a literal segment with a `.` or `"` is double-quoted so [`parse_pattern`]
+/// rebuilds the same segments.
+pub(crate) fn segments_to_pattern(segs: &[String]) -> String {
+    segs.iter()
+        .map(|s| {
+            if s == "*" || s == "#" || !(s.contains('.') || s.contains('"')) {
+                s.clone()
+            } else {
+                format!("\"{s}\"")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(".")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -412,5 +511,114 @@ mod tests {
         let root = StubNode::set(vec![("top", StubNode::set(vec![("d", StubNode::drv())]))]);
         let got = discover(&&root, &[segs(&["top", "*"])], &[]).unwrap();
         assert_eq!(got, vec!["top.d"]);
+    }
+
+    // ── plan_shards ──────────────────────────────────────────────────────────
+
+    fn shards(root: &StubNode, pattern: &[&str]) -> Vec<Vec<String>> {
+        plan_shards(&root, &[segs(pattern)]).unwrap()
+    }
+
+    /// The contract that justifies the whole split: discovering each shard and
+    /// unioning must equal discovering the original pattern in one pass.
+    fn assert_split_equivalent(root: &StubNode, pattern: &[&str]) {
+        let original = discover(&root, &[segs(pattern)], &[]).unwrap();
+
+        let mut union = Vec::new();
+        for shard in plan_shards(&root, &[segs(pattern)]).unwrap() {
+            union.extend(discover(&root, &[shard], &[]).unwrap());
+        }
+        union.sort();
+        union.dedup();
+
+        assert_eq!(union, original, "split of {pattern:?} must match one-pass discover");
+    }
+
+    #[test]
+    fn plan_trailing_star_splits_per_child_with_recover_shard() {
+        let root = tree();
+        assert_eq!(shards(&root, &["packages", "*", "*"]), vec![
+            segs(&["packages", "aarch64-linux", "#"]),
+            segs(&["packages", "x86_64-linux", "#"]),
+        ]);
+        assert_split_equivalent(&root, &["packages", "*", "*"]);
+    }
+
+    #[test]
+    fn plan_non_trailing_wildcard_keeps_residual() {
+        let root = tree();
+        assert_eq!(shards(&root, &["packages", "*", "hello"]), vec![
+            segs(&["packages", "aarch64-linux", "hello"]),
+            segs(&["packages", "x86_64-linux", "hello"]),
+        ]);
+        assert_split_equivalent(&root, &["packages", "*", "hello"]);
+    }
+
+    #[test]
+    fn plan_hash_terminal_splits_only_derivation_children() {
+        let root = tree();
+        assert_eq!(shards(&root, &["packages", "x86_64-linux", "#"]), vec![
+            segs(&["packages", "x86_64-linux", "cowsay"]),
+            segs(&["packages", "x86_64-linux", "hello"]),
+        ]);
+        assert_split_equivalent(&root, &["packages", "x86_64-linux", "#"]);
+    }
+
+    #[test]
+    fn plan_literal_pattern_passes_through() {
+        let root = tree();
+        assert_eq!(shards(&root, &["packages", "x86_64-linux", "hello"]), vec![segs(
+            &["packages", "x86_64-linux", "hello"]
+        )]);
+    }
+
+    #[test]
+    fn plan_missing_prefix_yields_no_shards() {
+        let root = tree();
+        assert!(shards(&root, &["nope", "*"]).is_empty());
+    }
+
+    #[test]
+    fn plan_skips_opaque_under_wildcard() {
+        let root = StubNode::set(vec![(
+            "packages",
+            StubNode::set(vec![
+                ("sysA", StubNode::opaque(vec![("hello", StubNode::drv())])),
+                ("sysB", StubNode::set(vec![("hello", StubNode::drv())])),
+            ]),
+        )]);
+        assert_eq!(shards(&root, &["packages", "*", "hello"]), vec![segs(&[
+            "packages", "sysB", "hello"
+        ])]);
+        assert_split_equivalent(&root, &["packages", "*", "hello"]);
+        assert_split_equivalent(&root, &["packages", "*", "*"]);
+    }
+
+    #[test]
+    fn plan_top_level_wildcard_shards_by_category() {
+        let root = tree();
+        assert_split_equivalent(&root, &["*", "*", "*"]);
+    }
+
+    #[test]
+    fn plan_multiple_includes_concatenate() {
+        let root = tree();
+        let got = plan_shards(&root, &[segs(&["packages", "*", "*"]), segs(&["checks", "*", "*"])])
+            .unwrap();
+        assert_eq!(got, vec![
+            segs(&["packages", "aarch64-linux", "#"]),
+            segs(&["packages", "x86_64-linux", "#"]),
+            segs(&["checks", "x86_64-linux", "#"]),
+        ]);
+    }
+
+    #[test]
+    fn segments_to_pattern_quotes_dotted_segments_only() {
+        assert_eq!(segments_to_pattern(&segs(&["packages", "x86_64-linux", "#"])), "packages.x86_64-linux.#");
+        assert_eq!(segments_to_pattern(&segs(&["packages", "*"])), "packages.*");
+        let dotted = segs(&["packages", "x86_64-linux", "python3.12"]);
+        let rendered = segments_to_pattern(&dotted);
+        assert_eq!(rendered, r#"packages.x86_64-linux."python3.12""#);
+        assert_eq!(parse_pattern(&rendered).1, dotted);
     }
 }
