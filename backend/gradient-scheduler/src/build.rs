@@ -605,24 +605,24 @@ impl<'a> BuildStateHandler<'a> {
     }
 
     /// Sweep every in-flight evaluation and reconcile its status against the
-    /// current set of connected workers.
+    /// current set of connected workers, keyed on the eval's current state:
     ///
-    /// Two regimes apply, keyed on whether the eval has any pending builds:
-    ///
-    /// - **Pre-build phase** (no pending builds yet, status in
-    ///   `Queued`/`Fetching`/`EvaluatingFlake`/`EvaluatingDerivation`): if no
-    ///   worker is connected, flip to `Waiting` so the UI can explain why the
-    ///   eval is stuck. A `Waiting` eval with no pending builds came from this
-    ///   path; if a worker has since connected, recover to `Queued` and let the
-    ///   dispatch loop replay the normal progression.
-    /// - **Build phase** (pending builds present, status in
-    ///   `Building`/`Waiting`): flip `Building ↔ Waiting` based on whether any
-    ///   pending build's `(architecture, required_features)` is satisfiable by
-    ///   the connected pool, persisting the structured reason for the UI.
+    /// - **Pre-build** (`Queued`/`Fetching`/`EvaluatingFlake`/
+    ///   `EvaluatingDerivation`): park to `Waiting` with an `EvalWorkers` reason
+    ///   when no worker provides the capability the state needs - `fetch` for
+    ///   `Fetching`, `eval` otherwise - regardless of any builds the eval has
+    ///   already batched (so a mid-eval stall is caught, not skipped).
+    /// - **Build** (`Building`): flip `Building ↔ Waiting` from whether the pool
+    ///   can satisfy any pending build's `(architecture, required_features)`.
+    /// - **Waiting**: recover via the reason it parked under - `EvalWorkers`
+    ///   back to `Queued` once the capability returns, `Workers` back to
+    ///   `Building` once buildable. `Approval`/`NoCache`/`CacheStorageFull` parks
+    ///   are owned by other hooks and left untouched.
     pub async fn reconcile_waiting_state(
         &self,
         worker_caps: &[(Vec<String>, Vec<String>)],
         eval_capable_workers: usize,
+        fetch_capable_workers: usize,
     ) -> Result<()> {
         let evals = EEvaluation::find()
             .filter(CEvaluation::Status.is_in(vec![
@@ -640,68 +640,65 @@ impl<'a> BuildStateHandler<'a> {
             return Ok(());
         }
 
+        let connected_workers = worker_caps.len() as u32;
+
         for eval in evals {
-            // Approval and no-cache parks are owned by webhook + cache-create
-            // hooks. The reconciler must not unpark them just because workers
-            // showed up.
+            let reason = eval.waiting_reason.as_ref().and_then(WaitingReason::from_json);
+
+            // Approval, no-cache and storage-full parks are owned by webhook +
+            // cache hooks. The reconciler must not unpark them just because
+            // workers showed up.
             if eval.status == EvaluationStatus::Waiting
-                && eval
-                    .waiting_reason
-                    .as_ref()
-                    .and_then(WaitingReason::from_json)
-                    .is_some_and(|r| !matches!(r, WaitingReason::Workers { .. }))
+                && reason.as_ref().is_some_and(|r| {
+                    matches!(
+                        r,
+                        WaitingReason::Approval { .. }
+                            | WaitingReason::NoCache
+                            | WaitingReason::CacheStorageFull
+                    )
+                })
             {
                 continue;
             }
 
-            let pending_builds = EBuild::find()
-                .filter(CBuild::Evaluation.eq(eval.id))
-                .filter(CBuild::Status.is_in(vec![
-                    BuildStatus::Created,
-                    BuildStatus::Queued,
-                    BuildStatus::Building,
-                    BuildStatus::FailedTransient,
-                ]))
-                .all(&self.state.worker_db)
-                .await
-                .context("fetch pending builds")?;
-
-            let (target, new_reason) = if pending_builds.is_empty() {
-                match eval.status {
-                    EvaluationStatus::Building => continue,
-                    EvaluationStatus::Queued
-                    | EvaluationStatus::Fetching
-                    | EvaluationStatus::EvaluatingFlake
-                    | EvaluationStatus::EvaluatingDerivation
-                    | EvaluationStatus::Waiting => {
-                        match decide_pre_build_target(eval.status, eval_capable_workers) {
-                            Some(pair) => pair,
-                            None => continue,
-                        }
-                    }
-                    _ => continue,
-                }
-            } else {
-                if !matches!(
+            let outcome = match eval.status {
+                EvaluationStatus::Waiting => match reason {
+                    Some(WaitingReason::EvalWorkers { capability, .. }) => Some(decide_eval_recovery(
+                        capability,
+                        eval_capable_workers,
+                        fetch_capable_workers,
+                        connected_workers,
+                    )),
+                    // Build-phase park, or a legacy/untagged row: recover from the
+                    // pending builds, falling back to eval recovery when the eval
+                    // never produced any (a pre-build park predating EvalWorkers).
+                    _ => match self.build_phase_decision(eval.id, worker_caps).await? {
+                        Some(pair) => Some(pair),
+                        None => Some(decide_eval_recovery(
+                            EvalCapability::Eval,
+                            eval_capable_workers,
+                            fetch_capable_workers,
+                            connected_workers,
+                        )),
+                    },
+                },
+                EvaluationStatus::Queued
+                | EvaluationStatus::Fetching
+                | EvaluationStatus::EvaluatingFlake
+                | EvaluationStatus::EvaluatingDerivation => decide_pre_build_target(
                     eval.status,
-                    EvaluationStatus::Building | EvaluationStatus::Waiting
-                ) {
-                    continue;
+                    eval_capable_workers,
+                    fetch_capable_workers,
+                    connected_workers,
+                ),
+                EvaluationStatus::Building => {
+                    self.build_phase_decision(eval.id, worker_caps).await?
                 }
-                let arches: std::collections::HashSet<String> =
-                    worker_caps.iter().flat_map(|(a, _)| a.iter().cloned()).collect();
-                let checker = BuildabilityChecker::load(self.state, &pending_builds, arches).await?;
-                let target = if checker.any_buildable(&pending_builds, worker_caps) {
-                    EvaluationStatus::Building
-                } else {
-                    EvaluationStatus::Waiting
-                };
-                let reason = if matches!(target, EvaluationStatus::Waiting) {
-                    Some(checker.compute_waiting_reason(&pending_builds, worker_caps))
-                } else {
-                    None
-                };
-                (target, reason)
+                _ => None,
+            };
+
+            let Some((target, new_reason)) = outcome else {
+                continue;
             };
 
             if eval.status != target {
@@ -709,9 +706,9 @@ impl<'a> BuildStateHandler<'a> {
                     evaluation_id = %eval.id,
                     from = ?eval.status,
                     to = ?target,
-                    pending = pending_builds.len(),
-                    workers = worker_caps.len(),
+                    workers = connected_workers,
                     eval_workers = eval_capable_workers,
+                    fetch_workers = fetch_capable_workers,
                     "reconciling evaluation waiting state"
                 );
             }
@@ -731,46 +728,111 @@ impl<'a> BuildStateHandler<'a> {
 
         Ok(())
     }
+
+    /// Build-phase reconciliation for one evaluation: decide `Building` vs
+    /// `Waiting` from whether the connected pool can satisfy any pending build.
+    /// Returns `None` when the eval has no pending builds (nothing to decide).
+    async fn build_phase_decision(
+        &self,
+        evaluation_id: EvaluationId,
+        worker_caps: &[(Vec<String>, Vec<String>)],
+    ) -> Result<Option<(EvaluationStatus, Option<WaitingReason>)>> {
+        let pending_builds = EBuild::find()
+            .filter(CBuild::Evaluation.eq(evaluation_id))
+            .filter(CBuild::Status.is_in(vec![
+                BuildStatus::Created,
+                BuildStatus::Queued,
+                BuildStatus::Building,
+                BuildStatus::FailedTransient,
+            ]))
+            .all(&self.state.worker_db)
+            .await
+            .context("fetch pending builds")?;
+        if pending_builds.is_empty() {
+            return Ok(None);
+        }
+
+        let arches: std::collections::HashSet<String> =
+            worker_caps.iter().flat_map(|(a, _)| a.iter().cloned()).collect();
+        let checker = BuildabilityChecker::load(self.state, &pending_builds, arches).await?;
+        let target = if checker.any_buildable(&pending_builds, worker_caps) {
+            EvaluationStatus::Building
+        } else {
+            EvaluationStatus::Waiting
+        };
+        let reason = if matches!(target, EvaluationStatus::Waiting) {
+            Some(checker.compute_waiting_reason(&pending_builds, worker_caps))
+        } else {
+            None
+        };
+
+        Ok(Some((target, reason)))
+    }
 }
 
-/// Decides whether a pre-build evaluation needs to be reconciled.
+/// The capability a pre-build evaluation needs to make progress: `Fetching`
+/// wants a fetch-capable worker, every other pre-build state wants an
+/// eval-capable one.
+fn pre_build_capability(status: EvaluationStatus) -> Option<EvalCapability> {
+    match status {
+        EvaluationStatus::Fetching => Some(EvalCapability::Fetch),
+        EvaluationStatus::Queued
+        | EvaluationStatus::EvaluatingFlake
+        | EvaluationStatus::EvaluatingDerivation => Some(EvalCapability::Eval),
+        _ => None,
+    }
+}
+
+/// Whether the connected pool provides `capability`.
+fn capability_available(
+    capability: EvalCapability,
+    eval_capable_workers: usize,
+    fetch_capable_workers: usize,
+) -> bool {
+    match capability {
+        EvalCapability::Fetch => fetch_capable_workers > 0,
+        EvalCapability::Eval => eval_capable_workers > 0,
+    }
+}
+
+/// Decide whether an *active* (non-`Waiting`) pre-build evaluation must stall.
 ///
-/// Returns `Some((target, reason))` when the evaluation should transition or
-/// have its waiting reason refreshed; `None` when it is actively progressing
-/// and must be left alone.
-///
-/// `eval_capable_workers` is the count of connected workers whose negotiated
-/// `GradientCapabilities` includes `eval`. Pre-build states cannot make
-/// progress unless that count is non-zero - even a fleet of build-only
-/// workers leaves the eval stuck in `Queued`. Active pre-build states
-/// (`Fetching`, `EvaluatingFlake`, `EvaluatingDerivation`) are owned by an
-/// eval worker; they only stall into `Waiting` when every eval-capable
-/// worker has disconnected, and they must never be reset back to `Queued`.
+/// Returns `Some((Waiting, reason))` when no worker provides the capability the
+/// state needs - a `Fetching` eval needs `fetch`, every other pre-build state
+/// needs `eval`. Returns `None` while the eval can progress. `Waiting` evals are
+/// handled by [`decide_eval_recovery`], so this returns `None` for them.
 fn decide_pre_build_target(
     current: EvaluationStatus,
     eval_capable_workers: usize,
+    fetch_capable_workers: usize,
+    connected_workers: u32,
 ) -> Option<(EvaluationStatus, Option<WaitingReason>)> {
-    let stall = || {
+    let capability = pre_build_capability(current)?;
+    if capability_available(capability, eval_capable_workers, fetch_capable_workers) {
+        return None;
+    }
+
+    Some((
+        EvaluationStatus::Waiting,
+        Some(WaitingReason::eval_workers(capability, connected_workers)),
+    ))
+}
+
+/// Recovery for a `Waiting` eval parked in a pre-build phase: unpark to `Queued`
+/// once `capability` is back, otherwise refresh the reason with the live count.
+fn decide_eval_recovery(
+    capability: EvalCapability,
+    eval_capable_workers: usize,
+    fetch_capable_workers: usize,
+    connected_workers: u32,
+) -> (EvaluationStatus, Option<WaitingReason>) {
+    if capability_available(capability, eval_capable_workers, fetch_capable_workers) {
+        (EvaluationStatus::Queued, None)
+    } else {
         (
             EvaluationStatus::Waiting,
-            Some(WaitingReason::Workers {
-                unmet: Vec::new(),
-                connected_workers: 0,
-                available_architectures: Vec::new(),
-            }),
+            Some(WaitingReason::eval_workers(capability, connected_workers)),
         )
-    };
-    match (current, eval_capable_workers) {
-        (EvaluationStatus::Waiting, 0) => Some(stall()),
-        (EvaluationStatus::Waiting, _) => Some((EvaluationStatus::Queued, None)),
-        (
-            EvaluationStatus::Queued
-            | EvaluationStatus::Fetching
-            | EvaluationStatus::EvaluatingFlake
-            | EvaluationStatus::EvaluatingDerivation,
-            0,
-        ) => Some(stall()),
-        _ => None,
     }
 }
 
@@ -859,9 +921,10 @@ pub async fn reconcile_waiting_state(
     state: &Arc<ServerState>,
     worker_caps: &[(Vec<String>, Vec<String>)],
     eval_capable_workers: usize,
+    fetch_capable_workers: usize,
 ) -> Result<()> {
     BuildStateHandler::new(state)
-        .reconcile_waiting_state(worker_caps, eval_capable_workers)
+        .reconcile_waiting_state(worker_caps, eval_capable_workers, fetch_capable_workers)
         .await
 }
 
@@ -1156,6 +1219,16 @@ mod waiting_reason_tests {
         }
     }
 
+    fn eval_workers_view(r: &WaitingReason) -> (EvalCapability, u32) {
+        match r {
+            WaitingReason::EvalWorkers {
+                capability,
+                connected_workers,
+            } => (*capability, *connected_workers),
+            other => panic!("expected EvalWorkers variant, got {other:?}"),
+        }
+    }
+
     fn drv(id: DerivationId, arch: &str) -> MDerivation {
         gradient_entity::derivation::Model {
             id,
@@ -1285,85 +1358,73 @@ mod waiting_reason_tests {
         assert_eq!(unmet[0].build_count, 3);
     }
 
+    /// Regression for issue #268/#381: a Queued evaluation whose connected
+    /// workers lack the `eval` capability stalls to Waiting with an `eval`
+    /// `EvalWorkers` reason, reporting the total connected pool size.
     #[test]
-    fn pre_build_target_queued_no_workers_stalls_to_waiting() {
-        let (target, reason) = decide_pre_build_target(EvaluationStatus::Queued, 0)
+    fn pre_build_target_queued_no_eval_worker_stalls_to_eval_waiting() {
+        let (target, reason) = decide_pre_build_target(EvaluationStatus::Queued, 0, 1, 3)
             .expect("stall must produce a transition");
         assert_eq!(target, EvaluationStatus::Waiting);
-        let reason = reason.expect("stall target must carry a reason");
-        let (unmet, connected_workers, available_architectures) = workers_view(&reason);
-        assert_eq!(connected_workers, 0);
-        assert!(unmet.is_empty());
-        assert!(available_architectures.is_empty());
+        let (cap, connected) = eval_workers_view(&reason.expect("stall carries a reason"));
+        assert_eq!(cap, EvalCapability::Eval);
+        assert_eq!(connected, 3);
     }
 
+    /// #381: a `Fetching` eval needs a fetch-capable worker - an eval-only pool
+    /// still strands it, with a `fetch` reason.
     #[test]
-    fn pre_build_target_waiting_with_workers_recovers_to_queued() {
-        let (target, reason) = decide_pre_build_target(EvaluationStatus::Waiting, 2)
-            .expect("recovery must produce a transition");
-        assert_eq!(target, EvaluationStatus::Queued);
-        assert!(reason.is_none());
-    }
-
-    #[test]
-    fn pre_build_target_waiting_no_workers_keeps_waiting() {
-        let (target, reason) = decide_pre_build_target(EvaluationStatus::Waiting, 0)
-            .expect("waiting must refresh its reason");
+    fn pre_build_target_fetching_no_fetch_worker_stalls_to_fetch_waiting() {
+        let (target, reason) = decide_pre_build_target(EvaluationStatus::Fetching, 2, 0, 2)
+            .expect("stall must produce a transition");
         assert_eq!(target, EvaluationStatus::Waiting);
-        assert!(reason.is_some());
+        let (cap, connected) = eval_workers_view(&reason.expect("stall carries a reason"));
+        assert_eq!(cap, EvalCapability::Fetch);
+        assert_eq!(connected, 2);
     }
 
     #[test]
-    fn pre_build_target_queued_with_workers_is_noop() {
-        assert!(decide_pre_build_target(EvaluationStatus::Queued, 1).is_none());
-    }
-
-    #[test]
-    fn pre_build_target_active_pre_build_with_workers_left_alone() {
-        // Regression: a Fetching/EvaluatingFlake/EvaluatingDerivation eval is
-        // already being processed by an eval worker. Reconcile must not push
-        // it back to Queued - that violates the state machine and would log a
-        // spurious "invalid status transition: Fetching → Queued" warning.
+    fn pre_build_target_active_pre_build_with_capability_left_alone() {
+        // Fetching needs fetch; Queued/Evaluating* need eval. With both present
+        // the eval is progressing and must not be reconciled.
         for status in [
             EvaluationStatus::Fetching,
             EvaluationStatus::EvaluatingFlake,
             EvaluationStatus::EvaluatingDerivation,
+            EvaluationStatus::Queued,
         ] {
             assert!(
-                decide_pre_build_target(status, 1).is_none(),
-                "{status:?} with workers connected must not be reconciled"
+                decide_pre_build_target(status, 1, 1, 1).is_none(),
+                "{status:?} with capable workers must not be reconciled"
             );
         }
     }
 
     #[test]
-    fn pre_build_target_active_pre_build_no_workers_stalls() {
-        for status in [
-            EvaluationStatus::Fetching,
-            EvaluationStatus::EvaluatingFlake,
-            EvaluationStatus::EvaluatingDerivation,
-        ] {
-            let (target, reason) = decide_pre_build_target(status, 0)
-                .unwrap_or_else(|| panic!("{status:?} with no workers must stall"));
-            assert_eq!(target, EvaluationStatus::Waiting);
-            assert!(reason.is_some());
-        }
+    fn pre_build_target_ignores_waiting() {
+        // Waiting recovery is decide_eval_recovery's job, not this function's.
+        assert!(decide_pre_build_target(EvaluationStatus::Waiting, 0, 0, 0).is_none());
+        assert!(decide_pre_build_target(EvaluationStatus::Waiting, 2, 2, 2).is_none());
     }
 
-    /// Regression for issue #268: a Queued evaluation in an org whose only
-    /// connected workers lack the `eval` capability must stall to Waiting.
-    /// The caller in `BuildStateHandler::reconcile_waiting_state` passes the
-    /// eval-capable count - not total connected workers - so the function
-    /// sees `0` here and produces the same `Workers { connected_workers: 0 }`
-    /// reason as the no-workers-at-all path.
     #[test]
-    fn pre_build_target_queued_no_eval_capable_workers_stalls() {
-        let (target, reason) = decide_pre_build_target(EvaluationStatus::Queued, 0)
-            .expect("stall must produce a transition");
+    fn eval_recovery_unparks_to_queued_when_capability_returns() {
+        let (target, reason) = decide_eval_recovery(EvalCapability::Eval, 1, 0, 1);
+        assert_eq!(target, EvaluationStatus::Queued);
+        assert!(reason.is_none());
+
+        let (target, reason) = decide_eval_recovery(EvalCapability::Fetch, 0, 1, 1);
+        assert_eq!(target, EvaluationStatus::Queued);
+        assert!(reason.is_none());
+    }
+
+    #[test]
+    fn eval_recovery_refreshes_reason_while_capability_absent() {
+        let (target, reason) = decide_eval_recovery(EvalCapability::Fetch, 5, 0, 5);
         assert_eq!(target, EvaluationStatus::Waiting);
-        let reason = reason.expect("stall target must carry a reason");
-        let (_, connected_workers, _) = workers_view(&reason);
-        assert_eq!(connected_workers, 0);
+        let (cap, connected) = eval_workers_view(&reason.expect("refresh carries a reason"));
+        assert_eq!(cap, EvalCapability::Fetch);
+        assert_eq!(connected, 5);
     }
 
     #[test]
