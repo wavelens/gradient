@@ -106,18 +106,20 @@
       assert responses[3]["kind"] == "resolve_ok", responses[3]
       items = {it["attr"]: it for it in responses[3]["items"]}
 
+      # ResolvedItem omits None fields (serde skip_serializing_if), so a clean
+      # resolve has no `error` key and a failed one has no `drv_path` key.
       h = items[hello]
-      assert h["error"] is None and h["drv_path"] and h["drv_path"].endswith(".drv"), h
+      assert h.get("error") is None and h.get("drv_path", "").endswith(".drv"), h
 
       b = items["packages.x86_64-linux.boom"]
-      assert b["drv_path"] is None and b["error"], f"boom must isolate as a per-item error: {b}"
+      assert b.get("drv_path") is None and b.get("error"), f"boom must isolate as a per-item error: {b}"
 
       # ── Fingerprint ↔ on-disk eval-cache path agreement (#386 L3) ──────────
       # The lock-only `fingerprint` op must yield the same key Nix names the
       # on-disk cache after, so the worker can stage/pull `<fp>.sqlite`.
       banner("Assert fingerprint matches the eval-cache filename")
       assert responses[4]["kind"] == "fingerprint_ok", responses[4]
-      fp = responses[4]["fingerprint"]
+      fp = responses[4].get("fingerprint")
       assert fp, f"expected a fingerprint for the committed flake, got {fp}"
       machine.succeed(f"test -f /root/.cache/nix/eval-cache-v6/{fp}.sqlite")
 
