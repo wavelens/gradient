@@ -15,7 +15,7 @@
 
 use anyhow::Result;
 use tokio::sync::watch;
-use tracing::info;
+use tracing::debug;
 
 use crate::executor::check_abort;
 use crate::nix::store::LocalNixStore;
@@ -51,7 +51,7 @@ pub async fn compress_and_push_paths(
             Some(store),
         )
         .await?;
-        info!(store_path, "compressed and pushed NAR");
+        debug!(store_path, "compressed and pushed NAR");
     }
 
     Ok(())

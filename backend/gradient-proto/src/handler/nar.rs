@@ -11,7 +11,7 @@ use gradient_types::*;
 use gradient_core::ServerState;
 use gradient_scheduler::Scheduler;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
-use tracing::{info, warn};
+use tracing::{debug, warn};
 
 pub(super) struct NarUploadRecord<'a> {
     pub file_hash: &'a str,
@@ -136,7 +136,7 @@ pub(super) async fn mark_nar_stored(
         }
     }
     if marked > 0 {
-        info!(
+        debug!(
             store_path,
             file_size = record.file_size,
             count = marked,
@@ -144,6 +144,6 @@ pub(super) async fn mark_nar_stored(
         );
     }
 
-    info!(store_path, "cached_path metadata recorded after NarUploaded");
+    debug!(store_path, "cached_path metadata recorded after NarUploaded");
     Ok(())
 }
