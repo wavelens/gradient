@@ -492,6 +492,7 @@ async fn create_or_update_user(
         email_verified: true,
         oidc_issuer: Some(claims.iss),
         oidc_subject: Some(claims.sub),
+        active: true,
         ..Default::default()
     }
     .into_active_model()

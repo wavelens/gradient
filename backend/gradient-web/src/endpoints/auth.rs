@@ -121,6 +121,7 @@ pub async fn post_basic_register(
         email_verified,
         email_verification_token: verification_token.clone(),
         email_verification_token_expires: verification_expires,
+        active: true,
         ..Default::default()
     }
     .into_active_model();

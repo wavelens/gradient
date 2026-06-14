@@ -65,6 +65,7 @@ impl<'a> StateApplicator<'a> {
                     email_verified: state_user.email_verified,
                     managed: true,
                     superuser: state_user.superuser,
+                    active: true,
                     ..Default::default()
                 }
                 .into_active_model();
