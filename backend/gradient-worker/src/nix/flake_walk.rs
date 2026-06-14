@@ -106,9 +106,9 @@ impl<'a> FlakeWalker<'a> {
         self.cache.commit().context("committing eval cache")
     }
 
-    /// Fold the WAL into the main `.sqlite` (truncate checkpoint) so the
-    /// fleet-share push sees every shard's writes. Call once after all shards
-    /// finish, with no concurrent eval-cache readers.
+    /// Fold the WAL into the main `.sqlite` (PASSIVE checkpoint) so the
+    /// fleet-share push sees the shards' writes. Never blocks: safe to call even
+    /// while another evaluator of the same flake is reading the cache.
     pub(crate) fn checkpoint_cache(&self) -> Result<()> {
         self.cache.checkpoint().context("checkpointing eval cache")
     }

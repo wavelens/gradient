@@ -216,10 +216,10 @@ pub async fn evaluate_derivations(
     )
     .await?;
 
-    // Fold the shared eval-cache WAL into the main `.sqlite` once, now that all
-    // shards have committed and no worker is reading it, so the pushed blob is
-    // complete (per-shard commits only append to the WAL to avoid the concurrent
-    // checkpoint deadlock). Best-effort: a stale-but-readable WAL is acceptable.
+    // Fold the shared eval-cache WAL into the main `.sqlite` so the pushed blob
+    // carries this eval's writes (per-shard commits only append to the WAL). The
+    // checkpoint is PASSIVE: it never blocks, so it is safe even when another
+    // evaluation of the same flake is concurrently reading the cache. Best-effort.
     if cache_path.is_some()
         && let Err(e) = evaluator.resolver.checkpoint_cache(repo.clone()).await
     {

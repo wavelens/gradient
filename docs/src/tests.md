@@ -4088,13 +4088,15 @@ host RAM.
 
 ### Concurrent eval-cache without WAL deadlock
 
-Parallel shards share one eval-cache `<fp>.sqlite`. The nix fork splits
-`EvalCache::commit()` (commits the SQLite txn → appends to the WAL, no
-checkpoint, safe to call from concurrent writers) from `EvalCache::checkpoint()`
-(`wal_checkpoint(truncate)`, folds the WAL into the main file). Gradient calls
-`commit_cache()` per shard and `checkpoint_cache()` once at end-of-eval (before
-the fleet-share push), so the prior writer-holds-`@120`/checkpoint-needs-`@123`
-deadlock cannot form. The `Checkpoint` eval-op round-trips through the
+Parallel shards (and concurrent evaluations of the same flake) share one
+eval-cache `<fp>.sqlite`. The nix fork splits `EvalCache::commit()` (commits the
+SQLite txn, appends to the WAL, no checkpoint, safe under concurrent writers)
+from `EvalCache::checkpoint()` (`wal_checkpoint(passive)`, folds the WAL into the
+main file without taking the exclusive read-slot lock, so it never blocks on a
+concurrent reader). Gradient calls `commit_cache()` per shard and
+`checkpoint_cache()` once at end-of-eval (before the fleet-share push), so
+neither the per-shard `@120`-vs-`@123` deadlock nor the end-of-eval truncate
+deadlock can form. The `Checkpoint` eval-op round-trips through the
 `EvalRequest`/`EvalResponse` serde tests; the concurrent-write path itself is
 covered by the `gradient-eval` VM test (needs the fork's libnix, no local
 harness).
