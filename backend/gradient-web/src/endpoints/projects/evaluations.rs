@@ -26,10 +26,7 @@ use gradient_storage::nar_extract::{ExtractError, Extracted, extract_path_from_n
 use gradient_types::input::vec_to_hex;
 use gradient_types::*;
 use gradient_core::ServerState;
-use sea_orm::{
-    ColumnTrait, DbBackend, EntityTrait, FromQueryResult, QueryFilter, QueryOrder, QuerySelect,
-    Statement,
-};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -496,43 +493,42 @@ impl EntryPointRelatedData {
             m
         };
 
+        // Latest attempt per build, batched into one DISTINCT ON query.
         let build_time_ms: HashMap<BuildId, Option<i64>> = {
             let ids: Vec<BuildId> = entry_points.iter().map(|ep| ep.build).collect();
-            // Latest attempt per build via DISTINCT ON, so the list never loads
-            // every historical attempt just to keep the newest one.
-            let attempts = gradient_db::fetch_in_chunks(&ids, |chunk| async move {
-                let in_list = chunk
-                    .iter()
-                    .map(|id| format!("'{}'", id.into_inner()))
-                    .collect::<Vec<_>>()
-                    .join(",");
-                let sql = format!(
-                    "SELECT DISTINCT ON (build) * FROM build_attempt \
-                     WHERE build IN ({in_list}) ORDER BY build, created_at DESC"
-                );
-                MBuildAttempt::find_by_statement(Statement::from_string(DbBackend::Postgres, sql))
-                    .all(db)
-                    .await
-            })
-            .await?;
-            attempts.into_iter().map(|a| (a.build, a.duration_ms())).collect()
+            gradient_db::latest_attempts(db, &ids)
+                .await?
+                .into_iter()
+                .map(|(b, a)| (b, a.duration_ms()))
+                .collect()
         };
 
         // Read the incrementally-maintained per-entry-point counts (#383). Evals
-        // predating that machinery have no rows; fall back to the live closure
-        // CTE so they still render correctly.
+        // predating that machinery have no rows. Backfill them once (a single
+        // closure recompute that persists the counts) instead of running the
+        // live closure CTE on every request, which pegged Postgres for ~10s per
+        // page load (#391); fall back to the live CTE only if the backfill fails.
         let entry_point_ids: Vec<EntryPointId> = entry_points.iter().map(|ep| ep.id).collect();
         let mut raw = gradient_db::load_entry_point_dep_counts(db, &entry_point_ids).await?;
         if raw.is_empty() {
-            let seeds: Vec<(EntryPointId, uuid::Uuid)> = entry_points
-                .iter()
-                .filter_map(|ep| {
-                    let build = builds.get(&ep.build)?;
-                    Some((ep.id, build.derivation.into_inner()))
-                })
-                .collect();
             let eval_id = entry_points[0].evaluation;
-            raw = gradient_db::entry_point_dep_counts(db, eval_id, &seeds).await?;
+            match gradient_db::reconcile_eval_dep_counts(db, eval_id).await {
+                Ok(()) => {
+                    raw = gradient_db::load_entry_point_dep_counts(db, &entry_point_ids).await?;
+                }
+                Err(e) => {
+                    tracing::warn!(evaluation_id = %eval_id, error = %e,
+                        "dep-count backfill failed; using live closure CTE");
+                    let seeds: Vec<(EntryPointId, uuid::Uuid)> = entry_points
+                        .iter()
+                        .filter_map(|ep| {
+                            let build = builds.get(&ep.build)?;
+                            Some((ep.id, build.derivation.into_inner()))
+                        })
+                        .collect();
+                    raw = gradient_db::entry_point_dep_counts(db, eval_id, &seeds).await?;
+                }
+            }
         }
         let deps: HashMap<EntryPointId, BuildStatusCounts> = raw
             .into_iter()
