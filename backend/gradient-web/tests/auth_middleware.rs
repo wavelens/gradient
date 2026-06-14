@@ -52,6 +52,7 @@ fn server() -> TestServer {
         started_at: chrono::Utc::now(),
         pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
+        scim_group_roles: std::sync::Arc::new(Default::default()),
         board_events: tokio::sync::broadcast::channel(256).0,
         forge: gradient_forge::ForgeRegistry::with_builtin(),
         reactor: std::sync::Arc::new(gradient_db::NoReactor),

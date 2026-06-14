@@ -77,6 +77,7 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
     .map_err(|e| InitError::StateLoad(e.to_string()))?;
     let pending_org_memberships = Arc::new(state_result.pending);
     let oidc_group_roles = Arc::new(state_result.oidc_group_roles);
+    let scim_group_roles = Arc::new(state_result.scim_group_roles);
 
     if cli.storage.keep_evaluations > 0 {
         let max = cli.storage.keep_evaluations as i32;
@@ -193,6 +194,7 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
         started_at: chrono::Utc::now(),
         pending_org_memberships,
         oidc_group_roles,
+        scim_group_roles,
         board_events: tokio::sync::broadcast::channel(256).0,
         reactor,
     }))
