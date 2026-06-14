@@ -252,6 +252,7 @@ impl Worker<Connected> {
             config.eval_fork_workers,
             config.max_eval_rss,
             config.eval_cache_dir(),
+            config.eval_cache_share,
         );
         let gcroots = crate::nix::gcroots::GcRootKeeper::new(
             &config.gcroots_dir,

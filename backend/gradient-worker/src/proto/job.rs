@@ -13,18 +13,22 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use gradient_proto::messages::{
-    BuildMetrics, BuildOutput, CachedPath, ClientMessage, DiscoveredDerivation, EvalMessageLevel,
-    JobUpdateKind, QueryMode,
+    BuildMetrics, BuildOutput, CachedPath, ClientMessage, DiscoveredDerivation, EvalCachePullOutcome,
+    EvalCachePushMode, EvalMessageLevel, JobUpdateKind, QueryMode,
 };
 use tokio::sync::oneshot;
 use tracing::debug;
 
 use crate::connection::ProtoWriter;
+use crate::proto::eval_cache_recv::EvalCacheReceiver;
 use crate::proto::nar_recv::NarReceiver;
 use gradient_proto::traits::JobReporter;
+
+/// Chunk size for an inline eval-cache push (mirrors the NAR push chunk size).
+const EVAL_CACHE_CHUNK_SIZE: usize = 4 * 1024 * 1024;
 
 /// Shared map from job-id to a oneshot sender that delivers `CacheStatus` responses
 /// back to the waiting job task.
@@ -60,6 +64,9 @@ pub struct JobUpdater {
     /// Routes incoming `NarPush` chunks back to the job task that requested
     /// them via `NarRequest`. Cloneable; cheap.
     pub(crate) nar_recv: NarReceiver,
+    /// Routes `EvalCachePullResult` / `EvalCacheChunk` / `EvalCachePushGrant`
+    /// back to the job task during the eval-cache pull/push handshake.
+    pub(crate) eval_cache_recv: EvalCacheReceiver,
 }
 
 impl JobUpdater {
@@ -69,6 +76,7 @@ impl JobUpdater {
         cache_waiters: CacheWaiters,
         known_derivation_waiters: KnownDerivationWaiters,
         nar_recv: NarReceiver,
+        eval_cache_recv: EvalCacheReceiver,
     ) -> Self {
         Self {
             job_id,
@@ -76,6 +84,95 @@ impl JobUpdater {
             cache_waiters,
             known_derivation_waiters,
             nar_recv,
+            eval_cache_recv,
+        }
+    }
+
+    /// Pull `fingerprint`'s shared eval-cache blob, if the server has one.
+    /// Best-effort: returns `Ok(None)` on miss; `Err` only on transport failure.
+    pub async fn pull_eval_cache(&self, fingerprint: &str) -> Result<Option<Vec<u8>>> {
+        let mut pending = self.eval_cache_recv.register_pull(&self.job_id);
+        self.writer.send(ClientMessage::EvalCachePull {
+            job_id: self.job_id.clone(),
+            fingerprint: fingerprint.to_owned(),
+        })?;
+
+        match pending.await_outcome().await? {
+            EvalCachePullOutcome::Miss => Ok(None),
+            EvalCachePullOutcome::Presigned { url } => {
+                let bytes = crate::http::client()
+                    .get(&url)
+                    .send()
+                    .await
+                    .with_context(|| format!("eval-cache GET {url}"))?
+                    .error_for_status()
+                    .with_context(|| format!("eval-cache GET {url} returned non-2xx"))?
+                    .bytes()
+                    .await
+                    .with_context(|| format!("read eval-cache body of {url}"))?
+                    .to_vec();
+                Ok(Some(bytes))
+            }
+            EvalCachePullOutcome::Inline { total_bytes, .. } => {
+                let bytes = pending.await_inline(total_bytes).await?;
+                Ok(Some(bytes))
+            }
+        }
+    }
+
+    /// Push the local eval-cache blob for `fingerprint`. Best-effort.
+    pub async fn push_eval_cache(&self, fingerprint: &str, bytes: Vec<u8>) -> Result<()> {
+        let size_bytes = bytes.len() as u64;
+        let mut pending = self.eval_cache_recv.register_push(&self.job_id);
+        self.writer.send(ClientMessage::EvalCachePush {
+            job_id: self.job_id.clone(),
+            fingerprint: fingerprint.to_owned(),
+            size_bytes,
+        })?;
+
+        match pending.await_grant().await? {
+            EvalCachePushMode::Skip => Ok(()),
+            EvalCachePushMode::Presigned { url } => {
+                crate::http::client()
+                    .put(&url)
+                    .body(bytes)
+                    .send()
+                    .await
+                    .with_context(|| format!("eval-cache PUT {url}"))?
+                    .error_for_status()
+                    .with_context(|| format!("eval-cache PUT {url} returned non-2xx"))?;
+                self.writer.send(ClientMessage::EvalCachePushDone {
+                    job_id: self.job_id.clone(),
+                    fingerprint: fingerprint.to_owned(),
+                    size_bytes,
+                })?;
+                Ok(())
+            }
+            EvalCachePushMode::Inline { .. } => {
+                let mut offset: u64 = 0;
+                let mut chunks = bytes.chunks(EVAL_CACHE_CHUNK_SIZE).peekable();
+                if chunks.peek().is_none() {
+                    self.writer.send(ClientMessage::EvalCacheChunk {
+                        job_id: self.job_id.clone(),
+                        data: Vec::new(),
+                        offset: 0,
+                        is_final: true,
+                    })?;
+                }
+
+                while let Some(chunk) = chunks.next() {
+                    let is_final = chunks.peek().is_none();
+                    self.writer.send(ClientMessage::EvalCacheChunk {
+                        job_id: self.job_id.clone(),
+                        data: chunk.to_vec(),
+                        offset,
+                        is_final,
+                    })?;
+                    offset += chunk.len() as u64;
+                }
+
+                Ok(())
+            }
         }
     }
 
@@ -435,12 +532,14 @@ mod tests {
         let cache_waiters = Arc::new(Mutex::new(HashMap::new()));
         let known_derivation_waiters = Arc::new(Mutex::new(HashMap::new()));
         let nar_recv = NarReceiver::new();
+        let eval_cache_recv = EvalCacheReceiver::new();
         let updater = JobUpdater::new(
             job_id,
             writer,
             cache_waiters,
             known_derivation_waiters,
             nar_recv,
+            eval_cache_recv,
         );
         (updater, reader)
     }
