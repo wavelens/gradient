@@ -401,6 +401,51 @@ fn scim_patch_group_remove_member_deletes_membership() {
 }
 
 #[test]
+fn inactive_user_session_returns_403() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        let user = scim_user("mallory@example.com", false);
+        let now = chrono::Utc::now().naive_utc();
+        let session = gradient_entity::session::Model {
+            id: gradient_types::SessionId::now_v7(),
+            user_id: user.id,
+            created_at: now,
+            expires_at: now + chrono::Duration::hours(24),
+            last_used_at: now,
+            revoked_at: None,
+            user_agent: None,
+            ip: None,
+            remember_me: false,
+        };
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![session.clone()]]) // decode_jwt session lookup
+            .append_query_results([vec![session.clone()]]) // last_used_at UPDATE ... RETURNING
+            .append_query_results([vec![user.clone()]]) // EUser::find_by_id -> inactive
+            .into_connection();
+        let s = scim_server(db);
+
+        let claims = gradient_web::authorization::Cliams {
+            iat: now.and_utc().timestamp() as usize,
+            exp: (now + chrono::Duration::hours(24)).and_utc().timestamp() as usize,
+            id: user.id,
+            jti: session.id,
+        };
+        let token = jsonwebtoken::encode(
+            &jsonwebtoken::Header::default(),
+            &claims,
+            &jsonwebtoken::EncodingKey::from_secret(b"test-jwt-secret"),
+        )
+        .expect("encode jwt");
+
+        let res = s
+            .get("/api/v1/user")
+            .add_header("Authorization", format!("Bearer {token}"))
+            .await;
+        res.assert_status_forbidden();
+    });
+}
+
+#[test]
 fn scim_service_provider_config_ok() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {

@@ -157,6 +157,11 @@ pub async fn authorize(
         }
     };
 
+    if !current_user.active {
+        audit_deny(&state, Some(user_id), info, method, path, "Account deactivated").await;
+        return Err(WebError::forbidden("account is deactivated"));
+    }
+
     req.extensions_mut().insert(current_user);
     req.extensions_mut().insert(api_key_extension);
     req.extensions_mut().insert(ClientIp(client_ip));

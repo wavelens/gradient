@@ -709,6 +709,36 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         .merge(cache_log)
         .merge(cache_proto_route);
 
+    // SCIM provisioning surface - mounted only when configured so disabled
+    // instances expose nothing. Guarded by the bearer-token middleware.
+    if state.config.scim.is_some() {
+        let scim_routes = Router::new()
+            .route(
+                "/ServiceProviderConfig",
+                get(scim::discovery::service_provider_config),
+            )
+            .route("/ResourceTypes", get(scim::discovery::resource_types))
+            .route("/Schemas", get(scim::discovery::schemas))
+            .route("/Users", get(scim::users::list).post(scim::users::create))
+            .route(
+                "/Users/{id}",
+                get(scim::users::get)
+                    .put(scim::users::replace)
+                    .patch(scim::users::patch)
+                    .delete(scim::users::delete),
+            )
+            .route("/Groups", get(scim::groups::list))
+            .route(
+                "/Groups/{id}",
+                get(scim::groups::get).patch(scim::groups::patch),
+            )
+            .route_layer(middleware::from_fn_with_state(
+                Arc::clone(&state),
+                authorization::authorize_scim,
+            ));
+        app = app.nest("/scim/v2", scim_routes);
+    }
+
     // Layer order (outer → inner, i.e. last `.layer()` is outermost):
     //   SetRequestIdLayer    - assigns x-request-id on inbound requests
     //   TraceLayer           - opens the span (reads the id from headers)
