@@ -61,6 +61,7 @@ pub fn user() -> user::Model {
         last_login_at: test_date(),
         created_at: test_date(),
         email_verified: true,
+        active: true,
         ..Default::default()
     }
 }
