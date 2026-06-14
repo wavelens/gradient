@@ -382,6 +382,10 @@ async fn create_or_update_user(
         .context("Database error while finding OIDC user")?;
 
     if let Some(user) = existing {
+        if !user.active {
+            bail!("account is deactivated");
+        }
+
         let email_changed = claims.email.as_ref().is_some_and(|e| e != &user.email);
         let name_changed = claims.name.as_ref().is_some_and(|n| n != &user.name);
 
@@ -428,6 +432,10 @@ async fn create_or_update_user(
     if let Some(existing) = collision {
         if !is_claimable(&existing.password, &existing.oidc_subject) {
             bail!("An account already exists with this username or email.");
+        }
+
+        if !existing.active {
+            bail!("account is deactivated");
         }
 
         let user_id = existing.id;

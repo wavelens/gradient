@@ -241,6 +241,10 @@ pub async fn post_basic_login(
         return Err(WebError::invalid_credentials());
     }
 
+    if !user.active {
+        return Err(WebError::forbidden("account is deactivated"));
+    }
+
     if state
         .config
         .email

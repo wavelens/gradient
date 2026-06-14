@@ -10,7 +10,6 @@ use serde_json::Value;
 pub const USER_SCHEMA: &str = "urn:ietf:params:scim:schemas:core:2.0:User";
 pub const GROUP_SCHEMA: &str = "urn:ietf:params:scim:schemas:core:2.0:Group";
 pub const LIST_SCHEMA: &str = "urn:ietf:params:scim:api:messages:2.0:ListResponse";
-pub const PATCH_SCHEMA: &str = "urn:ietf:params:scim:api:messages:2.0:PatchOp";
 
 #[derive(Serialize)]
 pub struct ListResponse<T> {
@@ -117,14 +116,6 @@ pub struct GroupMember {
     pub value: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display: Option<String>,
-}
-
-#[derive(Deserialize)]
-pub struct GroupRequest {
-    #[serde(rename = "displayName")]
-    pub display_name: String,
-    #[serde(default)]
-    pub members: Vec<GroupMember>,
 }
 
 #[derive(Deserialize)]

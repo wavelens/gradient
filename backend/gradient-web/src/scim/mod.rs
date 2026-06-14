@@ -7,9 +7,6 @@
 //! SCIM 2.0 (RFC 7643/7644) provisioning surface. Instance-level, bearer-token
 //! authenticated, mounted at `/scim/v2` only when SCIM is configured.
 
-// DTOs/filter are consumed by the handler modules filled in by later tasks.
-#![allow(dead_code)]
-
 mod dto;
 mod error;
 mod filter;
