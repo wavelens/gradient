@@ -124,6 +124,15 @@ pub(super) async fn evaluations_to_summaries(
             .started_by
             .and_then(|uid| user_names.get(&uid).cloned());
 
+        // PR number lives in `source_comment` for every PR trigger, or in an
+        // approval `waiting_reason` for gated PRs; both expose it as raw JSON.
+        let pr_number = evaluation
+            .source_comment
+            .as_ref()
+            .and_then(|v| v.get("pr_number"))
+            .or_else(|| evaluation.waiting_reason.as_ref().and_then(|v| v.get("pr_number")))
+            .and_then(|n| n.as_u64());
+
         out.push(EvaluationSummary {
             id: evaluation.id,
             commit: commit_hash,
@@ -131,6 +140,7 @@ pub(super) async fn evaluations_to_summaries(
             status: evaluation.status,
             trigger,
             triggered_by,
+            pr_number,
             total_builds: builds.total(),
             builds,
             errors,

@@ -152,6 +152,12 @@ async fn react_to_source_comment_on_terminal(
     let Some(raw) = evaluation.source_comment.as_ref() else {
         return;
     };
+    // PR-triggered evals stamp `source_comment` with just `{pr_number, pr_author}`
+    // (no `comment_id`) so the UI can show "PR #42"; there's no comment to react
+    // to, so skip silently rather than warning about a "malformed" payload.
+    if raw.get("comment_id").is_none() {
+        return;
+    }
     let Some(target) = parse_source_comment(raw) else {
         warn!(
             evaluation_id = %evaluation.id,

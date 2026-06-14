@@ -97,6 +97,8 @@ pub struct GitHubPullRequest {
     pub number: Option<u64>,
     #[serde(default)]
     pub user: Option<GitHubUser>,
+    #[serde(default)]
+    pub title: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -158,6 +160,8 @@ pub struct GiteaPullRequest {
     pub number: Option<u64>,
     #[serde(default)]
     pub user: Option<GiteaUser>,
+    #[serde(default)]
+    pub title: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -218,6 +222,8 @@ pub struct GitLabMRAttributes {
     pub action: String,
     pub source_branch: String,
     pub last_commit: GitLabCommit,
+    #[serde(default)]
+    pub title: Option<String>,
     #[serde(default)]
     pub iid: Option<u64>,
     #[serde(default)]
@@ -351,6 +357,9 @@ pub struct ParsedPullRequestEvent {
     /// exists) rather than the base repo. `None` for same-repo PRs and
     /// for payloads that lack a `head.repo.clone_url`.
     pub head_repo_clone_url: Option<String>,
+    /// PR / MR title. PR webhook payloads don't carry the head commit message,
+    /// so this is used as the evaluation's display message for PR triggers.
+    pub title: Option<String>,
 }
 
 /// Release/tag event. `commit_hash` is the SHA the tag points at.
@@ -582,6 +591,7 @@ impl ParsedPullRequestEvent {
             sender,
             is_fork,
             head_repo_clone_url,
+            title: payload.pull_request.title,
         })
     }
 
@@ -647,6 +657,7 @@ impl ParsedPullRequestEvent {
             sender,
             is_fork,
             head_repo_clone_url,
+            title: payload.pull_request.title,
         })
     }
 
@@ -695,6 +706,7 @@ impl ParsedPullRequestEvent {
             sender,
             is_fork,
             head_repo_clone_url,
+            title: payload.object_attributes.title,
         })
     }
 }
@@ -872,7 +884,8 @@ mod tests {
                     "head": {{
                         "sha": "{VALID_SHA}",
                         "ref": "feature-x"
-                    }}
+                    }},
+                    "title": "Add the widget"
                 }},
                 "repository": {{
                     "clone_url": "https://github.com/org/repo.git",
@@ -885,6 +898,9 @@ mod tests {
         assert_eq!(ev.branch, Some("feature-x".to_string()));
         assert_eq!(ev.commit_hash, hex::decode(VALID_SHA).unwrap());
         assert_eq!(ev.repository_urls.len(), 2);
+        // PR title becomes the evaluation's display message (PR payloads carry no
+        // head commit message) (#391).
+        assert_eq!(ev.title, Some("Add the widget".to_string()));
     }
 
     #[test]

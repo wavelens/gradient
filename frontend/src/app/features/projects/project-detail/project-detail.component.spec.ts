@@ -29,6 +29,7 @@ function evalSummary(id: string, status: EvaluationSummary['status'] = 'Building
     status,
     trigger: null,
     triggered_by: null,
+    pr_number: null,
     total_builds: 0,
     builds: zeroCounts(),
     errors: 0,
@@ -187,6 +188,15 @@ describe('ProjectDetailComponent - evaluation selection', () => {
     const component = fixture.componentInstance;
     component.select(component.evaluations()[1]);
     expect(spy).toHaveBeenCalledWith(component.orgName, component.projectName, component.evaluations()[1].id);
+  });
+
+  it('labels a pull-request trigger as "PR #<n>" (#391)', () => {
+    const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true });
+    const component = fixture.componentInstance;
+    const pr = { ...evalSummary('pr1'), trigger: { id: 't', type: 'reporter_pull_request' as const }, pr_number: 42 };
+    expect(component.triggerLabel(pr)).toBe('PR #42');
+    const noNum = { ...pr, pr_number: null };
+    expect(component.triggerLabel(noNum)).toBe('PR');
   });
 
   it('preserves an explicit non-newest selection across a live refetch', () => {
