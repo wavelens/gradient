@@ -34,7 +34,7 @@ pub use self::nars::{
     available as nars_available, delete as nars_delete, list as nars_list, show as nars_show,
     stats as nars_stats,
 };
-pub use self::upload::nars_upload;
+pub use self::upload::{nar_chunk, nar_finalize, nars_upload};
 pub use self::serve::serve;
 pub use self::upstreams::{
     delete_cache_upstream, get_cache_upstreams, patch_cache_upstream, put_cache_upstream,

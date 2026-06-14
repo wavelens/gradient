@@ -10,18 +10,21 @@ use crate::error::{ErrorCode, WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::permissions::CachePermission;
 use axum::Extension;
-use axum::extract::{Multipart, Path, State};
+use axum::body::Bytes;
+use axum::extract::{Multipart, Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use gradient_proto::ingest::{IngestInput, SignTargets, ingest_nar};
+use gradient_storage::PartialStore;
 use gradient_types::*;
 use gradient_core::ServerState;
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
+use std::time::Duration;
 
 #[derive(Deserialize)]
-struct NarinfoPart {
+pub struct NarinfoPart {
     store_path: String,
     file_hash: String,
     file_size: i64,
@@ -132,6 +135,188 @@ pub async fn nars_upload(
             "cache_name": cache.name,
             "store_path": narinfo.store_path,
             "created": outcome.created,
+        })),
+    )
+    .await;
+
+    Ok((
+        StatusCode::CREATED,
+        ok_json(json!({
+            "store_path": narinfo.store_path,
+            "created": outcome.created,
+        })),
+    ))
+}
+
+#[derive(Deserialize)]
+pub struct ChunkQuery {
+    offset: u64,
+}
+
+/// Disk-staging store for chunked uploads. Reuses the `#225` `PartialStore` but
+/// under a dedicated root so per-NAR keys never collide with the proto path's
+/// per-session budget accounting.
+fn upload_partial_store(state: &ServerState) -> WebResult<PartialStore> {
+    let root = format!("{}/nar-upload-partial", state.config.storage.base_path);
+    let ttl = Duration::from_secs(state.config.proto.nar_partial_ttl_secs);
+    Ok(PartialStore::new(root, ttl)?)
+}
+
+/// A store path's base name (`<hash>-<name>`) used as the staging key. Rejected
+/// when it could escape the staging root.
+fn require_safe_hash(store_hash: &str) -> WebResult<()> {
+    if store_hash.is_empty() || store_hash.contains('/') || store_hash.contains("..") {
+        return Err(WebError::BadRequest(
+            ErrorCode::INPUT_VALIDATION,
+            "invalid store hash".into(),
+        ));
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::require_safe_hash;
+
+    #[test]
+    fn accepts_a_normal_store_basename() {
+        assert!(require_safe_hash("bnq5n76hrfr50l5s2hbbg9vw32fvcrbc-linux-rpi-6.12.75").is_ok());
+    }
+
+    #[test]
+    fn rejects_traversal_and_separators() {
+        for bad in ["", "../etc/passwd", "a/b", "..", "x/.."] {
+            assert!(require_safe_hash(bad).is_err(), "{bad:?} must be rejected");
+        }
+    }
+}
+
+/// `PUT /caches/{cache}/nars/{store_hash}/chunk?offset=N` - append one NAR slice
+/// to the staged `.partial`. `offset` must equal the bytes already received
+/// (`0` starts fresh); a mismatch returns `409` with the authoritative
+/// `received` so the client can resume. Keeps each request small enough to clear
+/// the reverse proxy's body limit no matter how large the NAR is.
+pub async fn nar_chunk(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
+    Path((cache_name, store_hash)): Path<(String, String)>,
+    Query(ChunkQuery { offset }): Query<ChunkQuery>,
+    body: Bytes,
+) -> WebResult<impl IntoResponse> {
+    let cache = load_cache(
+        &state,
+        Caller::User(&user),
+        api_key.as_ref(),
+        cache_name,
+        CacheAccess::Require {
+            permission: CachePermission::WriteStore,
+            reject_managed: false,
+        },
+    )
+    .await?;
+    require_safe_hash(&store_hash)?;
+
+    let max = state.config.limits.max_nar_upload_size as u64;
+    if offset + body.len() as u64 > max {
+        return Err(WebError::PayloadTooLarge(
+            ErrorCode::PAYLOAD_TOO_LARGE,
+            format!("nar exceeds max upload size of {max} bytes"),
+        ));
+    }
+
+    let store = upload_partial_store(&state)?;
+    let key = format!("{}/{store_hash}", cache.id);
+    // A fresh upload sweeps abandoned partials (best-effort) and truncates any
+    // stale prefix for this key, so a re-run after a failure restarts cleanly.
+    if offset == 0 {
+        let _ = store.gc();
+    }
+
+    let received = store.received_len(&key, &store_hash)?;
+    if offset != received {
+        return Ok((
+            StatusCode::CONFLICT,
+            ok_json(json!({ "received": received })),
+        ));
+    }
+
+    store.append(&key, &store_hash, offset, &body)?;
+
+    Ok((
+        StatusCode::OK,
+        ok_json(json!({ "received": offset + body.len() as u64 })),
+    ))
+}
+
+/// `POST /caches/{cache}/nars/{store_hash}/finalize` - validate the fully staged
+/// NAR against its narinfo and ingest it, then drop the partial.
+pub async fn nar_finalize(
+    state: State<Arc<ServerState>>,
+    info: RequestInfo,
+    Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
+    Path((cache_name, store_hash)): Path<(String, String)>,
+    axum::Json(narinfo): axum::Json<NarinfoPart>,
+) -> WebResult<impl IntoResponse> {
+    let cache = load_cache(
+        &state,
+        Caller::User(&user),
+        api_key.as_ref(),
+        cache_name,
+        CacheAccess::Require {
+            permission: CachePermission::WriteStore,
+            reject_managed: false,
+        },
+    )
+    .await?;
+    require_safe_hash(&store_hash)?;
+
+    let store = upload_partial_store(&state)?;
+    let key = format!("{}/{store_hash}", cache.id);
+    let staged = store.staged_len(&key);
+    if staged as i64 != narinfo.file_size {
+        return Err(WebError::BadRequest(
+            ErrorCode::INPUT_VALIDATION,
+            format!(
+                "nar size mismatch: declared {} bytes, staged {staged}",
+                narinfo.file_size
+            ),
+        ));
+    }
+
+    let nar_bytes = store.read_all(&key)?;
+    let outcome = ingest_nar(
+        &state.web_db,
+        &state.nar_storage,
+        nar_bytes,
+        IngestInput {
+            store_path: &narinfo.store_path,
+            file_hash: &narinfo.file_hash,
+            file_size: narinfo.file_size,
+            nar_size: narinfo.nar_size,
+            nar_hash: &narinfo.nar_hash,
+            references: &narinfo.references,
+            deriver: narinfo.deriver.as_deref(),
+        },
+        SignTargets::Cache(cache.id),
+    )
+    .await
+    .map_err(WebError::from)?;
+    let _ = store.discard(&key);
+
+    audit_record(
+        &state.web_db,
+        Some(user.id),
+        events::CACHE_NAR_UPLOAD,
+        &info,
+        Some(json!({
+            "cache_id": cache.id.to_string(),
+            "cache_name": cache.name,
+            "store_path": narinfo.store_path,
+            "created": outcome.created,
+            "chunked": true,
         })),
     )
     .await;
