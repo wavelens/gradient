@@ -268,6 +268,15 @@ in {
         };
       };
 
+      scim = {
+        enable = lib.mkEnableOption "SCIM provisioning";
+        tokenFile = lib.mkOption {
+          description = "Path to the file holding the SCIM provisioning bearer token";
+          type = lib.types.path;
+        };
+        hardDelete = lib.mkEnableOption "hard-delete users on SCIM DELETE (default: soft-disable)";
+      };
+
       email = {
         enable = lib.mkEnableOption "email functionality";
         requireVerification = lib.mkEnableOption "email verification requirement for registrations";
@@ -765,6 +774,8 @@ in {
           "gradient_state:${validatedStateJsonFile}"
         ] ++ lib.optional cfg.oidc.enable [
           "gradient_oidc_client_secret:${cfg.oidc.clientSecretFile}"
+        ] ++ lib.optional cfg.scim.enable [
+          "gradient_scim_token:${cfg.scim.tokenFile}"
         ] ++ lib.optional cfg.email.enable [
           "gradient_email_smtp_password:${cfg.email.smtpPasswordFile}"
         ] ++ lib.optionals (cfg.s3.enable && cfg.s3.secretAccessKeyFile != null) [
@@ -798,6 +809,7 @@ in {
         GRADIENT_DATABASE_WEB_MAX_CONNECTIONS = toString cfg.databaseWebMaxConnections;
         GRADIENT_DATABASE_WEB_MIN_CONNECTIONS = toString cfg.databaseWebMinConnections;
         GRADIENT_OIDC_ENABLED = lib.boolToString cfg.oidc.enable;
+        GRADIENT_SCIM_ENABLED = lib.boolToString cfg.scim.enable;
         GRADIENT_ENABLE_REGISTRATION = lib.boolToString cfg.settings.enableRegistration;
         GRADIENT_CRYPT_SECRET_FILE = "%d/gradient_crypt_secret";
         GRADIENT_JWT_SECRET_FILE = "%d/gradient_jwt_secret";
@@ -861,6 +873,9 @@ in {
         GRADIENT_OIDC_SCOPES = builtins.concatStringsSep " " cfg.oidc.scopes;
         GRADIENT_OIDC_DISCOVERY_URL = cfg.oidc.discoveryUrl;
         GRADIENT_OIDC_REQUIRED = lib.boolToString cfg.oidc.required;
+      } // lib.optionalAttrs cfg.scim.enable {
+        GRADIENT_SCIM_TOKEN_FILE = "%d/gradient_scim_token";
+        GRADIENT_SCIM_HARD_DELETE = lib.boolToString cfg.scim.hardDelete;
       } // lib.optionalAttrs cfg.email.enable {
         GRADIENT_EMAIL_ENABLED = lib.boolToString cfg.email.enable;
         GRADIENT_EMAIL_REQUIRE_VERIFICATION = lib.boolToString cfg.email.requireVerification;
