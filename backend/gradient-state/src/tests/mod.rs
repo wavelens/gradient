@@ -6,7 +6,7 @@
 
 mod fixtures;
 
-use super::{StateConfiguration, resolve_oidc_group_roles};
+use super::{StateConfiguration, resolve_oidc_group_roles, resolve_scim_group_roles};
 use gradient_types::triggers::ConcurrencyPolicy;
 use gradient_types::{OrganizationId, RoleId};
 use fixtures::{reporter_cfg, worker_cfg};
@@ -778,6 +778,40 @@ fn resolves_group_to_org_role_grants() {
 
     let resolved = resolve_oidc_group_roles(&cfg, &role_ids);
     assert_eq!(resolved.get("platform-team"), Some(&vec![(org, role)]));
+    assert_eq!(resolved.get("ops"), Some(&vec![(org, role)]));
+    assert!(!resolved.contains_key("unmapped"));
+}
+
+#[test]
+fn resolves_scim_group_to_org_role_grants() {
+    let json = r#"{
+        "roles": {
+            "eng": {
+                "name": "platform-admin",
+                "organization": "acme",
+                "permissions": ["create_project"],
+                "scim_group": ["acme-eng", "ops"]
+            },
+            "unmapped": {
+                "name": "viewer",
+                "organization": "acme",
+                "permissions": ["view_project"]
+            }
+        }
+    }"#;
+    let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
+
+    let org = OrganizationId::now_v7();
+    let role = RoleId::now_v7();
+    let mut role_ids = HashMap::new();
+    role_ids.insert(("acme".to_string(), "platform-admin".to_string()), (org, role));
+    role_ids.insert(
+        ("acme".to_string(), "viewer".to_string()),
+        (org, RoleId::now_v7()),
+    );
+
+    let resolved = resolve_scim_group_roles(&cfg, &role_ids);
+    assert_eq!(resolved.get("acme-eng"), Some(&vec![(org, role)]));
     assert_eq!(resolved.get("ops"), Some(&vec![(org, role)]));
     assert!(!resolved.contains_key("unmapped"));
 }

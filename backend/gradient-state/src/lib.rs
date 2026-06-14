@@ -6,7 +6,7 @@
 
 //! Declarative state management: the on-disk DTOs ([`config`]), pre-apply
 //! [`validation`], database [`provisioning`], and [`export`]. This root keeps
-//! the load entry point and the OIDC group → role resolution.
+//! the load entry point and the OIDC/SCIM group → role resolution.
 
 mod config;
 pub mod export;
@@ -55,6 +55,37 @@ pub fn resolve_oidc_group_roles(
     map
 }
 
+/// Resolved at startup from [`StateRole::scim_group`]: SCIM group name → the
+/// `(organization, role)` grants a member of that SCIM group receives.
+pub type ScimGroupRoles = HashMap<String, Vec<(OrganizationId, RoleId)>>;
+
+/// Build the SCIM group → grants map from declared roles. Mirrors
+/// [`resolve_oidc_group_roles`].
+pub fn resolve_scim_group_roles(
+    config: &StateConfiguration,
+    role_ids: &HashMap<(String, String), (OrganizationId, RoleId)>,
+) -> ScimGroupRoles {
+    let mut map: ScimGroupRoles = HashMap::new();
+    for role in config.roles.values() {
+        if role.scim_group.is_empty() {
+            continue;
+        }
+        let key = (role.organization.clone(), role.name.clone());
+        let Some(&grant) = role_ids.get(&key) else {
+            tracing::warn!(
+                organization = %role.organization,
+                role = %role.name,
+                "scim_group references a role that was not provisioned; skipping",
+            );
+            continue;
+        };
+        for group in &role.scim_group {
+            map.entry(group.clone()).or_default().push(grant);
+        }
+    }
+    map
+}
+
 /// Load and validate a state file without touching the database. Returns the
 /// human-readable validation errors (empty `Vec` = valid). Backs the
 /// `--validate-state` CLI flag so config mistakes surface at build/CI time
@@ -81,6 +112,7 @@ pub async fn load_and_apply_state(
         return Ok(StateApplyResult {
             pending: PendingOrgMemberships::new(),
             oidc_group_roles: OidcGroupRoles::new(),
+            scim_group_roles: ScimGroupRoles::new(),
         });
     };
 
