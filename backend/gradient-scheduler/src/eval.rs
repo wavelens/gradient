@@ -738,10 +738,10 @@ pub async fn handle_eval_result(
     let drv_path_to_id = batch.insert(state, &proc.evaluation).await?;
 
     // Dependency edges are NOT created here. The BFS walks roots→leaves, so
-    // batch N may contain derivation A whose dep B lands in batch N+1. Instead,
-    // deps are accumulated in `Scheduler::deferred_deps` and flushed in one
-    // shot by `flush_deferred_deps` inside `handle_eval_job_completed`, when
-    // every derivation row is guaranteed to be in the DB.
+    // batch N may contain derivation A whose dep B lands in batch N+1. Edges are
+    // written incrementally by `write_edges_and_promote` once both endpoints
+    // have rows, with any stragglers flushed by `flush_deferred_deps` at
+    // `handle_eval_job_completed`.
 
     proc.insert_build_rows(&derivations, &drv_path_to_id)
         .await?;
@@ -839,11 +839,10 @@ pub async fn handle_eval_job_completed(
     check_evaluation_done(state, evaluation_id).await
 }
 
-/// Flush all deferred dependency edges for `evaluation_id`.
-///
-/// Called once from `handle_eval_job_completed` after every derivation row is
-/// guaranteed to be in the DB. Resolves `(drv_path, Vec<dep_drv_path>)` pairs
-/// to `(derivation_uuid, dep_uuid)` edges and inserts them in bulk.
+/// Resolve `(drv_path, Vec<dep_drv_path>)` pairs to `(derivation_uuid,
+/// dep_uuid)` edges and insert them (conflict-do-nothing). Called per-batch from
+/// [`write_edges_and_promote`] for edge-complete sources, and once at
+/// `handle_eval_job_completed` to flush any stragglers.
 pub async fn flush_deferred_deps(
     state: &Arc<ServerState>,
     evaluation_id: EvaluationId,

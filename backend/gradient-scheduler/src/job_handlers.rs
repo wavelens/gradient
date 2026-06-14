@@ -309,27 +309,28 @@ impl Scheduler {
             }
         }
 
-        // Accumulate dep edges to flush later (at eval-job-completed) when
-        // every derivation row is guaranteed to be in the DB. The BFS walks
-        // roots→leaves, so batch N may contain a derivation whose dep lands
-        // in batch N+1 - inserting the edge now would FK-fail or silently
-        // skip the dep because the row doesn't exist yet.
+        // #392: record this batch in the eval's readiness tracker (a pure,
+        // in-memory step) before inserting rows, then insert rows, then write
+        // the now-complete edges and promote their builds to Queued. The BFS
+        // walks roots→leaves, so a batch may reference a dep whose row lands
+        // later; the tracker reports a source only once all its deps have rows.
+        // The map lock is held only for the in-memory observe so other evals
+        // aren't blocked on this eval's DB work.
         let eval_id = job.evaluation_id;
-        let dep_pairs: Vec<(String, Vec<String>)> = derivations
-            .iter()
-            .filter(|d| !d.dependencies.is_empty())
-            .map(|d| (d.drv_path.clone(), d.dependencies.clone()))
-            .collect();
-        if !dep_pairs.is_empty() {
-            self.deferred_deps
-                .write()
-                .await
-                .entry(eval_id)
-                .or_default()
-                .extend(dep_pairs);
+        let ready = {
+            let mut trackers = self.edge_readiness.write().await;
+            trackers.entry(eval_id).or_default().observe(&derivations)
+        };
+
+        eval::handle_eval_result(&self.state, &job, derivations, warnings, errors).await?;
+
+        match eval::write_edges_and_promote(&self.state, eval_id, job.peer_id, ready).await {
+            Ok(n) if n > 0 => self.kick_dispatch(),
+            Ok(_) => {}
+            Err(e) => error!(error = %e, %eval_id, "write_edges_and_promote failed"),
         }
 
-        eval::handle_eval_result(&self.state, &job, derivations, warnings, errors).await
+        Ok(())
     }
 
     pub async fn handle_build_output(
@@ -393,13 +394,15 @@ impl Scheduler {
                     };
                 }
 
-                // Flush deferred dependency edges BEFORE promoting builds,
+                // Drain any edges the incremental path never resolved (a dep
+                // whose row never landed) and flush them before final promotion
                 // so the dispatch SQL's dep-gating sees the full graph.
                 let deferred = self
-                    .deferred_deps
+                    .edge_readiness
                     .write()
                     .await
                     .remove(&j.evaluation_id)
+                    .map(|mut t| t.drain_pending())
                     .unwrap_or_default();
                 if let Err(e) =
                     eval::flush_deferred_deps(&self.state, j.evaluation_id, j.peer_id, deferred)
@@ -440,6 +443,7 @@ impl Scheduler {
         let job = self.job_tracker.write().await.remove_active(job_id);
         match job {
             Some(PendingJob::Eval(j)) => {
+                self.edge_readiness.write().await.remove(&j.evaluation_id);
                 eval::handle_eval_job_failed(&self.state, j.evaluation_id, error).await
             }
             Some(PendingJob::Build(j)) => {

@@ -37,12 +37,14 @@ use gradient_types::*;
 use gradient_core::ServerState;
 use tokio::sync::RwLock;
 
+use edge_readiness::EdgeReadiness;
 use jobs::JobTracker;
 use worker_pool::WorkerPool;
 
-/// Per-evaluation deferred dependency edges accumulated during eval result
-/// processing and flushed once all derivation rows are in the DB.
-type DeferredDeps = Arc<RwLock<HashMap<EvaluationId, Vec<(String, Vec<String>)>>>>;
+/// Per-evaluation edge-readiness trackers driving incremental `Created → Queued`
+/// promotion (#392). Entries are dropped when the eval completes, fails, or is
+/// aborted.
+type EdgeReadinessMap = Arc<RwLock<HashMap<EvaluationId, EdgeReadiness>>>;
 
 pub use gradient_types::BoardEvent;
 pub use jobs::PendingJobInfo;
@@ -72,16 +74,11 @@ pub struct Scheduler {
     /// completion speed rather than one level per interval. `notify_one` keeps a
     /// single permit, so a kick fired mid-pass is still serviced next iteration.
     pub(crate) dispatch_kick: Arc<tokio::sync::Notify>,
-    /// Per-evaluation deferred dependency edges.
-    ///
-    /// The worker's BFS walks roots→leaves, so batch N may contain a
-    /// derivation whose dependency lands in batch N+1. Trying to insert the
-    /// edge immediately would FK-fail (dep row doesn't exist yet) or silently
-    /// skip (dep not in `drv_path_to_id`). We accumulate `(drv_path,
-    /// Vec<dep_drv_path>)` per eval here and flush them all at once in
-    /// `handle_eval_job_completed` when every derivation row is guaranteed
-    /// to be in the DB.
-    pub(crate) deferred_deps: DeferredDeps,
+    /// Per-evaluation edge-readiness trackers (#392). The worker's BFS walks
+    /// roots→leaves, so a batch may reference a dep whose row lands later; the
+    /// tracker records seen derivations and reports which become edge-complete
+    /// each batch so their builds promote to `Queued` mid-evaluation.
+    pub(crate) edge_readiness: EdgeReadinessMap,
     /// Scoring policy used when selecting which pending job to assign to a
     /// requesting worker.  Shared via `Arc` so it can be read lock-free.
     pub(crate) policy: Arc<dyn gradient_score::ScoringPolicy>,
@@ -105,7 +102,7 @@ impl Scheduler {
             job_tracker: Arc::new(RwLock::new(JobTracker::new())),
             job_notify: Arc::new(tokio::sync::watch::channel(0u64).0),
             dispatch_kick: Arc::new(tokio::sync::Notify::new()),
-            deferred_deps: Arc::new(RwLock::new(HashMap::new())),
+            edge_readiness: Arc::new(RwLock::new(HashMap::new())),
             policy,
             instance: Arc::new(arc_swap::ArcSwap::from_pointee(gradient_score::InstanceContext::default())),
         }
@@ -121,6 +118,8 @@ impl Scheduler {
         for bid in build_ids {
             tracker.remove_job(&format!("build:{bid}"));
         }
+
+        self.edge_readiness.write().await.remove(&eval_id);
     }
 
     /// Spawn background project polling, eval dispatch, and build dispatch loops.
