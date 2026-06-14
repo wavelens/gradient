@@ -109,6 +109,11 @@ pub struct NarinfoUpload {
     pub deriver: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct ChunkReceived {
+    received: u64,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct NarListQuery {
     pub hash: Option<String>,
@@ -453,6 +458,51 @@ impl CachesApi<'_> {
             };
             return Err(ConnectorError::Api { status, message });
         }
+        Ok(())
+    }
+
+    /// Append one slice of a NAR to the server's staging file, keyed by
+    /// `(cache, store_hash)`. Returns the authoritative number of bytes staged;
+    /// the caller sets its next offset to it and resends if it did not advance.
+    pub async fn nar_upload_chunk(
+        &self,
+        cache: &str,
+        store_hash: &str,
+        offset: u64,
+        chunk: Vec<u8>,
+    ) -> Result<u64, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::PUT,
+            &format!("caches/{cache}/nars/{store_hash}/chunk?offset={offset}"),
+            true,
+        )?
+        .header("Content-Type", "application/octet-stream")
+        .body(chunk);
+        let received: ChunkReceived = http::decode(req.send().await?).await?;
+        Ok(received.received)
+    }
+
+    /// Finalize a chunked upload: the server validates the staged NAR against
+    /// `narinfo` and ingests it.
+    pub async fn nar_upload_finalize(
+        &self,
+        cache: &str,
+        store_hash: &str,
+        narinfo: NarinfoUpload,
+    ) -> Result<(), ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::POST,
+            &format!("caches/{cache}/nars/{store_hash}/finalize"),
+            true,
+        )?
+        .json(&narinfo);
+        let _: serde_json::Value = http::decode(req.send().await?).await?;
         Ok(())
     }
 
