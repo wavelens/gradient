@@ -113,6 +113,7 @@ The nixos module provides two preconfigured reverse proxies:
 | Option | Default | Description |
 |--------|---------|-------------|
 | `reverseProxy.nginx.enable` | `false` | Whether to enable nginx as the reverse proxy |
+| `reverseProxy.nginx.manageTls` | `true` | Let nginx obtain/serve the certificate (`enableACME` + `forceSSL`). Set `false` when an upstream proxy terminates TLS and forwards plain HTTP to nginx; keep `useTls = true` for correct `https://` URLs and secure cookies. No effect when `useTls = false`. |
 
 ### Caddy
 
@@ -335,7 +336,7 @@ The token must be the 48-byte random secret returned by the registration API (ge
 | `serverUrl` | `null` | WebSocket URL of the server's `/proto` endpoint (required) |
 | `workerId` | `null` | Override the worker UUID (`GRADIENT_WORKER_ID`). When null, the ID is read from `$StateDirectory/worker-id` or auto-generated on first start |
 | `peersFile` | `null` | Path to peers file (`peer_id:token` per line, `*` = any peer) |
-| `useTls` | `true` | Enable TLS (ACME + forceSSL) on the nginx vhost |
+| `useTls` | `true` | Serve Gradient over HTTPS: emit `https://` URLs (`GRADIENT_SERVE_URL`, OIDC redirect) and mark session cookies `Secure`. With `reverseProxy.nginx.manageTls` also enables ACME + forceSSL on the nginx vhost. Set `false` only for plain-HTTP deployments |
 | `discoverable` | `false` | Accept incoming connections from the server (reverse-proxy mode) |
 | `listenAddr` | `127.0.0.1` | Bind address for the worker listener |
 | `port` | `3100` | Listener port when `discoverable` is enabled |
