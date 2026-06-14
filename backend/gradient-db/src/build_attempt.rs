@@ -78,6 +78,35 @@ pub async fn latest_attempt<C: ConnectionTrait>(
         .await
 }
 
+/// Most recent attempt for each build, fetched in one `DISTINCT ON` query per
+/// chunk. Replaces per-build [`latest_attempt`] loops, which turned a build
+/// list into an N+1 (~one round-trip per row).
+pub async fn latest_attempts<C: ConnectionTrait>(
+    db: &C,
+    builds: &[BuildId],
+) -> Result<std::collections::HashMap<BuildId, Model>, DbErr> {
+    use sea_orm::{DbBackend, Statement};
+
+    let rows = crate::fetch_in_chunks(builds, |chunk| async move {
+        let in_list = chunk
+            .iter()
+            .map(|id| format!("'{}'", id.into_inner()))
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!(
+            "SELECT DISTINCT ON (build) * FROM build_attempt \
+             WHERE build IN ({in_list}) ORDER BY build, created_at DESC"
+        );
+        Entity::find()
+            .from_raw_sql(Statement::from_string(DbBackend::Postgres, sql))
+            .all(db)
+            .await
+    })
+    .await?;
+
+    Ok(rows.into_iter().map(|a| (a.build, a)).collect())
+}
+
 /// The log id to read/finalize for a build: its latest attempt's `log_id`,
 /// falling back to the build id (mirrors the old `build.log_id.unwrap_or(id)`).
 pub async fn latest_attempt_log_id<C: ConnectionTrait>(

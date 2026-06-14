@@ -283,16 +283,17 @@ pub async fn get_evaluation_builds(
         }
     }
 
+    // Batch the latest-attempt lookup for the whole page; a per-build query here
+    // is an N+1 that made large build lists take ~10s (#391).
+    let page_build_ids: Vec<BuildId> = page_slice.iter().map(|(_, _, b)| b.id).collect();
+    let attempts = gradient_db::latest_attempts(&state.web_db, &page_build_ids).await?;
+
     let mut page = Vec::with_capacity(page_slice.len());
     for (_, _, b) in &page_slice {
         let drv = derivations
             .get(&b.derivation)
             .expect("derivation hydrated above");
-        let build_time_ms = gradient_db::latest_attempt(&state.web_db, b.id)
-            .await
-            .ok()
-            .flatten()
-            .and_then(|a| a.duration_ms());
+        let build_time_ms = attempts.get(&b.id).and_then(|a| a.duration_ms());
 
         page.push(BuildItem {
             id: b.id,
