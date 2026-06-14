@@ -65,6 +65,7 @@
            "wildcards": ["packages.x86_64-linux.*", "!packages.x86_64-linux.cowsay"]},
           {"op": "resolve", "repository": REPO,
            "attrs": ["packages.x86_64-linux.hello", "packages.x86_64-linux.boom"]},
+          {"op": "fingerprint", "repository": REPO},
           {"op": "shutdown"},
       ]
       payload = "".join(json.dumps(r) + "\n" for r in requests)
@@ -82,7 +83,7 @@
       assert status == 0, f"eval-worker exited {status}; see eval.log above"
 
       responses = [json.loads(l) for l in machine.succeed("cat /root/out.jsonl").splitlines() if l.strip()]
-      assert len(responses) == 4, f"expected 4 responses, got {len(responses)}: {responses}"
+      assert len(responses) == 5, f"expected 5 responses, got {len(responses)}: {responses}"
 
       # ── Wildcard parity ────────────────────────────────────────────────────
       banner("Assert wildcard parity")
@@ -111,9 +112,14 @@
       b = items["packages.x86_64-linux.boom"]
       assert b["drv_path"] is None and b["error"], f"boom must isolate as a per-item error: {b}"
 
-      # ── Eval-cache warmth: the on-disk cache was populated ─────────────────
-      banner("Assert eval cache populated")
-      machine.succeed("ls /root/.cache/nix/eval-cache-v6/*.sqlite")
+      # ── Fingerprint ↔ on-disk eval-cache path agreement (#386 L3) ──────────
+      # The lock-only `fingerprint` op must yield the same key Nix names the
+      # on-disk cache after, so the worker can stage/pull `<fp>.sqlite`.
+      banner("Assert fingerprint matches the eval-cache filename")
+      assert responses[4]["kind"] == "fingerprint_ok", responses[4]
+      fp = responses[4]["fingerprint"]
+      assert fp, f"expected a fingerprint for the committed flake, got {fp}"
+      machine.succeed(f"test -f /root/.cache/nix/eval-cache-v6/{fp}.sqlite")
 
       banner("Eval test PASSED")
       '';
