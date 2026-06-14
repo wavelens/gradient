@@ -182,6 +182,24 @@ Gradient uses PKCE (S256) and discovers all provider endpoints from `discoveryUr
 
 To map OIDC groups to organization roles, request the `groups` scope (add `"groups"` to `scopes`) so the ID token carries the user's group claims, then attach `oidc_group` lists to state-managed roles (see [Declarative State](usage/state.md)).
 
+## SCIM
+
+```nix
+services.gradient.scim = {
+  enable     = true;
+  tokenFile  = "/run/secrets/gradient-scim-token";
+  hardDelete = false;   # default: DELETE soft-disables (active=false)
+};
+```
+
+Enabling SCIM mounts an instance-level SCIM 2.0 provisioning surface at `https://$domain/scim/v2`, authenticated by the bearer token in `tokenFile` (not user credentials). SCIM provisions passwordless `managed` users that later authenticate via OIDC; SCIM groups map to roles through `scim_group` (see [SCIM](usage/scim.md) and [Declarative State](usage/state.md)).
+
+| Option | Env | Default | Description |
+|---|---|---|---|
+| `scim.enable` | `GRADIENT_SCIM_ENABLED` | `false` | Mount the `/scim/v2` provisioning endpoints |
+| `scim.tokenFile` | `GRADIENT_SCIM_TOKEN_FILE` | - | Path to the file holding the SCIM bearer token (required when enabled) |
+| `scim.hardDelete` | `GRADIENT_SCIM_HARD_DELETE` | `false` | Hard-delete (cascade) on `DELETE /Users/{id}`; default soft-disables (`active=false`) |
+
 ## Email
 
 ```nix

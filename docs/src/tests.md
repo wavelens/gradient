@@ -4085,3 +4085,32 @@ host RAM.
 - The sharded `list_flake_derivations` fan-out, per-shard RSS recycle, and the
   `EVAL_RAM_SHARE`-of-host-RAM pool sizing are exercised end-to-end by the
   `gradient-eval` VM test (no local libnix harness).
+
+## SCIM provisioning (#384)
+
+`backend/gradient-web/tests/scim.rs` drives the `/scim/v2` surface through
+`axum_test::TestServer` against a `MockDatabase`, asserting SCIM-shaped
+`application/scim+json` responses:
+
+- **Auth** - a missing or wrong bearer token returns `401` with the
+  `urn:ietf:params:scim:api:messages:2.0:Error` body.
+- **Users CRUD** - `POST /Users` returns `201` with an `id`; duplicate `userName`
+  returns `409`; `GET /Users/{id}` returns the user; `PUT`/`PATCH` update it;
+  `GET /Users` filters by `userName eq "..."` and honours `startIndex`/`count`
+  pagination.
+- **Active toggle + delete** - `PATCH` with `active=false` deactivates;
+  `DELETE /Users/{id}` soft-disables by default (issues an `UPDATE`, not a
+  `DELETE`) and hard-deletes when `scim_hard_delete` is set.
+- **Groups** - `PATCH /Groups/{id}` add/remove members maps to
+  `organization_user` grants for the resolved `(organization, role)`; an unknown
+  group name returns `404`.
+- **Discovery** - `GET ServiceProviderConfig`/`ResourceTypes`/`Schemas` return the
+  advertised capabilities.
+- **Inactive login** - an inactive (`active=false`) user is rejected at login with
+  `403`, exercised via the auth path alongside the active guard.
+
+`gradient-types` `config.rs` unit tests cover `scim_config()` (disabled → `None`,
+enabled-without-token → `None`, fully-configured → `Some`) and `RuntimeConfig`
+propagation; `gradient-state` covers `resolve_scim_group_roles` mapping a
+`scim_group` name to its `(org, role)` grant; `scim/filter.rs` covers the
+`attr eq "value"` parser.
