@@ -157,7 +157,10 @@ pub fn run_eval_worker() -> std::io::Result<()> {
                     continue;
                 };
                 let (result, warnings) = capture_warnings_during(|| {
-                    ev.walker(&repository).and_then(|w| w.discover(&wildcards))
+                    let walker = ev.walker(&repository)?;
+                    let attrs = walker.discover(&wildcards)?;
+                    let _ = walker.commit_cache();
+                    Ok(attrs)
                 });
                 match result {
                     Ok(attrs) => EvalResponse::ListOk { attrs, warnings },
@@ -203,6 +206,8 @@ pub fn run_eval_worker() -> std::io::Result<()> {
                                 }),
                             }
                         }
+
+                        let _ = walker.commit_cache();
                     }
                     Err(e) => {
                         let msg = format!("{:#}", e);

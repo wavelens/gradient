@@ -423,6 +423,25 @@ in {
           j = server.succeed("journalctl -u gradient-server --no-pager --since='-900s' -n 200")
           raise Exception(f"Evaluation did not complete after 900 s:\n{j[-2000:]}")
 
+      # ── Phase 5b: the worker committed a non-empty eval cache to disk ─────
+      # Regression guard (#386): nix commits the eval-cache AttrDb only on
+      # EvalState teardown / WAL checkpoint, but the worker reads & pushes the
+      # `<fp>.sqlite` while still alive, so the file never grew past the 4096-
+      # byte SQLite header and every flake re-evaluated cold. A committed cache
+      # is >=12 KB (schema) and larger once attributes are memoised.
+      banner("Phase 5b: worker eval-cache is committed (non-empty)")
+      eval_cache_dir = "/var/lib/gradient-worker/eval-cache/eval-cache-v6"
+      builder.succeed(f"test -d {eval_cache_dir}")
+      sizes = builder.succeed(
+          f"find {eval_cache_dir} -name '*.sqlite' -printf '%s %p\\n' | sort -rn"
+      ).strip()
+      print(sizes or "(no .sqlite files)")
+      biggest = int(sizes.splitlines()[0].split()[0]) if sizes else 0
+      assert biggest > 4096, (
+          f"eval-cache never committed: largest .sqlite is {biggest} bytes "
+          f"(4096 = empty SQLite header).\n{sizes}"
+      )
+
       # ── Phase 6: extract hello's `.drv` from the eval's build list ────────
       # We hit `/evals/{id}/builds` directly with the eval_id already pinned
       # by Phase 5; screen-scraping `gradient project show` is too brittle

@@ -217,20 +217,28 @@ impl DerivationResolver for WorkerPoolResolver {
             return Ok((vec![], vec![]));
         }
 
-        // Round-robin partition into one chunk per worker, preserving the
-        // original index so we can re-order at the end.
+        // Dynamic work queue: split into many small index-tagged batches and let
+        // each pooled worker pull the next as soon as it is free. A slow attr on
+        // one worker no longer leaves the others idle the way the old static
+        // round-robin partition did. ~4 batches per worker leaves enough slack to
+        // steal without paying a walker rebuild per attr.
         let n_workers = self.pool.max().min(attrs.len());
-        let mut chunks: Vec<Vec<(usize, String)>> = (0..n_workers).map(|_| Vec::new()).collect();
-        for (idx, a) in attrs.into_iter().enumerate() {
-            chunks[idx % n_workers].push((idx, a));
-        }
+        let batch_size = attrs.len().div_ceil(n_workers * 4).max(1);
+        let queue: std::sync::Mutex<std::collections::VecDeque<Vec<(usize, String)>>> =
+            std::sync::Mutex::new(
+                attrs
+                    .into_iter()
+                    .enumerate()
+                    .collect::<Vec<_>>()
+                    .chunks(batch_size)
+                    .map(|c| c.to_vec())
+                    .collect(),
+            );
 
         // Shared warning sink: the pure core's `Ok` payload is items only, so
-        // warnings are funnelled here instead of through `resolve_chunk`. The
-        // closure (and its `&warnings` borrow) is dropped with the block, so
-        // `warnings` can be unwrapped by value afterwards.
+        // warnings are funnelled here instead of through `resolve_chunk`.
         let warnings = std::sync::Mutex::new(Vec::<String>::new());
-        let mut indexed: Vec<IndexedDerivation> = Vec::new();
+        let indexed = std::sync::Mutex::new(Vec::<IndexedDerivation>::new());
         {
             let repo = repository.as_str();
             let sink = &warnings;
@@ -242,19 +250,31 @@ impl DerivationResolver for WorkerPoolResolver {
                 })
             };
 
-            let mut tasks: FuturesUnordered<_> = chunks
-                .into_iter()
-                .filter(|c| !c.is_empty())
-                .map(|chunk| resolve_chunk(&resolve_batch, chunk, 0))
+            let (queue, indexed, resolve_batch) = (&queue, &indexed, &resolve_batch);
+            let mut tasks: FuturesUnordered<_> = (0..n_workers)
+                .map(|_| async move {
+                    loop {
+                        // Scope the pop so the guard drops before the await;
+                        // holding it across `.await` would deadlock the executor.
+                        let batch = queue.lock().unwrap().pop_front();
+                        let Some(batch) = batch else { break };
+
+                        // A crash became per-attr errors in the core; only a
+                        // protocol violation (item-count mismatch) is a hard fail.
+                        let resolved = resolve_chunk(resolve_batch, batch, 0).await?;
+                        indexed.lock().unwrap().extend(resolved);
+                    }
+
+                    Ok::<(), anyhow::Error>(())
+                })
                 .collect();
 
-            // A crash became per-attr errors in the core; only a protocol
-            // violation (item-count mismatch) propagates as a hard failure.
-            while let Some(chunk_result) = tasks.next().await {
-                indexed.extend(chunk_result?);
+            while let Some(drained) = tasks.next().await {
+                drained?;
             }
         }
 
+        let mut indexed = indexed.into_inner().unwrap();
         indexed.sort_by_key(|(idx, _)| *idx);
         let mut all_warnings = warnings.into_inner().unwrap();
         all_warnings.sort_unstable();
