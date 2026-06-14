@@ -895,6 +895,12 @@ in {
             "/api/" = {
               proxyPass = "http://${config.services.gradient.listenAddr}:${toString config.services.gradient.port}";
               proxyWebsockets = true;
+              extraConfig = ''
+                client_max_body_size 100M;
+                proxy_connect_timeout 1h;
+                proxy_send_timeout 1h;
+                proxy_read_timeout 1h;
+              '';
             };
 
             "/proto" = lib.mkIf (cfg.discoverable && cfg.proto.public) {
@@ -910,6 +916,12 @@ in {
             "/cache/" = {
               proxyPass = "http://${config.services.gradient.listenAddr}:${toString config.services.gradient.port}";
               proxyWebsockets = true;
+              extraConfig = ''
+                client_max_body_size 100M;
+                proxy_connect_timeout 1h;
+                proxy_send_timeout 1h;
+                proxy_read_timeout 1h;
+              '';
             };
           };
         };
@@ -920,6 +932,9 @@ in {
         virtualHosts."${if cfg.useTls then "" else "http://"}${cfg.domain}" = {
           inherit (cfg.reverseProxy.caddy) useACMEHost;
           extraConfig = ''
+            request_body {
+              max_size 100MB
+            }
             handle /api/* {
               reverse_proxy http://${cfg.listenAddr}:${toString cfg.port}
             }
