@@ -169,4 +169,27 @@ describe('EvaluationLogComponent', () => {
       expect(cmp.sidebarSearchQuery()).toBe('');
     });
   });
+
+  // #381: pre-build evals park with an eval_workers reason naming the missing
+  // capability (fetch while Fetching, eval while Evaluating).
+  describe('eval_workers waiting reason', () => {
+    it('titles and explains a missing fetch worker', () => {
+      const { cmp } = setup();
+      const reason = { kind: 'eval_workers', capability: 'fetch', connected_workers: 0 } as const;
+      expect(cmp.waitingTitle(reason)).toBe('Waiting for a Fetch Worker');
+      expect(cmp.formatWaitingReason(reason)).toContain('fetch the flake sources');
+    });
+
+    it('titles and explains a missing eval worker with connected count', () => {
+      const { cmp } = setup();
+      const reason = { kind: 'eval_workers', capability: 'eval', connected_workers: 2 } as const;
+      expect(cmp.waitingTitle(reason)).toBe('Waiting for an Eval Worker');
+      expect(cmp.formatWaitingReason(reason)).toBe('2 workers are connected, but none can run the evaluation.');
+    });
+
+    it('titles a full-cache stall', () => {
+      const { cmp } = setup();
+      expect(cmp.waitingTitle({ kind: 'cache_storage_full' })).toBe('Cache Storage Full');
+    });
+  });
 });

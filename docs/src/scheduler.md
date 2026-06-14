@@ -79,3 +79,22 @@ penalty when a fetch-capable worker is offered a cached-eval job, steering
 those workers toward fetch work; it is a soft steer rather than a ban, so a
 fetch worker still accepts cached-eval jobs when no other candidate is
 available.
+
+## Waiting reasons
+
+Every dispatch pass reconciles each in-flight evaluation against the live worker
+pool and parks it in `Waiting` (with a structured `waiting_reason`) when it
+cannot make progress, auto-unparking once the blocker clears:
+
+- **Pre-build phases** — a `Fetching` eval needs a worker advertising the
+  `fetch` capability; `Queued`/`EvaluatingFlake`/`EvaluatingDerivation` need an
+  `eval`-capable worker. When none is connected the eval parks with an
+  `eval_workers` reason naming the missing `capability`, even if it has already
+  batched some builds, and recovers to `Queued` when such a worker connects
+  (issue #381).
+- **Build phase** — a `Building` eval parks with a `workers` reason listing the
+  unmet `(architecture, required_features)` combinations when no connected
+  worker can satisfy any pending build.
+
+Approval, no-cache and full-cache parks are owned by the webhook and cache hooks
+and are never unparked by the worker reconciler.
