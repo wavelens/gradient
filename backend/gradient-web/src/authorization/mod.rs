@@ -8,6 +8,7 @@ mod api_key;
 mod jwt;
 mod middleware;
 mod oidc;
+mod scim;
 
 pub use self::api_key::{ApiKeyContext, DecodedRequest, MaybeApiKey};
 pub use self::jwt::{
@@ -16,3 +17,4 @@ pub use self::jwt::{
 };
 pub use self::middleware::{MaybeUser, authorize, authorize_optional, update_last_login};
 pub use self::oidc::{OidcAuthRequest, oidc_login_create, oidc_login_verify};
+pub use self::scim::authorize_scim;
