@@ -79,9 +79,24 @@ in {
         '';
       };
       reverseProxy = {
-        nginx.enable = lib.mkEnableOption "Nginx configuration" // {
-          default = !cfg.reverseProxy.caddy.enable;
-          defaultText = lib.literalExpression "!config.services.gradient.reverseProxy.caddy.enable";
+        nginx = {
+          enable = lib.mkEnableOption "Nginx configuration" // {
+            default = !cfg.reverseProxy.caddy.enable;
+            defaultText = lib.literalExpression "!config.services.gradient.reverseProxy.caddy.enable";
+          };
+
+          manageTls = lib.mkOption {
+            description = ''
+              Let nginx obtain and serve the TLS certificate itself (sets the
+              vhost's `enableACME` and `forceSSL`). Disable when TLS is
+              terminated by an upstream proxy (Traefik, Cloudflare, a load
+              balancer) that forwards plain HTTP to nginx - keep `useTls = true`
+              so Gradient still emits `https://` URLs and marks session cookies
+              `Secure`. Has no effect when `useTls = false`.
+            '';
+            type = lib.types.bool;
+            default = true;
+          };
         };
 
         caddy = {
@@ -882,8 +897,8 @@ in {
       nginx = lib.mkIf cfg.reverseProxy.nginx.enable {
         enable = true;
         virtualHosts."${cfg.domain}" = {
-          enableACME = cfg.useTls;
-          forceSSL = cfg.useTls;
+          enableACME = cfg.useTls && cfg.reverseProxy.nginx.manageTls;
+          forceSSL = cfg.useTls && cfg.reverseProxy.nginx.manageTls;
           http2 = true;
           http3 = cfg.enableQuic;
           locations = {

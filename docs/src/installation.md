@@ -73,25 +73,21 @@ broken logins:
   plaintext-HTTP deployment — turning it off so that nginx stops managing
   certificates will also stop your browser from sending the secure session
   cookie, breaking login.
-- When `reverseProxy.nginx.enable = true`, Gradient sets the nginx vhost's
-  `enableACME` and `forceSSL` to `useTls`, so nginx terminates TLS and obtains a
-  certificate itself.
+- `services.gradient.reverseProxy.nginx.manageTls` (default `true`) controls
+  whether nginx obtains and serves the certificate itself (it sets the vhost's
+  `enableACME` and `forceSSL`). It has no effect when `useTls = false`.
 
 If TLS is terminated by an upstream proxy (Traefik, Cloudflare, a load balancer)
 that forwards plain HTTP to nginx, keep `useTls = true` so Gradient still emits
-`https://` URLs and secure cookies, and disable nginx's own certificate handling:
+`https://` URLs and secure cookies, and set `manageTls = false` so nginx doesn't
+also try to obtain a certificate:
 
 ```nix
 {
   services.gradient = {
-    useTls = true;            # emit https URLs + secure cookies
-    reverseProxy.nginx.enable = true;  # still let nginx serve static files
-  };
-
-  # The upstream proxy already terminates TLS; don't let nginx fight it.
-  services.nginx.virtualHosts."gradient.example.com" = {
-    enableACME = lib.mkForce false;
-    forceSSL = lib.mkForce false;
+    useTls = true;                          # emit https URLs + secure cookies
+    reverseProxy.nginx.enable = true;       # still let nginx serve static files
+    reverseProxy.nginx.manageTls = false;   # upstream proxy terminates TLS
   };
 }
 ```
