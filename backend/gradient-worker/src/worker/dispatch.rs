@@ -59,6 +59,7 @@ pub(super) async fn run_dispatch_loop(
             crate::proto::nar_recv::NarReceiver::new()
         }
     };
+    let eval_cache_recv = crate::proto::eval_cache_recv::EvalCacheReceiver::new();
     let mut abort_senders: HashMap<String, watch::Sender<bool>> = HashMap::new();
     let mut job_kinds: HashMap<String, JobKind> = HashMap::new();
     let (done_tx, mut done_rx) = mpsc::unbounded_channel::<(String, Result<()>)>();
@@ -83,7 +84,7 @@ pub(super) async fn run_dispatch_loop(
             Some((job_id, result)) = done_rx.recv() => {
                 on_job_done(
                     job_id, result,
-                    &writer, &cache_waiters, &known_derivation_waiters, &nar_recv,
+                    &writer, &cache_waiters, &known_derivation_waiters, &nar_recv, &eval_cache_recv,
                     credentials, &mut job_kinds, &mut abort_senders,
                     &draining, max_eval, max_build,
                 )?;
@@ -108,6 +109,7 @@ pub(super) async fn run_dispatch_loop(
                     cache_waiters: &cache_waiters,
                     known_derivation_waiters: &known_derivation_waiters,
                     nar_recv: &nar_recv,
+                    eval_cache_recv: &eval_cache_recv,
                     abort_senders: &mut abort_senders,
                     job_kinds: &mut job_kinds,
                     max_eval,
@@ -149,6 +151,7 @@ fn on_job_done(
     cache_waiters: &CacheWaiters,
     known_derivation_waiters: &KnownDerivationWaiters,
     nar_recv: &crate::proto::nar_recv::NarReceiver,
+    eval_cache_recv: &crate::proto::eval_cache_recv::EvalCacheReceiver,
     credentials: &mut CredentialStore,
     job_kinds: &mut HashMap<String, JobKind>,
     abort_senders: &mut HashMap<String, watch::Sender<bool>>,
@@ -160,6 +163,7 @@ fn on_job_done(
     cache_waiters.lock().unwrap().remove(&job_id);
     known_derivation_waiters.lock().unwrap().remove(&job_id);
     nar_recv.forget_job(&job_id);
+    eval_cache_recv.forget_job(&job_id);
     credentials.clear();
 
     let completed_kind = job_kinds.remove(&job_id);
@@ -271,6 +275,7 @@ pub(super) struct MessageHandler<'a> {
     pub cache_waiters: &'a CacheWaiters,
     pub known_derivation_waiters: &'a KnownDerivationWaiters,
     pub nar_recv: &'a crate::proto::nar_recv::NarReceiver,
+    pub eval_cache_recv: &'a crate::proto::eval_cache_recv::EvalCacheReceiver,
     pub abort_senders: &'a mut HashMap<String, watch::Sender<bool>>,
     pub job_kinds: &'a mut HashMap<String, JobKind>,
     pub max_eval: u32,
@@ -397,6 +402,21 @@ impl<'a> MessageHandler<'a> {
             }
             ServerMessage::KnownDerivations { job_id, known } => {
                 self.on_known_derivations(job_id, known);
+            }
+            ServerMessage::EvalCachePullResult { job_id, outcome } => {
+                self.eval_cache_recv.deliver_pull_result(&job_id, outcome);
+            }
+            ServerMessage::EvalCacheChunk {
+                job_id,
+                data,
+                offset,
+                is_final,
+            } => {
+                self.eval_cache_recv
+                    .deliver_pull_chunk(&job_id, data, offset, is_final);
+            }
+            ServerMessage::EvalCachePushGrant { job_id, mode } => {
+                self.eval_cache_recv.deliver_push_grant(&job_id, mode);
             }
         }
         Ok(())
@@ -559,6 +579,7 @@ impl<'a> MessageHandler<'a> {
         let job_cache_waiters = Arc::clone(self.cache_waiters);
         let job_known_derivation_waiters = Arc::clone(self.known_derivation_waiters);
         let job_nar_recv = self.nar_recv.clone();
+        let job_eval_cache_recv = self.eval_cache_recv.clone();
         let job_done_tx = self.done_tx.clone();
         let jid = job_id.clone();
 
@@ -569,6 +590,7 @@ impl<'a> MessageHandler<'a> {
                 job_cache_waiters,
                 job_known_derivation_waiters,
                 job_nar_recv,
+                job_eval_cache_recv,
             );
             let result = run_job(executor, job, &mut updater, &credentials, abort_rx).await;
             let _ = job_done_tx.send((jid, result));
@@ -712,6 +734,9 @@ pub(super) fn msg_kind(msg: &ServerMessage) -> &'static str {
         ServerMessage::AuthUpdate { .. } => "AuthUpdate",
         ServerMessage::CacheStatus { .. } => "CacheStatus",
         ServerMessage::KnownDerivations { .. } => "KnownDerivations",
+        ServerMessage::EvalCachePullResult { .. } => "EvalCachePullResult",
+        ServerMessage::EvalCacheChunk { .. } => "EvalCacheChunk",
+        ServerMessage::EvalCachePushGrant { .. } => "EvalCachePushGrant",
     }
 }
 

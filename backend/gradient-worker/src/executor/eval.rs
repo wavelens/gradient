@@ -57,6 +57,9 @@ use crate::traits::{DrvReader, FsDrvReader, JobReporter};
 /// to isolate the Nix C API from the async runtime.
 pub struct WorkerEvaluator {
     resolver: Arc<WorkerPoolResolver>,
+    /// When set, the worker pulls/pushes the flake's shared eval-cache blob
+    /// around evaluation (issue #386 L3).
+    eval_cache_share: bool,
 }
 
 impl WorkerEvaluator {
@@ -68,6 +71,7 @@ impl WorkerEvaluator {
         fork_workers: usize,
         max_eval_rss: u64,
         eval_cache_dir: String,
+        eval_cache_share: bool,
     ) -> Self {
         Self {
             resolver: Arc::new(WorkerPoolResolver::new(
@@ -75,6 +79,7 @@ impl WorkerEvaluator {
                 max_eval_rss,
                 eval_cache_dir,
             )),
+            eval_cache_share,
         }
     }
 
@@ -88,6 +93,7 @@ impl Clone for WorkerEvaluator {
     fn clone(&self) -> Self {
         Self {
             resolver: self.resolver.clone(),
+            eval_cache_share: self.eval_cache_share,
         }
     }
 }
@@ -135,7 +141,40 @@ pub async fn evaluate_derivations(
     updater: &mut JobUpdater,
     abort: &mut watch::Receiver<bool>,
 ) -> Result<Vec<String>> {
-    evaluate_derivations_with(
+    let repo = build_flake_url(job, local_flake_path);
+
+    // Best-effort fingerprint + pull of the flake's shared eval-cache blob so
+    // the eval runs warm. A fingerprint/pull failure never fails the eval.
+    let fingerprint = if evaluator.eval_cache_share {
+        match evaluator.resolver.fingerprint(repo.clone()).await {
+            Ok(fp) => fp,
+            Err(e) => {
+                warn!(error = %e, "eval-cache fingerprint failed; evaluating local-only");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    let cache_path = fingerprint
+        .as_ref()
+        .map(|fp| format!("{}/eval-cache-v6/{fp}.sqlite", evaluator.resolver.eval_cache_dir()));
+
+    if let (Some(fp), Some(path)) = (fingerprint.as_ref(), cache_path.as_ref()) {
+        // TODO(#386): report cache_status (hit/miss) once an eval-update field exists
+        match updater.pull_eval_cache(fp).await {
+            Ok(Some(bytes)) => {
+                if let Err(e) = write_eval_cache_blob(path, &bytes).await {
+                    warn!(error = %e, %path, "failed to stage pulled eval-cache blob");
+                }
+            }
+            Ok(None) => {}
+            Err(e) => warn!(error = %e, "eval-cache pull failed; evaluating local-only"),
+        }
+    }
+
+    let produced = evaluate_derivations_with(
         &*evaluator.resolver,
         &FsDrvReader,
         job,
@@ -143,7 +182,26 @@ pub async fn evaluate_derivations(
         updater,
         abort,
     )
-    .await
+    .await?;
+
+    if let (Some(fp), Some(path)) = (fingerprint.as_ref(), cache_path.as_ref())
+        && let Ok(bytes) = tokio::fs::read(path).await
+        && let Err(e) = updater.push_eval_cache(fp, bytes).await
+    {
+        warn!(error = %e, "eval-cache push failed; continuing");
+    }
+
+    Ok(produced)
+}
+
+/// Write a pulled eval-cache blob to `path`, creating its parent directory.
+async fn write_eval_cache_blob(path: &str, bytes: &[u8]) -> Result<()> {
+    if let Some(parent) = std::path::Path::new(path).parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+
+    tokio::fs::write(path, bytes).await?;
+    Ok(())
 }
 
 /// Query the server cache for `batch`'s output paths and set `substituted`
