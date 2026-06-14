@@ -50,6 +50,16 @@ const DRV_READ_CONCURRENCY: usize = 64;
 /// leaving headroom for the OS, the parent worker, and a concurrent build.
 const EVAL_RAM_SHARE: f64 = 0.75;
 
+/// Max eval-workers allowed to touch the shared eval-cache SQLite at once.
+/// Pinned to 1: concurrent writers deadlock on the WAL — a committing worker
+/// holds the write lock (byte 120) while its checkpoint needs read-slot 0
+/// (byte 123) that the other shard readers hold, and they in turn wait for the
+/// write lock. Sharding still bounds memory by discovering systems sequentially
+/// with per-shard recycle. Raise once the eval-cache tolerates concurrent
+/// writers (nix fork: open the eval-cache with `wal_autocheckpoint=0` and run a
+/// single end-of-eval checkpoint).
+const MAX_EVAL_CACHE_CONCURRENCY: usize = 1;
+
 /// Total physical RAM in bytes, or a 4 GiB fallback if it cannot be read.
 fn total_memory_bytes() -> u64 {
     use sysinfo::{MemoryRefreshKind, RefreshKind, System};
@@ -87,19 +97,22 @@ impl WorkerEvaluator {
         eval_cache_dir: String,
         eval_cache_share: bool,
     ) -> Self {
-        // Size the pool so `pool_size * max_eval_rss` stays within a fraction of
-        // host RAM: a flake with many systems then evaluates without OOM, falling
-        // back to fewer concurrent shards (down to one) on a small host instead
-        // of being killed. `max_eval_rss` is the per-shard working-set budget.
+        // Pool size is bounded two ways: by host RAM (`pool_size * max_eval_rss`
+        // within a fraction of memory, so a many-system flake never OOMs) and by
+        // `MAX_EVAL_CACHE_CONCURRENCY` (currently 1, because concurrent workers
+        // deadlock on the shared eval-cache WAL). The cache bound dominates today
+        // so eval runs one shard at a time; sharding still bounds memory via
+        // sequential per-shard recycle, and L3 fleet-share stays intact.
         let ram_budget = (total_memory_bytes() as f64 * EVAL_RAM_SHARE) as u64;
-        let pool_size = budgeted_pool_size(fork_workers, max_eval_rss, ram_budget);
+        let pool_size = budgeted_pool_size(fork_workers, max_eval_rss, ram_budget)
+            .min(MAX_EVAL_CACHE_CONCURRENCY);
         if pool_size < fork_workers {
             info!(
                 fork_workers,
                 pool_size,
                 max_eval_rss,
                 ram_budget,
-                "eval pool sized down to fit the memory budget"
+                "eval pool serialized (shared eval-cache); memory bounded by sequential shards"
             );
         }
 
