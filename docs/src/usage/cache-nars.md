@@ -69,10 +69,18 @@ The bundled reverse proxy (nginx/Caddy) caps each HTTP request body at 100 MiB.
 NARs larger than that still upload because the CLI splits them across multiple
 chunked requests (see below); no single request exceeds the cap.
 
-### Backend endpoint
+### Backend endpoints
 
-`POST /api/v1/caches/{cache}/nars` — multipart form with a `narinfo` JSON
-part and a `nar` binary part.
+- `POST /api/v1/caches/{cache}/nars` — single-shot multipart form with a
+  `narinfo` JSON part and a `nar` binary part. Suitable for NARs under the
+  reverse proxy's 100 MiB request limit.
+- `PUT /api/v1/caches/{cache}/nars/{hash}/chunk?offset=N` — append one NAR
+  slice to a server-side staging file. The CLI uses this to upload larger NARs
+  in 32 MiB chunks so no single request exceeds the proxy limit.
+- `POST /api/v1/caches/{cache}/nars/{hash}/finalize` — validate the fully
+  staged NAR against its narinfo and ingest it.
+
+The CLI automatically chunks; you do not call these endpoints by hand.
 
 ## Web UI
 

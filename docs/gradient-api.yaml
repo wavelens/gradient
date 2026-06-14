@@ -4707,6 +4707,9 @@ paths:
         reuses the cached path and only adds this cache's signature.
 
         The route's body limit is `GRADIENT_MAX_NAR_UPLOAD_SIZE` (default 512 MiB).
+        The bundled reverse proxy additionally caps each request body at 100 MiB,
+        so NARs above that must use the chunked endpoints
+        (`PUT .../nars/{hash}/chunk` + `POST .../nars/{hash}/finalize`).
       operationId: uploadCacheNar
       requestBody:
         required: true
@@ -4725,6 +4728,143 @@ paths:
                   type: string
                   format: binary
                   description: Raw NAR bytes.
+      responses:
+        '201':
+          description: NAR stored
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: object
+                        properties:
+                          store_path:
+                            type: string
+                          created:
+                            type: boolean
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /caches/{cache}/nars/{hash}/chunk:
+    parameters:
+      - $ref: '#/components/parameters/CacheSlug'
+      - name: hash
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Store-path base name (`<hash>-<name>`) being uploaded.
+    put:
+      tags: [caches]
+      summary: Append a chunk of a NAR being uploaded
+      description: |-
+        Appends one slice of a NAR to a server-side `.partial` staging file,
+        keyed by `(cache, hash)`. Used to upload NARs larger than the reverse
+        proxy's per-request body limit by splitting them across several requests.
+        Requires `writeStore`. `offset` must equal the number of bytes already
+        staged (`0` starts fresh and truncates any stale partial); a mismatch
+        returns `409` carrying the authoritative `received` count so the client
+        can resume. Call `POST .../finalize` once every chunk is sent.
+      operationId: uploadCacheNarChunk
+      parameters:
+        - name: offset
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+          description: Byte offset this chunk starts at; must equal bytes already staged.
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+              description: Raw NAR slice (≤ the proxy body limit).
+      responses:
+        '200':
+          description: Chunk staged
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: object
+                        properties:
+                          received:
+                            type: integer
+                            format: int64
+                            description: Total bytes staged after this chunk.
+        '409':
+          description: Offset did not match staged length; body carries `received` to resume from.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: object
+                        properties:
+                          received:
+                            type: integer
+                            format: int64
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '413':
+          description: Chunk would push the NAR past `GRADIENT_MAX_NAR_UPLOAD_SIZE`.
+
+  /caches/{cache}/nars/{hash}/finalize:
+    parameters:
+      - $ref: '#/components/parameters/CacheSlug'
+      - name: hash
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Store-path base name (`<hash>-<name>`) being finalized.
+    post:
+      tags: [caches]
+      summary: Finalize a chunked NAR upload
+      description: |-
+        Validates the fully staged NAR against its narinfo (the staged byte
+        length must equal `file_size`), ingests it exactly like the single-shot
+        upload, and drops the `.partial`. Requires `writeStore`.
+      operationId: finalizeCacheNarUpload
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [store_path, file_hash, file_size, nar_size, nar_hash]
+              properties:
+                store_path: { type: string }
+                file_hash: { type: string }
+                file_size: { type: integer, format: int64 }
+                nar_size: { type: integer, format: int64 }
+                nar_hash: { type: string }
+                references:
+                  type: array
+                  items: { type: string }
+                deriver: { type: string, nullable: true }
       responses:
         '201':
           description: NAR stored

@@ -49,6 +49,11 @@ use gradient_proto::{ProtoLimiter, proto_router};
 use gradient_scheduler::Scheduler;
 use std::sync::Arc;
 
+/// Per-request body cap for chunked NAR uploads. Comfortably above the CLI's
+/// 32 MiB chunk and below the reverse proxy's 100 MiB limit, so each chunk
+/// always clears the proxy regardless of total NAR size.
+const NAR_UPLOAD_CHUNK_LIMIT: usize = 64 * 1024 * 1024;
+
 /// Wraps `SmartIpKeyExtractor` with a constant fallback so requests that
 /// carry no client-IP signal at all (no `X-Forwarded-For` / `X-Real-IP`,
 /// no `ConnectInfo`) share a single bucket instead of returning 500. This
@@ -348,6 +353,14 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             "/caches/{cache}/nars",
             post(caches::nars_upload)
                 .layer(DefaultBodyLimit::max(state.config.limits.max_nar_upload_size)),
+        )
+        .route(
+            "/caches/{cache}/nars/{hash}/chunk",
+            put(caches::nar_chunk).layer(DefaultBodyLimit::max(NAR_UPLOAD_CHUNK_LIMIT)),
+        )
+        .route(
+            "/caches/{cache}/nars/{hash}/finalize",
+            post(caches::nar_finalize),
         )
         .route(
             "/caches/{cache}/nars/{hash}",
