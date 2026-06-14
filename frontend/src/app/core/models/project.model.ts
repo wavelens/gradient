@@ -119,13 +119,26 @@ export interface Evaluation {
   trigger: { id: string; type: TriggerType } | null;
 }
 
-export type WaitingReason = WorkersWaitingReason | ApprovalWaitingReason | NoCacheWaitingReason;
+export type WaitingReason =
+  | WorkersWaitingReason
+  | EvalWorkersWaitingReason
+  | ApprovalWaitingReason
+  | NoCacheWaitingReason
+  | CacheStorageFullWaitingReason;
 
 export interface WorkersWaitingReason {
   kind: 'workers';
   unmet: UnmetRequirement[];
   connected_workers: number;
   available_architectures: string[];
+}
+
+export type EvalCapability = 'fetch' | 'eval';
+
+export interface EvalWorkersWaitingReason {
+  kind: 'eval_workers';
+  capability: EvalCapability;
+  connected_workers: number;
 }
 
 export interface ApprovalWaitingReason {
@@ -136,6 +149,10 @@ export interface ApprovalWaitingReason {
 
 export interface NoCacheWaitingReason {
   kind: 'no_cache';
+}
+
+export interface CacheStorageFullWaitingReason {
+  kind: 'cache_storage_full';
 }
 
 export interface UnmetRequirement {

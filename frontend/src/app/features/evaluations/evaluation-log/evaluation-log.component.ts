@@ -1275,17 +1275,28 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
         const workerWord = reason.connected_workers === 1 ? 'worker' : 'workers';
         return `${reason.connected_workers} connected ${workerWord} (${archList}) cannot satisfy:`;
       }
+      case 'eval_workers': {
+        const action = reason.capability === 'fetch' ? 'fetch the flake sources' : 'run the evaluation';
+        const workerWord = reason.connected_workers === 1 ? 'worker is' : 'workers are';
+        return reason.connected_workers === 0
+          ? `No workers are connected to ${action}.`
+          : `${reason.connected_workers} ${workerWord} connected, but none can ${action}.`;
+      }
       case 'approval':
         return `Awaiting maintainer approval for pull request #${reason.pr_number} by ${reason.pr_author}.`;
       case 'no_cache':
         return 'No cache is configured for this organization. Configure a cache before this evaluation can run.';
+      case 'cache_storage_full':
+        return 'Every writable cache for this organization is full. Free space or raise the limit before this evaluation can run.';
     }
   }
 
   waitingTitle(reason: WaitingReason | undefined): string {
     switch (reason?.kind) {
+      case 'eval_workers': return reason.capability === 'fetch' ? 'Waiting for a Fetch Worker' : 'Waiting for an Eval Worker';
       case 'approval': return 'Awaiting Approval';
       case 'no_cache': return 'No Cache Configured';
+      case 'cache_storage_full': return 'Cache Storage Full';
       default: return 'Waiting for Workers';
     }
   }

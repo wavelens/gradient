@@ -7538,15 +7538,17 @@ components:
       description: |
         Populated only when `status == "Waiting"`. Tagged by `kind`:
 
-        - `workers`: no connected worker can satisfy the pending builds'
-          `(architecture, required_features)` combos. Also used at evaluation
-          creation time with `connected_workers: 0` when the project's
-          organisation has no active worker registration with `enable_eval`
-          (issue #268) - the eval would otherwise be stranded in `Queued`
-          forever, because the build-dispatch reconciler can only act on
-          builds the eval phase has not yet produced. Refreshed whenever
+        - `workers`: the evaluation has reached the build phase but no
+          connected worker can satisfy the pending builds'
+          `(architecture, required_features)` combos. Refreshed whenever
           the scheduler reconciles the evaluation against the live worker
           pool.
+        - `eval_workers`: the evaluation is still in a pre-build phase and no
+          connected worker provides the capability it needs. `capability` is
+          `fetch` while `Fetching` (the worker must fetch the flake sources) or
+          `eval` while `Queued`/`EvaluatingFlake`/`EvaluatingDerivation` (the
+          worker must run the evaluation). Auto-unparks to `Queued` the moment a
+          worker with that capability connects (issue #381).
         - `approval`: the PR comes from a contributor who is not a forge
           repo writer, and the trigger has `require_approval = true`. The
           evaluation stays parked until a maintainer clicks "Approve and
@@ -7560,16 +7562,23 @@ components:
           subscription, so build outputs would have nowhere to land. The
           evaluation auto-unparks the moment a writable cache is
           subscribed.
+        - `cache_storage_full`: every writable cache for the organisation is
+          within the headroom threshold of its (or the instance-wide)
+          max-storage limit, so build outputs would have nowhere to land.
       oneOf:
         - $ref: '#/components/schemas/WaitingReasonWorkers'
+        - $ref: '#/components/schemas/WaitingReasonEvalWorkers'
         - $ref: '#/components/schemas/WaitingReasonApproval'
         - $ref: '#/components/schemas/WaitingReasonNoCache'
+        - $ref: '#/components/schemas/WaitingReasonCacheStorageFull'
       discriminator:
         propertyName: kind
         mapping:
           workers: '#/components/schemas/WaitingReasonWorkers'
+          eval_workers: '#/components/schemas/WaitingReasonEvalWorkers'
           approval: '#/components/schemas/WaitingReasonApproval'
           no_cache: '#/components/schemas/WaitingReasonNoCache'
+          cache_storage_full: '#/components/schemas/WaitingReasonCacheStorageFull'
 
     WaitingReasonWorkers:
       type: object
@@ -7612,6 +7621,28 @@ components:
           type: string
           description: Forge login of the PR author whose contribution is being gated.
 
+    WaitingReasonEvalWorkers:
+      type: object
+      required: [kind, capability, connected_workers]
+      properties:
+        kind:
+          type: string
+          enum: [eval_workers]
+        capability:
+          type: string
+          enum: [fetch, eval]
+          description: |
+            The pre-build capability the evaluation is stranded on: `fetch`
+            (waiting for a worker to fetch the flake sources) or `eval`
+            (waiting for a worker to run the evaluation).
+        connected_workers:
+          type: integer
+          minimum: 0
+          description: |
+            Total workers currently connected. May be greater than zero when
+            only build-only workers are online and an eval/fetch worker is
+            missing.
+
     WaitingReasonNoCache:
       type: object
       required: [kind]
@@ -7619,6 +7650,14 @@ components:
         kind:
           type: string
           enum: [no_cache]
+
+    WaitingReasonCacheStorageFull:
+      type: object
+      required: [kind]
+      properties:
+        kind:
+          type: string
+          enum: [cache_storage_full]
 
     UnmetRequirement:
       type: object
