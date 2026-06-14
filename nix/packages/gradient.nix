@@ -10,7 +10,7 @@
 , glibc
 , installShellFiles
 , llvmPackages
-, nixVersion
+, gradient-nix
 , openssl
 , pkg-config
 , pkgs
@@ -58,13 +58,13 @@ let
     nativeBuildInputs = [
       installShellFiles
       pkg-config
-      (lib.getDev nixVersion)
+      (lib.getDev gradient-nix)
       (lib.getDev glibc)
     ];
 
     buildInputs = [
       git
-      nixVersion
+      gradient-nix
       openssl
       zstd
     ];
