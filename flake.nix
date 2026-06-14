@@ -34,11 +34,15 @@
     checks = import ./nix/tests { inherit self inputs system pkgs; };
     apps = import ./nix/vms { inherit inputs system pkgs; };
     packages = rec {
-      gradient-nix = pkgs.gradient-nix;
+      inherit (pkgs) gradient-nix;
       store = pkgs.callPackage ./nix/scripts/store.nix { };
       gradient = pkgs.callPackage ./nix/packages/gradient.nix { inherit craneLib; };
       gradient-frontend = pkgs.callPackage ./nix/packages/gradient-frontend.nix { };
-      gradient-cli = pkgs.callPackage ./nix/packages/gradient-cli.nix { inherit craneLib; };
+      gradient-cli = pkgs.callPackage ./nix/packages/gradient-cli.nix {
+        inherit craneLib;
+        cargoFeatures = [ "nix" ];
+      };
+
       default = gradient;
     };
 
