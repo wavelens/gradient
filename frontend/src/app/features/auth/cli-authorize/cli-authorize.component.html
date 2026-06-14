@@ -53,12 +53,25 @@
           and the confirmation code matches what your terminal displays.
         </p>
         <div class="actions">
-          <button type="button" class="btn-primary" [disabled]="submitting()" (click)="authorize()">
-            Authorize
-          </button>
-          <button type="button" class="btn-secondary" [disabled]="submitting()" (click)="deny()">
-            Deny
-          </button>
+          <button
+            pButton
+            type="button"
+            class="w-full"
+            label="Authorize"
+            [loading]="submitting()"
+            [disabled]="submitting()"
+            (click)="authorize()"
+          ></button>
+          <button
+            pButton
+            type="button"
+            class="w-full"
+            label="Deny"
+            severity="secondary"
+            [outlined]="true"
+            [disabled]="submitting()"
+            (click)="deny()"
+          ></button>
         </div>
       </div>
     } @else {
@@ -74,9 +87,13 @@
             autocomplete="off"
           />
         </div>
-        <button type="submit" class="btn-primary" [disabled]="!form.valid">
-          Continue
-        </button>
+        <button
+          pButton
+          type="submit"
+          class="w-full"
+          label="Continue"
+          [disabled]="!form.valid"
+        ></button>
       </form>
     }
   </div>
