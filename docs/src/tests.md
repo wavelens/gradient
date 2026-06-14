@@ -3347,7 +3347,8 @@ Run with: `cargo test -p gradient-cli`
 Run with: `cargo test -p gradient-cli`
 
 - `upload_nar_file_with_narinfo_succeeds` — providing both `--nar-file` and
-  `--narinfo` against a mock server returns success.
+  `--narinfo` drives the chunked upload (`PUT .../nars/{hash}/chunk` then
+  `POST .../nars/{hash}/finalize`) against a mock server and returns success.
 - `upload_nar_file_without_narinfo_errors` — omitting `--narinfo` in no-nix
   mode exits with a usage error (exit code 2).
 
