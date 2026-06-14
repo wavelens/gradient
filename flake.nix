@@ -24,7 +24,6 @@
       config = { allowUnfree = true; };
     };
 
-    nixVersion = inputs.nix.packages.${system}.default;
     craneLib = crane.mkLib pkgs;
 
     rustEnv = with pkgs.rustPackages; [
@@ -35,10 +34,11 @@
     checks = import ./nix/tests { inherit self inputs system pkgs; };
     apps = import ./nix/vms { inherit inputs system pkgs; };
     packages = rec {
+      gradient-nix = pkgs.gradient-nix;
       store = pkgs.callPackage ./nix/scripts/store.nix { };
-      gradient = pkgs.callPackage ./nix/packages/gradient.nix { inherit craneLib nixVersion; };
+      gradient = pkgs.callPackage ./nix/packages/gradient.nix { inherit craneLib; };
       gradient-frontend = pkgs.callPackage ./nix/packages/gradient-frontend.nix { };
-      gradient-cli = pkgs.callPackage ./nix/packages/gradient-cli.nix { inherit craneLib nixVersion; };
+      gradient-cli = pkgs.callPackage ./nix/packages/gradient-cli.nix { inherit craneLib; };
       default = gradient;
     };
 
@@ -46,7 +46,6 @@
       buildInputs = [
         stdenv.cc.cc.lib
         pam
-        nixVersion
       ];
 
       packages = [
@@ -74,7 +73,7 @@
       ];
 
       nativeBuildInputs = [
-        nixVersion.dev
+        gradient-nix.dev
         pkg-config
         glibc.dev
       ];
@@ -100,7 +99,7 @@
     };
   }) // {
     overlays = {
-      nix = final: prev: { inherit (nix.packages.${final.stdenv.hostPlatform.system}) nix; };
+      nix = final: prev: { gradient-nix = nix.packages.${final.stdenv.hostPlatform.system}.nix; };
       gradient = final: prev: { inherit (self.packages.${final.stdenv.hostPlatform.system}) gradient; };
       gradient-frontend = final: prev: { inherit (self.packages.${final.stdenv.hostPlatform.system}) gradient-frontend; };
       gradient-cli = final: prev: { inherit (self.packages.${final.stdenv.hostPlatform.system}) gradient-cli; };

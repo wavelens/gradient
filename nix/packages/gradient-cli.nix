@@ -8,7 +8,7 @@
 , craneLib
 , git
 , installShellFiles
-, nixVersion
+, gradient-nix
 , openssl
 , pkg-config
 , stdenv
@@ -47,7 +47,7 @@ let
 
     buildInputs = [
       git
-      nixVersion
+      gradient-nix
       openssl
     ];
   };
