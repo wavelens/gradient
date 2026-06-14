@@ -63,6 +63,25 @@ impl<'a> FlakeWalker<'a> {
         wildcard_walk::discover_patterns(&root, wildcards)
     }
 
+    /// Split the include patterns into disjoint sub-patterns for memory-bounded
+    /// parallel discovery (one shard per first-wildcard child). Exclusions are
+    /// dropped here; the caller re-attaches them to every shard so each worker's
+    /// `discover` applies them.
+    pub(crate) fn plan_shards(&self, wildcards: &[String]) -> Result<Vec<String>> {
+        let root = self.root()?;
+        let includes: Vec<Vec<String>> = wildcards
+            .iter()
+            .map(|w| wildcard_walk::parse_pattern(w))
+            .filter(|(exclude, _)| !exclude)
+            .map(|(_, segs)| segs)
+            .collect();
+
+        Ok(wildcard_walk::plan_shards(&root, &includes)?
+            .iter()
+            .map(|s| wildcard_walk::segments_to_pattern(s))
+            .collect())
+    }
+
     pub(crate) fn resolve(&self, attr_path: &str) -> Result<(String, Vec<String>)> {
         let (_, segs) = wildcard_walk::parse_pattern(attr_path);
         let mut cursor = self.cache.root()?;

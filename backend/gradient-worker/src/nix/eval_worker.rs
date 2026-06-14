@@ -26,6 +26,13 @@ use crate::nix::nix_eval::NixEvaluator;
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum EvalRequest {
+    /// Split `wildcards` into disjoint sub-patterns (one per first-wildcard
+    /// child) so the parent can fan discovery across the pool, one shard per
+    /// system within each worker's memory budget.
+    Plan {
+        repository: String,
+        wildcards: Vec<String>,
+    },
     /// Discover all attribute paths in `repository` matching `wildcards`.
     List {
         repository: String,
@@ -50,6 +57,9 @@ pub enum EvalRequest {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum EvalResponse {
+    PlanOk {
+        sub_patterns: Vec<String>,
+    },
     ListOk {
         attrs: Vec<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -142,6 +152,34 @@ pub fn run_eval_worker() -> std::io::Result<()> {
             EvalRequest::Shutdown => {
                 trace!("eval worker shutting down on request");
                 return Ok(());
+            }
+            EvalRequest::Plan {
+                repository,
+                wildcards,
+            } => {
+                let Some(ev) = evaluator.as_ref() else {
+                    write_response(
+                        &mut writer,
+                        &EvalResponse::Err {
+                            message: "evaluator not initialized".to_string(),
+                        },
+                    )?;
+                    continue;
+                };
+                // Warnings from priming the prefix attrset resurface when each
+                // shard re-forces it, so they are not captured here.
+                let result = (|| -> anyhow::Result<Vec<String>> {
+                    let walker = ev.walker(&repository)?;
+                    let shards = walker.plan_shards(&wildcards)?;
+                    let _ = walker.commit_cache();
+                    Ok(shards)
+                })();
+                match result {
+                    Ok(sub_patterns) => EvalResponse::PlanOk { sub_patterns },
+                    Err(e) => EvalResponse::Err {
+                        message: format!("{:#}", e),
+                    },
+                }
             }
             EvalRequest::List {
                 repository,
@@ -248,6 +286,7 @@ pub fn run_eval_worker() -> std::io::Result<()> {
         };
 
         let kind = match &resp {
+            EvalResponse::PlanOk { sub_patterns } => format!("PlanOk({} shards)", sub_patterns.len()),
             EvalResponse::ListOk { attrs, .. } => format!("ListOk({} attrs)", attrs.len()),
             EvalResponse::ResolveOk { items, .. } => format!("ResolveOk({} items)", items.len()),
             EvalResponse::FingerprintOk { fingerprint } => {
@@ -381,6 +420,10 @@ mod tests {
     #[test]
     fn eval_request_serde_roundtrip() {
         let requests = [
+            EvalRequest::Plan {
+                repository: "github:nixos/nixpkgs".into(),
+                wildcards: vec!["packages.*.*".into()],
+            },
             EvalRequest::List {
                 repository: "github:nixos/nixpkgs".into(),
                 wildcards: vec!["packages.*.*".into()],
@@ -410,6 +453,9 @@ mod tests {
     #[test]
     fn eval_response_serde_roundtrip() {
         let responses: Vec<EvalResponse> = vec![
+            EvalResponse::PlanOk {
+                sub_patterns: vec!["packages.x86_64-linux.#".into()],
+            },
             EvalResponse::ListOk {
                 attrs: vec!["packages.x86_64-linux.hello".into()],
                 warnings: vec![],

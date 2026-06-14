@@ -220,9 +220,9 @@ in {
       };
 
       maxEvalRss = lib.mkOption {
-        description = "Recycle an eval subprocess (parent-side) once its RSS exceeds this many bytes.";
+        description = "Safety cap on an eval subprocess's resident memory: once its RSS exceeds this many bytes it is recycled (parent-side). Keep it above a typical eval's heap so warm workers are not recycled mid-evaluation.";
         type = lib.types.ints.positive;
-        default = 2147483648;
+        default = 8589934592;
       };
 
       evalCacheDir = lib.mkOption {
