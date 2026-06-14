@@ -145,6 +145,7 @@ pub fn make_ctx() -> crate::CiContext {
         registration: gradient_types::RegistrationArgs::default(),
         proto: gradient_types::ProtoArgs::default(),
         oidc: gradient_types::OidcArgs::default(),
+        scim: gradient_types::ScimArgs::default(),
         email: gradient_types::EmailArgs::default(),
         s3: gradient_types::S3Args::default(),
         github_app: gradient_types::GitHubAppArgs::default(),

@@ -20,7 +20,7 @@ use gradient_ci::manifest_state::{ManifestStateStore, PendingCredentialsStore};
 use gradient_db::{DbContext, StatusReactor, WebDb, WorkerDb};
 use gradient_forge::ForgeRegistry;
 use gradient_util::shutdown::Shutdown;
-use gradient_state::{OidcGroupRoles, PendingOrgMemberships};
+use gradient_state::{OidcGroupRoles, PendingOrgMemberships, ScimGroupRoles};
 use gradient_storage::{EmailSender, LogStorage, NarStore, StorageCtx};
 use gradient_types::{BoardEvent, RuntimeConfig, SecretString};
 
@@ -60,6 +60,8 @@ pub struct AppState {
     pub pending_org_memberships: Arc<PendingOrgMemberships>,
     /// OIDC group -> (organization, role) grants resolved from state at startup.
     pub oidc_group_roles: Arc<OidcGroupRoles>,
+    /// SCIM group -> (organization, role) grants resolved from state at startup.
+    pub scim_group_roles: Arc<ScimGroupRoles>,
     /// Broadcast of live board events to WebSocket subscribers.
     pub board_events: broadcast::Sender<BoardEvent>,
     /// Terminal-status reaction hook: `ci` turns terminal build/eval statuses

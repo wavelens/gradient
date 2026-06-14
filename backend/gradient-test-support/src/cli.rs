@@ -67,6 +67,7 @@ pub fn test_cli_with_crypt(crypt_secret_file: String) -> Cli {
             ..Default::default()
         },
         oidc: OidcArgs::default(),
+        scim: ScimArgs::default(),
         email: EmailArgs {
             email_from_name: "Gradient Test".into(),
             email_enable_tls: false,
