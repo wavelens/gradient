@@ -603,7 +603,7 @@ mod tests {
     #[test]
     fn plan_multiple_includes_concatenate() {
         let root = tree();
-        let got = plan_shards(&root, &[segs(&["packages", "*", "*"]), segs(&["checks", "*", "*"])])
+        let got = plan_shards(&&root, &[segs(&["packages", "*", "*"]), segs(&["checks", "*", "*"])])
             .unwrap();
         assert_eq!(got, vec![
             segs(&["packages", "aarch64-linux", "#"]),

@@ -398,6 +398,22 @@ services.gradient.state.roles.platform-admin = {
 };
 ```
 
+### Mapping SCIM groups to roles
+
+A role may list `scim_group` values: IdP group names provisioned via SCIM. When
+the IdP adds a user to a listed SCIM group, that user is granted this role in the
+role's organization; removal from the group removes the membership. Grants are
+additive across groups. A SCIM group whose name matches no `scim_group` entry is
+unknown and returns `404`. See [SCIM](scim.md).
+
+```nix
+services.gradient.state.roles.acme-engineer = {
+  organization = "acme";
+  permissions  = [ "viewOrg" "triggerEvaluation" ];
+  scim_group   = [ "acme-eng" ];
+};
+```
+
 ### Role options
 
 | Option | Default | Description |
@@ -406,6 +422,7 @@ services.gradient.state.roles.platform-admin = {
 | `organization` | - | Owning organization name (required) |
 | `permissions` | - | List of capability identifiers granted by the role (required, see `GET /user/keys/permissions` for the catalogue) |
 | `oidc_group` | `[]` | OIDC group claims that grant this role on login (additive). Requires the `groups` scope |
+| `scim_group` | `[]` | SCIM group names whose members are granted this role (additive). Requires SCIM enabled |
 
 ## API Keys
 

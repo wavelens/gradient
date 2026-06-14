@@ -131,6 +131,8 @@ tags:
     description: Per-organization named forge integrations (inbound HMAC secrets + outbound API credentials)
   - name: admin
     description: Server-wide administrative endpoints. All routes require the caller to have the `superuser` flag.
+  - name: scim
+    description: SCIM 2.0 instance-level provisioning (Users + Groups), bearer-token authenticated, mounted at `/scim/v2` only when SCIM is enabled.
 
 security:
   - bearerAuth: []
@@ -6163,6 +6165,271 @@ paths:
         '404':
           description: Organization or worker not found
 
+  # ── SCIM 2.0 ─────────────────────────────────────────────────────────────────
+  # Instance-level provisioning (RFC 7643/7644), mounted at /scim/v2 only when
+  # SCIM is enabled. All routes use the scimBearer token, not user auth.
+
+  /scim/v2/ServiceProviderConfig:
+    get:
+      tags: [scim]
+      summary: SCIM service provider configuration
+      description: Advertises supported SCIM features (patch, filter, no bulk/sort/etag/change-password).
+      operationId: scimServiceProviderConfig
+      security:
+        - scimBearer: []
+      responses:
+        '200':
+          description: Service provider configuration
+          content:
+            application/scim+json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/ScimUnauthorized'
+
+  /scim/v2/ResourceTypes:
+    get:
+      tags: [scim]
+      summary: SCIM resource types
+      description: Lists the supported resource types (User, Group).
+      operationId: scimResourceTypes
+      security:
+        - scimBearer: []
+      responses:
+        '200':
+          description: Resource types
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/ScimListResponse'
+        '401':
+          $ref: '#/components/responses/ScimUnauthorized'
+
+  /scim/v2/Schemas:
+    get:
+      tags: [scim]
+      summary: SCIM schemas
+      description: Lists the supported core schemas (User, Group).
+      operationId: scimSchemas
+      security:
+        - scimBearer: []
+      responses:
+        '200':
+          description: Schemas
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/ScimListResponse'
+        '401':
+          $ref: '#/components/responses/ScimUnauthorized'
+
+  /scim/v2/Users:
+    get:
+      tags: [scim]
+      summary: List / filter SCIM users
+      description: |-
+        Lists managed (SCIM-provisioned) users. Supports the `userName eq "..."`
+        and `externalId eq "..."` filter subset plus `startIndex`/`count` pagination.
+      operationId: scimListUsers
+      security:
+        - scimBearer: []
+      parameters:
+        - { name: filter, in: query, required: false, schema: { type: string }, example: 'userName eq "alice@example.com"' }
+        - { name: startIndex, in: query, required: false, schema: { type: integer, default: 1 } }
+        - { name: count, in: query, required: false, schema: { type: integer, default: 100 } }
+      responses:
+        '200':
+          description: User list
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/ScimListResponse'
+        '400':
+          $ref: '#/components/responses/ScimBadRequest'
+        '401':
+          $ref: '#/components/responses/ScimUnauthorized'
+    post:
+      tags: [scim]
+      summary: Provision a SCIM user
+      description: Creates a passwordless `managed` user. Login happens later via OIDC (claimable path). `userName` conflicts return 409.
+      operationId: scimCreateUser
+      security:
+        - scimBearer: []
+      requestBody:
+        required: true
+        content:
+          application/scim+json:
+            schema:
+              $ref: '#/components/schemas/ScimUser'
+      responses:
+        '201':
+          description: User created
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/ScimUser'
+        '401':
+          $ref: '#/components/responses/ScimUnauthorized'
+        '409':
+          $ref: '#/components/responses/ScimConflict'
+
+  /scim/v2/Users/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [scim]
+      summary: Get a SCIM user
+      operationId: scimGetUser
+      security:
+        - scimBearer: []
+      responses:
+        '200':
+          description: User
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/ScimUser'
+        '401':
+          $ref: '#/components/responses/ScimUnauthorized'
+        '404':
+          $ref: '#/components/responses/ScimNotFound'
+    put:
+      tags: [scim]
+      summary: Replace a SCIM user
+      operationId: scimReplaceUser
+      security:
+        - scimBearer: []
+      requestBody:
+        required: true
+        content:
+          application/scim+json:
+            schema:
+              $ref: '#/components/schemas/ScimUser'
+      responses:
+        '200':
+          description: User replaced
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/ScimUser'
+        '401':
+          $ref: '#/components/responses/ScimUnauthorized'
+        '404':
+          $ref: '#/components/responses/ScimNotFound'
+    patch:
+      tags: [scim]
+      summary: Patch a SCIM user
+      description: Applies a SCIM PatchOp. Typically toggles `active` for deactivation/reactivation.
+      operationId: scimPatchUser
+      security:
+        - scimBearer: []
+      requestBody:
+        required: true
+        content:
+          application/scim+json:
+            schema:
+              $ref: '#/components/schemas/ScimPatchOp'
+      responses:
+        '200':
+          description: User patched
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/ScimUser'
+        '401':
+          $ref: '#/components/responses/ScimUnauthorized'
+        '404':
+          $ref: '#/components/responses/ScimNotFound'
+    delete:
+      tags: [scim]
+      summary: Deprovision a SCIM user
+      description: |-
+        Soft-disables the user (`active=false`) by default; hard-deletes (cascade)
+        when `GRADIENT_SCIM_HARD_DELETE=true`.
+      operationId: scimDeleteUser
+      security:
+        - scimBearer: []
+      responses:
+        '204':
+          description: User deprovisioned
+        '401':
+          $ref: '#/components/responses/ScimUnauthorized'
+        '404':
+          $ref: '#/components/responses/ScimNotFound'
+
+  /scim/v2/Groups:
+    get:
+      tags: [scim]
+      summary: List SCIM groups
+      description: |-
+        Lists SCIM groups. A SCIM group is an IdP group name that resolves to
+        `(organization, role)` grants via `scim_group` on a state role; groups are
+        not created through SCIM. Supports the `displayName eq "..."` filter.
+      operationId: scimListGroups
+      security:
+        - scimBearer: []
+      parameters:
+        - { name: filter, in: query, required: false, schema: { type: string }, example: 'displayName eq "acme-eng"' }
+      responses:
+        '200':
+          description: Group list
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/ScimListResponse'
+        '400':
+          $ref: '#/components/responses/ScimBadRequest'
+        '401':
+          $ref: '#/components/responses/ScimUnauthorized'
+
+  /scim/v2/Groups/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string }, description: SCIM group name (IdP group) }
+    get:
+      tags: [scim]
+      summary: Get a SCIM group
+      description: Unknown group names return 404.
+      operationId: scimGetGroup
+      security:
+        - scimBearer: []
+      responses:
+        '200':
+          description: Group
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/ScimGroup'
+        '401':
+          $ref: '#/components/responses/ScimUnauthorized'
+        '404':
+          $ref: '#/components/responses/ScimNotFound'
+    patch:
+      tags: [scim]
+      summary: Patch SCIM group membership
+      description: |-
+        Adds or removes members. Membership maps to `organization_user` grants for
+        the `(organization, role)` the group resolves to. Unknown group names return 404.
+      operationId: scimPatchGroup
+      security:
+        - scimBearer: []
+      requestBody:
+        required: true
+        content:
+          application/scim+json:
+            schema:
+              $ref: '#/components/schemas/ScimPatchOp'
+      responses:
+        '200':
+          description: Group patched
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/ScimGroup'
+        '401':
+          $ref: '#/components/responses/ScimUnauthorized'
+        '404':
+          $ref: '#/components/responses/ScimNotFound'
+
 components:
 
   securitySchemes:
@@ -6179,6 +6446,13 @@ components:
       description: |-
         Operator-configured bearer token loaded from `GRADIENT_METRICS_TOKEN_FILE`.
         Independent of user authentication.
+    scimBearer:
+      type: http
+      scheme: bearer
+      description: |-
+        Operator-configured SCIM provisioning token loaded from
+        `GRADIENT_SCIM_TOKEN_FILE`. Presented by the IdP (Okta/Entra) on every
+        `/scim/v2` request. Independent of user authentication.
 
   parameters:
     OrganizationSlug:
@@ -6278,6 +6552,34 @@ components:
           example:
             error: true
             message: "Server Name already exists"
+
+    ScimUnauthorized:
+      description: Missing or invalid SCIM bearer token
+      content:
+        application/scim+json:
+          schema:
+            $ref: '#/components/schemas/ScimError'
+
+    ScimBadRequest:
+      description: Unsupported filter or invalid value
+      content:
+        application/scim+json:
+          schema:
+            $ref: '#/components/schemas/ScimError'
+
+    ScimNotFound:
+      description: Resource not found
+      content:
+        application/scim+json:
+          schema:
+            $ref: '#/components/schemas/ScimError'
+
+    ScimConflict:
+      description: Resource already exists (uniqueness)
+      content:
+        application/scim+json:
+          schema:
+            $ref: '#/components/schemas/ScimError'
 
   schemas:
 
@@ -9555,3 +9857,104 @@ components:
         queued_at: { type: string, format: date-time }
         dependency_count: { type: integer }
         pname: { type: string, nullable: true }
+
+    # ── SCIM 2.0 ──────────────────────────────────────────────────────────────
+
+    ScimError:
+      type: object
+      description: SCIM-shaped error (RFC 7644 §3.12), served as `application/scim+json`.
+      properties:
+        schemas:
+          type: array
+          items: { type: string }
+          example: ["urn:ietf:params:scim:api:messages:2.0:Error"]
+        status: { type: string, example: "404" }
+        scimType: { type: string, nullable: true, example: "uniqueness" }
+        detail: { type: string, example: "user not found" }
+
+    ScimListResponse:
+      type: object
+      description: SCIM list response envelope (RFC 7644 §3.4.2).
+      properties:
+        schemas:
+          type: array
+          items: { type: string }
+          example: ["urn:ietf:params:scim:api:messages:2.0:ListResponse"]
+        totalResults: { type: integer }
+        startIndex: { type: integer }
+        itemsPerPage: { type: integer }
+        Resources:
+          type: array
+          items: { type: object }
+
+    ScimUser:
+      type: object
+      description: SCIM core User (RFC 7643 §4.1) — the Okta/Entra subset Gradient stores.
+      properties:
+        schemas:
+          type: array
+          items: { type: string }
+          example: ["urn:ietf:params:scim:schemas:core:2.0:User"]
+        id: { type: string, format: uuid, readOnly: true }
+        userName: { type: string }
+        externalId: { type: string, nullable: true }
+        displayName: { type: string }
+        name:
+          type: object
+          properties:
+            formatted: { type: string }
+        emails:
+          type: array
+          items:
+            type: object
+            properties:
+              value: { type: string }
+              primary: { type: boolean }
+        active: { type: boolean }
+        meta:
+          type: object
+          properties:
+            resourceType: { type: string, example: "User" }
+      required: [userName]
+
+    ScimGroup:
+      type: object
+      description: |-
+        SCIM core Group (RFC 7643 §4.2). `id`/`displayName` are the IdP group name;
+        `members` are users holding the resolved `(organization, role)` grant.
+      properties:
+        schemas:
+          type: array
+          items: { type: string }
+          example: ["urn:ietf:params:scim:schemas:core:2.0:Group"]
+        id: { type: string, example: "acme-eng" }
+        displayName: { type: string, example: "acme-eng" }
+        members:
+          type: array
+          items:
+            type: object
+            properties:
+              value: { type: string, format: uuid }
+              display: { type: string, nullable: true }
+        meta:
+          type: object
+          properties:
+            resourceType: { type: string, example: "Group" }
+
+    ScimPatchOp:
+      type: object
+      description: SCIM PatchOp request (RFC 7644 §3.5.2).
+      properties:
+        schemas:
+          type: array
+          items: { type: string }
+          example: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"]
+        Operations:
+          type: array
+          items:
+            type: object
+            properties:
+              op: { type: string, example: "replace" }
+              path: { type: string, nullable: true, example: "active" }
+              value: {}
+      required: [Operations]
