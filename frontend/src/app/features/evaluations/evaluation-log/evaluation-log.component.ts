@@ -14,8 +14,10 @@ import {
   ViewChild,
   ElementRef,
   ChangeDetectorRef,
+  DestroyRef,
   HostListener,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   LogChunkIndex,
   LogSearchHit,
@@ -60,6 +62,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   protected authService = inject(AuthService);
   private sanitizer = inject(DomSanitizer);
   private cdr = inject(ChangeDetectorRef);
+  private destroyRef = inject(DestroyRef);
 
   @ViewChild('logContainer') logContainerRef?: ElementRef<HTMLDivElement>;
 
@@ -181,7 +184,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
   loadEvaluation(): void {
     this.loading.set(true);
-    this.evalService.getEvaluation(this.evaluationId).subscribe({
+    this.evalService.getEvaluation(this.evaluationId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (evaluation) => {
         this.evaluation.set(evaluation);
         this.loading.set(false);
@@ -195,7 +198,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   }
 
   loadMessages(): void {
-    this.evalService.getEvaluationMessages(this.evaluationId).subscribe({
+    this.evalService.getEvaluationMessages(this.evaluationId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (msgs) => this.messages.set(
         msgs.map(m => ({
           ...m,
@@ -290,7 +293,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     const limit = this.isInitialBuildsLoad
       ? this.PAGE_SIZE
       : Math.max(this.PAGE_SIZE, this.totalBuilds, this.activeBuildsCount());
-    this.evalService.getBuilds(this.evaluationId, limit, 0).subscribe({
+    this.evalService.getBuilds(this.evaluationId, limit, 0).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (result) => {
         this.totalBuilds = result.total;
         this.totalBuildsCount.set(result.total);
@@ -407,7 +410,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.loadingMore = true;
     const offset = this.builds().length;
 
-    this.evalService.getBuilds(this.evaluationId, this.PAGE_SIZE, offset).subscribe({
+    this.evalService.getBuilds(this.evaluationId, this.PAGE_SIZE, offset).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (result) => {
         // Do NOT update totalBuildsCount / activeBuildsCount here - those metric signals
         // are owned exclusively by loadBuilds() to avoid jumps from concurrent responses.
@@ -498,7 +501,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     }
     if (this.fetchingInitialBuild) return;
     this.fetchingInitialBuild = true;
-    this.evalService.getBuild(id).subscribe({
+    this.evalService.getBuild(id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (b: BuildWithOutputs) => {
         this.fetchingInitialBuild = false;
         if (this.initialBuildId !== id) return;
@@ -1205,7 +1208,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
   abortEvaluation(): void {
     this.aborting.set(true);
-    this.evalService.abortEvaluation(this.evaluationId).subscribe({
+    this.evalService.abortEvaluation(this.evaluationId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.aborting.set(false);
         this.loadEvaluation();
