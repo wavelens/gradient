@@ -915,6 +915,17 @@
         '';
         example = [ "platform-team" "ops" ];
       };
+
+      scim_group = mkOption {
+        type = types.listOf types.str;
+        default = [];
+        description = ''
+          SCIM group names that grant this role. A user the IdP adds to a
+          listed SCIM group is granted this role in the role's organization.
+          Grants are additive; removal from the group removes the membership.
+        '';
+        example = [ "acme-eng" ];
+      };
     };
   });
 
