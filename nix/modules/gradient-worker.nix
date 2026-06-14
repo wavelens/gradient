@@ -13,10 +13,10 @@ in {
     packages = {
       gradient = lib.mkPackageOption pkgs "gradient" { };
       nix = lib.mkOption {
-        default = config.nix.package;
-        defaultText = lib.literalExpression "config.nix.package";
+        default = pkgs.gradient-nix;
+        defaultText = lib.literalExpression "pkgs.gradient-nix";
         type = lib.types.package;
-        description = "Nix package to use for evaluation and fetching. The `nix` binary from this package is passed to the worker as `GRADIENT_BINPATH_NIX`.";
+        description = "Nix package to use for evaluation and fetching. The `nix` binary from this package is passed to the worker as `GRADIENT_BINPATH_NIX`. Defaults to the gradient nix fork so the shelled-out `nix` matches the worker's embedded fork evaluator.";
       };
 
       git = lib.mkOption {
