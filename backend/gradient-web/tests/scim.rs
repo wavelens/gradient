@@ -11,12 +11,13 @@ use axum::http::StatusCode;
 use axum_test::TestServer;
 use gradient_core::ServerState;
 use gradient_db::{WebDb, WorkerDb};
-use gradient_entity::user;
+use gradient_entity::{organization_user, user};
+use gradient_state::ScimGroupRoles;
 use gradient_storage::{EmailSender, NarStore};
 use gradient_test_support::cli::test_cli;
 use gradient_test_support::fakes::email::InMemoryEmailSender;
 use gradient_test_support::log_storage::NoopLogStorage;
-use gradient_types::RuntimeConfig;
+use gradient_types::{OrganizationId, RoleId, RuntimeConfig, UserId};
 use gradient_web::create_router;
 use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase, MockExecResult};
 use serde_json::{Value, json};
@@ -40,6 +41,18 @@ fn scim_server(db: DatabaseConnection) -> TestServer {
 }
 
 fn scim_server_with(db: DatabaseConnection, hard_delete: bool) -> TestServer {
+    build_server(db, hard_delete, ScimGroupRoles::new())
+}
+
+fn scim_server_with_groups(db: DatabaseConnection, groups: ScimGroupRoles) -> TestServer {
+    build_server(db, false, groups)
+}
+
+fn build_server(
+    db: DatabaseConnection,
+    hard_delete: bool,
+    scim_group_roles: ScimGroupRoles,
+) -> TestServer {
     let jwt_path = std::env::temp_dir().join(format!("gradient-scim-jwt-{}", Uuid::now_v7()));
     std::fs::write(&jwt_path, "test-jwt-secret").expect("write jwt secret file");
 
@@ -66,7 +79,7 @@ fn scim_server_with(db: DatabaseConnection, hard_delete: bool) -> TestServer {
         started_at: chrono::Utc::now(),
         pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
-        scim_group_roles: std::sync::Arc::new(Default::default()),
+        scim_group_roles: std::sync::Arc::new(scim_group_roles),
         board_events: tokio::sync::broadcast::channel(256).0,
         forge: gradient_forge::ForgeRegistry::with_builtin(),
         reactor: std::sync::Arc::new(gradient_db::NoReactor),
@@ -274,5 +287,115 @@ fn scim_delete_user_hard_deletes() {
             .await;
 
         res.assert_status(StatusCode::NO_CONTENT);
+    });
+}
+
+fn group_with_grant(name: &str) -> (ScimGroupRoles, OrganizationId, RoleId) {
+    let org = OrganizationId::now_v7();
+    let role = RoleId::now_v7();
+    let mut groups = ScimGroupRoles::new();
+    groups.insert(name.to_string(), vec![(org, role)]);
+    (groups, org, role)
+}
+
+fn membership(org: OrganizationId, user: UserId, role: RoleId) -> organization_user::Model {
+    organization_user::Model {
+        id: Uuid::now_v7().into(),
+        organization: org,
+        user,
+        role,
+    }
+}
+
+#[test]
+fn scim_unknown_group_returns_404() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        let s = scim_server(db); // empty scim_group_roles
+        let res = s
+            .get("/scim/v2/Groups/nope")
+            .add_header("Authorization", auth_header())
+            .await;
+
+        res.assert_status_not_found();
+    });
+}
+
+#[test]
+fn scim_get_group_lists_members() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        let (groups, org, role) = group_with_grant("acme-eng");
+        let member = UserId::now_v7();
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![membership(org, member, role)]]) // members lookup
+            .into_connection();
+        let s = scim_server_with_groups(db, groups);
+        let res = s
+            .get("/scim/v2/Groups/acme-eng")
+            .add_header("Authorization", auth_header())
+            .await;
+
+        res.assert_status_ok();
+        let body: Value = res.json();
+        assert_eq!(body["displayName"], "acme-eng");
+        assert_eq!(body["members"][0]["value"], member.to_string());
+    });
+}
+
+#[test]
+fn scim_patch_group_add_member_inserts_membership() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        let (groups, org, role) = group_with_grant("acme-eng");
+        let member = UserId::now_v7();
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([Vec::<organization_user::Model>::new()]) // existing? none
+            .append_query_results([vec![membership(org, member, role)]]) // INSERT ... RETURNING
+            .append_query_results([vec![membership(org, member, role)]]) // members lookup
+            .into_connection();
+        let s = scim_server_with_groups(db, groups);
+        let res = s
+            .patch("/scim/v2/Groups/acme-eng")
+            .add_header("Authorization", auth_header())
+            .json(&json!({
+                "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+                "Operations": [{"op": "add", "path": "members", "value": [{"value": member.to_string()}]}]
+            }))
+            .await;
+
+        res.assert_status_ok();
+        let body: Value = res.json();
+        assert_eq!(body["members"][0]["value"], member.to_string());
+    });
+}
+
+#[test]
+fn scim_patch_group_remove_member_deletes_membership() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        let (groups, _org, _role) = group_with_grant("acme-eng");
+        let member = UserId::now_v7();
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }]) // DELETE
+            .append_query_results([Vec::<organization_user::Model>::new()]) // members lookup: empty
+            .into_connection();
+        let s = scim_server_with_groups(db, groups);
+        let res = s
+            .patch("/scim/v2/Groups/acme-eng")
+            .add_header("Authorization", auth_header())
+            .json(&json!({
+                "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+                "Operations": [{"op": "remove", "path": format!("members[value eq \"{member}\"]")}]
+            }))
+            .await;
+
+        res.assert_status_ok();
+        let body: Value = res.json();
+        assert_eq!(body["members"].as_array().unwrap().len(), 0);
     });
 }
