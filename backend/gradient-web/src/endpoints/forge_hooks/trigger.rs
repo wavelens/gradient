@@ -450,6 +450,17 @@ where
             }
         };
 
+    // Persist PR number/author on the evaluation (via `source_comment`) for every
+    // PR trigger, so the UI can render "PR #42" with a link (#391). A
+    // comment-triggered run already carries a richer source_comment (with a
+    // `comment_id`), so only synthesize one when absent.
+    let source_comment = source_comment.or_else(|| {
+        approval_ctx.as_ref().and_then(|c| {
+            c.pr_number
+                .map(|n| serde_json::json!({ "pr_number": n, "pr_author": c.pr_author }))
+        })
+    });
+
     let mut outcome = WebhookTriggerOutcome::default();
     for trig in triggers {
         let cfg = match TriggerConfig::parse_row(trig.trigger_type, &trig.config) {

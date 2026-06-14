@@ -4768,10 +4768,11 @@ paths:
         Appends one slice of a NAR to a server-side `.partial` staging file,
         keyed by `(cache, hash)`. Used to upload NARs larger than the reverse
         proxy's per-request body limit by splitting them across several requests.
-        Requires `writeStore`. `offset` must equal the number of bytes already
-        staged (`0` starts fresh and truncates any stale partial); a mismatch
-        returns `409` carrying the authoritative `received` count so the client
-        can resume. Call `POST .../finalize` once every chunk is sent.
+        Requires `writeStore`. `offset == 0` starts fresh (truncating any stale
+        partial); otherwise the chunk is appended only when `offset` equals the
+        bytes already staged. The response's `received` is authoritative: the
+        client sets its next offset to it (resending if it did not advance) and
+        calls `POST .../finalize` once `received` equals the NAR size.
       operationId: uploadCacheNarChunk
       parameters:
         - name: offset
@@ -4806,22 +4807,7 @@ paths:
                           received:
                             type: integer
                             format: int64
-                            description: Total bytes staged after this chunk.
-        '409':
-          description: Offset did not match staged length; body carries `received` to resume from.
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/BaseResponse'
-                  - type: object
-                    properties:
-                      message:
-                        type: object
-                        properties:
-                          received:
-                            type: integer
-                            format: int64
+                            description: Authoritative bytes staged; the client's next offset.
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -7418,6 +7404,10 @@ components:
           type: string
           nullable: true
           description: Display name of the user who manually started the evaluation; null for trigger-driven runs
+        pr_number:
+          type: integer
+          nullable: true
+          description: PR/MR number for pull-request-triggered evaluations (for the "PR #42" label); null otherwise
         total_builds:
           type: integer
           description: Sum of the four bar segments (excludes substituted and aborted)

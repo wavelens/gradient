@@ -4043,3 +4043,20 @@ validates and ingests the staged NAR.
   already covered under *Resumable NAR transfers (#225)*.
 - The chunk→finalize→ingest round trip is DB- and storage-dependent and covered
   end-to-end by CI (no local Postgres unit harness).
+
+## Project page bugs: PR label, stale packages, redirect (#391)
+
+- `backend/gradient-forge/src/webhook.rs::tests::parse_github_pr_opened_event`
+  now asserts the parsed PR `title`, which becomes the evaluation's display
+  message for PR triggers (PR webhooks carry no head commit message).
+- `frontend/.../project-detail.component.spec.ts`:
+  - `labels a pull-request trigger as "PR #<n>"` - the trigger label shows the
+    PR number (from `EvaluationSummary.pr_number`) and falls back to "PR".
+  - the existing evaluation-selection specs cover the stale-packages clear on
+    switch (entry points reset + reload on `select`).
+- `frontend/.../evaluation-log.component.spec.ts` continues to pass with the
+  `takeUntilDestroyed` teardown that stops late fetches from redirecting back to
+  the log page after the user navigates away.
+- The build-list latest-attempt batching, the dep-count backfill, and the
+  `source_comment` PR-number persistence are DB-dependent and covered end-to-end
+  by CI (no local Postgres unit harness).

@@ -94,6 +94,9 @@ pub struct EvaluationSummary {
     pub status: EvaluationStatus,
     pub trigger: Option<EvaluationTriggerSummary>,
     pub triggered_by: Option<String>,
+    /// PR/MR number for pull-request-triggered evaluations, for the "PR #42"
+    /// label and forge link. `None` for non-PR triggers.
+    pub pr_number: Option<u64>,
     pub total_builds: i64,
     pub builds: BuildStatusCounts,
     pub errors: i64,

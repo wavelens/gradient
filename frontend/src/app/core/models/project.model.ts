@@ -51,6 +51,7 @@ export interface EvaluationSummary {
   status: EvaluationStatus;
   trigger: { id: string; type: TriggerType } | null;
   triggered_by: string | null;
+  pr_number: number | null;
   total_builds: number;
   builds: BuildStatusCounts;
   errors: number;

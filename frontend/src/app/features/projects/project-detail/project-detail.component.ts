@@ -287,7 +287,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
     switch (e.trigger?.type) {
       case 'polling': return 'Polling';
       case 'reporter_push': return 'Push';
-      case 'reporter_pull_request': return 'PR';
+      case 'reporter_pull_request': return e.pr_number ? `PR #${e.pr_number}` : 'PR';
       case 'time': return 'Schedule';
       default: return 'Manual';
     }
