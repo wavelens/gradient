@@ -269,6 +269,11 @@ pub struct StateRole {
     /// per OIDC login.
     #[serde(default)]
     pub oidc_group: Vec<String>,
+    /// SCIM group names that grant this role. Resolved at startup into
+    /// [`ScimGroupRoles`](super::ScimGroupRoles); membership is applied/removed
+    /// when the IdP adds/removes the user from the SCIM group.
+    #[serde(default)]
+    pub scim_group: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

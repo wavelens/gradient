@@ -42,10 +42,11 @@ pub struct PendingOrgMembership {
 pub type PendingOrgMemberships = HashMap<String, Vec<PendingOrgMembership>>;
 
 /// Outcome of applying declarative state: memberships deferred until their user
-/// exists, and the OIDC group → role grants resolved from `StateRole.oidc_group`.
+/// exists, and the OIDC/SCIM group → role grants resolved from `StateRole`.
 pub struct StateApplyResult {
     pub pending: PendingOrgMemberships,
     pub oidc_group_roles: crate::OidcGroupRoles,
+    pub scim_group_roles: crate::ScimGroupRoles,
 }
 
 pub(super) async fn apply_state_to_database(
@@ -82,11 +83,13 @@ pub(super) async fn apply_state_to_database(
     app.unmark_removed_entities(config, delete_state).await?;
 
     let oidc_group_roles = super::resolve_oidc_group_roles(config, &role_ids);
+    let scim_group_roles = super::resolve_scim_group_roles(config, &role_ids);
 
     tracing::info!("State applied successfully");
     Ok(StateApplyResult {
         pending,
         oidc_group_roles,
+        scim_group_roles,
     })
 }
 

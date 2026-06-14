@@ -246,6 +246,7 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
                     .map(|p| p.as_wire_name().to_string())
                     .collect(),
                 oidc_group: Vec::new(),
+                scim_group: Vec::new(),
             },
         );
     }
