@@ -146,6 +146,7 @@ mod m20260610_000003_slim_build_and_dispatched_job;
 mod m20260612_000001_add_started_by_to_evaluation;
 mod m20260613_000001_add_dep_closure_counts;
 mod m20260614_000001_eval_cache_store;
+mod m20260614_000002_add_scim_to_user;
 
 pub struct Migrator;
 
@@ -293,6 +294,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260612_000001_add_started_by_to_evaluation::Migration),
             Box::new(m20260613_000001_add_dep_closure_counts::Migration),
             Box::new(m20260614_000001_eval_cache_store::Migration),
+            Box::new(m20260614_000002_add_scim_to_user::Migration),
         ]
     }
 }
