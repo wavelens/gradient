@@ -1749,4 +1749,6 @@ a committed fixture flake):
   `!` exclusion drops `cowsay`.
 - `resolve` returns `hello`'s `.drv`; a `throw`-ing `boom` attribute isolates as a
   per-item error without aborting the batch (#139).
-- The on-disk eval cache (`eval-cache-v6/*.sqlite`) is populated, confirming warmth.
+- The lock-only `fingerprint` op returns the flake's eval-cache key, and the
+  on-disk cache is named exactly `eval-cache-v6/<fingerprint>.sqlite` — the
+  path-agreement the fleet eval-cache (#386 L3) relies on to stage/pull blobs.
