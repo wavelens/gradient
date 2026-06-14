@@ -25,6 +25,7 @@ pub mod worker_pool;
 pub mod worker_state;
 
 mod dispatch_mode;
+mod edge_readiness;
 mod job_handlers;
 pub(crate) mod trigger_dispatch;
 mod worker_lifecycle;
