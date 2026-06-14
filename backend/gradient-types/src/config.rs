@@ -32,6 +32,15 @@ pub struct OidcConfig {
     pub required: bool,
 }
 
+/// SCIM provisioning configuration - only present when `scim_enabled` is true
+/// and a token file is configured.
+#[derive(Debug, Clone)]
+pub struct ScimConfig {
+    pub token_file: String,
+    /// When true, SCIM `DELETE /Users/{id}` hard-deletes (cascade) instead of soft-disabling.
+    pub hard_delete: bool,
+}
+
 /// Email/SMTP configuration - only present when `email_enabled` is true and
 /// all required fields are configured.
 #[derive(Debug, Clone)]
@@ -109,6 +118,17 @@ impl Cli {
             scopes: self.oidc.oidc_scopes.clone(),
             discovery_url: self.oidc.oidc_discovery_url.clone()?,
             required: self.oidc.oidc_required,
+        })
+    }
+
+    /// Returns the typed SCIM config when SCIM is enabled and a token file is set.
+    pub fn scim_config(&self) -> Option<ScimConfig> {
+        if !self.scim.scim_enabled {
+            return None;
+        }
+        Some(ScimConfig {
+            token_file: self.scim.scim_token_file.clone()?,
+            hard_delete: self.scim.scim_hard_delete,
         })
     }
 
@@ -205,6 +225,7 @@ pub struct RuntimeConfig {
     pub registration: RegistrationArgs,
     pub proto: ProtoArgs,
     pub oidc: Option<OidcConfig>,
+    pub scim: Option<ScimConfig>,
     pub email: Option<EmailConfig>,
     pub s3: Option<S3Config>,
     pub github_app: Option<GitHubAppConfig>,
@@ -230,6 +251,7 @@ impl RuntimeConfig {
             registration: cli.registration.clone(),
             proto: cli.proto.clone(),
             oidc: cli.oidc_config(),
+            scim: cli.scim_config(),
             email: cli.email_config(),
             s3: cli.s3_config(),
             github_app: cli.github_app_config(),
@@ -291,6 +313,7 @@ mod tests {
                 ..Default::default()
             },
             oidc: OidcArgs::default(),
+            scim: ScimArgs::default(),
             email: EmailArgs {
                 email_from_name: "Gradient Test".into(),
                 email_enable_tls: false,
@@ -504,5 +527,38 @@ mod tests {
         cli.metrics.metrics_token_file = Some(path);
         let runtime = RuntimeConfig::from_cli(&cli).expect("valid");
         assert!(runtime.metrics.is_some());
+    }
+
+    #[test]
+    fn scim_config_disabled_returns_none() {
+        let cli = base_cli();
+        assert!(cli.scim_config().is_none());
+    }
+
+    #[test]
+    fn scim_config_enabled_missing_token_returns_none() {
+        let mut cli = base_cli();
+        cli.scim.scim_enabled = true;
+        assert!(cli.scim_config().is_none());
+    }
+
+    #[test]
+    fn scim_config_fully_configured_returns_some() {
+        let mut cli = base_cli();
+        cli.scim.scim_enabled = true;
+        cli.scim.scim_token_file = Some("/run/secrets/scim".into());
+        cli.scim.scim_hard_delete = true;
+        let cfg = cli.scim_config().expect("should return Some");
+        assert_eq!(cfg.token_file, "/run/secrets/scim");
+        assert!(cfg.hard_delete);
+    }
+
+    #[test]
+    fn runtime_config_scim_propagates() {
+        let mut cli = base_cli();
+        cli.scim.scim_enabled = true;
+        cli.scim.scim_token_file = Some("/run/secrets/scim".into());
+        let runtime = RuntimeConfig::from_cli(&cli).expect("valid");
+        assert!(runtime.scim.is_some());
     }
 }

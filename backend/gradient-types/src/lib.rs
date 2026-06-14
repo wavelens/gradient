@@ -32,12 +32,12 @@ pub use self::build_output_metadata::BuildOutputMetadata;
 pub use self::cached_path_info::CachedPathInfo;
 pub use self::cli::{
     CidrParseError, DatabaseArgs, EmailArgs, EvalArgs, GitHubAppArgs, LimitsArgs, LoggingArgs,
-    MetricsArgs, NetworkArgs, OidcArgs, ProtoArgs, RegistrationArgs, S3Args, SecretsArgs,
+    MetricsArgs, NetworkArgs, OidcArgs, ProtoArgs, RegistrationArgs, S3Args, ScimArgs, SecretsArgs,
     ServerArgs, StorageArgs, in_any, parse_cidr_list,
 };
 pub use self::config::{
     ConfigError, EmailConfig, GitHubAppConfig, MetricsConfig, NetworkConfig, OidcConfig,
-    RuntimeConfig, S3Config,
+    RuntimeConfig, S3Config, ScimConfig,
 };
 pub use self::consts::*;
 pub use self::entity_aliases::*;
@@ -87,6 +87,8 @@ pub struct Cli {
     pub proto: ProtoArgs,
     #[command(flatten)]
     pub oidc: OidcArgs,
+    #[command(flatten)]
+    pub scim: ScimArgs,
     #[command(flatten)]
     pub email: EmailArgs,
     #[command(flatten)]
