@@ -37,17 +37,18 @@ impl EdgeReadiness {
     pub(crate) fn observe(&mut self, batch: &[DiscoveredDerivation]) -> Vec<(String, Vec<String>)> {
         let mut ready: Vec<(String, Vec<String>)> = Vec::new();
 
-        // 1. Mark every drv_path in this batch as seen; remember the new ones.
-        let mut newly_seen: Vec<String> = Vec::new();
+        // 1. Mark every drv_path as seen; keep only the first sighting of each so
+        //    a re-observed derivation is never registered or reported twice.
+        let mut fresh: Vec<&DiscoveredDerivation> = Vec::new();
         for d in batch {
             if self.seen.insert(d.drv_path.clone()) {
-                newly_seen.push(d.drv_path.clone());
+                fresh.push(d);
             }
         }
 
-        // 2. Register each source against the post-step-1 seen set, so deps that
-        //    arrived in this same batch already count as satisfied.
-        for d in batch {
+        // 2. Register each fresh source against the post-step-1 seen set, so deps
+        //    that arrived in this same batch already count as satisfied.
+        for d in &fresh {
             if d.dependencies.is_empty() {
                 ready.push((d.drv_path.clone(), Vec::new()));
                 continue;
@@ -71,16 +72,16 @@ impl EdgeReadiness {
             }
         }
 
-        // 3. A drv_path newly seen this batch may complete sources registered in
-        //    earlier batches. No cascade: becoming ready never marks a new seen.
-        for p in newly_seen {
-            let Some(srcs) = self.waiters.remove(&p) else {
+        // 3. Each freshly seen drv_path may complete sources registered in earlier
+        //    batches. No cascade: becoming ready never marks a new seen.
+        for d in &fresh {
+            let Some(srcs) = self.waiters.remove(&d.drv_path) else {
                 continue;
             };
 
             for src in srcs {
                 if let Some(missing) = self.pending.get_mut(&src) {
-                    missing.remove(&p);
+                    missing.remove(&d.drv_path);
                     if missing.is_empty() {
                         self.pending.remove(&src);
                         if let Some(deps) = self.deps.remove(&src) {
