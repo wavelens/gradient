@@ -29,7 +29,11 @@ pub async fn org_has_eval_capable_worker_registration<C: ConnectionTrait>(
         .filter(CWR::EnableEval.eq(true))
         .one(db)
         .await?;
-    Ok(row.is_some())
+    if row.is_some() {
+        return Ok(true);
+    }
+
+    crate::base_workers::org_has_eval_capable_base_worker(db, organization).await
 }
 
 #[cfg(test)]
@@ -68,6 +72,7 @@ mod tests {
     async fn returns_false_when_no_registrations_exist() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([Vec::<gradient_entity::worker_registration::Model>::new()])
+            .append_query_results([Vec::<gradient_entity::organization_base_worker::Model>::new()])
             .into_connection();
 
         let out = org_has_eval_capable_worker_registration(&db, OrganizationId::nil())
