@@ -171,6 +171,26 @@ impl<'a> StateApplicator<'a> {
             }
         }
 
+        let base_worker_ids: HashSet<&String> = config
+            .workers
+            .values()
+            .filter(|w| w.base_worker)
+            .map(|w| &w.worker_id)
+            .collect();
+        let base_workers = base_worker::Entity::find().all(db).await?;
+        for bw in base_workers {
+            if base_worker_ids.contains(&bw.worker_id) {
+                continue;
+            }
+            organization_base_worker::Entity::delete_many()
+                .filter(organization_base_worker::Column::BaseWorker.eq(bw.id))
+                .exec(db)
+                .await?;
+            let worker_id = bw.worker_id.clone();
+            base_worker::Entity::delete_by_id(bw.id).exec(db).await?;
+            tracing::info!(worker_id, "Deleted base worker");
+        }
+
         Ok(())
     }
 }
