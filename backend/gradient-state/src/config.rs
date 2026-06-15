@@ -299,6 +299,17 @@ pub struct StateWorker {
     /// Per-registration server-side gate for `build`. Defaults to true.
     #[serde(default = "default_true")]
     pub enable_build: bool,
+    /// When true this entry is a base worker (server-level, not per-org).
+    /// `organizations` then lists orgs to pre-enable.
+    #[serde(default)]
+    pub base_worker: bool,
+    /// Optional fixed auth identity (UUID) for a base worker; replaces the
+    /// per-org challenge. Ignored for non-base workers.
+    #[serde(default)]
+    pub authorize_against: Option<String>,
+    /// Global enable for a base worker. Ignored for non-base workers.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
