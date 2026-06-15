@@ -36,6 +36,8 @@ pub struct PendingEvalJob {
     /// Number of dispatch ticks this job has waited while pending. Bumped once
     /// per dispatch loop and fed into the scoring policy's rescore-wait rule.
     pub rescore_count: u32,
+    /// Per-project predicted peak eval RSS, fed into `ResourceFitRule`.
+    pub history: gradient_score::HistoryPrediction,
 }
 
 impl PendingEvalJob {
@@ -409,6 +411,7 @@ impl JobTracker {
                     id,
                     job.peer_id(),
                     e.job.tasks.contains(&FlakeTask::FetchFlake),
+                    e.history,
                 ),
                 PendingJob::Build(b) => ScoredJob::new_build(
                     id,
@@ -480,6 +483,7 @@ impl JobTracker {
                     job_id.as_str(),
                     job.peer_id(),
                     e.job.tasks.contains(&FlakeTask::FetchFlake),
+                    e.history,
                 ),
                 PendingJob::Build(b) => ScoredJob::new_build(
                     job_id.as_str(),
@@ -726,6 +730,7 @@ mod tests {
             queued_at: gradient_types::now(),
             ready_at: gradient_types::now(),
             rescore_count: 0,
+            history: Default::default(),
         })
     }
 
@@ -754,6 +759,7 @@ mod tests {
             queued_at: gradient_types::now(),
             ready_at: gradient_types::now(),
             rescore_count: 0,
+            history: Default::default(),
         })
     }
 

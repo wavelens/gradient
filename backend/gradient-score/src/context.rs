@@ -117,9 +117,10 @@ pub struct LazyProviders<'a> {
     pub history: &'a dyn Fn() -> HistoryPrediction,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EvalContext {
     pub fetch_flake: bool,
+    pub history: HistoryPrediction,
 }
 
 pub struct BuildContextLazy<'a> {
@@ -165,8 +166,9 @@ impl<'a> ScoredJob<'a> {
         job_id: &'a str,
         peer_id: gradient_types::ids::OrganizationId,
         fetch_flake: bool,
+        history: HistoryPrediction,
     ) -> Self {
-        Self { job_id, peer_id, kind: JobKindContext::Eval(EvalContext { fetch_flake }) }
+        Self { job_id, peer_id, kind: JobKindContext::Eval(EvalContext { fetch_flake, history }) }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -203,6 +205,13 @@ impl<'a> ScoredJob<'a> {
         match &self.kind {
             JobKindContext::Build(b) => Some(b),
             _ => None,
+        }
+    }
+
+    pub fn history(&self) -> HistoryPrediction {
+        match &self.kind {
+            JobKindContext::Eval(e) => e.history,
+            JobKindContext::Build(b) => b.history(),
         }
     }
 }

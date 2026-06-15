@@ -242,7 +242,7 @@ mod tests {
     }
 
     fn eval_job(fetch_flake: bool) -> ScoredJob<'static> {
-        ScoredJob::new_eval("test", OrganizationId::now_v7(), fetch_flake)
+        ScoredJob::new_eval("test", OrganizationId::now_v7(), fetch_flake, Default::default())
     }
 
     fn worker<'a>(archs: &'a [String], fetch: bool) -> WorkerContext<'a> {

@@ -86,6 +86,10 @@ pub struct Scheduler {
     /// Windowed instance metrics snapshot, recomputed periodically by
     /// `instance_metrics_loop` and read lock-free during scoring.
     pub(crate) instance: Arc<arc_swap::ArcSwap<gradient_score::InstanceContext>>,
+    /// Per-project eval-RAM prediction (p95 peak RSS), refreshed by
+    /// `instance_metrics_loop`, consumed by eval scoring.
+    pub(crate) eval_history:
+        Arc<arc_swap::ArcSwap<std::collections::HashMap<gradient_types::ids::ProjectId, gradient_score::HistoryPrediction>>>,
 }
 
 impl std::fmt::Debug for Scheduler {
@@ -106,6 +110,7 @@ impl Scheduler {
             edge_readiness: Arc::new(RwLock::new(HashMap::new())),
             policy,
             instance: Arc::new(arc_swap::ArcSwap::from_pointee(gradient_score::InstanceContext::default())),
+            eval_history: Arc::new(arc_swap::ArcSwap::from_pointee(std::collections::HashMap::new())),
         }
     }
 
