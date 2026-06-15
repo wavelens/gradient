@@ -18,14 +18,14 @@ import { RouterModule } from '@angular/router';
       <nav class="board-nav">
         <a routerLink="overview" routerLinkActive="active">Overview</a>
         <a routerLink="live" routerLinkActive="active">Live Jobs</a>
-        <a routerLink="scheduler" routerLinkActive="active">Scheduler &amp; Scoring</a>
+        <a routerLink="scheduler" routerLinkActive="active">Scheduler</a>
         <a routerLink="throughput" routerLinkActive="active">Throughput</a>
         <a routerLink="durations" routerLinkActive="active">Durations</a>
         <a routerLink="workers" routerLinkActive="active">Workers</a>
         <a routerLink="cache" routerLinkActive="active">Cache</a>
-        <a routerLink="network" routerLinkActive="active">Network &amp; API</a>
-        <a routerLink="expensive" routerLinkActive="active">Expensive Jobs</a>
-        <a routerLink="expensive-evals" routerLinkActive="active">Expensive Evals</a>
+        <a routerLink="network" routerLinkActive="active">Network</a>
+        <a routerLink="expensive" routerLinkActive="active">Jobs</a>
+        <a routerLink="expensive-evals" routerLinkActive="active">Evals</a>
         <a routerLink="health" routerLinkActive="active">System Health</a>
       </nav>
       <router-outlet></router-outlet>
