@@ -528,6 +528,8 @@ services.gradient.state.workers = {
 
 `enabled` is a global gate: setting it to `false` hides the base worker from every org until it is turned back on.
 
+If an organization already has a normal worker registered under the same `worker_id`, that registration shadows the base worker: the base entry is hidden from that org's list and deleting the worker removes the org's own registration instead of erroring about state management.
+
 `authorize_against` pins the UUID identity the base worker authenticates as. When set, the worker's `peersFile` only needs a single `<authorize_against>:<token>` line rather than per-org entries. When omitted the worker must present per-org tokens or use the `*:<token>` wildcard form.
 
 The `peerFile` options for a base worker in order of preference:

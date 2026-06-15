@@ -26,6 +26,10 @@ This page tracks notable tests added to Gradient and where they live.
 
 `frontend/src/app/core/services/board.service.spec.ts` — `getScoringRules()` test verifies the catalog is fetched from `board/scoring/rules`, unwrapped from the response envelope, and cached so repeat subscribers do not refetch.
 
+## Worker shadows base worker of same id (#407)
+
+`backend/gradient-web/src/endpoints/orgs/workers.rs` — `registration_shadows_base_worker_of_same_id` asserts `unshadowed_base_workers` drops a base worker whose `worker_id` matches one of the org's normal registrations, so `GET /orgs/{org}/workers` lists the conflicting worker only once (as the org registration). `delete_org_worker` deletes the registration first, so the normal worker is removed even when a base worker shares its id, and the `409` base-worker guard fires only when no registration exists.
+
 ## Incremental Created → Queued promotion (#392)
 
 `backend/gradient-scheduler/src/edge_readiness.rs` unit-tests the pure
