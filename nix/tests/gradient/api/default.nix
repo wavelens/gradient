@@ -132,6 +132,24 @@ in {
                 enable_fetch = false;
               };
 
+              workers.statebaseworker = {
+                worker_id = "a0000000-0000-0000-0000-0000000000bb";
+                base_worker = true;
+                organizations = [ "stateorg" ];
+                token_file = toString stateWorkerToken;
+                display_name = "State Base Worker";
+                created_by = "stateadmin";
+              };
+
+              workers.statebaseworker2 = {
+                worker_id = "a0000000-0000-0000-0000-0000000000cc";
+                base_worker = true;
+                organizations = [ ];
+                token_file = toString stateWorkerToken;
+                display_name = "State Base Worker 2";
+                created_by = "stateadmin";
+              };
+
               integrations = {
                 state-inbound = {
                   organization = "stateorg";

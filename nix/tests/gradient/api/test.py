@@ -520,6 +520,32 @@ worker = next(w for w in api("GET", "orgs/stateorg/workers", token=sa_token)
               if w["worker_id"] == "a0000000-0000-0000-0000-0000000000aa")
 assert worker["enable_eval"] is True and worker["enable_fetch"] is False, worker
 
+# base workers (#115)
+base_id = "a0000000-0000-0000-0000-0000000000bb"
+base_id2 = "a0000000-0000-0000-0000-0000000000cc"
+
+sa_workers = api("GET", "orgs/stateorg/workers", token=sa_token)
+base = next(w for w in sa_workers if w["worker_id"] == base_id)
+assert base["is_base"] is True, base
+assert base["active"] is True, "base worker pre-enabled via organizations should be active"
+
+base2 = next(w for w in sa_workers if w["worker_id"] == base_id2)
+assert base2["is_base"] is True and base2["active"] is False, base2
+
+api("PATCH", f"orgs/stateorg/workers/{base_id2}", token=sa_token, body=json.dumps({"active": True}))
+assert next(w for w in api("GET", "orgs/stateorg/workers", token=sa_token)
+            if w["worker_id"] == base_id2)["active"] is True, "enable failed"
+api("PATCH", f"orgs/stateorg/workers/{base_id2}", token=sa_token, body=json.dumps({"active": False}))
+assert next(w for w in api("GET", "orgs/stateorg/workers", token=sa_token)
+            if w["worker_id"] == base_id2)["active"] is False, "disable failed"
+
+api("PATCH", f"orgs/stateorg/workers/{base_id}", token=sa_token, expect_error=True,
+    body=json.dumps({"display_name": "nope"}))
+api("DELETE", f"orgs/stateorg/workers/{base_id}", token=sa_token, expect_error=True)
+
+test_res = api("POST", f"orgs/stateorg/workers/{base_id}/test", token=sa_token)
+assert test_res["connected"] is False and test_res["ok"] is False, test_res
+
 # Both integration kinds applied.
 ints = {(i["name"], i["kind"]) for i in api("GET", "orgs/stateorg/integrations", token=sa_token)}
 assert ("state-inbound", "inbound") in ints and ("state-outbound", "outbound") in ints, ints
