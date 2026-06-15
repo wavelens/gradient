@@ -11,6 +11,8 @@ import { FormsModule } from '@angular/forms';
 import { DialogModule } from 'primeng/dialog';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
+import { ToastModule } from 'primeng/toast';
+import { MessageService } from 'primeng/api';
 import { WorkersService } from '@core/services/workers.service';
 import { OrganizationsService } from '@core/services/organizations.service';
 import { OrgAccessService } from '@core/services/org-access.service';
@@ -28,10 +30,12 @@ import { WritableDirective, ManagedDisableDirective } from '@shared/access';
     DialogModule,
     ButtonModule,
     InputTextModule,
+    ToastModule,
     LoadingSpinnerComponent,
     WritableDirective,
     ManagedDisableDirective,
   ],
+  providers: [MessageService],
   templateUrl: './workers.component.html',
   styleUrls: ['./workers.component.scss', './workers.dialog.scss'],
 })
@@ -40,6 +44,7 @@ export class WorkersComponent implements OnInit {
   private workersService = inject(WorkersService);
   private orgsService = inject(OrganizationsService);
   private orgAccess = inject(OrgAccessService);
+  private messageService = inject(MessageService);
 
   access = signal<AccessState>({ managed: false, canEdit: false, canTrigger: false });
 
@@ -50,6 +55,13 @@ export class WorkersComponent implements OnInit {
       canEdit: a.canEdit,
       canTrigger: a.canTrigger,
     };
+  }
+
+  /// Gate for Enable/Disable and Fire Test: base workers are state-managed but
+  /// these actions stay available, so drop `managed` while keeping permission gating.
+  actionAccess(worker: Worker): AccessState {
+    const a = this.rowAccess(worker);
+    return worker.is_base ? { ...a, managed: false } : a;
   }
 
   readonly capLabels: { key: keyof GradientCapabilities; label: string }[] = [
@@ -64,6 +76,7 @@ export class WorkersComponent implements OnInit {
   renaming = signal(false);
   deletingId = signal<string | null>(null);
   togglingId = signal<string | null>(null);
+  testingId = signal<string | null>(null);
   showRegisterDialog = signal(false);
   showTokenDialog = signal(false);
   showToggleWarningDialog = signal(false);
@@ -256,6 +269,28 @@ export class WorkersComponent implements OnInit {
   cancelRename(): void {
     this.showRenameDialog.set(false);
     this.renamingWorker.set(null);
+  }
+
+  fireTest(worker: Worker): void {
+    this.testingId.set(worker.worker_id);
+    this.workersService.testWorker(this.orgName, worker.worker_id).subscribe({
+      next: (r) => {
+        this.testingId.set(null);
+        this.messageService.add({
+          severity: r.ok ? 'success' : 'error',
+          summary: r.ok ? 'Worker reachable' : 'Worker test failed',
+          detail: r.message,
+        });
+      },
+      error: (err) => {
+        this.testingId.set(null);
+        this.messageService.add({
+          severity: 'error',
+          summary: 'Worker test failed',
+          detail: err?.message || 'Failed to reach worker.',
+        });
+      },
+    });
   }
 
   toggleCapability(worker: Worker, cap: 'fetch' | 'eval' | 'build', enabled: boolean): void {

@@ -31,6 +31,7 @@ const workerUnmanaged: Worker = {
   display_name: 'Builder',
   managed: false,
   active: true,
+  is_base: false,
   enable_fetch: true,
   enable_eval: true,
   enable_build: true,
@@ -41,6 +42,18 @@ const workerManaged: Worker = {
   display_name: 'Nix-managed',
   managed: true,
   active: true,
+  is_base: false,
+  enable_fetch: true,
+  enable_eval: true,
+  enable_build: true,
+};
+
+const workerBase: Worker = {
+  worker_id: 'w3',
+  display_name: 'Base worker',
+  managed: true,
+  active: true,
+  is_base: true,
   enable_fetch: true,
   enable_eval: true,
   enable_build: true,
@@ -50,8 +63,12 @@ function setup(opts: {
   access: AccessState;
   workers: Worker[];
   caches: { id: string; name: string }[];
+  testWorker?: ReturnType<typeof vi.fn>;
 }) {
-  const workersService = { getWorkers: vi.fn(() => of(opts.workers)) };
+  const workersService = {
+    getWorkers: vi.fn(() => of(opts.workers)),
+    testWorker: opts.testWorker ?? vi.fn(() => of({ ok: true, connected: true, authorized_for_org: true, message: 'ok' })),
+  };
   const orgs: MockedOrgs = {
     getOrganization: vi.fn(() => of({ id: 'org-uuid', display_name: 'Org' } as never)),
     getSubscribedCaches: vi.fn(() => of(opts.caches)),
@@ -146,5 +163,66 @@ describe('WorkersComponent - access gating', () => {
     // Buttons appear in DOM order matching workers[] order
     expect(editButtons[0].disabled).toBe(false);
     expect(editButtons[1].disabled).toBe(true);
+  });
+});
+
+describe('WorkersComponent - base workers', () => {
+  it('renders a Base badge and leaves Activate/Fire Test enabled but Edit/Delete disabled', async () => {
+    const fixture = setup({
+      access: { managed: false, canEdit: true, canTrigger: true },
+      workers: [workerBase],
+      caches: [{ id: 'c', name: 'c' }],
+    });
+    await settled(fixture);
+
+    const badge = (Array.from(fixture.nativeElement.querySelectorAll('.badge-base')) as HTMLElement[])
+      .find((el) => (el.textContent ?? '').trim() === 'Base');
+    expect(badge, 'Base badge').toBeTruthy();
+
+    const deactivate = findByText(fixture.nativeElement, 'deactivate') as HTMLButtonElement | null;
+    const fireTest = findByText(fixture.nativeElement, 'fire test') as HTMLButtonElement | null;
+    const edit = findByText(fixture.nativeElement, 'edit') as HTMLButtonElement | null;
+    const del = findByText(fixture.nativeElement, 'delete') as HTMLButtonElement | null;
+
+    expect(deactivate!.disabled).toBe(false);
+    expect(fireTest!.disabled).toBe(false);
+    expect(edit!.disabled).toBe(true);
+    expect(del!.disabled).toBe(true);
+  });
+
+  it('actionAccess drops the managed flag for base workers but not for normal managed workers', async () => {
+    const fixture = setup({
+      access: { managed: false, canEdit: true, canTrigger: true },
+      workers: [],
+      caches: [],
+    });
+    await settled(fixture);
+    const cmp = fixture.componentInstance;
+
+    expect(cmp.actionAccess(workerBase).managed).toBe(false);
+    expect(cmp.actionAccess(workerBase).canEdit).toBe(true);
+    expect(cmp.actionAccess(workerManaged).managed).toBe(true);
+    expect(cmp.actionAccess(workerUnmanaged)).toEqual(cmp.rowAccess(workerUnmanaged));
+  });
+
+  it('fireTest calls the service and surfaces the result via a toast', async () => {
+    const testWorker = vi.fn(() => of({ ok: true, connected: true, authorized_for_org: true, message: 'reachable' }));
+    const fixture = setup({
+      access: { managed: false, canEdit: true, canTrigger: true },
+      workers: [workerBase],
+      caches: [{ id: 'c', name: 'c' }],
+      testWorker,
+    });
+    await settled(fixture);
+    const cmp = fixture.componentInstance;
+    const addSpy = vi.spyOn(cmp['messageService'], 'add');
+
+    cmp.fireTest(workerBase);
+
+    expect(testWorker).toHaveBeenCalledWith('demo', workerBase.worker_id);
+    expect(cmp.testingId()).toBeNull();
+    expect(addSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ severity: 'success', detail: 'reachable' }),
+    );
   });
 });
