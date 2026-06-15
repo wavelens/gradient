@@ -4148,3 +4148,19 @@ enabled-without-token → `None`, fully-configured → `Some`) and `RuntimeConfi
 propagation; `gradient-state` covers `resolve_scim_group_roles` mapping a
 `scim_group` name to its `(org, role)` grant; `scim/filter.rs` covers the
 `attr eq "value"` parser.
+
+## Eval-metrics read endpoints
+
+`backend/gradient-web/src/endpoints/board.rs` unit-tests the pure pieces of the
+two new eval-metrics endpoints:
+
+- `eval_metric_expr_known_keys_have_units` / `eval_metric_expr_unknown_is_none` -
+  the closed metric allow-list maps each known key (`rss`, `heap`, `thunks`,
+  `fncalls`, `alloc`, `time`) to the right unit and rejects anything else, so the
+  `metric` query param can never inject SQL.
+- `flake_output_node_maps_to_graph_node` - `to_graph_node` maps a
+  `flake_output_node::Model` to the `FlakeGraphNode` DTO field-for-field.
+
+The org-scoping SQL of `get_expensive_evals_by_resource` (raw query mirroring the
+proven `get_expensive_by_resource`) and the `EvalAccessContext` auth path of
+`get_eval_flake_graph` have no local DB harness and are covered by E2E CI.
