@@ -109,16 +109,16 @@
         "nixpkgs-regression": "nixpkgs-regression"
       },
       "locked": {
-        "lastModified": 1781461239,
-        "narHash": "sha256-2Ft0TVf06ulIfcHHKfaVnv+CL3D+v8xloQZT8+cF+E4=",
+        "lastModified": 1781540398,
+        "narHash": "sha256-OHUQhUxKylsh/V+8rcHAiHTegu2miZVTsQB9JW34btk=",
         "owner": "DerDennisOP",
         "repo": "nix",
-        "rev": "32c561e0073087db87f449e782249e2513ab9402",
+        "rev": "300429457c3e75af371a73a84189949258c15742",
         "type": "github"
       },
       "original": {
         "owner": "DerDennisOP",
-        "ref": "feat/optimized-eval-capi",
+        "ref": "feat/eval-metrics-stats",
         "repo": "nix",
         "type": "github"
       }
