@@ -13,7 +13,11 @@
     crane.url = "github:ipetkov/crane";
     nix = {
       url = "github:DerDennisOP/nix/feat/eval-metrics-stats";
-      inputs.nixpkgs.follows = "nixpkgs";
+      inputs = {
+        nixpkgs.follows = "nixpkgs";
+        nixpkgs-23-11.follows = "nixpkgs";
+        nixpkgs-regression.follows = "nixpkgs";
+      };
     };
   };
 
