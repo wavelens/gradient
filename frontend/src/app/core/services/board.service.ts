@@ -274,6 +274,24 @@ export interface ExpensiveResource {
   worker: string;
 }
 
+export interface ExpensiveEval {
+  evaluation: string;
+  organization: string;
+  name: string;
+  value: number;
+  unit: string;
+  worker: string;
+}
+
+export interface FlakeGraphNode {
+  path: string;
+  parent: string | null;
+  name: string;
+  kind: string;
+  is_derivation: boolean;
+  drv_path: string | null;
+}
+
 @Injectable({ providedIn: 'root' })
 export class BoardService {
   private api = inject(ApiService);
@@ -340,6 +358,19 @@ export class BoardService {
     return this.api.get<ExpensiveResource[]>(
       `board/jobs/expensive-by-resource?metric=${metric}&window_days=${windowDays}&exclude_acknowledged=${excludeAcknowledged}`
     );
+  }
+
+  getExpensiveEvalsByResource(
+    metric: 'time' | 'rss' | 'heap' | 'thunks' | 'fncalls' | 'alloc',
+    windowDays = 30
+  ): Observable<ExpensiveEval[]> {
+    return this.api.get<ExpensiveEval[]>(
+      `board/evals/expensive-by-resource?metric=${metric}&window_days=${windowDays}`
+    );
+  }
+
+  getEvalFlakeGraph(evaluationId: string): Observable<FlakeGraphNode[]> {
+    return this.api.get<FlakeGraphNode[]>(`evals/${evaluationId}/flake-graph`);
   }
 
   query(metric: string, granularity = 'hour', org?: string): Observable<MetricPoint[]> {

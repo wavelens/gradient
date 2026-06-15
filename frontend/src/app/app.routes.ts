@@ -348,6 +348,13 @@ export const routes: Routes = [
                 (m) => m.BoardExpensiveJobsComponent
               ),
           },
+          {
+            path: 'expensive-evals',
+            loadComponent: () =>
+              import('./features/board/expensive-evals/expensive-evals.component').then(
+                (m) => m.BoardExpensiveEvalsComponent
+              ),
+          },
         ],
       },
 
