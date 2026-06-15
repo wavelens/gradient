@@ -5,6 +5,7 @@
  */
 
 pub mod admin_tasks;
+pub mod base_workers;
 pub mod build;
 pub mod build_attempt;
 pub mod cache_reach;
