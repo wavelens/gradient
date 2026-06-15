@@ -25,6 +25,7 @@ import { RouterModule } from '@angular/router';
         <a routerLink="cache" routerLinkActive="active">Cache</a>
         <a routerLink="network" routerLinkActive="active">Network &amp; API</a>
         <a routerLink="expensive" routerLinkActive="active">Expensive Jobs</a>
+        <a routerLink="expensive-evals" routerLinkActive="active">Expensive Evals</a>
         <a routerLink="health" routerLinkActive="active">System Health</a>
       </nav>
       <router-outlet></router-outlet>
