@@ -150,6 +150,8 @@ mod m20260614_000002_add_scim_to_user;
 mod m20260615_000001_create_evaluation_metric;
 mod m20260615_000002_create_evaluation_attr_cost;
 mod m20260615_000003_create_flake_output_node;
+mod m20260615_000001_create_base_worker;
+mod m20260615_000002_create_organization_base_worker;
 
 pub struct Migrator;
 
@@ -301,6 +303,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20260615_000001_create_evaluation_metric::Migration),
             Box::new(m20260615_000002_create_evaluation_attr_cost::Migration),
             Box::new(m20260615_000003_create_flake_output_node::Migration),
+            Box::new(m20260615_000001_create_base_worker::Migration),
+            Box::new(m20260615_000002_create_organization_base_worker::Migration),
         ]
     }
 }
