@@ -57,8 +57,8 @@ export class WorkersComponent implements OnInit {
     };
   }
 
-  /// Gate for Enable/Disable and Fire Test: base workers are state-managed but
-  /// these actions stay available, so drop `managed` while keeping permission gating.
+  // Base workers are state-managed, but Enable/Disable and Fire Test stay available:
+  // drop `managed` while keeping permission gating.
   actionAccess(worker: Worker): AccessState {
     const a = this.rowAccess(worker);
     return worker.is_base ? { ...a, managed: false } : a;
