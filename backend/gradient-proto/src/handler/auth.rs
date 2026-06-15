@@ -112,6 +112,59 @@ pub(super) async fn lookup_registered_peers(
     }
 }
 
+/// Challenge data for a connecting base worker.
+pub(super) struct BaseWorkerChallenge {
+    /// `(peer_id, token_hash)` pairs to send in the AuthChallenge.
+    pub challenge: Vec<(String, String)>,
+    /// When set, a successful auth of this single identity expands to
+    /// `enabled_orgs`; otherwise `challenge` already lists the enabled orgs.
+    pub authorize_against: Option<String>,
+    /// Org UUID strings that opted into this base worker.
+    pub enabled_orgs: Vec<String>,
+    pub caps: EnabledCapsAggregate,
+}
+
+/// Returns base-worker challenge data when `worker_id` is an enabled base
+/// worker, else `None`.
+pub(super) async fn lookup_base_worker_challenge(
+    state: &ServerState,
+    worker_id: &str,
+) -> Option<BaseWorkerChallenge> {
+    let bw = gradient_db::base_workers::enabled_base_worker_by_worker_id(&state.worker_db, worker_id)
+        .await
+        .ok()
+        .flatten()?;
+
+    let enabled_orgs: Vec<String> =
+        gradient_db::base_workers::orgs_enabling_base_worker(&state.worker_db, bw.id)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|o| o.to_string())
+            .collect();
+
+    let caps = EnabledCapsAggregate {
+        enable_fetch: bw.enable_fetch,
+        enable_eval: bw.enable_eval,
+        enable_build: bw.enable_build,
+    };
+
+    let challenge = match &bw.authorize_against {
+        Some(uuid) => vec![(uuid.to_string(), bw.token_hash.clone())],
+        None => enabled_orgs
+            .iter()
+            .map(|o| (o.clone(), bw.token_hash.clone()))
+            .collect(),
+    };
+
+    Some(BaseWorkerChallenge {
+        challenge,
+        authorize_against: bw.authorize_against.map(|u| u.to_string()),
+        enabled_orgs,
+        caps,
+    })
+}
+
 /// Per-registration capability gate aggregated across all **active**
 /// registrations for a worker. A capability is enabled iff every active
 /// registration enables it (AND across peers). Used to clamp the
@@ -156,6 +209,16 @@ pub(super) async fn aggregate_enabled_caps(
     };
 
     if rows.is_empty() {
+        if let Ok(Some(bw)) =
+            gradient_db::base_workers::enabled_base_worker_by_worker_id(&state.worker_db, worker_id).await
+        {
+            return EnabledCapsAggregate {
+                enable_fetch: bw.enable_fetch,
+                enable_eval: bw.enable_eval,
+                enable_build: bw.enable_build,
+            };
+        }
+
         return EnabledCapsAggregate::all();
     }
 
@@ -491,6 +554,20 @@ mod tests {
         assert!(!result.fetch);
         assert!(!result.eval);
         assert!(!result.build);
+    }
+
+    // ── base worker challenge ────────────────────────────────────────────────
+
+    #[test]
+    fn base_worker_challenge_per_org_lists_enabled_orgs() {
+        let c = BaseWorkerChallenge {
+            challenge: vec![("org-1".into(), "hash".into()), ("org-2".into(), "hash".into())],
+            authorize_against: None,
+            enabled_orgs: vec!["org-1".into(), "org-2".into()],
+            caps: EnabledCapsAggregate::all(),
+        };
+        assert_eq!(c.challenge.len(), 2);
+        assert!(c.authorize_against.is_none());
     }
 
     // ── filter_org_peers_without_cache ───────────────────────────────────────
