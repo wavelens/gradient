@@ -729,6 +729,11 @@ impl<'a> DispatchContext<'a> {
                 }
             }
             JobUpdateKind::Compressing => {}
+            JobUpdateKind::EvalStats(report) => {
+                if let Err(e) = self.scheduler.record_eval_metrics(&job_id, report).await {
+                    error!(peer_id = %self.peer_id, %job_id, error = %e, "record_eval_metrics failed");
+                }
+            }
         }
     }
 

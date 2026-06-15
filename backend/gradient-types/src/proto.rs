@@ -175,6 +175,9 @@ pub enum JobUpdateKind {
         substituted: bool,
     },
     Compressing,
+    /// Per-evaluation stats + walked flake-output graph, sent once at eval
+    /// completion. Informational/metrics only - does not affect job state.
+    EvalStats(EvalStatsReport),
 }
 
 // ── Scheduling types ─────────────────────────────────────────────────────────
