@@ -507,18 +507,50 @@ State-managed worker registrations are deleted automatically when removed from `
 
 On the worker machine, the `peersFile` authenticates with `<org_id>:<token>` lines. The `org_id` is the organization's UUID — to know it ahead of the first server start, pin it with `state.organizations.<name>.id` and reference that same value in the worker's `peersFile`. The `*:<token>` wildcard remains the alternative when a single token may serve any org.
 
+### Base workers
+
+Setting `base_worker = true` makes the entry a server-level worker that appears in every organization's worker list, disabled by default. Organizations can enable or disable it from the UI but cannot edit or delete it (it is state-managed).
+
+```nix
+services.gradient.state.workers = {
+  shared-builder = {
+    worker_id    = "550e8400-e29b-41d4-a716-446655440099";
+    base_worker  = true;
+    enabled      = true;   # global gate; false removes it from all orgs
+    organizations = [ "acme" ];  # pre-enable for these orgs; may be empty
+    token_file   = "/run/secrets/shared-builder-token";
+    created_by   = "alice";
+  };
+};
+```
+
+`organizations` for a base worker lists orgs to pre-enable at provisioning time. It may be empty — orgs can still enable the worker later from the UI.
+
+`enabled` is a global gate: setting it to `false` hides the base worker from every org until it is turned back on.
+
+`authorize_against` pins the UUID identity the base worker authenticates as. When set, the worker's `peersFile` only needs a single `<authorize_against>:<token>` line rather than per-org entries. When omitted the worker must present per-org tokens or use the `*:<token>` wildcard form.
+
+The `peerFile` options for a base worker in order of preference:
+
+- `*:<token>` — one token answers any org challenge (simplest).
+- `<authorize_against>:<token>` — single fixed identity, set `authorize_against` to that UUID in state.
+- Per-org lines `<org_id>:<token>` — one line per organization.
+
 ### Worker options
 
 | Option | Default | Description |
 |---|---|---|
 | `display_name` | `<attrset key>` | Display name shown in the workers list |
 | `worker_id` | - | Persistent worker identity. Must match the worker's `GRADIENT_WORKER_ID` (required) |
-| `organizations` | - | List of organizations the worker is registered under. One row per (worker_id, organization). Must contain at least one entry (required) |
+| `organizations` | `[]` | Organizations to register under (non-base) or pre-enable (base worker). Non-base workers must list at least one |
 | `token_file` | - | Plaintext token file. Hashed at provision time (required) |
 | `url` | `null` | When set, the server dials the worker at this WebSocket URL instead of waiting for an inbound connection |
 | `enable_fetch` | `true` | Server-side gate for the `fetch` capability |
 | `enable_eval` | `true` | Server-side gate for the `eval` capability |
 | `enable_build` | `true` | Server-side gate for the `build` capability |
+| `base_worker` | `false` | When true, makes this a server-level base worker visible to every org |
+| `enabled` | `true` | Global on/off for a base worker. Ignored for non-base workers |
+| `authorize_against` | `null` | Fixed UUID identity a base worker authenticates as. Ignored for non-base workers |
 | `created_by` | - | Username of creator (required) |
 
 ## Triggers
