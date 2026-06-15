@@ -137,6 +137,8 @@ id_newtype!(MetricRollupId);
 id_newtype!(PhaseEventId);
 id_newtype!(WorkerConnectionId);
 id_newtype!(WorkerSampleId);
+id_newtype!(BaseWorkerId);
+id_newtype!(OrganizationBaseWorkerId);
 
 #[cfg(test)]
 mod tests {
@@ -220,5 +222,12 @@ mod tests {
         assert_eq!(Uuid::from(WorkerConnectionId::from(u)), u);
         assert_eq!(Uuid::from(AcknowledgedDerivationId::from(u)), u);
         assert_eq!(Uuid::from(MetricRollupId::from(u)), u);
+    }
+
+    #[test]
+    fn base_worker_ids_round_trip() {
+        let u = Uuid::now_v7();
+        assert_eq!(Uuid::from(BaseWorkerId::from(u)), u);
+        assert_eq!(Uuid::from(OrganizationBaseWorkerId::from(u)), u);
     }
 }
