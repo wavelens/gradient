@@ -1698,28 +1698,28 @@ Postgres backend, which is a follow-up infrastructure task.
 
 ## Evaluation metrics
 
-Unit tests for the per-evaluation metrics pipeline (eval-worker capture →
-scheduler persistence + RAM routing → board read endpoints → frontend panel):
+Unit tests for the per-evaluation metrics pipeline (eval-worker capture ->
+scheduler persistence + RAM routing -> board read endpoints -> frontend panel):
 
 - **Eval-stats delta aggregator** (`gradient-worker`
-  `worker_pool::eval_stats`) — `sums_totals_across_requests`,
+  `worker_pool::eval_stats`) - `sums_totals_across_requests`,
   `buckets_per_entry_point`, and `heap_peak_is_max_gauge_not_sum` cover diffing
   cumulative counters per request, bucketing costs per entry-point, and treating
   the GC heap as a max gauge rather than a sum.
 - **Per-project eval-RAM window** (`gradient-scheduler`
-  `instance::eval_history`) — `eval_history_maps_row_into_prediction` maps the
+  `instance::eval_history`) - `eval_history_maps_row_into_prediction` maps the
   per-project p95 peak-RSS window row into a `HistoryPrediction`.
-- **Eval RAM-overshoot scoring** (`gradient-score` `rules::resource`) —
+- **Eval RAM-overshoot scoring** (`gradient-score` `rules::resource`) -
   `eval_ram_overshoot_routes_to_big_ram_worker` asserts `ResourceFitRule`
   penalises an RAM-heavy eval on a small worker so it routes to a big-RAM one.
-- **Board read endpoints** (`gradient-web` `endpoints::board`) —
+- **Board read endpoints** (`gradient-web` `endpoints::board`) -
   `eval_metric_expr_known_keys_have_units` / `eval_metric_expr_unknown_is_none`
   cover the closed metric allow-list (so `metric` can never inject SQL);
   `flake_output_node_maps_to_graph_node` maps a `flake_output_node::Model` to the
   `FlakeGraphNode` DTO field-for-field. The org-scoping SQL of
   `get_expensive_evals_by_resource` and the `EvalAccessContext` auth path of
   `get_eval_flake_graph` have no local DB harness and are covered by E2E CI.
-- **Frontend `board.service`** (`board.service.spec.ts`) —
+- **Frontend `board.service`** (`board.service.spec.ts`) -
   `getExpensiveEvalsByResource()` and `getEvalFlakeGraph()` GET their endpoints
   and unwrap the response array.
 

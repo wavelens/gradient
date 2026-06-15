@@ -294,7 +294,7 @@ mod tests {
         assert_eq!(ic.idle_workers, 1);
     }
 
-    /// `MockDatabase` replays one grouped row; pins the project→prediction
+    /// `MockDatabase` replays one grouped row; pins the project->prediction
     /// mapping. The percentile aggregation is validated in CI against Postgres.
     #[tokio::test]
     async fn eval_history_maps_row_into_prediction() {

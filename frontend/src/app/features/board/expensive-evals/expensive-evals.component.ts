@@ -35,7 +35,7 @@ type Tab = 'time' | 'rss' | 'heap' | 'thunks' | 'fncalls' | 'alloc';
       <thead><tr><th>#</th><th>Evaluation</th><th>{{ valueHeader() }}</th><th>Worker</th></tr></thead>
       <tbody>
         @for (r of rows(); track r.evaluation; let i = $index) {
-          <tr><td>{{ i + 1 }}</td><td class="mono">{{ r.name }}</td><td>{{ formatValue(r) }}</td><td class="mono">{{ r.worker || '—' }}</td></tr>
+          <tr><td>{{ i + 1 }}</td><td class="mono">{{ r.name }}</td><td>{{ formatValue(r) }}</td><td class="mono">{{ r.worker || '-' }}</td></tr>
         } @empty {
           <tr><td colspan="4" class="muted">No evaluation metrics recorded in this window.</td></tr>
         }
