@@ -12,7 +12,7 @@
     flake-utils.url = "github:numtide/flake-utils";
     crane.url = "github:ipetkov/crane";
     nix = {
-      url = "github:DerDennisOP/nix/feat/optimized-eval-capi";
+      url = "github:DerDennisOP/nix/feat/eval-metrics-stats";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
