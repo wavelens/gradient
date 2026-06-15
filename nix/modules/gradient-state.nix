@@ -780,12 +780,15 @@
 
       organizations = mkOption {
         type = types.listOf types.str;
+        default = [ ];
         description = ''
           Organizations this worker is registered under. The provisioner
           creates one <literal>worker_registration</literal> row per
           (worker_id, organization) pair so the same physical worker can
           serve builds for multiple organizations from a single state
-          entry. Must list at least one organization.
+          entry. For a base worker, lists organizations to pre-enable;
+          may be empty. Non-base workers must list at least one
+          organization (enforced by the server at state-apply time).
         '';
         example = [ "acme-corp" "globex" ];
       };
@@ -816,6 +819,25 @@
         type = types.bool;
         default = true;
         description = "Server-side gate for the worker's `build` capability for this registration.";
+      };
+
+      base_worker = mkOption {
+        type = types.bool;
+        default = false;
+        description = "When true this entry is a base worker (server-level, available to every organization) rather than a per-organization registration. `organizations` then lists organizations to pre-enable.";
+      };
+
+      authorize_against = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        description = "Optional fixed UUID identity a base worker authenticates as, instead of the per-organization challenge. Ignored for non-base workers.";
+        example = "123e4567-e89b-12d3-a456-426614174000";
+      };
+
+      enabled = mkOption {
+        type = types.bool;
+        default = true;
+        description = "Global enable for a base worker. When false the base worker is unavailable to every organization. Ignored for non-base workers.";
       };
     };
   });

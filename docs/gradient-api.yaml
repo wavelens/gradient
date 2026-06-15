@@ -3957,6 +3957,47 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /orgs/{organization}/workers/{worker_id}/test:
+    post:
+      tags: [workers]
+      summary: Test worker connectivity and authorization
+      description: |
+        Checks whether the worker is currently connected and whether it has
+        successfully authorized for the given organization. Useful for
+        verifying base-worker setup without waiting for a real job.
+      operationId: testOrgWorker
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: organization
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Organization name
+        - name: worker_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Worker ID to test
+      responses:
+        '200':
+          description: Test result
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/WorkerTestResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   # ── Admin ────────────────────────────────────────────────────────────────────
 
   /admin/workers:
@@ -6889,7 +6930,7 @@ components:
 
     OrgWorkerEntry:
       type: object
-      required: [worker_id, display_name, registered_at, active, enable_fetch, enable_eval, enable_build]
+      required: [worker_id, display_name, registered_at, active, enable_fetch, enable_eval, enable_build, is_base]
       properties:
         worker_id:
           type: string
@@ -6922,6 +6963,9 @@ components:
         enable_build:
           type: boolean
           description: Server-side gate for the worker's `build` capability for this registration.
+        is_base:
+          type: boolean
+          description: Whether this entry is a server-level base worker (visible to every org, managed via state).
         live:
           allOf:
             - $ref: '#/components/schemas/WorkerLiveInfo'
@@ -6960,6 +7004,23 @@ components:
         draining:
           type: boolean
           description: Whether the worker is draining (no new jobs will be dispatched)
+
+    WorkerTestResponse:
+      type: object
+      required: [ok, connected, authorized_for_org, message]
+      properties:
+        ok:
+          type: boolean
+          description: Whether the test passed overall
+        connected:
+          type: boolean
+          description: Whether the worker is currently connected to the server
+        authorized_for_org:
+          type: boolean
+          description: Whether the worker successfully authorized for the requesting organization
+        message:
+          type: string
+          description: Human-readable summary of the test result
 
     ListItem:
       type: object

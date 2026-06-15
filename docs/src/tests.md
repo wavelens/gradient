@@ -2,6 +2,20 @@
 
 This page tracks notable tests added to Gradient and where they live.
 
+## Base workers (#115)
+
+`backend/gradient-db/src/` — `base_worker_db_helpers` tests cover inserting and querying `base_worker` rows, the `eval_gate` fallback (base workers bypass the per-org eval gate when `authorize_against` is set), and the `enabled` global flag filtering.
+
+`backend/gradient-proto/` — `base_worker_auth` tests cover the auth-challenge path for a base worker: wildcard `*` handshake succeeds, per-org scope is rejected when `authorize_against` forces a fixed identity, and a base worker with no connected orgs is rejected with an appropriate error.
+
+`backend/gradient-state/` — `state_validation` tests that a non-base worker with an empty `organizations` list fails validation, and that `base_worker = true` with an empty list is accepted. `state_provisioning` asserts that pre-enabled orgs listed under a base worker get `worker_registration` rows at provision time.
+
+`backend/web/` — `list_workers_includes_is_base` asserts the union query marks base-worker rows `is_base: true`; `patch_enable_disable_base_worker` verifies that org members can toggle a base worker on/off but PATCH with `display_name` or `enable_fetch` is rejected (405); `fire_test_endpoint` tests the `POST /orgs/{org}/workers/{id}/test` response shape for connected/disconnected and authorized/unauthorized states.
+
+`frontend/src/app/organizations/workers/` — `workers.component.spec.ts` covers rendering of `is_base` badge, the enable/disable toggle emitting the correct PATCH body, and that the edit/delete actions are absent for base-worker rows.
+
+`nix/tests/gradient/api` — E2E NixOS VM test provisions a base worker via state, calls `GET /orgs/{org}/workers` and asserts `is_base: true` in the response, then calls `POST /orgs/{org}/workers/{id}/test` and checks `ok: true`.
+
 ## Incremental Created → Queued promotion (#392)
 
 `backend/gradient-scheduler/src/edge_readiness.rs` unit-tests the pure
