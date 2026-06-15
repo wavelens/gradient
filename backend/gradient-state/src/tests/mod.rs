@@ -481,6 +481,47 @@ fn state_worker_rejects_empty_organizations() {
     );
 }
 
+fn base_worker_cfg(authorize_against: &str) -> StateConfiguration {
+    let json = format!(
+        r#"{{
+            "users": {{
+                "alice": {{ "username": "alice", "name": "Alice", "email": "alice@example.com", "password_file": "/dev/null" }}
+            }},
+            "workers": {{
+                "base-1": {{
+                    "worker_id": "550e8400-e29b-41d4-a716-446655440001",
+                    "organizations": [],
+                    "token_file": "/dev/null",
+                    "display_name": "Base Build Server",
+                    "created_by": "alice",
+                    "base_worker": true,
+                    "authorize_against": {authorize_against}
+                }}
+            }}
+        }}"#
+    );
+
+    serde_json::from_str(&json).unwrap()
+}
+
+#[test]
+fn base_worker_rejects_bad_authorize_against() {
+    let cfg = base_worker_cfg(r#""not-a-uuid""#);
+    let v = cfg.validate();
+    assert!(!v.is_valid);
+    assert!(
+        v.errors.iter().any(|e| e.message.contains("authorize_against")),
+        "expected authorize_against error, got: {:?}",
+        v.errors
+    );
+}
+
+#[test]
+fn base_worker_accepts_valid_authorize_against_and_empty_orgs() {
+    let cfg = base_worker_cfg(r#""018f6f3a-0000-7000-8000-000000000001""#);
+    assert!(cfg.validate().is_valid, "{:?}", cfg.validate().errors);
+}
+
 #[test]
 fn state_org_accepts_explicit_id() {
     let json = r#"{

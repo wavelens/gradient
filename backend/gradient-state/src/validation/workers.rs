@@ -8,12 +8,23 @@ use super::helpers::{EntityLookup, ErrorCollector};
 
 pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
     for worker in lookup.config.workers.values() {
-        if worker.organizations.is_empty() {
+        if !worker.base_worker && worker.organizations.is_empty() {
             errors.push(
                 format!("workers.{}.organizations", worker.worker_id),
                 "Worker must be registered under at least one organization",
             );
         }
+
+        if worker.base_worker
+            && let Some(identity) = &worker.authorize_against
+            && uuid::Uuid::parse_str(identity).is_err()
+        {
+            errors.push(
+                format!("workers.{}.authorize_against", worker.worker_id),
+                format!("authorize_against '{}' is not a valid UUID", identity),
+            );
+        }
+
         for org in &worker.organizations {
             if !lookup.org_exists(org) {
                 errors.push(

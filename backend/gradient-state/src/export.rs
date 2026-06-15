@@ -301,6 +301,9 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
                 enable_fetch: reg.enable_fetch,
                 enable_eval: reg.enable_eval,
                 enable_build: reg.enable_build,
+                base_worker: false,
+                authorize_against: None,
+                enabled: true,
             },
         );
     }
