@@ -602,6 +602,7 @@ impl<'a> ClosureWalker<'a> {
 
 /// Result of one closure-walk eval: the produced `.drv` paths (pushed to the
 /// cache by the caller) plus the walked flake-output graph for eval metrics.
+#[derive(Debug)]
 pub struct EvalOutcome {
     pub produced_drvs: Vec<String>,
     pub flake_nodes: Vec<FlakeOutputNode>,
