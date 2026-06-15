@@ -147,6 +147,9 @@ mod m20260612_000001_add_started_by_to_evaluation;
 mod m20260613_000001_add_dep_closure_counts;
 mod m20260614_000001_eval_cache_store;
 mod m20260614_000002_add_scim_to_user;
+mod m20260615_000001_create_evaluation_metric;
+mod m20260615_000002_create_evaluation_attr_cost;
+mod m20260615_000003_create_flake_output_node;
 
 pub struct Migrator;
 
@@ -295,6 +298,9 @@ impl MigratorTrait for Migrator {
             Box::new(m20260613_000001_add_dep_closure_counts::Migration),
             Box::new(m20260614_000001_eval_cache_store::Migration),
             Box::new(m20260614_000002_add_scim_to_user::Migration),
+            Box::new(m20260615_000001_create_evaluation_metric::Migration),
+            Box::new(m20260615_000002_create_evaluation_attr_cost::Migration),
+            Box::new(m20260615_000003_create_flake_output_node::Migration),
         ]
     }
 }
