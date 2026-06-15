@@ -21,8 +21,9 @@ use crate::messages::{
 use gradient_scheduler::Scheduler;
 
 use super::auth::{
-    aggregate_enabled_caps, filter_org_peers_without_cache, has_any_registrations,
-    lookup_base_worker_challenge, lookup_registered_peers, negotiate_capabilities, validate_tokens,
+    aggregate_enabled_caps, expand_base_authorized, filter_org_peers_without_cache,
+    has_any_registrations, lookup_base_worker_challenge, lookup_registered_peers,
+    negotiate_capabilities, validate_tokens,
 };
 use super::dispatch::{DispatchContext, NarReceiveStore};
 use super::eval_cache::EvalCacheReceiveStore;
@@ -156,17 +157,8 @@ impl ProtoSession<Opening> {
             None => return None,
         };
 
-        let (mut token_authorized, mut failed_peers) = validate_tokens(&registered_peers, &tokens);
-
-        if let Some(b) = &base {
-            if let Some(identity) = &b.authorize_against {
-                token_authorized = if token_authorized.iter().any(|p| p == identity) {
-                    b.enabled_orgs.clone()
-                } else {
-                    Vec::new()
-                };
-            }
-        }
+        let (token_authorized, mut failed_peers) = validate_tokens(&registered_peers, &tokens);
+        let token_authorized = expand_base_authorized(&base, token_authorized);
 
         let had_token_authorized = !token_authorized.is_empty();
         let (authorized_peers, demoted) =
@@ -357,8 +349,12 @@ impl ProtoSession<Registered> {
 
 async fn on_reauth_notify(writer: &ProtoWriter, state: &ServerState, peer_id: &str) -> bool {
     debug!(%peer_id, "server-initiated reauth");
-    let registered_peers = lookup_registered_peers(state, peer_id).await;
-    if registered_peers.is_empty() && has_any_registrations(state, peer_id).await {
+    let base = lookup_base_worker_challenge(state, peer_id).await;
+    let registered_peers = match &base {
+        Some(b) => b.challenge.clone(),
+        None => lookup_registered_peers(state, peer_id).await,
+    };
+    if base.is_none() && registered_peers.is_empty() && has_any_registrations(state, peer_id).await {
         info!(%peer_id, "all registrations deactivated - disconnecting worker");
         let _ = send_server_msg(
             writer,

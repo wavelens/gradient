@@ -157,6 +157,26 @@ pub(super) async fn lookup_base_worker_challenge(
     })
 }
 
+/// Applies a base worker's authorize_against expansion: in single-identity mode,
+/// a successful auth of the identity expands to the enabled-org set; otherwise the
+/// token-authorized set is returned unchanged.
+pub(super) fn expand_base_authorized(
+    base: &Option<BaseWorkerChallenge>,
+    token_authorized: Vec<String>,
+) -> Vec<String> {
+    if let Some(b) = base {
+        if let Some(identity) = &b.authorize_against {
+            return if token_authorized.iter().any(|p| p == identity) {
+                b.enabled_orgs.clone()
+            } else {
+                Vec::new()
+            };
+        }
+    }
+
+    token_authorized
+}
+
 /// Per-registration capability gate aggregated across all **active**
 /// registrations for a worker. A capability is enabled iff every active
 /// registration enables it (AND across peers). Used to clamp the
@@ -550,15 +570,41 @@ mod tests {
 
     // ── base worker challenge ────────────────────────────────────────────────
 
+    fn base_challenge(authorize_against: Option<&str>, enabled: &[&str]) -> BaseWorkerChallenge {
+        BaseWorkerChallenge {
+            challenge: enabled.iter().map(|o| ((*o).into(), "hash".into())).collect(),
+            authorize_against: authorize_against.map(|s| s.into()),
+            enabled_orgs: enabled.iter().map(|o| (*o).into()).collect(),
+        }
+    }
+
     #[test]
-    fn base_worker_challenge_per_org_lists_enabled_orgs() {
-        let c = BaseWorkerChallenge {
-            challenge: vec![("org-1".into(), "hash".into()), ("org-2".into(), "hash".into())],
-            authorize_against: None,
-            enabled_orgs: vec!["org-1".into(), "org-2".into()],
-        };
-        assert_eq!(c.challenge.len(), 2);
-        assert!(c.authorize_against.is_none());
+    fn expand_base_authorized_identity_present_expands_to_enabled_orgs() {
+        let base = Some(base_challenge(Some("id-1"), &["org-1", "org-2"]));
+        let out = expand_base_authorized(&base, vec!["id-1".into()]);
+        assert_eq!(out, vec!["org-1".to_string(), "org-2".to_string()]);
+    }
+
+    #[test]
+    fn expand_base_authorized_identity_absent_returns_empty() {
+        let base = Some(base_challenge(Some("id-1"), &["org-1", "org-2"]));
+        let out = expand_base_authorized(&base, vec!["other".into()]);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn expand_base_authorized_per_org_mode_passes_through_unchanged() {
+        let base = Some(base_challenge(None, &["org-1", "org-2"]));
+        let token_authorized = vec!["org-1".to_string()];
+        let out = expand_base_authorized(&base, token_authorized.clone());
+        assert_eq!(out, token_authorized);
+    }
+
+    #[test]
+    fn expand_base_authorized_none_passes_through_unchanged() {
+        let token_authorized = vec!["org-1".to_string(), "org-2".to_string()];
+        let out = expand_base_authorized(&None, token_authorized.clone());
+        assert_eq!(out, token_authorized);
     }
 
     // ── filter_org_peers_without_cache ───────────────────────────────────────

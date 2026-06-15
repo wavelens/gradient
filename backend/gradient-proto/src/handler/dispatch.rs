@@ -19,7 +19,9 @@ use tracing::{debug, error, info, warn};
 use crate::messages::{CandidateScore, ClientMessage, JobKind, JobUpdateKind, ServerMessage};
 use gradient_scheduler::Scheduler;
 
-use super::auth::{lookup_registered_peers, validate_tokens};
+use super::auth::{
+    expand_base_authorized, lookup_base_worker_challenge, lookup_registered_peers, validate_tokens,
+};
 use super::cache::handle_cache_query;
 use super::eval_cache::{
     EvalCacheReceiveStore, handle_eval_cache_chunk, handle_eval_cache_pull, handle_eval_cache_push,
@@ -486,7 +488,10 @@ impl<'a> DispatchContext<'a> {
 
     async fn on_reauth_request(&mut self) -> bool {
         debug!(peer_id = %self.peer_id, "ReauthRequest");
-        let registered_peers = lookup_registered_peers(self.state, self.peer_id).await;
+        let registered_peers = match lookup_base_worker_challenge(self.state, self.peer_id).await {
+            Some(b) => b.challenge,
+            None => lookup_registered_peers(self.state, self.peer_id).await,
+        };
         send_server_msg(
             self.writer,
             &ServerMessage::AuthChallenge {
@@ -498,8 +503,33 @@ impl<'a> DispatchContext<'a> {
     }
 
     async fn on_auth_response(&mut self, tokens: Vec<(String, String)>) -> bool {
-        let registered_peers = lookup_registered_peers(self.state, self.peer_id).await;
-        let (authorized_peers, failed_peers) = validate_tokens(&registered_peers, &tokens);
+        let base = lookup_base_worker_challenge(self.state, self.peer_id).await;
+        let registered_peers = match &base {
+            Some(b) => b.challenge.clone(),
+            None => lookup_registered_peers(self.state, self.peer_id).await,
+        };
+        let (token_authorized, failed_peers) = validate_tokens(&registered_peers, &tokens);
+        let authorized_peers = expand_base_authorized(&base, token_authorized);
+
+        // A base worker must never reach PeerAuth::Open (empty == Open). If it has no
+        // authorized orgs (toggled off everywhere, or globally disabled), disconnect.
+        let is_base =
+            gradient_db::base_workers::worker_id_is_base(&self.state.worker_db, self.peer_id)
+                .await
+                .unwrap_or(false);
+        if is_base && authorized_peers.is_empty() {
+            info!(peer_id = %self.peer_id, "base worker not enabled by any organization - disconnecting");
+            let _ = send_server_msg(
+                self.writer,
+                &ServerMessage::Reject {
+                    code: 403,
+                    reason: "base worker not enabled by any organization".into(),
+                },
+            )
+            .await;
+            return false;
+        }
+
         let updated_uuids: HashSet<OrganizationId> = authorized_peers
             .iter()
             .filter_map(|s| s.parse().ok())
