@@ -270,6 +270,10 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             get(orgs::get_org_worker_metrics),
         )
         .route(
+            "/orgs/{organization}/workers/{worker_id}/test",
+            post(orgs::post_org_worker_test),
+        )
+        .route(
             "/orgs/{organization}/integrations",
             get(orgs::get_integrations).put(orgs::put_integration),
         )
