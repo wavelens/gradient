@@ -153,8 +153,8 @@ in {
       architectures = lib.mkOption {
         description = "Nix system strings this worker can build for";
         type = lib.types.listOf lib.types.str;
-        default = [ pkgs.stdenv.hostPlatform.system ];
-        defaultText = lib.literalExpression "[ pkgs.system ]";
+        default = [ pkgs.stdenv.hostPlatform.system ] ++ lib.optional (pkgs.stdenv.hostPlatform.system == "x86_64-linux") "i686-linux";
+        defaultText = lib.literalExpression ''[ pkgs.stdenv.hostPlatform.system ] ++ lib.optional (pkgs.stdenv.hostPlatform.system == "x86_64-linux") "i686-linux"'';
         example = [ "x86_64-linux" "aarch64-linux" ];
       };
 
