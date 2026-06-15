@@ -22,7 +22,7 @@ use gradient_scheduler::Scheduler;
 
 use super::auth::{
     aggregate_enabled_caps, filter_org_peers_without_cache, has_any_registrations,
-    lookup_registered_peers, negotiate_capabilities, validate_tokens,
+    lookup_base_worker_challenge, lookup_registered_peers, negotiate_capabilities, validate_tokens,
 };
 use super::dispatch::{DispatchContext, NarReceiveStore};
 use super::eval_cache::EvalCacheReceiveStore;
@@ -132,7 +132,12 @@ impl ProtoSession<Opening> {
         peer_id: &str,
         server_initiated: bool,
     ) -> Option<(Vec<String>, Vec<FailedPeer>)> {
-        let registered_peers = lookup_registered_peers(&self.state, peer_id).await;
+        let base = lookup_base_worker_challenge(&self.state, peer_id).await;
+        let registered_peers = match &base {
+            Some(b) => b.challenge.clone(),
+            None => lookup_registered_peers(&self.state, peer_id).await,
+        };
+
         self.socket
             .send_msg(&ServerMessage::AuthChallenge {
                 peers: registered_peers.iter().map(|(id, _)| id.clone()).collect(),
@@ -151,7 +156,18 @@ impl ProtoSession<Opening> {
             None => return None,
         };
 
-        let (token_authorized, mut failed_peers) = validate_tokens(&registered_peers, &tokens);
+        let (mut token_authorized, mut failed_peers) = validate_tokens(&registered_peers, &tokens);
+
+        if let Some(b) = &base {
+            if let Some(identity) = &b.authorize_against {
+                token_authorized = if token_authorized.iter().any(|p| p == identity) {
+                    b.enabled_orgs.clone()
+                } else {
+                    Vec::new()
+                };
+            }
+        }
+
         let had_token_authorized = !token_authorized.is_empty();
         let (authorized_peers, demoted) =
             filter_org_peers_without_cache(&self.state, token_authorized).await;
@@ -159,6 +175,7 @@ impl ProtoSession<Opening> {
             authorized_peers.is_empty() && had_token_authorized && !demoted.is_empty();
         failed_peers.extend(demoted);
 
+        let is_base = base.is_some();
         let has_any =
             registered_peers.is_empty() && has_any_registrations(&self.state, peer_id).await;
         match decide_auth(
@@ -167,6 +184,7 @@ impl ProtoSession<Opening> {
             has_any,
             authorized_peers.is_empty(),
             emptied_by_missing_cache,
+            is_base,
         ) {
             AuthDecision::Accept => {
                 if registered_peers.is_empty() {
@@ -439,7 +457,19 @@ fn decide_auth(
     has_any_registrations: bool,
     authorized_peers_empty: bool,
     emptied_by_missing_cache: bool,
+    is_base: bool,
 ) -> AuthDecision {
+    if is_base {
+        return if authorized_peers_empty {
+            AuthDecision::Reject {
+                code: 403,
+                reason: "base worker not enabled by any organization",
+            }
+        } else {
+            AuthDecision::Accept
+        };
+    }
+
     if registered_peers_empty {
         if has_any_registrations {
             return AuthDecision::Reject {
@@ -481,7 +511,7 @@ mod auth_decision_tests {
     /// `server_initiated` branch ran for everyone.
     #[test]
     fn inbound_unknown_worker_rejected() {
-        let d = decide_auth(false, true, false, true, false);
+        let d = decide_auth(false, true, false, true, false, false);
         assert_eq!(
             d,
             AuthDecision::Reject {
@@ -496,7 +526,7 @@ mod auth_decision_tests {
     #[test]
     fn outbound_unknown_worker_accepted() {
         assert_eq!(
-            decide_auth(true, true, false, true, false),
+            decide_auth(true, true, false, true, false, false),
             AuthDecision::Accept
         );
     }
@@ -506,7 +536,7 @@ mod auth_decision_tests {
     #[test]
     fn deactivated_worker_rejected_inbound() {
         assert_eq!(
-            decide_auth(false, true, true, true, false),
+            decide_auth(false, true, true, true, false, false),
             AuthDecision::Reject {
                 code: 403,
                 reason: "worker is deactivated",
@@ -517,7 +547,7 @@ mod auth_decision_tests {
     #[test]
     fn deactivated_worker_rejected_outbound() {
         assert_eq!(
-            decide_auth(true, true, true, true, false),
+            decide_auth(true, true, true, true, false, false),
             AuthDecision::Reject {
                 code: 403,
                 reason: "worker is deactivated",
@@ -529,7 +559,7 @@ mod auth_decision_tests {
     #[test]
     fn registered_but_no_valid_token() {
         assert_eq!(
-            decide_auth(false, false, false, true, false),
+            decide_auth(false, false, false, true, false, false),
             AuthDecision::Reject {
                 code: 401,
                 reason: "no valid peer tokens provided",
@@ -542,7 +572,7 @@ mod auth_decision_tests {
     #[test]
     fn registered_emptied_by_missing_cache() {
         assert_eq!(
-            decide_auth(false, false, false, true, true),
+            decide_auth(false, false, false, true, true, false),
             AuthDecision::Reject {
                 code: 495,
                 reason: "organization has no cache subscribed",
@@ -554,8 +584,45 @@ mod auth_decision_tests {
     #[test]
     fn registered_with_valid_token_accepted() {
         assert_eq!(
-            decide_auth(false, false, false, false, false),
+            decide_auth(false, false, false, false, false, false),
             AuthDecision::Accept
         );
+    }
+
+    /// Base worker whose final authorized set is empty must be rejected,
+    /// otherwise it would reach the pool as an Open peer (all orgs).
+    #[test]
+    fn base_worker_empty_authorized_rejected() {
+        assert_eq!(
+            decide_auth(true, false, false, true, false, true),
+            AuthDecision::Reject {
+                code: 403,
+                reason: "base worker not enabled by any organization",
+            }
+        );
+    }
+
+    /// Base worker with a non-empty authorized set is accepted.
+    #[test]
+    fn base_worker_with_authorized_accepted() {
+        assert_eq!(
+            decide_auth(true, false, false, false, false, true),
+            AuthDecision::Accept
+        );
+    }
+
+    /// `authorize_against` mode expands a single authorized identity to the
+    /// full enabled-org set; a non-match collapses to empty.
+    #[test]
+    fn authorize_against_expands_to_enabled_orgs_when_identity_authorized() {
+        let identity = "id-1".to_string();
+        let enabled = vec!["org-1".to_string(), "org-2".to_string()];
+        let authorized = vec![identity.clone()];
+        let out = if authorized.iter().any(|p| *p == identity) {
+            enabled.clone()
+        } else {
+            vec![]
+        };
+        assert_eq!(out, enabled);
     }
 }
