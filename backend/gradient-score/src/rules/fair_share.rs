@@ -33,6 +33,10 @@ impl ScoreRule for FairShareRule {
             None => 0.0,
         }
     }
+
+    fn description(&self) -> &'static str {
+        "Penalizes a job by how large a share of currently-active builds its organization already holds, so a busy org cannot starve a quiet one."
+    }
 }
 
 #[cfg(test)]

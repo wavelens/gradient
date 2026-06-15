@@ -27,6 +27,7 @@ gradient-util = { workspace = true }
 gradient-types = { workspace = true }
 gradient-proto = { workspace = true }
 gradient-scheduler = { workspace = true }
+gradient-score = { workspace = true }
 gradient-cache = { workspace = true }
 gradient-entity = { workspace = true }
 

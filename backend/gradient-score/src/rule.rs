@@ -41,4 +41,7 @@ pub trait ScoreRule: Send + Sync + std::fmt::Debug {
         let full = std::any::type_name::<Self>();
         full.rsplit("::").next().unwrap_or(full)
     }
+    /// Human-readable explanation of what the rule rewards or penalizes, surfaced
+    /// in the board UI next to the rule name.
+    fn description(&self) -> &'static str;
 }

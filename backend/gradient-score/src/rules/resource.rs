@@ -48,6 +48,10 @@ impl ScoreRule for ResourceFitRule {
         }
         s
     }
+
+    fn description(&self) -> &'static str {
+        "Uses historical RAM and CPU usage to penalize workers that would likely run out of memory and reward CPU-strong workers for compute-heavy builds."
+    }
 }
 
 #[cfg(test)]

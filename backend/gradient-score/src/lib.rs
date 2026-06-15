@@ -15,5 +15,5 @@ pub use context::{
     BuildContext, BuildContextLazy, DerivationRef, EvalContext, HistoryPrediction, InstanceContext,
     JobKindContext, LazyProviders, ScoredJob, Windowed, WorkerMetricsView,
 };
-pub use policy::{policy_by_name, RulePolicy, ScoringPolicy};
+pub use policy::{policy_by_name, rule_catalog, RulePolicy, ScoringPolicy};
 pub use rule::{JobContext, ScoreRule, WorkerContext};

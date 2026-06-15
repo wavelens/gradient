@@ -40,6 +40,10 @@ impl ScoreRule for NetworkAffinityRule {
         let reference = instance.network_mbps.w24h_or(self.reference_mbps);
         self.bonus * (net as f64 / reference).min(1.0)
     }
+
+    fn description(&self) -> &'static str {
+        "Steers fixed-output (network-fetching) derivations towards workers with faster measured network throughput."
+    }
 }
 
 /// Disk-heavy builds (by history) prefer faster-disk workers. Bonus scales to
@@ -75,6 +79,10 @@ impl ScoreRule for DiskAffinityRule {
             return 0.0;
         };
         self.bonus * (disk as f64 / self.reference_mbps).min(1.0)
+    }
+
+    fn description(&self) -> &'static str {
+        "Steers builds that have historically been disk-heavy towards workers with faster measured disk throughput."
     }
 }
 

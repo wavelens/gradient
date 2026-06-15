@@ -36,6 +36,10 @@ impl ScoreRule for MissingPathsRule {
             }
         }
     }
+
+    fn description(&self) -> &'static str {
+        "Rewards jobs whose dependencies are mostly already on the worker, so fewer store paths must be substituted before the build can start."
+    }
 }
 
 #[derive(Debug)]
@@ -68,6 +72,10 @@ impl ScoreRule for MissingNarSizeRule {
             }
         }
     }
+
+    fn description(&self) -> &'static str {
+        "Rewards jobs with little or no data left to download, favouring small substitution transfers over large ones."
+    }
 }
 
 #[derive(Debug)]
@@ -95,6 +103,10 @@ impl ScoreRule for BuiltinDeprioritizeRule {
         }
 
         0.0
+    }
+
+    fn description(&self) -> &'static str {
+        "Penalizes Nix builtin derivations (fetchers and the like) so they yield worker slots to real compilation jobs."
     }
 }
 
@@ -126,6 +138,10 @@ impl ScoreRule for DependencyCountRule {
 
         self.cap * (job.dependency_count as f64 / base).clamp(0.0, 1.0)
     }
+
+    fn description(&self) -> &'static str {
+        "Rewards jobs that many other queued builds depend on, so unblocking work is scheduled ahead of leaf builds."
+    }
 }
 
 #[derive(Debug)]
@@ -153,6 +169,10 @@ impl ScoreRule for WaitTimeRule {
         let avg = instance.wait_secs.w1h_or(self.fallback_avg_secs);
 
         (self.gain * (waited / avg)).min(self.cap)
+    }
+
+    fn description(&self) -> &'static str {
+        "Grows with how long a job has been waiting in the queue, preventing starvation of jobs the other rules keep deprioritizing."
     }
 }
 
@@ -187,6 +207,10 @@ impl ScoreRule for ReserveFetchWorkersRule {
 
         -self.penalty * (1.0 - spare).clamp(0.0, 1.0)
     }
+
+    fn description(&self) -> &'static str {
+        "Keeps fetch-capable workers free for flake fetches by penalizing them for cached evaluations, easing off as idle workers appear."
+    }
 }
 
 #[derive(Debug)]
@@ -217,6 +241,10 @@ impl ScoreRule for RescoreWaitRule {
         } else {
             0.0
         }
+    }
+
+    fn description(&self) -> &'static str {
+        "Briefly holds back builds whose substitution cost has not been measured yet, letting them be rescored once the data lands."
     }
 }
 

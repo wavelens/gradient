@@ -16,6 +16,16 @@ This page tracks notable tests added to Gradient and where they live.
 
 `nix/tests/gradient/api` — E2E NixOS VM test provisions a base worker via state, calls `GET /orgs/{org}/workers` and asserts `is_base: true` in the response, then calls `POST /orgs/{org}/workers/{id}/test` and checks `ok: true`.
 
+## State export includes base workers (#405)
+
+`backend/gradient-state/src/export.rs` — `export_base_worker_emits_flag_orgs_and_authorize_against` asserts the exporter reconstructs a base worker as a `StateWorker` with `base_worker = true`, the `enabled` and `enable_*` gates, the stringified `authorize_against` UUID, and only the orgs linked via `organization_base_worker` (other base workers' links excluded); `token_file` stays blank because it cannot be recovered from the stored hash.
+
+## Scoring rule descriptions (#403)
+
+`backend/gradient-score/src/policy.rs` — `rule_catalog_covers_every_rule_with_a_description` asserts every `ScoreRule` in the superset policy appears once in `rule_catalog()` with a non-empty name and description, guarding against a new rule shipping without help text.
+
+`frontend/src/app/core/services/board.service.spec.ts` — `getScoringRules()` test verifies the catalog is fetched from `board/scoring/rules`, unwrapped from the response envelope, and cached so repeat subscribers do not refetch.
+
 ## Incremental Created → Queued promotion (#392)
 
 `backend/gradient-scheduler/src/edge_readiness.rs` unit-tests the pure

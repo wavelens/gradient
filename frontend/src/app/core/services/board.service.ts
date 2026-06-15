@@ -5,7 +5,7 @@
  */
 
 import { Injectable, inject } from '@angular/core';
-import { Observable } from 'rxjs';
+import { Observable, shareReplay } from 'rxjs';
 import { ApiService } from './api.service';
 
 export interface DispatchedJobSummary {
@@ -184,6 +184,11 @@ export interface ScoringSummary {
   rules: RuleContribution[];
 }
 
+export interface RuleDescription {
+  rule: string;
+  description: string;
+}
+
 export interface SeriesPoint {
   bucket_start: string;
   count: number;
@@ -295,6 +300,7 @@ export interface FlakeGraphNode {
 @Injectable({ providedIn: 'root' })
 export class BoardService {
   private api = inject(ApiService);
+  private scoringRules$?: Observable<RuleDescription[]>;
 
   getDispatchedJobs(): Observable<DispatchedJobsResponse> {
     return this.api.get<DispatchedJobsResponse>('board/jobs/dispatched');
@@ -324,6 +330,14 @@ export class BoardService {
 
   getScoringSummary(windowHours = 24): Observable<ScoringSummary> {
     return this.api.get<ScoringSummary>(`board/scoring/summary?window_hours=${windowHours}`);
+  }
+
+  getScoringRules(): Observable<RuleDescription[]> {
+    this.scoringRules$ ??= this.api
+      .get<RuleDescription[]>('board/scoring/rules')
+      .pipe(shareReplay({ bufferSize: 1, refCount: false }));
+
+    return this.scoringRules$;
   }
 
   getCache(windowHours = 24): Observable<BoardCacheStats> {

@@ -2501,6 +2501,7 @@ dependencies = [
  "gradient-nix",
  "gradient-proto",
  "gradient-scheduler",
+ "gradient-score",
  "gradient-sources",
  "gradient-state",
  "gradient-storage",

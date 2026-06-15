@@ -4038,9 +4038,10 @@ paths:
       summary: Export the live state configuration
       description: |
         Reconstructs the current users, organizations, projects, caches,
-        custom roles, API keys, workers and integrations into a declarative
-        `services.gradient.state` shape, so operators can codify the running
-        system back into their nix configuration.
+        custom roles, API keys, workers (including server-level base workers
+        with their pre-enabled organizations) and integrations into a
+        declarative `services.gradient.state` shape, so operators can codify
+        the running system back into their nix configuration.
 
         Every credential-file field (`password_file`, `private_key_file`,
         `signing_key_file`, `token_file`, `key_file`, `secret_file`,
@@ -6051,6 +6052,31 @@ paths:
       responses:
         '200':
           description: Scoring summary
+
+  /board/scoring/rules:
+    get:
+      tags: [board]
+      summary: Scoring rule catalog
+      description: Static name and human-readable description for every scheduler scoring rule, used by the board UI to explain rule names.
+      operationId: getBoardScoringRules
+      responses:
+        '200':
+          description: Rule catalog
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: array
+                        items:
+                          type: object
+                          required: [rule, description]
+                          properties:
+                            rule: { type: string }
+                            description: { type: string }
 
   /board/workers:
     get:
