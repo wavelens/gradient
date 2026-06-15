@@ -446,8 +446,10 @@ mod tests {
     #[tokio::test]
     async fn unpark_no_workers_is_noop_when_no_eval_capable_registration() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            // Gate query: no eval-capable registration → short-circuit
+            // Gate: no eval-capable registration, and no base worker enabled for
+            // this org either, so the gate returns false and unpark is a noop.
             .append_query_results([Vec::<gradient_entity::worker_registration::Model>::new()])
+            .append_query_results([Vec::<gradient_entity::organization_base_worker::Model>::new()])
             .into_connection();
         let out = unpark_no_workers_for_org(&db, OrganizationId::now_v7())
             .await

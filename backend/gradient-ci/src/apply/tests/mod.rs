@@ -615,8 +615,10 @@ async fn no_eval_capable_worker_parks_evaluation_in_waiting_workers() {
     let db = with_writable_cache(db);
     // park_if_storage_full: no writable cache rows → not full.
     let db = with_storage_not_full(db)
-        // park_if_no_workers: no eval-capable registration → park.
+        // park_if_no_workers: no eval-capable registration and no base worker
+        // enabled for this org → park.
         .append_query_results([Vec::<gradient_entity::worker_registration::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::organization_base_worker::Model>::new()])
         // Park: update eval read-back + exec, returns the parked row.
         .append_query_results([vec![parked_eval.clone()]])
         .append_exec_results([MockExecResult {
