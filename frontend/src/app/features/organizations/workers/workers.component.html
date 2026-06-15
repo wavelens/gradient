@@ -4,6 +4,8 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
+<p-toast />
+
 <div class="container">
   <div class="page-header">
     <div>
@@ -114,6 +116,9 @@
               </div>
             </div>
             <div class="worker-meta">
+              @if (worker.is_base) {
+                <span class="badge badge-base">Base</span>
+              }
               @if (worker.managed) {
                 <span class="badge badge-managed">Managed</span>
               }
@@ -143,7 +148,7 @@
                 severity="secondary"
                 size="small"
                 class="worker-action-btn"
-                [disabled]="deletingId() !== null || togglingId() !== null || renaming()"
+                [disabled]="deletingId() !== null || togglingId() !== null || testingId() !== null || renaming()"
                 [appManagedDisable]="rowAccess(worker)"
                 (click)="openRenameDialog(worker)"
               ></button>
@@ -155,10 +160,23 @@
                 [severity]="worker.active ? 'warn' : 'success'"
                 size="small"
                 class="worker-action-btn"
-                [disabled]="togglingId() !== null || deletingId() !== null"
-                [appManagedDisable]="rowAccess(worker)"
+                [disabled]="togglingId() !== null || deletingId() !== null || testingId() !== null"
+                [appManagedDisable]="actionAccess(worker)"
                 [loading]="togglingId() === worker.worker_id"
                 (click)="requestToggleWorker(worker)"
+              ></button>
+              <button
+                *appWritable="access()"
+                pButton
+                label="Fire Test"
+                icon="pi pi-bolt"
+                severity="secondary"
+                size="small"
+                class="worker-action-btn"
+                [disabled]="testingId() !== null || togglingId() !== null || deletingId() !== null"
+                [appManagedDisable]="actionAccess(worker)"
+                [loading]="testingId() === worker.worker_id"
+                (click)="fireTest(worker)"
               ></button>
               <button
                 *appWritable="access()"
@@ -168,7 +186,7 @@
                 severity="danger"
                 size="small"
                 class="worker-action-btn"
-                [disabled]="deletingId() !== null || togglingId() !== null"
+                [disabled]="deletingId() !== null || togglingId() !== null || testingId() !== null"
                 [appManagedDisable]="rowAccess(worker)"
                 [loading]="deletingId() === worker.worker_id"
                 (click)="deleteWorker(worker)"

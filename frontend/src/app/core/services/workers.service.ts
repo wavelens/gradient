@@ -7,7 +7,7 @@
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { ApiService } from './api.service';
-import { Worker, WorkerRegistration } from '@core/models';
+import { Worker, WorkerRegistration, WorkerTestResponse } from '@core/models';
 
 export interface WorkerSamplePoint {
   at: string;
@@ -88,5 +88,9 @@ export class WorkersService {
 
   deleteWorker(org: string, workerId: string): Observable<string> {
     return this.api.delete<string>(`orgs/${org}/workers/${workerId}`);
+  }
+
+  testWorker(org: string, workerId: string): Observable<WorkerTestResponse> {
+    return this.api.post<WorkerTestResponse>(`orgs/${org}/workers/${workerId}/test`, {});
   }
 }
