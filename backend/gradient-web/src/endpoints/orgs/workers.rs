@@ -15,7 +15,7 @@ use gradient_entity::worker_registration::{
     Model as MWorkerRegistration,
 };
 use gradient_entity::{base_worker, organization_base_worker};
-use gradient_types::{EBaseWorker, EOrganizationBaseWorker};
+use gradient_types::{AOrganizationBaseWorker, EBaseWorker, EOrganizationBaseWorker};
 use gradient_types::ids::*;
 use gradient_types::proto::GradientCapabilities;
 use gradient_types::{BaseResponse, MUser};
@@ -102,6 +102,16 @@ pub struct PatchWorkerRequest {
     pub enable_eval: Option<bool>,
     /// When present, update the per-registration `build` gate.
     pub enable_build: Option<bool>,
+}
+
+/// Base workers are server-managed: the only patch a member may apply is the
+/// per-org `active` opt-in/out. Any attempt to edit name or capability gates is
+/// a conflict.
+fn patch_edits_base_worker_fields(body: &PatchWorkerRequest) -> bool {
+    body.display_name.is_some()
+        || body.enable_fetch.is_some()
+        || body.enable_eval.is_some()
+        || body.enable_build.is_some()
 }
 
 #[derive(Serialize)]
@@ -436,6 +446,56 @@ pub async fn patch_org_worker(
     )
     .await?;
 
+    if let Some(bw) =
+        gradient_db::base_workers::enabled_base_worker_by_worker_id(&state.web_db, &worker_id)
+            .await?
+    {
+        if patch_edits_base_worker_fields(&body) {
+            return Err(WebError::conflict("base workers are managed by server state"));
+        }
+
+        use gradient_entity::organization_base_worker::{Column as OBWC, Entity as OBW};
+
+        match body.active {
+            Some(true) => {
+                let exists = OBW::find()
+                    .filter(OBWC::Organization.eq(org.id))
+                    .filter(OBWC::BaseWorker.eq(bw.id))
+                    .one(&state.web_db)
+                    .await?
+                    .is_some();
+                if !exists {
+                    AOrganizationBaseWorker {
+                        id: Set(OrganizationBaseWorkerId::now_v7()),
+                        organization: Set(org.id),
+                        base_worker: Set(bw.id),
+                        created_by: Set(Some(user.id)),
+                        created_at: Set(gradient_types::now()),
+                    }
+                    .insert(&state.web_db)
+                    .await?;
+                }
+            }
+            Some(false) => {
+                OBW::delete_many()
+                    .filter(OBWC::Organization.eq(org.id))
+                    .filter(OBWC::BaseWorker.eq(bw.id))
+                    .exec(&state.web_db)
+                    .await?;
+                let org_set = std::collections::HashSet::from([org.id]);
+                scheduler.abort_org_jobs_on_worker(&worker_id, &org_set).await;
+            }
+            None => {}
+        }
+
+        scheduler.request_reauth(&worker_id).await;
+        if matches!(body.active, Some(true)) {
+            let _ = gradient_ci::unpark_no_workers_for_org(&state.web_db, org.id).await;
+        }
+
+        return Ok(ok_json("ok".to_string()));
+    }
+
     let reg = EWorkerRegistration::find()
         .filter(worker_registration::Column::PeerId.eq(org.id))
         .filter(worker_registration::Column::WorkerId.eq(&worker_id))
@@ -515,6 +575,15 @@ pub async fn delete_org_worker(
     )
     .await?;
 
+    if gradient_db::base_workers::enabled_base_worker_by_worker_id(&state.web_db, &worker_id)
+        .await?
+        .is_some()
+    {
+        return Err(WebError::conflict(
+            "base workers cannot be deleted; manage them via server state",
+        ));
+    }
+
     let result = EWorkerRegistration::delete_many()
         .filter(worker_registration::Column::PeerId.eq(org.id))
         .filter(worker_registration::Column::WorkerId.eq(&worker_id))
@@ -587,6 +656,50 @@ mod tests {
             enabled: true,
             created_at: gradient_types::now(),
             ..Default::default()
+        }
+    }
+
+    fn empty_patch() -> PatchWorkerRequest {
+        PatchWorkerRequest {
+            active: None,
+            display_name: None,
+            enable_fetch: None,
+            enable_eval: None,
+            enable_build: None,
+        }
+    }
+
+    #[test]
+    fn active_only_patch_is_allowed_on_base_worker() {
+        let body = PatchWorkerRequest {
+            active: Some(true),
+            ..empty_patch()
+        };
+        assert!(!patch_edits_base_worker_fields(&body));
+        assert!(!patch_edits_base_worker_fields(&empty_patch()));
+    }
+
+    #[test]
+    fn editing_name_or_caps_is_rejected_on_base_worker() {
+        for body in [
+            PatchWorkerRequest {
+                display_name: Some("x".into()),
+                ..empty_patch()
+            },
+            PatchWorkerRequest {
+                enable_fetch: Some(false),
+                ..empty_patch()
+            },
+            PatchWorkerRequest {
+                enable_eval: Some(true),
+                ..empty_patch()
+            },
+            PatchWorkerRequest {
+                enable_build: Some(false),
+                ..empty_patch()
+            },
+        ] {
+            assert!(patch_edits_base_worker_fields(&body));
         }
     }
 
