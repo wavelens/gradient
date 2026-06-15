@@ -121,7 +121,6 @@ pub(super) struct BaseWorkerChallenge {
     pub authorize_against: Option<String>,
     /// Org UUID strings that opted into this base worker.
     pub enabled_orgs: Vec<String>,
-    pub caps: EnabledCapsAggregate,
 }
 
 /// Returns base-worker challenge data when `worker_id` is an enabled base
@@ -143,12 +142,6 @@ pub(super) async fn lookup_base_worker_challenge(
             .map(|o| o.to_string())
             .collect();
 
-    let caps = EnabledCapsAggregate {
-        enable_fetch: bw.enable_fetch,
-        enable_eval: bw.enable_eval,
-        enable_build: bw.enable_build,
-    };
-
     let challenge = match &bw.authorize_against {
         Some(uuid) => vec![(uuid.to_string(), bw.token_hash.clone())],
         None => enabled_orgs
@@ -161,7 +154,6 @@ pub(super) async fn lookup_base_worker_challenge(
         challenge,
         authorize_against: bw.authorize_against.map(|u| u.to_string()),
         enabled_orgs,
-        caps,
     })
 }
 
@@ -564,7 +556,6 @@ mod tests {
             challenge: vec![("org-1".into(), "hash".into()), ("org-2".into(), "hash".into())],
             authorize_against: None,
             enabled_orgs: vec!["org-1".into(), "org-2".into()],
-            caps: EnabledCapsAggregate::all(),
         };
         assert_eq!(c.challenge.len(), 2);
         assert!(c.authorize_against.is_none());
