@@ -16,6 +16,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tracing::{debug, error, trace, warn};
 
 use crate::nix::eval_worker::{EvalRequest, EvalResponse, ResolvedItem};
+use crate::worker_pool::eval_stats::StatsDelta;
 
 /// Handle to a single live eval-worker subprocess.
 ///
@@ -197,7 +198,7 @@ impl EvalWorker {
         &mut self,
         repository: String,
         wildcards: Vec<String>,
-    ) -> Result<(Vec<String>, Vec<String>)> {
+    ) -> Result<(Vec<String>, Vec<String>, Option<StatsDelta>)> {
         self.evaluations_served += 1;
         match self
             .request(&EvalRequest::List {
@@ -206,7 +207,11 @@ impl EvalWorker {
             })
             .await?
         {
-            EvalResponse::ListOk { attrs, warnings } => Ok((attrs, warnings)),
+            EvalResponse::ListOk {
+                attrs,
+                warnings,
+                stats,
+            } => Ok((attrs, warnings, stats)),
             EvalResponse::Err { message } => Err(anyhow::anyhow!("eval worker: {}", message)),
             _ => anyhow::bail!("eval worker: unexpected response to List"),
         }
@@ -226,7 +231,10 @@ impl EvalWorker {
 
     pub(super) async fn checkpoint(&mut self, repository: String) -> Result<()> {
         self.evaluations_served += 1;
-        match self.request(&EvalRequest::Checkpoint { repository }).await? {
+        match self
+            .request(&EvalRequest::Checkpoint { repository })
+            .await?
+        {
             EvalResponse::CheckpointOk => Ok(()),
             EvalResponse::Err { message } => Err(anyhow::anyhow!("eval worker: {}", message)),
             _ => anyhow::bail!("eval worker: unexpected response to Checkpoint"),
@@ -270,13 +278,17 @@ impl EvalWorker {
         &mut self,
         repository: String,
         attrs: Vec<String>,
-    ) -> Result<(Vec<ResolvedItem>, Vec<String>)> {
+    ) -> Result<(Vec<ResolvedItem>, Vec<String>, Option<StatsDelta>)> {
         self.evaluations_served += 1;
         match self
             .request(&EvalRequest::Resolve { repository, attrs })
             .await?
         {
-            EvalResponse::ResolveOk { items, warnings } => Ok((items, warnings)),
+            EvalResponse::ResolveOk {
+                items,
+                warnings,
+                stats,
+            } => Ok((items, warnings, stats)),
             EvalResponse::Err { message } => Err(anyhow::anyhow!("eval worker: {}", message)),
             _ => anyhow::bail!("eval worker: unexpected response to Resolve"),
         }
@@ -503,8 +515,8 @@ impl Drop for PooledEvalWorker {
             }
 
             // recycle disabled; RSS-based reclamation lands in a later task
-            let overused = self.recycle_after > 0
-                && worker.evaluations_served >= self.recycle_after;
+            let overused =
+                self.recycle_after > 0 && worker.evaluations_served >= self.recycle_after;
             if overused {
                 debug!(
                     evaluations = worker.evaluations_served,
@@ -605,7 +617,11 @@ mod tests {
 
     #[tokio::test]
     async fn inflight_worker_shuts_down_gracefully_on_pool_shutdown() {
-        let pool = Arc::new(EvalWorkerPool::new(1, 2 * 1024 * 1024 * 1024, String::new()));
+        let pool = Arc::new(EvalWorkerPool::new(
+            1,
+            2 * 1024 * 1024 * 1024,
+            String::new(),
+        ));
         pool.push_for_test(fake_worker());
 
         let pooled = pool.acquire().await.expect("acquire");

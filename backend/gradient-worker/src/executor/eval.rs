@@ -22,7 +22,10 @@ use anyhow::{Context, Result};
 use futures::stream::{FuturesUnordered, StreamExt as _};
 use gradient_db::parse_drv;
 use gradient_nix::DerivationResolver;
-use gradient_proto::messages::{DerivationOutput, DiscoveredDerivation, FlakeJob, FlakeSource};
+use gradient_proto::messages::{
+    DerivationOutput, DiscoveredDerivation, EvalAttrCost, EvalStatsReport, FlakeJob,
+    FlakeOutputNode, FlakeSource,
+};
 use tokio::sync::watch;
 use tracing::{debug, info, warn};
 
@@ -50,7 +53,6 @@ const DRV_READ_CONCURRENCY: usize = 64;
 /// leaving headroom for the OS, the parent worker, and a concurrent build.
 const EVAL_RAM_SHARE: f64 = 0.75;
 
-
 /// Total physical RAM in bytes, or a 4 GiB fallback if it cannot be read.
 fn total_memory_bytes() -> u64 {
     use sysinfo::{MemoryRefreshKind, RefreshKind, System};
@@ -58,7 +60,11 @@ fn total_memory_bytes() -> u64 {
         RefreshKind::nothing().with_memory(MemoryRefreshKind::nothing().with_ram()),
     );
     let total = sys.total_memory();
-    if total == 0 { 4 * 1024 * 1024 * 1024 } else { total }
+    if total == 0 {
+        4 * 1024 * 1024 * 1024
+    } else {
+        total
+    }
 }
 
 use gradient_proto::messages::QueryMode;
@@ -174,6 +180,7 @@ pub async fn evaluate_derivations(
     abort: &mut watch::Receiver<bool>,
 ) -> Result<Vec<String>> {
     let repo = build_flake_url(job, local_flake_path);
+    let start = Instant::now();
 
     // Best-effort fingerprint + pull of the flake's shared eval-cache blob so
     // the eval runs warm. A fingerprint/pull failure never fails the eval.
@@ -189,9 +196,12 @@ pub async fn evaluate_derivations(
         None
     };
 
-    let cache_path = fingerprint
-        .as_ref()
-        .map(|fp| format!("{}/eval-cache-v6/{fp}.sqlite", evaluator.resolver.eval_cache_dir()));
+    let cache_path = fingerprint.as_ref().map(|fp| {
+        format!(
+            "{}/eval-cache-v6/{fp}.sqlite",
+            evaluator.resolver.eval_cache_dir()
+        )
+    });
 
     if let (Some(fp), Some(path)) = (fingerprint.as_ref(), cache_path.as_ref()) {
         // TODO(#386): report cache_status (hit/miss) once an eval-update field exists
@@ -206,7 +216,10 @@ pub async fn evaluate_derivations(
         }
     }
 
-    let produced = evaluate_derivations_with(
+    let EvalOutcome {
+        produced_drvs: produced,
+        flake_nodes,
+    } = evaluate_derivations_with(
         &*evaluator.resolver,
         &FsDrvReader,
         job,
@@ -215,6 +228,17 @@ pub async fn evaluate_derivations(
         abort,
     )
     .await?;
+
+    // Drain the per-eval stats and ship one report; skip if nothing was
+    // observed (metrics gated off or an empty eval).
+    let totals = evaluator.resolver.take_eval_stats();
+    if totals.total_thunks > 0 || !totals.per_entry_point.is_empty() {
+        let report =
+            build_eval_stats_report(totals, flake_nodes, start.elapsed().as_millis() as u64);
+        if let Err(e) = updater.report_eval_stats(report) {
+            warn!(error = %e, "failed to send eval stats report");
+        }
+    }
 
     // Fold the shared eval-cache WAL into the main `.sqlite` so the pushed blob
     // carries this eval's writes (per-shard commits only append to the WAL). The
@@ -299,11 +323,9 @@ fn build_flake_url(job: &FlakeJob, local_flake_path: Option<&str>) -> String {
         return format!("path:{}", path);
     }
     match &job.source {
-        FlakeSource::Repository { url, commit } => {
-            gradient_nix::NixFlakeUrl::new(url, commit)
-                .map(|u| u.to_string())
-                .unwrap_or_else(|_| url.clone())
-        }
+        FlakeSource::Repository { url, commit } => gradient_nix::NixFlakeUrl::new(url, commit)
+            .map(|u| u.to_string())
+            .unwrap_or_else(|_| url.clone()),
         // Eval-only: Nix accepts `/nix/store/...` directly as a flake URI.
         FlakeSource::Cached { store_path } => format!("path:{}", store_path),
     }
@@ -342,8 +364,7 @@ async fn parse_drv_wave(
         })
         .collect();
 
-    let mut slots: Vec<Option<gradient_db::Derivation>> =
-        (0..wave.len()).map(|_| None).collect();
+    let mut slots: Vec<Option<gradient_db::Derivation>> = (0..wave.len()).map(|_| None).collect();
     while let Some(result) = futs.next().await {
         let (i, drv) = result?;
         slots[i] = Some(drv);
@@ -378,11 +399,12 @@ fn build_discovered_derivation(
         .collect();
 
     let meta = drv.build_meta();
-    let name = drv.environment.get("name").map(String::as_str).unwrap_or("");
-    let pname = gradient_db::derive_pname(
-        drv.environment.get("pname").map(String::as_str),
-        name,
-    );
+    let name = drv
+        .environment
+        .get("name")
+        .map(String::as_str)
+        .unwrap_or("");
+    let pname = gradient_db::derive_pname(drv.environment.get("pname").map(String::as_str), name);
     DiscoveredDerivation {
         attr: attr.unwrap_or_default(),
         drv_path,
@@ -578,6 +600,84 @@ impl<'a> ClosureWalker<'a> {
 
 // ── Orchestrator ──────────────────────────────────────────────────────────────
 
+/// Result of one closure-walk eval: the produced `.drv` paths (pushed to the
+/// cache by the caller) plus the walked flake-output graph for eval metrics.
+pub struct EvalOutcome {
+    pub produced_drvs: Vec<String>,
+    pub flake_nodes: Vec<FlakeOutputNode>,
+}
+
+/// Classify a flake-output attr path into a coarse node kind from its top-level
+/// segment, matching the metric tables' `kind` column.
+fn flake_kind(attr: &str) -> &'static str {
+    match attr.split('.').next().unwrap_or("") {
+        "packages" | "legacyPackages" => "package",
+        "devShells" | "devShell" => "devShell",
+        "checks" => "check",
+        "apps" => "app",
+        "nixosConfigurations" => "nixosConfiguration",
+        _ => "other",
+    }
+}
+
+/// Build flake-output nodes from the resolved entry-point attrs. Each resolved
+/// root is a derivation leaf; its `parent` is the dotted path minus the last
+/// segment. No extra evaluation: only attrs the discovery walk already produced.
+fn flake_nodes_from_roots(root_drvs: &[(String, String)]) -> Vec<FlakeOutputNode> {
+    root_drvs
+        .iter()
+        .map(|(attr, drv)| {
+            let (parent, name) = match attr.rsplit_once('.') {
+                Some((p, n)) => (Some(p.to_string()), n.to_string()),
+                None => (None, attr.clone()),
+            };
+
+            FlakeOutputNode {
+                path: attr.clone(),
+                parent,
+                name,
+                kind: flake_kind(attr).to_string(),
+                is_derivation: true,
+                drv_path: Some(drv.clone()),
+            }
+        })
+        .collect()
+}
+
+/// Convert the resolver's accumulated totals into the wire report. Per-entry
+/// `eval_ms` is not tracked by the aggregator, so it stays 0; phase timings and
+/// `worker_id` are filled by the caller.
+fn build_eval_stats_report(
+    totals: crate::worker_pool::eval_stats::EvalStatsTotals,
+    flake_nodes: Vec<FlakeOutputNode>,
+    total_eval_ms: u64,
+) -> EvalStatsReport {
+    const MB: u64 = 1024 * 1024;
+    EvalStatsReport {
+        total_thunks: totals.total_thunks,
+        fn_calls: totals.fn_calls,
+        primop_calls: totals.primop_calls,
+        lookups: totals.lookups,
+        alloc_bytes: totals.alloc_bytes,
+        peak_heap_mb: totals.peak_heap_bytes / MB,
+        peak_rss_mb: totals.peak_rss_bytes / MB,
+        total_eval_ms,
+        per_entry_point: totals
+            .per_entry_point
+            .into_iter()
+            .map(|c| EvalAttrCost {
+                attr: c.attr,
+                thunks: c.thunks,
+                fn_calls: c.fn_calls,
+                eval_ms: 0,
+                alloc_bytes: c.alloc_bytes,
+            })
+            .collect(),
+        flake_nodes,
+        ..Default::default()
+    }
+}
+
 /// Testable version of [`evaluate_derivations`] that accepts trait objects.
 ///
 /// All concrete dependencies are replaced with trait objects so this function
@@ -595,7 +695,7 @@ pub async fn evaluate_derivations_with(
     local_flake_path: Option<&str>,
     updater: &mut dyn JobReporter,
     abort: &mut watch::Receiver<bool>,
-) -> Result<Vec<String>> {
+) -> Result<EvalOutcome> {
     if is_aborted(abort) {
         anyhow::bail!(ABORT_ERR);
     }
@@ -625,7 +725,10 @@ pub async fn evaluate_derivations_with(
     if attrs.is_empty() {
         warn!("no derivations found for evaluation");
         updater.report_eval_result(vec![], warnings, vec![]).await?;
-        return Ok(Vec::new());
+        return Ok(EvalOutcome {
+            produced_drvs: Vec::new(),
+            flake_nodes: Vec::new(),
+        });
     }
 
     if is_aborted(abort) {
@@ -663,8 +766,13 @@ pub async fn evaluate_derivations_with(
     if root_drvs.is_empty() {
         warn!("all attr resolutions failed");
         updater.report_eval_result(vec![], warnings, errors).await?;
-        return Ok(Vec::new());
+        return Ok(EvalOutcome {
+            produced_drvs: Vec::new(),
+            flake_nodes: Vec::new(),
+        });
     }
+
+    let flake_nodes = flake_nodes_from_roots(&root_drvs);
 
     // ── Step 3+4+5: BFS closure walk with incremental flushes ────────────────
     let mut walker = ClosureWalker::new(drv_reader, &root_drvs);
@@ -687,15 +795,18 @@ pub async fn evaluate_derivations_with(
     updater
         .report_eval_result(remaining, warnings, errors)
         .await?;
-    Ok(produced_drvs)
+    Ok(EvalOutcome {
+        produced_drvs,
+        flake_nodes,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
     use gradient_test_support::fakes::derivation_resolver::FakeDerivationResolver;
     use gradient_test_support::prelude::*;
+    use std::path::PathBuf;
 
     fn fixture_dir() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -746,7 +857,10 @@ mod tests {
         let cached = FlakeSource::Cached {
             store_path: "/nix/store/abc-source".into(),
         };
-        assert_eq!(required_local_source(&cached), Some("/nix/store/abc-source"));
+        assert_eq!(
+            required_local_source(&cached),
+            Some("/nix/store/abc-source")
+        );
         let repo = FlakeSource::Repository {
             url: "u".into(),
             commit: "c".into(),

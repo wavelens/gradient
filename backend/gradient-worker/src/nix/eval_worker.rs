@@ -21,6 +21,7 @@ use std::io::{BufRead, Write};
 use tracing::{error, trace};
 
 use crate::nix::nix_eval::NixEvaluator;
+use crate::worker_pool::eval_stats::StatsDelta;
 
 /// Request from parent → worker. One JSON object per line on the worker's stdin.
 #[derive(Debug, Serialize, Deserialize)]
@@ -46,14 +47,10 @@ pub enum EvalRequest {
     },
     /// Return `repository`'s eval-cache fingerprint without evaluating it.
     /// `None` in the response for mutable/dirty flakes.
-    Fingerprint {
-        repository: String,
-    },
+    Fingerprint { repository: String },
     /// Fold the eval-cache WAL into the main `.sqlite` (truncate checkpoint).
     /// Run once after all shards finish, before the fleet-share push.
-    Checkpoint {
-        repository: String,
-    },
+    Checkpoint { repository: String },
     /// Ask the worker to exit cleanly. Parent uses this on graceful shutdown.
     Shutdown,
 }
@@ -69,11 +66,15 @@ pub enum EvalResponse {
         attrs: Vec<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         warnings: Vec<String>,
+        #[serde(default)]
+        stats: Option<crate::worker_pool::eval_stats::StatsDelta>,
     },
     ResolveOk {
         items: Vec<ResolvedItem>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         warnings: Vec<String>,
+        #[serde(default)]
+        stats: Option<crate::worker_pool::eval_stats::StatsDelta>,
     },
     FingerprintOk {
         fingerprint: Option<String>,
@@ -123,6 +124,42 @@ pub fn run_eval_worker() -> std::io::Result<()> {
             );
             None
         }
+    };
+
+    // Per-request delta collection is on by default; disabling it skips every
+    // `ev.stats()` call so the subprocess pays zero overhead.
+    let collect_stats = std::env::var("GRADIENT_EVAL_METRICS_ENABLED")
+        .map(|v| v != "false" && v != "0")
+        .unwrap_or(true);
+    let mut last = if collect_stats {
+        evaluator
+            .as_ref()
+            .and_then(|ev| ev.stats().ok())
+            .unwrap_or_default()
+    } else {
+        nix_bindings::EvalStats::default()
+    };
+
+    // Reads the cumulative counters, returns the delta since the prior request,
+    // and advances the baseline. `None` when stats collection is disabled.
+    let mut take_delta = |ev: &NixEvaluator| -> Option<StatsDelta> {
+        if !collect_stats {
+            return None;
+        }
+
+        ev.stats().ok().map(|cur| {
+            let d = cur.saturating_sub(&last);
+            let heap = cur.gc_heap_size;
+            last = cur;
+            StatsDelta {
+                nr_thunks: d.nr_thunks,
+                nr_function_calls: d.nr_function_calls,
+                nr_primop_calls: d.nr_primop_calls,
+                nr_lookups: d.nr_lookups,
+                alloc_bytes: d.gc_total_bytes,
+                gc_heap_size: heap,
+            }
+        })
     };
 
     let mut line = String::new();
@@ -200,14 +237,20 @@ pub fn run_eval_worker() -> std::io::Result<()> {
                     )?;
                     continue;
                 };
-                let (result, warnings) = capture_warnings_during(|| -> anyhow::Result<Vec<String>> {
-                    let walker = ev.walker(&repository)?;
-                    let attrs = walker.discover(&wildcards)?;
-                    let _ = walker.commit_cache();
-                    Ok(attrs)
-                });
+                let (result, warnings) =
+                    capture_warnings_during(|| -> anyhow::Result<Vec<String>> {
+                        let walker = ev.walker(&repository)?;
+                        let attrs = walker.discover(&wildcards)?;
+                        let _ = walker.commit_cache();
+                        Ok(attrs)
+                    });
+                let stats = take_delta(ev);
                 match result {
-                    Ok(attrs) => EvalResponse::ListOk { attrs, warnings },
+                    Ok(attrs) => EvalResponse::ListOk {
+                        attrs,
+                        warnings,
+                        stats,
+                    },
                     Err(e) => EvalResponse::Err {
                         message: format!("{:#}", e),
                     },
@@ -267,9 +310,11 @@ pub fn run_eval_worker() -> std::io::Result<()> {
                 }
 
                 all_warnings.dedup();
+                let stats = take_delta(ev);
                 EvalResponse::ResolveOk {
                     items,
                     warnings: all_warnings,
+                    stats,
                 }
             }
             EvalRequest::Fingerprint { repository } => {
@@ -299,9 +344,8 @@ pub fn run_eval_worker() -> std::io::Result<()> {
                     )?;
                     continue;
                 };
-                let result = (|| -> anyhow::Result<()> {
-                    ev.walker(&repository)?.checkpoint_cache()
-                })();
+                let result =
+                    (|| -> anyhow::Result<()> { ev.walker(&repository)?.checkpoint_cache() })();
                 match result {
                     Ok(()) => EvalResponse::CheckpointOk,
                     Err(e) => EvalResponse::Err {
@@ -312,7 +356,9 @@ pub fn run_eval_worker() -> std::io::Result<()> {
         };
 
         let kind = match &resp {
-            EvalResponse::PlanOk { sub_patterns } => format!("PlanOk({} shards)", sub_patterns.len()),
+            EvalResponse::PlanOk { sub_patterns } => {
+                format!("PlanOk({} shards)", sub_patterns.len())
+            }
             EvalResponse::ListOk { attrs, .. } => format!("ListOk({} attrs)", attrs.len()),
             EvalResponse::ResolveOk { items, .. } => format!("ResolveOk({} items)", items.len()),
             EvalResponse::FingerprintOk { fingerprint } => {
@@ -396,7 +442,9 @@ where
 fn parse_warnings(captured: &str) -> Vec<String> {
     fn is_boundary(line: &str) -> bool {
         let t = line.trim_start().to_ascii_lowercase();
-        ["warning:", "trace:", "error:", "note:"].iter().any(|p| t.starts_with(p))
+        ["warning:", "trace:", "error:", "note:"]
+            .iter()
+            .any(|p| t.starts_with(p))
     }
 
     let lines: Vec<&str> = captured.lines().collect();
@@ -441,7 +489,10 @@ mod tests {
     #[test]
     fn parse_warnings_splits_distinct_and_drops_sqlite_busy() {
         let captured = "warning: first\nwarning: SQLite database is busy\nwarning: second\n";
-        assert_eq!(parse_warnings(captured), vec!["warning: first", "warning: second"]);
+        assert_eq!(
+            parse_warnings(captured),
+            vec!["warning: first", "warning: second"]
+        );
     }
 
     #[test]
@@ -489,6 +540,7 @@ mod tests {
             EvalResponse::ListOk {
                 attrs: vec!["packages.x86_64-linux.hello".into()],
                 warnings: vec![],
+                stats: None,
             },
             EvalResponse::ResolveOk {
                 items: vec![ResolvedItem {
@@ -498,6 +550,7 @@ mod tests {
                     error: None,
                 }],
                 warnings: vec![],
+                stats: None,
             },
             EvalResponse::FingerprintOk {
                 fingerprint: Some("deadbeef".into()),

@@ -16,8 +16,9 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use gradient_proto::messages::{
-    BuildMetrics, BuildOutput, CachedPath, ClientMessage, DiscoveredDerivation, EvalCachePullOutcome,
-    EvalCachePushMode, EvalMessageLevel, JobUpdateKind, QueryMode,
+    BuildMetrics, BuildOutput, CachedPath, ClientMessage, DiscoveredDerivation,
+    EvalCachePullOutcome, EvalCachePushMode, EvalMessageLevel, EvalStatsReport, JobUpdateKind,
+    QueryMode,
 };
 use tokio::sync::oneshot;
 use tracing::debug;
@@ -273,6 +274,11 @@ impl JobUpdater {
 
     pub fn report_evaluating_flake(&self) -> Result<()> {
         self.send_update(JobUpdateKind::EvaluatingFlake)
+    }
+
+    /// Send the per-eval stats + walked flake-output graph at eval completion.
+    pub fn report_eval_stats(&self, report: EvalStatsReport) -> Result<()> {
+        self.send_update(JobUpdateKind::EvalStats(report))
     }
 
     pub fn report_building(&self, build_id: String) -> Result<()> {

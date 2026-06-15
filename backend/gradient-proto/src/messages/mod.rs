@@ -14,9 +14,9 @@ pub use client::ClientMessage;
 pub use gradient_types::proto::{
     BuildFailureKind, BuildJob, BuildMetrics, BuildOutput, BuildProduct, BuildTask, CacheInfo,
     CachedPath, CandidateScore, CredentialKind, DerivationOutput, DiscoveredDerivation,
-    EvalCachePullOutcome, EvalCachePushMode, EvalMessageLevel, FlakeInputOverride,
-    FlakeJob, FlakeSource, FlakeTask, GradientCapabilities, Job, JobCandidate, JobKind,
-    JobUpdateKind, QueryMode, RequiredPath,
+    EvalAttrCost, EvalCachePullOutcome, EvalCachePushMode, EvalMessageLevel, EvalStatsReport,
+    FlakeInputOverride, FlakeJob, FlakeOutputNode, FlakeSource, FlakeTask, GradientCapabilities,
+    Job, JobCandidate, JobKind, JobUpdateKind, QueryMode, RequiredPath,
 };
 pub use server::{FailedPeer, ServerMessage};
 pub use wire::{decode_client_message, decode_server_message};
