@@ -50,6 +50,7 @@ impl MigrationTrait for Migration {
                     .name("fk-base_worker-created_by")
                     .from(Alias::new("base_worker"), Alias::new("created_by"))
                     .to(Alias::new("user"), Alias::new("id"))
+                    .on_delete(ForeignKeyAction::SetNull)
                     .to_owned(),
             )
             .await

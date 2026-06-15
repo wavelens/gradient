@@ -44,6 +44,7 @@ impl MigrationTrait for Migration {
                     .name("fk-org_base_worker-organization")
                     .from(Alias::new("organization_base_worker"), Alias::new("organization"))
                     .to(Alias::new("organization"), Alias::new("id"))
+                    .on_delete(ForeignKeyAction::Cascade)
                     .to_owned(),
             )
             .await?;
@@ -54,6 +55,18 @@ impl MigrationTrait for Migration {
                     .name("fk-org_base_worker-base_worker")
                     .from(Alias::new("organization_base_worker"), Alias::new("base_worker"))
                     .to(Alias::new("base_worker"), Alias::new("id"))
+                    .on_delete(ForeignKeyAction::Cascade)
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("fk-org_base_worker-created_by")
+                    .from(Alias::new("organization_base_worker"), Alias::new("created_by"))
+                    .to(Alias::new("user"), Alias::new("id"))
+                    .on_delete(ForeignKeyAction::SetNull)
                     .to_owned(),
             )
             .await
