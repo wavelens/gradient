@@ -427,6 +427,61 @@ pub async fn get_org_worker_metrics(
     }))
 }
 
+#[derive(Debug, Serialize)]
+pub struct WorkerTestResponse {
+    pub ok: bool,
+    pub connected: bool,
+    pub authorized_for_org: bool,
+    pub message: String,
+}
+
+/// Pure decision for the Fire Test outcome, kept out of the handler so it can
+/// be unit-tested without a live scheduler.
+fn worker_test_result(connected: bool, authorized_for_org: bool) -> (bool, String) {
+    if !connected {
+        (false, "worker is not connected".to_string())
+    } else if !authorized_for_org {
+        (
+            false,
+            "worker is connected but not authorized for this organization".to_string(),
+        )
+    } else {
+        (true, "worker is connected and authorized".to_string())
+    }
+}
+
+/// Connectivity probe: reports whether the worker is connected and authorized
+/// for this org. No job is dispatched. Works for base and normal workers.
+pub async fn post_org_worker_test(
+    state: State<Arc<ServerState>>,
+    Path((organization, worker_id)): Path<(String, String)>,
+    Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
+    Extension(scheduler): Extension<Arc<Scheduler>>,
+) -> WebResult<Json<BaseResponse<WorkerTestResponse>>> {
+    let org = load_org(
+        &state,
+        Caller::User(&user),
+        api_key.as_ref(),
+        organization,
+        OrgAccess::Member {
+            reject_managed: false,
+        },
+    )
+    .await?;
+
+    let connected = scheduler.is_worker_connected(&worker_id).await;
+    let authorized_for_org = scheduler.worker_authorized_for_org(&worker_id, org.id).await;
+    let (ok, message) = worker_test_result(connected, authorized_for_org);
+
+    Ok(ok_json(WorkerTestResponse {
+        ok,
+        connected,
+        authorized_for_org,
+        message,
+    }))
+}
+
 pub async fn patch_org_worker(
     state: State<Arc<ServerState>>,
     Path((organization, worker_id)): Path<(String, String)>,
@@ -701,6 +756,28 @@ mod tests {
         ] {
             assert!(patch_edits_base_worker_fields(&body));
         }
+    }
+
+    #[test]
+    fn worker_test_result_covers_all_states() {
+        let (ok, msg) = worker_test_result(false, false);
+        assert!(!ok);
+        assert_eq!(msg, "worker is not connected");
+
+        let (ok, msg) = worker_test_result(false, true);
+        assert!(!ok);
+        assert_eq!(msg, "worker is not connected");
+
+        let (ok, msg) = worker_test_result(true, false);
+        assert!(!ok);
+        assert_eq!(
+            msg,
+            "worker is connected but not authorized for this organization"
+        );
+
+        let (ok, msg) = worker_test_result(true, true);
+        assert!(ok);
+        assert_eq!(msg, "worker is connected and authorized");
     }
 
     #[test]

@@ -56,6 +56,15 @@ impl Scheduler {
         self.worker_pool.read().await.is_connected(peer_id)
     }
 
+    pub async fn worker_authorized_for_org(&self, worker_id: &str, org: OrganizationId) -> bool {
+        self.worker_pool
+            .read()
+            .await
+            .peer_auth_for(worker_id)
+            .map(|a| a.contains(&org))
+            .unwrap_or(false)
+    }
+
     pub async fn register_worker(
         &self,
         peer_id: &str,
