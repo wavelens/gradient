@@ -405,6 +405,53 @@ pub struct BuildMetrics {
     pub peak_network_mbps: Option<f32>,
 }
 
+/// Per-entry-point evaluation cost, aggregated by the worker across the
+/// requests resolving that entry point's attributes.
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
+#[rkyv(derive(Debug, PartialEq))]
+pub struct EvalAttrCost {
+    pub attr: String,
+    pub thunks: u64,
+    pub fn_calls: u64,
+    pub eval_ms: u64,
+    pub alloc_bytes: u64,
+}
+
+/// One node of the flake-output graph actually walked during discovery
+/// (no extra evaluation). `parent`/`drv_path` are `None` at the root / for
+/// non-derivation nodes.
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
+#[rkyv(derive(Debug, PartialEq))]
+pub struct FlakeOutputNode {
+    pub path: String,
+    pub parent: Option<String>,
+    pub name: String,
+    pub kind: String,
+    pub is_derivation: bool,
+    pub drv_path: Option<String>,
+}
+
+/// Per-evaluation statistics + walked flake-output graph, sent once at eval
+/// completion. Byte gauges are pre-converted to MB by the worker.
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
+#[rkyv(derive(Debug, PartialEq))]
+pub struct EvalStatsReport {
+    pub total_thunks: u64,
+    pub fn_calls: u64,
+    pub primop_calls: u64,
+    pub lookups: u64,
+    pub alloc_bytes: u64,
+    pub peak_heap_mb: u64,
+    pub peak_rss_mb: u64,
+    pub fetch_ms: u64,
+    pub eval_flake_ms: u64,
+    pub eval_drv_ms: u64,
+    pub total_eval_ms: u64,
+    pub worker_id: String,
+    pub per_entry_point: Vec<EvalAttrCost>,
+    pub flake_nodes: Vec<FlakeOutputNode>,
+}
+
 // ── Credential types ─────────────────────────────────────────────────────────
 
 /// Type of credential delivered via the protocol.
