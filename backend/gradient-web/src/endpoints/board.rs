@@ -9,7 +9,8 @@
 //! masked: their jobs collapse to an aggregate count and foreign workers lose
 //! their identity and live metrics.
 
-use crate::authorization::MaybeUser;
+use crate::authorization::{MaybeApiKey, MaybeUser};
+use crate::endpoints::evals::EvalAccessContext;
 use crate::error::{WebError, WebResult, require_superuser};
 use crate::helpers::ok_json;
 use crate::metrics_scope::MetricsScope;
@@ -25,7 +26,7 @@ use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, IntoActiveModel, QueryFilter,
     QueryOrder, QuerySelect, Statement,
 };
-use gradient_entity::build_attempt;
+use gradient_entity::{build_attempt, flake_output_node};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -811,4 +812,169 @@ pub async fn delete_acknowledged(
         .await?;
 
     Ok(ok_json(true))
+}
+
+#[derive(Deserialize)]
+pub struct EvalResourceParams {
+    pub metric: String,
+    pub window_days: Option<i64>,
+}
+
+#[derive(Serialize)]
+pub struct ExpensiveEval {
+    pub evaluation: Uuid,
+    pub organization: Uuid,
+    pub name: String,
+    pub value: f64,
+    pub unit: &'static str,
+    pub worker: String,
+}
+
+/// Maps a metric key to its SQL value expression + unit. Pure + tested so the
+/// metric param can never inject SQL (closed allow-list).
+fn eval_metric_expr(metric: &str) -> Option<(&'static str, &'static str)> {
+    Some(match metric {
+        "rss" => ("em.peak_rss_mb::double precision", "MB"),
+        "heap" => ("em.peak_heap_mb::double precision", "MB"),
+        "thunks" => ("em.total_thunks::double precision", "count"),
+        "fncalls" => ("em.fn_calls::double precision", "count"),
+        "alloc" => ("em.alloc_bytes::double precision", "bytes"),
+        "time" => ("em.total_eval_ms::double precision", "ms"),
+        _ => return None,
+    })
+}
+
+/// Top evaluations by a captured per-eval resource (peak RSS/heap, thunks, fn
+/// calls, allocated bytes, or total eval time) from `evaluation_metric`,
+/// org-scoped through the evaluation's project.
+pub async fn get_expensive_evals_by_resource(
+    State(state): State<Arc<ServerState>>,
+    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Query(params): Query<EvalResourceParams>,
+) -> WebResult<Json<BaseResponse<Vec<ExpensiveEval>>>> {
+    let (value_expr, unit) =
+        eval_metric_expr(&params.metric).ok_or_else(|| WebError::not_found("Metric"))?;
+    let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
+
+    let mut clauses = vec![];
+    if let Some(list) = scope.org_in_list() {
+        if list.is_empty() {
+            return Ok(ok_json(vec![]));
+        }
+
+        clauses.push(format!("p.organization IN ({list})"));
+    }
+
+    let window = params.window_days.unwrap_or(30).max(1);
+    clauses.push(format!(
+        "em.created_at >= (now() AT TIME ZONE 'UTC') - interval '{window} days'"
+    ));
+
+    let sql = format!(
+        "SELECT em.evaluation, p.organization, ev.wildcard AS name, {value_expr} AS value, em.worker_id \
+         FROM evaluation_metric em \
+         JOIN evaluation ev ON ev.id = em.evaluation \
+         JOIN project p ON p.id = ev.project \
+         WHERE {} ORDER BY value DESC LIMIT 20",
+        clauses.join(" AND ")
+    );
+
+    let rows = state
+        .web_db
+        .query_all(Statement::from_string(DatabaseBackend::Postgres, sql))
+        .await?;
+
+    let out = rows
+        .into_iter()
+        .map(|r| ExpensiveEval {
+            evaluation: r.try_get("", "evaluation").unwrap_or_default(),
+            organization: r.try_get("", "organization").unwrap_or_default(),
+            name: r.try_get("", "name").unwrap_or_default(),
+            value: r.try_get("", "value").unwrap_or(0.0),
+            unit,
+            worker: r.try_get("", "worker_id").unwrap_or_default(),
+        })
+        .collect();
+
+    Ok(ok_json(out))
+}
+
+#[derive(Serialize)]
+pub struct FlakeGraphNode {
+    pub path: String,
+    pub parent: Option<String>,
+    pub name: String,
+    pub kind: String,
+    pub is_derivation: bool,
+    pub drv_path: Option<String>,
+}
+
+fn to_graph_node(n: flake_output_node::Model) -> FlakeGraphNode {
+    FlakeGraphNode {
+        path: n.path,
+        parent: n.parent,
+        name: n.name,
+        kind: n.kind,
+        is_derivation: n.is_derivation,
+        drv_path: n.drv_path,
+    }
+}
+
+/// GET /evals/{evaluation}/flake-graph - the eval's walked flake output graph.
+pub async fn get_eval_flake_graph(
+    State(state): State<Arc<ServerState>>,
+    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
+    Path(evaluation_id): Path<EvaluationId>,
+) -> WebResult<Json<BaseResponse<Vec<FlakeGraphNode>>>> {
+    let _ctx = EvalAccessContext::load(&state, evaluation_id, &maybe_user, api_key.as_ref()).await?;
+    let rows = flake_output_node::Entity::find()
+        .filter(flake_output_node::Column::Evaluation.eq(evaluation_id))
+        .all(&state.web_db)
+        .await?;
+
+    let out = rows.into_iter().map(to_graph_node).collect();
+    Ok(ok_json(out))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn eval_metric_expr_known_keys_have_units() {
+        assert_eq!(eval_metric_expr("rss").unwrap().1, "MB");
+        assert_eq!(eval_metric_expr("heap").unwrap().1, "MB");
+        assert_eq!(eval_metric_expr("thunks").unwrap().1, "count");
+        assert_eq!(eval_metric_expr("fncalls").unwrap().1, "count");
+        assert_eq!(eval_metric_expr("alloc").unwrap().1, "bytes");
+        assert_eq!(eval_metric_expr("time").unwrap().1, "ms");
+    }
+
+    #[test]
+    fn eval_metric_expr_unknown_is_none() {
+        assert!(eval_metric_expr("bogus").is_none());
+        assert!(eval_metric_expr("").is_none());
+    }
+
+    #[test]
+    fn flake_output_node_maps_to_graph_node() {
+        let model = flake_output_node::Model {
+            id: FlakeOutputNodeId::now_v7(),
+            evaluation: EvaluationId::now_v7(),
+            path: "packages.x86_64-linux.hello".into(),
+            parent: Some("packages.x86_64-linux".into()),
+            name: "hello".into(),
+            kind: "derivation".into(),
+            is_derivation: true,
+            drv_path: Some("/nix/store/abc-hello.drv".into()),
+        };
+        let node = to_graph_node(model);
+        assert_eq!(node.path, "packages.x86_64-linux.hello");
+        assert_eq!(node.parent.as_deref(), Some("packages.x86_64-linux"));
+        assert_eq!(node.name, "hello");
+        assert_eq!(node.kind, "derivation");
+        assert!(node.is_derivation);
+        assert_eq!(node.drv_path.as_deref(), Some("/nix/store/abc-hello.drv"));
+    }
 }

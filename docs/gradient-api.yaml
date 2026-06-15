@@ -3059,6 +3059,35 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /evals/{evaluation}/flake-graph:
+    parameters:
+      - $ref: '#/components/parameters/EvaluationId'
+    get:
+      tags: [evals]
+      summary: Get the walked flake output graph for an evaluation
+      description: |-
+        Returns the flake output nodes walked during evaluation, each with its
+        attribute path, parent, name, kind, and (for derivations) the `.drv` path.
+      operationId: getEvalFlakeGraph
+      responses:
+        '200':
+          description: Flake output graph
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/FlakeGraphNode'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /evals/{evaluation}/runtime-closure:
     parameters:
       - $ref: '#/components/parameters/EvaluationId'
@@ -5926,6 +5955,32 @@ paths:
         '404':
           description: Unknown metric
 
+  /board/evals/expensive-by-resource:
+    get:
+      tags: [board]
+      summary: Most expensive evaluations by resource
+      description: Top evaluations by a captured per-eval resource (peak RSS/heap, thunks, fn calls, allocated bytes, or total eval time) from `evaluation_metric`. Org-scoped through the evaluation's project.
+      operationId: getBoardExpensiveEvalsByResource
+      parameters:
+        - { name: metric, in: query, required: true, schema: { type: string, enum: [rss, heap, thunks, fncalls, alloc, time] } }
+        - { name: window_days, in: query, schema: { type: integer } }
+      responses:
+        '200':
+          description: Top evaluations by resource
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ExpensiveEval'
+        '404':
+          description: Unknown metric
+
   /board/jobs/{id}:
     get:
       tags: [board]
@@ -8618,6 +8673,53 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ClosureEdge'
+
+    ExpensiveEval:
+      type: object
+      required: [evaluation, organization, name, value, unit, worker]
+      properties:
+        evaluation:
+          type: string
+          format: uuid
+        organization:
+          type: string
+          format: uuid
+        name:
+          type: string
+          description: Evaluation wildcard (entry-point attribute pattern)
+        value:
+          type: number
+          format: double
+          description: Captured metric value in the metric's `unit`
+        unit:
+          type: string
+          description: Unit of `value` (MB, count, bytes, or ms depending on the metric)
+        worker:
+          type: string
+          description: Worker that produced the evaluation metric
+
+    FlakeGraphNode:
+      type: object
+      required: [path, name, kind, is_derivation]
+      properties:
+        path:
+          type: string
+          description: Attribute path of the flake output node
+        parent:
+          type: string
+          nullable: true
+          description: Attribute path of the parent node (null at the root)
+        name:
+          type: string
+        kind:
+          type: string
+          description: Node kind (e.g. attrset or derivation)
+        is_derivation:
+          type: boolean
+        drv_path:
+          type: string
+          nullable: true
+          description: Derivation `.drv` store path when the node is a derivation
 
     BuildProduct:
       type: object

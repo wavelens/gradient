@@ -483,6 +483,10 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         .route("/evals/{evaluation}/artefacts", get(evals::get_artefacts))
         .route("/evals/{evaluation}/closure", get(builds::get_eval_closure))
         .route(
+            "/evals/{evaluation}/flake-graph",
+            get(board::get_eval_flake_graph),
+        )
+        .route(
             "/evals/{evaluation}/runtime-closure",
             get(builds::get_eval_runtime_closure),
         )
@@ -549,6 +553,10 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         .route(
             "/board/jobs/expensive-by-resource",
             get(board::get_expensive_by_resource),
+        )
+        .route(
+            "/board/evals/expensive-by-resource",
+            get(board::get_expensive_evals_by_resource),
         )
         .route("/board/jobs/{id}", get(board::get_dispatched_job))
         .route("/board/scoring/summary", get(board::get_scoring_summary))
