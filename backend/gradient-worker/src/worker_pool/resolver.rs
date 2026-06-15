@@ -10,10 +10,11 @@ use futures::future::BoxFuture;
 use futures::stream::{FuturesUnordered, StreamExt};
 use gradient_db::{Derivation, parse_drv};
 use gradient_nix::{DerivationResolver, ResolvedDerivation};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use super::pool::EvalWorkerPool;
 use crate::nix::eval_worker::ResolvedItem;
+use crate::worker_pool::eval_stats::{EvalStatsAccumulator, EvalStatsTotals, StatsDelta};
 
 /// Strips `/nix/store/` and returns just the hash-name component (mirrors the
 /// helper in [`super::resolver`]).
@@ -36,10 +37,43 @@ fn nix_store_path(hash_name: &str) -> String {
 pub struct WorkerPoolResolver {
     pool: Arc<EvalWorkerPool>,
     eval_cache_dir: String,
+    /// Accumulates per-request deltas + peak RSS across one eval. Drained by
+    /// the executor via [`Self::take_eval_stats`] once the eval finishes.
+    stats: Arc<Mutex<EvalStatsAccumulator>>,
+    /// The eval's user entry-point patterns, set by `list_flake_derivations` so
+    /// the later resolve pass can bucket each delta under its owning pattern.
+    patterns: Arc<Mutex<Vec<String>>>,
 }
 
 /// One resolved attr keyed by its index in the original request.
 type IndexedDerivation = (usize, ResolvedDerivation);
+
+/// Pick `attr`'s owning entry-point: the longest wildcard `pattern` whose
+/// segments all match `attr`'s leading segments (a `*` segment matches any one
+/// segment). Falls back to `attr`'s top-level segment when nothing matches.
+fn entry_point_of(attr: &str, patterns: &[String]) -> String {
+    let attr_segs: Vec<&str> = attr.split('.').collect();
+    let matches = |pat: &str| {
+        let pat_segs: Vec<&str> = pat.split('.').collect();
+        pat_segs.len() <= attr_segs.len()
+            && pat_segs
+                .iter()
+                .zip(&attr_segs)
+                .all(|(p, a)| *p == "*" || p == a)
+    };
+
+    // Rank by segment count, then prefer fewer `*` (the more specific pattern).
+    patterns
+        .iter()
+        .filter(|p| matches(p))
+        .max_by_key(|p| {
+            let segs = p.split('.').count();
+            let literals = p.split('.').filter(|s| *s != "*").count();
+            (segs, literals)
+        })
+        .cloned()
+        .unwrap_or_else(|| attr_segs.first().copied().unwrap_or("").to_string())
+}
 
 /// Convert a worker's [`ResolvedItem`] into the trait's `(attr, Result)` shape.
 fn item_to_resolved(item: ResolvedItem) -> ResolvedDerivation {
@@ -140,7 +174,21 @@ impl WorkerPoolResolver {
                 eval_cache_dir.clone(),
             )),
             eval_cache_dir,
+            stats: Arc::new(Mutex::new(EvalStatsAccumulator::default())),
+            patterns: Arc::new(Mutex::new(Vec::new())),
         }
+    }
+
+    /// Bucket one worker delta under `entry_point`, folding peak RSS in too.
+    fn observe_stats(&self, entry_point: &str, delta: StatsDelta, rss: u64) {
+        self.stats.lock().unwrap().observe(entry_point, delta, rss);
+    }
+
+    /// Drain the accumulated per-eval stats, resetting the accumulator so the
+    /// next eval starts clean. Called once by the executor at eval completion.
+    pub fn take_eval_stats(&self) -> EvalStatsTotals {
+        let acc = std::mem::take(&mut *self.stats.lock().unwrap());
+        acc.finish()
     }
 
     /// On-disk eval-cache directory shared by every worker (set as
@@ -209,14 +257,22 @@ impl WorkerPoolResolver {
         repository: &str,
         wildcards: Vec<String>,
     ) -> Result<(Vec<String>, Vec<String>)> {
+        let bucket = wildcards
+            .first()
+            .map(|w| entry_point_of(w, &self.patterns.lock().unwrap()))
+            .unwrap_or_default();
         let mut worker = self.pool.acquire().await?;
         match worker.list(repository.to_string(), wildcards).await {
-            Ok(v) => {
-                if worker.rss_bytes() > self.pool.max_eval_rss() {
+            Ok((attrs, warnings, stats)) => {
+                let rss = worker.rss_bytes();
+                if let Some(delta) = stats {
+                    self.observe_stats(&bucket, delta, rss);
+                }
+                if rss > self.pool.max_eval_rss() {
                     worker.mark_dead();
                 }
 
-                Ok(v)
+                Ok((attrs, warnings))
             }
             Err(e) => {
                 worker.mark_dead();
@@ -234,10 +290,21 @@ impl WorkerPoolResolver {
         repository: &str,
         attrs: Vec<String>,
     ) -> Result<(Vec<ResolvedItem>, Vec<String>)> {
+        // A batch's delta is one number, so it is attributed whole to the
+        // entry-point of its first attr; the dynamic queue keeps batches small
+        // and same-prefix, so cross-bucket bleed is minor.
+        let bucket = attrs
+            .first()
+            .map(|a| entry_point_of(a, &self.patterns.lock().unwrap()))
+            .unwrap_or_default();
         let mut worker = self.pool.acquire().await?;
         match worker.resolve(repository.to_string(), attrs).await {
-            Ok((items, warnings)) => {
-                if worker.rss_bytes() > self.pool.max_eval_rss() {
+            Ok((items, warnings, stats)) => {
+                let rss = worker.rss_bytes();
+                if let Some(delta) = stats {
+                    self.observe_stats(&bucket, delta, rss);
+                }
+                if rss > self.pool.max_eval_rss() {
                     worker.mark_dead();
                 }
 
@@ -258,6 +325,13 @@ impl DerivationResolver for WorkerPoolResolver {
         repository: String,
         wildcards: Vec<String>,
     ) -> Result<(Vec<String>, Vec<String>)> {
+        // Record the user entry-points so the resolve pass can bucket by them.
+        *self.patterns.lock().unwrap() = wildcards
+            .iter()
+            .filter(|w| !w.starts_with('!'))
+            .cloned()
+            .collect();
+
         // Plan the split on one worker (cheap: forces only the prefix attrset),
         // then discover each shard separately. A single giant discovery of the
         // whole flake is the call that blows past the RAM budget and never
@@ -375,13 +449,14 @@ impl DerivationResolver for WorkerPoolResolver {
         {
             let repo = repository.as_str();
             let sink = &warnings;
-            let resolve_batch = move |attrs: Vec<String>| -> BoxFuture<'_, Result<Vec<ResolvedItem>>> {
-                Box::pin(async move {
-                    let (items, w) = self.resolve_once(repo, attrs).await?;
-                    sink.lock().unwrap().extend(w);
-                    Ok(items)
-                })
-            };
+            let resolve_batch =
+                move |attrs: Vec<String>| -> BoxFuture<'_, Result<Vec<ResolvedItem>>> {
+                    Box::pin(async move {
+                        let (items, w) = self.resolve_once(repo, attrs).await?;
+                        sink.lock().unwrap().extend(w);
+                        Ok(items)
+                    })
+                };
 
             let (queue, indexed, resolve_batch) = (&queue, &indexed, &resolve_batch);
             let mut tasks: FuturesUnordered<_> = (0..n_workers)
@@ -451,6 +526,30 @@ mod tests {
         assert_eq!(nix_store_path("hash-name"), "/nix/store/hash-name");
     }
 
+    #[test]
+    fn entry_point_longest_prefix_match() {
+        let pats = vec!["packages.*.*".into(), "packages.*.foo".into()];
+        assert_eq!(
+            entry_point_of("packages.x86_64-linux.hello", &["packages.*.*".into()]),
+            "packages.*.*"
+        );
+        // A more specific literal pattern wins over the broad wildcard.
+        assert_eq!(
+            entry_point_of("packages.x86_64-linux.foo", &pats),
+            "packages.*.foo"
+        );
+        // No matching pattern falls back to the attr's top-level segment.
+        assert_eq!(entry_point_of("checks.x86_64-linux.t", &pats), "checks");
+        // A `*` segment matches any one segment.
+        assert_eq!(
+            entry_point_of(
+                "devShells.aarch64-linux.default",
+                &["devShells.*.default".into()]
+            ),
+            "devShells.*.default"
+        );
+    }
+
     fn ok_item(attr: &str) -> ResolvedItem {
         ResolvedItem {
             attr: attr.to_string(),
@@ -502,21 +601,22 @@ mod tests {
 
         let mut out = {
             let stub = &stub;
-            let resolve_once = move |attrs: Vec<String>| -> BoxFuture<'_, Result<Vec<ResolvedItem>>> {
-                Box::pin(async move {
-                    let prior = {
-                        let mut n = stub.calls.lock().unwrap();
-                        let prior = *n;
-                        *n += 1;
-                        prior
-                    };
-                    if (stub.crash_if)(&attrs, prior) {
-                        anyhow::bail!("worker crashed");
-                    }
+            let resolve_once =
+                move |attrs: Vec<String>| -> BoxFuture<'_, Result<Vec<ResolvedItem>>> {
+                    Box::pin(async move {
+                        let prior = {
+                            let mut n = stub.calls.lock().unwrap();
+                            let prior = *n;
+                            *n += 1;
+                            prior
+                        };
+                        if (stub.crash_if)(&attrs, prior) {
+                            anyhow::bail!("worker crashed");
+                        }
 
-                    Ok(attrs.iter().map(|a| ok_item(a)).collect())
-                })
-            };
+                        Ok(attrs.iter().map(|a| ok_item(a)).collect())
+                    })
+                };
             resolve_chunk(&resolve_once, chunk, 0).await.unwrap()
         };
         out.sort_by_key(|(idx, _)| *idx);
@@ -532,11 +632,10 @@ mod tests {
     #[tokio::test]
     async fn no_crash_resolves_all_in_one_call() {
         let (out, calls) = run(crashes_on(&[]), &["a", "b", "c"]).await;
-        assert_eq!(out, vec![
-            ("a".into(), true),
-            ("b".into(), true),
-            ("c".into(), true),
-        ]);
+        assert_eq!(
+            out,
+            vec![("a".into(), true), ("b".into(), true), ("c".into(), true),]
+        );
         assert_eq!(calls, 1, "no crash → single batch call");
     }
 

@@ -4,13 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Per-request counter delta a worker reports after serving List/Resolve.
 /// Counters are diffs since the worker's prior request; gc_heap_size is the
-/// current gauge at report time.
-#[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct StatsDelta {
+/// current gauge at report time. Canonical delta type, shared internally and
+/// on the eval-worker wire protocol.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+pub struct StatsDelta {
     pub nr_thunks: u64,
     pub nr_function_calls: u64,
     pub nr_primop_calls: u64,
@@ -21,7 +23,10 @@ pub(crate) struct StatsDelta {
 
 impl StatsDelta {
     #[cfg(test)]
-    fn with_heap(mut self, h: u64) -> Self { self.gc_heap_size = h; self }
+    fn with_heap(mut self, h: u64) -> Self {
+        self.gc_heap_size = h;
+        self
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -46,7 +51,7 @@ pub(crate) struct EvalStatsTotals {
 
 /// Accumulates per-request deltas into eval-wide totals, per-entry-point
 /// buckets, and peak gauges.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub(crate) struct EvalStatsAccumulator {
     totals: EvalStatsTotals,
     buckets: HashMap<String, EntryPointCost>,
@@ -62,9 +67,13 @@ impl EvalStatsAccumulator {
         self.totals.peak_heap_bytes = self.totals.peak_heap_bytes.max(delta.gc_heap_size);
         self.totals.peak_rss_bytes = self.totals.peak_rss_bytes.max(rss_bytes);
 
-        let b = self.buckets.entry(entry_point.to_string()).or_insert_with(|| {
-            EntryPointCost { attr: entry_point.to_string(), ..Default::default() }
-        });
+        let b = self
+            .buckets
+            .entry(entry_point.to_string())
+            .or_insert_with(|| EntryPointCost {
+                attr: entry_point.to_string(),
+                ..Default::default()
+            });
         b.thunks += delta.nr_thunks;
         b.fn_calls += delta.nr_function_calls;
         b.alloc_bytes += delta.alloc_bytes;
@@ -81,8 +90,14 @@ mod tests {
     use super::*;
 
     fn d(thunks: u64, fn_calls: u64, alloc: u64) -> StatsDelta {
-        StatsDelta { nr_thunks: thunks, nr_function_calls: fn_calls, nr_primop_calls: 0,
-                     alloc_bytes: alloc, gc_heap_size: alloc, ..Default::default() }
+        StatsDelta {
+            nr_thunks: thunks,
+            nr_function_calls: fn_calls,
+            nr_primop_calls: 0,
+            alloc_bytes: alloc,
+            gc_heap_size: alloc,
+            ..Default::default()
+        }
     }
 
     #[test]
@@ -105,8 +120,13 @@ mod tests {
         acc.observe("a", d(6, 0, 0), 100);
         let mut costs = acc.finish().per_entry_point;
         costs.sort_by(|x, y| x.attr.cmp(&y.attr));
-        assert_eq!(costs.iter().map(|c| (c.attr.as_str(), c.thunks)).collect::<Vec<_>>(),
-                   vec![("a", 16), ("b", 4)]);
+        assert_eq!(
+            costs
+                .iter()
+                .map(|c| (c.attr.as_str(), c.thunks))
+                .collect::<Vec<_>>(),
+            vec![("a", 16), ("b", 4)]
+        );
     }
 
     #[test]

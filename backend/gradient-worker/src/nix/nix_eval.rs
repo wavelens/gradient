@@ -67,9 +67,20 @@ impl NixEvaluator {
         })
     }
 
+    /// Cheap cumulative Nix evaluator counters (thunks, calls, GC gauges).
+    /// The caller diffs successive reads to get a per-request delta.
+    pub fn stats(&self) -> Result<nix_bindings::EvalStats> {
+        self.state
+            .stats()
+            .map_err(|e| anyhow::anyhow!("eval stats: {e}"))
+    }
+
     /// Lock `flake_ref` and open its eval cache, returning a walker that reuses
     /// the one locked flake + warm cursor for all discover/resolve calls.
-    pub(crate) fn walker(&self, flake_ref: &str) -> Result<crate::nix::flake_walk::FlakeWalker<'_>> {
+    pub(crate) fn walker(
+        &self,
+        flake_ref: &str,
+    ) -> Result<crate::nix::flake_walk::FlakeWalker<'_>> {
         crate::nix::flake_walk::FlakeWalker::open(
             &self.ctx,
             &self.fetch_settings,
