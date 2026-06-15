@@ -3782,7 +3782,7 @@ dependencies = [
 [[package]]
 name = "nix-bindings"
 version = "0.2347.2"
-source = "git+https://github.com/DerDennisOP/nix-bindings?branch=feat%2Foptimized-eval-capi#a65cf1829b7473e7a61c3772c935390598614cd6"
+source = "git+https://github.com/DerDennisOP/nix-bindings?branch=feat%2Feval-metrics-stats#b1abd9b8dd7ea8a7df3b23a41af64ac7de586106"
 dependencies = [
  "nix-bindings-sys",
 ]
@@ -3790,7 +3790,7 @@ dependencies = [
 [[package]]
 name = "nix-bindings-sys"
 version = "0.2347.2"
-source = "git+https://github.com/DerDennisOP/nix-bindings?branch=feat%2Foptimized-eval-capi#a65cf1829b7473e7a61c3772c935390598614cd6"
+source = "git+https://github.com/DerDennisOP/nix-bindings?branch=feat%2Feval-metrics-stats#b1abd9b8dd7ea8a7df3b23a41af64ac7de586106"
 dependencies = [
  "bindgen",
  "cc",
