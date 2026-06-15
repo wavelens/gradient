@@ -14,6 +14,8 @@ use gradient_entity::worker_registration::{
     self, ActiveModel as AWorkerRegistration, Entity as EWorkerRegistration,
     Model as MWorkerRegistration,
 };
+use gradient_entity::{base_worker, organization_base_worker};
+use gradient_types::{EBaseWorker, EOrganizationBaseWorker};
 use gradient_types::ids::*;
 use gradient_types::proto::GradientCapabilities;
 use gradient_types::{BaseResponse, MUser};
@@ -81,6 +83,8 @@ pub struct OrgWorkerEntry {
     pub enable_fetch: bool,
     pub enable_eval: bool,
     pub enable_build: bool,
+    /// True for server-level base workers, false for per-org registrations.
+    pub is_base: bool,
     /// Present when the worker is currently connected to this server.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub live: Option<WorkerLiveInfo>,
@@ -210,6 +214,28 @@ fn worker_live_for_org(info: &WorkerInfo, org: OrganizationId) -> bool {
         .is_none_or(|peers| peers.contains(&org))
 }
 
+/// Maps an enabled base-worker row into an `OrgWorkerEntry`. `active` reflects
+/// whether the requesting org has opted in via `organization_base_worker`.
+fn base_worker_entry(
+    bw: base_worker::Model,
+    active: bool,
+    live: Option<WorkerLiveInfo>,
+) -> OrgWorkerEntry {
+    OrgWorkerEntry {
+        active,
+        worker_id: bw.worker_id,
+        display_name: bw.display_name,
+        registered_at: bw.created_at,
+        url: bw.url,
+        created_by: bw.created_by,
+        enable_fetch: bw.enable_fetch,
+        enable_eval: bw.enable_eval,
+        enable_build: bw.enable_build,
+        is_base: true,
+        live,
+    }
+}
+
 pub async fn get_org_workers(
     state: State<Arc<ServerState>>,
     Path(organization): Path<String>,
@@ -241,25 +267,27 @@ pub async fn get_org_workers(
         .map(|w| (w.id.clone(), w))
         .collect();
 
-    let entries = registrations
+    // Live info is only exposed when the worker has actually authenticated for
+    // THIS org. A worker may be globally connected (authorized for some other
+    // org) without holding a valid token for this org.
+    let live_for = |worker_id: &str| {
+        live_workers
+            .get(worker_id)
+            .filter(|w| worker_live_for_org(w, org.id))
+            .map(|w| WorkerLiveInfo {
+                capabilities: w.capabilities.clone(),
+                architectures: w.architectures.clone(),
+                system_features: w.system_features.clone(),
+                max_concurrent_builds: w.max_concurrent_builds,
+                assigned_job_count: w.assigned_job_count,
+                draining: w.draining,
+            })
+    };
+
+    let mut entries: Vec<OrgWorkerEntry> = registrations
         .into_iter()
         .map(|reg| {
-            // Only expose live info when the worker has actually authenticated
-            // for THIS org. A worker may be globally connected (authorized for
-            // some other org) without having a valid token for this org.
-            let live = live_workers
-                .get(&reg.worker_id)
-                .filter(|w| worker_live_for_org(w, org.id))
-                .map(|w| WorkerLiveInfo {
-                    capabilities: w.capabilities.clone(),
-                    // architectures/system_features are only non-empty for build-capable workers
-                    // (WorkerCapabilities is only sent when `build` is negotiated)
-                    architectures: w.architectures.clone(),
-                    system_features: w.system_features.clone(),
-                    max_concurrent_builds: w.max_concurrent_builds,
-                    assigned_job_count: w.assigned_job_count,
-                    draining: w.draining,
-                });
+            let live = live_for(&reg.worker_id);
             OrgWorkerEntry {
                 worker_id: reg.worker_id,
                 display_name: reg.display_name,
@@ -270,10 +298,29 @@ pub async fn get_org_workers(
                 enable_fetch: reg.enable_fetch,
                 enable_eval: reg.enable_eval,
                 enable_build: reg.enable_build,
+                is_base: false,
                 live,
             }
         })
         .collect();
+
+    let base_workers = EBaseWorker::find()
+        .filter(base_worker::Column::Enabled.eq(true))
+        .all(&state.web_db)
+        .await?;
+    let enabled_ids: std::collections::HashSet<BaseWorkerId> = EOrganizationBaseWorker::find()
+        .filter(organization_base_worker::Column::Organization.eq(org.id))
+        .all(&state.web_db)
+        .await?
+        .into_iter()
+        .map(|r| r.base_worker)
+        .collect();
+
+    entries.extend(base_workers.into_iter().map(|bw| {
+        let live = live_for(&bw.worker_id);
+        let active = enabled_ids.contains(&bw.id);
+        base_worker_entry(bw, active, live)
+    }));
 
     Ok(ok_json(entries))
 }
@@ -527,5 +574,30 @@ mod tests {
     fn open_worker_is_live_on_any_org() {
         let w = worker(None);
         assert!(worker_live_for_org(&w, OrganizationId::now_v7()));
+    }
+
+    fn base_worker_model() -> base_worker::Model {
+        base_worker::Model {
+            id: BaseWorkerId::now_v7(),
+            worker_id: "bw1".into(),
+            display_name: "Base 1".into(),
+            enable_fetch: true,
+            enable_eval: true,
+            enable_build: true,
+            enabled: true,
+            created_at: gradient_types::now(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn base_worker_entry_is_flagged_and_reflects_opt_in() {
+        let opted_in = base_worker_entry(base_worker_model(), true, None);
+        assert!(opted_in.is_base);
+        assert!(opted_in.active);
+
+        let opted_out = base_worker_entry(base_worker_model(), false, None);
+        assert!(opted_out.is_base);
+        assert!(!opted_out.active);
     }
 }
