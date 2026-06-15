@@ -237,6 +237,12 @@ in {
         default = true;
       };
 
+      evalMetricsEnabled = lib.mkOption {
+        description = "Capture per-evaluation Nix metrics (thunks, heap, peak RSS, per-entry-point hotspots, flake graph). When false, eval-workers skip the stats read (zero overhead).";
+        type = lib.types.bool;
+        default = true;
+      };
+
       maxProtoConnections = lib.mkOption {
         description = "Maximum number of simultaneous proto WebSocket connections";
         type = lib.types.ints.positive;
@@ -450,6 +456,7 @@ in {
           GRADIENT_WORKER_EVAL_WORKERS                = toString cfg.settings.evalWorkers;
           GRADIENT_MAX_EVAL_RSS                       = toString cfg.settings.maxEvalRss;
           GRADIENT_EVAL_CACHE_SHARE                   = lib.boolToString cfg.settings.evalCacheShare;
+          GRADIENT_EVAL_METRICS_ENABLED               = lib.boolToString cfg.settings.evalMetricsEnabled;
           GRADIENT_MAX_PROTO_CONNECTIONS              = toString cfg.settings.maxProtoConnections;
           GRADIENT_WORKER_GCROOTS_DIR                 = cfg.settings.gcrootsDir;
           GRADIENT_WORKER_BUILD_METRICS               = lib.boolToString cfg.settings.buildMetrics;
