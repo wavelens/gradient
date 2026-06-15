@@ -3775,9 +3775,12 @@ paths:
       summary: List registered workers for an organization
       description: |
         Returns all workers registered under this organization (peer), merged with
-        live status from the scheduler for currently connected workers.
+        live status from the scheduler for currently connected workers, plus the
+        server-level base workers (`is_base: true`) the org can opt into.
         Live fields (`architectures`, `system_features`, etc.) are only populated
-        for build-capable workers that have sent `WorkerCapabilities`.
+        for build-capable workers that have sent `WorkerCapabilities`. A base
+        worker is omitted when the org already has a normal registration with the
+        same `worker_id` - that registration shadows it.
       operationId: listOrgWorkers
       security:
         - bearerAuth: []
@@ -3937,6 +3940,9 @@ paths:
       description: |
         Removes the worker registration. The worker may still be connected until
         it disconnects naturally - it will not be able to reconnect after that.
+        The org's own registration is removed first, so a normal worker is deleted
+        even when a base worker shares its `worker_id`; `409` is only returned when
+        the id resolves solely to a base worker (managed via server state).
       operationId: deleteOrgWorker
       security:
         - bearerAuth: []
@@ -3956,6 +3962,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: The id resolves only to a base worker, which is managed via server state.
 
   /orgs/{organization}/workers/{worker_id}/test:
     post:

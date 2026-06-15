@@ -246,6 +246,19 @@ fn base_worker_entry(
     }
 }
 
+/// A normal per-org registration shadows a base worker with the same
+/// `worker_id` (#407): the org manages its own entry, so the redundant base
+/// worker is dropped from that org's list.
+fn unshadowed_base_workers(
+    base_workers: Vec<base_worker::Model>,
+    registered_worker_ids: &std::collections::HashSet<String>,
+) -> Vec<base_worker::Model> {
+    base_workers
+        .into_iter()
+        .filter(|bw| !registered_worker_ids.contains(&bw.worker_id))
+        .collect()
+}
+
 pub async fn get_org_workers(
     state: State<Arc<ServerState>>,
     Path(organization): Path<String>,
@@ -326,7 +339,10 @@ pub async fn get_org_workers(
         .map(|r| r.base_worker)
         .collect();
 
-    entries.extend(base_workers.into_iter().map(|bw| {
+    let registered_ids: std::collections::HashSet<String> =
+        entries.iter().map(|e| e.worker_id.clone()).collect();
+
+    entries.extend(unshadowed_base_workers(base_workers, &registered_ids).into_iter().map(|bw| {
         let live = live_for(&bw.worker_id);
         let active = enabled_ids.contains(&bw.id);
         base_worker_entry(bw, active, live)
@@ -630,15 +646,9 @@ pub async fn delete_org_worker(
     )
     .await?;
 
-    if gradient_db::base_workers::enabled_base_worker_by_worker_id(&state.web_db, &worker_id)
-        .await?
-        .is_some()
-    {
-        return Err(WebError::conflict(
-            "base workers cannot be deleted; manage them via server state",
-        ));
-    }
-
+    // A normal registration shadows a base worker of the same id (#407), so
+    // delete it first; only fall back to the base-worker guard when the org has
+    // no registration to remove.
     let result = EWorkerRegistration::delete_many()
         .filter(worker_registration::Column::PeerId.eq(org.id))
         .filter(worker_registration::Column::WorkerId.eq(&worker_id))
@@ -646,6 +656,15 @@ pub async fn delete_org_worker(
         .await?;
 
     if result.rows_affected == 0 {
+        if gradient_db::base_workers::enabled_base_worker_by_worker_id(&state.web_db, &worker_id)
+            .await?
+            .is_some()
+        {
+            return Err(WebError::conflict(
+                "base workers cannot be deleted; manage them via server state",
+            ));
+        }
+
         return Err(WebError::not_found("worker registration"));
     }
 
@@ -789,5 +808,19 @@ mod tests {
         let opted_out = base_worker_entry(base_worker_model(), false, None);
         assert!(opted_out.is_base);
         assert!(!opted_out.active);
+    }
+
+    #[test]
+    fn registration_shadows_base_worker_of_same_id() {
+        let shadowed = base_worker_model();
+        let mut other = base_worker_model();
+        other.id = BaseWorkerId::now_v7();
+        other.worker_id = "bw2".into();
+
+        let registered = HashSet::from(["bw1".to_string()]);
+        let visible = unshadowed_base_workers(vec![shadowed, other], &registered);
+
+        assert_eq!(visible.len(), 1, "the registered worker_id is hidden");
+        assert_eq!(visible[0].worker_id, "bw2");
     }
 }
