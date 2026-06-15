@@ -613,8 +613,8 @@ mod auth_decision_tests {
     fn authorize_against_expands_to_enabled_orgs_when_identity_authorized() {
         let identity = "id-1".to_string();
         let enabled = vec!["org-1".to_string(), "org-2".to_string()];
-        let authorized = vec![identity.clone()];
-        let out = if authorized.iter().any(|p| *p == identity) {
+        let authorized = [identity.clone()];
+        let out = if authorized.contains(&identity) {
             enabled.clone()
         } else {
             vec![]

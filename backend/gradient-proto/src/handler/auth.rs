@@ -164,14 +164,14 @@ pub(super) fn expand_base_authorized(
     base: &Option<BaseWorkerChallenge>,
     token_authorized: Vec<String>,
 ) -> Vec<String> {
-    if let Some(b) = base {
-        if let Some(identity) = &b.authorize_against {
-            return if token_authorized.iter().any(|p| p == identity) {
-                b.enabled_orgs.clone()
-            } else {
-                Vec::new()
-            };
-        }
+    if let Some(b) = base
+        && let Some(identity) = &b.authorize_against
+    {
+        return if token_authorized.iter().any(|p| p == identity) {
+            b.enabled_orgs.clone()
+        } else {
+            Vec::new()
+        };
     }
 
     token_authorized
