@@ -8,7 +8,7 @@ import { TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { HttpTestingController } from '@angular/common/http/testing';
-import { BoardService, ExpensiveEval, FlakeGraphNode } from './board.service';
+import { BoardService, ExpensiveEval, FlakeGraphNode, RuleDescription } from './board.service';
 import { environment } from '@environments/environment';
 
 const apiUrl = environment.apiUrl;
@@ -67,5 +67,21 @@ describe('BoardService', () => {
     req.flush({ error: false, message: [sampleNode] });
 
     expect(result).toEqual([sampleNode]);
+  });
+
+  it('getScoringRules() unwraps the catalog and caches it across subscribers', () => {
+    const rules: RuleDescription[] = [{ rule: 'WaitTimeRule', description: 'Grows with queue wait.' }];
+    let first: RuleDescription[] | undefined;
+    service.getScoringRules().subscribe((v) => (first = v));
+
+    const req = httpMock.expectOne(`${apiUrl}/board/scoring/rules`);
+    expect(req.request.method).toBe('GET');
+    req.flush({ error: false, message: rules });
+    expect(first).toEqual(rules);
+
+    let second: RuleDescription[] | undefined;
+    service.getScoringRules().subscribe((v) => (second = v));
+    httpMock.expectNone(`${apiUrl}/board/scoring/rules`);
+    expect(second).toEqual(rules);
   });
 });

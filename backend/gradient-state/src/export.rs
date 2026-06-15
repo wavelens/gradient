@@ -58,6 +58,9 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
     let cache_roles = gradient_entity::cache_role::Entity::find().all(db).await?;
     let api_keys = gradient_entity::api::Entity::find().all(db).await?;
     let registrations = gradient_entity::worker_registration::Entity::find().all(db).await?;
+    let base_workers = gradient_entity::base_worker::Entity::find().all(db).await?;
+    let base_worker_orgs =
+        gradient_entity::organization_base_worker::Entity::find().all(db).await?;
     let integrations = gradient_entity::integration::Entity::find().all(db).await?;
     let org_users = gradient_entity::organization_user::Entity::find().all(db).await?;
     let cache_users = gradient_entity::cache_user::Entity::find().all(db).await?;
@@ -308,6 +311,14 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
         );
     }
 
+    // Server-level base workers live in their own table; emit them with their
+    // pre-enabled orgs so `base_worker = true` entries survive a state round-trip.
+    for bw in &base_workers {
+        config
+            .workers
+            .insert(bw.worker_id.clone(), export_base_worker(bw, &base_worker_orgs, &org_name, &username));
+    }
+
     for i in &integrations {
         let (Ok(kind), Ok(forge)) = (
             IntegrationKind::try_from(i.kind),
@@ -342,6 +353,37 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
     }
 
     Ok(config)
+}
+
+/// Reconstruct a base-worker [`StateWorker`] from its row plus the per-org
+/// opt-ins. `token_file` is unrecoverable from the stored hash, so it is blank
+/// (redacted to `null`), same as the registered-worker export.
+fn export_base_worker(
+    bw: &gradient_entity::base_worker::Model,
+    org_links: &[gradient_entity::organization_base_worker::Model],
+    org_name: &HashMap<OrganizationId, String>,
+    username: &HashMap<UserId, String>,
+) -> StateWorker {
+    let organizations = org_links
+        .iter()
+        .filter(|l| l.base_worker == bw.id)
+        .filter_map(|l| org_name.get(&l.organization).cloned())
+        .collect();
+
+    StateWorker {
+        worker_id: bw.worker_id.clone(),
+        url: bw.url.clone(),
+        organizations,
+        token_file: String::new(),
+        display_name: bw.display_name.clone(),
+        created_by: bw.created_by.and_then(|id| username.get(&id).cloned()).unwrap_or_default(),
+        enable_fetch: bw.enable_fetch,
+        enable_eval: bw.enable_eval,
+        enable_build: bw.enable_build,
+        base_worker: true,
+        authorize_against: bw.authorize_against.map(|u| u.to_string()),
+        enabled: bw.enabled,
+    }
 }
 
 fn export_trigger(
@@ -605,6 +647,54 @@ fn nix_string(s: &str) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn export_base_worker_emits_flag_orgs_and_authorize_against() {
+        let org_a = OrganizationId::now_v7();
+        let org_b = OrganizationId::now_v7();
+        let user = UserId::now_v7();
+        let bw_id = BaseWorkerId::now_v7();
+        let auth = uuid::Uuid::now_v7();
+
+        let bw = gradient_entity::base_worker::Model {
+            id: bw_id,
+            worker_id: "bw-1".to_string(),
+            token_hash: "hash".to_string(),
+            url: Some("https://bw.example".to_string()),
+            display_name: "Base".to_string(),
+            enable_fetch: true,
+            enable_eval: false,
+            enable_build: true,
+            enabled: true,
+            authorize_against: Some(auth),
+            created_by: Some(user),
+            ..Default::default()
+        };
+        let links = vec![
+            gradient_entity::organization_base_worker::Model {
+                organization: org_a,
+                base_worker: bw_id,
+                ..Default::default()
+            },
+            gradient_entity::organization_base_worker::Model {
+                organization: org_b,
+                base_worker: BaseWorkerId::now_v7(),
+                ..Default::default()
+            },
+        ];
+        let org_name = HashMap::from([(org_a, "org-a".to_string()), (org_b, "org-b".to_string())]);
+        let username = HashMap::from([(user, "alice".to_string())]);
+
+        let sw = export_base_worker(&bw, &links, &org_name, &username);
+
+        assert!(sw.base_worker);
+        assert!(sw.enabled);
+        assert!(!sw.enable_eval);
+        assert_eq!(sw.created_by, "alice");
+        assert_eq!(sw.authorize_against, Some(auth.to_string()));
+        assert_eq!(sw.organizations, vec!["org-a".to_string()]);
+        assert!(sw.token_file.is_empty());
+    }
 
     #[test]
     fn redact_nulls_secret_files_at_any_depth() {

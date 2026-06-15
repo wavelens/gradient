@@ -564,6 +564,7 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         )
         .route("/board/jobs/{id}", get(board::get_dispatched_job))
         .route("/board/scoring/summary", get(board::get_scoring_summary))
+        .route("/board/scoring/rules", get(board::get_scoring_rules))
         .route("/board/cache", get(board_metrics::get_board_cache))
         .route("/board/network", get(board_metrics::get_board_network))
         .route("/board/fleet", get(board_metrics::get_board_fleet))

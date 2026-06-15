@@ -21,7 +21,10 @@ unset, and unknown names log a warning and fall back to `resource-aware`.
   `score(&JobContext, &WorkerContext, &InstanceContext) -> f64`.
 - `RulePolicy`: a named `Vec<Box<dyn ScoreRule>>` whose `score` sums each rule.
 - `ScoreRule` (`rule.rs`): one
-  `score(&JobContext, &WorkerContext, &InstanceContext) -> f64` contribution.
+  `score(&JobContext, &WorkerContext, &InstanceContext) -> f64` contribution
+  plus a `description()` explaining what it rewards or penalizes. The board UI
+  reads these via `GET /board/scoring/rules` (`rule_catalog()`) to show a help
+  popup next to each rule name.
 - Three scoring inputs:
   - `JobContext` — per-candidate: kind, architecture, missing-path count,
     missing NAR size, dependency count, `queued_at`/`ready_at`, `rescore_count`
@@ -121,7 +124,8 @@ affinity rules are no-ops.
 
 ## Adding a rule or policy
 
-Implement `ScoreRule` for a new contribution, add it to a rule list in
-`policy.rs` (or a new list), and register the named policy in `policy_by_name`.
-Each rule has unit tests in `backend/score/src/rules`; run them with
-`cargo test -p score`.
+Implement `ScoreRule` (including `description()`) for a new contribution, add it
+to a rule list in `policy.rs` (or a new list), and register the named policy in
+`policy_by_name`. The rule is automatically picked up by `rule_catalog()` and so
+appears in the board's rule-help popup. Each rule has unit tests in
+`backend/gradient-score/src/rules`; run them with `cargo test -p gradient-score`.

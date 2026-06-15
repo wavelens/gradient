@@ -14,7 +14,7 @@ breakdown, connected workers, throughput, and the most expensive builds.
 
 - **Overview** — live KPIs (connected workers, pending/active jobs, dispatched count) and builds-completed-per-hour.
 - **Live Jobs** — the in-flight dispatched jobs you can see, updated live over a WebSocket. Click a persisted job to open its **inspection page** (`/board/jobs/{id}`): the per-rule scoring breakdown with contribution bars, queue→dispatch wait, and the job/worker context captured at dispatch time. Jobs in orgs you can't access are shown only as an aggregate count.
-- **Scheduler & Scoring** — wait breakdown (**queue wait excluding dependency wait** vs dependency wait) plus an aggregate scoring view: score-distribution histogram and mean per-rule contribution over recent dispatches (`GET /api/v1/board/scoring/summary`).
+- **Scheduler & Scoring** — wait breakdown (**queue wait excluding dependency wait** vs dependency wait) plus an aggregate scoring view: score-distribution histogram and mean per-rule contribution over recent dispatches (`GET /api/v1/board/scoring/summary`). The **?** next to a rule name opens a popup explaining what that rule rewards or penalizes, served by `GET /api/v1/board/scoring/rules`.
 - **Throughput** — build pipeline (created/completed/failed) and evaluation rates per hour, plus active jobs per worker.
 - **Durations** — build-duration trend (avg vs max) and the queue-vs-dependency wait split.
 - **Workers** — fleet over time (connected vs draining), capability trend, load-by-capability radar, per-worker slot utilisation, and the live worker table.

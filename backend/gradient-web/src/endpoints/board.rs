@@ -443,6 +443,26 @@ pub struct ScoringSummary {
     pub rules: Vec<RuleContribution>,
 }
 
+#[derive(Serialize)]
+pub struct RuleDescription {
+    pub rule: String,
+    pub description: String,
+}
+
+/// Static catalog of every scoring rule and what it rewards or penalizes, so the
+/// board UI can explain rule names in a help popup without duplicating the text.
+pub async fn get_scoring_rules() -> WebResult<Json<BaseResponse<Vec<RuleDescription>>>> {
+    let rules = gradient_score::rule_catalog()
+        .into_iter()
+        .map(|(rule, description)| RuleDescription {
+            rule: rule.to_string(),
+            description: description.to_string(),
+        })
+        .collect();
+
+    Ok(ok_json(rules))
+}
+
 /// Aggregate scoring view over recently dispatched jobs: a score histogram plus
 /// the mean per-rule contribution, so operators can see how the policy scored
 /// real dispatches without opening every job. Scope-masked to the caller's orgs.

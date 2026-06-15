@@ -9,12 +9,14 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { DialogModule } from 'primeng/dialog';
 import { ButtonModule } from 'primeng/button';
+import { PopoverModule, Popover } from 'primeng/popover';
 import {
   BoardService,
   DispatchedJobDetail,
   GradientCapabilities,
   InstanceContextView,
   PendingJobSummary,
+  RuleDescription,
   Windowed,
 } from '@core/services/board.service';
 import { EvaluationsService, BuildWithOutputs } from '@core/services/evaluations.service';
@@ -24,12 +26,13 @@ interface RuleRow {
   value: number;
   share: number;
   positive: boolean;
+  description: string;
 }
 
 @Component({
   selector: 'app-board-job-detail',
   standalone: true,
-  imports: [CommonModule, RouterModule, DialogModule, ButtonModule],
+  imports: [CommonModule, RouterModule, DialogModule, ButtonModule, PopoverModule],
   template: `
     <a routerLink="/board/live" class="back">← Live Jobs</a>
 
@@ -66,7 +69,12 @@ interface RuleRow {
         <tbody>
           @for (r of rules(); track r.name) {
             <tr>
-              <td class="mono">{{ r.name }}</td>
+              <td class="mono">
+                {{ r.name }}
+                @if (r.description) {
+                  <button type="button" class="help" aria-label="Explain rule" (click)="showHelp($event, r, rulePop)">?</button>
+                }
+              </td>
               <td class="num" [class.neg]="!r.positive">{{ r.value | number: '1.2-2' }}</td>
               <td class="bar-cell">
                 <div class="bar" [class.neg]="!r.positive" [style.width.%]="r.share"></div>
@@ -77,6 +85,12 @@ interface RuleRow {
           }
         </tbody>
       </table>
+
+      <p-popover #rulePop>
+        @if (activeRule(); as a) {
+          <div class="rule-help"><strong>{{ a.rule }}</strong><p>{{ a.description }}</p></div>
+        }
+      </p-popover>
 
       @if (j.candidates) {
         <h2>Runner-up candidates</h2>
@@ -309,6 +323,11 @@ interface RuleRow {
       .drv-row .path { color: #818181; font-size: 0.8rem; word-break: break-all; }
       tbody tr.clickable { cursor: pointer; transition: background 0.1s; }
       tbody tr.clickable:hover { background: #2d333b; }
+      .help { margin-left: 0.4rem; width: 1.1rem; height: 1.1rem; padding: 0; border-radius: 50%; border: 1px solid #3d444d; background: #2d333b; color: #abb0b4; font-size: 0.7rem; line-height: 1; cursor: pointer; }
+      .help:hover { color: #fff; border-color: #6f42c1; }
+      .rule-help { max-width: 22rem; }
+      .rule-help strong { display: block; font-family: monospace; color: #fff; margin-bottom: 0.35rem; }
+      .rule-help p { margin: 0; color: #abb0b4; font-size: 0.85rem; line-height: 1.4; }
     `,
   ],
 })
@@ -320,6 +339,8 @@ export class BoardJobDetailComponent implements OnInit {
   job = signal<DispatchedJobDetail | null>(null);
   pending = signal<PendingJobSummary | null>(null);
   notFound = signal(false);
+  private descriptions = signal<Map<string, string>>(new Map());
+  activeRule = signal<RuleDescription | null>(null);
   build = signal<BuildWithOutputs | null>(null);
   buildDialog = signal(false);
   buildLoading = signal(false);
@@ -338,6 +359,7 @@ export class BoardJobDetailComponent implements OnInit {
 
   rules = computed<RuleRow[]>(() => {
     const rules = this.job()?.score_breakdown?.rules ?? {};
+    const descriptions = this.descriptions();
     const entries = Object.entries(rules);
     const maxAbs = Math.max(1e-9, ...entries.map(([, v]) => Math.abs(v)));
     return entries
@@ -346,9 +368,15 @@ export class BoardJobDetailComponent implements OnInit {
         value,
         share: (Math.abs(value) / maxAbs) * 100,
         positive: value >= 0,
+        description: descriptions.get(name) ?? '',
       }))
       .sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
   });
+
+  showHelp(event: Event, row: RuleRow, popover: Popover): void {
+    this.activeRule.set({ rule: row.name, description: row.description });
+    popover.toggle(event);
+  }
 
   waitLabel = computed(() => {
     const j = this.job();
@@ -361,6 +389,9 @@ export class BoardJobDetailComponent implements OnInit {
   ngOnInit(): void {
     const id = this.route.snapshot.paramMap.get('id');
     if (!id) return;
+    this.board
+      .getScoringRules()
+      .subscribe((rules) => this.descriptions.set(new Map(rules.map((r) => [r.rule, r.description]))));
     this.board.getJob(id).subscribe({
       next: (d) => {
         this.job.set(d);

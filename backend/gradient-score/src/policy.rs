@@ -108,6 +108,16 @@ pub fn resource_aware_rules() -> Vec<Box<dyn ScoreRule>> {
     rules
 }
 
+/// `(name, description)` for every known scoring rule, so the board UI can show
+/// what each rule does. Built from the superset policy and deduplicated by name.
+pub fn rule_catalog() -> Vec<(&'static str, &'static str)> {
+    let mut catalog: Vec<(&'static str, &'static str)> =
+        resource_aware_rules().iter().map(|r| (r.name(), r.description())).collect();
+    catalog.sort_by_key(|(name, _)| *name);
+    catalog.dedup_by_key(|(name, _)| *name);
+    catalog
+}
+
 pub fn policy_by_name(name: &str) -> std::sync::Arc<dyn ScoringPolicy> {
     match name {
         "simple" => std::sync::Arc::new(RulePolicy::new("simple", simple_rules(), false)),
@@ -142,6 +152,25 @@ mod tests {
 
     fn worker_ctx<'a>(archs: &'a [String], feats: &'a [String]) -> WorkerContext<'a> {
         WorkerContext { architectures: archs, system_features: feats, fetch: false, metrics: None }
+    }
+
+    #[test]
+    fn rule_catalog_covers_every_rule_with_a_description() {
+        let catalog = rule_catalog();
+        let rules = resource_aware_rules();
+
+        assert_eq!(catalog.len(), rules.len(), "catalog must list every rule once");
+        for (name, description) in &catalog {
+            assert!(!name.is_empty(), "rule name must not be empty");
+            assert!(!description.is_empty(), "{name} is missing a description");
+        }
+        for r in &rules {
+            assert!(
+                catalog.iter().any(|(n, _)| *n == r.name()),
+                "{} missing from catalog",
+                r.name()
+            );
+        }
     }
 
     #[test]

@@ -39,6 +39,10 @@ impl ScoreRule for PreferLocalBuildRule {
             None => 0.0,
         }
     }
+
+    fn description(&self) -> &'static str {
+        "Rewards keeping a `preferLocalBuild` derivation on a worker that already has its inputs, since shipping it elsewhere rarely pays off."
+    }
 }
 
 #[cfg(test)]

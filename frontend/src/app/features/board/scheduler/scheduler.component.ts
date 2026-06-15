@@ -6,13 +6,14 @@
 
 import { Component, OnInit, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { BoardService, MetricPoint, ScoringSummary } from '@core/services/board.service';
+import { PopoverModule, Popover } from 'primeng/popover';
+import { BoardService, MetricPoint, RuleDescription, ScoringSummary } from '@core/services/board.service';
 import { MetricChartComponent } from '@shared/components/metric-chart/metric-chart.component';
 
 @Component({
   selector: 'app-board-scheduler',
   standalone: true,
-  imports: [CommonModule, MetricChartComponent],
+  imports: [CommonModule, PopoverModule, MetricChartComponent],
   template: `
     <div class="kpis">
       <div class="kpi"><span class="label">Scored dispatches (24h)</span><span class="value">{{ summary()?.sample_size ?? 0 }}</span></div>
@@ -42,7 +43,12 @@ import { MetricChartComponent } from '@shared/components/metric-chart/metric-cha
       <tbody>
         @for (r of ruleRows(); track r.rule) {
           <tr>
-            <td class="mono">{{ r.rule }}</td>
+            <td class="mono">
+              {{ r.rule }}
+              @if (r.description) {
+                <button type="button" class="help" aria-label="Explain rule" (click)="showHelp($event, r, rulePop)">?</button>
+              }
+            </td>
             <td class="num" [class.neg]="r.avg < 0">{{ r.avg | number: '1.2-2' }}</td>
             <td class="num">{{ r.min | number: '1.2-2' }}</td>
             <td class="num">{{ r.max | number: '1.2-2' }}</td>
@@ -53,6 +59,12 @@ import { MetricChartComponent } from '@shared/components/metric-chart/metric-cha
         }
       </tbody>
     </table>
+
+    <p-popover #rulePop>
+      @if (activeRule(); as a) {
+        <div class="rule-help"><strong>{{ a.rule }}</strong><p>{{ a.description }}</p></div>
+      }
+    </p-popover>
   `,
   styles: [
     `
@@ -73,6 +85,11 @@ import { MetricChartComponent } from '@shared/components/metric-chart/metric-cha
       .bar { height: 10px; background: #28a745; border-radius: 3px; min-width: 2px; }
       .bar.neg { background: #dc3545; }
       .muted { color: #818181; }
+      .help { margin-left: 0.4rem; width: 1.1rem; height: 1.1rem; padding: 0; border-radius: 50%; border: 1px solid #3d444d; background: #2d333b; color: #abb0b4; font-size: 0.7rem; line-height: 1; cursor: pointer; }
+      .help:hover { color: #fff; border-color: #6f42c1; }
+      .rule-help { max-width: 22rem; }
+      .rule-help strong { display: block; font-family: monospace; color: #fff; margin-bottom: 0.35rem; }
+      .rule-help p { margin: 0; color: #abb0b4; font-size: 0.85rem; line-height: 1.4; }
     `,
   ],
 })
@@ -82,6 +99,8 @@ export class BoardSchedulerComponent implements OnInit {
   private wait = signal<MetricPoint[]>([]);
   private deps = signal<MetricPoint[]>([]);
   summary = signal<ScoringSummary | null>(null);
+  private descriptions = signal<Map<string, string>>(new Map());
+  activeRule = signal<RuleDescription | null>(null);
 
   waitCategories = computed(() => this.wait().map((p) => p.bucket_start.slice(11, 16)));
   waitSeries = computed(() => {
@@ -101,13 +120,26 @@ export class BoardSchedulerComponent implements OnInit {
 
   ruleRows = computed(() => {
     const rules = this.summary()?.rules ?? [];
+    const descriptions = this.descriptions();
     const maxAbs = Math.max(1e-9, ...rules.map((r) => Math.abs(r.avg)));
-    return rules.map((r) => ({ ...r, share: (Math.abs(r.avg) / maxAbs) * 100 }));
+    return rules.map((r) => ({
+      ...r,
+      share: (Math.abs(r.avg) / maxAbs) * 100,
+      description: descriptions.get(r.rule) ?? '',
+    }));
   });
+
+  showHelp(event: Event, row: { rule: string; description: string }, popover: Popover): void {
+    this.activeRule.set({ rule: row.rule, description: row.description });
+    popover.toggle(event);
+  }
 
   ngOnInit(): void {
     this.board.query('dispatch.wait_ms', 'hour').subscribe((p) => this.wait.set(p));
     this.board.query('deps.wait_ms', 'hour').subscribe((p) => this.deps.set(p));
     this.board.getScoringSummary(24).subscribe((s) => this.summary.set(s));
+    this.board
+      .getScoringRules()
+      .subscribe((rules) => this.descriptions.set(new Map(rules.map((r) => [r.rule, r.description]))));
   }
 }
