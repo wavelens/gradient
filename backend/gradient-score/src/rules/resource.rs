@@ -30,8 +30,7 @@ impl ScoreRule for ResourceFitRule {
         instance: &InstanceContext,
     ) -> f64 {
         let Some(m) = worker.metrics else { return 0.0 };
-        let Some(b) = job.job.build() else { return 0.0 };
-        let h = b.history();
+        let h = job.job.history();
         if h.samples == 0 {
             return 0.0;
         }
@@ -68,6 +67,10 @@ mod tests {
             None,
             LazyProviders { closure_size: &|| None, history: provider },
         )
+    }
+
+    fn eval_job_with_history(h: HistoryPrediction) -> ScoredJob<'static> {
+        ScoredJob::new_eval("eval", OrganizationId::now_v7(), true, h)
     }
 
     fn ctx<'a>(job: &'a ScoredJob<'a>) -> JobContext<'a> {
@@ -129,6 +132,16 @@ mod tests {
         assert!(s_strong > 0.0);
         let cap = rule.cpu_affinity_bonus * rule.cpu_bonus_cap;
         assert!((s_monster - cap).abs() < 0.001, "cpu bonus must cap at {cap}, got {s_monster}");
+    }
+
+    #[test]
+    fn eval_ram_overshoot_routes_to_big_ram_worker() {
+        let rule = ResourceFitRule::default();
+        let job = || eval_job_with_history(HistoryPrediction { predicted_peak_ram_mb: 40_000, samples: 5, ..Default::default() });
+        let small = worker_with(WorkerMetricsView { ram_free_mb: 16_000, ..Default::default() });
+        let big = worker_with(WorkerMetricsView { ram_free_mb: 64_000, ..Default::default() });
+        assert!(rule.score(&ctx(&job()), &small, &InstanceContext::default()) < 0.0);
+        assert_eq!(rule.score(&ctx(&job()), &big, &InstanceContext::default()), 0.0);
     }
 
     #[test]

@@ -50,6 +50,7 @@ fn eval_job(peer: OrganizationId) -> PendingEvalJob {
         queued_at: gradient_types::now(),
         ready_at: gradient_types::now(),
         rescore_count: 0,
+        history: Default::default(),
     }
 }
 
@@ -500,6 +501,7 @@ async fn cancel_evaluation_jobs_drops_eval_and_build_jobs() {
                 queued_at: gradient_types::now(),
                 ready_at: gradient_types::now(),
                 rescore_count: 0,
+                history: Default::default(),
             },
         )
         .await;

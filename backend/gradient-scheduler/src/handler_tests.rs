@@ -180,6 +180,7 @@ fn make_eval_job(eval_id: EvaluationId, org_id: OrganizationId) -> PendingEvalJo
         queued_at: gradient_types::now(),
         ready_at: gradient_types::now(),
         rescore_count: 0,
+        history: Default::default(),
     }
 }
 
@@ -2319,6 +2320,7 @@ async fn eval_result_creates_entry_points_for_project() {
         queued_at: gradient_types::now(),
         ready_at: gradient_types::now(),
         rescore_count: 0,
+        history: Default::default(),
     };
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -2592,6 +2594,7 @@ async fn eval_result_all_substituted_with_project_completes() {
         queued_at: gradient_types::now(),
         ready_at: gradient_types::now(),
         rescore_count: 0,
+        history: Default::default(),
     };
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)

@@ -79,6 +79,10 @@ async fn instance_metrics_loop(scheduler: Arc<Scheduler>) {
         )
         .await;
         scheduler.instance.store(Arc::new(ctx));
+
+        let eval_history =
+            crate::instance::compute_eval_history(&scheduler.state.worker_db, gradient_types::now()).await;
+        scheduler.eval_history.store(Arc::new(eval_history));
     }
 }
 
@@ -206,6 +210,11 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
             }
         };
 
+        let history = eval
+            .project
+            .and_then(|p| scheduler.eval_history.load().get(&p).copied())
+            .unwrap_or_default();
+
         let pending = PendingEvalJob {
             evaluation_id: eval.id,
             project_id: eval.project,
@@ -217,6 +226,7 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
             queued_at: eval.updated_at,
             ready_at: eval.updated_at,
             rescore_count: 0,
+            history,
         };
 
         scheduler.enqueue_eval_job(job_id.clone(), pending).await;
