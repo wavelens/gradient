@@ -61,6 +61,7 @@ impl ScoreRule for ResourceFitRule {
 pub struct ResourceSaturationRule {
     pub penalty: f64,
     pub cpu_saturated_pct: f32,
+    pub cpu_saturated_pct_builtin: f32,
     pub ram_saturated_free_frac: f64,
     pub ram_fit_headroom: f64,
 }
@@ -69,7 +70,8 @@ impl Default for ResourceSaturationRule {
     fn default() -> Self {
         Self {
             penalty: 1000.0,
-            cpu_saturated_pct: 90.0,
+            cpu_saturated_pct: 80.0,
+            cpu_saturated_pct_builtin: 90.0,
             ram_saturated_free_frac: 0.10,
             ram_fit_headroom: 1.1,
         }
@@ -88,14 +90,16 @@ impl ScoreRule for ResourceSaturationRule {
         // Only a real build loads the worker. `builtin` is a substitute-only job
         // (fetch, no build); evals have no architecture and their own rules.
         let Some(b) = job.job.build() else { return 0.0 };
-        if b.architecture == "builtin" {
-            return 0.0;
-        }
+        let cpu_saturated_pct = if b.architecture == "builtin" {
+            self.cpu_saturated_pct_builtin
+        } else {
+            self.cpu_saturated_pct
+        };
 
         let mut s = 0.0;
 
         // The worker is already saturated.
-        let cpu_saturated = m.cpu_usage_pct >= self.cpu_saturated_pct;
+        let cpu_saturated = m.cpu_usage_pct >= cpu_saturated_pct;
         let ram_saturated = m.ram_total_mb > 0
             && (m.ram_free_mb as f64 / m.ram_total_mb as f64) <= self.ram_saturated_free_frac;
         if cpu_saturated || ram_saturated {
