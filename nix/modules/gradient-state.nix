@@ -783,7 +783,7 @@
         default = [ ];
         description = ''
           Organizations this worker is registered under. The provisioner
-          creates one <literal>worker_registration</literal> row per
+          creates one `worker_registration` row per
           (worker_id, organization) pair so the same physical worker can
           serve builds for multiple organizations from a single state
           entry. For a base worker, lists organizations to pre-enable;
