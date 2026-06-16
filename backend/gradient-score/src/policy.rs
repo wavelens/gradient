@@ -12,6 +12,7 @@ use crate::rules::builtin::{
 };
 use crate::rules::{
     DiskAffinityRule, FairShareRule, NetworkAffinityRule, PreferLocalBuildRule, ResourceFitRule,
+    ResourceSaturationRule,
 };
 
 pub trait ScoringPolicy: Send + Sync + std::fmt::Debug {
@@ -101,6 +102,7 @@ pub fn simple_rules() -> Vec<Box<dyn ScoreRule>> {
 pub fn resource_aware_rules() -> Vec<Box<dyn ScoreRule>> {
     let mut rules = simple_rules();
     rules.push(Box::new(ResourceFitRule::default()));
+    rules.push(Box::new(ResourceSaturationRule::default()));
     rules.push(Box::new(PreferLocalBuildRule::default()));
     rules.push(Box::new(FairShareRule::default()));
     rules.push(Box::new(NetworkAffinityRule::default()));

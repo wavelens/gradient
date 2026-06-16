@@ -54,6 +54,72 @@ impl ScoreRule for ResourceFitRule {
     }
 }
 
+/// Hard penalty for dispatching real work to a worker whose CPU or RAM is
+/// already saturated. Substitute-only `builtin` jobs fetch rather than build, so
+/// they never load the worker and are exempt.
+#[derive(Debug)]
+pub struct ResourceSaturationRule {
+    pub penalty: f64,
+    pub cpu_saturated_pct: f32,
+    pub ram_saturated_free_frac: f64,
+    pub ram_fit_headroom: f64,
+}
+
+impl Default for ResourceSaturationRule {
+    fn default() -> Self {
+        Self {
+            penalty: 1000.0,
+            cpu_saturated_pct: 90.0,
+            ram_saturated_free_frac: 0.10,
+            ram_fit_headroom: 1.1,
+        }
+    }
+}
+
+impl ScoreRule for ResourceSaturationRule {
+    fn score(
+        &self,
+        job: &JobContext<'_>,
+        worker: &WorkerContext<'_>,
+        _instance: &InstanceContext,
+    ) -> f64 {
+        let Some(m) = worker.metrics else { return 0.0 };
+
+        // Only a real build loads the worker. `builtin` is a substitute-only job
+        // (fetch, no build); evals have no architecture and their own rules.
+        let Some(b) = job.job.build() else { return 0.0 };
+        if b.architecture == "builtin" {
+            return 0.0;
+        }
+
+        let mut s = 0.0;
+
+        // The worker is already saturated.
+        let cpu_saturated = m.cpu_usage_pct >= self.cpu_saturated_pct;
+        let ram_saturated = m.ram_total_mb > 0
+            && (m.ram_free_mb as f64 / m.ram_total_mb as f64) <= self.ram_saturated_free_frac;
+        if cpu_saturated || ram_saturated {
+            s -= self.penalty;
+        }
+
+        // The build's historical peak RAM (plus headroom) would not fit in the
+        // worker's free RAM, so it would likely OOM here.
+        let h = job.job.history();
+        if h.samples > 0
+            && m.ram_free_mb > 0
+            && h.predicted_peak_ram_mb as f64 * self.ram_fit_headroom > m.ram_free_mb as f64
+        {
+            s -= self.penalty;
+        }
+
+        s
+    }
+
+    fn description(&self) -> &'static str {
+        "Strongly penalizes sending a real build to a worker whose CPU or RAM is already saturated, or whose free RAM cannot hold the build's historical peak RAM plus headroom; substitute-only builtin builds are exempt."
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -175,6 +241,103 @@ mod tests {
         let mut inst = InstanceContext::default();
         inst.cpu_time_ms.w1h = 10_000.0;
         assert!(rule.score(&ctx(&job), &strong, &inst) > 0.0);
+    }
+
+    fn builtin_job() -> ScoredJob<'static> {
+        ScoredJob::new_build(
+            "test",
+            OrganizationId::now_v7(),
+            "builtin",
+            false,
+            false,
+            None,
+            LazyProviders { closure_size: &|| None, history: &|| HistoryPrediction::default() },
+        )
+    }
+
+    #[test]
+    fn saturation_penalizes_real_build_on_hot_cpu_or_ram_only() {
+        let rule = ResourceSaturationRule::default();
+        let job = job_with_history(HistoryPrediction::default()); // x86_64-linux
+
+        let cpu_hot = worker_with(WorkerMetricsView {
+            cpu_usage_pct: 95.0,
+            ram_total_mb: 16_000,
+            ram_free_mb: 8_000,
+            ..Default::default()
+        });
+        let ram_hot = worker_with(WorkerMetricsView {
+            cpu_usage_pct: 10.0,
+            ram_total_mb: 16_000,
+            ram_free_mb: 800,
+            ..Default::default()
+        });
+        let idle = worker_with(WorkerMetricsView {
+            cpu_usage_pct: 10.0,
+            ram_total_mb: 16_000,
+            ram_free_mb: 8_000,
+            ..Default::default()
+        });
+
+        assert_eq!(rule.score(&ctx(&job), &cpu_hot, &InstanceContext::default()), -1000.0);
+        assert_eq!(rule.score(&ctx(&job), &ram_hot, &InstanceContext::default()), -1000.0);
+        assert_eq!(rule.score(&ctx(&job), &idle, &InstanceContext::default()), 0.0);
+    }
+
+    #[test]
+    fn saturation_exempts_builtin_builds_and_evals_and_no_metrics() {
+        let rule = ResourceSaturationRule::default();
+        let hot = WorkerMetricsView {
+            cpu_usage_pct: 99.0,
+            ram_total_mb: 16_000,
+            ram_free_mb: 100,
+            ..Default::default()
+        };
+
+        let builtin = builtin_job();
+        assert_eq!(rule.score(&ctx(&builtin), &worker_with(hot), &InstanceContext::default()), 0.0);
+
+        let eval = eval_job_with_history(HistoryPrediction::default());
+        assert_eq!(rule.score(&ctx(&eval), &worker_with(hot), &InstanceContext::default()), 0.0);
+
+        let real = job_with_history(HistoryPrediction::default());
+        let no_metrics =
+            WorkerContext { architectures: &[], system_features: &[], fetch: false, metrics: None };
+        assert_eq!(rule.score(&ctx(&real), &no_metrics, &InstanceContext::default()), 0.0);
+    }
+
+    #[test]
+    fn ram_prediction_exceeding_free_penalizes_and_stacks_with_saturation() {
+        let rule = ResourceSaturationRule::default();
+        let job =
+            job_with_history(HistoryPrediction { predicted_peak_ram_mb: 10_000, samples: 5, ..Default::default() });
+
+        // Not saturated, but 10_000 * 1.1 = 11_000 > 8_000 free -> RAM won't fit.
+        let tight = worker_with(WorkerMetricsView {
+            cpu_usage_pct: 10.0,
+            ram_total_mb: 16_000,
+            ram_free_mb: 8_000,
+            ..Default::default()
+        });
+        assert_eq!(rule.score(&ctx(&job), &tight, &InstanceContext::default()), -1000.0);
+
+        // 12_000 free >= 11_000 needed and not saturated -> no penalty.
+        let roomy = worker_with(WorkerMetricsView {
+            cpu_usage_pct: 10.0,
+            ram_total_mb: 32_000,
+            ram_free_mb: 12_000,
+            ..Default::default()
+        });
+        assert_eq!(rule.score(&ctx(&job), &roomy, &InstanceContext::default()), 0.0);
+
+        // Saturated CPU AND RAM won't fit -> both -1000 penalties stack.
+        let hot_and_tight = worker_with(WorkerMetricsView {
+            cpu_usage_pct: 99.0,
+            ram_total_mb: 16_000,
+            ram_free_mb: 8_000,
+            ..Default::default()
+        });
+        assert_eq!(rule.score(&ctx(&job), &hot_and_tight, &InstanceContext::default()), -2000.0);
     }
 
     #[test]

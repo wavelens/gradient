@@ -59,6 +59,13 @@ a banner when draining, and the button click calls `AdminService.setDraining(tru
 
 `frontend/src/app/core/services/board.service.spec.ts` - `getScoringRules()` test verifies the catalog is fetched from `board/scoring/rules`, unwrapped from the response envelope, and cached so repeat subscribers do not refetch.
 
+## Worker CPU/RAM saturation penalty
+
+`backend/gradient-score/src/rules/resource.rs` - `ResourceSaturationRule` applies `-1000` to a real build dispatched to a worker whose live CPU usage is `>= 90%` or whose free RAM is `<= 10%` of total, plus another `-1000` when the build's historical peak RAM x1.1 exceeds the worker's free RAM. Both stay below the `WaitTimeRule` cap so anti-starvation can still win eventually.
+- `saturation_penalizes_real_build_on_hot_cpu_or_ram_only` - a non-`builtin` build scores `-1000` on a CPU-hot or RAM-hot worker and `0` on an idle one.
+- `saturation_exempts_builtin_builds_and_evals_and_no_metrics` - `builtin`-architecture builds, eval jobs, and workers reporting no metrics all score `0` regardless of saturation.
+- `ram_prediction_exceeding_free_penalizes_and_stacks_with_saturation` - a build whose predicted peak RAM x1.1 exceeds free RAM scores `-1000`, `0` when it fits, and `-2000` when the worker is also saturated.
+
 ## Worker shadows base worker of same id (#407)
 
 `backend/gradient-web/src/endpoints/orgs/workers.rs` - `registration_shadows_base_worker_of_same_id` asserts `unshadowed_base_workers` drops a base worker whose `worker_id` matches one of the org's normal registrations, so `GET /orgs/{org}/workers` lists the conflicting worker only once (as the org registration). `delete_org_worker` deletes the registration first, so the normal worker is removed even when a base worker shares its id, and the `409` base-worker guard fires only when no registration exists.

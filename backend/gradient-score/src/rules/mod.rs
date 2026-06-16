@@ -17,4 +17,4 @@ pub use builtin::{
 };
 pub use fair_share::FairShareRule;
 pub use prefer_local::PreferLocalBuildRule;
-pub use resource::ResourceFitRule;
+pub use resource::{ResourceFitRule, ResourceSaturationRule};
