@@ -155,29 +155,22 @@ pub async fn org_caches_all_full<C: ConnectionTrait>(
     Ok(true)
 }
 
-/// Demote a cached output proven unfetchable: null the `cached_path` size/hash
-/// fields (so `Model::is_fully_cached()` flips to `false`) and clear
-/// `derivation_output.is_cached` / `cached_path` for every output with this
-/// store-path `hash`. Returns the derivations that produce the output so the
-/// caller can re-queue them for a real rebuild.
+/// Purge a cached output proven unfetchable, so the next evaluation rebuilds it
+/// from scratch as if it had never been cached. Clears `is_cached` /
+/// `cached_path` on every `derivation_output` with this store-path `hash`, then
+/// deletes the `cached_path` row itself (its `cached_path_signature` rows
+/// cascade; the `derivation_output` FK is `ON DELETE SET NULL`). The derivation
+/// graph is left intact - only the cache artifact is removed. Returns the
+/// producing derivations for logging.
 pub async fn demote_cached_output<C: ConnectionTrait>(
     db: &C,
     hash: &str,
 ) -> Result<Vec<DerivationId>, sea_orm::DbErr> {
-    use gradient_entity::cached_path::{ActiveModel as ACachedPath, Column as CCP, Entity as ECP};
+    use gradient_entity::cached_path::{Column as CCP, Entity as ECP};
     use gradient_entity::derivation_output::{
         ActiveModel as ADerivationOutput, Column as CDO, Entity as EDO,
     };
     use sea_orm::{ActiveModelTrait, ActiveValue::Set, IntoActiveModel};
-
-    if let Some(row) = ECP::find().filter(CCP::Hash.eq(hash)).one(db).await? {
-        let mut active: ACachedPath = row.into_active_model();
-        active.file_hash = Set(None);
-        active.nar_hash = Set(None);
-        active.file_size = Set(None);
-        active.nar_size = Set(None);
-        active.update(db).await?;
-    }
 
     let outputs = EDO::find().filter(CDO::Hash.eq(hash)).all(db).await?;
     let mut producers = Vec::with_capacity(outputs.len());
@@ -188,6 +181,8 @@ pub async fn demote_cached_output<C: ConnectionTrait>(
         active.cached_path = Set(None);
         active.update(db).await?;
     }
+
+    ECP::delete_many().filter(CCP::Hash.eq(hash)).exec(db).await?;
 
     Ok(producers)
 }

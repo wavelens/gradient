@@ -273,12 +273,12 @@ pub(super) async fn serve_nar_request(
     Ok(())
 }
 
-/// Demote a `cached_path` row whose NAR is no longer in `nar_storage`.
+/// Purge a `cached_path` row whose NAR is no longer in `nar_storage`.
 ///
-/// Sets `file_hash` / `nar_hash` / `file_size` / `nar_size` to NULL so
-/// `Model::is_fully_cached()` flips to `false` and the next `CacheQuery`
-/// stops claiming the path is available - letting the next build either
-/// rebuild from source or pick the path up from a configured upstream.
+/// Deletes the stale artifact and clears `derivation_output.is_cached` /
+/// `cached_path` so the next `CacheQuery` stops claiming the path is available -
+/// letting the next build either rebuild from source or pick the path up from a
+/// configured upstream. The derivation graph is untouched.
 async fn invalidate_cached_path(state: &Arc<ServerState>, hash: &str, store_path: &str) {
     match gradient_db::demote_cached_output(&state.worker_db, hash).await {
         Ok(_) => warn!(

@@ -538,51 +538,54 @@ impl<'a> BuildStateHandler<'a> {
     }
 
     /// Self-heal for `BuildFailureKind::InputsUnavailable`. A build attempt
-    /// proved these input outputs are unfetchable from the cache, so demote
-    /// them (`is_cached = false`, drop the stale `cached_path`) and re-queue any
-    /// build in this evaluation that produces them yet sits in a done state
-    /// (`Substituted`/`Completed`). The scheduler then builds and caches them
-    /// for real, so the dependent succeeds on the next evaluation.
+    /// proved these input paths are unfetchable from the cache, so purge each
+    /// one's stale cache artifact (delete the `cached_path`, clear the output's
+    /// `is_cached` / `cached_path`) while leaving the derivation graph intact.
+    /// The next evaluation then sees the outputs as never cached and rebuilds
+    /// them from scratch. This build is already terminal for this eval
+    /// (`InputsUnavailable` is permanent), so we don't re-queue anything here -
+    /// the rebuild belongs to the next evaluation.
+    ///
+    /// A missing input with no producing derivation (a lost source or
+    /// fixed-output input) can't be rebuilt from the graph; it is logged so the
+    /// otherwise-silent dead-end is diagnosable.
     async fn reconcile_missing_inputs(
         &self,
         evaluation_id: EvaluationId,
         missing_paths: &[String],
     ) -> Result<()> {
         let db = &self.state.worker_db;
-        let mut producers: std::collections::HashSet<DerivationId> = std::collections::HashSet::new();
+        let mut purged = 0usize;
+        let mut unrecoverable: Vec<&str> = Vec::new();
         for path in missing_paths {
             let Some(hash) = store_path_hash(path) else {
                 continue;
             };
 
             match gradient_db::demote_cached_output(db, hash).await {
-                Ok(drvs) => producers.extend(drvs),
-                Err(e) => warn!(%path, error = %e, "reconcile: demote_cached_output failed"),
+                Ok(drvs) if !drvs.is_empty() => purged += 1,
+                Ok(_) => unrecoverable.push(path),
+                Err(e) => warn!(%path, error = %e, "reconcile: purge cached output failed"),
             }
         }
 
-        if producers.is_empty() {
-            return Ok(());
+        if !unrecoverable.is_empty() {
+            warn!(
+                %evaluation_id,
+                count = unrecoverable.len(),
+                sample = ?unrecoverable.iter().take(5).collect::<Vec<_>>(),
+                "reconcile: missing inputs have no producing derivation; cannot rebuild \
+                 (lost source or fixed-output input - re-evaluate to refetch)"
+            );
         }
 
-        let producer_ids: Vec<DerivationId> = producers.into_iter().collect();
-        let stale = gradient_db::fetch_in_chunks(&producer_ids, |chunk| async move {
-            EBuild::find()
-                .filter(CBuild::Evaluation.eq(evaluation_id))
-                .filter(CBuild::Status.is_in(vec![BuildStatus::Substituted, BuildStatus::Completed]))
-                .filter(CBuild::Derivation.is_in(chunk))
-                .all(db)
-                .await
-        })
-        .await
-        .context("reconcile: fetch producing builds")?;
-
-        let count = stale.len();
-        for build in stale {
-            self.force_requeue(build).await;
-        }
-
-        info!(%evaluation_id, requeued = count, paths = missing_paths.len(), "reconciled missing inputs; producers re-queued for rebuild");
+        info!(
+            %evaluation_id,
+            purged,
+            unrecoverable = unrecoverable.len(),
+            paths = missing_paths.len(),
+            "reconciled missing inputs; stale cache outputs purged for next-eval rebuild"
+        );
         Ok(())
     }
 

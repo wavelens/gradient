@@ -749,8 +749,12 @@ Backend (`cargo test -p worker --tests`):
 A build whose prefetch finds a required input absent from the cache no longer
 dies as an opaque permanent failure that recurs every evaluation. The worker
 classifies it as `BuildFailureKind::InputsUnavailable` and forwards the
-offending paths on `JobFailed.missing_paths`; the server demotes those outputs
-and re-queues their producers so the next evaluation builds them for real.
+offending paths on `JobFailed.missing_paths`. The server then purges each
+path's stale cache artifact - deleting the `cached_path` row and clearing the
+output's `is_cached` / `cached_path` while leaving the derivation graph intact -
+so the next evaluation sees the output as never cached and rebuilds it from
+scratch. The failing build stays terminal for this eval (`InputsUnavailable` is
+permanent); the rebuild belongs to the next evaluation.
 
 Backend (`cargo test -p gradient-worker -p gradient-scheduler --tests`):
 - `proto::nar_import::tests::missing_inputs_message_and_downcast` - the typed
@@ -763,15 +767,18 @@ Backend (`cargo test -p gradient-worker -p gradient-scheduler --tests`):
   input that will not appear until its producer is rebuilt.
 - `build::retry_tests::store_path_hash_extracts_32_char_hash` - the helper that
   maps a missing `/nix/store/<hash>-<name>` path to the `derivation_output`
-  hash used to demote and locate its producer.
+  hash used to purge its cache artifact.
 - `proto::nar_import::tests::presigned_404_410_are_missing_inputs_other_statuses_retry` -
   a presigned S3 download that 404/410s is reclassified as a missing input
   (the bucket lost an object the DB still claims), while 403/429/5xx stay
   retryable transport errors. The server never sees this since it only signs
   the URL, so the worker is the one that triggers the self-heal.
 
-The demotion path itself (`gradient_db::demote_cached_output`) is shared with
-the NAR-serve self-heal in `socket.rs` and is exercised end-to-end in CI.
+The purge path itself (`gradient_db::demote_cached_output`) deletes the
+`cached_path` row (its `cached_path_signature` rows cascade; the
+`derivation_output` FK is `ON DELETE SET NULL`) and is shared with the
+NAR-serve self-heal in `socket.rs`. It is exercised end-to-end in CI (the db
+crate has no real-Postgres unit harness).
 
 Preventively, `expand_substituted_closure` now only marks a closure dep
 `Substituted` when its `derivation_output` rows are all `is_cached = true`;
