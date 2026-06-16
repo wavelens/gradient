@@ -2,13 +2,14 @@
 
 Actions are the response-side counterpart of Triggers. Where a Trigger fires an evaluation when an event arrives, an Action reacts to evaluation and build lifecycle events and does something: sends an email, calls a webhook, or posts a commit status back to a forge.
 
-Actions are per-project. Three types ship in v1:
+Actions are per-project. Four types ship in v1:
 
 | Type | Summary | Prerequisite |
 |---|---|---|
 | `send_mail` | Email one or more recipients | Server SMTP configured |
 | `send_web_request` | HTTP POST to an external URL | None |
 | `forge_status_report` | Post commit status to a forge | Outbound integration in the org |
+| `open_pr` | Open/update a flake.lock-update pull request | Outbound integration in the org |
 
 ## Events
 
@@ -96,6 +97,27 @@ A run that targets a wildcard other than the project default — e.g. `/gradient
 
 The integration must be `kind: outbound`. The forge type determines the API call format (Gitea, GitLab, GitHub App).
 
+## Open PR
+
+Opens (or updates) a pull request that bumps the project's flake inputs, driven by a native `flake.lock` updater. Unlike the other actions it does not react to a project's ordinary runs: it fires on a verify-gate event (default `build.completed`) but only for `input_update` evaluations.
+
+**Config fields:**
+
+| Field | Required | Default | Description |
+|---|---|---|---|
+| `integration_id` | yes | (none) | UUID of an outbound integration in the same org |
+| `generator` | no | `flake_lock` | Update generator; only the native flake.lock updater exists in v1 |
+| `granularity` | no | `per_run` | `per_run` opens one PR for the whole run; `per_input` opens one PR per tracked input |
+| `verify_gate` | no | `build` | How far the candidate lock is verified before the PR opens: `none`, `eval`, or `build` |
+| `branch_pattern` | no | `gradient/flake-lock-update` | Branch name for the PR; for `per_input` it must contain the `{input}` placeholder |
+| `title_template` | no | (none) | PR title with placeholders |
+| `body_template` | no | (none) | PR body with placeholders |
+| `update_existing` | no | `true` | Update an already-open PR in place instead of opening a duplicate |
+
+**Tracked inputs.** The set of inputs to bump is declared with flake-input override rows on the project. An override whose `url` is unset marks that input as *tracked*, and it will be bumped to its newest revision. As a safety gate, the presence of *any* override with a `url` set (a pinned input) blocks the run, so a project cannot accidentally open a PR while an input is being held at a fixed revision. v1 supports `github`, `gitlab`, and `git` flake inputs.
+
+**PR lifecycle.** A trigger fires; if the project has an `open_pr` action and at least one tracked input, Gradient creates an `input_update` evaluation. The worker bumps each tracked input to its newest revision with a natively recomputed `narHash`, and the candidate lock is verified by a normal eval/build per `verify_gate`. Once the verify gate passes, the PR is opened or, when `update_existing` is true, updated in place. An empty or no-change patch opens no PR.
+
 ## Declarative configuration via Nix
 
 ```nix
@@ -124,6 +146,16 @@ services.gradient.state.projects.web-app = {
       type = "forge_status_report";
       config = {
         integration = "github-main";
+      };
+    }
+    {
+      name = "flake-lock-pr";
+      type = "open_pr";
+      config = {
+        integration = "github-main";
+        granularity = "per_input";
+        verify_gate = "build";
+        branch_pattern = "gradient/flake-lock-update/{input}";
       };
     }
   ];

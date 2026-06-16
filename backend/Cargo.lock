@@ -2176,6 +2176,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "gradient-flake-lock"
+version = "1.2.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64",
+ "chrono",
+ "flate2",
+ "futures",
+ "git2",
+ "harmonia-file-nar",
+ "reqwest 0.13.4",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tar",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "gradient-forge"
 version = "1.2.0"
 dependencies = [

@@ -364,8 +364,9 @@
         default = [];
         description = ''
           Project actions (email notifications, outbound web requests, forge
-          status reports). Re-applying state with fewer actions removes the
-          missing ones (matched by `name` within the project).
+          status reports, pull-request automation). Re-applying state with
+          fewer actions removes the missing ones (matched by `name` within
+          the project).
 
           Token files for `send_web_request` actions must live at the systemd
           credential path
@@ -395,6 +396,20 @@
               name = "report-status";
               type = "forge_status_report";
               config = { integration = "gitea-prod"; };
+            }
+            {
+              name = "flake-lock-pr";
+              type = "open_pr";
+              config = {
+                integration = "gitea-prod";
+                generator = "flake_lock";
+                granularity = "per_input";
+                verify_gate = "build";
+                branch_pattern = "gradient/flake-lock-update/{input}";
+                title_template = "flake.lock: update {input}";
+                body_template = "Automated flake input update opened by Gradient.";
+                update_existing = true;
+              };
             }
           ]
         '';
@@ -551,7 +566,7 @@
       };
 
       type = mkOption {
-        type = types.enum [ "send_mail" "send_web_request" "forge_status_report" ];
+        type = types.enum [ "send_mail" "send_web_request" "forge_status_report" "open_pr" ];
         description = "Action kind. Drives which `config` shape is expected.";
       };
 
@@ -578,6 +593,28 @@
           - `send_mail`: `{ recipients = [ "ops@example.com" ]; subject_template = null; }`
           - `send_web_request`: `{ url = "https://hooks.example.com/gradient"; token_file = "/etc/gradient/secrets/<name>-token"; }`
           - `forge_status_report`: `{ integration = "gitea-prod"; }` (name of an outbound integration in the same organization)
+          - `open_pr`: opens a pull request on the forge with the result of a
+            generator (currently `flake_lock`, which updates `flake.lock`).
+            Fields:
+            - `integration` (string): name of an outbound integration in the
+              same organization, same convention as `forge_status_report`.
+            - `generator` (string, default `"flake_lock"`): which change
+              generator produces the PR contents.
+            - `granularity` (string, default `"per_run"`): one of `"per_run"`
+              (a single PR with every input update) or `"per_input"` (one PR
+              per updated input).
+            - `verify_gate` (string, default `"build"`): one of `"none"`,
+              `"eval"` or `"build"`. Gates PR creation on the generated change
+              passing the named stage.
+            - `branch_pattern` (string, default
+              `"gradient/flake-lock-update"`): branch name the PR is opened
+              from. For `per_input` granularity it must contain the `{input}`
+              placeholder, which is substituted with each input name.
+            - `title_template` (string, optional): template for the PR title.
+            - `body_template` (string, optional): template for the PR body.
+            - `update_existing` (bool, default `true`): when an open PR for the
+              same branch already exists, force-push the new contents to it
+              instead of opening a duplicate.
 
           For `send_web_request`, omit `token_file` to send unauthenticated
           requests. When set, the token is read from the systemd credential

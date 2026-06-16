@@ -4185,3 +4185,47 @@ enabled-without-token → `None`, fully-configured → `Some`) and `RuntimeConfi
 propagation; `gradient-state` covers `resolve_scim_group_roles` mapping a
 `scim_group` name to its `(org, role)` grant; `scim/filter.rs` covers the
 `attr eq "value"` parser.
+
+## Open PR flake.lock updater
+
+The `open_pr` action opens/updates a pull request from a natively recomputed
+flake.lock. An `input_update` evaluation bumps the project's tracked inputs
+(override rows with `url` unset; any override with a `url` set blocks the run as
+a safety gate), verifies the candidate lock by a normal eval/build per
+`verify_gate`, then opens or updates the PR. v1 covers `github`, `gitlab`, and
+`git` flake inputs.
+
+Backend (`cargo test -p gradient-nix --lib lock`):
+- `lock_model_round_trips` - a `flake.lock` with `github`/`gitlab`/`git` nodes
+  parses into the lock model and re-serialises byte-stable, so a no-change bump
+  produces an empty patch (and opens no PR).
+
+Backend (`cargo test -p gradient-nix --lib update_input`):
+- `update_input_github` / `update_input_gitlab` / `update_input_git` - per
+  fetcher, the updater resolves the newest revision and rewrites the node's
+  `rev`/`narHash` with a natively recomputed hash (one case per supported input
+  type).
+
+Backend (`cargo test -p gradient-ci --lib actions::open_pr`):
+- `matcher_fires_only_on_input_update` - the action's verify-gate matcher
+  (default `build.completed`) fires for an `input_update` evaluation and is a
+  no-op for a `normal` evaluation, so ordinary runs never open a PR.
+- `tracked_inputs_collected_and_pinned_override_blocks` - tracked inputs are
+  collected from `url`-unset override rows, while the presence of any `url`-set
+  override blocks the `input_update` run.
+
+Backend (`cargo test -p gradient-forge --lib reporter::pull_request`):
+- `open_pr_creates_branch_and_pr` / `open_pr_updates_existing_in_place` - the
+  reporter's PR methods open a fresh PR and, with `update_existing`, update an
+  already-open PR in place rather than opening a duplicate.
+
+Backend (`cargo test -p gradient-nix --test narhash_corpus`):
+- `narhash_matches_nix_golden_corpus` - a golden-corpus differential test
+  compares the natively recomputed `narHash` against fixtures produced by
+  upstream `nix` for each fetcher, guarding the native hasher against drift.
+
+NixOS VM (`nix/tests/gradient/open-pr`):
+- E2E trigger-to-PR path: a trigger fires on a project with an `open_pr` action
+  and one tracked input, the worker bumps the input and verifies the candidate
+  lock, and a PR is opened on the (test) forge; a re-run with no upstream change
+  produces an empty patch and opens no second PR.

@@ -6,6 +6,7 @@
 
 use gradient_util::http_validation::{WebhookUrlError, validate_webhook_url};
 use gradient_types::ForgeType;
+use crate::pr::{BranchCommit, PrRef};
 use crate::registry::ForgeRegistry;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -230,6 +231,42 @@ pub trait CiReporter: Send + Sync + std::fmt::Debug + 'static {
     /// just swallow the call.
     async fn add_reaction(&self, _target: &ReactionTarget, _kind: ReactionKind) -> Result<()> {
         Ok(())
+    }
+
+    /// Commit `commit`'s file edits onto `branch` (created from `base` when it
+    /// does not yet exist) and return the new head commit sha.
+    ///
+    /// Default impl fails: reporters that cannot write to the forge reject PR
+    /// automation rather than silently dropping it.
+    async fn upsert_branch(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _branch: &str,
+        _base: &str,
+        _commit: &BranchCommit,
+    ) -> Result<String> {
+        anyhow::bail!("this reporter does not support opening pull requests")
+    }
+
+    /// Open a PR from `head` into `base`, or update the open one in place.
+    ///
+    /// Default impl fails for the same reason as [`CiReporter::upsert_branch`].
+    async fn open_or_update_pr(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _head: &str,
+        _base: &str,
+        _title: &str,
+        _body: &str,
+    ) -> Result<PrRef> {
+        anyhow::bail!("this reporter does not support opening pull requests")
+    }
+
+    /// The repository's default branch, used as the base of an opened PR.
+    async fn default_branch(&self, _owner: &str, _repo: &str) -> Result<String> {
+        anyhow::bail!("this reporter does not support opening pull requests")
     }
 }
 
@@ -533,6 +570,54 @@ impl CiReporter for GiteaReporter {
             is_fork,
         }))
     }
+
+    async fn upsert_branch(
+        &self,
+        owner: &str,
+        repo: &str,
+        branch: &str,
+        base: &str,
+        commit: &BranchCommit,
+    ) -> Result<String> {
+        crate::pr::gitea::upsert_branch(
+            &self.client,
+            &self.base_url,
+            &self.token,
+            owner,
+            repo,
+            branch,
+            base,
+            commit,
+        )
+        .await
+    }
+
+    async fn open_or_update_pr(
+        &self,
+        owner: &str,
+        repo: &str,
+        head: &str,
+        base: &str,
+        title: &str,
+        body: &str,
+    ) -> Result<PrRef> {
+        crate::pr::gitea::open_or_update_pr(
+            &self.client,
+            &self.base_url,
+            &self.token,
+            owner,
+            repo,
+            head,
+            base,
+            title,
+            body,
+        )
+        .await
+    }
+
+    async fn default_branch(&self, owner: &str, repo: &str) -> Result<String> {
+        crate::pr::gitea::default_branch(&self.client, &self.base_url, &self.token, owner, repo).await
+    }
 }
 
 // ── GitlabReporter ────────────────────────────────────────────────────────────
@@ -825,6 +910,54 @@ impl CiReporter for GitlabReporter {
             is_fork,
         }))
     }
+
+    async fn upsert_branch(
+        &self,
+        owner: &str,
+        repo: &str,
+        branch: &str,
+        base: &str,
+        commit: &BranchCommit,
+    ) -> Result<String> {
+        crate::pr::gitlab::upsert_branch(
+            &self.client,
+            &self.base_url,
+            &self.token,
+            owner,
+            repo,
+            branch,
+            base,
+            commit,
+        )
+        .await
+    }
+
+    async fn open_or_update_pr(
+        &self,
+        owner: &str,
+        repo: &str,
+        head: &str,
+        base: &str,
+        title: &str,
+        body: &str,
+    ) -> Result<PrRef> {
+        crate::pr::gitlab::open_or_update_pr(
+            &self.client,
+            &self.base_url,
+            &self.token,
+            owner,
+            repo,
+            head,
+            base,
+            title,
+            body,
+        )
+        .await
+    }
+
+    async fn default_branch(&self, owner: &str, repo: &str) -> Result<String> {
+        crate::pr::gitlab::default_branch(&self.client, &self.base_url, &self.token, owner, repo).await
+    }
 }
 
 // ── GithubReporter ────────────────────────────────────────────────────────────
@@ -1054,6 +1187,54 @@ impl CiReporter for GithubReporter {
         let url = github_reaction_url(&self.base_url, &target.owner, &target.repo, target.comment_id);
         post_github_reaction(&self.client, &url, &self.token, kind).await
     }
+
+    async fn upsert_branch(
+        &self,
+        owner: &str,
+        repo: &str,
+        branch: &str,
+        base: &str,
+        commit: &BranchCommit,
+    ) -> Result<String> {
+        crate::pr::github::upsert_branch(
+            &self.client,
+            &self.base_url,
+            &self.token,
+            owner,
+            repo,
+            branch,
+            base,
+            commit,
+        )
+        .await
+    }
+
+    async fn open_or_update_pr(
+        &self,
+        owner: &str,
+        repo: &str,
+        head: &str,
+        base: &str,
+        title: &str,
+        body: &str,
+    ) -> Result<PrRef> {
+        crate::pr::github::open_or_update_pr(
+            &self.client,
+            &self.base_url,
+            &self.token,
+            owner,
+            repo,
+            head,
+            base,
+            title,
+            body,
+        )
+        .await
+    }
+
+    async fn default_branch(&self, owner: &str, repo: &str) -> Result<String> {
+        crate::pr::github::default_branch(&self.client, &self.base_url, &self.token, owner, repo).await
+    }
 }
 
 fn github_reaction_url(base_url: &str, owner: &str, repo: &str, comment_id: i64) -> String {
@@ -1277,6 +1458,19 @@ struct UpdateCheckRunPayload<'a> {
 #[derive(Debug, Deserialize)]
 struct CheckRunCreateResponse {
     id: i64,
+}
+
+impl GithubAppReporter {
+    async fn installation_token(&self) -> Result<String> {
+        crate::github_app::get_installation_token(
+            &self.client,
+            self.app_id,
+            &self.private_key_pem,
+            self.installation_id,
+        )
+        .await
+        .context("Failed to mint GitHub App installation token")
+    }
 }
 
 #[async_trait]
@@ -1518,6 +1712,57 @@ impl CiReporter for GithubAppReporter {
             target.comment_id,
         );
         post_github_reaction(&self.client, &url, &token, kind).await
+    }
+
+    async fn upsert_branch(
+        &self,
+        owner: &str,
+        repo: &str,
+        branch: &str,
+        base: &str,
+        commit: &BranchCommit,
+    ) -> Result<String> {
+        let token = self.installation_token().await?;
+        crate::pr::github::upsert_branch(
+            &self.client,
+            &self.api_base_url,
+            &token,
+            owner,
+            repo,
+            branch,
+            base,
+            commit,
+        )
+        .await
+    }
+
+    async fn open_or_update_pr(
+        &self,
+        owner: &str,
+        repo: &str,
+        head: &str,
+        base: &str,
+        title: &str,
+        body: &str,
+    ) -> Result<PrRef> {
+        let token = self.installation_token().await?;
+        crate::pr::github::open_or_update_pr(
+            &self.client,
+            &self.api_base_url,
+            &token,
+            owner,
+            repo,
+            head,
+            base,
+            title,
+            body,
+        )
+        .await
+    }
+
+    async fn default_branch(&self, owner: &str, repo: &str) -> Result<String> {
+        let token = self.installation_token().await?;
+        crate::pr::github::default_branch(&self.client, &self.api_base_url, &token, owner, repo).await
     }
 }
 
