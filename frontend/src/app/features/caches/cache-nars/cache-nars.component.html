@@ -85,7 +85,7 @@
             <i class="pi" [class.pi-sort-amount-up]="order() === 'asc'" [class.pi-sort-amount-down]="order() === 'desc'"></i>
           }
         </span>
-        <span class="col col-size">File size</span>
+        <span class="col col-size">Compressed size</span>
         <span class="col col-time sortable" (click)="sortBy('created_at')">
           Created
           @if (sort() === 'created_at') {
@@ -109,7 +109,7 @@
           <span class="col col-time text-secondary">{{ formatDate(row.created_at) }}</span>
           <span class="col col-time text-secondary">{{ formatDate(row.last_fetched_at, 'never') }}</span>
           <span class="col col-actions" (click)="$event.stopPropagation()">
-            <button pButton icon="pi pi-eye" severity="secondary" [text]="true" (click)="show(row)" title="Show details"></button>
+            <button pButton icon="pi pi-info-circle" severity="secondary" [text]="true" (click)="show(row)" title="Show details"></button>
             <button
               *appWritable="access()"
               pButton

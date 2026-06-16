@@ -70,11 +70,6 @@ export class CacheListComponent implements OnInit, OnDestroy {
   publicCaches = signal<Cache[]>([]);
   publicLoading = signal(false);
 
-  get priorityInvalid(): boolean {
-    const p = this.newCache.priority;
-    return p === null || p === undefined || isNaN(Number(p)) || p < 0 || p > 255;
-  }
-
   ngOnInit(): void {
     if (this.authService.isAuthenticated()) {
       this.loadCaches();

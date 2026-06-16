@@ -25,6 +25,7 @@ nav:
     - Pull Deployment: usage/pull-deployment.md
     - Forge Integration: usage/integration.md
     - Actions: usage/actions.md
+    - Caches: usage/caches.md
     - Cache NARs: usage/cache-nars.md
     - Closure View: usage/closure-view.md
   - Development:

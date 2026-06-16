@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, inject, signal, computed } from '@angular/core';
+import { Component, OnInit, DestroyRef, inject, signal, computed } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { DialogModule } from 'primeng/dialog';
@@ -335,6 +336,7 @@ export class BoardJobDetailComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private board = inject(BoardService);
   private evaluations = inject(EvaluationsService);
+  private destroyRef = inject(DestroyRef);
 
   job = signal<DispatchedJobDetail | null>(null);
   pending = signal<PendingJobSummary | null>(null);
@@ -387,11 +389,23 @@ export class BoardJobDetailComponent implements OnInit {
   });
 
   ngOnInit(): void {
-    const id = this.route.snapshot.paramMap.get('id');
-    if (!id) return;
     this.board
       .getScoringRules()
       .subscribe((rules) => this.descriptions.set(new Map(rules.map((r) => [r.rule, r.description]))));
+    // Navigating between Previous Build Attempts reuses this component, so react
+    // to param changes rather than reading the snapshot once.
+    this.route.paramMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((pm) => {
+      const id = pm.get('id');
+      if (id) this.loadJob(id);
+    });
+  }
+
+  private loadJob(id: string): void {
+    this.job.set(null);
+    this.pending.set(null);
+    this.notFound.set(false);
+    this.build.set(null);
+    this.buildDialog.set(false);
     this.board.getJob(id).subscribe({
       next: (d) => {
         this.job.set(d);

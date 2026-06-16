@@ -108,7 +108,7 @@ export class EntryPointMetricsComponent implements OnInit {
         background: CHART_COLORS.background,
         toolbar: { show: false },
         animations: { enabled: true, speed: 400 },
-        zoom: { enabled: false },
+        zoom: { enabled: false, allowMouseWheelZoom: false },
       },
       theme: { mode: 'dark' },
       stroke: { curve: 'smooth', width: 2 },

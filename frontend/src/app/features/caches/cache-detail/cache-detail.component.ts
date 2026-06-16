@@ -11,6 +11,7 @@ import { ButtonModule } from 'primeng/button';
 import { CardModule } from 'primeng/card';
 import { CachesService, CacheStats, CacheMetricPoint, StorageMetricPoint, UpstreamCache } from '@core/services/caches.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
+import { LabelHelpComponent } from '@shared/components/form';
 import { Cache } from '@core/models';
 import {
   NgApexchartsModule,
@@ -47,6 +48,7 @@ const CHART_COLORS = {
     ButtonModule,
     CardModule,
     LoadingSpinnerComponent,
+    LabelHelpComponent,
     NgApexchartsModule,
   ],
   templateUrl: './cache-detail.component.html',
@@ -81,23 +83,6 @@ export class CacheDetailComponent implements OnInit {
 
   get installNetrcCommand(): string {
     return `nix run wavelens/gradient#gradient-cli -- cache install-netrc --server ${this.serverUrl} --token <YOUR_TOKEN> --cache ${this.cacheName}`;
-  }
-
-  get declerativeNetrcCode(): string {
-    return `
-      { config, ... }: {
-        sops.secrets."gradient-api-token" = { };
-        sops.templates."nix-netrc" = {
-          content = ''
-            machine ${window.location.hostname}
-            login gradient
-            password \${config.sops.placeholder."gradient-api-token"}
-          '';
-          owner = "YOUR_USERNAME";
-          path = "/etc/nix/netrc";
-        };
-      }
-    `;
   }
 
   readonly windows: { key: Window; label: string }[] = [
@@ -142,6 +127,7 @@ export class CacheDetailComponent implements OnInit {
         height: 220,
         background: CHART_COLORS.background,
         toolbar: { show: false },
+        zoom: { allowMouseWheelZoom: false },
         sparkline: { enabled: false },
         animations: { enabled: true, speed: 400 },
       },
@@ -222,6 +208,7 @@ export class CacheDetailComponent implements OnInit {
         height: 220,
         background: CHART_COLORS.background,
         toolbar: { show: false },
+        zoom: { allowMouseWheelZoom: false },
         sparkline: { enabled: false },
         animations: { enabled: true, speed: 400 },
       },

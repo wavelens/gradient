@@ -27,21 +27,15 @@
 
   <div class="form-group">
     <label>Type</label>
-    <div class="radio-row">
-      @for (opt of typeOptions(); track opt.value) {
-        <label class="radio-option">
-          <input
-            type="radio"
-            name="action-type"
-            [value]="opt.value"
-            [checked]="type() === opt.value"
-            [disabled]="typeRadioDisabled()"
-            (change)="onTypeChange(opt.value)"
-          />
-          {{ opt.label }}
-        </label>
-      }
-    </div>
+    <p-selectbutton
+      [options]="typeOptions()"
+      [ngModel]="type()"
+      (ngModelChange)="onTypeChange($event)"
+      optionLabel="label"
+      optionValue="value"
+      [allowEmpty]="false"
+      [disabled]="typeRadioDisabled()"
+    />
     @if (typeRadioDisabled()) {
       <small class="text-secondary">Action type cannot be changed after creation.</small>
     }

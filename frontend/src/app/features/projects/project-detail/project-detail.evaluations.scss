@@ -17,7 +17,7 @@
 .mono { font-family: 'JetBrains Mono', 'Fira Code', monospace; }
 
 .pp-head { display: flex; justify-content: space-between; align-items: center; padding-top: 26px; margin-bottom: 18px; }
-.breadcrumb { color: #818181; font-size: 13px; a { color: #abb0b4; text-decoration: none; } .sep { margin: 0 6px; } b { color: #abb0b4; font-weight: 500; } }
+.breadcrumb { color: #818181; font-size: 13px; a { color: #abb0b4; text-decoration: none; &:hover { color: $text-primary; text-decoration: underline; } } }
 h1 { font-size: $font-size-xxl; margin: 0; }
 .head-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 

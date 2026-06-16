@@ -210,9 +210,16 @@
     </div>
   }
   <div class="form-group">
-    <label for="int-name">Name</label>
-    <input pInputText id="int-name" [(ngModel)]="formData.name" class="w-full" placeholder="e.g. main-gitea" />
-    <small class="text-secondary">Used in the webhook URL. Use letters, digits, and dashes.</small>
+    <label for="int-name">
+      Name
+      <gr-label-help href="https://wavelens.github.io/gradient/usage/integration/" title="Learn about forge integrations" />
+    </label>
+    <input pInputText id="int-name" [(ngModel)]="formData.name" [class.input-invalid]="nameInvalid" class="w-full" placeholder="e.g. main-gitea" />
+    @if (nameInvalid) {
+      <small class="text-danger">Lowercase letters, digits, and dashes only. Cannot start or end with a dash.</small>
+    } @else {
+      <small class="text-secondary">Used in the webhook URL. Lowercase letters, digits, and dashes.</small>
+    }
   </div>
   <div class="form-group">
     <label for="int-display-name">Display Name</label>
@@ -220,7 +227,10 @@
     <small class="text-secondary">Human-readable label shown in the integrations list.</small>
   </div>
   <div class="form-group">
-    <label for="int-kind">Kind</label>
+    <label for="int-kind">
+      Kind
+      <gr-label-help href="https://wavelens.github.io/gradient/usage/integration/" title="Inbound vs outbound integrations" />
+    </label>
     <p-select
       inputId="int-kind"
       [(ngModel)]="formData.kind"
@@ -276,7 +286,7 @@
 
   <ng-template pTemplate="footer">
     <button pButton label="Cancel" severity="secondary" (click)="showCreateDialog.set(false)" [disabled]="saving()"></button>
-    <button pButton label="Create" icon="pi pi-check" (click)="createIntegration()" [loading]="saving()" [disabled]="saving() || !formData.name.trim()"></button>
+    <button pButton label="Create" icon="pi pi-check" (click)="createIntegration()" [loading]="saving()" [disabled]="saving() || !formData.name.trim() || nameInvalid"></button>
   </ng-template>
 </p-dialog>
 

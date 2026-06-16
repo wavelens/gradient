@@ -31,12 +31,12 @@
           </span>
         </div>
       </div>
-      @if (c.can_edit) {
-        <div class="header-actions">
-          <button pButton label="NARs" icon="pi pi-database" severity="secondary" [routerLink]="['/caches', cacheName, 'nars']"></button>
+      <div class="header-actions">
+        <button pButton label="NARs" icon="pi pi-database" severity="secondary" [routerLink]="['/caches', cacheName, 'nars']"></button>
+        @if (c.can_edit) {
           <button pButton label="Settings" icon="pi pi-cog" severity="secondary" [routerLink]="['/caches', cacheName, 'settings']"></button>
-        </div>
-      }
+        }
+      </div>
     </div>
 
     <!-- Stats -->
@@ -177,7 +177,10 @@ trusted-public-keys = &lt;unavailable&gt;</pre>
 
         @if (!c.public) {
           <div class="usage-divider"></div>
-          <h3 class="usage-section-title">Authentication</h3>
+          <h3 class="usage-section-title">
+            Authentication
+            <gr-label-help href="https://wavelens.github.io/gradient/usage/caches/#authentication" title="Cache authentication docs" />
+          </h3>
           <p class="text-secondary">This cache is private. Run the following command as root to install the credentials Nix needs to access it:</p>
           <div class="usage-row">
             <span class="usage-label">Install netrc</span>
@@ -189,20 +192,10 @@ trusted-public-keys = &lt;unavailable&gt;</pre>
             </div>
             <p class="text-secondary usage-hint">Replace <code>&lt;YOUR_TOKEN&gt;</code> with your API key or login token. The command writes the credentials to <code>/etc/nix/netrc</code> so the Nix daemon can authenticate against this cache.</p>
           </div>
-          <div class="usage-row">
-            <span class="usage-label">Or install <code>/etc/nix/netrc</code> decleratively</span>
-            <div class="code-block multiline">
-              <pre>
-                {{ declerativeNetrcCode }}
-              </pre>
-              <button class="copy-btn" (click)="copy(declerativeNetrcCode, 'netrc-code')" [title]="copied() === 'netrc-code' ? 'Copied!' : 'Copy'">
-                <span class="material-symbols-outlined">{{ copied() === 'netrc-code' ? 'check' : 'content_copy' }}</span>
-              </button>
-            </div>
-            <p class="text-secondary usage-hint">
-              This example uses <a href="https://github.com/Mic92/sops-nix">sops-nix</a>.
-              Replace <code>&lt;YOUR_USERNAME&gt;</code> with the user who should be able to use this cache. </p>
-          </div>
+          <p class="text-secondary usage-hint">
+            Prefer a declarative NixOS setup? See the
+            <a href="https://wavelens.github.io/gradient/usage/caches/#declarative-netrc" target="_blank" rel="noopener noreferrer">declarative netrc example</a> in the docs.
+          </p>
         }
       </div>
     </div>

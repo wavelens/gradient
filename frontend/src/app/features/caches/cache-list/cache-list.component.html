@@ -199,38 +199,6 @@
     </div>
 
     <div class="form-group">
-      <label for="cache-priority">Priority</label>
-      <input
-        type="number"
-        id="cache-priority"
-        [(ngModel)]="newCache.priority"
-        [class.input-invalid]="priorityInvalid"
-        class="w-full"
-        min="0"
-        max="255"
-      />
-      @if (priorityInvalid) {
-        <small class="text-danger">Priority must be between 0 and 255</small>
-      } @else {
-        <small class="text-secondary">Higher priority caches are used first (0-255)</small>
-      }
-    </div>
-
-    <div class="form-group">
-      <label for="cache-local-priority">Local Priority</label>
-      <input
-        type="number"
-        id="cache-local-priority"
-        [(ngModel)]="newCache.local_priority"
-        class="w-full"
-      />
-      <small class="text-secondary">
-        Advertised to clients in the server's local-IPs allowlist.
-        Leave empty (or set 0) to always advertise the default priority.
-      </small>
-    </div>
-
-    <div class="form-group">
       <label for="cache-visibility">Visibility</label>
       <select id="cache-visibility" [(ngModel)]="newCache.public" class="visibility-select w-full">
         <option [ngValue]="false">Private</option>
@@ -252,7 +220,7 @@
       pButton
       label="Create"
       (click)="createCache()"
-      [disabled]="!newCache.name || !newCache.display_name || priorityInvalid || nameCheckState() === 'taken' || nameCheckState() === 'invalid' || nameCheckState() === 'checking' || creating()"
+      [disabled]="!newCache.name || !newCache.display_name || nameCheckState() === 'taken' || nameCheckState() === 'invalid' || nameCheckState() === 'checking' || creating()"
       [loading]="creating()"
     ></button>
   </ng-template>

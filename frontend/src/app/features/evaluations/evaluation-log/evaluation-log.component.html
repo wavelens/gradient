@@ -176,7 +176,7 @@
           </div>
           <div class="info-metric">
             <span class="metric-label">Commit</span>
-            <code class="commit-hash">{{ (ev.commit || '').slice(0, 8) }}</code>
+            <code class="commit-hash" [title]="ev.commit || ''">{{ (ev.commit || '').slice(0, 8) }}</code>
           </div>
           <div class="info-metric nav-btns">
             <button pButton icon="pi pi-arrow-left" severity="secondary" size="small"
@@ -197,6 +197,15 @@
 
       <!-- Log area -->
       <div class="log-area">
+        @if (ev.status === 'Waiting' && selectedSection() !== 'messages' && selectedBuildId()) {
+          <div class="waiting-banner">
+            <span class="material-symbols-outlined">pause_circle</span>
+            <span class="waiting-banner-title">{{ waitingTitle(ev.waiting_reason) }}</span>
+            @if (ev.waiting_reason) {
+              <span class="waiting-banner-sub">{{ formatWaitingReason(ev.waiting_reason) }}</span>
+            }
+          </div>
+        }
         @if (selectedSection() === 'messages') {
           <div class="messages-panel">
             <div class="messages-panel-header">Evaluation Messages</div>

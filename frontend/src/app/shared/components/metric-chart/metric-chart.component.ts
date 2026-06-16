@@ -21,7 +21,7 @@ import { NgApexchartsModule, ApexAxisChartSeries } from 'ng-apexcharts';
       }
       <apx-chart
         [series]="series"
-        [chart]="{ type: type, height: height, background: 'transparent', toolbar: { show: false }, animations: { enabled: false } }"
+        [chart]="{ type: type, height: height, background: 'transparent', toolbar: { show: false }, animations: { enabled: false }, zoom: { allowMouseWheelZoom: false } }"
         [theme]="{ mode: 'dark' }"
         [plotOptions]="{ bar: { horizontal: horizontal } }"
         [xaxis]="{ categories: categories, labels: { rotate: -45, style: { colors: '#abb0b4', fontSize: '10px' } } }"

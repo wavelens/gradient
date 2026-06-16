@@ -11,6 +11,7 @@ import { DialogModule } from 'primeng/dialog';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { SelectModule } from 'primeng/select';
+import { SelectButtonModule } from 'primeng/selectbutton';
 import { CheckboxModule } from 'primeng/checkbox';
 import { TextareaModule } from 'primeng/textarea';
 import { ConfigService } from '@core/services/config.service';
@@ -44,6 +45,7 @@ interface IntegrationOption {
     ButtonModule,
     InputTextModule,
     SelectModule,
+    SelectButtonModule,
     CheckboxModule,
     TextareaModule,
     ActionEventsComponent,

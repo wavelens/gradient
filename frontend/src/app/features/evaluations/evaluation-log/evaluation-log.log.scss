@@ -37,6 +37,21 @@
   color: $color-warning;
 }
 
+.waiting-banner {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  padding: $spacing-sm $spacing-md;
+  background: rgba($color-warning, 0.08);
+  border-bottom: 1px solid rgba($color-warning, 0.35);
+  color: $text-secondary;
+  flex-shrink: 0;
+
+  .material-symbols-outlined { font-size: 20px; color: $color-warning; }
+  .waiting-banner-title { font-weight: 600; color: $text-primary; }
+  .waiting-banner-sub { font-size: $font-size-sm; color: $text-light; }
+}
+
 .queued-hint {
   display: flex;
   flex-direction: column;
