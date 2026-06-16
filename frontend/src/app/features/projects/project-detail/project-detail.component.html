@@ -11,7 +11,6 @@
     <div>
       <div class="breadcrumb">
         <a [routerLink]="['/organization', orgName]">{{ orgDisplayName() || orgName }}</a>
-        <span class="sep">/</span><b>{{ proj.display_name }}</b>
       </div>
       <h1>{{ proj.display_name }}</h1>
     </div>
@@ -86,7 +85,7 @@
                 <div>
                   <h2>{{ evalTitle(sel) }}</h2>
                   <div class="sub">
-                    <span class="mono">{{ sel.commit.substring(0, 8) }}</span> ·
+                    <span class="mono" [title]="sel.commit">{{ sel.commit.substring(0, 8) }}</span> ·
                     {{ triggerLabel(sel) }} · started {{ sel.created_at + 'Z' | date: 'MMM d, HH:mm' }}
                   </div>
                 </div>

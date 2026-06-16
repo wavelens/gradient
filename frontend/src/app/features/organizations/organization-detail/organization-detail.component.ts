@@ -19,6 +19,7 @@ import { OrganizationsService } from '@core/services/organizations.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { EmptyStateComponent } from '@shared/components/empty-state/empty-state.component';
+import { LabelHelpComponent } from '@shared/components/form';
 import { Organization, Project, EvaluationStatus } from '@core/models';
 
 const RESERVED_PROJECT_NAMES = ['build-request'];
@@ -36,6 +37,7 @@ const RESERVED_PROJECT_NAMES = ['build-request'];
     TextareaModule,
     LoadingSpinnerComponent,
     EmptyStateComponent,
+    LabelHelpComponent,
   ],
   templateUrl: './organization-detail.component.html',
   styleUrl: './organization-detail.component.scss',

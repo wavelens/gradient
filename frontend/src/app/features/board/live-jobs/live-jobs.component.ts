@@ -122,6 +122,9 @@ type StatusFilter = 'all' | 'pending' | 'dispatched';
 })
 export class BoardLiveJobsComponent implements OnInit, OnDestroy {
   private static readonly STATE_KEY = 'board.live-jobs.filters';
+  // Mirror the server's `board/jobs/dispatched` cap so optimistic live rows and
+  // the reconciled API list converge instead of flipping the count.
+  private static readonly MAX_DISPATCHED = 500;
 
   private board = inject(BoardService);
   private live = inject(BoardLiveService);
@@ -196,7 +199,7 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
                 pname: null,
               },
               ...list,
-            ].slice(0, 200)
+            ].slice(0, BoardLiveJobsComponent.MAX_DISPATCHED)
           );
           this.scheduleRefresh();
         }

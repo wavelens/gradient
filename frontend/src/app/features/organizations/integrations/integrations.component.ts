@@ -24,6 +24,7 @@ import {
   Organization,
 } from '@core/models';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
+import { LabelHelpComponent } from '@shared/components/form';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 
 interface Option<T> {
@@ -43,6 +44,7 @@ interface Option<T> {
     InputTextModule,
     SelectModule,
     LoadingSpinnerComponent,
+    LabelHelpComponent,
     WritableDirective,
     ManagedDisableDirective,
   ],
@@ -65,6 +67,13 @@ export class IntegrationsComponent implements OnInit {
   orgDisplayName = signal('');
   organization = signal<Organization | null>(null);
   integrations = signal<Integration[]>([]);
+
+  private readonly namePattern = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
+
+  get nameInvalid(): boolean {
+    const n = this.formData.name.trim();
+    return n.length > 0 && !this.namePattern.test(n);
+  }
 
   showCreateDialog = signal(false);
   showEditDialog = signal(false);
@@ -196,7 +205,7 @@ export class IntegrationsComponent implements OnInit {
   }
 
   createIntegration(): void {
-    if (!this.formData.name.trim()) return;
+    if (!this.formData.name.trim() || this.nameInvalid) return;
     this.saving.set(true);
     this.errorMessage.set(null);
     const body: any = {

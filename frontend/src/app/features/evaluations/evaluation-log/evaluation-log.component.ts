@@ -210,21 +210,21 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
   private readonly buildStatusOrder: Record<string, number> = {
     building: 0,
-    queued: 1,
+    failed: 1,
+    dependencyfailed: 1,
     aborted: 2,
-    failed: 3,
-    dependencyfailed: 3,
+    queued: 3,
     completed: 4,
     substituted: 4,
   };
 
-  /// Sidebar sections, in display order. `Completed` absorbs `Substituted`,
-  /// `Failed` absorbs `DependencyFailed` - matching the dot colours.
+  /// Sidebar sections, in display order. Failures sort above queued so they stay
+  /// visible. `Completed` absorbs `Substituted`, `Failed` absorbs `DependencyFailed`.
   private readonly buildGroups: { key: string; label: string; members: string[] }[] = [
     { key: 'building', label: 'Building', members: ['building'] },
-    { key: 'queued', label: 'Queued', members: ['queued'] },
-    { key: 'aborted', label: 'Aborted', members: ['aborted'] },
     { key: 'failed', label: 'Failed', members: ['failed', 'dependencyfailed'] },
+    { key: 'aborted', label: 'Aborted', members: ['aborted'] },
+    { key: 'queued', label: 'Queued', members: ['queued'] },
     { key: 'completed', label: 'Completed', members: ['completed', 'substituted'] },
   ];
 

@@ -24,20 +24,6 @@
   }
 }
 
-.radio-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: $spacing-md;
-}
-
-.radio-option {
-  display: inline-flex;
-  align-items: center;
-  gap: $spacing-xs;
-  font-weight: normal;
-  margin-bottom: 0;
-}
-
 .token-row {
   display: flex;
   gap: $spacing-sm;
