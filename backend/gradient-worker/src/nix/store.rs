@@ -54,6 +54,20 @@ use gradient_proto::traits::WorkerStore;
 /// to surface as an error.
 const POOL_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(600);
 
+/// Maximum time the pool waits for a brand-new connection to finish its socket
+/// connect plus daemon handshake before failing.
+///
+/// Harmonia's default is 10 s. On a worker whose local nix-daemon already
+/// carries a high connection count (concurrent build jobs, their own daemon
+/// forks, eval workers), accepting and handshaking a fresh connection under
+/// CPU saturation routinely takes longer than that. The pool then surfaces it
+/// as `acquire daemon connection: timeout: connecting to daemon` and fails an
+/// otherwise-healthy prefetch import. Connection establishment gets the same
+/// generous ceiling as [`POOL_ACQUIRE_TIMEOUT`]: any single daemon interaction
+/// (queueing, connecting, importing) has 10 minutes before the daemon is
+/// treated as genuinely wedged.
+const POOL_CONNECT_TIMEOUT: Duration = Duration::from_secs(600);
+
 /// Build the harmonia [`PoolConfig`] used by [`LocalNixStore::connect_at`].
 ///
 /// Extracted so the policy is asserted in tests without a live daemon.
@@ -61,6 +75,7 @@ pub(crate) fn build_pool_config(pool_size: usize) -> PoolConfig {
     PoolConfig {
         max_size: pool_size,
         acquire_timeout: POOL_ACQUIRE_TIMEOUT,
+        connection_timeout: POOL_CONNECT_TIMEOUT,
         ..Default::default()
     }
 }
@@ -323,6 +338,23 @@ mod tests {
             "acquire_timeout must accommodate worst-case queue depth across \
              concurrent build jobs; got {:?}",
             cfg.acquire_timeout
+        );
+    }
+
+    /// Regression for `acquire daemon connection: timeout: connecting to
+    /// daemon`: `build_pool_config` must override the per-connection
+    /// establishment timeout too, not only `acquire_timeout`. Harmonia's 10 s
+    /// default fires while a saturated local daemon is still completing the
+    /// handshake for a fresh pooled connection, failing prefetch imports under
+    /// high daemon connection count.
+    #[test]
+    fn pool_config_connection_timeout_is_generous() {
+        let cfg = build_pool_config(8);
+        assert!(
+            cfg.connection_timeout >= Duration::from_secs(120),
+            "connection_timeout must tolerate a saturated daemon's handshake; \
+             the 10 s harmonia default fails prefetch imports under load; got {:?}",
+            cfg.connection_timeout
         );
     }
 

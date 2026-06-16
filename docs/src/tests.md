@@ -743,6 +743,13 @@ Backend (`cargo test -p worker --tests`):
   prefetcher abort with a clear message that names the missing path.
 - `proto::nar_import::tests::classify_empty_input_is_empty_output` - empty
   cache responses produce empty buckets.
+- `nix::store::tests::pool_config_connection_timeout_is_generous` - regression
+  for `acquire daemon connection: timeout: connecting to daemon`. The worker's
+  pool config must override harmonia's 10 s `connection_timeout` default, not
+  just `acquire_timeout`. Under a high daemon connection count the handshake
+  for a fresh pooled connection routinely outlasts 10 s, so the build failed an
+  otherwise-healthy prefetch import; the config now grants connection
+  establishment the same 10 min ceiling as the acquire wait.
 
 ## Missing-input self-heal (#410)
 
