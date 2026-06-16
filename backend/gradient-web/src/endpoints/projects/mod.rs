@@ -5,6 +5,7 @@
  */
 
 pub mod actions;
+mod auto_attach;
 pub mod evaluations;
 pub mod flake_inputs;
 pub mod management;
