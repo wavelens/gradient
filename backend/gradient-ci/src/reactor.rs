@@ -11,9 +11,18 @@
 
 use async_trait::async_trait;
 use gradient_entity::build::BuildStatus;
-use gradient_entity::evaluation::EvaluationStatus;
+use gradient_entity::evaluation::{EvaluationKind, EvaluationStatus};
 use sea_orm::EntityTrait;
 use tracing::{error, warn};
+
+/// Snake-case tag of an evaluation kind, surfaced in action payloads so the
+/// dispatcher can restrict `OpenPr` to `input_update` runs.
+fn eval_kind_str(kind: EvaluationKind) -> &'static str {
+    match kind {
+        EvaluationKind::Normal => "normal",
+        EvaluationKind::InputUpdate => "input_update",
+    }
+}
 
 use crate::actions::{dispatch_build_event, dispatch_evaluation_event, reporter_for_project};
 use crate::context::CiContext;
@@ -93,6 +102,7 @@ impl StatusReactor for CiStatusReactor {
             "evaluation_id": build.evaluation,
             "derivation_path": derivation_path,
             "status": event,
+            "evaluation_kind": eval_kind_str(evaluation.kind),
         });
 
         dispatch_build_event(&ctx, project_id, event, payload).await;
@@ -128,6 +138,7 @@ impl StatusReactor for CiStatusReactor {
             "project_id": evaluation.project,
             "repository": evaluation.repository,
             "status": event,
+            "evaluation_kind": eval_kind_str(evaluation.kind),
         });
 
         dispatch_evaluation_event(&ctx, project_id, event, payload).await;

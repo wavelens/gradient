@@ -9,11 +9,13 @@
 //! builds of a previous evaluation.
 
 mod flake_snapshot;
+mod input_update;
 mod new_evaluation;
 mod restart;
 
 use thiserror::Error;
 
+pub use input_update::maybe_trigger_input_update;
 pub use new_evaluation::trigger_evaluation;
 pub use restart::trigger_restart_builds;
 

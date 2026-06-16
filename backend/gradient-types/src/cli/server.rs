@@ -31,6 +31,12 @@ pub struct ServerArgs {
     /// flag on session cookies. Set to `false` for plain HTTP deployments.
     #[arg(long, env = "GRADIENT_USE_TLS", default_value = "true")]
     pub use_tls: bool,
+    /// Author/committer name for commits the `OpenPr` action pushes.
+    #[arg(long, env = "GRADIENT_PR_COMMIT_NAME", default_value = "Gradient")]
+    pub pr_commit_name: String,
+    /// Author/committer email for commits the `OpenPr` action pushes.
+    #[arg(long, env = "GRADIENT_PR_COMMIT_EMAIL", default_value = "gradient@localhost")]
+    pub pr_commit_email: String,
 }
 
 impl Default for ServerArgs {
@@ -41,6 +47,8 @@ impl Default for ServerArgs {
             serve_url: "http://127.0.0.1:8000".into(),
             frontend_url: "http://127.0.0.1:8000".into(),
             use_tls: true,
+            pr_commit_name: "Gradient".into(),
+            pr_commit_email: "gradient@localhost".into(),
         }
     }
 }

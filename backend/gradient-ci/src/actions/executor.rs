@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::send::{execute_forge_status_report, execute_send_mail, execute_send_web_request};
+use super::send::{
+    execute_forge_status_report, execute_open_pr, execute_send_mail, execute_send_web_request,
+};
 use super::{MAX_BODY_BYTES, truncate};
 use crate::context::CiContext;
 use gradient_types::{
@@ -25,6 +27,8 @@ pub async fn execute_action(
 ) -> Result<()> {
     let cfg: ActionConfig =
         serde_json::from_value(action.config.clone()).context("decoding action config")?;
+    let action_id_for_pr = action.id;
+    let project_for_pr = action.project;
     let started = Instant::now();
     let request_body = truncate(
         serde_json::to_string(&payload).unwrap_or_default(),
@@ -50,6 +54,28 @@ pub async fn execute_action(
         }
         ActionConfig::ForgeStatusReport { integration_id } => {
             execute_forge_status_report(ctx, event, &payload, integration_id).await
+        }
+        ActionConfig::OpenPr {
+            integration_id,
+            branch_pattern,
+            title_template,
+            body_template,
+            update_existing,
+            ..
+        } => {
+            execute_open_pr(
+                ctx,
+                event,
+                &payload,
+                action_id_for_pr,
+                project_for_pr,
+                integration_id,
+                &branch_pattern,
+                title_template.as_deref(),
+                body_template.as_deref(),
+                update_existing,
+            )
+            .await
         }
     };
 
