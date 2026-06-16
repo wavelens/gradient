@@ -444,6 +444,17 @@ impl JobReporter for JobUpdater {
         self.send_update(JobUpdateKind::FetchResult { flake_source })
     }
 
+    async fn report_input_update(
+        &mut self,
+        candidate_lock: String,
+        bumped: Vec<gradient_proto::messages::BumpedInputWire>,
+    ) -> Result<()> {
+        self.send_update(JobUpdateKind::InputUpdateResult {
+            candidate_lock,
+            bumped,
+        })
+    }
+
     async fn report_evaluating_flake(&mut self) -> Result<()> {
         self.send_update(JobUpdateKind::EvaluatingFlake)
     }

@@ -764,6 +764,14 @@ impl<'a> DispatchContext<'a> {
                     error!(peer_id = %self.peer_id, %job_id, error = %e, "record_eval_metrics failed");
                 }
             }
+            JobUpdateKind::InputUpdateResult {
+                candidate_lock,
+                bumped,
+            } => {
+                self.scheduler
+                    .persist_input_update_result(&job_id, candidate_lock, bumped)
+                    .await;
+            }
         }
     }
 

@@ -175,6 +175,25 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
                 .collect::<Vec<_>>()
         };
 
+        let input_update = if eval.kind == gradient_entity::evaluation::EvaluationKind::InputUpdate
+        {
+            use gradient_entity::evaluation_input_update as eiu;
+            eiu::Entity::find()
+                .filter(eiu::Column::Evaluation.eq(eval.id))
+                .one(&state.worker_db)
+                .await?
+                .map(|s| gradient_types::proto::InputUpdateSpec {
+                    generator: s.generator,
+                    inputs: s
+                        .target_inputs
+                        .as_array()
+                        .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                        .unwrap_or_default(),
+                })
+        } else {
+            None
+        };
+
         let split_fetch = scheduler.worker_pool.read().await.has_idle_eval_only_worker();
         let tasks = if split_fetch {
             vec![FlakeTask::FetchFlake]
@@ -199,6 +218,7 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
                 .unwrap_or_else(|_| vec![eval.wildcard.clone()]),
             timeout_secs: None,
             input_overrides,
+            input_update,
         };
 
         let organization_id = organization_id_for_eval(state, &eval).await;

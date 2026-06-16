@@ -131,6 +131,7 @@ fn assign_job_roundtrip() {
             wildcards: vec!["packages.*".into()],
             timeout_secs: Some(300),
             input_overrides: vec![],
+            input_update: None,
         }),
         timeout_secs: Some(600),
     };
@@ -159,6 +160,7 @@ fn flake_input_override_roundtrip() {
                 url: None,
             },
         ],
+        input_update: None,
     };
     let bytes = rkyv::to_bytes::<RkyvError>(&job).unwrap();
     let decoded: FlakeJob = rkyv::from_bytes::<_, RkyvError>(&bytes[..]).unwrap();

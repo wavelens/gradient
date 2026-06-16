@@ -56,6 +56,36 @@ fn matches_event_send_mail_filters_by_stored_events() {
 }
 
 #[test]
+fn matches_event_open_pr_fires_only_on_gate_event() {
+    use gradient_types::{ActionConfig, IntegrationId, VerifyGate};
+
+    let open_pr = |gate: VerifyGate| {
+        let mut a = action_with(ActionType::OpenPr, vec![]);
+        a.config = serde_json::to_value(ActionConfig::OpenPr {
+            integration_id: IntegrationId::now_v7(),
+            generator: Default::default(),
+            granularity: Default::default(),
+            verify_gate: gate,
+            branch_pattern: "gradient/flake-lock-update".into(),
+            title_template: None,
+            body_template: None,
+            update_existing: true,
+        })
+        .unwrap();
+        a
+    };
+
+    let build_gate = open_pr(VerifyGate::Build);
+    assert!(matches_event(&build_gate, "build.completed"));
+    assert!(!matches_event(&build_gate, "build.failed"));
+    assert!(!matches_event(&build_gate, "evaluation.completed"));
+
+    let eval_gate = open_pr(VerifyGate::Eval);
+    assert!(matches_event(&eval_gate, "evaluation.completed"));
+    assert!(!matches_event(&eval_gate, "build.completed"));
+}
+
+#[test]
 fn matches_event_forge_status_ignores_stored_events() {
     // The stored `events` list is irrelevant for ForgeStatusReport - the
     // hardcoded FORGE_STATUS_EVENTS set drives matching. Seed the row

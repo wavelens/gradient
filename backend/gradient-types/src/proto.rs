@@ -78,6 +78,26 @@ pub struct FlakeInputOverride {
     pub url: Option<String>,
 }
 
+/// Drives an `input_update` evaluation: which generator to run and which flake
+/// inputs to bump during `FetchFlake`. `None` on a normal evaluation.
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[rkyv(derive(Debug, PartialEq))]
+pub struct InputUpdateSpec {
+    /// `PatchGeneratorKind` snake_case tag, e.g. `flake_lock`.
+    pub generator: String,
+    /// Tracked input names to bump. Empty means "all tracked inputs".
+    pub inputs: Vec<String>,
+}
+
+/// One bumped input, reported back from the worker for the sidecar + PR body.
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[rkyv(derive(Debug, PartialEq))]
+pub struct BumpedInputWire {
+    pub name: String,
+    pub old_rev: Option<String>,
+    pub new_rev: String,
+}
+
 /// Evaluation job: fetch and/or evaluate a Nix flake.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
@@ -88,6 +108,8 @@ pub struct FlakeJob {
     pub timeout_secs: Option<u64>,
     /// Per-input overrides applied during `FetchFlake`. Empty means no overrides.
     pub input_overrides: Vec<FlakeInputOverride>,
+    /// Set on an `input_update` evaluation to bump tracked inputs during fetch.
+    pub input_update: Option<InputUpdateSpec>,
 }
 
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -178,6 +200,13 @@ pub enum JobUpdateKind {
     /// Per-evaluation stats + walked flake-output graph, sent once at eval
     /// completion. Informational/metrics only - does not affect job state.
     EvalStats(EvalStatsReport),
+    /// Worker-produced candidate `flake.lock` (utf-8) and the inputs it bumped,
+    /// reported during `FetchFlake` of an `input_update` eval. Empty `bumped`
+    /// means nothing changed and no PR should be opened.
+    InputUpdateResult {
+        candidate_lock: String,
+        bumped: Vec<BumpedInputWire>,
+    },
 }
 
 // ── Scheduling types ─────────────────────────────────────────────────────────

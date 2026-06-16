@@ -116,6 +116,14 @@ pub async fn fetch_repository(
         }
     };
 
+    // `input_update` evals bump tracked flake inputs natively, writing the
+    // candidate lock into the checkout so the rest of eval/build runs against
+    // exactly the lock that will be committed. An empty patch is left as a
+    // no-op so no PR is opened.
+    if let Some(spec) = &job.input_update {
+        run_input_update(spec, &tmp_path, updater).await?;
+    }
+
     let overrides_in: Vec<OverrideInput> = job.input_overrides.iter().map(Into::into).collect();
     let (applied_overrides, warnings) = if overrides_in.is_empty() {
         (Vec::new(), Vec::new())
@@ -175,6 +183,56 @@ pub async fn fetch_repository(
         }
         Err(e) => Err(e),
     }
+}
+
+/// Run the native flake.lock generator over the checkout, write the candidate
+/// lock back, and report it (with the bumped set) to the server. An empty patch
+/// returns without reporting so no PR is opened.
+async fn run_input_update(
+    spec: &gradient_proto::messages::InputUpdateSpec,
+    checkout: &str,
+    updater: &mut dyn JobReporter,
+) -> Result<()> {
+    use gradient_flake_lock::PatchGenerator as _;
+
+    let resolver = gradient_flake_lock::HttpRevisionResolver::new(reqwest::Client::new());
+    let generator = gradient_flake_lock::FlakeLockGenerator::new(resolver);
+    let tracked: Vec<gradient_flake_lock::InputName> =
+        spec.inputs.iter().cloned().map(Into::into).collect();
+
+    let Some(patch) = generator
+        .produce(std::path::Path::new(checkout), &tracked)
+        .await
+        .context("flake.lock update generator failed")?
+    else {
+        return Ok(());
+    };
+
+    for edit in &patch.edits {
+        let dest = std::path::Path::new(checkout).join(&edit.path);
+        tokio::fs::write(&dest, &edit.contents)
+            .await
+            .with_context(|| format!("writing {}", dest.display()))?;
+    }
+
+    let candidate = patch
+        .edits
+        .iter()
+        .find(|e| e.path.to_string_lossy().as_ref() == "flake.lock")
+        .map(|e| String::from_utf8_lossy(&e.contents).into_owned())
+        .unwrap_or_default();
+
+    let bumped = patch
+        .bumped
+        .into_iter()
+        .map(|b| gradient_proto::messages::BumpedInputWire {
+            name: b.name,
+            old_rev: b.old_rev,
+            new_rev: b.new_rev,
+        })
+        .collect();
+
+    updater.report_input_update(candidate, bumped).await
 }
 
 fn parse_nix_json(stdout: &[u8], cmd: &str) -> Result<serde_json::Value> {
@@ -534,6 +592,7 @@ mod tests {
             wildcards: vec![],
             timeout_secs: None,
             input_overrides: vec![],
+            input_update: None,
         }
     }
 
@@ -638,6 +697,7 @@ mod tests {
             wildcards: vec![],
             timeout_secs: None,
             input_overrides: vec![],
+            input_update: None,
         };
 
         let credentials = crate::proto::credentials::CredentialStore::new();
