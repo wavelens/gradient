@@ -53,6 +53,9 @@ pub(crate) fn decide_failure_outcome(
         BuildFailureKind::Timeout => FailureOutcome::Timeout,
         BuildFailureKind::Permanent => FailureOutcome::Permanent,
         BuildFailureKind::SubstituteUnavailable => FailureOutcome::Requeue,
+        // The build itself is terminal for this eval; the self-heal that
+        // re-queues the missing inputs' producers runs separately.
+        BuildFailureKind::InputsUnavailable => FailureOutcome::Permanent,
         BuildFailureKind::Transient => {
             if (attempt + 1) < max_attempts as i32 {
                 FailureOutcome::Retry
@@ -67,7 +70,9 @@ pub(crate) fn decide_failure_outcome(
 /// `build_attempt.reason`. `Transient` has no single cause, so it stays `None`.
 fn attempt_reason(kind: BuildFailureKind) -> Option<AttemptFailureReason> {
     match kind {
-        BuildFailureKind::SubstituteUnavailable => Some(AttemptFailureReason::SubstituteUnavailable),
+        BuildFailureKind::SubstituteUnavailable | BuildFailureKind::InputsUnavailable => {
+            Some(AttemptFailureReason::SubstituteUnavailable)
+        }
         BuildFailureKind::Permanent => Some(AttemptFailureReason::BuilderNonzero),
         BuildFailureKind::Timeout => Some(AttemptFailureReason::WallClockTimeout),
         BuildFailureKind::Transient => None,
@@ -86,6 +91,14 @@ pub(crate) fn retry_backoff_elapsed(
     let shift = (attempt.max(1) - 1).min(16) as u32;
     let window = base_secs.saturating_mul(1u64 << shift);
     (now - failed_at).num_seconds() >= window as i64
+}
+
+/// Extract the 32-char hash from a `/nix/store/<hash>-<name>` store path.
+fn store_path_hash(store_path: &str) -> Option<&str> {
+    store_path
+        .strip_prefix("/nix/store/")
+        .and_then(|s| s.split('-').next())
+        .filter(|h| !h.is_empty())
 }
 
 /// Wraps `&ServerState` so build-lifecycle helpers don't repeat `state` as a parameter.
@@ -304,6 +317,7 @@ impl<'a> BuildStateHandler<'a> {
         build_id: BuildId,
         error: &str,
         kind: BuildFailureKind,
+        missing_paths: &[String],
     ) -> Result<()> {
         let build = match EBuild::find_by_id(build_id)
             .one(&self.state.worker_db)
@@ -346,6 +360,19 @@ impl<'a> BuildStateHandler<'a> {
         .await
         {
             warn!(%build_id, error = %e, "failed to record attempt failure reason");
+        }
+
+        // Self-heal: a required input was reported absent from the cache while
+        // its producer was marked done/substituted. Demote those outputs and
+        // re-queue their producers before this build is marked terminal, so the
+        // next evaluation finds them genuinely cached.
+        if matches!(kind, BuildFailureKind::InputsUnavailable)
+            && !missing_paths.is_empty()
+            && let Err(e) = self
+                .reconcile_missing_inputs(evaluation_id, missing_paths)
+                .await
+        {
+            warn!(%build_id, error = %e, "failed to reconcile missing inputs");
         }
 
         match decide_failure_outcome(kind, attempt, max_attempts) {
@@ -429,35 +456,8 @@ impl<'a> BuildStateHandler<'a> {
         }
 
         if is_success {
-            let now = gradient_types::now();
             for follower in followers {
-                let follower_id = follower.id;
-                let (old_status, evaluation, derivation) =
-                    (follower.status, follower.evaluation, follower.derivation);
-                let mut active: ABuild = follower.into_active_model();
-                active.status = Set(BuildStatus::Queued);
-                active.via = Set(None);
-                active.updated_at = Set(now);
-                if let Err(e) = active.update(&self.state.worker_db).await {
-                    error!(error = %e, %follower_id, "failed to release follower for re-dispatch");
-                    continue;
-                }
-
-                // This force-set bypasses `update_build_status`, so maintain the
-                // dependency-closure counts directly (#383).
-                if old_status != BuildStatus::Queued {
-                    let state = Arc::clone(self.state);
-                    self.state.shutdown.spawn(async move {
-                        let _ = gradient_db::apply_dep_count_delta(
-                            &state.worker_db,
-                            evaluation,
-                            derivation,
-                            i32::from(old_status),
-                            i32::from(BuildStatus::Queued),
-                        )
-                        .await;
-                    });
-                }
+                self.force_requeue(follower).await;
             }
 
             return Ok(());
@@ -493,6 +493,96 @@ impl<'a> BuildStateHandler<'a> {
             self.check_evaluation_done(evaluation_id).await?;
         }
 
+        Ok(())
+    }
+
+    /// Force a build back to `Queued`, bypassing the state machine (which
+    /// forbids leaving a terminal state) and maintaining the entry-point
+    /// dep-closure counts directly (#383). Used to release followers on leader
+    /// success and to re-queue producers of inputs the cache could not serve.
+    async fn force_requeue(&self, build: MBuild) {
+        let build_id = build.id;
+        let (old_status, evaluation, derivation, has_queued_at) = (
+            build.status,
+            build.evaluation,
+            build.derivation,
+            build.queued_at.is_some(),
+        );
+        let now = gradient_types::now();
+        let mut active: ABuild = build.into_active_model();
+        active.status = Set(BuildStatus::Queued);
+        active.via = Set(None);
+        active.updated_at = Set(now);
+        if !has_queued_at {
+            active.queued_at = Set(Some(now));
+        }
+
+        if let Err(e) = active.update(&self.state.worker_db).await {
+            error!(error = %e, %build_id, "failed to re-queue build");
+            return;
+        }
+
+        if old_status != BuildStatus::Queued {
+            let state = Arc::clone(self.state);
+            self.state.shutdown.spawn(async move {
+                let _ = gradient_db::apply_dep_count_delta(
+                    &state.worker_db,
+                    evaluation,
+                    derivation,
+                    i32::from(old_status),
+                    i32::from(BuildStatus::Queued),
+                )
+                .await;
+            });
+        }
+    }
+
+    /// Self-heal for `BuildFailureKind::InputsUnavailable`. A build attempt
+    /// proved these input outputs are unfetchable from the cache, so demote
+    /// them (`is_cached = false`, drop the stale `cached_path`) and re-queue any
+    /// build in this evaluation that produces them yet sits in a done state
+    /// (`Substituted`/`Completed`). The scheduler then builds and caches them
+    /// for real, so the dependent succeeds on the next evaluation.
+    async fn reconcile_missing_inputs(
+        &self,
+        evaluation_id: EvaluationId,
+        missing_paths: &[String],
+    ) -> Result<()> {
+        let db = &self.state.worker_db;
+        let mut producers: std::collections::HashSet<DerivationId> = std::collections::HashSet::new();
+        for path in missing_paths {
+            let Some(hash) = store_path_hash(path) else {
+                continue;
+            };
+
+            match gradient_db::demote_cached_output(db, hash).await {
+                Ok(drvs) => producers.extend(drvs),
+                Err(e) => warn!(%path, error = %e, "reconcile: demote_cached_output failed"),
+            }
+        }
+
+        if producers.is_empty() {
+            return Ok(());
+        }
+
+        let producer_ids: Vec<DerivationId> = producers.into_iter().collect();
+        let stale = gradient_db::fetch_in_chunks(&producer_ids, |chunk| async move {
+            EBuild::find()
+                .filter(CBuild::Evaluation.eq(evaluation_id))
+                .filter(CBuild::Status.is_in(vec![BuildStatus::Substituted, BuildStatus::Completed]))
+                .filter(CBuild::Derivation.is_in(chunk))
+                .all(db)
+                .await
+        })
+        .await
+        .context("reconcile: fetch producing builds")?;
+
+        let count = stale.len();
+        for build in stale {
+            self.force_requeue(build).await;
+        }
+
+        info!(%evaluation_id, requeued = count, paths = missing_paths.len(), "reconciled missing inputs; producers re-queued for rebuild");
         Ok(())
     }
 
@@ -936,9 +1026,10 @@ pub async fn handle_build_job_failed(
     build_id: BuildId,
     error: &str,
     kind: BuildFailureKind,
+    missing_paths: &[String],
 ) -> Result<()> {
     BuildStateHandler::new(state)
-        .handle_build_job_failed(build_id, error, kind)
+        .handle_build_job_failed(build_id, error, kind, missing_paths)
         .await
 }
 
@@ -1180,7 +1271,7 @@ impl BuildabilityChecker {
 
 #[cfg(test)]
 mod retry_tests {
-    use super::{FailureOutcome, decide_failure_outcome, retry_backoff_elapsed};
+    use super::{FailureOutcome, decide_failure_outcome, retry_backoff_elapsed, store_path_hash};
     use gradient_types::proto::BuildFailureKind;
 
     #[test]
@@ -1236,6 +1327,24 @@ mod retry_tests {
         assert!(matches!(decide_failure_outcome(BuildFailureKind::Transient, 0, 3), FailureOutcome::Retry));
         assert!(matches!(decide_failure_outcome(BuildFailureKind::Transient, 1, 3), FailureOutcome::Retry));
         assert!(matches!(decide_failure_outcome(BuildFailureKind::Transient, 2, 3), FailureOutcome::Permanent));
+    }
+    #[test]
+    fn inputs_unavailable_is_terminal_no_retry() {
+        for attempt in [0, 1, 99] {
+            assert_eq!(
+                decide_failure_outcome(BuildFailureKind::InputsUnavailable, attempt, 3),
+                FailureOutcome::Permanent
+            );
+        }
+    }
+    #[test]
+    fn store_path_hash_extracts_32_char_hash() {
+        assert_eq!(
+            store_path_hash("/nix/store/g9y0fvqh2c991vjprgz9mvdm0zj7ggij-python3-static-3.13"),
+            Some("g9y0fvqh2c991vjprgz9mvdm0zj7ggij")
+        );
+        assert_eq!(store_path_hash("not-a-store-path"), None);
+        assert_eq!(store_path_hash("/nix/store/"), None);
     }
 }
 

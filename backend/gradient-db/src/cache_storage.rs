@@ -9,7 +9,7 @@
 //! bytes): per-cache via the `cached_path_signature` join, instance-wide as a
 //! global sum. Backend-agnostic (works for local FS and S3).
 
-use gradient_types::ids::{CacheId, OrganizationId};
+use gradient_types::ids::{CacheId, DerivationId, OrganizationId};
 use gradient_entity::cache::Model as MCache;
 use gradient_entity::organization_cache::CacheSubscriptionMode;
 use sea_orm::sea_query::{Alias, SimpleExpr};
@@ -153,6 +153,43 @@ pub async fn org_caches_all_full<C: ConnectionTrait>(
         }
     }
     Ok(true)
+}
+
+/// Demote a cached output proven unfetchable: null the `cached_path` size/hash
+/// fields (so `Model::is_fully_cached()` flips to `false`) and clear
+/// `derivation_output.is_cached` / `cached_path` for every output with this
+/// store-path `hash`. Returns the derivations that produce the output so the
+/// caller can re-queue them for a real rebuild.
+pub async fn demote_cached_output<C: ConnectionTrait>(
+    db: &C,
+    hash: &str,
+) -> Result<Vec<DerivationId>, sea_orm::DbErr> {
+    use gradient_entity::cached_path::{ActiveModel as ACachedPath, Column as CCP, Entity as ECP};
+    use gradient_entity::derivation_output::{
+        ActiveModel as ADerivationOutput, Column as CDO, Entity as EDO,
+    };
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set, IntoActiveModel};
+
+    if let Some(row) = ECP::find().filter(CCP::Hash.eq(hash)).one(db).await? {
+        let mut active: ACachedPath = row.into_active_model();
+        active.file_hash = Set(None);
+        active.nar_hash = Set(None);
+        active.file_size = Set(None);
+        active.nar_size = Set(None);
+        active.update(db).await?;
+    }
+
+    let outputs = EDO::find().filter(CDO::Hash.eq(hash)).all(db).await?;
+    let mut producers = Vec::with_capacity(outputs.len());
+    for o in outputs {
+        producers.push(o.derivation);
+        let mut active: ADerivationOutput = o.into_active_model();
+        active.is_cached = Set(false);
+        active.cached_path = Set(None);
+        active.update(db).await?;
+    }
+
+    Ok(producers)
 }
 
 #[cfg(test)]

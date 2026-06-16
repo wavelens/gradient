@@ -883,7 +883,7 @@ enum ClientMessage {
     RequestAllCandidates,                       // startup-only: ask server to re-send all active candidates once
     JobUpdate { job_id: Uuid, update: JobUpdateKind },
     JobCompleted { job_id: Uuid },              // all tasks done; results already sent via JobUpdate. Per-build metrics travel on JobUpdate::BuildOutput
-    JobFailed { job_id: Uuid, error: String },
+    JobFailed { job_id: Uuid, error: String, kind: BuildFailureKind, missing_paths: Vec<String> }, // missing_paths set only for kind=InputsUnavailable
     Draining,                                   // no more jobs; finishing in-flight work then disconnecting
 
     // Streaming
@@ -1255,6 +1255,12 @@ After a successful build, the worker reads `<output>/nix-support/hydra-build-pro
 Outputs with no `hydra-build-products` file send `products: []` and have no `build_product` rows.
 
 ---
+
+## Missing-input self-heal (`InputsUnavailable`)
+
+A build's prefetch can find that a transitive input output is marked done/`Substituted` yet its NAR is absent from the cache (e.g. it was never fully uploaded, or was GC'd). The worker reports `JobFailed { kind: InputsUnavailable, missing_paths }` listing those paths. The server demotes each output (`derivation_output.is_cached = false`, drops the stale `cached_path`) and re-queues every build in that evaluation that produces them yet sits in a done state, so the scheduler rebuilds and caches them for real. The failing build is terminal for this evaluation; the next evaluation finds the inputs genuinely cached and succeeds.
+
+Preventively, `expand_substituted_closure` (`gradient-scheduler/src/eval.rs`) only marks a closure dep `Substituted` when its own `derivation_output` rows are all `is_cached = true`; a dep reached via the substitution invariant but not actually cached is inserted `Created + substitutable = true` instead, so the worker substitute-attempts it and the `SubstituteUnavailable` miss path re-queues and escalates it to a real build rather than trusting a NAR that is not there.
 
 ## DependencyFailed Cascade
 

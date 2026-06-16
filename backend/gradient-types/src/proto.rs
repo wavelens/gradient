@@ -523,4 +523,10 @@ pub enum BuildFailureKind {
     /// A substitute attempt could not pull the output from cache. Penalty-free
     /// re-queue; escalates to a real arch-bound build after repeated misses.
     SubstituteUnavailable,
+    /// Prefetch found required input paths that the gradient cache cannot
+    /// serve: a transitive dependency is marked done/substituted yet its NAR is
+    /// absent. Terminal for this build; the server demotes those outputs and
+    /// re-queues their producers so the next evaluation succeeds. Carries the
+    /// offending paths on `ClientMessage::JobFailed.missing_paths`.
+    InputsUnavailable,
 }

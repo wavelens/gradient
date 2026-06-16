@@ -175,15 +175,19 @@ fn on_job_done(
         }
         Err(e) => {
             let error_chain = format!("{e:#}");
-            let kind = e
+            let (kind, missing_paths) = e
                 .downcast_ref::<crate::executor::build::BuildError>()
-                .map(|be| be.kind)
-                .unwrap_or(gradient_proto::messages::BuildFailureKind::Permanent);
+                .map(|be| (be.kind, be.missing_paths.clone()))
+                .unwrap_or((
+                    gradient_proto::messages::BuildFailureKind::Permanent,
+                    Vec::new(),
+                ));
             error!(%job_id, error = %error_chain, ?kind, "job failed");
             writer.send(ClientMessage::JobFailed {
                 job_id,
                 error: error_chain,
                 kind,
+                missing_paths,
             })?;
         }
     }

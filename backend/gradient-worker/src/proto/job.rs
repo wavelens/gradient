@@ -706,6 +706,7 @@ mod tests {
                 job_id: updater.job_id.clone(),
                 error: "something went wrong".to_owned(),
                 kind: gradient_proto::messages::BuildFailureKind::Permanent,
+                missing_paths: vec![],
             })
             .unwrap();
         server_task.await.unwrap();

@@ -334,8 +334,9 @@ impl<'a> DispatchContext<'a> {
                 job_id,
                 error,
                 kind,
+                missing_paths,
             } => {
-                self.on_job_failed(job_id, error, kind).await;
+                self.on_job_failed(job_id, error, kind, missing_paths).await;
                 true
             }
             ClientMessage::Draining => {
@@ -794,11 +795,12 @@ impl<'a> DispatchContext<'a> {
         job_id: String,
         error: String,
         kind: gradient_types::proto::BuildFailureKind,
+        missing_paths: Vec<String>,
     ) {
         warn!(peer_id = %self.peer_id, %job_id, %error, ?kind, "job failed");
         if let Err(e) = self
             .scheduler
-            .handle_job_failed(self.peer_id, &job_id, &error, kind)
+            .handle_job_failed(self.peer_id, &job_id, &error, kind, &missing_paths)
             .await
         {
             error!(peer_id = %self.peer_id, %job_id, error = %e, "handle_job_failed failed");

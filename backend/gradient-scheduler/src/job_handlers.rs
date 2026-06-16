@@ -493,6 +493,7 @@ impl Scheduler {
         job_id: &str,
         error: &str,
         kind: BuildFailureKind,
+        missing_paths: &[String],
     ) -> Result<()> {
         self.worker_pool.write().await.release_job(peer_id, job_id);
         let job = self.job_tracker.write().await.remove_active(job_id);
@@ -502,7 +503,8 @@ impl Scheduler {
                 eval::handle_eval_job_failed(&self.state, j.evaluation_id, error).await
             }
             Some(PendingJob::Build(j)) => {
-                build::handle_build_job_failed(&self.state, j.build_id, error, kind).await
+                build::handle_build_job_failed(&self.state, j.build_id, error, kind, missing_paths)
+                    .await
             }
             None => {
                 warn!(%job_id, "job_failed for unknown job");

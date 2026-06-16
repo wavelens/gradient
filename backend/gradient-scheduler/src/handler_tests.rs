@@ -1026,7 +1026,7 @@ async fn build_failed_cascades_to_direct_dependent() {
         .into_connection();
 
     let state = make_state(db);
-    let result = build_handler::handle_build_job_failed(&state, build_a_id, "build error", BuildFailureKind::Permanent).await;
+    let result = build_handler::handle_build_job_failed(&state, build_a_id, "build error", BuildFailureKind::Permanent, &[]).await;
     assert!(result.is_ok());
 }
 
@@ -1087,7 +1087,7 @@ async fn build_failed_appends_worker_error_to_log() {
 
     let worker_error = "input prefetch failed: acquire local store for import: timeout: \
                         acquiring connection from pool";
-    let result = build_handler::handle_build_job_failed(&state, build_id, worker_error, BuildFailureKind::Permanent).await;
+    let result = build_handler::handle_build_job_failed(&state, build_id, worker_error, BuildFailureKind::Permanent, &[]).await;
     assert!(result.is_ok(), "handler returned error: {result:?}");
 
     let entries = log.entries();
@@ -1150,7 +1150,7 @@ async fn build_failed_no_dependents() {
         .into_connection();
 
     let state = make_state(db);
-    let result = build_handler::handle_build_job_failed(&state, build_id, "error", BuildFailureKind::Permanent).await;
+    let result = build_handler::handle_build_job_failed(&state, build_id, "error", BuildFailureKind::Permanent, &[]).await;
     assert!(result.is_ok());
 }
 
@@ -1217,7 +1217,7 @@ async fn build_failed_cascade_only_direct_dependents() {
         .into_connection();
 
     let state = make_state(db);
-    let result = build_handler::handle_build_job_failed(&state, build_a_id, "error", BuildFailureKind::Permanent).await;
+    let result = build_handler::handle_build_job_failed(&state, build_a_id, "error", BuildFailureKind::Permanent, &[]).await;
     assert!(result.is_ok());
 }
 
@@ -1231,7 +1231,7 @@ async fn build_failed_unknown_build_noop() {
         .into_connection();
 
     let state = make_state(db);
-    let result = build_handler::handle_build_job_failed(&state, build_id, "error", BuildFailureKind::Permanent).await;
+    let result = build_handler::handle_build_job_failed(&state, build_id, "error", BuildFailureKind::Permanent, &[]).await;
     assert!(result.is_ok());
 }
 
@@ -1276,7 +1276,7 @@ async fn build_failed_cascade_skips_building_status() {
         .into_connection();
 
     let state = make_state(db);
-    let result = build_handler::handle_build_job_failed(&state, build_a_id, "err", BuildFailureKind::Permanent).await;
+    let result = build_handler::handle_build_job_failed(&state, build_a_id, "err", BuildFailureKind::Permanent, &[]).await;
     assert!(result.is_ok());
 }
 
@@ -2260,7 +2260,7 @@ async fn action_not_dispatched_for_dep_failed() {
         .into_connection();
 
     let state = make_state(db);
-    let result = build_handler::handle_build_job_failed(&state, build_a_id, "build error", BuildFailureKind::Permanent).await;
+    let result = build_handler::handle_build_job_failed(&state, build_a_id, "build error", BuildFailureKind::Permanent, &[]).await;
     assert!(result.is_ok());
     tokio::task::yield_now().await;
 }
@@ -2762,7 +2762,7 @@ async fn build_failed_cascades_transitively_through_graph() {
         .into_connection();
 
     let state = gradient_test_support::prelude::test_state(db);
-    let result = build_handler::handle_build_job_failed(&state, build_c, "nix build failed", BuildFailureKind::Permanent).await;
+    let result = build_handler::handle_build_job_failed(&state, build_c, "nix build failed", BuildFailureKind::Permanent, &[]).await;
     assert!(
         result.is_ok(),
         "transitive cascade should succeed: {:?}",

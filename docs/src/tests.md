@@ -737,6 +737,37 @@ Backend (`cargo test -p worker --tests`):
 - `proto::nar_import::tests::classify_empty_input_is_empty_output` - empty
   cache responses produce empty buckets.
 
+## Missing-input self-heal (#410)
+
+A build whose prefetch finds a required input absent from the cache no longer
+dies as an opaque permanent failure that recurs every evaluation. The worker
+classifies it as `BuildFailureKind::InputsUnavailable` and forwards the
+offending paths on `JobFailed.missing_paths`; the server demotes those outputs
+and re-queues their producers so the next evaluation builds them for real.
+
+Backend (`cargo test -p gradient-worker -p gradient-scheduler --tests`):
+- `proto::nar_import::tests::missing_inputs_message_and_downcast` - the typed
+  `MissingInputs` error renders the human message (count + first path) and
+  survives `anyhow` boxing, so the executor can `downcast_ref` it and forward
+  the exact paths to the server.
+- `build::retry_tests::inputs_unavailable_is_terminal_no_retry` -
+  `decide_failure_outcome(InputsUnavailable, ..)` is always `Permanent`: the
+  build fails this evaluation rather than burning the retry budget against an
+  input that will not appear until its producer is rebuilt.
+- `build::retry_tests::store_path_hash_extracts_32_char_hash` - the helper that
+  maps a missing `/nix/store/<hash>-<name>` path to the `derivation_output`
+  hash used to demote and locate its producer.
+
+The demotion path itself (`gradient_db::demote_cached_output`) is shared with
+the NAR-serve self-heal in `socket.rs` and is exercised end-to-end in CI.
+
+Preventively, `expand_substituted_closure` now only marks a closure dep
+`Substituted` when its `derivation_output` rows are all `is_cached = true`;
+otherwise it inserts a `Created + substitutable = true` build so the dep
+substitute-attempts and escalates to a real build on a miss. The `cached` flag
+is computed in the recursive-CTE query and is covered by E2E CI (the scheduler
+has no real-Postgres unit harness for raw SQL).
+
 ## State configuration - optional fields for OIDC-only users
 
 Backend (`cargo test -p core --lib state::tests`):

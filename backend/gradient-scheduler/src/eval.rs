@@ -558,12 +558,14 @@ async fn expand_substituted_closure(
     // recurse through derivation_dependency until the closure is exhausted.
     // The outer SELECT filters to derivations without a build row yet, and
     // tags each result with the kind of seed it descends from:
-    //  - 'sub' - reached from a `Substituted` (status=7) build; outputs are
-    //    in our cache, transitive deps are too (Nix substitution invariant)
-    //  - 'ext' - reached from a `Created + substitutable = true` build;
-    //    outputs are in upstream only, transitive deps too. New rows for
-    //    these get inserted with `substitutable = true` so the worker
-    //    fetches them from upstream rather than trying to rebuild.
+    //  - 'sub' - reached from a `Substituted` (status=7) build. The Nix
+    //    invariant says its closure is in our cache too, but that can be false
+    //    when the cache was populated unevenly (#410), so we verify each drv's
+    //    own outputs are actually cached before trusting it (the `cached` flag
+    //    below). A 'sub' drv that is NOT cached is treated like 'ext'.
+    //  - 'ext' (or uncached 'sub') - inserted `Created + substitutable = true`
+    //    so the worker substitute-attempts it; a miss reports
+    //    `SubstituteUnavailable`, which re-queues and escalates to a real build.
     //
     // When a drv is reachable via both kinds of seed simultaneously, prefer
     // 'sub' (already retrievable from our cache).
@@ -582,7 +584,12 @@ async fn expand_substituted_closure(
             FROM derivation_dependency dd2
             JOIN sub_closure sc ON sc.drv_id = dd2.derivation
         )
-        SELECT sc.drv_id, MIN(sc.kind) AS kind
+        SELECT sc.drv_id, MIN(sc.kind) AS kind,
+            (EXISTS (SELECT 1 FROM derivation_output o WHERE o.derivation = sc.drv_id)
+             AND NOT EXISTS (
+                 SELECT 1 FROM derivation_output o
+                 WHERE o.derivation = sc.drv_id AND o.is_cached = false
+             )) AS cached
         FROM sub_closure sc
         WHERE NOT EXISTS (
             SELECT 1 FROM build WHERE derivation = sc.drv_id AND evaluation = $1
@@ -612,9 +619,13 @@ async fn expand_substituted_closure(
         let Ok(kind) = row.try_get::<String>("", "kind") else {
             continue;
         };
-        let (status, substitutable) = if kind == "sub" {
+        let cached = row.try_get::<bool>("", "cached").unwrap_or(false);
+        let (status, substitutable) = if kind == "sub" && cached {
             (BuildStatus::Substituted, false)
         } else {
+            // 'ext', or a 'sub' dep whose output is not actually in our cache:
+            // dispatch as a substitute attempt so it self-heals (substitute or
+            // escalate-to-build) instead of being falsely trusted (#410).
             (BuildStatus::Created, true)
         };
         let build_id = BuildId::now_v7();
