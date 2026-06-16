@@ -82,7 +82,11 @@ async fn query_fetched_paths(updater: &mut JobUpdater, all_paths: Vec<String>) -
 /// Errors during closure expansion or individual NAR pushes are logged but
 /// not fatal - operators see them in the worker log, and downstream builds
 /// surface the missing path through their existing prefetch error path.
-async fn push_drv_closure(drv_paths: &[String], updater: &mut JobUpdater, store: &LocalNixStore) {
+pub(crate) async fn push_drv_closure(
+    drv_paths: &[String],
+    updater: &mut JobUpdater,
+    store: &LocalNixStore,
+) {
     if drv_paths.is_empty() {
         return;
     }
@@ -255,7 +259,13 @@ impl JobExecutor {
                         crate::proto::nar_import::ensure_path(&self.store, src, updater).await?;
                     }
 
-                    let produced_drvs = eval::evaluate_derivations(
+                    // Each batch's `.drv` runtime closure (input_sources + .drvs,
+                    // for narinfo substitution and downstream-build prefetch) is
+                    // pushed to the cache inside the walk, before that batch's
+                    // `report_eval_result` — so #392's mid-eval build dispatch
+                    // never races the source upload. The server keys cached_path
+                    // by hash, so NAR/row ordering is irrelevant.
+                    eval::evaluate_derivations(
                         &self.evaluator,
                         &job,
                         local_flake_path.as_deref(),
@@ -263,17 +273,6 @@ impl JobExecutor {
                         &mut abort.clone(),
                     )
                     .await?;
-
-                    // Push the full runtime closure of every produced
-                    // `.drv` to the cache so substituters can fetch
-                    // `<drv-hash>.narinfo` *and* downstream builds find
-                    // every `input_source` they need on prefetch. Runs
-                    // after eval so the server already has the derivation
-                    // rows; ordering between the NAR and the row doesn't
-                    // matter (the server keys cached_path by hash). The
-                    // server computes narinfo signatures from the uploaded
-                    // metadata.
-                    push_drv_closure(&produced_drvs, updater, &self.store).await;
                 }
             }
         }

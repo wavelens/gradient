@@ -24,6 +24,7 @@ use tokio::sync::oneshot;
 use tracing::debug;
 
 use crate::connection::ProtoWriter;
+use crate::nix::store::LocalNixStore;
 use crate::proto::eval_cache_recv::EvalCacheReceiver;
 use crate::proto::nar_recv::NarReceiver;
 use gradient_proto::traits::JobReporter;
@@ -68,6 +69,9 @@ pub struct JobUpdater {
     /// Routes `EvalCachePullResult` / `EvalCacheChunk` / `EvalCachePushGrant`
     /// back to the job task during the eval-cache pull/push handshake.
     pub(crate) eval_cache_recv: EvalCacheReceiver,
+    /// Local store, set for jobs that push NARs (eval closure, build outputs).
+    /// `None` in proto round-trip unit tests that never touch the store.
+    pub(crate) store: Option<Arc<LocalNixStore>>,
 }
 
 impl JobUpdater {
@@ -78,6 +82,7 @@ impl JobUpdater {
         known_derivation_waiters: KnownDerivationWaiters,
         nar_recv: NarReceiver,
         eval_cache_recv: EvalCacheReceiver,
+        store: Option<Arc<LocalNixStore>>,
     ) -> Self {
         Self {
             job_id,
@@ -86,6 +91,7 @@ impl JobUpdater {
             known_derivation_waiters,
             nar_recv,
             eval_cache_recv,
+            store,
         }
     }
 
@@ -459,6 +465,14 @@ impl JobReporter for JobUpdater {
         })
     }
 
+    async fn push_drv_closure(&mut self, drv_paths: &[String]) {
+        let Some(store) = self.store.clone() else {
+            return;
+        };
+
+        crate::executor::push_drv_closure(drv_paths, self, &store).await;
+    }
+
     async fn report_building(&mut self, build_id: String) -> Result<()> {
         self.send_update(JobUpdateKind::Building { build_id })
     }
@@ -546,6 +560,7 @@ mod tests {
             known_derivation_waiters,
             nar_recv,
             eval_cache_recv,
+            None,
         );
         (updater, reader)
     }

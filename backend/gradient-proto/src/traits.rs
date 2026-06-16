@@ -77,6 +77,15 @@ pub trait JobReporter: Send {
         warnings: Vec<String>,
         errors: Vec<String>,
     ) -> Result<()>;
+
+    /// Push the runtime closure of `drv_paths` (their `input_sources` and
+    /// transitive `.drv` files) into the gradient cache. Best-effort: failures
+    /// are logged, never propagated. Called per batch *before*
+    /// [`report_eval_result`](Self::report_eval_result) so every source a
+    /// downstream build worker prefetches is already cacheable by the time the
+    /// server can dispatch that build mid-evaluation.
+    async fn push_drv_closure(&mut self, drv_paths: &[String]);
+
     async fn report_building(&mut self, build_id: String) -> Result<()>;
     async fn report_build_output(
         &mut self,

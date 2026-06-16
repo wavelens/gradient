@@ -574,6 +574,7 @@ impl<'a> MessageHandler<'a> {
         self.abort_senders.insert(job_id.clone(), abort_tx);
 
         let executor = self.executor.clone();
+        let job_store = Arc::clone(&executor.store);
         let credentials = self.credentials.clone();
         let job_writer = self.writer.clone();
         let job_cache_waiters = Arc::clone(self.cache_waiters);
@@ -591,6 +592,7 @@ impl<'a> MessageHandler<'a> {
                 job_known_derivation_waiters,
                 job_nar_recv,
                 job_eval_cache_recv,
+                Some(job_store),
             );
             let result = run_job(executor, job, &mut updater, &credentials, abort_rx).await;
             let _ = job_done_tx.send((jid, result));
