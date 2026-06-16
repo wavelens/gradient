@@ -30,6 +30,7 @@ const HEALTH: BoardHealth = {
   http: [],
   rollup_lag_seconds: 0,
   latest_rollup_bucket: null,
+  draining: false,
 };
 
 const TASK: AdminTask = {
@@ -44,18 +45,23 @@ const TASK: AdminTask = {
   created_by: null,
 };
 
-function setup(githubAppConfigured: () => Observable<boolean>): ComponentFixture<BoardHealthComponent> {
+function setup(
+  githubAppConfigured: () => Observable<boolean>,
+  health: BoardHealth = HEALTH,
+  setDraining = vi.fn(() => of({ draining: true })),
+): ComponentFixture<BoardHealthComponent> {
   TestBed.configureTestingModule({
     imports: [BoardHealthComponent],
     providers: [
       provideRouter([]),
-      { provide: BoardService, useValue: { getHealth: () => of(HEALTH) } },
+      { provide: BoardService, useValue: { getHealth: () => of(health) } },
       {
         provide: AdminService,
         useValue: {
           listTasks: () => of([TASK]),
           githubAppConfigured,
           startDeepGc: () => of({ task_id: 't2', status: 'pending' }),
+          setDraining,
         },
       },
     ],
@@ -99,6 +105,32 @@ describe('BoardHealthComponent', () => {
       expect(link).toBeTruthy();
       expect(link.textContent?.trim()).toBe('Set up GitHub App');
       expect(link.classList.contains('disabled')).toBe(false);
+    });
+  });
+
+  describe('draining controls', () => {
+    afterEach(() => TestBed.resetTestingModule());
+
+    it('offers "Enable Draining" and no banner when not draining', () => {
+      const fixture = setup(() => of(true));
+      expect(fixture.nativeElement.textContent).toContain('Enable Draining');
+      expect(fixture.nativeElement.textContent).not.toContain('Instance is draining');
+    });
+
+    it('offers "Disable Draining" and shows a banner when draining', () => {
+      const fixture = setup(() => of(true), { ...HEALTH, draining: true });
+      expect(fixture.nativeElement.textContent).toContain('Disable Draining');
+      expect(fixture.nativeElement.textContent).toContain('Instance is draining');
+    });
+
+    it('toggles draining via the admin service when clicked', () => {
+      const setDraining = vi.fn(() => of({ draining: true }));
+      const fixture = setup(() => of(true), HEALTH, setDraining);
+      const button: HTMLButtonElement = Array.from(
+        fixture.nativeElement.querySelectorAll('button.btn'),
+      ).find((b) => (b as HTMLButtonElement).textContent?.includes('Enable Draining')) as HTMLButtonElement;
+      button.click();
+      expect(setDraining).toHaveBeenCalledWith(true);
     });
   });
 });

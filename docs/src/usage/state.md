@@ -6,7 +6,7 @@ When `settings.deleteState = true` (default), entities that are removed from `st
 
 ## Build-time validation
 
-`services.gradient.validateState` (default `true`) checks the generated state at **build time** by running the server binary's `--validate-state` over it. Schema and cross-reference errors — unknown organizations or users, reporter triggers pointing at an undeclared inbound integration, duplicate org ids, and so on — then fail the Nix build instead of the server on first start. No database is touched and no secret files are required, so it is safe to run in CI. Set it to `false` to skip the check.
+`services.gradient.validateState` (default `true`) checks the generated state at **build time** by running the server binary's `--validate-state` over it. Schema and cross-reference errors - unknown organizations or users, reporter triggers pointing at an undeclared inbound integration, duplicate org ids, and so on - then fail the Nix build instead of the server on first start. No database is touched and no secret files are required, so it is safe to run in CI. Set it to `false` to skip the check.
 
 To validate a state file by hand:
 
@@ -148,7 +148,7 @@ services.gradient.state.organizations.acme = {
 |---|---|---|
 | `name` | `<attrset key>` | Unique organization name |
 | `display_name` | `<name>` | Display name |
-| `id` | `null` | Explicit organization UUID, applied on create only. Pin it to reference the org in a worker's `peersFile` (`<id>:<token>`) without first looking up the server-generated id. Immutable — a value conflicting with an existing org is rejected |
+| `id` | `null` | Explicit organization UUID, applied on create only. Pin it to reference the org in a worker's `peersFile` (`<id>:<token>`) without first looking up the server-generated id. Immutable - a value conflicting with an existing org is rejected |
 | `description` | `null` | Optional description |
 | `private_key_file` | - | Path to SSH private key (required) |
 | `public` | `false` | Visible to all users |
@@ -173,14 +173,14 @@ services.gradient.state.organizations.acme = {
 };
 ```
 
-When `members` is **empty** (the default), the `created_by` user is added as Admin and no other membership reconciliation happens — this is the legacy behavior.
+When `members` is **empty** (the default), the `created_by` user is added as Admin and no other membership reconciliation happens - this is the legacy behavior.
 
 When `members` is **non-empty**, the list is the source of truth:
 
 - Built-in roles (`Admin`, `Write`, `View`) and state-managed custom org roles are both accepted.
 - Members referencing **unknown users are skipped silently** at provision time. The membership is applied automatically the instant that user registers (`POST /user`) or first-logs-in via OIDC.
 - Memberships no longer in the list are removed on next state apply (drift reconciliation, mirroring cache members).
-- The implicit "creator becomes Admin" rule does **not** fire — list yourself explicitly if you want it.
+- The implicit "creator becomes Admin" rule does **not** fire - list yourself explicitly if you want it.
 
 | Option | Default | Description |
 |---|---|---|
@@ -505,7 +505,7 @@ services.gradient.worker.workerId = "550e8400-e29b-41d4-a716-446655440001";
 
 State-managed worker registrations are deleted automatically when removed from `state.workers`, and per-(worker_id, organization) rows are deleted when an organization is dropped from `organizations` (subject to `settings.deleteState`).
 
-On the worker machine, the `peersFile` authenticates with `<org_id>:<token>` lines. The `org_id` is the organization's UUID — to know it ahead of the first server start, pin it with `state.organizations.<name>.id` and reference that same value in the worker's `peersFile`. The `*:<token>` wildcard remains the alternative when a single token may serve any org.
+On the worker machine, the `peersFile` authenticates with `<org_id>:<token>` lines. The `org_id` is the organization's UUID - to know it ahead of the first server start, pin it with `state.organizations.<name>.id` and reference that same value in the worker's `peersFile`. The `*:<token>` wildcard remains the alternative when a single token may serve any org.
 
 ### Base workers
 
@@ -524,7 +524,7 @@ services.gradient.state.workers = {
 };
 ```
 
-`organizations` for a base worker lists orgs to pre-enable at provisioning time. It may be empty — orgs can still enable the worker later from the UI.
+`organizations` for a base worker lists orgs to pre-enable at provisioning time. It may be empty - orgs can still enable the worker later from the UI.
 
 `enabled` is a global gate: setting it to `false` hides the base worker from every org until it is turned back on.
 
@@ -534,9 +534,9 @@ If an organization already has a normal worker registered under the same `worker
 
 The `peerFile` options for a base worker in order of preference:
 
-- `*:<token>` — one token answers any org challenge (simplest).
-- `<authorize_against>:<token>` — single fixed identity, set `authorize_against` to that UUID in state.
-- Per-org lines `<org_id>:<token>` — one line per organization.
+- `*:<token>` - one token answers any org challenge (simplest).
+- `<authorize_against>:<token>` - single fixed identity, set `authorize_against` to that UUID in state.
+- Per-org lines `<org_id>:<token>` - one line per organization.
 
 ### Worker options
 

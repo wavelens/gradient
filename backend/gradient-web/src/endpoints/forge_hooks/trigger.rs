@@ -164,7 +164,7 @@ pub(super) fn normalize_repo_url(url: &str) -> String {
 /// (you can only install the App once per GitHub account, but each gradient
 /// org gets its own `github_installation_id` pointing at it). Matching purely
 /// on `installation_id` therefore returns one arbitrary org and silently
-/// drops the others — adding the repo-URL gate is what makes multi-org
+/// drops the others - adding the repo-URL gate is what makes multi-org
 /// installations fire the correct subset.
 ///
 /// Returns an empty vec when no org carries this installation, when no
@@ -1565,13 +1565,13 @@ async fn post_wildcard_error_comment(
 /// Outcome of parsing a `/gradient …` PR comment.
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum GradientCommand {
-    /// `/gradient run [wildcard]` — re-run CI for this PR. Unparks an
+    /// `/gradient run [wildcard]` - re-run CI for this PR. Unparks an
     /// existing approval-gated eval if one exists, otherwise creates a fresh
     /// evaluation. The optional `wildcard` overrides the project's default
     /// attribute path for this run; it is not yet validated, the caller must
     /// pass it through `Wildcard::from_str` and reply on parse failure.
     Run { wildcard: Option<String> },
-    /// `/gradient approve` — explicitly clear the approval gate for this PR.
+    /// `/gradient approve` - explicitly clear the approval gate for this PR.
     /// No-op if there is no parked eval.
     Approve,
 }

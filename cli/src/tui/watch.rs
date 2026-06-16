@@ -113,7 +113,7 @@ pub fn format_build_time(ms: Option<i64>) -> String {
     match ms {
         Some(ms) if ms >= 1000 => format!("{:.1}s", ms as f64 / 1000.0),
         Some(ms) => format!("{ms}ms"),
-        None => "—".to_string(),
+        None => "-".to_string(),
     }
 }
 
@@ -268,7 +268,7 @@ impl View for Dashboard {
         if let Some(e) = &self.eval {
             header.push(Line::raw(format!(
                 "Project {}   Commit {}   Target {}",
-                e.project.as_deref().unwrap_or("—"),
+                e.project.as_deref().unwrap_or("-"),
                 short_commit(&e.commit),
                 e.wildcard
             )));
@@ -427,7 +427,7 @@ mod tests {
     fn build_time_formats_units() {
         assert_eq!(format_build_time(Some(1500)), "1.5s");
         assert_eq!(format_build_time(Some(250)), "250ms");
-        assert_eq!(format_build_time(None), "—");
+        assert_eq!(format_build_time(None), "-");
     }
 
     #[test]

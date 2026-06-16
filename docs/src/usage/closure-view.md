@@ -9,7 +9,7 @@ links to the closure of that entry point's most recent build.
 
 ## Runtime vs build closure
 
-The view shows the **runtime** closure by default — the transitive store-path
+The view shows the **runtime** closure by default - the transitive store-path
 references (narinfo `References:`) of the build's outputs, i.e. what the artefact
 actually needs to run. It is only as complete as the cached outputs. Append
 `?type=build` to the URL to see the **build-time** closure instead (the full
@@ -20,7 +20,7 @@ The dependency graph is a DAG, which has no conserved flow; rendering it as a
 Sankey directly produces meaningless bar heights and backward links. The view
 therefore reduces it to a rooted tree (each package keeps a single parent, via
 breadth-first walk from the roots) and sizes every flow by the package's
-**accumulated closure size** — its own NAR size plus everything it pulls in.
+**accumulated closure size** - its own NAR size plus everything it pulls in.
 Flow accumulates from leaf packages on the left into the root on the right, so a
 bar's height reflects how much that package contributes to the total.
 

@@ -28,7 +28,7 @@ Actions are per-project. Three types ship in v1:
 | `build.failed` | Build failed |
 | `build.substituted` | Build output came from an upstream cache substitution |
 
-An action with an empty `events` list never fires. `forge_status_report` ignores the `events` list — it is hard-wired to `build.started`, `build.completed`, and `build.failed`.
+An action with an empty `events` list never fires. `forge_status_report` ignores the `events` list - it is hard-wired to `build.started`, `build.completed`, and `build.failed`.
 
 ## Send Mail
 
@@ -78,15 +78,15 @@ Authorization: Bearer <token>   # only if token is set
 }
 ```
 
-Token management: the plaintext token is revealed exactly once — on create or after `POST .../regenerate-token`. Store it immediately.
+Token management: the plaintext token is revealed exactly once - on create or after `POST .../regenerate-token`. Store it immediately.
 
 ## Forge Status Report
 
-Posts commit status (pending / success / failure / action-required) back to the forge as three separate check runs per PR — `gradient/{project}: Approval` (fork-PR gate), `gradient/{project}: Evaluation` (eval phase), and `gradient/{project}: Build {label}` (one per build, labelled by entry-point name or by `{drv-name}.{architecture}` when no entry-point matched). Each check is updated in place as the phase progresses; the Approval check flips to Success when a maintainer clears the gate, and the Evaluation check is posted as Pending at the same instant so the PR immediately reflects that the pipeline is in flight.
+Posts commit status (pending / success / failure / action-required) back to the forge as three separate check runs per PR - `gradient/{project}: Approval` (fork-PR gate), `gradient/{project}: Evaluation` (eval phase), and `gradient/{project}: Build {label}` (one per build, labelled by entry-point name or by `{drv-name}.{architecture}` when no entry-point matched). Each check is updated in place as the phase progresses; the Approval check flips to Success when a maintainer clears the gate, and the Evaluation check is posted as Pending at the same instant so the PR immediately reflects that the pipeline is in flight.
 
-A run that targets a wildcard other than the project default — e.g. `/gradient run packages.x86_64-linux.foo` — reports under `gradient/{project}: Evaluation: {wildcard}` so the custom run shows as its own check line instead of overwriting the default evaluation check.
+A run that targets a wildcard other than the project default - e.g. `/gradient run packages.x86_64-linux.foo` - reports under `gradient/{project}: Evaluation: {wildcard}` so the custom run shows as its own check line instead of overwriting the default evaluation check.
 
-**Maintainer-initiated runs skip the fork-PR approval gate.** The gate only exists to hold untrusted external contributions; when the action comes from a repo writer it is not needed. The Evaluation runs immediately (no `Approval` check) when any of these happen: a maintainer issues `/gradient run` / `/gradient approve` on the PR, a maintainer submits an approving review through the forge's native PR-review UI (GitHub / Gitea / Forgejo `pull_request_review`), or a maintainer force-pushes onto the contributor's branch. In every case the actor is verified as a repo writer via the forge API before the gate is cleared. GitLab is the exception — it emits no webhook on merge-request approval, so use `/gradient approve` there.
+**Maintainer-initiated runs skip the fork-PR approval gate.** The gate only exists to hold untrusted external contributions; when the action comes from a repo writer it is not needed. The Evaluation runs immediately (no `Approval` check) when any of these happen: a maintainer issues `/gradient run` / `/gradient approve` on the PR, a maintainer submits an approving review through the forge's native PR-review UI (GitHub / Gitea / Forgejo `pull_request_review`), or a maintainer force-pushes onto the contributor's branch. In every case the actor is verified as a repo writer via the forge API before the gate is cleared. GitLab is the exception - it emits no webhook on merge-request approval, so use `/gradient approve` there.
 
 **Config fields:**
 

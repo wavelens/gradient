@@ -7,7 +7,7 @@
 //! Incremental edge-readiness tracker (#392).
 //!
 //! Decides, batch by batch, when a derivation's full set of direct dependency
-//! edges is writable — i.e. every dependency now has a row — so the owning
+//! edges is writable - i.e. every dependency now has a row - so the owning
 //! build can be promoted `Created → Queued` mid-evaluation. Order-independent:
 //! a dependency may be observed before or after its dependents.
 

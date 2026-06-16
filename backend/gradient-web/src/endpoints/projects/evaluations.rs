@@ -41,7 +41,7 @@ pub struct EvaluateRequest {
 
 /// Builds one [`EvaluationSummary`] per evaluation using grouped DB rollups
 /// (status counts, message counts) plus chunked lookups for triggers, commits,
-/// and the triggering user — a fixed number of round-trips regardless of size.
+/// and the triggering user - a fixed number of round-trips regardless of size.
 pub(super) async fn evaluations_to_summaries(
     state: &Arc<ServerState>,
     evaluations: Vec<MEvaluation>,

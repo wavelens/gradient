@@ -324,7 +324,7 @@ impl<'a> EvalResultProcessor<'a> {
     /// their terminal state and never go through `update_build_status`, so
     /// the regular status-change dispatch path never fires for them.
     ///
-    /// Must be called AFTER `process_entry_points` — the reporter skips
+    /// Must be called AFTER `process_entry_points` - the reporter skips
     /// build events without an `entry_point`, so dispatching before
     /// `entry_point` rows exist would silently drop every check.
     pub(crate) async fn dispatch_substituted_events(&self) -> Result<(), sea_orm::DbErr> {

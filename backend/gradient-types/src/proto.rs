@@ -482,14 +482,14 @@ pub enum JobKind {
 #[rkyv(derive(Debug, PartialEq))]
 pub enum BuildFailureKind {
     /// Infrastructure failure (OOM, disk full, network/substitution error,
-    /// builder crash) — eligible for retry.
+    /// builder crash) - eligible for retry.
     Transient,
-    /// The builder exited non-zero, or the retry budget is exhausted —
+    /// The builder exited non-zero, or the retry budget is exhausted -
     /// terminal. Default so eval-job failures (which ignore the kind) decode
     /// to a safe terminal value.
     #[default]
     Permanent,
-    /// Wall-clock or silent timeout exceeded — terminal.
+    /// Wall-clock or silent timeout exceeded - terminal.
     Timeout,
     /// A substitute attempt could not pull the output from cache. Penalty-free
     /// re-queue; escalates to a real arch-bound build after repeated misses.

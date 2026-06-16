@@ -252,7 +252,7 @@ fn job_eligible_for_caps(job: &PendingJob, caps: Option<&WorkerCaps>) -> bool {
     }
 }
 
-/// True when a flake job's only task is `FetchFlake` — a split-mode fetch-only
+/// True when a flake job's only task is `FetchFlake` - a split-mode fetch-only
 /// job whose completion enqueues a cached eval follow-up rather than finalizing.
 pub fn is_fetch_only(job: &FlakeJob) -> bool {
     job.tasks.as_slice() == [FlakeTask::FetchFlake]
@@ -674,7 +674,7 @@ impl JobTracker {
         self.active.len()
     }
 
-    /// `(active_builds, pending_builds)` — build jobs in flight and waiting,
+    /// `(active_builds, pending_builds)` - build jobs in flight and waiting,
     /// fed into the windowed instance snapshot.
     pub fn instance_counts(&self) -> (u32, u32) {
         let active = self

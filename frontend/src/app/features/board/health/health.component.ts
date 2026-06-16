@@ -18,6 +18,9 @@ const MIB = 1024 ** 2;
   imports: [CommonModule, RouterModule],
   template: `
     @if (health(); as h) {
+      @if (h.draining) {
+        <div class="drain-banner">Instance is draining: scheduling is paused and in-flight evaluations are parked. Clears on restart.</div>
+      }
       <div class="kpis">
         <div class="kpi"><span class="label">Version</span><span class="value sm">{{ h.version }}</span></div>
         <div class="kpi"><span class="label">Uptime</span><span class="value sm">{{ uptime(h.uptime_seconds) }}</span></div>
@@ -37,7 +40,7 @@ const MIB = 1024 ** 2;
       <h2>Pipeline</h2>
       <div class="grid">
         <div class="cell"><span class="label">Rollup lag</span><span [class.bad]="(h.rollup_lag_seconds ?? 0) > 300">{{ h.rollup_lag_seconds !== null ? (h.rollup_lag_seconds | number: '1.0-0') + ' s' : 'no data' }}</span></div>
-        <div class="cell"><span class="label">Latest bucket</span><span>{{ h.latest_rollup_bucket ? (h.latest_rollup_bucket | date: 'short') : '—' }}</span></div>
+        <div class="cell"><span class="label">Latest bucket</span><span>{{ h.latest_rollup_bucket ? (h.latest_rollup_bucket | date: 'short') : '-' }}</span></div>
         <div class="cell"><span class="label">Cache size</span><span>{{ (h.cache_bytes / (1024*1024*1024)) | number: '1.2-2' }} GiB</span></div>
         <div class="cell"><span class="label">Packages</span><span>{{ h.cache_packages }}</span></div>
       </div>
@@ -49,6 +52,9 @@ const MIB = 1024 ** 2;
           {{ githubConfigured() ? 'GitHub App configured' : 'Set up GitHub App' }}
         </a>
         <button class="btn" (click)="runDeepGc()" [disabled]="gcBusy()">Run Deep GC</button>
+        <button class="btn" [class.danger]="!h.draining" (click)="toggleDraining(h.draining)" [disabled]="drainBusy()">
+          {{ h.draining ? 'Disable Draining' : 'Enable Draining' }}
+        </button>
         @if (gcNotice(); as n) { <span class="notice">{{ n }}</span> }
       </div>
 
@@ -60,7 +66,7 @@ const MIB = 1024 ** 2;
               <td>{{ t.kind }}</td>
               <td>{{ t.status }}</td>
               <td>{{ t.created_at | date: 'short' }}</td>
-              <td>{{ t.finished_at ? (t.finished_at | date: 'short') : '—' }}</td>
+              <td>{{ t.finished_at ? (t.finished_at | date: 'short') : '-' }}</td>
               <td [class.bad]="!!t.error">{{ t.error ?? '' }}</td>
             </tr>
           } @empty {
@@ -92,7 +98,9 @@ const MIB = 1024 ** 2;
       .admin-actions { display: flex; align-items: center; gap: 0.75rem; margin: 0 0 1rem; }
       .btn { background: #2d333b; color: #fff; border: 1px solid #444c56; border-radius: 6px; padding: 0.4rem 0.8rem; cursor: pointer; text-decoration: none; font-size: 0.85rem; }
       .btn[disabled], .btn.disabled { opacity: 0.5; pointer-events: none; }
+      .btn.danger { border-color: #b9434f; color: #f0a4ab; }
       .notice { color: #e3b341; font-size: 0.8rem; }
+      .drain-banner { background: #3d1f24; border: 1px solid #b9434f; color: #f0a4ab; border-radius: 8px; padding: 0.6rem 0.9rem; margin-bottom: 1rem; font-size: 0.9rem; }
     `,
   ],
 })
@@ -105,6 +113,7 @@ export class BoardHealthComponent implements OnInit {
   githubConfigured = signal(false);
   gcBusy = signal(false);
   gcNotice = signal<string | null>(null);
+  drainBusy = signal(false);
 
   mib(bytes: number): string {
     return (bytes / MIB).toFixed(0);
@@ -129,8 +138,20 @@ export class BoardHealthComponent implements OnInit {
     });
   }
 
-  ngOnInit(): void {
+  toggleDraining(current: boolean): void {
+    this.drainBusy.set(true);
+    this.admin.setDraining(!current).subscribe({
+      next: () => { this.drainBusy.set(false); this.refreshHealth(); },
+      error: () => this.drainBusy.set(false),
+    });
+  }
+
+  private refreshHealth(): void {
     this.board.getHealth().subscribe((h) => this.health.set(h));
+  }
+
+  ngOnInit(): void {
+    this.refreshHealth();
     this.loadTasks();
     this.admin.githubAppConfigured().subscribe((v) => this.githubConfigured.set(v));
   }

@@ -58,6 +58,10 @@ export class AdminService {
     return this.api.post<StartDeepGcResponse>('admin/maintenance/deep-gc', {});
   }
 
+  setDraining(enabled: boolean): Observable<{ draining: boolean }> {
+    return this.api.post<{ draining: boolean }>('admin/draining', { enabled });
+  }
+
   listTasks(): Observable<AdminTask[]> {
     return this.api.get<AdminTask[]>('admin/tasks');
   }

@@ -623,6 +623,7 @@ impl<'a> BuildStateHandler<'a> {
         worker_caps: &[(Vec<String>, Vec<String>)],
         eval_capable_workers: usize,
         fetch_capable_workers: usize,
+        draining: bool,
     ) -> Result<()> {
         let evals = EEvaluation::find()
             .filter(CEvaluation::Status.is_in(vec![
@@ -637,6 +638,36 @@ impl<'a> BuildStateHandler<'a> {
             .await
             .context("fetch in-flight evaluations")?;
         if evals.is_empty() {
+            return Ok(());
+        }
+
+        // Draining: park every in-flight evaluation so the server can be stopped
+        // safely. Dispatch is already gated, so parked evals stay put until
+        // draining is disabled (recovered to `Queued` by the branch below).
+        if draining {
+            for eval in evals {
+                let reason = eval.waiting_reason.as_ref().and_then(WaitingReason::from_json);
+                if eval.status == EvaluationStatus::Waiting
+                    && reason == Some(WaitingReason::Draining)
+                {
+                    continue;
+                }
+
+                let needs_status_change = eval.status != EvaluationStatus::Waiting;
+                persist_waiting_reason(
+                    self.state,
+                    eval.id,
+                    &eval.waiting_reason,
+                    Some(&WaitingReason::Draining),
+                )
+                .await;
+
+                if needs_status_change {
+                    info!(evaluation_id = %eval.id, from = ?eval.status, "parking evaluation: instance draining");
+                    update_evaluation_status(&self.state.db(), eval, EvaluationStatus::Waiting).await;
+                }
+            }
+
             return Ok(());
         }
 
@@ -669,6 +700,9 @@ impl<'a> BuildStateHandler<'a> {
                         fetch_capable_workers,
                         connected_workers,
                     )),
+                    // Draining was disabled: resume from the queue and let the
+                    // next pass re-park to the appropriate capacity reason.
+                    Some(WaitingReason::Draining) => Some((EvaluationStatus::Queued, None)),
                     // Build-phase park, or a legacy/untagged row: recover from the
                     // pending builds, falling back to eval recovery when the eval
                     // never produced any (a pre-build park predating EvalWorkers).
@@ -922,9 +956,10 @@ pub async fn reconcile_waiting_state(
     worker_caps: &[(Vec<String>, Vec<String>)],
     eval_capable_workers: usize,
     fetch_capable_workers: usize,
+    draining: bool,
 ) -> Result<()> {
     BuildStateHandler::new(state)
-        .reconcile_waiting_state(worker_caps, eval_capable_workers, fetch_capable_workers)
+        .reconcile_waiting_state(worker_caps, eval_capable_workers, fetch_capable_workers, draining)
         .await
 }
 

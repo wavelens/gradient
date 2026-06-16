@@ -4155,6 +4155,55 @@ paths:
         '409':
           description: A deep_gc task is already active.
 
+  /admin/draining:
+    post:
+      tags: [admin]
+      summary: Toggle instance draining
+      description: |
+        Enables or disables draining for the instance. While draining, the
+        scheduler stops dispatching queued evaluations and builds, and every
+        in-flight evaluation is parked (`Waiting`, reason `draining`) so the
+        server can be stopped safely. Disabling recovers the parked evaluations
+        back to `Queued`.
+
+        Draining is in-memory only, so it always clears on the next server
+        startup (parked evaluations are recovered automatically).
+
+        Requires `superuser`.
+      operationId: setDraining
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled:
+                  type: boolean
+      responses:
+        '200':
+          description: Draining state applied
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: object
+                        required: [draining]
+                        properties:
+                          draining:
+                            type: boolean
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
   /admin/tasks:
     get:
       tags: [admin]
@@ -4632,7 +4681,7 @@ paths:
         Returns the Nix-format secret signing key string for the cache, e.g.:
         `gradient.example.com-mycache:AAAA...` (base64-encoded 64-byte ed25519 keypair)
 
-        Requires `manageCacheKeys`. Keep the secret key private — do not add it to `nix.conf`.
+        Requires `manageCacheKeys`. Keep the secret key private - do not add it to `nix.conf`.
         To configure Nix clients use the public key from `GET /caches/{cache}/public-key` instead.
       operationId: getCacheKey
       responses:
@@ -5063,7 +5112,7 @@ paths:
         `cached_path` row is removed in the same transaction, any matching
         `derivation_output.is_cached` rows are flipped to `false`, and the NAR
         blob is garbage-collected asynchronously after the response. Requires
-        `writeStore`. Allowed on state-managed caches — NAR content is operational
+        `writeStore`. Allowed on state-managed caches - NAR content is operational
         data, distinct from cache configuration.
       operationId: deleteCacheNar
       security:
@@ -6239,7 +6288,7 @@ paths:
     get:
       tags: [board]
       summary: System health (superuser)
-      description: Process/runtime snapshot, pipeline rollup lag, and HTTP route stats. Superuser only.
+      description: Process/runtime snapshot, pipeline rollup lag, HTTP route stats, and the instance `draining` flag. Superuser only.
       operationId: getBoardHealth
       responses:
         '200':
@@ -10086,7 +10135,7 @@ components:
 
     ScimUser:
       type: object
-      description: SCIM core User (RFC 7643 §4.1) — the Okta/Entra subset Gradient stores.
+      description: SCIM core User (RFC 7643 §4.1) - the Okta/Entra subset Gradient stores.
       properties:
         schemas:
           type: array

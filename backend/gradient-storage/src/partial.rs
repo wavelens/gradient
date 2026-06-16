@@ -130,7 +130,7 @@ impl PartialStore {
         fs::read_to_string(self.token_path(key)).ok()
     }
 
-    /// Read the whole partial into memory (small/medium NARs only — prefer
+    /// Read the whole partial into memory (small/medium NARs only - prefer
     /// streaming [`Self::path`] for large commits).
     pub fn read_all(&self, key: &str) -> Result<Vec<u8>> {
         let mut buf = Vec::new();

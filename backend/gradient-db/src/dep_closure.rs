@@ -11,7 +11,7 @@
 //! its size is cached on `derivation.dep_closure_count`. The per-entry-point
 //! build-status histogram lives in `entry_point_dep_count`, initialised once per
 //! evaluation and then maintained incrementally on every build status
-//! transition — replacing the per-request recursive closure walk in
+//! transition - replacing the per-request recursive closure walk in
 //! [`crate::entry_point_dep_counts`].
 
 use crate::closure::transitive_closure_reachable;

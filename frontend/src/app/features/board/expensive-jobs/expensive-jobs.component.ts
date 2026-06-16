@@ -49,7 +49,7 @@ type Tab = 'time' | 'ram' | 'cpu' | 'disk' | 'network';
         <thead><tr><th>#</th><th>Derivation</th><th>Build time</th><th>Worker</th></tr></thead>
         <tbody>
           @for (b of builds(); track b.build_id; let i = $index) {
-            <tr><td>{{ i + 1 }}</td><td class="mono">{{ b.name }}</td><td>{{ formatMs(b.build_time_ms) }}</td><td class="mono">{{ b.worker ?? '—' }}</td></tr>
+            <tr><td>{{ i + 1 }}</td><td class="mono">{{ b.name }}</td><td>{{ formatMs(b.build_time_ms) }}</td><td class="mono">{{ b.worker ?? '-' }}</td></tr>
           } @empty {
             <tr><td colspan="4" class="muted">No builds in this window.</td></tr>
           }
@@ -63,7 +63,7 @@ type Tab = 'time' | 'ram' | 'cpu' | 'disk' | 'network';
         <thead><tr><th>#</th><th>Derivation</th><th>{{ valueHeader() }}</th><th>Worker</th></tr></thead>
         <tbody>
           @for (r of resources(); track r.derivation; let i = $index) {
-            <tr><td>{{ i + 1 }}</td><td class="mono">{{ r.name }}</td><td>{{ formatValue(r) }}</td><td class="mono">{{ r.worker || '—' }}</td></tr>
+            <tr><td>{{ i + 1 }}</td><td class="mono">{{ r.name }}</td><td>{{ formatValue(r) }}</td><td class="mono">{{ r.worker || '-' }}</td></tr>
           } @empty {
             <tr><td colspan="4" class="muted">No per-build metrics recorded in this window (needs cgroup metrics enabled on workers).</td></tr>
           }

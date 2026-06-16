@@ -56,13 +56,13 @@ import { MetricChartComponent } from '@shared/components/metric-chart/metric-cha
       <tbody>
         @for (w of workers(); track $index) {
           <tr>
-            <td class="mono">{{ w.id ?? '—' }}</td>
-            <td class="mono">{{ w.organization ?? '—' }}</td>
+            <td class="mono">{{ w.id ?? '-' }}</td>
+            <td class="mono">{{ w.organization ?? '-' }}</td>
             <td>{{ w.draining ? 'draining' : 'active' }}</td>
             <td>{{ w.assigned_jobs }}/{{ w.max_concurrent_builds }}</td>
-            <td>{{ w.cpu_usage_pct !== null ? (w.cpu_usage_pct | number: '1.0-0') : '—' }}</td>
-            <td>{{ w.ram_free_mb !== null ? w.ram_free_mb + ' MB' : '—' }}</td>
-            <td class="mono">{{ w.architectures.join(', ') || '—' }}</td>
+            <td>{{ w.cpu_usage_pct !== null ? (w.cpu_usage_pct | number: '1.0-0') : '-' }}</td>
+            <td>{{ w.ram_free_mb !== null ? w.ram_free_mb + ' MB' : '-' }}</td>
+            <td class="mono">{{ w.architectures.join(', ') || '-' }}</td>
           </tr>
         } @empty {
           <tr><td colspan="7" class="muted">No connected workers.</td></tr>

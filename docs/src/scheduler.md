@@ -60,9 +60,9 @@ upstream serves the log, the build is recorded without one.
 
 ## Adaptive fetch/eval split
 
-When the scheduler detects an idle dedicated eval-only worker — determined by
+When the scheduler detects an idle dedicated eval-only worker - determined by
 checking whether any connected worker is eval-only (fetch capability absent)
-and has no currently assigned job — it splits a flake evaluation into two
+and has no currently assigned job - it splits a flake evaluation into two
 sequential jobs instead of dispatching the usual bundled fetch+eval job. The
 split is a heuristic: if no idle eval-only worker exists at dispatch time, the
 original bundled job is issued unchanged.
@@ -86,13 +86,13 @@ Every dispatch pass reconciles each in-flight evaluation against the live worker
 pool and parks it in `Waiting` (with a structured `waiting_reason`) when it
 cannot make progress, auto-unparking once the blocker clears:
 
-- **Pre-build phases** — a `Fetching` eval needs a worker advertising the
+- **Pre-build phases** - a `Fetching` eval needs a worker advertising the
   `fetch` capability; `Queued`/`EvaluatingFlake`/`EvaluatingDerivation` need an
   `eval`-capable worker. When none is connected the eval parks with an
   `eval_workers` reason naming the missing `capability`, even if it has already
   batched some builds, and recovers to `Queued` when such a worker connects
   (issue #381).
-- **Build phase** — a `Building` eval parks with a `workers` reason listing the
+- **Build phase** - a `Building` eval parks with a `workers` reason listing the
   unmet `(architecture, required_features)` combinations when no connected
   worker can satisfy any pending build.
 

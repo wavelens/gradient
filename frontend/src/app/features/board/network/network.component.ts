@@ -121,7 +121,7 @@ export class BoardNetworkComponent implements OnInit {
     { name: 'egress', data: (this.stats()?.nar_egress ?? []).map((p) => +(p.sum / GIB).toFixed(3)) },
   ]);
   workerCats = computed(() =>
-    (this.stats()?.workers ?? []).map((w) => (w.worker_id ?? '—').slice(0, 12))
+    (this.stats()?.workers ?? []).map((w) => (w.worker_id ?? '-').slice(0, 12))
   );
   netSeries = computed(() => [
     { name: 'network', data: (this.stats()?.workers ?? []).map((w) => w.network_speed_mbps ?? 0) },

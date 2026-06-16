@@ -73,7 +73,7 @@ struct DispatchRow {
 }
 
 /// Compute a fresh windowed snapshot from `derivation_metric` + `dispatched_job`.
-/// Each query degrades independently — errors are logged and that query's windows zero; counts always survive.
+/// Each query degrades independently - errors are logged and that query's windows zero; counts always survive.
 pub async fn compute_instance_context(
     db: &impl ConnectionTrait,
     counts: InstanceCounts,

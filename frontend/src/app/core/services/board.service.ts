@@ -257,6 +257,7 @@ export interface BoardHealth {
   http: HttpRouteStat[];
   rollup_lag_seconds: number | null;
   latest_rollup_bucket: string | null;
+  draining: boolean;
 }
 
 export interface DurationsHeatmap {

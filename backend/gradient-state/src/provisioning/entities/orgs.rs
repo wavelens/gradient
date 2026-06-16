@@ -131,7 +131,7 @@ impl<'a> StateApplicator<'a> {
     ///
     /// When `state_org.members` is empty, the legacy behavior applies:
     /// `created_by` is added as Admin if no row exists. When `members` is
-    /// non-empty, the declared list is authoritative — see
+    /// non-empty, the declared list is authoritative - see
     /// [`StateApplicator::apply_org_members`] for the per-org logic.
     pub(crate) async fn apply_organization_members(
         &self,

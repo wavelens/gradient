@@ -7,6 +7,27 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// Whether per-eval metrics collection is enabled (default on). Disabling skips
+/// the worker's `ev.stats()` reads and the subprocess's `NIX_SHOW_STATS`
+/// counters so eval pays zero stats overhead.
+pub fn metrics_enabled() -> bool {
+    std::env::var("GRADIENT_EVAL_METRICS_ENABLED")
+        .map(|v| v != "false" && v != "0")
+        .unwrap_or(true)
+}
+
+/// Environment the eval-worker subprocess needs for thunk/function-call counts.
+/// libnixexpr's `Counter`s are no-ops unless `NIX_SHOW_STATS` is set (otherwise
+/// `total_thunks`/`fn_calls` always report 0); the stats dump it would print is
+/// routed to `/dev/null` so it cannot pollute the worker's stderr.
+pub(crate) fn eval_worker_stats_env(metrics_enabled: bool) -> &'static [(&'static str, &'static str)] {
+    if metrics_enabled {
+        &[("NIX_SHOW_STATS", "1"), ("NIX_SHOW_STATS_PATH", "/dev/null")]
+    } else {
+        &[]
+    }
+}
+
 /// Per-request counter delta a worker reports after serving List/Resolve.
 /// Counters are diffs since the worker's prior request; gc_heap_size is the
 /// current gauge at report time. Canonical delta type, shared internally and
@@ -135,5 +156,14 @@ mod tests {
         acc.observe("a", d(0, 0, 0).with_heap(900), 0);
         acc.observe("a", d(0, 0, 0).with_heap(300), 0);
         assert_eq!(acc.finish().peak_heap_bytes, 900);
+    }
+
+    #[test]
+    fn stats_env_enables_nix_show_stats_only_when_metrics_on() {
+        assert_eq!(
+            eval_worker_stats_env(true),
+            [("NIX_SHOW_STATS", "1"), ("NIX_SHOW_STATS_PATH", "/dev/null")].as_slice()
+        );
+        assert!(eval_worker_stats_env(false).is_empty());
     }
 }

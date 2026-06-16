@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The per-forge behaviour seam. Every forge-specific decision — which reporter
+//! The per-forge behaviour seam. Every forge-specific decision - which reporter
 //! to build, how to verify a webhook signature, which header carries the event,
-//! how to parse each payload — lives behind this trait, so the rest of the
+//! how to parse each payload - lives behind this trait, so the rest of the
 //! codebase dispatches through [`ForgeRegistry`](crate::ForgeRegistry)
 //! instead of matching on [`ForgeType`].
 

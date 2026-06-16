@@ -7,6 +7,7 @@
 //! Routes under `/api/v1/admin/*`. All handlers must be superuser-gated via
 //! `require_superuser`.
 
+pub mod draining;
 pub mod github_app;
 pub mod maintenance;
 pub mod state;
@@ -31,6 +32,7 @@ pub fn admin_router() -> Router<Arc<ServerState>> {
         .route("/github-app/manifest", post(github_app::request_manifest))
         .route("/github-app/credentials", get(github_app::credentials))
         .route("/maintenance/deep-gc", post(maintenance::start_deep_gc))
+        .route("/draining", post(draining::set_draining))
         .route("/tasks", get(tasks::list_tasks))
         .route("/tasks/{task_id}", get(tasks::get_task))
 }

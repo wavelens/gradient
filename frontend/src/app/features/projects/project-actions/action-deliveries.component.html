@@ -42,7 +42,7 @@
                     <span class="badge fail">FAIL</span>
                   }
                 </td>
-                <td>{{ d.response_status ?? '—' }}</td>
+                <td>{{ d.response_status ?? '-' }}</td>
                 <td>{{ d.duration_ms }} ms</td>
                 <td>
                   <button type="button" class="toggle-btn" (click)="toggleRow(d.id)">

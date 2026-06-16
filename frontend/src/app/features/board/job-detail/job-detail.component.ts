@@ -101,16 +101,16 @@ interface RuleRow {
         <h2>Worker context</h2>
         <table class="kv">
           <tbody>
-            <tr><td class="label">Architectures</td><td class="mono">{{ j.worker_context.architectures.join(', ') || '—' }}</td></tr>
-            <tr><td class="label">System features</td><td class="mono">{{ j.worker_context.system_features.join(', ') || '—' }}</td></tr>
-            <tr><td class="label">Capabilities</td><td class="mono">{{ capabilityList(j.worker_context.capabilities) || '—' }}</td></tr>
+            <tr><td class="label">Architectures</td><td class="mono">{{ j.worker_context.architectures.join(', ') || '-' }}</td></tr>
+            <tr><td class="label">System features</td><td class="mono">{{ j.worker_context.system_features.join(', ') || '-' }}</td></tr>
+            <tr><td class="label">Capabilities</td><td class="mono">{{ capabilityList(j.worker_context.capabilities) || '-' }}</td></tr>
             <tr><td class="label">CPU count</td><td class="mono">{{ j.worker_context.cpu_count }}</td></tr>
             <tr><td class="label">CPU core score</td><td class="mono">{{ j.worker_context.cpu_core_score | number: '1.0-2' }}</td></tr>
             <tr><td class="label">CPU usage</td><td class="mono">{{ j.worker_context.cpu_usage_pct | number: '1.0-1' }} %</td></tr>
             <tr><td class="label">RAM total</td><td class="mono">{{ j.worker_context.ram_total_mb | number }} MB</td></tr>
             <tr><td class="label">RAM free</td><td class="mono">{{ j.worker_context.ram_free_mb | number }} MB</td></tr>
-            <tr><td class="label">Disk speed</td><td class="mono">{{ j.worker_context.disk_speed_mbps != null ? (j.worker_context.disk_speed_mbps | number) + ' MB/s' : '—' }}</td></tr>
-            <tr><td class="label">Network speed</td><td class="mono">{{ j.worker_context.network_speed_mbps != null ? (j.worker_context.network_speed_mbps | number) + ' Mbps' : '—' }}</td></tr>
+            <tr><td class="label">Disk speed</td><td class="mono">{{ j.worker_context.disk_speed_mbps != null ? (j.worker_context.disk_speed_mbps | number) + ' MB/s' : '-' }}</td></tr>
+            <tr><td class="label">Network speed</td><td class="mono">{{ j.worker_context.network_speed_mbps != null ? (j.worker_context.network_speed_mbps | number) + ' Mbps' : '-' }}</td></tr>
           </tbody>
         </table>
       </section>
@@ -123,16 +123,16 @@ interface RuleRow {
             @if (j.job_context.kind === 'Build') {
               <tr><td class="label">Architecture</td><td class="mono">{{ j.job_context.architecture }}</td></tr>
             }
-            <tr><td class="label">Missing count</td><td class="mono">{{ j.job_context.missing_count ?? '—' }}</td></tr>
-            <tr><td class="label">Missing NAR size</td><td class="mono">{{ j.job_context.missing_nar_size != null ? (j.job_context.missing_nar_size | number) : '—' }}</td></tr>
-            <tr><td class="label">Org work share</td><td class="mono">{{ j.job_context.org_work_share != null ? (j.job_context.org_work_share | number: '1.0-3') : '—' }}</td></tr>
+            <tr><td class="label">Missing count</td><td class="mono">{{ j.job_context.missing_count ?? '-' }}</td></tr>
+            <tr><td class="label">Missing NAR size</td><td class="mono">{{ j.job_context.missing_nar_size != null ? (j.job_context.missing_nar_size | number) : '-' }}</td></tr>
+            <tr><td class="label">Org work share</td><td class="mono">{{ j.job_context.org_work_share != null ? (j.job_context.org_work_share | number: '1.0-3') : '-' }}</td></tr>
             <tr><td class="label">Rescore count</td><td class="mono">{{ j.job_context.rescore_count }}</td></tr>
             <tr><td class="label">Queued</td><td class="mono">{{ j.job_context.queued_at | date: 'medium' }}</td></tr>
             <tr><td class="label">Ready</td><td class="mono">{{ j.job_context.ready_at | date: 'medium' }}</td></tr>
             @if (j.job_context.kind === 'Build') {
-              <tr><td class="label">Dependency count</td><td class="mono">{{ j.job_context.dependency_count ?? '—' }}</td></tr>
-              <tr><td class="label">Package name</td><td class="mono">{{ j.job_context.pname ?? '—' }}</td></tr>
-              <tr><td class="label">Closure size</td><td class="mono">{{ j.job_context.closure_size != null ? (j.job_context.closure_size | number) : '—' }}</td></tr>
+              <tr><td class="label">Dependency count</td><td class="mono">{{ j.job_context.dependency_count ?? '-' }}</td></tr>
+              <tr><td class="label">Package name</td><td class="mono">{{ j.job_context.pname ?? '-' }}</td></tr>
+              <tr><td class="label">Closure size</td><td class="mono">{{ j.job_context.closure_size != null ? (j.job_context.closure_size | number) : '-' }}</td></tr>
               <tr><td class="label">Prefer local build</td><td class="mono">{{ j.job_context.prefer_local_build ? 'yes' : 'no' }}</td></tr>
               <tr><td class="label">Fixed output</td><td class="mono">{{ j.job_context.is_fixed_output ? 'yes' : 'no' }}</td></tr>
             } @else {
@@ -160,7 +160,7 @@ interface RuleRow {
           <div class="drv-list">
             @for (d of j.job_context.derivations; track d.drv_path) {
               <div class="drv-row clickable" (click)="openBuild(d.build_id)">
-                <span class="mono pname">{{ d.pname ?? '—' }}</span>
+                <span class="mono pname">{{ d.pname ?? '-' }}</span>
                 <span class="mono path">{{ d.drv_path }}</span>
               </div>
             }
@@ -221,7 +221,7 @@ interface RuleRow {
           <h1>Pending job</h1>
         </div>
       </header>
-      <p class="muted">Still queued — limited details are available until it is dispatched.</p>
+      <p class="muted">Still queued - limited details are available until it is dispatched.</p>
       <section class="ids">
         <div><span class="label">Evaluation</span><span class="mono">{{ p.evaluation_id }}</span></div>
         @if (p.build_id) {
@@ -256,7 +256,7 @@ interface RuleRow {
           <div><span class="label">Build ID</span><span class="mono">{{ b.id }}</span></div>
           <div><span class="label">Status</span><span class="mono">{{ b.status }}</span></div>
           <div><span class="label">Architecture</span><span class="mono">{{ b.architecture }}</span></div>
-          <div><span class="label">Worker</span><span class="mono">{{ b.worker ?? '—' }}</span></div>
+          <div><span class="label">Worker</span><span class="mono">{{ b.worker ?? '-' }}</span></div>
           @if (b.via) {
             <div><span class="label">Via</span><span class="mono">{{ b.via }}</span></div>
           }
@@ -350,7 +350,7 @@ export class BoardJobDetailComponent implements OnInit {
 
   currentState = computed(() => {
     const j = this.job();
-    if (!j) return '—';
+    if (!j) return '-';
     const b = this.build();
     if (b && b.id === j.build_id) return b.status;
 
@@ -380,9 +380,9 @@ export class BoardJobDetailComponent implements OnInit {
 
   waitLabel = computed(() => {
     const j = this.job();
-    if (!j) return '—';
+    if (!j) return '-';
     const ms = new Date(j.dispatched_at).getTime() - new Date(j.queued_at).getTime();
-    if (!isFinite(ms) || ms < 0) return '—';
+    if (!isFinite(ms) || ms < 0) return '-';
     return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
   });
 

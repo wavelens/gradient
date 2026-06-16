@@ -128,9 +128,7 @@ pub fn run_eval_worker() -> std::io::Result<()> {
 
     // Per-request delta collection is on by default; disabling it skips every
     // `ev.stats()` call so the subprocess pays zero overhead.
-    let collect_stats = std::env::var("GRADIENT_EVAL_METRICS_ENABLED")
-        .map(|v| v != "false" && v != "0")
-        .unwrap_or(true);
+    let collect_stats = crate::worker_pool::eval_stats::metrics_enabled();
     let mut last = if collect_stats {
         evaluator
             .as_ref()

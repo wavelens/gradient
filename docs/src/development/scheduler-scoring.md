@@ -26,13 +26,13 @@ unset, and unknown names log a warning and fall back to `resource-aware`.
   reads these via `GET /board/scoring/rules` (`rule_catalog()`) to show a help
   popup next to each rule name.
 - Three scoring inputs:
-  - `JobContext` — per-candidate: kind, architecture, missing-path count,
+  - `JobContext` - per-candidate: kind, architecture, missing-path count,
     missing NAR size, dependency count, `queued_at`/`ready_at`, `rescore_count`
     and the owning org's work share.
-  - `WorkerContext` — the worker's architectures, system features, fetch
+  - `WorkerContext` - the worker's architectures, system features, fetch
     capability and optional live metrics (free RAM, CPU-core score, disk/network
     speed).
-  - `InstanceContext` — instance-wide 5m/1h/24h windowed averages plus live
+  - `InstanceContext` - instance-wide 5m/1h/24h windowed averages plus live
     counts (active/pending builds, total/idle workers), recomputed every
     `GRADIENT_INSTANCE_METRICS_INTERVAL` seconds (default 30) and used to make
     soft-rule thresholds instance-relative.
@@ -40,23 +40,23 @@ unset, and unknown names log a warning and fall back to `resource-aware`.
   pays for closure/history lookups only when a rule reads them.
 
 The scheduler builds the contexts, calls the configured policy per candidate,
-and assigns the worker its top-scoring job — unless that score is negative.
+and assigns the worker its top-scoring job - unless that score is negative.
 
 ## Soft rules vs. disqualifiers
 
 Each rule is one of two classes:
 
-- **Soft rule** — returns a bounded `[0, cap]` bonus, with the threshold for
+- **Soft rule** - returns a bounded `[0, cap]` bonus, with the threshold for
   saturation taken from the instance window (e.g. `MissingNarSizeRule` caps at
   500, `MissingPathsRule` at 200, `DependencyCountRule` at 50, `WaitTimeRule`
   scaled by the instance average wait). Soft rules never push a job below zero.
-- **Disqualifier** — may go negative (`RescoreWaitRule`, `FairShareRule`,
+- **Disqualifier** - may go negative (`RescoreWaitRule`, `FairShareRule`,
   `BuiltinDeprioritizeRule`, `ReserveFetchWorkersRule`). `ResourceFitRule` is
   mixed: its RAM-overshoot side is a disqualifier; its CPU-affinity side is a
   soft bonus.
 
 `take_best_of_kind` will not dispatch a candidate whose **total** score is
-negative — the worker idles that round and the job is retried next cycle. This
+negative - the worker idles that round and the job is retried next cycle. This
 gates builds the worker cannot yet serve well rather than forcing a bad
 placement.
 
@@ -75,9 +75,9 @@ by the instance average wait, and saturates at the rule cap for anti-starvation.
 
 ### `FairShareRule`
 
-Penalty proportional to the owning org's share of in-flight **work** —
+Penalty proportional to the owning org's share of in-flight **work** -
 weighted by build duration (prefer-local builds count at half), not by job
-count — so a few long builds and many short ones are balanced fairly.
+count - so a few long builds and many short ones are balanced fairly.
 
 ## `simple` policy rules
 
@@ -109,7 +109,7 @@ The worker measures both speeds passively and reports them on the 10 s
 `WorkerMetrics` heartbeat as exponentially-weighted moving averages:
 
 - **Network speed (Mbps):** derived from real NAR transfers (upload in
-  `push_direct`, download in `NarReceiver::accept_chunk`) — bytes over elapsed
+  `push_direct`, download in `NarReceiver::accept_chunk`) - bytes over elapsed
   transfer time. Fixed-output derivations are flagged at parse time
   (`is_fixed_output`, persisted on the `derivation` row) and steered toward
   faster-network workers.

@@ -262,7 +262,7 @@ impl JobExecutor {
                     // Each batch's `.drv` runtime closure (input_sources + .drvs,
                     // for narinfo substitution and downstream-build prefetch) is
                     // pushed to the cache inside the walk, before that batch's
-                    // `report_eval_result` — so #392's mid-eval build dispatch
+                    // `report_eval_result` - so #392's mid-eval build dispatch
                     // never races the source upload. The server keys cached_path
                     // by hash, so NAR/row ordering is irrelevant.
                     eval::evaluate_derivations(
