@@ -178,7 +178,7 @@ pub async fn evaluate_derivations(
     local_flake_path: Option<&str>,
     updater: &mut JobUpdater,
     abort: &mut watch::Receiver<bool>,
-) -> Result<Vec<String>> {
+) -> Result<()> {
     let repo = build_flake_url(job, local_flake_path);
     let start = Instant::now();
 
@@ -216,10 +216,7 @@ pub async fn evaluate_derivations(
         }
     }
 
-    let EvalOutcome {
-        produced_drvs: produced,
-        flake_nodes,
-    } = evaluate_derivations_with(
+    let EvalOutcome { flake_nodes } = evaluate_derivations_with(
         &*evaluator.resolver,
         &FsDrvReader,
         job,
@@ -257,7 +254,7 @@ pub async fn evaluate_derivations(
         warn!(error = %e, "eval-cache push failed; continuing");
     }
 
-    Ok(produced)
+    Ok(())
 }
 
 /// Write a pulled eval-cache blob to `path`, creating its parent directory.
@@ -437,9 +434,10 @@ struct ClosureWalker<'a> {
     queue: VecDeque<(Option<String>, String)>,
     walked: usize,
     start: Instant,
-    /// Every `.drv` path the walker actually parsed (i.e. present in the
-    /// local store, not pruned via `known_set`). The caller uses this to
-    /// push each drv NAR into the cache and sign it.
+    /// `.drv` paths the walker parsed since the last flush (present in the
+    /// local store, not pruned via `known_set`). Drained at each flush to push
+    /// the batch's runtime closure to the cache *before* its `report_eval_result`
+    /// so a mid-eval build dispatch never races the source upload.
     produced_drvs: Vec<String>,
 }
 
@@ -580,8 +578,13 @@ impl<'a> ClosureWalker<'a> {
                 );
             }
 
-            // Mid-walk flush: let the server start queuing builds early.
+            // Mid-walk flush: let the server start queuing builds early. Push
+            // this batch's `.drv` runtime closure (input_sources + .drvs)
+            // BEFORE reporting it, so once #392 promotes and dispatches these
+            // builds mid-eval their sources are already in the cache.
             if self.batch.len() >= EVAL_BATCH_SIZE {
+                updater.push_drv_closure(&self.produced_drvs).await;
+                self.produced_drvs.clear();
                 mark_substituted(&mut self.batch, updater).await;
                 debug!(
                     count = self.batch.len(),
@@ -600,11 +603,11 @@ impl<'a> ClosureWalker<'a> {
 
 // ── Orchestrator ──────────────────────────────────────────────────────────────
 
-/// Result of one closure-walk eval: the produced `.drv` paths (pushed to the
-/// cache by the caller) plus the walked flake-output graph for eval metrics.
+/// Result of one closure-walk eval: the walked flake-output graph for eval
+/// metrics. Each batch's `.drv` runtime closure is pushed to the cache during
+/// the walk (before its `report_eval_result`), not by the caller afterwards.
 #[derive(Debug)]
 pub struct EvalOutcome {
-    pub produced_drvs: Vec<String>,
     pub flake_nodes: Vec<FlakeOutputNode>,
 }
 
@@ -727,7 +730,6 @@ pub async fn evaluate_derivations_with(
         warn!("no derivations found for evaluation");
         updater.report_eval_result(vec![], warnings, vec![]).await?;
         return Ok(EvalOutcome {
-            produced_drvs: Vec::new(),
             flake_nodes: Vec::new(),
         });
     }
@@ -768,7 +770,6 @@ pub async fn evaluate_derivations_with(
         warn!("all attr resolutions failed");
         updater.report_eval_result(vec![], warnings, errors).await?;
         return Ok(EvalOutcome {
-            produced_drvs: Vec::new(),
             flake_nodes: Vec::new(),
         });
     }
@@ -778,7 +779,7 @@ pub async fn evaluate_derivations_with(
     // ── Step 3+4+5: BFS closure walk with incremental flushes ────────────────
     let mut walker = ClosureWalker::new(drv_reader, &root_drvs);
     let mut remaining = walker.walk(updater, abort).await?;
-    let produced_drvs = std::mem::take(&mut walker.produced_drvs);
+    let remaining_drvs = std::mem::take(&mut walker.produced_drvs);
 
     // ── Final flush: remaining derivations + deduplicated warnings/errors ─────
     warnings.sort_unstable();
@@ -786,6 +787,9 @@ pub async fn evaluate_derivations_with(
     errors.sort_unstable();
     errors.dedup();
 
+    // Push the trailing batch's closure before its report, same as the mid-walk
+    // flushes, so the last builds' sources are cached before dispatch.
+    updater.push_drv_closure(&remaining_drvs).await;
     mark_substituted(&mut remaining, updater).await;
     debug!(
         count = remaining.len(),
@@ -796,10 +800,7 @@ pub async fn evaluate_derivations_with(
     updater
         .report_eval_result(remaining, warnings, errors)
         .await?;
-    Ok(EvalOutcome {
-        produced_drvs,
-        flake_nodes,
-    })
+    Ok(EvalOutcome { flake_nodes })
 }
 
 #[cfg(test)]
@@ -906,6 +907,54 @@ mod tests {
         if let ReportedEvent::EvalResult { warnings, .. } = reporter.last_eval_result().unwrap() {
             assert!(warnings.is_empty(), "unexpected warnings: {:?}", warnings);
         }
+    }
+
+    /// Regression (#392): every parsed derivation's `.drv` runtime closure must
+    /// be pushed to the cache BEFORE the batch that reports it. Reporting a
+    /// derivation is what lets the server promote+dispatch its build mid-eval,
+    /// so a build worker would otherwise prefetch input_sources that aren't in
+    /// the cache yet ("required input path missing").
+    #[tokio::test]
+    async fn pushes_batch_closure_before_reporting_it() {
+        let fixture = load_store(&fixture_dir());
+        let repo = "https://example.com/repo";
+        let (resolver, drv_reader) = setup_from_fixture(&fixture, repo, "hello");
+        let job = make_flake_job(repo);
+        let mut reporter = RecordingJobReporter::new();
+
+        evaluate_derivations_with(
+            &resolver,
+            &drv_reader,
+            &job,
+            None,
+            &mut reporter,
+            &mut never_abort(),
+        )
+        .await
+        .unwrap();
+
+        let mut pushed: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        for event in &reporter.events {
+            match event {
+                ReportedEvent::DrvClosurePush { drv_paths } => {
+                    pushed.extend(drv_paths.iter().map(|s| s.as_str()));
+                }
+                ReportedEvent::EvalResult { derivations, .. } => {
+                    for d in derivations {
+                        // Known/substituted entries are already cached server-side
+                        // and carry no closure to push; only parsed drvs matter.
+                        assert!(
+                            d.substituted || pushed.contains(d.drv_path.as_str()),
+                            "reported {} before pushing its source closure",
+                            d.drv_path
+                        );
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        assert!(!pushed.is_empty(), "expected at least one closure push");
     }
 
     #[tokio::test]

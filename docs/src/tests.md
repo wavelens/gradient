@@ -43,6 +43,15 @@ proven `flush_deferred_deps` query and the `update_build_status` promotion loop,
 so it is covered by the existing `handle_eval_job_completed` handler tests plus
 E2E CI rather than a new MockDatabase sequence.
 
+`backend/gradient-worker/src/executor/eval.rs` — `pushes_batch_closure_before_reporting_it`
+guards the worker side of the same change. Because #392 dispatches builds
+mid-evaluation, each batch's `.drv` runtime closure (its `input_sources`) must be
+pushed to the cache *before* `report_eval_result` lets the server promote and
+dispatch that batch's builds. Driving the walk with a `RecordingJobReporter`, the
+test asserts every reported (non-substituted) derivation was covered by an earlier
+`push_drv_closure`, so a build worker never prefetches a source the cache does not
+yet hold ("required input path missing").
+
 ## PostgreSQL minimum-version guard (#387)
 
 `connect_db` reads `server_version_num` at startup and aborts before running

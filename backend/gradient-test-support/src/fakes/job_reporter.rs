@@ -27,6 +27,9 @@ pub enum ReportedEvent {
         warnings: Vec<String>,
         errors: Vec<String>,
     },
+    DrvClosurePush {
+        drv_paths: Vec<String>,
+    },
     Building {
         build_id: String,
     },
@@ -94,6 +97,18 @@ impl RecordingJobReporter {
             .iter()
             .rev()
             .find(|e| matches!(e, ReportedEvent::EvalResult { .. }))
+    }
+
+    /// Collect every drv path pushed via `push_drv_closure`, across all batches.
+    pub fn all_pushed_drv_paths(&self) -> Vec<&String> {
+        self.events
+            .iter()
+            .filter_map(|e| match e {
+                ReportedEvent::DrvClosurePush { drv_paths } => Some(drv_paths.iter()),
+                _ => None,
+            })
+            .flatten()
+            .collect()
     }
 
     /// Collect all derivations across every `EvalResult` event (incremental batches).
@@ -189,6 +204,12 @@ impl JobReporter for RecordingJobReporter {
             errors,
         });
         Ok(())
+    }
+
+    async fn push_drv_closure(&mut self, drv_paths: &[String]) {
+        self.events.push(ReportedEvent::DrvClosurePush {
+            drv_paths: drv_paths.to_vec(),
+        });
     }
 
     async fn report_building(&mut self, build_id: String) -> Result<()> {
