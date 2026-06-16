@@ -255,10 +255,12 @@ in {
         description = ''
           Capture per-build resource metrics (peak RAM, CPU time, disk I/O) by
           enabling Nix's experimental `cgroups` feature and `use-cgroups` on the
-          daemon. CPU time comes from the daemon build result; peak RAM and disk
-          I/O are sampled live from the build's cgroup (located via
-          `buildCgroupStateDir`), reliable at concurrency 1 and best-effort
-          above. Wall-clock build time is always reported.
+          daemon, and delegating the cgroup-v2 controllers to `nix-daemon.service`
+          (`Delegate=yes`) so per-build `memory.peak`/`io.stat` are exposed. CPU
+          time comes from the daemon build result; peak RAM and disk I/O are
+          sampled live from the build's cgroup (located via `buildCgroupStateDir`),
+          reliable at concurrency 1 and best-effort above. Wall-clock build time
+          is always reported.
         '';
         type = lib.types.bool;
         default = false;
@@ -367,6 +369,11 @@ in {
           group = "gradient-worker";
           mode = "0755";
         };
+      };
+
+      # Delegate cgroup-v2 controllers so per-build cgroups expose memory.peak / io.stat.
+      services.nix-daemon = lib.mkIf cfg.settings.buildMetrics {
+        serviceConfig.Delegate = true;
       };
 
       services.gradient-worker = {
