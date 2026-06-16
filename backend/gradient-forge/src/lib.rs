@@ -10,6 +10,7 @@
 //! one [`ForgeRegistry::with_builtin`] registration.
 
 pub mod github_app;
+pub mod pr;
 pub mod provider;
 pub mod providers;
 pub mod registry;
@@ -17,6 +18,7 @@ pub mod reporter;
 pub mod webhook;
 
 pub use github_app::*;
+pub use pr::{BranchCommit, CommitFile, PrRef};
 pub use provider::ForgeProvider;
 pub use registry::ForgeRegistry;
 pub use reporter::*;

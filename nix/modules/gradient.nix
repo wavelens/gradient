@@ -717,6 +717,18 @@ in {
           type = lib.types.ints.positive;
           default = 200;
         };
+
+        prCommitName = lib.mkOption {
+          description = "Git author and committer name used for the bot commits Gradient creates when opening pull requests via an `open_pr` action.";
+          type = lib.types.str;
+          default = "Gradient";
+        };
+
+        prCommitEmail = lib.mkOption {
+          description = "Git author and committer email used for the bot commits Gradient creates when opening pull requests via an `open_pr` action.";
+          type = lib.types.str;
+          default = "gradient@localhost";
+        };
       };
     };
   };
@@ -852,6 +864,8 @@ in {
         GRADIENT_PROTO_ANON_MAX_CONNECTIONS_PER_IP = toString cfg.settings.anonMaxConnectionsPerIp;
         GRADIENT_PROTO_ANON_RATE_PER_SECOND = toString cfg.settings.anonRatePerSecond;
         GRADIENT_PROTO_ANON_RATE_BURST = toString cfg.settings.anonRateBurst;
+        GRADIENT_PR_COMMIT_NAME = cfg.settings.prCommitName;
+        GRADIENT_PR_COMMIT_EMAIL = cfg.settings.prCommitEmail;
         GRADIENT_LOCAL_IPS = builtins.concatStringsSep "," cfg.settings.localIps;
         GRADIENT_TRUSTED_PROXIES = builtins.concatStringsSep "," cfg.settings.trustedProxies;
         GRADIENT_STATE_FILE = "%d/gradient_state";

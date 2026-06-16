@@ -4,12 +4,27 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-export type ActionType = 'send_mail' | 'send_web_request' | 'forge_status_report';
+export type ActionType = 'send_mail' | 'send_web_request' | 'forge_status_report' | 'open_pr';
+
+export type PrGenerator = 'flake_lock';
+export type PrGranularity = 'per_run' | 'per_input';
+export type PrVerifyGate = 'none' | 'eval' | 'build';
 
 export type ActionConfig =
   | { type: 'send_mail'; recipients: string[]; subject_template?: string }
   | { type: 'send_web_request'; url: string; token?: string }
-  | { type: 'forge_status_report'; integration_id: string };
+  | { type: 'forge_status_report'; integration_id: string }
+  | {
+      type: 'open_pr';
+      integration_id: string;
+      generator: PrGenerator;
+      granularity: PrGranularity;
+      verify_gate: PrVerifyGate;
+      branch_pattern: string;
+      title_template?: string;
+      body_template?: string;
+      update_existing: boolean;
+    };
 
 export interface Action {
   id: string;

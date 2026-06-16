@@ -72,6 +72,32 @@ impl EvaluationStatus {
     ];
 }
 
+/// What an evaluation is for: a normal CI run, or an `input_update` run that
+/// bumps tracked flake inputs and feeds the `OpenPr` action.
+#[repr(i32)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    DeriveActiveEnum,
+    EnumIter,
+    Deserialize,
+    Serialize,
+    IntoPrimitive,
+    TryFromPrimitive,
+)]
+#[sea_orm(rs_type = "i32", db_type = "Integer")]
+pub enum EvaluationKind {
+    #[default]
+    #[sea_orm(num_value = 0)]
+    Normal = 0,
+    #[sea_orm(num_value = 1)]
+    InputUpdate = 1,
+}
+
 #[repr(i32)]
 #[derive(
     Debug,
@@ -108,6 +134,7 @@ pub struct Model {
     pub commit: CommitId,
     pub wildcard: String,
     pub status: EvaluationStatus,
+    pub kind: EvaluationKind,
     pub cache_status: EvalCacheStatus,
     pub previous: Option<EvaluationId>,
     pub next: Option<EvaluationId>,

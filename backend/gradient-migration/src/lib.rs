@@ -152,6 +152,9 @@ mod m20260615_000002_create_evaluation_attr_cost;
 mod m20260615_000003_create_flake_output_node;
 mod m20260615_000004_create_base_worker;
 mod m20260615_000005_create_organization_base_worker;
+mod m20260616_000001_add_kind_to_evaluation;
+mod m20260616_000002_create_evaluation_input_update;
+mod m20260616_000003_create_open_pr_state;
 
 pub struct Migrator;
 
@@ -305,6 +308,9 @@ impl MigratorTrait for Migrator {
             Box::new(m20260615_000003_create_flake_output_node::Migration),
             Box::new(m20260615_000004_create_base_worker::Migration),
             Box::new(m20260615_000005_create_organization_base_worker::Migration),
+            Box::new(m20260616_000001_add_kind_to_evaluation::Migration),
+            Box::new(m20260616_000002_create_evaluation_input_update::Migration),
+            Box::new(m20260616_000003_create_open_pr_state::Migration),
         ]
     }
 }

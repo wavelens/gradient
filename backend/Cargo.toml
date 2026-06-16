@@ -1,6 +1,6 @@
 [workspace]
-members      = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-db", "gradient-entity", "gradient-exec", "gradient-forge", "gradient-migration", "gradient-nix", "gradient-proto", "gradient-scheduler", "gradient-score", "gradient-sources", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-worker"]
-default-members = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-db", "gradient-entity", "gradient-exec", "gradient-forge", "gradient-migration", "gradient-nix", "gradient-proto", "gradient-scheduler", "gradient-score", "gradient-sources", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-worker"]
+members      = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-db", "gradient-entity", "gradient-exec", "gradient-flake-lock", "gradient-forge", "gradient-migration", "gradient-nix", "gradient-proto", "gradient-scheduler", "gradient-score", "gradient-sources", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-worker"]
+default-members = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-db", "gradient-entity", "gradient-exec", "gradient-flake-lock", "gradient-forge", "gradient-migration", "gradient-nix", "gradient-proto", "gradient-scheduler", "gradient-score", "gradient-sources", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-worker"]
 resolver     = "2"
 
 [workspace.package]
@@ -23,6 +23,7 @@ gradient-core         = { path = "gradient-core" }
 gradient-db           = { path = "gradient-db" }
 gradient-entity       = { path = "gradient-entity" }
 gradient-exec         = { path = "gradient-exec" }
+gradient-flake-lock   = { path = "gradient-flake-lock" }
 gradient-forge        = { path = "gradient-forge" }
 gradient-migration    = { path = "gradient-migration" }
 gradient-nix          = { path = "gradient-nix" }
@@ -81,6 +82,7 @@ ssh-key         = { version = "0.6", default-features = false, features = ["ed25
 # Compression / archive
 async-compression = { version = "0.4", default-features = false, features = ["tokio", "zstd"] }
 bzip2             = { version = "0.6" } # defaults: pure-Rust backend is only reachable via `default`
+flate2            = { version = "1", default-features = false, features = ["rust_backend"] }
 tar               = { version = "0.4", default-features = false }
 xz2               = { version = "0.1", default-features = false }
 zstd              = { version = "0.13", default-features = false }

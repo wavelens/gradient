@@ -245,6 +245,7 @@ export class ProjectActionsComponent implements OnInit {
       case 'send_mail': return 'Send Mail';
       case 'send_web_request': return 'Web Request';
       case 'forge_status_report': return 'Forge Status';
+      case 'open_pr': return 'Open PR';
     }
   }
 
@@ -253,6 +254,7 @@ export class ProjectActionsComponent implements OnInit {
       case 'send_mail': return 'pi pi-envelope';
       case 'send_web_request': return 'pi pi-globe';
       case 'forge_status_report': return 'pi pi-github';
+      case 'open_pr': return 'pi pi-code';
     }
   }
 

@@ -123,6 +123,99 @@
     </div>
   }
 
+  @if (type() === 'open_pr') {
+    <div class="form-group">
+      <label for="pr-integration">Outbound Integration</label>
+      <p-select
+        inputId="pr-integration"
+        [ngModel]="integrationId()"
+        (ngModelChange)="integrationId.set($event)"
+        [options]="integrationOptions()"
+        optionLabel="label"
+        optionValue="value"
+        styleClass="w-full"
+      />
+    </div>
+    <div class="form-group">
+      <label for="pr-generator">Generator</label>
+      <p-select
+        inputId="pr-generator"
+        [ngModel]="prGenerator()"
+        (ngModelChange)="prGenerator.set($event)"
+        [options]="generatorOptions"
+        optionLabel="label"
+        optionValue="value"
+        styleClass="w-full"
+      />
+    </div>
+    <div class="form-group">
+      <label for="pr-granularity">Granularity</label>
+      <p-select
+        inputId="pr-granularity"
+        [ngModel]="prGranularity()"
+        (ngModelChange)="prGranularity.set($event)"
+        [options]="granularityOptions"
+        optionLabel="label"
+        optionValue="value"
+        styleClass="w-full"
+      />
+    </div>
+    <div class="form-group">
+      <label for="pr-verify-gate">Verify Gate</label>
+      <p-select
+        inputId="pr-verify-gate"
+        [ngModel]="prVerifyGate()"
+        (ngModelChange)="prVerifyGate.set($event)"
+        [options]="verifyGateOptions"
+        optionLabel="label"
+        optionValue="value"
+        styleClass="w-full"
+      />
+    </div>
+    <div class="form-group">
+      <label for="pr-branch-pattern">Branch Pattern</label>
+      <input
+        pInputText
+        id="pr-branch-pattern"
+        [ngModel]="prBranchPattern()"
+        (ngModelChange)="prBranchPattern.set($event)"
+        placeholder="gradient/flake-lock-update"
+        class="w-full"
+      />
+      <small class="text-secondary">Per Input granularity requires a {{ '{input}' }} placeholder.</small>
+    </div>
+    <div class="form-group">
+      <label for="pr-title-template">Title Template (optional)</label>
+      <input
+        pInputText
+        id="pr-title-template"
+        [ngModel]="prTitleTemplate()"
+        (ngModelChange)="prTitleTemplate.set($event)"
+        class="w-full"
+      />
+    </div>
+    <div class="form-group">
+      <label for="pr-body-template">Body Template (optional)</label>
+      <textarea
+        pInputTextarea
+        id="pr-body-template"
+        [ngModel]="prBodyTemplate()"
+        (ngModelChange)="prBodyTemplate.set($event)"
+        rows="3"
+        class="w-full"
+      ></textarea>
+    </div>
+    <div class="form-group checkbox-group">
+      <p-checkbox
+        inputId="pr-update-existing"
+        [ngModel]="prUpdateExisting()"
+        (ngModelChange)="prUpdateExisting.set($event)"
+        [binary]="true"
+      />
+      <label for="pr-update-existing">Update existing PR</label>
+    </div>
+  }
+
   <div class="form-group">
     <label>Events</label>
     @if (type() === 'forge_status_report') {

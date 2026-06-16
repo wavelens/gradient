@@ -7424,7 +7424,7 @@ components:
 
     ActionType:
       type: string
-      enum: [send_mail, send_web_request, forge_status_report]
+      enum: [send_mail, send_web_request, forge_status_report, open_pr]
 
     ActionConfigSendMail:
       type: object
@@ -7452,11 +7452,47 @@ components:
         type: { type: string, enum: [forge_status_report] }
         integration_id: { type: string, format: uuid }
 
+    ActionConfigOpenPr:
+      type: object
+      required: [type, integration_id]
+      properties:
+        type: { type: string, enum: [open_pr] }
+        integration_id:
+          type: string
+          format: uuid
+          description: Outbound forge integration in the same org
+        generator:
+          type: string
+          enum: [flake_lock]
+          default: flake_lock
+          description: Update generator; only the native flake.lock updater is available in v1
+        granularity:
+          type: string
+          enum: [per_run, per_input]
+          default: per_run
+          description: One PR for the whole run, or one PR per tracked input
+        verify_gate:
+          type: string
+          enum: [none, eval, build]
+          default: build
+          description: How far the candidate lock is verified before the PR is opened
+        branch_pattern:
+          type: string
+          default: gradient/flake-lock-update
+          description: Branch name for the PR; with `per_input` it must contain the `{input}` placeholder
+        title_template: { type: string, nullable: true }
+        body_template: { type: string, nullable: true }
+        update_existing:
+          type: boolean
+          default: true
+          description: Update an already-open PR in place instead of opening a duplicate
+
     ActionConfig:
       oneOf:
         - { $ref: '#/components/schemas/ActionConfigSendMail' }
         - { $ref: '#/components/schemas/ActionConfigSendWebRequest' }
         - { $ref: '#/components/schemas/ActionConfigForgeStatusReport' }
+        - { $ref: '#/components/schemas/ActionConfigOpenPr' }
       discriminator:
         propertyName: type
 
@@ -7895,6 +7931,8 @@ components:
           type: string
           nullable: true
           description: First non-blank line of the commit message, truncated to 100 chars; null when the message is blank
+        kind:
+          $ref: '#/components/schemas/EvaluationKind'
         status:
           $ref: '#/components/schemas/EvaluationStatus'
         trigger:
@@ -8091,6 +8129,16 @@ components:
 
     # ── Evaluations ───────────────────────────────────────────────────────────
 
+    EvaluationKind:
+      type: string
+      enum: [normal, input_update]
+      default: normal
+      description: |-
+        | Value | Meaning |
+        |---|---|
+        | `normal` | Ordinary evaluation of the project's flake |
+        | `input_update` | Evaluation of a candidate flake.lock with tracked inputs bumped, driving an `open_pr` action |
+
     EvaluationStatus:
       type: string
       enum: [Queued, Fetching, EvaluatingFlake, EvaluatingDerivation, Building, Waiting, Completed, Failed, Aborted]
@@ -8129,6 +8177,8 @@ components:
         wildcard:
           type: string
           description: Nix attribute wildcard that was evaluated
+        kind:
+          $ref: '#/components/schemas/EvaluationKind'
         status:
           $ref: '#/components/schemas/EvaluationStatus'
         trigger:
