@@ -38,8 +38,8 @@ pub use self::build::builds_with_satisfied_deps;
 pub use self::build_attempt::*;
 pub use self::cache_reach::*;
 pub use self::cache_storage::{
-    STORAGE_HEADROOM_BYTES, cache_used_bytes, instance_used_bytes, org_caches_all_full,
-    org_writable_caches,
+    STORAGE_HEADROOM_BYTES, cache_used_bytes, demote_cached_output, instance_used_bytes,
+    org_caches_all_full, org_writable_caches,
 };
 pub use self::cache_upstream::{
     GradientProtoUpstream, gradient_proto_upstreams_for_org, upstream_urls_for_org,

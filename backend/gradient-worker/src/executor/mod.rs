@@ -375,7 +375,17 @@ impl JobExecutor {
                         error = %e,
                         "input prefetch failed; aborting build"
                     );
-                    crate::executor::build::BuildError::transient(e)
+                    // A "required inputs not in cache" miss is terminal and
+                    // self-healing server-side: forward the paths so the server
+                    // demotes them and re-queues their producers. Every other
+                    // prefetch error is infrastructure-transient.
+                    match e.downcast_ref::<crate::proto::nar_import::MissingInputs>() {
+                        Some(mi) => crate::executor::build::BuildError::inputs_unavailable(
+                            mi.0.clone(),
+                            e,
+                        ),
+                        None => crate::executor::build::BuildError::transient(e),
+                    }
                 })?;
             let outputs = build::build_derivation(
                 &self.store,

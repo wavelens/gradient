@@ -19,7 +19,7 @@ use futures::StreamExt;
 use gradient_types::ids::OrganizationId;
 use gradient_types::*;
 use gradient_core::ServerState;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::EntityTrait;
 use tracing::{debug, error, warn};
 
 use crate::messages::ServerMessage;
@@ -280,53 +280,14 @@ pub(super) async fn serve_nar_request(
 /// stops claiming the path is available - letting the next build either
 /// rebuild from source or pick the path up from a configured upstream.
 async fn invalidate_cached_path(state: &Arc<ServerState>, hash: &str, store_path: &str) {
-    let row = match ECachedPath::find()
-        .filter(CCachedPath::Hash.eq(hash))
-        .one(&state.worker_db)
-        .await
-    {
-        Ok(Some(row)) => row,
-        Ok(None) => return,
-        Err(e) => {
-            warn!(%hash, %store_path, error = %e, "self-heal: cached_path lookup failed");
-            return;
-        }
-    };
-    let cached_path_id = row.id;
-    let mut active: ACachedPath = row.into();
-    active.file_hash = Set(None);
-    active.nar_hash = Set(None);
-    active.file_size = Set(None);
-    active.nar_size = Set(None);
-    if let Err(e) = active.update(&state.worker_db).await {
-        warn!(%hash, %store_path, error = %e, "self-heal: failed to demote cached_path row");
-        return;
+    match gradient_db::demote_cached_output(&state.worker_db, hash).await {
+        Ok(_) => warn!(
+            %hash,
+            %store_path,
+            "self-heal: NAR missing from storage; cached_path demoted so the path will be rebuilt"
+        ),
+        Err(e) => warn!(%hash, %store_path, error = %e, "self-heal: failed to demote cached output"),
     }
-
-    let outputs = match EDerivationOutput::find()
-        .filter(CDerivationOutput::CachedPath.eq(cached_path_id))
-        .all(&state.worker_db)
-        .await
-    {
-        Ok(rows) => rows,
-        Err(e) => {
-            warn!(%hash, %store_path, error = %e, "self-heal: derivation_output lookup failed");
-            return;
-        }
-    };
-    for o in outputs {
-        let mut active: ADerivationOutput = o.into();
-        active.is_cached = Set(false);
-        if let Err(e) = active.update(&state.worker_db).await {
-            warn!(%hash, %store_path, error = %e, "self-heal: failed to clear derivation_output.is_cached");
-        }
-    }
-
-    warn!(
-        %hash,
-        %store_path,
-        "self-heal: NAR missing from storage; cached_path demoted so the path will be rebuilt"
-    );
 }
 
 async fn send_nar_unavailable(

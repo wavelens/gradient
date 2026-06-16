@@ -57,6 +57,26 @@ const HTTP_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(600);
 /// and we don't want to swamp the AddToStoreNar queue.
 const PREFETCH_CONCURRENCY: usize = 8;
 
+/// Required input store paths the gradient cache could not serve. Carried as a
+/// typed error so the executor classifies the failure as
+/// `BuildFailureKind::InputsUnavailable` and forwards the paths to the server,
+/// which demotes those outputs and re-queues their producers (#410).
+#[derive(Debug)]
+pub struct MissingInputs(pub Vec<String>);
+
+impl std::fmt::Display for MissingInputs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} required input path(s) are missing from local store and not available in the gradient cache; cannot build (first: {})",
+            self.0.len(),
+            self.0.first().map(String::as_str).unwrap_or("<none>")
+        )
+    }
+}
+
+impl std::error::Error for MissingInputs {}
+
 /// How the closure walker treats `.drv` content seeds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ClosureMode {
@@ -262,12 +282,7 @@ impl<'a> InputPrefetcher<'a> {
                 sample = ?uncached.iter().take(5).collect::<Vec<_>>(),
                 "prefetch: server cannot serve required inputs (not in gradient cache)"
             );
-            return Err(anyhow::anyhow!(
-                "{} required input path(s) are missing from local store and \
-                 not available in the gradient cache; cannot build (first: {})",
-                uncached.len(),
-                uncached.first().map(String::as_str).unwrap_or("<none>")
-            ));
+            return Err(anyhow::Error::new(MissingInputs(uncached)));
         }
 
         Ok((by_url, by_request))
@@ -1474,5 +1489,22 @@ mod tests {
             seeds.contains(&"/nix/store/cccccccccccccccccccccccccccccccc-src".to_string()),
             "input_source still present: {seeds:?}"
         );
+    }
+
+    #[test]
+    fn missing_inputs_message_and_downcast() {
+        let paths = vec![
+            "/nix/store/g9y0fvqh2c991vjprgz9mvdm0zj7ggij-python3-static".to_string(),
+            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-other".to_string(),
+        ];
+        let err = anyhow::Error::new(MissingInputs(paths.clone()));
+        let msg = format!("{err}");
+        assert!(msg.contains("2 required input path(s)"), "msg: {msg}");
+        assert!(msg.contains("python3-static"), "msg: {msg}");
+
+        let recovered = err
+            .downcast_ref::<MissingInputs>()
+            .expect("MissingInputs survives anyhow boxing");
+        assert_eq!(recovered.0, paths);
     }
 }

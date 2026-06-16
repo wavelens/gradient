@@ -103,6 +103,9 @@ pub enum ClientMessage {
         job_id: String,
         error: String,
         kind: BuildFailureKind,
+        /// For `BuildFailureKind::InputsUnavailable`: the required input store
+        /// paths the cache could not serve. Empty for every other kind.
+        missing_paths: Vec<String>,
     },
 
     /// Worker is draining - it will finish in-flight jobs then disconnect.

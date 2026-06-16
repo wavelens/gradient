@@ -230,6 +230,7 @@ mod tests {
                 job_id: "job".into(),
                 error: "x".into(),
                 kind: crate::messages::BuildFailureKind::Permanent,
+                missing_paths: vec![],
             })
             .is_some()
         );

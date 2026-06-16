@@ -58,6 +58,9 @@ const CGROUP_SAMPLE_MS: u64 = 200;
 pub struct BuildError {
     pub kind: BuildFailureKind,
     pub source: anyhow::Error,
+    /// For `BuildFailureKind::InputsUnavailable`: the required input store paths
+    /// the cache could not serve. Empty for every other kind.
+    pub missing_paths: Vec<String>,
 }
 
 impl std::fmt::Display for BuildError {
@@ -68,40 +71,45 @@ impl std::fmt::Display for BuildError {
 impl std::error::Error for BuildError {}
 
 impl BuildError {
-    pub(crate) fn transient(e: impl Into<anyhow::Error>) -> Self {
+    fn new(kind: BuildFailureKind, source: anyhow::Error) -> Self {
         Self {
-            kind: BuildFailureKind::Transient,
-            source: e.into(),
+            kind,
+            source,
+            missing_paths: Vec::new(),
         }
+    }
+    pub(crate) fn transient(e: impl Into<anyhow::Error>) -> Self {
+        Self::new(BuildFailureKind::Transient, e.into())
     }
     pub(crate) fn permanent(e: impl Into<anyhow::Error>) -> Self {
-        Self {
-            kind: BuildFailureKind::Permanent,
-            source: e.into(),
-        }
+        Self::new(BuildFailureKind::Permanent, e.into())
     }
     pub(crate) fn timeout(e: impl Into<anyhow::Error>) -> Self {
-        Self {
-            kind: BuildFailureKind::Timeout,
-            source: e.into(),
-        }
+        Self::new(BuildFailureKind::Timeout, e.into())
     }
     /// A substitute attempt missed: this worker could not pull the output from
     /// cache. Never falls back to a local build (wrong-arch); the scheduler
     /// re-dispatches or escalates to a real build.
     pub(crate) fn substitute_unavailable(e: impl Into<anyhow::Error>) -> Self {
+        Self::new(BuildFailureKind::SubstituteUnavailable, e.into())
+    }
+    /// Prefetch found required inputs the gradient cache cannot serve. Carries
+    /// the offending paths so the server demotes them and re-queues their
+    /// producers; terminal for this build.
+    pub(crate) fn inputs_unavailable(missing_paths: Vec<String>, e: impl Into<anyhow::Error>) -> Self {
         Self {
-            kind: BuildFailureKind::SubstituteUnavailable,
+            kind: BuildFailureKind::InputsUnavailable,
             source: e.into(),
+            missing_paths,
         }
     }
     /// The server sent `AbortJob` while the daemon was building. Terminal: the
     /// build is already in a terminal state server-side, so retrying is wrong.
     pub(crate) fn aborted(drv_path: &str) -> Self {
-        Self {
-            kind: BuildFailureKind::Permanent,
-            source: anyhow::anyhow!("build aborted by server: {}", drv_path),
-        }
+        Self::new(
+            BuildFailureKind::Permanent,
+            anyhow::anyhow!("build aborted by server: {}", drv_path),
+        )
     }
 }
 
@@ -530,10 +538,10 @@ impl ParsedDerivation {
                 let msg = String::from_utf8_lossy(&f.error_msg).to_string();
                 warn!(drv = %drv_path, error = %msg, "build failed");
                 let kind = classify_build_error(&msg);
-                Err(BuildError {
+                Err(BuildError::new(
                     kind,
-                    source: anyhow::anyhow!("build failed: {}", msg),
-                })
+                    anyhow::anyhow!("build failed: {}", msg),
+                ))
             }
         }
     }
