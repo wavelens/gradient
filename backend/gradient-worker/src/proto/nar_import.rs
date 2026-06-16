@@ -77,6 +77,13 @@ impl std::fmt::Display for MissingInputs {
 
 impl std::error::Error for MissingInputs {}
 
+/// True when a presigned download's HTTP status means the object is genuinely
+/// absent (treat as a missing input, self-heal) rather than a retryable
+/// transport error: 404 Not Found / 410 Gone.
+fn presigned_status_is_missing(status: u16) -> bool {
+    matches!(status, 404 | 410)
+}
+
 /// How the closure walker treats `.drv` content seeds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ClosureMode {
@@ -337,7 +344,16 @@ impl<'a> InputPrefetcher<'a> {
                     .timeout(HTTP_DOWNLOAD_TIMEOUT)
                     .send()
                     .await
-                    .with_context(|| format!("HTTP GET {} (path {})", url, cp.path))?
+                    .with_context(|| format!("HTTP GET {} (path {})", url, cp.path))?;
+                // A 404/410 means the cache's DB row claims the NAR but the
+                // object is gone from the bucket. The server only signs the URL
+                // and never sees this, so surface it as a missing input and let
+                // the InputsUnavailable self-heal demote + rebuild it (#410).
+                if presigned_status_is_missing(resp.status().as_u16()) {
+                    return Ok((cp.path.clone(), None));
+                }
+
+                let resp = resp
                     .error_for_status()
                     .with_context(|| format!("HTTP {} returned non-2xx", url))?;
                 let bytes = resp
@@ -345,14 +361,24 @@ impl<'a> InputPrefetcher<'a> {
                     .await
                     .with_context(|| format!("read body of {}", url))?
                     .to_vec();
-                Ok::<_, anyhow::Error>((cp.path.clone(), bytes, cp))
+                Ok::<_, anyhow::Error>((cp.path.clone(), Some((bytes, cp))))
             })
             .collect::<FuturesUnordered<_>>();
 
         let mut results = Vec::new();
+        let mut missing = Vec::new();
         while let Some(r) = futs.next().await {
-            results.push(r.context("presigned NAR download failed")?);
+            let (path, fetched) = r.context("presigned NAR download failed")?;
+            match fetched {
+                Some((bytes, cp)) => results.push((path, bytes, cp)),
+                None => missing.push(path),
+            }
         }
+
+        if !missing.is_empty() {
+            return Err(anyhow::Error::new(MissingInputs(missing)));
+        }
+
         Ok(results)
     }
 
@@ -1506,5 +1532,17 @@ mod tests {
             .downcast_ref::<MissingInputs>()
             .expect("MissingInputs survives anyhow boxing");
         assert_eq!(recovered.0, paths);
+    }
+
+    #[test]
+    fn presigned_404_410_are_missing_inputs_other_statuses_retry() {
+        assert!(presigned_status_is_missing(404));
+        assert!(presigned_status_is_missing(410));
+        for retryable in [200, 403, 429, 500, 502, 503] {
+            assert!(
+                !presigned_status_is_missing(retryable),
+                "status {retryable} must stay retryable, not a missing input"
+            );
+        }
     }
 }

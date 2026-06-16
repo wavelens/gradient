@@ -757,6 +757,11 @@ Backend (`cargo test -p gradient-worker -p gradient-scheduler --tests`):
 - `build::retry_tests::store_path_hash_extracts_32_char_hash` - the helper that
   maps a missing `/nix/store/<hash>-<name>` path to the `derivation_output`
   hash used to demote and locate its producer.
+- `proto::nar_import::tests::presigned_404_410_are_missing_inputs_other_statuses_retry` -
+  a presigned S3 download that 404/410s is reclassified as a missing input
+  (the bucket lost an object the DB still claims), while 403/429/5xx stay
+  retryable transport errors. The server never sees this since it only signs
+  the URL, so the worker is the one that triggers the self-heal.
 
 The demotion path itself (`gradient_db::demote_cached_output`) is shared with
 the NAR-serve self-heal in `socket.rs` and is exercised end-to-end in CI.
