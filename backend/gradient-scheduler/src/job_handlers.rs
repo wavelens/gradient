@@ -249,6 +249,61 @@ impl Scheduler {
         }
     }
 
+    /// Store the worker-produced candidate lock + bumps on the `input_update`
+    /// sidecar so the `OpenPr` action can read them once the verify gate clears.
+    pub async fn persist_input_update_result(
+        &self,
+        job_id: &str,
+        candidate_lock: String,
+        bumped: Vec<gradient_types::proto::BumpedInputWire>,
+    ) {
+        use gradient_entity::evaluation_input_update as eiu;
+        use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
+
+        let evaluation_id = {
+            let tracker = self.job_tracker.read().await;
+            match tracker.active_job(job_id) {
+                Some(PendingJob::Eval(j)) => j.evaluation_id,
+                _ => return,
+            }
+        };
+
+        let bumped_json = serde_json::json!(
+            bumped
+                .iter()
+                .map(|b| serde_json::json!({
+                    "name": b.name,
+                    "old_rev": b.old_rev,
+                    "new_rev": b.new_rev,
+                }))
+                .collect::<Vec<_>>()
+        );
+
+        let sidecar = match eiu::Entity::find()
+            .filter(eiu::Column::Evaluation.eq(evaluation_id))
+            .one(&self.state.worker_db)
+            .await
+        {
+            Ok(Some(s)) => s,
+            Ok(None) => {
+                warn!(%evaluation_id, "input_update sidecar missing for result");
+                return;
+            }
+            Err(e) => {
+                warn!(error = %e, %evaluation_id, "loading input_update sidecar");
+                return;
+            }
+        };
+
+        let mut am = sidecar.into_active_model();
+        am.candidate_lock = Set(Some(candidate_lock));
+        am.bumped_inputs = Set(Some(bumped_json));
+        am.updated_at = Set(gradient_types::now());
+        if let Err(e) = am.update(&self.state.worker_db).await {
+            warn!(error = %e, %evaluation_id, "failed to persist input_update result");
+        }
+    }
+
     pub async fn handle_build_status_update(&self, build_id_str: &str, _worker_id: &str) {
         let build_id = match build_id_str.parse::<BuildId>() {
             Ok(id) => id,

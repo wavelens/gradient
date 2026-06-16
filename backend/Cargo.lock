@@ -2581,6 +2581,7 @@ dependencies = [
  "gradient-db",
  "gradient-entity",
  "gradient-exec",
+ "gradient-flake-lock",
  "gradient-nix",
  "gradient-proto",
  "gradient-sources",

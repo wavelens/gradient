@@ -69,6 +69,18 @@ pub trait JobReporter: Send {
     async fn query_known_derivations(&mut self, drv_paths: Vec<String>) -> Result<Vec<String>>;
     async fn report_fetching(&mut self) -> Result<()>;
     async fn report_fetch_result(&mut self, flake_source: Option<String>) -> Result<()>;
+
+    /// Report the worker-produced candidate `flake.lock` and the inputs it
+    /// bumped during an `input_update` fetch. Default is a no-op for reporters
+    /// that never run input_update jobs.
+    async fn report_input_update(
+        &mut self,
+        candidate_lock: String,
+        bumped: Vec<crate::messages::BumpedInputWire>,
+    ) -> Result<()> {
+        let _ = (candidate_lock, bumped);
+        Ok(())
+    }
     async fn report_evaluating_flake(&mut self) -> Result<()>;
     async fn report_evaluating_derivations(&mut self) -> Result<()>;
     async fn report_eval_result(
