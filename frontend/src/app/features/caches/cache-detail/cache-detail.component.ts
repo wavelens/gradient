@@ -85,18 +85,19 @@ export class CacheDetailComponent implements OnInit {
 
   get declerativeNetrcCode(): string {
     return `
-{ config, ... }: {
-  sops.secrets."gradient-api-token" = { };
-  sops.templates."nix-netrc" = {
-    content = ''
-      machine ${window.location.hostname}
-      login gradient
-      password \${config.sops.placeholder."gradient-api-token"}
-    '';
-    owner = "YOUR_USERNAME";
-    path = "/etc/nix/netrc";
-  };
-}`;
+      { config, ... }: {
+        sops.secrets."gradient-api-token" = { };
+        sops.templates."nix-netrc" = {
+          content = ''
+            machine ${window.location.hostname}
+            login gradient
+            password \${config.sops.placeholder."gradient-api-token"}
+          '';
+          owner = "YOUR_USERNAME";
+          path = "/etc/nix/netrc";
+        };
+      }
+    `;
   }
 
   readonly windows: { key: Window; label: string }[] = [
