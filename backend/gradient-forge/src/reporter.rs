@@ -268,6 +268,21 @@ pub trait CiReporter: Send + Sync + std::fmt::Debug + 'static {
     async fn default_branch(&self, _owner: &str, _repo: &str) -> Result<String> {
         anyhow::bail!("this reporter does not support opening pull requests")
     }
+
+    /// Submit an approving review on a pull request, reflecting Gradient's
+    /// maintainer-approval gate back onto the forge.
+    ///
+    /// Default impl is a no-op so forges/reporters that don't model PR reviews
+    /// simply swallow the request.
+    async fn approve_pull_request(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _pr_number: u64,
+        _body: &str,
+    ) -> Result<()> {
+        Ok(())
+    }
 }
 
 // ── NoopCiReporter ────────────────────────────────────────────────────────────
@@ -986,6 +1001,53 @@ fn github_comment_url(base_url: &str, owner: &str, repo: &str, pr_number: u64) -
     )
 }
 
+fn github_reviews_url(base_url: &str, owner: &str, repo: &str, pr_number: u64) -> String {
+    format!(
+        "{}/repos/{}/{}/pulls/{}/reviews",
+        base_url, owner, repo, pr_number
+    )
+}
+
+#[derive(serde::Serialize)]
+struct GithubReviewPayload<'a> {
+    event: &'static str,
+    body: &'a str,
+}
+
+/// POST an `APPROVE` review to the GitHub PR reviews endpoint, sharing the
+/// request shape between the token and GitHub App reporters.
+async fn post_github_approval(
+    client: &reqwest::Client,
+    base_url: &str,
+    token: &str,
+    owner: &str,
+    repo: &str,
+    pr_number: u64,
+    body: &str,
+) -> Result<()> {
+    let url = github_reviews_url(base_url, owner, repo, pr_number);
+    let payload = GithubReviewPayload { event: "APPROVE", body };
+
+    let resp = client
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Accept", "application/vnd.github+json")
+        .header("X-GitHub-Api-Version", "2022-11-28")
+        .json(&payload)
+        .send()
+        .await
+        .context("Failed to send GitHub PR review request")?;
+
+    let status = resp.status();
+    if !status.is_success() {
+        let resp_body = resp.text().await.unwrap_or_default();
+        warn!(github_url = %url, http_status = %status, body = %resp_body, "GitHub PR approval review failed");
+        anyhow::bail!("GitHub returned {}: {}", status, resp_body);
+    }
+
+    Ok(())
+}
+
 impl GithubReporter {
     const DEFAULT_API_URL: &'static str = "https://api.github.com";
 
@@ -1147,6 +1209,25 @@ impl CiReporter for GithubReporter {
             anyhow::bail!("GitHub returned {}: {}", status, resp_body);
         }
         Ok(())
+    }
+
+    async fn approve_pull_request(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+        body: &str,
+    ) -> Result<()> {
+        post_github_approval(
+            &self.client,
+            &self.base_url,
+            &self.token,
+            owner,
+            repo,
+            pr_number,
+            body,
+        )
+        .await
     }
 
     async fn get_pull_request(
@@ -1651,6 +1732,34 @@ impl CiReporter for GithubAppReporter {
             anyhow::bail!("GitHub App returned {}: {}", status, resp_body);
         }
         Ok(())
+    }
+
+    async fn approve_pull_request(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+        body: &str,
+    ) -> Result<()> {
+        let token = crate::github_app::get_installation_token(
+            &self.client,
+            self.app_id,
+            &self.private_key_pem,
+            self.installation_id,
+        )
+        .await
+        .context("Failed to mint GitHub App installation token")?;
+
+        post_github_approval(
+            &self.client,
+            &self.api_base_url,
+            &token,
+            owner,
+            repo,
+            pr_number,
+            body,
+        )
+        .await
     }
 
     async fn get_pull_request(

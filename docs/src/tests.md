@@ -2,6 +2,18 @@
 
 This page tracks notable tests added to Gradient and where they live.
 
+## Minor frontend issues (#401)
+
+`backend/gradient-web/src/endpoints/projects/auto_attach.rs`: `host_parsing_covers_url_shapes`,
+`self_hosted_pairs_inbound_and_outbound`, `public_github_matches_by_forge_type`,
+`ambiguous_inbound_is_skipped`, and `unrelated_forge_does_not_match` cover the
+repository-URL → org-integration matcher that auto-attaches a push trigger and a
+status-report action on project creation.
+
+`backend/gradient-forge/src/webhook.rs`: `github_push_extracts_commit_subject_and_author`,
+`github_push_without_head_commit_has_no_message`, and `gitlab_push_picks_commit_matching_after`
+cover push webhooks now writing the commit subject + author (previously only Pull/PR triggers did).
+
 ## Draining server + board fixes (#411)
 
 `backend/gradient-types/src/waiting_reason.rs`: `draining_round_trip` asserts the

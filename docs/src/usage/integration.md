@@ -54,6 +54,8 @@ integration.
 
 To report build status back to a forge, create a `forge_status_report` action on the project (see [Actions](./actions.md)).
 
+When a project is created and its repository URL unambiguously matches one of the organization's integrations, Gradient auto-attaches the wiring: a push trigger for the matching inbound integration and a `forge_status_report` action for the matching outbound integration (at most one of each). Ambiguous matches are left for manual setup.
+
 ## 3. Configure the forge webhook
 
 ### Gitea / Forgejo

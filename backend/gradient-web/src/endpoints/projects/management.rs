@@ -5,6 +5,7 @@
  */
 
 use super::ProjectResponse;
+use super::auto_attach;
 use crate::access::{Caller, OrgAccess, ProjectAccess, has_permission, load_org, load_project};
 use crate::audit::{RequestInfo, events, record as audit_record};
 use crate::authorization::{MaybeApiKey, MaybeUser};
@@ -281,6 +282,15 @@ pub async fn put(
     .into_active_model()
     .insert(&state.web_db)
     .await?;
+
+    let integrations = EIntegration::find()
+        .filter(CIntegration::Organization.eq(organization.id))
+        .all(&state.web_db)
+        .await
+        .unwrap_or_default();
+    if let Err(e) = auto_attach::apply(&state.web_db, &project, &integrations).await {
+        tracing::warn!("auto-attaching integrations to project {} failed: {e}", project.id);
+    }
 
     let res = BaseResponse {
         error: false,

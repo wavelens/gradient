@@ -856,6 +856,9 @@ pub(super) async fn handle_github_check_run(
                 "PR approval gate cleared via GitHub action"
             );
             dispatch_approval_granted(state, &unparked).await;
+            if let Some(pr_number) = approval_pr_number(&eval) {
+                submit_pr_approval_review(state, project_id, owner, repo, pr_number).await;
+            }
         }
         Ok(None) => {
             warn!(
@@ -979,6 +982,41 @@ async fn unpark_pr_approval_eval(
             warn!(error = %e, evaluation_id = %eval.id, "Failed to unpark approval gate via review");
             None
         }
+    }
+}
+
+/// PR number carried by an approval-gated evaluation's waiting reason.
+fn approval_pr_number(eval: &MEvaluation) -> Option<u64> {
+    match eval.waiting_reason.as_ref().and_then(WaitingReason::from_json)? {
+        WaitingReason::Approval { pr_number, .. } => Some(pr_number),
+        _ => None,
+    }
+}
+
+/// Reflect a Gradient maintainer approval back onto the forge by submitting an
+/// approving PR review (GitHub only; other forges no-op). Best-effort - a forge
+/// hiccup never undoes the local unpark.
+async fn submit_pr_approval_review(
+    state: &Arc<ServerState>,
+    project_id: ProjectId,
+    owner: &str,
+    repo: &str,
+    pr_number: u64,
+) {
+    let reporter = match gradient_ci::actions::reporter_for_project(&state.ci(), project_id).await {
+        Ok(Some(r)) => r,
+        Ok(None) => return,
+        Err(e) => {
+            warn!(error = %e, %project_id, "resolving reporter for PR approval review");
+            return;
+        }
+    };
+
+    if let Err(e) = reporter
+        .approve_pull_request(owner, repo, pr_number, "Approved via Gradient maintainer approval gate.")
+        .await
+    {
+        warn!(error = %e, %project_id, pr_number, "submitting forge PR approval review failed");
     }
 }
 
@@ -1356,6 +1394,10 @@ pub(super) async fn handle_issue_comment(
                         }
                     }
                     dispatch_approval_granted(state, &unparked).await;
+                    if matches!(cmd, GradientCommand::Approve) {
+                        submit_pr_approval_review(state, *project_id, owner, repo, pr_number).await;
+                    }
+
                     parked_unparked_in_integration = true;
                     action_taken = true;
                 }
