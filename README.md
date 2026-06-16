@@ -20,7 +20,9 @@
 
 ## Features
 
-![Gradient](./docs/gradient.png)
+![Gradient](./docs/gallery/gradient.png)
+
+<p align="center"><a href="./docs/gallery.md">📸 Screenshot Gallery</a></p>
 
 - **Modern UI**: clean and intuitive user interface
 - **Organizations**: multiple organizations, which work independently from each other (e.g. different workers, user access)
