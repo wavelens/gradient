@@ -168,7 +168,7 @@ mod tests {
     fn open_pr_defaults_apply() {
         let json = serde_json::json!({
             "type": "open_pr",
-            "integration_id": Uuid::new_v4(),
+            "integration_id": IntegrationId::now_v7(),
         });
         let cfg: ActionConfig = serde_json::from_value(json).unwrap();
         assert_eq!(cfg.action_type(), ActionType::OpenPr);
@@ -194,7 +194,7 @@ mod tests {
     #[test]
     fn open_pr_round_trip() {
         let cfg = ActionConfig::OpenPr {
-            integration_id: IntegrationId::from(Uuid::new_v4()),
+            integration_id: IntegrationId::now_v7(),
             generator: PatchGeneratorKind::FlakeLock,
             granularity: PrGranularity::PerInput,
             verify_gate: VerifyGate::Eval,
