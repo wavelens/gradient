@@ -93,6 +93,7 @@ fn action_type_to_str(t: ActionType) -> &'static str {
         ActionType::SendMail => "send_mail",
         ActionType::SendWebRequest => "send_web_request",
         ActionType::ForgeStatusReport => "forge_status_report",
+        ActionType::OpenPr => "open_pr",
     }
 }
 
@@ -199,6 +200,7 @@ pub async fn create_action(
                 return Err(WebError::unprocessable_entity(e.to_string()));
             }
         }
+        ActionConfig::OpenPr { .. } => {}
     }
 
     if let ActionConfig::SendMail { recipients, .. } = &body.config
@@ -209,9 +211,14 @@ pub async fn create_action(
         ));
     }
 
-    if let ActionConfig::ForgeStatusReport { integration_id } = &body.config {
+    let integration_id = match &body.config {
+        ActionConfig::ForgeStatusReport { integration_id }
+        | ActionConfig::OpenPr { integration_id, .. } => Some(*integration_id),
+        _ => None,
+    };
+    if let Some(integration_id) = integration_id {
         let integration = EIntegration::find()
-            .filter(CIntegration::Id.eq(*integration_id))
+            .filter(CIntegration::Id.eq(integration_id))
             .filter(CIntegration::Organization.eq(org.id))
             .one(&state.web_db)
             .await?;
@@ -370,7 +377,8 @@ pub async fn update_action(
                     return Err(WebError::unprocessable_entity(e.to_string()));
                 }
             }
-            ActionConfig::ForgeStatusReport { integration_id } => {
+            ActionConfig::ForgeStatusReport { integration_id }
+            | ActionConfig::OpenPr { integration_id, .. } => {
                 let integration = EIntegration::find()
                     .filter(CIntegration::Id.eq(*integration_id))
                     .filter(CIntegration::Organization.eq(org.id))
@@ -395,11 +403,14 @@ pub async fn update_action(
     }
 
     if let Some(ref evs) = body.events
-        && existing_type == ActionType::ForgeStatusReport
+        && matches!(
+            existing_type,
+            ActionType::ForgeStatusReport | ActionType::OpenPr
+        )
         && !evs.is_empty()
     {
         return Err(WebError::unprocessable_entity(
-            "forge_status_report actions cannot carry custom events",
+            "forge_status_report and open_pr actions cannot carry custom events",
         ));
     }
 
@@ -527,7 +538,7 @@ pub async fn test_action(
 
     let action_type = ActionType::from_i16(action.action_type).unwrap_or(ActionType::SendMail);
     let event = match action_type {
-        ActionType::ForgeStatusReport => "build.completed".to_string(),
+        ActionType::ForgeStatusReport | ActionType::OpenPr => "build.completed".to_string(),
         _ => action
             .events
             .as_array()
@@ -546,6 +557,7 @@ pub async fn test_action(
         "id": "00000000-0000-0000-0000-000000000000",
         "status": match action_type {
             ActionType::ForgeStatusReport => "success",
+            ActionType::OpenPr => "opened",
             _ => "ok",
         },
         "time": now.to_rfc3339(),

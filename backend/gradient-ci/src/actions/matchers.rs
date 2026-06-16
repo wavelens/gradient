@@ -5,7 +5,7 @@
  */
 
 use gradient_forge::reporter::{APPROVAL_ACTION_ID, CiStatus, RequestedAction};
-use gradient_types::{ActionType, MProjectAction};
+use gradient_types::{ActionConfig, ActionType, MProjectAction, VerifyGate};
 
 pub const FORGE_STATUS_EVENTS: &[&str] = &[
     "build.queued",
@@ -26,10 +26,27 @@ pub fn matches_event(action: &MProjectAction, event: &str) -> bool {
     if action.action_type == ActionType::ForgeStatusReport.to_i16() {
         return FORGE_STATUS_EVENTS.contains(&event);
     }
+    if action.action_type == ActionType::OpenPr.to_i16() {
+        return open_pr_gate_event(action) == Some(event);
+    }
     action
         .events
         .as_array()
         .is_some_and(|list| list.iter().any(|v| v.as_str() == Some(event)))
+}
+
+/// The single verify-gate event an `OpenPr` action fires on. The dispatcher
+/// additionally restricts firing to `input_update` evaluations.
+pub fn open_pr_gate_event(action: &MProjectAction) -> Option<&'static str> {
+    let cfg: ActionConfig = serde_json::from_value(action.config.clone()).ok()?;
+    let ActionConfig::OpenPr { verify_gate, .. } = cfg else {
+        return None;
+    };
+
+    Some(match verify_gate {
+        VerifyGate::Build => "build.completed",
+        VerifyGate::Eval | VerifyGate::None => "evaluation.completed",
+    })
 }
 
 pub fn forge_status_for_event(event: &str) -> Option<CiStatus> {

@@ -560,11 +560,69 @@ pub(crate) fn build_action_config(
             })?;
             Ok(ActionConfig::ForgeStatusReport { integration_id })
         }
+        "open_pr" => {
+            let int_name = want("integration")?
+                .as_str()
+                .ok_or_else(|| format!("action '{}': integration must be a string", a.name))?;
+            let integration_id = *outbound.get(int_name).ok_or_else(|| {
+                format!(
+                    "action '{}': outbound integration '{}' not found in project's organization",
+                    a.name, int_name
+                )
+            })?;
+            let generator: PatchGeneratorKind = parse_action_enum(a, "generator")?;
+            let granularity: PrGranularity = parse_action_enum(a, "granularity")?;
+            let verify_gate: VerifyGate = parse_action_enum(a, "verify_gate")?;
+            let branch_pattern = a
+                .config
+                .get("branch_pattern")
+                .and_then(|v| v.as_str())
+                .unwrap_or("gradient/flake-lock-update")
+                .to_owned();
+            let title_template = a
+                .config
+                .get("title_template")
+                .and_then(|v| v.as_str())
+                .map(str::to_owned);
+            let body_template = a
+                .config
+                .get("body_template")
+                .and_then(|v| v.as_str())
+                .map(str::to_owned);
+            let update_existing = a
+                .config
+                .get("update_existing")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+            Ok(ActionConfig::OpenPr {
+                integration_id,
+                generator,
+                granularity,
+                verify_gate,
+                branch_pattern,
+                title_template,
+                body_template,
+                update_existing,
+            })
+        }
         other => Err(format!(
-            "action '{}' has invalid type '{}': expected send_mail/send_web_request/forge_status_report",
+            "action '{}' has invalid type '{}': expected send_mail/send_web_request/forge_status_report/open_pr",
             a.name, other
         )
         .into()),
+    }
+}
+
+/// Decode a snake_case enum field from an action config, falling back to the
+/// enum's serde `Default` when the key is absent.
+fn parse_action_enum<T>(a: &StateAction, key: &str) -> Result<T, DynError>
+where
+    T: Default + serde::de::DeserializeOwned,
+{
+    match a.config.get(key) {
+        None | Some(serde_json::Value::Null) => Ok(T::default()),
+        Some(v) => serde_json::from_value(v.clone())
+            .map_err(|e| format!("action '{}': invalid '{}': {}", a.name, key, e).into()),
     }
 }
 

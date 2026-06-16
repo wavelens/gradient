@@ -86,7 +86,7 @@ pub async fn reporter_for_project(
     ))
 }
 
-async fn build_reporter_for_integration(
+pub(crate) async fn build_reporter_for_integration(
     ctx: &CiContext,
     integration_id: IntegrationId,
 ) -> Result<Arc<dyn CiReporter>> {

@@ -16,7 +16,7 @@ mod report;
 mod send;
 
 use crate::context::CiContext;
-use gradient_types::{CProjectAction, EProjectAction, ProjectId};
+use gradient_types::{ActionType, CProjectAction, EProjectAction, ProjectId};
 use serde_json::Value as JsonValue;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use tracing::{error, warn};
@@ -155,6 +155,14 @@ async fn dispatch_event(ctx: &CiContext, project_id: ProjectId, event: &str, pay
         if !matches_event(&action, event) {
             continue;
         }
+        // `OpenPr` fires on a normal gate event (build/eval completed) but must
+        // only act on `input_update` evaluations, never regular CI runs.
+        if action.action_type == ActionType::OpenPr.to_i16()
+            && payload.get("evaluation_kind").and_then(|v| v.as_str()) != Some("input_update")
+        {
+            continue;
+        }
+
         let ctx = ctx.clone();
         let payload = payload.clone();
         let event = event.to_string();

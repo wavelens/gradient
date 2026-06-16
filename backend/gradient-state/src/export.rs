@@ -449,6 +449,14 @@ fn export_trigger(
     })
 }
 
+/// Render a snake_case unit-variant enum to its serde string for the nix config.
+fn enum_str<T: serde::Serialize>(value: &T) -> String {
+    serde_json::to_value(value)
+        .ok()
+        .and_then(|v| v.as_str().map(str::to_owned))
+        .unwrap_or_default()
+}
+
 fn export_action(
     a: &gradient_entity::project_action::Model,
     integration_name: &HashMap<IntegrationId, String>,
@@ -482,6 +490,36 @@ fn export_action(
             );
             (ActionType::ForgeStatusReport, c)
         }
+        ActionConfig::OpenPr {
+            integration_id,
+            generator,
+            granularity,
+            verify_gate,
+            branch_pattern,
+            title_template,
+            body_template,
+            update_existing,
+        } => {
+            let mut c = serde_json::Map::new();
+            c.insert(
+                "integration".into(),
+                integration_name.get(&integration_id).cloned()?.into(),
+            );
+            c.insert("generator".into(), enum_str(&generator).into());
+            c.insert("granularity".into(), enum_str(&granularity).into());
+            c.insert("verify_gate".into(), enum_str(&verify_gate).into());
+            c.insert("branch_pattern".into(), branch_pattern.into());
+            c.insert(
+                "title_template".into(),
+                title_template.map(Into::into).unwrap_or(serde_json::Value::Null),
+            );
+            c.insert(
+                "body_template".into(),
+                body_template.map(Into::into).unwrap_or(serde_json::Value::Null),
+            );
+            c.insert("update_existing".into(), update_existing.into());
+            (ActionType::OpenPr, c)
+        }
     };
     Some(super::StateAction {
         name: a.name.clone(),
@@ -489,6 +527,7 @@ fn export_action(
             ActionType::SendMail => "send_mail",
             ActionType::SendWebRequest => "send_web_request",
             ActionType::ForgeStatusReport => "forge_status_report",
+            ActionType::OpenPr => "open_pr",
         }
         .to_string(),
         active: a.active,
