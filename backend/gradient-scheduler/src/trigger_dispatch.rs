@@ -91,7 +91,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gradient_entity::project_trigger as ept;
-use gradient_ci::{ApplyInput, ApplyOutcome, apply_trigger};
+use gradient_ci::{ApplyInput, ApplyOutcome, apply_trigger, trigger::maybe_trigger_input_update};
 use gradient_sources::{check_project_updates, get_commit_info};
 use gradient_types::triggers::{TriggerConfig, TriggerType};
 use gradient_types::*;
@@ -213,6 +213,22 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
         let (msg, _email, author) = get_commit_info(&state.db(), project, &commit_hash)
             .await
             .unwrap_or_else(|_| (String::new(), None, String::new()));
+
+        // Bump tracked flake inputs (OpenPr action) on the periodic trigger
+        // fire. Self-gated: no-ops unless the project qualifies. Runs alongside
+        // the normal CI evaluation below, not in place of it.
+        if let Err(e) = maybe_trigger_input_update(
+            state.worker_db.inner(),
+            project,
+            commit_hash.clone(),
+            Some(msg.clone()),
+            Some(author.clone()),
+            Some(trig.id),
+        )
+        .await
+        {
+            warn!(error = %e, trigger_id = %trig.id, "input_update trigger failed");
+        }
 
         let trigger_type = cfg.trigger_type();
         match apply_trigger(

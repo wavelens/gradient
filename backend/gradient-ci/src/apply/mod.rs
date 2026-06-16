@@ -13,7 +13,7 @@ mod concurrency;
 mod dedup;
 mod gates;
 
-use super::trigger::{TriggerError, maybe_trigger_input_update, trigger_evaluation};
+use super::trigger::{TriggerError, trigger_evaluation};
 use gradient_types::*;
 use gradient_entity::evaluation::EvaluationStatus;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
@@ -105,22 +105,6 @@ pub async fn apply_trigger<C: ConnectionTrait>(
         .filter(CEvaluation::Status.is_in(active_codes))
         .one(db)
         .await?;
-
-    // Independent of normal-CI dedup: a qualifying project bumps its tracked
-    // flake inputs on any trigger fire. The helper gates itself and no-ops when
-    // the OpenPr condition is not met or an input_update eval is already running.
-    if let Err(e) = maybe_trigger_input_update(
-        db,
-        project,
-        input.commit_hash.clone(),
-        input.commit_message.clone(),
-        input.author_name.clone(),
-        Some(input.trigger_id),
-    )
-    .await
-    {
-        tracing::warn!(error = %e, project = %project.id, "input_update trigger failed");
-    }
 
     if dedup::skip_for_same_commit(db, project, &input, in_flight.as_ref()).await? {
         return Ok(ApplyOutcome::SkippedSameCommit);
