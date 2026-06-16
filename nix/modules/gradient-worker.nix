@@ -62,7 +62,7 @@ in {
     };
 
     useTls = lib.mkEnableOption "TLS" // { default = true; };
-    discoverable = lib.mkEnableOption "accept incoming connections on /proto";
+    discoverable = lib.mkEnableOption "incoming connections on `/proto`";
     domain = lib.mkOption {
       description = "Domain under which the worker's nginx vhost is served. Only used when a reverseProxy is enabled";
       type = lib.types.str;
@@ -97,16 +97,11 @@ in {
 
     workerId = lib.mkOption {
       description = ''
-        Override the worker's persistent UUID. When set, this value is used as
-        the worker identity instead of the UUID auto-generated and stored in
-        <literal>$StateDirectory/worker-id</literal> on first start.
-
-        Useful for declarative deployments where the worker UUID must be known
-        ahead of time (e.g. to pre-register it in <literal>state.workers</literal>).
-        Must be a valid UUID.
-
-        When null (default) the worker reads or generates its ID from the state
-        directory as usual.
+        Override the worker's persistent UUID. When set, this UUID is used as
+        the worker identity instead of the one auto-generated and stored in
+        `$StateDirectory/worker-id` on first start. Useful for declarative
+        deployments that must know the worker UUID ahead of time (e.g. to
+        pre-register it in `state.workers`).
       '';
       type = lib.types.nullOr lib.types.str;
       default = null;
@@ -115,38 +110,33 @@ in {
 
     peersFile = lib.mkOption {
       description = ''
-        Path to a file containing peer-to-token pairs for challenge-response
-        auth with the Gradient server, one entry per line:
+        Path to a file of peer-to-token pairs for challenge-response auth with
+        the Gradient server, one `peer_id:token` per line (lines starting with
+        `#` are ignored):
 
-        <literal>
-        # one peer_id:token per line; lines starting with # are ignored
-        &lt;uuid&gt;:&lt;token&gt;
-        *:&lt;token&gt;
-        </literal>
+        ```
+        <uuid>:<token>
+        *:<token>
+        ```
 
-        The special peer ID <literal>*</literal> matches any UUID the server
-        challenges, so a single token works for any org. Each token must be
-        a 48-byte random secret (e.g. <literal>openssl rand -base64 48</literal>)
-        and is registered via <literal>POST /api/v1/orgs/{org}/workers</literal>.
+        The special peer ID `*` matches any UUID the server challenges, so a
+        single token works for any org. Each token is a 48-byte random secret
+        (e.g. `openssl rand -base64 48`) registered via
+        `POST /api/v1/orgs/{org}/workers`. Pin the org UUID with
+        `services.gradient.state.organizations.<name>.id` to reference it here.
 
-        In a fully declarative deployment, pin the org UUID with
-        <literal>services.gradient.state.organizations.&lt;name&gt;.id</literal>
-        on the server and reference the same value here, so the peer id is
-        known ahead of the first server start.
-
-        When null (default), the worker connects in open/discoverable mode -
-        the server accepts the connection without token validation. Suitable
-        for local co-located workers.
+        When null (default), the worker connects in open/discoverable mode and
+        the server accepts it without token validation.
       '';
       type = lib.types.nullOr lib.types.path;
       default = null;
     };
 
     capabilities = {
-      federate = lib.mkEnableOption "federate capability - relay work and NAR traffic between workers and servers (requires discoverable)";
-      fetch = lib.mkEnableOption "fetch capability - prefetch flake inputs and sources" // { default = true; };
-      eval  = lib.mkEnableOption "eval capability - run Nix flake evaluations" // { default = true; };
-      build = lib.mkEnableOption "build capability - execute Nix store builds" // { default = true; };
+      federate = lib.mkEnableOption "the federate capability (relay work and NAR traffic between workers and servers; requires discoverable)";
+      fetch = lib.mkEnableOption "the fetch capability (prefetch flake inputs and sources)" // { default = true; };
+      eval  = lib.mkEnableOption "the eval capability (run Nix flake evaluations)" // { default = true; };
+      build = lib.mkEnableOption "the build capability (execute Nix store builds)" // { default = true; };
     };
 
     settings = {
@@ -251,16 +241,11 @@ in {
 
       gcrootsDir = lib.mkOption {
         description = ''
-          Directory under which the worker writes one indirect GC root
-          symlink per active build (drv + outputs). Pins inputs and
-          just-built outputs through the local nix-daemon so a concurrent
-          <literal>nix-collect-garbage</literal> cannot delete them
-          mid-build. A systemd-tmpfiles rule creates the directory under
-          the worker user and adds it to the unit's
-          <literal>ReadWritePaths</literal>.
-
-          Set to an empty string to disable GC root pinning (the worker
-          still builds, but a concurrent GC may race the build).
+          Directory under which the worker writes one indirect GC root symlink
+          per active build (drv + outputs), pinning inputs and just-built
+          outputs so a concurrent `nix-collect-garbage` cannot delete them
+          mid-build. Set to an empty string to disable pinning (the worker
+          still builds, but a concurrent GC may race it).
         '';
         type = lib.types.str;
         default = "/nix/var/nix/gcroots/gradient";
@@ -268,33 +253,29 @@ in {
 
       buildMetrics = lib.mkOption {
         description = ''
-          Capture per-build resource metrics (peak RAM, CPU time, disk I/O).
-          Enables Nix's experimental <literal>cgroups</literal> feature and
-          <literal>use-cgroups</literal> on the daemon. CPU time comes from the
-          daemon build result; peak RAM and disk I/O are sampled live from the
-          build's cgroup (located via <literal>buildCgroupStateDir</literal>) -
-          reliable at build concurrency 1, best-effort under concurrency.
-          Wall-clock build time is always reported.
+          Capture per-build resource metrics (peak RAM, CPU time, disk I/O) by
+          enabling Nix's experimental `cgroups` feature and `use-cgroups` on the
+          daemon. CPU time comes from the daemon build result; peak RAM and disk
+          I/O are sampled live from the build's cgroup (located via
+          `buildCgroupStateDir`), reliable at concurrency 1 and best-effort
+          above. Wall-clock build time is always reported.
         '';
         type = lib.types.bool;
         default = false;
       };
 
       buildCgroupRoot = lib.mkOption {
-        description = ''
-          Cgroup-v2 mount root searched for per-build cgroups when
-          <literal>buildMetrics</literal> is enabled.
-        '';
+        description = "Cgroup-v2 mount root searched for per-build cgroups when `buildMetrics` is enabled.";
         type = lib.types.str;
         default = "/sys/fs/cgroup";
       };
 
       buildCgroupStateDir = lib.mkOption {
         description = ''
-          Nix's <literal>&lt;nix-state-dir&gt;/cgroups</literal> directory, where
-          the daemon records each build's cgroup path (`<uid>` files). The worker
-          reads the newest entry to locate a running build's cgroup for metrics.
-          Granted read access via <literal>ReadOnlyPaths</literal>.
+          Nix's `<nix-state-dir>/cgroups` directory, where the daemon records
+          each build's cgroup path (`<uid>` files). The worker reads the newest
+          entry to locate a running build's cgroup for metrics. Granted read
+          access via `ReadOnlyPaths`.
         '';
         type = lib.types.str;
         default = "/nix/var/nix/cgroups";
@@ -322,8 +303,8 @@ in {
       logFetchFromStore = lib.mkOption {
         description = ''
           When a derivation is already built in the local store (so the daemon
-          produces no fresh log), read nix's stored <literal>.bz2</literal> build
-          log and forward it so the UI still shows output.
+          produces no fresh log), read nix's stored `.bz2` build log and forward
+          it so the UI still shows output.
         '';
         type = lib.types.bool;
         default = true;

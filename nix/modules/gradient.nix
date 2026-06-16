@@ -127,8 +127,8 @@ in {
       configurePostgres = lib.mkEnableOption "PostgreSQL configuration";
       reportErrors = lib.mkEnableOption "error reporting to Sentry";
       useTls = lib.mkEnableOption "TLS" // { default = true; };
-      enableQuic = lib.mkEnableOption "Quic support";
-      discoverable = lib.mkEnableOption "accept incoming connections on /proto" // { default = true; };
+      enableQuic = lib.mkEnableOption "QUIC support";
+      discoverable = lib.mkEnableOption "incoming connections on `/proto`" // { default = true; };
       packages = {
         server = lib.mkPackageOption pkgs "gradient" { };
         frontend = lib.mkPackageOption pkgs "gradient-frontend" { };
@@ -222,8 +222,8 @@ in {
       };
 
       proto = {
-        public = lib.mkEnableOption "publicly accessible proto endpoint for federated builds and remote workers";
-        federate = lib.mkEnableOption "federate Gradient Proto";
+        public = lib.mkEnableOption "a publicly accessible `/proto` endpoint for federated builds and remote workers";
+        federate = lib.mkEnableOption "Gradient Proto federation";
       };
 
       frontend = {
@@ -239,7 +239,7 @@ in {
 
       oidc = {
         enable = lib.mkEnableOption "OIDC";
-        required = lib.mkEnableOption "OIDC requirement for registration";
+        required = lib.mkEnableOption "the OIDC requirement for registration";
         clientId = lib.mkOption {
           description = "Client ID for OIDC";
           type = lib.types.str;
@@ -274,12 +274,12 @@ in {
           description = "Path to the file holding the SCIM provisioning bearer token";
           type = lib.types.path;
         };
-        hardDelete = lib.mkEnableOption "hard-delete users on SCIM DELETE (default: soft-disable)";
+        hardDelete = lib.mkEnableOption "hard-deletion of users on SCIM DELETE (default: soft-disable)";
       };
 
       email = {
         enable = lib.mkEnableOption "email functionality";
-        requireVerification = lib.mkEnableOption "email verification requirement for registrations";
+        requireVerification = lib.mkEnableOption "the email-verification requirement for registrations";
         enableTls = lib.mkEnableOption "TLS for SMTP connections";
         smtpHost = lib.mkOption {
           description = "SMTP server hostname";
@@ -377,13 +377,12 @@ in {
         virtualHostedStyle = lib.mkOption {
           description = ''
             Use virtual-hosted-style requests
-            (`https://<bucket>.<endpoint>/key`) when a custom endpoint is
-            configured. Defaults to `false`, which produces path-style URLs
-            (`https://<endpoint>/<bucket>/key`) — required by MinIO,
-            Garage, and most self-hosted S3-compatible backends. Set to
-            `true` for providers that demand virtual-hosted addressing
-            (Cloudflare R2 with a custom domain, certain Backblaze B2
-            setups). Ignored when `endpoint` is null (AWS direct).
+            (`https://<bucket>.<endpoint>/key`) instead of the default
+            path-style (`https://<endpoint>/<bucket>/key`) when a custom
+            `endpoint` is set. Path-style is required by MinIO, Garage and most
+            self-hosted backends; enable this only for providers that demand
+            virtual-hosted addressing (e.g. Cloudflare R2 with a custom domain).
+            Ignored when `endpoint` is null.
           '';
           type = lib.types.bool;
           default = false;
@@ -391,7 +390,7 @@ in {
       };
 
       settings = {
-        enableRegistration = lib.mkEnableOption "registration. Users must be registered via OIDC." // { default = true; };
+        enableRegistration = lib.mkEnableOption "self-service user registration (when disabled, accounts are provisioned only via OIDC or state)" // { default = true; };
         sentryDsn = lib.mkOption {
           description = ''
             Override the Sentry DSN used when `reportErrors` is true.
@@ -537,13 +536,12 @@ in {
 
         schedulerScoringPolicy = lib.mkOption {
           description = ''
-            Scheduler scoring policy used to rank queued jobs against a
+            Scheduler scoring policy for ranking queued jobs against a
             requesting worker. `simple` weighs path availability, NAR size,
-            dependency count, wait-time anti-starvation, builtin
-            de-prioritization and fetch-worker reservation. `resource-aware`
-            adds RAM/OOM-fit, CPU affinity, preferLocalBuild affinity and
-            per-org fair-share, and is the default. Unknown values fall back to
-            `resource-aware`.
+            dependency count, anti-starvation, builtin de-prioritization and
+            fetch-worker reservation; `resource-aware` (the default) also adds
+            RAM/OOM-fit, CPU affinity, preferLocalBuild affinity and per-org
+            fair-share.
           '';
           type = lib.types.enum [ "simple" "resource-aware" ];
           default = "resource-aware";
