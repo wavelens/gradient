@@ -71,13 +71,13 @@ chunked requests (see below); no single request exceeds the cap.
 
 ### Backend endpoints
 
-- `POST /api/v1/caches/{cache}/nars` — single-shot multipart form with a
+- `POST /api/v1/caches/{cache}/nars` - single-shot multipart form with a
   `narinfo` JSON part and a `nar` binary part. Suitable for NARs under the
   reverse proxy's 100 MiB request limit.
-- `PUT /api/v1/caches/{cache}/nars/{hash}/chunk?offset=N` — append one NAR
+- `PUT /api/v1/caches/{cache}/nars/{hash}/chunk?offset=N` - append one NAR
   slice to a server-side staging file. The CLI uses this to upload larger NARs
   in 32 MiB chunks so no single request exceeds the proxy limit.
-- `POST /api/v1/caches/{cache}/nars/{hash}/finalize` — validate the fully
+- `POST /api/v1/caches/{cache}/nars/{hash}/finalize` - validate the fully
   staged NAR against its narinfo and ingest it.
 
 The CLI automatically chunks; you do not call these endpoints by hand.

@@ -8,7 +8,7 @@
 //! bounds a 1-minute burst, the other a 1-hour sustained rate. A log chunk is
 //! forwarded only if BOTH buckets admit it; once either is exhausted the
 //! limiter trips permanently for that build and forwarding stops. The build
-//! itself keeps running — only the log stream is capped.
+//! itself keeps running - only the log stream is capped.
 
 /// Per-build byte budgets for the two windows.
 #[derive(Debug, Clone, Copy)]

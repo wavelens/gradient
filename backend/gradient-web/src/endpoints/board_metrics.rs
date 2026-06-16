@@ -339,6 +339,7 @@ pub struct BoardHealth {
     pub http: Vec<HttpRouteStat>,
     pub rollup_lag_seconds: Option<f64>,
     pub latest_rollup_bucket: Option<String>,
+    pub draining: bool,
 }
 
 pub async fn get_board_health(
@@ -372,5 +373,6 @@ pub async fn get_board_health(
         http: http_snapshot(),
         rollup_lag_seconds,
         latest_rollup_bucket: latest.map(|t| t.and_utc().to_rfc3339()),
+        draining: scheduler.draining.load(std::sync::atomic::Ordering::Relaxed),
     }))
 }

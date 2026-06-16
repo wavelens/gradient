@@ -58,7 +58,7 @@ pub async fn ingest_nar<C: ConnectionTrait>(
     targets: SignTargets,
 ) -> anyhow::Result<IngestOutcome> {
     let (hash, package) = parse_store_hash(input.store_path)?;
-    // NAR written first; DB failure leaves an unreferenced blob — GC reclaims it.
+    // NAR written first; DB failure leaves an unreferenced blob - GC reclaims it.
     nar_storage.put(hash, nar_bytes).await?;
     upsert_and_sign(db, hash, package, input, targets).await
 }

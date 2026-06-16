@@ -24,7 +24,7 @@ pub(crate) trait WalkNode: Sized {
     /// Whether this node is a derivation.
     fn is_derivation(&self) -> Result<bool>;
     /// Whether this node is an opaque typed attrset (e.g. a NixOS option) that
-    /// is not a derivation — `*` traversal must not descend into it.
+    /// is not a derivation - `*` traversal must not descend into it.
     fn is_opaque(&self) -> Result<bool>;
 }
 
@@ -185,7 +185,7 @@ pub(crate) fn discover_patterns<N: WalkNode>(root: &N, wildcards: &[String]) -> 
 
 /// Split `includes` into disjoint sub-patterns for memory-bounded, parallel
 /// discovery: descend each pattern's literal prefix, then expand its **first**
-/// wildcard into one concrete shard per matched child — mirroring [`walk`]'s
+/// wildcard into one concrete shard per matched child - mirroring [`walk`]'s
 /// `*`/`#`/opaque/recover-one-level branch logic so the union of `discover` over
 /// the shards equals `discover` over the original pattern. Forcing past the first
 /// wildcard is left to each shard's worker, so a `system`-level wildcard yields

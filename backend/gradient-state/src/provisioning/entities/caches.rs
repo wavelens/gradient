@@ -407,7 +407,7 @@ impl<'a> StateApplicator<'a> {
             declared_members.insert(user_id);
         }
 
-        // (c) Drift reconciliation — remove managed roles not in declared set
+        // (c) Drift reconciliation - remove managed roles not in declared set
         let managed_roles = ECacheRole::find()
             .filter(CCacheRole::Cache.eq(cache_id))
             .filter(CCacheRole::Managed.eq(true))

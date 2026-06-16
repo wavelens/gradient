@@ -101,7 +101,7 @@ pub struct S3Config {
     pub secret_access_key_file: Option<String>,
     pub prefix: String,
     /// Use virtual-hosted-style addressing when a custom endpoint is set.
-    /// `false` (default) requests path-style URLs — MinIO/Garage/most
+    /// `false` (default) requests path-style URLs - MinIO/Garage/most
     /// self-hosted backends require this. No effect on AWS direct.
     pub virtual_hosted_style: bool,
 }

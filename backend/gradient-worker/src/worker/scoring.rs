@@ -28,8 +28,8 @@ use crate::proto::scorer::JobScorer;
 ///
 /// After the scores are sent, a `RequestJob` is emitted for each kind in
 /// `request_after` (capacity-gated by the caller). Scoring a fresh offer is what
-/// clears the server's rescore gate, so requesting here — rather than waiting for
-/// the next 10s heartbeat — lets a serial dependency chain advance at round-trip
+/// clears the server's rescore gate, so requesting here - rather than waiting for
+/// the next 10s heartbeat - lets a serial dependency chain advance at round-trip
 /// speed instead of one level per heartbeat.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn spawn_scoring_task(

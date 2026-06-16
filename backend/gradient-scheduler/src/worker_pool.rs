@@ -294,7 +294,7 @@ impl WorkerPool {
     }
 
     /// Remove a finished job from the worker's in-flight set. Returns `true` if
-    /// the worker now has no assigned jobs (went idle) — the caller kicks the
+    /// the worker now has no assigned jobs (went idle) - the caller kicks the
     /// dispatch loop only then, since feeding a still-busy worker can wait for
     /// the next tick.
     pub fn release_job(&mut self, worker_id: &str, job_id: &str) -> bool {
@@ -312,7 +312,7 @@ impl WorkerPool {
         self.workers.len()
     }
 
-    /// `(total_workers, idle_workers)` — connected workers and those with no
+    /// `(total_workers, idle_workers)` - connected workers and those with no
     /// assigned jobs, fed into the windowed instance snapshot.
     pub fn worker_counts(&self) -> (u32, u32) {
         let total = self.workers.len() as u32;
@@ -369,7 +369,7 @@ pub struct WorkerInfo {
     /// authorized for all peers; this should not happen in normal operation
     /// because workers must register with at least one org.
     pub authorized_peers: Option<HashSet<OrganizationId>>,
-    /// Internal sampling fields (skipped in API output — surfaced via the
+    /// Internal sampling fields (skipped in API output - surfaced via the
     /// access-controlled Job Board APIs, not the existing workers endpoint).
     #[serde(skip)]
     pub organization: Option<OrganizationId>,

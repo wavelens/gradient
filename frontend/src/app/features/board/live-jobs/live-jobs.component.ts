@@ -49,10 +49,10 @@ type StatusFilter = 'all' | 'pending' | 'dispatched';
           </select>
         </label>
         <label>Score min
-          <input type="number" step="0.1" [ngModel]="scoreMin()" (ngModelChange)="scoreMin.set($event)" placeholder="—" />
+          <input type="number" step="0.1" [ngModel]="scoreMin()" (ngModelChange)="scoreMin.set($event)" placeholder="-" />
         </label>
         <label>Score max
-          <input type="number" step="0.1" [ngModel]="scoreMax()" (ngModelChange)="scoreMax.set($event)" placeholder="—" />
+          <input type="number" step="0.1" [ngModel]="scoreMax()" (ngModelChange)="scoreMax.set($event)" placeholder="-" />
         </label>
       </div>
 
@@ -65,7 +65,7 @@ type StatusFilter = 'all' | 'pending' | 'dispatched';
             <tr [class.live]="isLive(j)" [class.clickable]="canInspect(j)" (click)="inspect(j)">
               <td>{{ j.kind === 1 ? 'build' : 'eval' }}</td>
               <td class="mono">{{ j.worker_id }}</td>
-              <td class="mono">{{ j.pname ?? '—' }}</td>
+              <td class="mono">{{ j.pname ?? '-' }}</td>
               <td>{{ j.score | number: '1.1-1' }}</td>
               <td>{{ j.dispatched_at | date: 'HH:mm:ss' }}</td>
               <td>{{ canInspect(j) ? '›' : '' }}</td>
@@ -89,7 +89,7 @@ type StatusFilter = 'all' | 'pending' | 'dispatched';
             <tr class="clickable" [routerLink]="['/board/jobs', p.evaluation_id]">
               <td>{{ p.kind === 1 ? 'build' : 'eval' }}</td>
               <td class="mono">{{ p.evaluation_id.slice(0, 8) }}</td>
-              <td class="mono">{{ p.pname ?? '—' }}</td>
+              <td class="mono">{{ p.pname ?? '-' }}</td>
               <td>{{ p.dependency_count }}</td>
               <td>{{ p.queued_at | date: 'HH:mm:ss' }}</td>
             </tr>

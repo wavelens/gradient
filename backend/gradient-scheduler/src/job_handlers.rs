@@ -64,7 +64,7 @@ impl Scheduler {
 
     /// Wake `build_dispatch_loop` now instead of waiting for its 5s tick. Called
     /// when a job completes and leaves its worker idle, so the dependents it just
-    /// unblocked are enqueued and offered immediately — collapsing per-level
+    /// unblocked are enqueued and offered immediately - collapsing per-level
     /// latency on serial chains without kicking while the worker is still busy.
     pub(crate) fn kick_dispatch(&self) {
         self.dispatch_kick.notify_one();

@@ -69,7 +69,7 @@ evaluation:  Queued → Fetching → EvaluatingFlake → EvaluatingDerivation �
 
 `Substituted` is distinct from `Completed`: it means the derivation was already in the local Nix store at evaluation time and never ran on a builder.
 
-Builds promote `Created → Queued` incrementally (#392): as soon as a derivation's full set of direct dependency edges is in the DB — which may happen mid-walk — its build is queued, and the dispatcher (which gates on dependencies, not evaluation status) may start it while later derivations still evaluate. The evaluation row stays in `EvaluatingDerivation` until the walk finishes, then moves to `Building`.
+Builds promote `Created → Queued` incrementally (#392): as soon as a derivation's full set of direct dependency edges is in the DB - which may happen mid-walk - its build is queued, and the dispatcher (which gates on dependencies, not evaluation status) may start it while later derivations still evaluate. The evaluation row stays in `EvaluatingDerivation` until the walk finishes, then moves to `Building`.
 
 ---
 
@@ -191,8 +191,8 @@ active task per kind exists; a concurrent `POST` collides on the index
 and the endpoint returns `409 Conflict`.
 
 `POST /admin/maintenance/deep-gc` inserts a `pending` row and spawns the
-sweep via `Shutdown::spawn`. The sweep runs three passes — NAR, blob,
-log — each bidirectionally reconciling its storage backend against the
+sweep via `Shutdown::spawn`. The sweep runs three passes - NAR, blob,
+log - each bidirectionally reconciling its storage backend against the
 DB:
 
 1. **NAR pass** reuses `cleanup_orphaned_cache_files`: removes

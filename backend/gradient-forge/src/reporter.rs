@@ -815,7 +815,7 @@ impl CiReporter for GitlabReporter {
         // GitLab's MR JSON does not surface the fork's clone URL directly; the
         // `synchronize`-style PR webhook does (via `object_attributes.source`),
         // but the GET endpoint omits it. For the comment-driven path we leave
-        // `head_clone_url` unset for forks — the existing fan-out keeps using
+        // `head_clone_url` unset for forks - the existing fan-out keeps using
         // `project.repository` for the worker fetch. Same-project MRs (the
         // common case) are unaffected.
         Ok(Some(PullRequestSnapshot {

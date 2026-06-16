@@ -23,6 +23,9 @@
 //!   so the build outputs would have nowhere to land.
 //! - `CacheStorageFull` - every writable cache for the organisation is within
 //!   the headroom threshold of its (or the instance-wide) max-storage limit.
+//! - `Draining` - the instance is draining (superuser action): all in-flight
+//!   evaluations are parked so the server can be stopped safely. Cleared on the
+//!   next startup or when draining is disabled.
 
 use serde::{Deserialize, Serialize};
 
@@ -60,6 +63,9 @@ pub enum WaitingReason {
     /// its configured `max_storage_gb` (or the instance-wide limit), so build
     /// outputs would have nowhere to land.
     CacheStorageFull,
+    /// The instance is draining: scheduling is paused and this evaluation is
+    /// parked until draining is disabled or the server restarts.
+    Draining,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -160,6 +166,14 @@ mod tests {
         let r = WaitingReason::CacheStorageFull;
         let v = r.to_json();
         assert_eq!(v["kind"], "cache_storage_full");
+        assert_eq!(WaitingReason::from_json(&v).unwrap(), r);
+    }
+
+    #[test]
+    fn draining_round_trip() {
+        let r = WaitingReason::Draining;
+        let v = r.to_json();
+        assert_eq!(v["kind"], "draining");
         assert_eq!(WaitingReason::from_json(&v).unwrap(), r);
     }
 

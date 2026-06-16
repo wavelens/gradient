@@ -70,7 +70,7 @@ broken logins:
 - `services.gradient.useTls` (default `true`) controls how Gradient itself
   behaves: it emits `https://` URLs (the OIDC redirect URL, `GRADIENT_SERVE_URL`)
   and marks session cookies `Secure`. Set it to `false` **only** for a genuinely
-  plaintext-HTTP deployment — turning it off so that nginx stops managing
+  plaintext-HTTP deployment - turning it off so that nginx stops managing
   certificates will also stop your browser from sending the secure session
   cookie, breaking login.
 - `services.gradient.reverseProxy.nginx.manageTls` (default `true`) controls

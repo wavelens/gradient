@@ -707,21 +707,34 @@ pub async fn get_expensive_by_resource(
 pub async fn board_live_ws(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Extension(scheduler): Extension<Arc<Scheduler>>,
     ws: WebSocketUpgrade,
 ) -> Response {
     let scope = MetricsScope::resolve(&state.web_db, &maybe_user)
         .await
         .unwrap_or(MetricsScope::Orgs(vec![]));
 
+    // Subscribe before snapshotting so no event is missed between the two.
     let rx = state.board_events.subscribe();
-    ws.on_upgrade(move |socket| board_live_loop(socket, rx, scope))
+    let (workers, pending, active) = scheduler.metrics_snapshot().await;
+    let initial = BoardEvent::QueueDepth { workers, pending, active };
+    ws.on_upgrade(move |socket| board_live_loop(socket, rx, scope, initial))
 }
 
 async fn board_live_loop(
     mut socket: WebSocket,
     mut rx: tokio::sync::broadcast::Receiver<BoardEvent>,
     scope: MetricsScope,
+    initial: BoardEvent,
 ) {
+    // Send a queue-depth snapshot immediately so freshly-opened boards show
+    // live counts without waiting for the next periodic broadcast.
+    if let Some(text) = mask_event(&initial, &scope)
+        && socket.send(Message::Text(text.into())).await.is_err()
+    {
+        return;
+    }
+
     loop {
         match rx.recv().await {
             Ok(ev) => {

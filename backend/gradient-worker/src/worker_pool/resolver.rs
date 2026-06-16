@@ -235,7 +235,7 @@ impl WorkerPoolResolver {
 
     /// Discover one shard on a pooled worker, retrying once on a fresh worker
     /// if the subprocess crashes (a transient stack/OOM death). A shard that
-    /// crashes twice propagates the error, failing the whole listing — matching
+    /// crashes twice propagates the error, failing the whole listing - matching
     /// the single-worker behaviour this replaces.
     async fn list_shard(
         &self,

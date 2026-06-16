@@ -275,7 +275,8 @@ impl Scheduler {
             .into_iter()
             .map(|w| (w.architectures, w.system_features))
             .collect();
-        build::reconcile_waiting_state(&self.state, &caps, eval_capable, fetch_capable).await
+        let draining = self.draining.load(std::sync::atomic::Ordering::Relaxed);
+        build::reconcile_waiting_state(&self.state, &caps, eval_capable, fetch_capable, draining).await
     }
 
     /// Snapshot of every connected worker for the Job Board (includes the

@@ -16,6 +16,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use crate::dispatch_mode::{arch_available, decide_dispatch_mode, BuildDispatchMode};
@@ -131,6 +132,10 @@ async fn eval_dispatch_loop(scheduler: Arc<Scheduler>) {
 }
 
 pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Result<()> {
+    if scheduler.draining.load(Ordering::Relaxed) {
+        return Ok(());
+    }
+
     let state = &scheduler.state;
 
     let evals = EEvaluation::find()
@@ -705,6 +710,10 @@ impl BuildDispatchMaps {
 }
 
 pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Result<()> {
+    if scheduler.draining.load(Ordering::Relaxed) {
+        return Ok(());
+    }
+
     let state = &scheduler.state;
 
     // Ready builds: status = Queued AND every dependency build is Completed or Substituted.

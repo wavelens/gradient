@@ -6,7 +6,7 @@ Caches mirror the organization permission model: each cache carries its own
 set of per-user roles with bitmask-encoded capabilities. Three immutable
 built-in roles (Admin, Write, View) cover the common cases; members with the
 `manageCacheRoles` capability can add custom roles scoped to a single cache.
-Access to a cache route is resolved the same way as org access—the caller's
+Access to a cache route is resolved the same way as org access-the caller's
 role bitmask is intersected with the required capability and a 403 is returned
 if the bit is absent.
 

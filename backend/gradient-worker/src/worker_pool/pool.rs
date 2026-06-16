@@ -48,6 +48,9 @@ impl EvalWorker {
         let mut command = Command::new(&exe);
         command.arg("--eval-worker");
         command.env("NIX_CACHE_HOME", eval_cache_dir);
+        for &(k, v) in super::eval_stats::eval_worker_stats_env(super::eval_stats::metrics_enabled()) {
+            command.env(k, v);
+        }
 
         // Match the Nix CLI: bump the subprocess's stack to 64 MiB so libnix's
         // libstdc++ std::regex DFS executor (used by `builtins.match` /
@@ -331,7 +334,7 @@ impl std::fmt::Debug for EvalWorker {
 
 /// Eval-pool size that keeps `size * max_eval_rss` within `ram_budget` (the
 /// no-OOM invariant), capped at the configured `fork_workers` and floored at 1
-/// so even a tiny host still evaluates — one shard at a time, slower, but it
+/// so even a tiny host still evaluates - one shard at a time, slower, but it
 /// completes. Lowering `max_eval_rss` therefore trades parallelism for a smaller
 /// footprint, never the ability to finish.
 pub fn budgeted_pool_size(fork_workers: usize, max_eval_rss: u64, ram_budget: u64) -> usize {

@@ -23,7 +23,7 @@
 //! load_cache with Require(ManageCacheSubscriptions):
 //!   7. SELECT cache (by name)
 //!   8. SELECT cache_user (membership)
-//!   9. SELECT cache_role (bitmask)  — only when member exists
+//!   9. SELECT cache_role (bitmask)  - only when member exists
 
 use gradient_entity::{cache, cache_role, cache_user, ids::*, organization_cache, organization_user, role};
 use gradient_db::permissions::{admin_mask, cache_admin_mask, cache_view_mask, mask_from};

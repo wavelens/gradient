@@ -48,7 +48,7 @@ Then log in:
 gradient login
 ```
 
-By default this opens your browser to authorize the CLI session, which is what you want for interactive use and works the same when the Gradient server is configured for OIDC-only login. Pass `--no-browser` to print the URL instead — useful when running over SSH on a headless machine, where you can open the URL on your laptop. The browser flow asks you to confirm a short code that the CLI also prints, then issues a 30-day session token.
+By default this opens your browser to authorize the CLI session, which is what you want for interactive use and works the same when the Gradient server is configured for OIDC-only login. Pass `--no-browser` to print the URL instead - useful when running over SSH on a headless machine, where you can open the URL on your laptop. The browser flow asks you to confirm a short code that the CLI also prints, then issues a 30-day session token.
 
 For unattended scripts you can still pass credentials directly:
 
@@ -62,7 +62,7 @@ Either way, the resulting token is stored in the local configuration file (`~/.c
 
 The CLI trusts the OS certificate store in addition to the bundled Mozilla
 CA roots, so self-hosted instances served behind a private CA work the same
-way `curl` does — install the CA in your system trust store (for example
+way `curl` does - install the CA in your system trust store (for example
 `update-ca-certificates` on Debian/Ubuntu, `trust anchor` on Fedora, or by
 adding it to `/etc/ssl/certs` on NixOS via `security.pki.certificateFiles`)
 and `gradient login` will pick it up. A `transport error` from `gradient

@@ -90,11 +90,11 @@ describe('BoardLiveJobsComponent - dispatched pname column', () => {
     expect(text).toContain('hello');
   });
 
-  it('renders — when pname is null', () => {
+  it('renders - when pname is null', () => {
     const fixture = setupWithDispatched([{ ...DISPATCHED, pname: null }]);
     fixture.detectChanges();
     const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
-    expect(text).toContain('—');
+    expect(text).toContain('-');
   });
 });
 

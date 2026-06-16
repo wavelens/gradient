@@ -443,7 +443,7 @@ Tests for best-effort per-build resource capture. The worker records wall-clock
 `build_time_ms` for every build. When `--build-metrics` is enabled, CPU time
 comes from the daemon's build result (`cpu_user + cpu_system`, read from the
 cgroup by nix before it tears the cgroup down), while peak RAM and disk I/O are
-sampled live from the build's cgroup — located via nix's
+sampled live from the build's cgroup - located via nix's
 `<state-dir>/cgroups/<uid>` map (newest entry written after the build started,
 since nix destroys the cgroup at build end). Stale map entries and idle/ambiguous
 cases degrade to `None`.
@@ -1779,5 +1779,5 @@ a committed fixture flake):
 - `resolve` returns `hello`'s `.drv`; a `throw`-ing `boom` attribute isolates as a
   per-item error without aborting the batch (#139).
 - The lock-only `fingerprint` op returns the flake's eval-cache key, and the
-  on-disk cache is named exactly `eval-cache-v6/<fingerprint>.sqlite` — the
+  on-disk cache is named exactly `eval-cache-v6/<fingerprint>.sqlite` - the
   path-agreement the fleet eval-cache (#386 L3) relies on to stage/pull blobs.

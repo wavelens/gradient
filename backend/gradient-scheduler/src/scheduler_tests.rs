@@ -78,7 +78,7 @@ async fn test_enqueue_and_get_candidates() {
 /// Regression (#359): an enqueue that happens while a session is NOT parked on
 /// the notification must still be observed on its next check. The `watch`
 /// generation is level-triggered, unlike the old `Notify::notify_waiters()`
-/// which dropped any wakeup fired while no task was awaiting — starving deep
+/// which dropped any wakeup fired while no task was awaiting - starving deep
 /// build chains of `JobOffer`s under load.
 #[tokio::test]
 async fn job_notify_bump_is_not_lost_when_not_awaiting() {
@@ -99,7 +99,7 @@ async fn job_notify_bump_is_not_lost_when_not_awaiting() {
 }
 
 /// Reactive dispatch (#359): a kick fired while the dispatch loop is mid-pass
-/// (not awaiting) is retained — `notify_one` stores one permit — and serviced on
+/// (not awaiting) is retained - `notify_one` stores one permit - and serviced on
 /// the loop's next iteration, so a serial dependency chain advances at
 /// completion speed instead of one level per 5s tick.
 #[tokio::test]

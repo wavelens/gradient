@@ -61,7 +61,6 @@ impl ActionConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uuid::Uuid;
 
     #[test]
     fn send_mail_round_trip() {
@@ -90,7 +89,7 @@ mod tests {
 
     #[test]
     fn forge_status_report_carries_integration_id() {
-        let id = IntegrationId::from(Uuid::new_v4());
+        let id = IntegrationId::now_v7();
         let cfg = ActionConfig::ForgeStatusReport { integration_id: id };
         let json = serde_json::to_string(&cfg).unwrap();
         let back: ActionConfig = serde_json::from_str(&json).unwrap();

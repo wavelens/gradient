@@ -52,7 +52,7 @@ fn frame(ev: &BoardEvent) -> Option<String> {
     serde_json::to_string(ev).ok()
 }
 
-/// `GET /projects/{organization}/{project}/live` — evaluation and entry-point
+/// `GET /projects/{organization}/{project}/live` - evaluation and entry-point
 /// build status changes for one project.
 pub async fn project_live_ws(
     State(state): State<Arc<ServerState>>,
@@ -113,7 +113,7 @@ fn project_frame(ev: &BoardEvent, project_id: Uuid, known: &mut HashSet<Uuid>) -
     }
 }
 
-/// `GET /evals/{evaluation}/live` — status changes for one evaluation and its
+/// `GET /evals/{evaluation}/live` - status changes for one evaluation and its
 /// builds.
 pub async fn evaluation_live_ws(
     State(state): State<Arc<ServerState>>,
@@ -128,7 +128,7 @@ pub async fn evaluation_live_ws(
     Ok(ws.on_upgrade(move |socket| live_stream(socket, rx, move |ev| eval_frame(ev, eval_id))))
 }
 
-/// `GET /builds/{build}/live` — build status changes for the build's evaluation,
+/// `GET /builds/{build}/live` - build status changes for the build's evaluation,
 /// which covers every node in its dependency graph.
 pub async fn build_live_ws(
     State(state): State<Arc<ServerState>>,
@@ -156,7 +156,7 @@ fn eval_frame(ev: &BoardEvent, eval_id: Uuid) -> Option<String> {
     }
 }
 
-/// `GET /board/cache/live` — content-free pings when cache contents or stats
+/// `GET /board/cache/live` - content-free pings when cache contents or stats
 /// change. Subscribers refetch their own scope-filtered cache view.
 pub async fn cache_live_ws(State(state): State<Arc<ServerState>>, ws: WebSocketUpgrade) -> Response {
     let rx = state.board_events.subscribe();

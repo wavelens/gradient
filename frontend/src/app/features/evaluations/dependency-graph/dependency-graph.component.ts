@@ -401,7 +401,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
       }
     }
 
-    // Update edge paths — every edge uses a smooth bottom→top bezier; hovering a
+    // Update edge paths - every edge uses a smooth bottom→top bezier; hovering a
     // node (highlightNode) makes its incident edges legible on demand.
     for (const edge of this.edgeEls) {
       const child = this.nodeMap.get(edge.source);
