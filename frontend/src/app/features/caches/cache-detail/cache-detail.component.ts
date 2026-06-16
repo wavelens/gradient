@@ -89,15 +89,13 @@ export class CacheDetailComponent implements OnInit {
   sops.secrets."gradient-api-token" = { };
   sops.templates."nix-netrc" = {
     content = ''
-      maschine ${window.location.hostname}
+      machine ${window.location.hostname}
       login gradient
       password \${config.sops.placeholder."gradient-api-token"}
     '';
     owner = "YOUR_USERNAME";
+    path = "/etc/nix/netrc";
   };
-  systemd.tmpfiles.rules = [
-    "L+ /etc/nix/netrc - - - - \${config.sops.templates."nix-netrc".path}"
-  ];
 }`;
   }
 
