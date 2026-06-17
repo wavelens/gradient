@@ -49,6 +49,12 @@ fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
         .append_query_results([vec![user()]])
 }
 
+fn with_org_access(db: MockDatabase) -> MockDatabase {
+    db.append_query_results([vec![gradient_test_support::fixtures::org()]])
+        .append_query_results([vec![membership()]])
+        .append_query_results([vec![write_role_row()]])
+}
+
 fn project_row(id: ProjectId) -> gradient_entity::project::Model {
     gradient_entity::project::Model {
         id,
@@ -111,7 +117,7 @@ fn eval_row(project: ProjectId, commit: CommitId) -> gradient_entity::evaluation
 }
 
 fn source_url() -> String {
-    format!("/api/v1/build-requests/source?organization={}", org_id())
+    "/api/v1/build-requests/source?organization=test-org".to_string()
 }
 
 fn run<F: std::future::Future>(fut: F) -> F::Output {
@@ -134,10 +140,10 @@ fn source_upload_creates_queued_eval() {
         let eval_model = eval_row(project_id, commit_model.id);
         let cp_row = cached_path_row("00000000000000000000000000000000");
 
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            // has_permission → membership + role
-            .append_query_results([vec![membership()]])
-            .append_query_results([vec![write_role_row()]])
+        let db = with_org_access(with_auth(
+            MockDatabase::new(DatabaseBackend::Postgres),
+            session_id,
+        ))
             // ensure_cached_path → SELECT (None) then INSERT
             .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
             .append_query_results([vec![cp_row]])
@@ -199,9 +205,10 @@ fn source_upload_missing_nar_is_400() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![membership()]])
-            .append_query_results([vec![write_role_row()]]);
+        let db = with_org_access(with_auth(
+            MockDatabase::new(DatabaseBackend::Postgres),
+            session_id,
+        ));
 
         let server = make_test_server(db.into_connection());
 

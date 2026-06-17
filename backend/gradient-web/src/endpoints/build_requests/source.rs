@@ -10,7 +10,7 @@
 //! CLI uses this to skip the per-file blob manifest.
 
 use super::dispatch::{DispatchResponse, finalize_build_request};
-use crate::access::has_permission;
+use crate::access::{Caller, OrgAccess, load_org};
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
@@ -20,14 +20,13 @@ use axum::Json;
 use axum::extract::{Multipart, Query, State};
 use gradient_core::ServerState;
 use gradient_storage::source_nar::source_nar_from_bytes;
-use gradient_types::ids::OrganizationId;
 use gradient_types::{BaseResponse, MUser};
 use serde::Deserialize;
 use std::sync::Arc;
 
 #[derive(Deserialize)]
 pub struct SourceQuery {
-    pub organization: OrganizationId,
+    pub organization: String,
 }
 
 pub async fn post_source(
@@ -37,17 +36,17 @@ pub async fn post_source(
     Query(query): Query<SourceQuery>,
     mut multipart: Multipart,
 ) -> WebResult<Json<BaseResponse<DispatchResponse>>> {
-    if !has_permission(
-        &state,
-        user.id,
-        query.organization,
-        Permission::TriggerEvaluation,
+    let org = load_org(
+        &state.0,
+        Caller::User(&user),
         api_key.as_ref(),
+        query.organization,
+        OrgAccess::Require {
+            permission: Permission::TriggerEvaluation,
+            reject_managed: false,
+        },
     )
-    .await?
-    {
-        return Err(WebError::not_found("Organization"));
-    }
+    .await?;
 
     let mut nar_bytes: Option<Vec<u8>> = None;
     let mut target: Option<String> = None;
@@ -82,7 +81,7 @@ pub async fn post_source(
         .map_err(|e| WebError::internal(format!("Failed to read source NAR: {}", e)))?;
 
     let response =
-        finalize_build_request(&state, query.organization, &user, &nar, target, system).await?;
+        finalize_build_request(&state, org.id, &user, &nar, target, system).await?;
 
     Ok(ok_json(response))
 }
