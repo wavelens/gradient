@@ -142,6 +142,22 @@ const GITEA_PUSH_BRANCH_BODY: &str = r#"{
     }
 }"#;
 
+// Gitea's "Test Delivery" button (and real branch deletions) send a push with
+// an all-zero `after` SHA; see issue #428.
+const GITEA_TEST_WEBHOOK_BODY: &str = r#"{
+    "ref": "refs/heads/master",
+    "before": "0000000000000000000000000000000000000000",
+    "after": "0000000000000000000000000000000000000000",
+    "commits": [
+        { "id": "0000000000000000000000000000000000000000", "message": "This is a fake commit", "verification": null, "added": null, "removed": null, "modified": null }
+    ],
+    "head_commit": { "id": "0000000000000000000000000000000000000000", "message": "This is a fake commit", "verification": null },
+    "repository": {
+        "clone_url": "https://gitea.example.com/test-org/repo",
+        "ssh_url": "git@gitea.example.com:test-org/repo.git"
+    }
+}"#;
+
 const GITHUB_PUSH_BODY: &str = r#"{
     "ref": "refs/heads/main",
     "after": "abcdef0123456789abcdef0123456789abcdef01",
@@ -476,6 +492,53 @@ async fn forge_webhook_push_fires_trigger_inner() {
     assert_eq!(queued.len(), 1);
     assert_eq!(queued[0]["project_name"], "test-project");
     assert_eq!(queued[0]["organization"], "test-org");
+    assert!(msg["skipped"].as_array().unwrap().is_empty());
+}
+
+// ── Gitea test webhook / branch deletion (all-zero SHA) → 200 no-op (#428) ────
+
+#[test]
+fn forge_webhook_test_ping_zero_sha_is_ok_noop() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async { forge_webhook_test_ping_zero_sha_is_ok_noop_inner().await });
+}
+
+async fn forge_webhook_test_ping_zero_sha_is_ok_noop_inner() {
+    let plaintext_secret = "test-secret-plaintext";
+    let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!"); // 32 bytes
+    let ciphertext = encrypt_webhook_secret(&crypt_path, plaintext_secret).expect("encrypt");
+
+    // Signature verification needs the org + integration rows; the all-zero push
+    // short-circuits before any trigger/project lookup, so no further rows.
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![org_row("test-org")]])
+        .append_query_results([vec![integration_row(&ciphertext)]])
+        .into_connection();
+
+    let state = make_state(db, Some(crypt_path), None);
+    let router = create_router(state);
+    let server = TestServer::new(router);
+
+    let body = GITEA_TEST_WEBHOOK_BODY.as_bytes();
+    let sig = gitea_signature(plaintext_secret, body);
+
+    let response = server
+        .post("/api/v1/hooks/gitea/test-org/my-hook")
+        .add_header("X-Gitea-Event", "push")
+        .add_header("X-Gitea-Signature", &sig)
+        .bytes(body.into())
+        .await;
+
+    response.assert_status_ok();
+    let json: Value = response.json();
+    assert_eq!(json["error"], false);
+    let msg = &json["message"];
+    assert_eq!(msg["event"], "push");
+    assert_eq!(msg["projects_scanned"], 0);
+    assert!(msg["queued"].as_array().unwrap().is_empty());
     assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
 

@@ -42,7 +42,7 @@ use crate::client_ip::{OptionalPeer, resolve_client_ip};
 use crate::error::{ErrorCode, WebError, WebResult};
 use crate::helpers::ok_json;
 
-use gradient_forge::{ParsedPullRequestEvent, ParsedPushEvent, ParsedReleaseEvent};
+use gradient_forge::{ParsedPullRequestEvent, ParsedPushEvent, ParsedReleaseEvent, PushOutcome};
 use trigger::{
     PushRefKind, handle_github_installation, resolve_github_app_targets,
     trigger_pr_for_integration, trigger_push_for_integration, trigger_release_for_integration,
@@ -100,21 +100,22 @@ pub async fn github_app_webhook(
     debug!(event = %event, "GitHub App webhook received");
 
     let response = match event.as_str() {
-        "push" => {
-            let Some(parsed) = ParsedPushEvent::from_github(&body) else {
-                return Err(WebError::bad_request("malformed webhook payload"));
-            };
-            let urls = parsed.repository_urls.clone();
-            let outcome =
-                dispatch_github_app_push(&state, &scheduler, parsed, &body, client_ip).await;
-            WebhookResponse {
-                event: "push".to_string(),
-                repository_urls: urls,
-                projects_scanned: outcome.projects_scanned,
-                queued: outcome.queued,
-                skipped: outcome.skipped,
+        "push" => match ParsedPushEvent::from_github(&body) {
+            None => return Err(WebError::bad_request("malformed webhook payload")),
+            Some(PushOutcome::Ignored) => WebhookResponse::empty("push"),
+            Some(PushOutcome::Build(parsed)) => {
+                let urls = parsed.repository_urls.clone();
+                let outcome =
+                    dispatch_github_app_push(&state, &scheduler, parsed, &body, client_ip).await;
+                WebhookResponse {
+                    event: "push".to_string(),
+                    repository_urls: urls,
+                    projects_scanned: outcome.projects_scanned,
+                    queued: outcome.queued,
+                    skipped: outcome.skipped,
+                }
             }
-        }
+        },
         "pull_request" => {
             let Some(parsed) = ParsedPullRequestEvent::from_github(&body) else {
                 return Err(WebError::bad_request("malformed webhook payload"));
@@ -439,36 +440,36 @@ pub async fn forge_webhook(
     let event_type = provider.classify_event(raw_event);
 
     let response = match event_type {
-        WebhookEventKind::Push => {
-            let Some(parsed) = provider.parse_push_event(&body) else {
-                return Err(WebError::bad_request("malformed webhook payload"));
-            };
-            let urls = parsed.repository_urls.clone();
-            let ref_name = parsed.ref_name.clone();
-            let is_tag = parsed.is_tag;
-            let ref_kind = if is_tag {
-                PushRefKind::Tag(&ref_name)
-            } else {
-                PushRefKind::Branch(&ref_name)
-            };
-            let outcome = trigger_push_for_integration(
-                &state,
-                &scheduler,
-                integration_id,
-                ref_kind,
-                parsed.commit_hash,
-                parsed.commit_message,
-                parsed.author_name,
-            )
-            .await;
-            WebhookResponse {
-                event: "push".to_string(),
-                repository_urls: urls,
-                projects_scanned: outcome.projects_scanned,
-                queued: outcome.queued,
-                skipped: outcome.skipped,
+        WebhookEventKind::Push => match provider.parse_push_event(&body) {
+            None => return Err(WebError::bad_request("malformed webhook payload")),
+            Some(PushOutcome::Ignored) => WebhookResponse::empty("push"),
+            Some(PushOutcome::Build(parsed)) => {
+                let urls = parsed.repository_urls.clone();
+                let ref_name = parsed.ref_name.clone();
+                let ref_kind = if parsed.is_tag {
+                    PushRefKind::Tag(&ref_name)
+                } else {
+                    PushRefKind::Branch(&ref_name)
+                };
+                let outcome = trigger_push_for_integration(
+                    &state,
+                    &scheduler,
+                    integration_id,
+                    ref_kind,
+                    parsed.commit_hash,
+                    parsed.commit_message,
+                    parsed.author_name,
+                )
+                .await;
+                WebhookResponse {
+                    event: "push".to_string(),
+                    repository_urls: urls,
+                    projects_scanned: outcome.projects_scanned,
+                    queued: outcome.queued,
+                    skipped: outcome.skipped,
+                }
             }
-        }
+        },
         WebhookEventKind::PullRequest => {
             let Some(parsed) = provider.parse_pull_request_event(&body) else {
                 return Err(WebError::bad_request("malformed webhook payload"));

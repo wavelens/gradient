@@ -15,7 +15,7 @@ use crate::github_app::verify_gitea_signature;
 use crate::provider::ForgeProvider;
 use crate::reporter::{CiReporter, GiteaReporter};
 use crate::webhook::{
-    ParsedPullRequestEvent, ParsedPushEvent, ParsedReleaseEvent, WebhookEventKind,
+    ParsedPullRequestEvent, ParsedPushEvent, ParsedReleaseEvent, PushOutcome, WebhookEventKind,
 };
 
 #[derive(Debug)]
@@ -71,7 +71,7 @@ impl ForgeProvider for GiteaProvider {
         }
     }
 
-    fn parse_push_event(&self, body: &[u8]) -> Option<ParsedPushEvent> {
+    fn parse_push_event(&self, body: &[u8]) -> Option<PushOutcome> {
         ParsedPushEvent::from_gitea(body)
     }
 

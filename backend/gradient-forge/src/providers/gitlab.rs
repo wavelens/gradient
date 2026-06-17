@@ -16,7 +16,7 @@ use gradient_types::ForgeType;
 use crate::provider::ForgeProvider;
 use crate::reporter::{CiReporter, GitlabReporter};
 use crate::webhook::{
-    ParsedPullRequestEvent, ParsedPushEvent, ParsedReleaseEvent, WebhookEventKind,
+    ParsedPullRequestEvent, ParsedPushEvent, ParsedReleaseEvent, PushOutcome, WebhookEventKind,
 };
 
 #[derive(Debug)]
@@ -63,7 +63,7 @@ impl ForgeProvider for GitlabProvider {
         }
     }
 
-    fn parse_push_event(&self, body: &[u8]) -> Option<ParsedPushEvent> {
+    fn parse_push_event(&self, body: &[u8]) -> Option<PushOutcome> {
         ParsedPushEvent::from_gitlab(body)
     }
 
