@@ -66,6 +66,13 @@ a banner when draining, and the button click calls `AdminService.setDraining(tru
 - `saturation_is_lenient_for_builtin_and_exempts_evals_and_no_metrics` - at `85%` CPU (between the two thresholds) a `builtin` fetch scores `0` while a real build scores `-1000`; eval jobs and workers reporting no metrics score `0` regardless of saturation.
 - `ram_prediction_exceeding_free_penalizes_and_stacks_with_saturation` - a build whose predicted peak RAM x1.1 exceeds free RAM scores `-1000`, `0` when it fits, and `-2000` when the worker is also saturated.
 
+## Wildcard attr tolerance + fair-share idle gate (#419)
+
+A wildcard (`*`/`#`) legitimately spans attrs that aren't buildable derivations, so a drvPath-resolution failure on a wildcard-matched attr is skipped silently; only an attr the user pinpointed exactly still surfaces the error. The `FairShareRule` penalty now applies only when every worker is busy, so a lone busy org is never penalized below the dispatcher's zero floor into leaving the cluster idle.
+
+- `backend/gradient-worker/src/executor/eval.rs`: `explicit_attr_set_keeps_only_wildcard_free_includes` asserts only wildcard-free, non-exclusion patterns count as explicit (quoted dots collapse to the discovered path form).
+- `backend/gradient-score/src/rules/fair_share.rs`: `idle_capacity_lifts_penalty` asserts a busy org is rationed when `idle_workers == 0` but not penalized when a worker is idle.
+
 ## Bulk evaluation abort + dispatch race
 
 Aborting an evaluation now parks it as `Waiting` with `WaitingReason::Aborting` before touching its builds, then aborts all in-flight builds in a handful of set-based statements instead of one round-trip per build. The dispatcher's queue finder skips `Waiting` evaluations, so it stops handing out the aborting eval's builds; any build that already escaped to a worker is aborted when it reports started.

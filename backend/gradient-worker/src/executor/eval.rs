@@ -41,6 +41,20 @@ fn is_aborted(abort: &mut watch::Receiver<bool>) -> bool {
     *abort.borrow_and_update()
 }
 
+/// The set of attr paths the user requested explicitly: patterns with no
+/// `*`/`#` wildcard segment (and not an exclusion). A drvPath-resolution
+/// failure on one of these is a genuine error; failures on wildcard-expanded
+/// attrs are skipped, since a wildcard spans attrs that aren't derivations.
+fn explicit_attr_set(wildcards: &[String]) -> HashSet<String> {
+    wildcards
+        .iter()
+        .filter_map(|w| {
+            let (exclude, segs) = crate::nix::wildcard_walk::parse_pattern(w);
+            (!exclude && !segs.iter().any(|s| s == "*" || s == "#")).then(|| segs.join("."))
+        })
+        .collect()
+}
+
 /// How many `.drv` files to read+parse concurrently inside a single BFS wave.
 /// Reading a `.drv` is async filesystem IO, so the sequential walk would only
 /// keep one in-flight read at a time and bottleneck on round-trip latency.
@@ -754,14 +768,22 @@ pub async fn evaluate_derivations_with(
         };
     warnings.extend(resolve_warnings);
 
+    // An attr the user pinpointed exactly (no `*`/`#`) must surface a resolution
+    // failure; one that only matched a wildcard is silently skipped - a wildcard
+    // legitimately spans attrs that aren't buildable derivations (#419).
+    let explicit = explicit_attr_set(&job.wildcards);
+
     let mut root_drvs: Vec<(String, String)> = Vec::new();
     let mut errors: Vec<String> = Vec::new();
     for (attr, result) in resolved {
         match result {
             Ok((drv_path, _refs)) => root_drvs.push((attr, drv_path)),
-            Err(e) => {
-                warn!(attr, error = %e, "failed to resolve attr; skipping");
+            Err(e) if explicit.contains(&attr) => {
+                warn!(attr, error = %e, "failed to resolve explicitly requested attr");
                 errors.push(format!("failed to resolve {attr}: {e}"));
+            }
+            Err(e) => {
+                debug!(attr, error = %e, "skipping wildcard attr with no resolvable derivation");
             }
         }
     }
@@ -839,6 +861,22 @@ mod tests {
     fn never_abort() -> watch::Receiver<bool> {
         let (_tx, rx) = watch::channel(false);
         rx
+    }
+
+    #[test]
+    fn explicit_attr_set_keeps_only_wildcard_free_includes() {
+        let set = explicit_attr_set(&[
+            "packages.x86_64-linux.hello".into(),
+            "packages.x86_64-linux.#".into(),
+            "packages.x86_64-linux.*".into(),
+            "!packages.x86_64-linux.broken".into(),
+            "checks.\"py.3\".unit".into(),
+        ]);
+
+        assert!(set.contains("packages.x86_64-linux.hello"));
+        assert!(set.contains("checks.py.3.unit"), "quoted dots collapse to the discovered path form");
+        assert!(!set.contains("packages.x86_64-linux.broken"), "exclusions are not explicit requests");
+        assert_eq!(set.len(), 2, "wildcard patterns contribute nothing");
     }
 
     fn setup_from_fixture(
