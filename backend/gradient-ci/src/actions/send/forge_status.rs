@@ -59,6 +59,35 @@ pub(crate) async fn execute_forge_status_report(
     })
 }
 
+/// Non-mutating "Test" probe for the forge-integration actions
+/// (`ForgeStatusReport`, `OpenPr`): builds the reporter from the action's
+/// integration and confirms it can reach the project's repository. The regular
+/// synthetic test-fire posts a status/PR against placeholder owner/repo/sha,
+/// which every forge rejects, so connectivity-verify is the only test these
+/// actions can meaningfully pass.
+pub async fn verify_forge_action(
+    ctx: &CiContext,
+    action: &gradient_types::MProjectAction,
+    repository: &str,
+) -> Result<()> {
+    let integration_id = match serde_json::from_value::<ActionConfig>(action.config.clone())
+        .context("decoding action config")?
+    {
+        ActionConfig::ForgeStatusReport { integration_id }
+        | ActionConfig::OpenPr { integration_id, .. } => integration_id,
+        _ => anyhow::bail!("action does not use a forge integration"),
+    };
+
+    let (owner, repo) = crate::parse_owner_repo(repository)
+        .ok_or_else(|| anyhow!("could not parse owner/repo from {}", repository))?;
+    let reporter = build_reporter_for_integration(ctx, integration_id).await?;
+
+    reporter
+        .verify(&owner, &repo)
+        .await
+        .context("forge connectivity check failed")
+}
+
 /// Find the project's first active `ForgeStatusReport` action and build a
 /// `CiReporter` from its integration. Used by the PR-approval trust probe to
 /// reuse the same forge credentials Actions already use for status reporting.

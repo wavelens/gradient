@@ -33,6 +33,15 @@ matcher keyed off a literal `github.com` substring and an org-name equals login
 fallback, so a `github:`-form project (and any org not named after the account)
 left `github_installation_id` unset.
 
+## Forge action "Test" button connectivity probe
+
+`backend/gradient-forge/src/reporter.rs`: `verify_reads_repo_without_reporting`
+asserts `CiReporter::verify` performs a non-mutating repo read (the default
+branch) and never calls `report`, and propagates a forge error when the repo is
+unreachable. This backs the Actions Test button, which now probes connectivity
+for `forge_status_report` / `open_pr` instead of posting a status against a
+placeholder commit (which the forge always rejects).
+
 ## Minor frontend issues (#401)
 
 `backend/gradient-web/src/endpoints/projects/auto_attach.rs`: `host_parsing_covers_url_shapes`,

@@ -537,16 +537,25 @@ pub async fn test_action(
         .or_not_found("Action")?;
 
     let action_type = ActionType::from_i16(action.action_type).unwrap_or(ActionType::SendMail);
-    let event = match action_type {
-        ActionType::ForgeStatusReport | ActionType::OpenPr => "build.completed".to_string(),
-        _ => action
-            .events
-            .as_array()
-            .and_then(|a| a.first())
-            .and_then(|v| v.as_str())
-            .unwrap_or("evaluation.completed")
-            .to_string(),
-    };
+
+    // Forge-integration actions can't be test-fired against a synthetic commit
+    // (the forge rejects the placeholder owner/repo/sha); probe the
+    // integration's connectivity to the project repo instead.
+    if matches!(action_type, ActionType::ForgeStatusReport | ActionType::OpenPr) {
+        gradient_ci::actions::verify_forge_action(&state.ci(), &action, &proj.repository)
+            .await
+            .map_err(|e| WebError::internal(format!("test fire failed: {}", e)))?;
+
+        return Ok(ok_json(serde_json::Value::Null));
+    }
+
+    let event = action
+        .events
+        .as_array()
+        .and_then(|a| a.first())
+        .and_then(|v| v.as_str())
+        .unwrap_or("evaluation.completed")
+        .to_string();
 
     let now = chrono::Utc::now();
     let payload = serde_json::json!({
@@ -555,11 +564,7 @@ pub async fn test_action(
         "org": organization,
         "project": project,
         "id": "00000000-0000-0000-0000-000000000000",
-        "status": match action_type {
-            ActionType::ForgeStatusReport => "success",
-            ActionType::OpenPr => "opened",
-            _ => "ok",
-        },
+        "status": "ok",
         "time": now.to_rfc3339(),
         "link": format!("https://gradient.example/projects/{}/{}", organization, project),
         "owner": "gradient-test",

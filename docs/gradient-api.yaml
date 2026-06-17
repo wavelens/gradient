@@ -2144,7 +2144,11 @@ paths:
       tags: [actions]
       summary: Fire action now (synthetic test)
       operationId: testProjectAction
-      description: Fires the action immediately with a synthetic test event, bypassing event matching.
+      description: >-
+        Fires the action immediately with a synthetic test event, bypassing event matching.
+        Forge-integration actions (`forge_status_report`, `open_pr`) instead run a non-mutating
+        connectivity check against the project's repository, since a synthetic status/PR posted
+        against a placeholder commit is always rejected by the forge.
       responses:
         '200':
           description: Action fired

@@ -35,3 +35,6 @@ sha2        = { workspace = true }
 subtle      = { workspace = true }
 tracing     = { workspace = true }
 url         = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }

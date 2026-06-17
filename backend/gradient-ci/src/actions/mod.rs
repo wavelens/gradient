@@ -27,7 +27,7 @@ pub use crypto::{
 pub use executor::execute_action;
 pub use matchers::{FORGE_STATUS_EVENTS, forge_status_for_event, matches_event};
 pub use payload::forge_status_payload;
-pub use send::reporter_for_project;
+pub use send::{reporter_for_project, verify_forge_action};
 
 pub const MAX_BODY_BYTES: usize = 64 * 1024;
 
