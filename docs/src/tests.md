@@ -66,6 +66,13 @@ a banner when draining, and the button click calls `AdminService.setDraining(tru
 - `saturation_is_lenient_for_builtin_and_exempts_evals_and_no_metrics` - at `85%` CPU (between the two thresholds) a `builtin` fetch scores `0` while a real build scores `-1000`; eval jobs and workers reporting no metrics score `0` regardless of saturation.
 - `ram_prediction_exceeding_free_penalizes_and_stacks_with_saturation` - a build whose predicted peak RAM x1.1 exceeds free RAM scores `-1000`, `0` when it fits, and `-2000` when the worker is also saturated.
 
+## Bulk evaluation abort + dispatch race
+
+Aborting an evaluation now parks it as `Waiting` with `WaitingReason::Aborting` before touching its builds, then aborts all in-flight builds in a handful of set-based statements instead of one round-trip per build. The dispatcher's queue finder skips `Waiting` evaluations, so it stops handing out the aborting eval's builds; any build that already escaped to a worker is aborted when it reports started.
+
+- `backend/gradient-types/src/waiting_reason.rs`: `aborting_round_trip` asserts `WaitingReason::Aborting` serialises to `kind: "aborting"` and decodes back.
+- `backend/gradient-db/src/status/abort.rs`: `partition_skips_busy_leaders_reelects_idle_leaders_and_aborts_the_rest` asserts the abort partition keeps a running leader with followers alive, re-elects an idle leader with followers, aborts followers and plain builds, and reports only executing builds as needing attempt/log finalization.
+
 ## Worker shadows base worker of same id (#407)
 
 `backend/gradient-web/src/endpoints/orgs/workers.rs` - `registration_shadows_base_worker_of_same_id` asserts `unshadowed_base_workers` drops a base worker whose `worker_id` matches one of the org's normal registrations, so `GET /orgs/{org}/workers` lists the conflicting worker only once (as the org registration). `delete_org_worker` deletes the registration first, so the normal worker is removed even when a base worker shares its id, and the `409` base-worker guard fires only when no registration exists.

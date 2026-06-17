@@ -736,7 +736,9 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
 
     let state = &scheduler.state;
 
-    // Ready builds: status = Queued AND every dependency build is Completed or Substituted.
+    // Ready builds: status = Queued, owning evaluation not parked (Waiting), and
+    // every dependency build is Completed or Substituted. The Waiting guard keeps
+    // an aborting evaluation's builds from being dispatched while it is torn down.
     // Ordered by dependency count desc (integration builds first), then by age.
     // Driven off the `idx-build-ready-queue` partial index for the outer
     // filter, and the `idx-build-evaluation-derivation` composite for the
@@ -750,6 +752,12 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
             FROM public.build b
             WHERE b.status = {queued}
               AND b.via IS NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM public.evaluation e
+                  WHERE e.id = b.evaluation
+                    AND e.status = {waiting}
+              )
               AND NOT EXISTS (
                   SELECT 1
                   FROM public.derivation_dependency dep_edge
@@ -771,6 +779,7 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
             queued = i32::from(BuildStatus::Queued),
             completed = i32::from(BuildStatus::Completed),
             substituted = i32::from(BuildStatus::Substituted),
+            waiting = i32::from(EvaluationStatus::Waiting),
         ),
     );
 

@@ -304,7 +304,7 @@ impl Scheduler {
         }
     }
 
-    pub async fn handle_build_status_update(&self, build_id_str: &str, _worker_id: &str) {
+    pub async fn handle_build_status_update(&self, build_id_str: &str, worker_id: &str) {
         let build_id = match build_id_str.parse::<BuildId>() {
             Ok(id) => id,
             Err(_) => {
@@ -318,6 +318,21 @@ impl Scheduler {
             .await
         {
             Ok(Some(build)) => {
+                // Backstop for the dispatch/abort race: a build dispatched by an
+                // in-flight pass just before its evaluation was aborted reports
+                // started here. Its status is already Aborted, so tell the worker
+                // to stop instead of letting it build to completion.
+                if build.status == BuildStatus::Aborted {
+                    let job_id = format!("build:{build_id}");
+                    self.worker_pool.read().await.send_abort(
+                        worker_id,
+                        job_id,
+                        "evaluation aborted".to_owned(),
+                    );
+                    info!(%build_id, %worker_id, "aborting build that started after its evaluation was aborted");
+                    return;
+                }
+
                 gradient_db::update_build_status(
                     &self.state.db(),
                     build,
