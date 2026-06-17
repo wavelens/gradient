@@ -28,9 +28,9 @@ use gradient_types::ids::{
 };
 use gradient_types::{
     ACachedPathSignature, AUploadSession, BaseResponse, CCachedPath, CCachedPathSignature,
-    COrganizationCache, CProject, ECachedPath, ECachedPathSignature, EOrganizationCache, EProject,
-    EUploadSession, MCachedPath, MCachedPathSignature, MCommit, MEvaluation, MProject, MUser,
-    NULL_TIME, now,
+    COrganizationCache, CProject, ECache, ECachedPath, ECachedPathSignature, EOrganizationCache,
+    EProject, EUploadSession, MCachedPath, MCachedPathSignature, MCommit, MEvaluation, MProject,
+    MUser, NULL_TIME, now,
 };
 use gradient_core::ServerState;
 use sea_orm::ActiveValue::Set;
@@ -59,6 +59,7 @@ pub struct DispatchResponse {
     pub evaluation: EvaluationId,
     pub project: ProjectId,
     pub commit: CommitId,
+    pub cache: Option<String>,
 }
 
 pub async fn post_dispatch(
@@ -118,6 +119,29 @@ pub async fn post_dispatch(
         .await
         .map_err(|e| WebError::internal(format!("Failed to materialise source NAR: {}", e)))?;
 
+    let response =
+        finalize_build_request(&state, session.organization, &user, &nar, body.target, body.system)
+            .await?;
+
+    let mut active: AUploadSession = session.into();
+    active.dispatched_at = Set(Some(now()));
+    active.update(&state.web_db).await?;
+
+    Ok(ok_json(response))
+}
+
+/// Materialise a source NAR into the cache and queue a build-request evaluation.
+/// Shared by the blob-manifest dispatch and the `nix`-feature source-NAR upload.
+pub(super) async fn finalize_build_request(
+    state: &ServerState,
+    organization: gradient_types::ids::OrganizationId,
+    user: &MUser,
+    nar: &SourceNar,
+    target: Option<String>,
+    system: Option<String>,
+) -> WebResult<DispatchResponse> {
+    let _ = system;
+
     state
         .nar_storage
         .put(&nar.store_hash, nar.nar_bytes.clone())
@@ -126,19 +150,18 @@ pub async fn post_dispatch(
 
     let tx = state.web_db.inner().begin().await?;
 
-    let cached_path = ensure_cached_path(&tx, &nar).await?;
-    queue_signature_placeholders(&tx, &cached_path, &session.organization).await?;
-    let project = ensure_build_request_project(&tx, session.organization, user.id).await?;
+    let cached_path = ensure_cached_path(&tx, nar).await?;
+    queue_signature_placeholders(&tx, &cached_path, &organization).await?;
+    let project = ensure_build_request_project(&tx, organization, user.id).await?;
 
-    let target = body
-        .target
+    let target = target
         .map(|t| t.trim().to_string())
         .filter(|t| !t.is_empty())
         .unwrap_or_else(|| project.wildcard.clone());
 
     let commit = MCommit {
         id: CommitId::now_v7(),
-        message: format!("Build request {}", session.id),
+        message: format!("Build request {}", nar.store_hash),
         hash: vec![0; 20],
         author: Some(user.id),
         author_name: user.name.clone(),
@@ -163,17 +186,35 @@ pub async fn post_dispatch(
     .insert(&tx)
     .await?;
 
+    let cache = resolve_org_cache_name(&tx, organization).await?;
+
     tx.commit().await?;
 
-    let mut active: AUploadSession = session.into();
-    active.dispatched_at = Set(Some(now()));
-    active.update(&state.web_db).await?;
-
-    Ok(ok_json(DispatchResponse {
+    Ok(DispatchResponse {
         evaluation: evaluation.id,
         project: project.id,
         commit: commit.id,
-    }))
+        cache,
+    })
+}
+
+async fn resolve_org_cache_name<C: ConnectionTrait>(
+    tx: &C,
+    org: gradient_types::ids::OrganizationId,
+) -> WebResult<Option<String>> {
+    let Some(link) = EOrganizationCache::find()
+        .filter(COrganizationCache::Organization.eq(org))
+        .one(tx)
+        .await?
+    else {
+        return Ok(None);
+    };
+
+    Ok(ECache::find_by_id(link.cache)
+        .one(tx)
+        .await?
+        .filter(|c| c.active)
+        .map(|c| c.name))
 }
 
 async fn materialise_staging(

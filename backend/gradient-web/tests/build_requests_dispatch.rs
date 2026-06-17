@@ -290,6 +290,8 @@ fn happy_path_creates_project_commit_and_evaluation() {
                 last_insert_id: 0,
                 rows_affected: 1,
             }])
+            // resolve_org_cache_name → org-cache link lookup (none → cache=null)
+            .append_query_results([Vec::<gradient_entity::organization_cache::Model>::new()])
             // After tx commit: UPDATE upload_session
             .append_query_results([vec![updated]])
             .append_exec_results([MockExecResult {
@@ -319,6 +321,11 @@ fn happy_path_creates_project_commit_and_evaluation() {
             body["message"]["evaluation"].as_str().unwrap(),
             eval_model.id.to_string()
         );
+        assert!(
+            body["message"].as_object().unwrap().contains_key("cache"),
+            "DispatchResponse must carry a `cache` field"
+        );
+        assert!(body["message"]["cache"].is_null());
     });
 }
 
@@ -360,6 +367,8 @@ fn happy_path_reuses_existing_build_request_project() {
                 last_insert_id: 0,
                 rows_affected: 1,
             }])
+            // resolve_org_cache_name → org-cache link lookup (none → cache=null)
+            .append_query_results([Vec::<gradient_entity::organization_cache::Model>::new()])
             .append_query_results([vec![updated]])
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
