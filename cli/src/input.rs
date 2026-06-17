@@ -37,6 +37,19 @@ pub fn client_from_config(out: Output) -> Client {
         .unwrap_or_else(|e| out.err(ExitKind::Api, format!("client init failed: {}", e)))
 }
 
+#[cfg(feature = "nix")]
+pub fn server_base(out: Output) -> String {
+    load_config()
+        .get(&ConfigKey::Server)
+        .and_then(|v| v.clone())
+        .unwrap_or_else(|| {
+            out.err(
+                ExitKind::Usage,
+                "Server URL not set. Use `gradient config server <url>`.",
+            );
+        })
+}
+
 pub fn handle_input(values: Vec<(String, Option<String>)>, skip: bool) -> HashMap<String, String> {
     if values.is_empty() {
         println!("No input fields");

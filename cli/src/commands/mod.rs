@@ -11,6 +11,8 @@ pub mod builds_log;
 pub mod cache_upload_nix;
 pub mod base;
 pub mod build;
+#[cfg(feature = "nix")]
+pub mod build_nix;
 pub mod cache;
 pub mod cache_nar;
 pub mod cache_upload;

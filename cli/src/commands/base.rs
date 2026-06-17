@@ -100,6 +100,9 @@ enum MainCommands {
         background: bool,
         #[arg(short, long)]
         quiet: bool,
+        /// Do not produce a `result` symlink/folder after the build
+        #[arg(long)]
+        no_link: bool,
     },
     /// Watch a running evaluation's live build logs and status
     Watch {
@@ -298,7 +301,10 @@ pub async fn run_cli() -> std::io::Result<()> {
             organization,
             background,
             quiet,
-        } => build::handle_build(target, system, organization, background, quiet, out).await,
+            no_link,
+        } => {
+            build::handle_build(target, system, organization, background, quiet, no_link, out).await
+        }
         MainCommands::Watch { evaluation } => watch::handle_watch(&evaluation, out).await,
         MainCommands::Download {
             flake_ref,

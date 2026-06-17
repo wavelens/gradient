@@ -7,9 +7,11 @@
 use crate::config::*;
 use crate::input::client_from_config;
 use crate::output::{Output, to_exit_kind};
-use connector::build_requests::{BuildManifestRequest, DispatchRequest, ManifestFile};
+use connector::build_requests::DispatchResponse;
+use connector::evals::{ArtefactTree, EntryPointArtefacts};
 use futures::StreamExt;
 use futures::pin_mut;
+#[cfg(not(feature = "nix"))]
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::exit;
@@ -20,6 +22,7 @@ pub async fn handle_build(
     organization: Option<String>,
     background: bool,
     quiet: bool,
+    no_link: bool,
     out: Output,
 ) {
     let organization = organization
@@ -73,20 +76,7 @@ pub async fn handle_build(
         if !abs.is_file() {
             continue;
         }
-        match hash_file(&abs) {
-            Ok((hash, size)) => entries.push(TrackedFile {
-                path,
-                hash,
-                size,
-                abs,
-            }),
-            Err(e) => {
-                if !quiet {
-                    out.progress(format!("Failed to hash {}: {}", abs.display(), e));
-                }
-                exit(1);
-            }
-        }
+        entries.push(TrackedFile { path, abs });
     }
 
     if entries.is_empty() {
@@ -96,90 +86,16 @@ pub async fn handle_build(
         exit(1);
     }
 
-    if !quiet {
-        out.human(format!(
-            "Sending manifest for {} tracked files...",
-            entries.len()
-        ));
-    }
-
-    let manifest_req = BuildManifestRequest {
-        organization,
-        files: entries
-            .iter()
-            .map(|e| ManifestFile {
-                path: e.path.clone(),
-                hash: e.hash.clone(),
-                size: e.size,
-            })
-            .collect(),
-    };
-
-    let manifest = match client.build_requests().submit_manifest(manifest_req).await {
-        Ok(m) => m,
-        Err(e) => {
-            if !quiet {
-                out.progress(format!("Manifest rejected: {}", e));
-            }
-            exit(1);
-        }
-    };
-
-    if !manifest.missing.is_empty() {
-        if !quiet {
-            out.human(format!(
-                "Uploading {} missing blob(s) to session {}...",
-                manifest.missing.len(),
-                manifest.session
-            ));
-        }
-
-        let missing: std::collections::HashSet<&str> =
-            manifest.missing.iter().map(String::as_str).collect();
-        let mut form = reqwest::multipart::Form::new();
-        for entry in &entries {
-            if !missing.contains(entry.hash.as_str()) {
-                continue;
-            }
-            match std::fs::read(&entry.abs) {
-                Ok(bytes) => {
-                    let part = reqwest::multipart::Part::bytes(bytes).file_name(entry.hash.clone());
-                    form = form.part(entry.hash.clone(), part);
-                }
-                Err(e) => {
-                    if !quiet {
-                        out.progress(format!("Failed to read {}: {}", entry.abs.display(), e));
-                    }
-                    exit(1);
-                }
-            }
-        }
-
-        if let Err(e) = client
-            .build_requests()
-            .upload_blobs(&manifest.session, form)
-            .await
-        {
-            if !quiet {
-                out.progress(format!("Failed to upload blobs: {}", e));
-            }
-            exit(1);
-        }
-    }
-
-    let dispatch = match client
-        .build_requests()
-        .dispatch(&manifest.session, DispatchRequest { target, system })
-        .await
-    {
-        Ok(d) => d,
-        Err(e) => {
-            if !quiet {
-                out.progress(format!("Failed to dispatch build request: {}", e));
-            }
-            exit(1);
-        }
-    };
+    let dispatch = upload_and_dispatch(
+        &client,
+        &organization,
+        &entries,
+        target.clone(),
+        system.clone(),
+        quiet,
+        out,
+    )
+    .await;
 
     if background {
         out.ok(&dispatch);
@@ -225,15 +141,273 @@ pub async fn handle_build(
             Err(e) => out.err(to_exit_kind(&e), e),
         }
     }
+
+    if no_link {
+        return;
+    }
+
+    let status = wait_for_terminal(&client, &dispatch.evaluation, out).await;
+    if status != "Completed" {
+        if !quiet {
+            out.human(format!(
+                "Build did not complete (status: {status}); skipping result."
+            ));
+        }
+        return;
+    }
+
+    let tree = match client.evals().artefacts(&dispatch.evaluation).await {
+        Ok(t) => t,
+        Err(e) => {
+            if !quiet {
+                out.progress(format!("Could not fetch artefacts: {}", e));
+            }
+            return;
+        }
+    };
+
+    #[cfg(feature = "nix")]
+    crate::commands::build_nix::link_result(&dispatch, &tree, target.as_deref(), out).await;
+    #[cfg(not(feature = "nix"))]
+    download_result_dir(&client, &tree, target.as_deref(), out).await;
 }
 
-struct TrackedFile {
-    path: String,
-    hash: String,
-    size: i64,
-    abs: PathBuf,
+async fn upload_and_dispatch(
+    client: &connector::Client,
+    organization: &str,
+    entries: &[TrackedFile],
+    target: Option<String>,
+    system: Option<String>,
+    quiet: bool,
+    out: Output,
+) -> DispatchResponse {
+    #[cfg(feature = "nix")]
+    {
+        crate::commands::build_nix::dispatch_via_nar(
+            client,
+            organization,
+            target,
+            system,
+            entries,
+            quiet,
+            out,
+        )
+        .await
+    }
+    #[cfg(not(feature = "nix"))]
+    {
+        dispatch_via_manifest(client, organization, entries, target, system, quiet, out).await
+    }
 }
 
+#[cfg(not(feature = "nix"))]
+async fn dispatch_via_manifest(
+    client: &connector::Client,
+    organization: &str,
+    entries: &[TrackedFile],
+    target: Option<String>,
+    system: Option<String>,
+    quiet: bool,
+    out: Output,
+) -> DispatchResponse {
+    use connector::build_requests::{BuildManifestRequest, DispatchRequest, ManifestFile};
+
+    if !quiet {
+        out.human(format!(
+            "Sending manifest for {} tracked files...",
+            entries.len()
+        ));
+    }
+
+    let hashed: Vec<(String, String, i64)> = entries
+        .iter()
+        .map(|e| match hash_file(&e.abs) {
+            Ok((hash, size)) => (e.path.clone(), hash, size),
+            Err(err) => {
+                if !quiet {
+                    out.progress(format!("Failed to hash {}: {}", e.abs.display(), err));
+                }
+                exit(1);
+            }
+        })
+        .collect();
+
+    let manifest_req = BuildManifestRequest {
+        organization: organization.to_owned(),
+        files: hashed
+            .iter()
+            .map(|(path, hash, size)| ManifestFile {
+                path: path.clone(),
+                hash: hash.clone(),
+                size: *size,
+            })
+            .collect(),
+    };
+
+    let manifest = match client.build_requests().submit_manifest(manifest_req).await {
+        Ok(m) => m,
+        Err(e) => {
+            if !quiet {
+                out.progress(format!("Manifest rejected: {}", e));
+            }
+            exit(1);
+        }
+    };
+
+    if !manifest.missing.is_empty() {
+        if !quiet {
+            out.human(format!(
+                "Uploading {} missing blob(s) to session {}...",
+                manifest.missing.len(),
+                manifest.session
+            ));
+        }
+
+        let missing: std::collections::HashSet<&str> =
+            manifest.missing.iter().map(String::as_str).collect();
+        let abs_by_path: std::collections::HashMap<&str, &PathBuf> =
+            entries.iter().map(|e| (e.path.as_str(), &e.abs)).collect();
+        let mut form = reqwest::multipart::Form::new();
+        for (path, hash, _) in &hashed {
+            if !missing.contains(hash.as_str()) {
+                continue;
+            }
+            let abs = abs_by_path[path.as_str()];
+            match std::fs::read(abs) {
+                Ok(bytes) => {
+                    let part = reqwest::multipart::Part::bytes(bytes).file_name(hash.clone());
+                    form = form.part(hash.clone(), part);
+                }
+                Err(e) => {
+                    if !quiet {
+                        out.progress(format!("Failed to read {}: {}", abs.display(), e));
+                    }
+                    exit(1);
+                }
+            }
+        }
+
+        match client
+            .build_requests()
+            .upload_blobs(&manifest.session, form)
+            .await
+        {
+            Ok(resp) => {
+                if !quiet {
+                    out.human(format!("Uploaded {} blob(s).", resp.uploaded));
+                }
+            }
+            Err(e) => {
+                if !quiet {
+                    out.progress(format!("Failed to upload blobs: {}", e));
+                }
+                exit(1);
+            }
+        }
+    }
+
+    match client
+        .build_requests()
+        .dispatch(&manifest.session, DispatchRequest { target, system })
+        .await
+    {
+        Ok(d) => d,
+        Err(e) => {
+            if !quiet {
+                out.progress(format!("Failed to dispatch build request: {}", e));
+            }
+            exit(1);
+        }
+    }
+}
+
+/// Poll the evaluation until it reaches a terminal status, returning it.
+async fn wait_for_terminal(client: &connector::Client, eval_id: &str, out: Output) -> String {
+    loop {
+        match client.evals().get(eval_id).await {
+            Ok(e) => {
+                if matches!(e.status.as_str(), "Completed" | "Failed" | "Aborted") {
+                    return e.status;
+                }
+            }
+            Err(e) => {
+                out.progress(format!("Status poll failed: {}", e));
+                return String::new();
+            }
+        }
+
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    }
+}
+
+/// Pick the entry point matching `target` (exact or suffix), else the first.
+pub(crate) fn select_primary_entry_point<'a>(
+    tree: &'a ArtefactTree,
+    target: Option<&str>,
+) -> Option<&'a EntryPointArtefacts> {
+    if let Some(t) = target.filter(|t| *t != "*")
+        && let Some(ep) = tree
+            .entry_points
+            .iter()
+            .find(|e| e.attr == t || e.attr.ends_with(t))
+    {
+        return Some(ep);
+    }
+
+    tree.entry_points.first()
+}
+
+#[cfg(not(feature = "nix"))]
+async fn download_result_dir(
+    client: &connector::Client,
+    tree: &ArtefactTree,
+    target: Option<&str>,
+    out: Output,
+) {
+    use crate::commands::download::{product_filename, safe_relative_name};
+
+    let Some(ep) = select_primary_entry_point(tree, target) else {
+        out.human("No outputs to download.");
+        return;
+    };
+
+    let dir = PathBuf::from("result");
+    let mut wrote = 0usize;
+    for output in &ep.outputs {
+        for product in &output.products {
+            let name = product_filename(product);
+            let bytes = match client.builds().download_file(&ep.build_id, &name).await {
+                Ok(b) => b,
+                Err(e) => {
+                    out.progress(format!("Failed to download {}: {}", name, e));
+                    continue;
+                }
+            };
+            let dest = dir.join(safe_relative_name(&name));
+            if let Some(parent) = dest.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            if let Err(e) = std::fs::write(&dest, bytes) {
+                out.progress(format!("Failed to write {}: {}", dest.display(), e));
+                continue;
+            }
+            wrote += 1;
+        }
+    }
+
+    if wrote == 0 {
+        out.human("No build products to place in result/.");
+    } else {
+        out.human(format!("Wrote {} product(s) to result/", wrote));
+    }
+}
+
+pub(crate) struct TrackedFile {
+    pub(crate) path: String,
+    pub(crate) abs: PathBuf,
+}
+
+#[cfg(not(feature = "nix"))]
 fn hash_file(path: &Path) -> std::io::Result<(String, i64)> {
     let mut hasher = blake3::Hasher::new();
     let mut reader = BufReader::new(std::fs::File::open(path)?);

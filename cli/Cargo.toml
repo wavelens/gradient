@@ -25,7 +25,7 @@ strum_macros = "0.28"
 serde = { version = "1.0", features = ["derive"] }
 dirs = "6.0"
 toml = "1.0"
-tokio = { version = "1.50", features = ["macros", "process", "rt-multi-thread"] }
+tokio = { version = "1.50", features = ["macros", "process", "rt-multi-thread", "time"] }
 serde_json = "1.0"
 connector = { path = "connector" }
 rand = { version = "0.10", features = ["std_rng"] }
@@ -38,7 +38,11 @@ ratatui = "0.30"
 
 [features]
 default = []
-nix = ["dep:harmonia-file-nar", "dep:harmonia-store-path", "dep:harmonia-store-remote", "dep:harmonia-utils-hash"]
+nix = ["dep:harmonia-file-nar", "dep:harmonia-store-path", "dep:harmonia-store-remote", "dep:harmonia-utils-hash", "dep:tempfile"]
+
+[dependencies.tempfile]
+version = "3"
+optional = true
 
 [dependencies.harmonia-file-nar]
 git = "https://github.com/nix-community/harmonia.git"
