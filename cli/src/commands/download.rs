@@ -143,7 +143,7 @@ fn flatten_products(tree: &ArtefactTree) -> Vec<FlatProduct<'_>> {
     out
 }
 
-fn product_filename(p: &ProductArtefact) -> String {
+pub(crate) fn product_filename(p: &ProductArtefact) -> String {
     Path::new(&p.path)
         .file_name()
         .and_then(|n| n.to_str())
@@ -151,7 +151,7 @@ fn product_filename(p: &ProductArtefact) -> String {
         .unwrap_or_else(|| p.name.clone())
 }
 
-fn safe_relative_name(name: &str) -> PathBuf {
+pub(crate) fn safe_relative_name(name: &str) -> PathBuf {
     let stripped = name.trim_start_matches('/');
     let mut buf = PathBuf::new();
     for comp in Path::new(stripped).components() {
