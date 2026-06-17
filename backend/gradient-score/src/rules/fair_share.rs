@@ -9,7 +9,8 @@ use crate::rule::{JobContext, ScoreRule, WorkerContext};
 
 /// Penalizes a job proportional to its owning org's share of currently-active
 /// builds, so a quiet org's job is picked promptly even when a busy org floods
-/// the queue (#111).
+/// the queue (#111). Only bites under contention - when every worker is busy -
+/// so a single busy org is never penalized into leaving the cluster idle (#419).
 #[derive(Debug)]
 pub struct FairShareRule {
     pub weight: f64,
@@ -26,8 +27,15 @@ impl ScoreRule for FairShareRule {
         &self,
         job: &JobContext<'_>,
         _worker: &WorkerContext<'_>,
-        _instance: &InstanceContext,
+        instance: &InstanceContext,
     ) -> f64 {
+        // Spare capacity means no org is starving another: dispatch freely.
+        // Penalizing here would only push a lone busy org's jobs below the
+        // dispatcher's zero floor and leave workers idle.
+        if instance.idle_workers > 0 {
+            return 0.0;
+        }
+
         match job.org_work_share {
             Some(share) => -self.weight * share as f64,
             None => 0.0,
@@ -35,7 +43,7 @@ impl ScoreRule for FairShareRule {
     }
 
     fn description(&self) -> &'static str {
-        "Penalizes a job by how large a share of currently-active builds its organization already holds, so a busy org cannot starve a quiet one."
+        "Penalizes a job by how large a share of currently-active builds its organization already holds, so a busy org cannot starve a quiet one; only applied when every worker is busy so it never idles the cluster."
     }
 }
 
@@ -84,6 +92,27 @@ mod tests {
         let busy = rule.score(&ctx(&job, Some(0.99)), &w, &InstanceContext::default());
         let quiet = rule.score(&ctx(&job, Some(0.01)), &w, &InstanceContext::default());
         assert!(busy < quiet, "busy org must score lower: {busy} vs {quiet}");
+    }
+
+    #[test]
+    fn idle_capacity_lifts_penalty() {
+        let rule = FairShareRule::default();
+        let job = build_job();
+        let w = worker();
+        let busy = ctx(&job, Some(1.0));
+
+        let saturated = InstanceContext { idle_workers: 0, total_workers: 4, ..Default::default() };
+        assert!(
+            rule.score(&busy, &w, &saturated) < 0.0,
+            "a saturated cluster still rations a busy org"
+        );
+
+        let spare = InstanceContext { idle_workers: 1, total_workers: 4, ..Default::default() };
+        assert_eq!(
+            rule.score(&busy, &w, &spare),
+            0.0,
+            "idle workers must not be left empty by the fair-share penalty"
+        );
     }
 
     #[test]
