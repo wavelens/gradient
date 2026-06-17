@@ -272,10 +272,12 @@
         type = types.ints.positive;
         default = 1;
         description = ''
-          Number of completed evaluations to retain per project for metrics
-          and history. Older evaluations beyond this count are garbage-
-          collected. Must be at least 1; capped at runtime by the global
-          `services.gradient.settings.keepEvaluations`.
+          Number of finished evaluations to retain per project for metrics
+          and history. The most recent finished evaluations are kept regardless
+          of outcome (completed, failed, or aborted), and GC is skipped while the
+          project has an in-progress evaluation. Older evaluations beyond this
+          count are garbage-collected. Must be at least 1; capped at runtime by
+          the global `services.gradient.settings.keepEvaluations`.
         '';
       };
 

@@ -22,7 +22,8 @@ use gradient_types::*;
 /// terminal evaluations (see [`evaluations_to_gc`]).
 ///
 /// Handles DB deletion, build log removal, NAR cache files, and GC root symlinks.
-/// Active evaluations are never deleted and never count toward `keep`.
+/// Skipped entirely while the project has any active evaluation, so an in-flight
+/// run never loses NARs it is about to reuse.
 pub async fn gc_project_evaluations(
     ctx: &DbContext,
     project_id: ProjectId,
@@ -146,28 +147,19 @@ pub async fn gc_project_evaluations(
 /// Selects, by index into a newest-first evaluation list, which evaluations the
 /// per-project GC should delete for a given `keep` count.
 ///
-/// Active evaluations (Queued/Fetching/Evaluating*/Building/Waiting) are never
-/// deleted and never consume a `keep` slot. Among terminal evaluations the
-/// `keep` most recent `Completed`/`Failed` ("done") ones are retained; `Aborted`
-/// evaluations are retained only to fill remaining slots when too few done
-/// evaluations exist, and are deleted otherwise.
+/// Returns nothing while any evaluation is active (Queued/Fetching/Evaluating*/
+/// Building/Waiting): an in-flight run may reuse NARs from older evaluations
+/// before it records its own build rows, so GC waits until the project is
+/// quiescent. Otherwise the `keep` most recent terminal evaluations are retained
+/// regardless of outcome - `Failed` and `Aborted` runs can still hold
+/// successfully-built NARs, so they are not sacrificed ahead of newer
+/// `Completed` ones.
 fn evaluations_to_gc(statuses: &[EvaluationStatus], keep: usize) -> Vec<usize> {
-    if keep == 0 {
+    if keep == 0 || statuses.iter().any(|s| s.is_active()) {
         return Vec::new();
     }
 
-    let terminal: Vec<usize> = (0..statuses.len())
-        .filter(|&i| !statuses[i].is_active())
-        .collect();
-
-    let mut retained = terminal.clone();
-    retained.sort_by_key(|&i| matches!(statuses[i], EvaluationStatus::Aborted));
-    let keep_set: std::collections::HashSet<usize> = retained.into_iter().take(keep).collect();
-
-    terminal
-        .into_iter()
-        .filter(|i| !keep_set.contains(i))
-        .collect()
+    (keep..statuses.len()).collect()
 }
 
 /// Derivation GC pass: deletes `derivation` rows that have no remaining `build`
@@ -294,43 +286,33 @@ mod tests {
     use EvaluationStatus::*;
 
     #[test]
-    fn keeps_last_done_when_newer_evaluation_is_active() {
+    fn skips_gc_while_an_evaluation_is_active() {
+        // An in-flight run may still reuse older NARs, so nothing is deleted -
+        // even completed evaluations far beyond `keep` are retained this pass.
         assert!(evaluations_to_gc(&[Building, Completed], 1).is_empty());
-    }
-
-    #[test]
-    fn never_deletes_active_evaluations() {
         assert!(evaluations_to_gc(&[Queued, Building, Waiting, Fetching], 1).is_empty());
+        assert!(evaluations_to_gc(&[Building, Completed, Aborted, Completed], 1).is_empty());
     }
 
     #[test]
-    fn gcs_aborted_when_a_done_evaluation_exists() {
-        assert_eq!(evaluations_to_gc(&[Aborted, Completed], 1), vec![0]);
+    fn retains_keep_most_recent_terminal_regardless_of_outcome() {
+        // A newer Aborted/Failed run is kept ahead of an older Completed one;
+        // its successfully-built NARs are not sacrificed.
+        assert_eq!(evaluations_to_gc(&[Aborted, Completed], 1), vec![1]);
+        assert_eq!(evaluations_to_gc(&[Completed, Aborted, Failed], 2), vec![2]);
     }
 
     #[test]
-    fn keeps_aborted_when_no_done_evaluation_exists() {
+    fn keeps_single_terminal_within_keep() {
         assert!(evaluations_to_gc(&[Aborted], 1).is_empty());
+        assert!(evaluations_to_gc(&[Failed], 1).is_empty());
     }
 
     #[test]
-    fn done_evaluations_take_priority_over_aborted() {
-        assert_eq!(evaluations_to_gc(&[Completed, Aborted, Failed], 2), vec![1]);
-    }
-
-    #[test]
-    fn deletes_done_evaluations_beyond_keep() {
+    fn deletes_terminal_evaluations_beyond_keep() {
         assert_eq!(
             evaluations_to_gc(&[Completed, Failed, Completed], 1),
             vec![1, 2]
-        );
-    }
-
-    #[test]
-    fn active_evaluations_do_not_consume_keep_slots() {
-        assert_eq!(
-            evaluations_to_gc(&[Building, Completed, Aborted, Completed], 1),
-            vec![2, 3]
         );
     }
 

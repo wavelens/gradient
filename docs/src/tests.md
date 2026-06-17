@@ -2,6 +2,16 @@
 
 This page tracks notable tests added to Gradient and where they live.
 
+## Evaluation GC keeps failed/aborted NARs and defers during active runs
+
+`backend/gradient-db/src/gc.rs`: `skips_gc_while_an_evaluation_is_active`,
+`retains_keep_most_recent_terminal_regardless_of_outcome`,
+`keeps_single_terminal_within_keep`, and `deletes_terminal_evaluations_beyond_keep`
+cover `evaluations_to_gc` after it stopped deprioritizing `Aborted` runs and
+started skipping the whole project while any evaluation is active. Previously GC
+preferentially deleted failed/aborted evaluations (dropping the completed NARs
+they held) and could race an in-flight run.
+
 ## GitHub App installation org-binding
 
 `backend/gradient-web/src/endpoints/forge_hooks/trigger.rs`:
