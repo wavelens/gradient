@@ -200,31 +200,19 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
         };
 
         let split_fetch = scheduler.worker_pool.read().await.has_idle_eval_only_worker();
-        let tasks = if split_fetch {
-            vec![FlakeTask::FetchFlake]
-        } else {
-            vec![
-                FlakeTask::FetchFlake,
-                FlakeTask::EvaluateFlake,
-                FlakeTask::EvaluateDerivations,
-            ]
-        };
-
-        let flake_job = FlakeJob {
-            tasks,
-            source: gradient_types::proto::FlakeSource::Repository {
-                url: eval.repository.clone(),
-                commit: commit_sha,
-            },
-            wildcards: eval
-                .wildcard
-                .parse::<Wildcard>()
-                .map(|w| w.patterns().to_vec())
-                .unwrap_or_else(|_| vec![eval.wildcard.clone()]),
-            timeout_secs: None,
+        let wildcards = eval
+            .wildcard
+            .parse::<Wildcard>()
+            .map(|w| w.patterns().to_vec())
+            .unwrap_or_else(|_| vec![eval.wildcard.clone()]);
+        let (flake_job, required_paths) = flake_job_for_eval_source(
+            &eval.repository,
+            commit_sha,
+            wildcards,
+            split_fetch,
             input_overrides,
             input_update,
-        };
+        );
 
         let organization_id = organization_id_for_eval(state, &eval).await;
         let org_id = match organization_id {
@@ -247,7 +235,7 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
             commit_id: eval.commit,
             repository: eval.repository.clone(),
             job: flake_job,
-            required_paths: vec![],
+            required_paths,
             queued_at: eval.updated_at,
             ready_at: eval.updated_at,
             rescore_count: 0,
@@ -259,6 +247,63 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
     }
 
     Ok(())
+}
+
+/// Build the eval `FlakeJob` and its `required_paths` from the evaluation's
+/// recorded source. A `/nix/store/...` repository is an already-materialised
+/// build-request source: dispatch it as `FlakeSource::Cached` (the worker
+/// substitutes the NAR and evaluates via `path:`) instead of git-cloning it.
+pub(crate) fn flake_job_for_eval_source(
+    repository: &str,
+    commit_sha: String,
+    wildcards: Vec<String>,
+    split_fetch: bool,
+    input_overrides: Vec<gradient_types::proto::FlakeInputOverride>,
+    input_update: Option<gradient_types::proto::InputUpdateSpec>,
+) -> (FlakeJob, Vec<RequiredPath>) {
+    use gradient_types::proto::FlakeSource;
+
+    if repository.starts_with("/nix/store/") {
+        let job = FlakeJob {
+            tasks: vec![FlakeTask::EvaluateFlake, FlakeTask::EvaluateDerivations],
+            source: FlakeSource::Cached {
+                store_path: repository.to_owned(),
+            },
+            wildcards,
+            timeout_secs: None,
+            input_overrides,
+            input_update,
+        };
+        let required = vec![RequiredPath {
+            path: repository.to_owned(),
+            cache_info: None,
+        }];
+
+        return (job, required);
+    }
+
+    let tasks = if split_fetch {
+        vec![FlakeTask::FetchFlake]
+    } else {
+        vec![
+            FlakeTask::FetchFlake,
+            FlakeTask::EvaluateFlake,
+            FlakeTask::EvaluateDerivations,
+        ]
+    };
+    let job = FlakeJob {
+        tasks,
+        source: FlakeSource::Repository {
+            url: repository.to_owned(),
+            commit: commit_sha,
+        },
+        wildcards,
+        timeout_secs: None,
+        input_overrides,
+        input_update,
+    };
+
+    (job, Vec::new())
 }
 
 // ── Build dispatch ────────────────────────────────────────────────────────────
@@ -896,6 +941,50 @@ mod dispatch_mode_tests {
     fn stalled_substitute_stays_builtin() {
         assert_eq!(decide_dispatch_mode(true, 2, 2, false), BuildDispatchMode::SubstituteStalled);
         assert_eq!(decide_dispatch_mode(true, 2, 2, true), BuildDispatchMode::RealArch);
+    }
+}
+
+#[cfg(test)]
+mod eval_source_tests {
+    use super::flake_job_for_eval_source;
+    use gradient_types::proto::{FlakeSource, FlakeTask};
+
+    #[test]
+    fn cached_source_dispatches_without_fetch() {
+        let (job, required) = flake_job_for_eval_source(
+            "/nix/store/qgzxagd5bql1iqx0w8qzljwdlb06sn6n-source",
+            "0".repeat(40),
+            vec!["*".into()],
+            false,
+            vec![],
+            None,
+        );
+        assert!(matches!(job.source, FlakeSource::Cached { .. }));
+        assert_eq!(
+            job.tasks,
+            vec![FlakeTask::EvaluateFlake, FlakeTask::EvaluateDerivations]
+        );
+        assert!(!job.tasks.contains(&FlakeTask::FetchFlake));
+        assert_eq!(required.len(), 1);
+        assert_eq!(
+            required[0].path,
+            "/nix/store/qgzxagd5bql1iqx0w8qzljwdlb06sn6n-source"
+        );
+    }
+
+    #[test]
+    fn repository_source_keeps_fetch() {
+        let (job, required) = flake_job_for_eval_source(
+            "git@github.com:org/repo.git",
+            "abc".into(),
+            vec!["*".into()],
+            false,
+            vec![],
+            None,
+        );
+        assert!(matches!(job.source, FlakeSource::Repository { .. }));
+        assert!(job.tasks.contains(&FlakeTask::FetchFlake));
+        assert!(required.is_empty());
     }
 }
 
