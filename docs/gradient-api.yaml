@@ -6062,6 +6062,28 @@ paths:
                   other_running:
                     type: integer
 
+  /board/jobs/decisions:
+    get:
+      tags: [board]
+      summary: Recent dispatch decisions (all candidate scores)
+      description: >
+        Bounded ring of the most recent dispatch decisions, each with every
+        scored candidate including the rejected/negative ones the dispatcher
+        passed over. For tuning scoring rules. Superuser-only, as candidates
+        span all organizations.
+      operationId: getBoardDispatchDecisions
+      responses:
+        '200':
+          description: Recent dispatch decisions, most recent first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DispatchDecision'
+        '403':
+          description: Caller is not a superuser
+
   /board/jobs/pending:
     get:
       tags: [board]
@@ -10218,6 +10240,31 @@ components:
         queued_at: { type: string, format: date-time }
         dependency_count: { type: integer }
         pname: { type: string, nullable: true }
+
+    DispatchDecisionCandidate:
+      type: object
+      description: One scored candidate weighed in a dispatch decision.
+      properties:
+        job_id: { type: string }
+        kind: { type: integer }
+        organization: { type: string, format: uuid }
+        build_id: { type: string, format: uuid, nullable: true }
+        evaluation_id: { type: string, format: uuid }
+        pname: { type: string, nullable: true }
+        score: { type: number }
+
+    DispatchDecision:
+      type: object
+      description: A recorded dispatch decision - the candidates a worker was scored against and which (if any) won.
+      properties:
+        at: { type: string, format: date-time }
+        worker_id: { type: string }
+        kind: { type: integer }
+        winner: { type: string, nullable: true }
+        candidates:
+          type: array
+          items:
+            $ref: '#/components/schemas/DispatchDecisionCandidate'
 
     # ── SCIM 2.0 ──────────────────────────────────────────────────────────────
 

@@ -163,6 +163,63 @@ pub async fn get_dispatched_jobs(
 }
 
 #[derive(Serialize)]
+pub struct DecisionCandidateView {
+    pub job_id: String,
+    pub kind: i16,
+    pub organization: Uuid,
+    pub build_id: Option<Uuid>,
+    pub evaluation_id: Uuid,
+    pub pname: Option<String>,
+    pub score: f64,
+}
+
+#[derive(Serialize)]
+pub struct DispatchDecisionView {
+    pub at: String,
+    pub worker_id: String,
+    pub kind: i16,
+    pub winner: Option<String>,
+    pub candidates: Vec<DecisionCandidateView>,
+}
+
+/// Recent dispatch decisions with every scored candidate, including rejected and
+/// negative ones the dispatcher passed over. Superuser-only: candidates span all
+/// orgs, and the view exists to tune cross-org scoring rules (#419).
+pub async fn get_dispatch_decisions(
+    Extension(user): Extension<MUser>,
+    Extension(scheduler): Extension<Arc<Scheduler>>,
+) -> WebResult<Json<BaseResponse<Vec<DispatchDecisionView>>>> {
+    require_superuser(&user)?;
+
+    let views = scheduler
+        .recent_decisions()
+        .await
+        .into_iter()
+        .map(|d| DispatchDecisionView {
+            at: d.at.and_utc().to_rfc3339(),
+            worker_id: d.worker_id,
+            kind: d.kind,
+            winner: d.winner,
+            candidates: d
+                .candidates
+                .into_iter()
+                .map(|c| DecisionCandidateView {
+                    job_id: c.job_id,
+                    kind: c.kind,
+                    organization: c.organization.into(),
+                    build_id: c.build_id.map(Into::into),
+                    evaluation_id: c.evaluation_id.into(),
+                    pname: c.pname,
+                    score: c.score,
+                })
+                .collect(),
+        })
+        .collect();
+
+    Ok(ok_json(views))
+}
+
+#[derive(Serialize)]
 pub struct AttemptSummary {
     pub dispatched_job_id: Uuid,
     pub substitute: bool,

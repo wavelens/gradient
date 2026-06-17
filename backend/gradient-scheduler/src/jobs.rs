@@ -6,7 +6,7 @@
 
 //! Pending and active job tracking.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use gradient_types::ids::{BuildId, CommitId, EvaluationId, OrganizationId, ProjectId};
 use gradient_types::proto::{
@@ -172,6 +172,28 @@ impl PendingJob {
         }
     }
 
+    /// Wire discriminator matching `dispatched_job.kind`: eval `0`, build `1`.
+    pub fn kind_disc(&self) -> i16 {
+        match self {
+            PendingJob::Eval(_) => 0,
+            PendingJob::Build(_) => 1,
+        }
+    }
+
+    pub fn build_id(&self) -> Option<BuildId> {
+        match self {
+            PendingJob::Build(j) => Some(j.build_id),
+            PendingJob::Eval(_) => None,
+        }
+    }
+
+    pub fn pname(&self) -> Option<String> {
+        match self {
+            PendingJob::Build(j) => j.pname.clone(),
+            PendingJob::Eval(_) => None,
+        }
+    }
+
     pub fn dependency_count(&self) -> u32 {
         match self {
             PendingJob::Build(j) => j.dependency_count,
@@ -278,12 +300,46 @@ pub struct PendingJobInfo {
     pub pname: Option<String>,
 }
 
+/// One scored candidate weighed in a dispatch decision. Captured for every
+/// candidate, including those that scored below the dispatch floor, so the Live
+/// Jobs "all scores" view can surface negative scores for rule tuning (#419).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DecisionCandidate {
+    pub job_id: String,
+    pub kind: i16,
+    pub organization: OrganizationId,
+    pub build_id: Option<BuildId>,
+    pub evaluation_id: EvaluationId,
+    pub pname: Option<String>,
+    pub score: f64,
+}
+
+/// A recorded dispatch decision: the candidates a worker was scored against and
+/// which (if any) won. Kept in a bounded ring on the tracker.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DispatchDecision {
+    pub at: chrono::NaiveDateTime,
+    pub worker_id: String,
+    pub kind: i16,
+    pub winner: Option<String>,
+    pub candidates: Vec<DecisionCandidate>,
+}
+
+/// How many dispatch decisions to retain, and how many candidates per decision.
+/// Both bounded so a large queue can't grow the ring without limit; candidates
+/// are kept highest-score first, so the dispatch boundary and the lowest-scoring
+/// jobs stay visible.
+const DECISION_RING_CAP: usize = 200;
+const CANDIDATES_PER_DECISION: usize = 64;
+
 #[derive(Debug, Default)]
 pub struct JobTracker {
     pending: HashMap<String, PendingJob>,
     /// Per-worker, per-job scores: `worker_id → job_id → score`.
     scores: HashMap<String, HashMap<String, WorkerJobScore>>,
     active: HashMap<String, (String, PendingJob)>,
+    /// Bounded ring of recent dispatch decisions for the Live Jobs view.
+    decisions: VecDeque<DispatchDecision>,
 }
 
 impl JobTracker {
@@ -341,6 +397,20 @@ impl JobTracker {
         }
     }
 
+    /// Append a dispatch decision to the bounded ring, evicting the oldest.
+    fn push_decision(&mut self, decision: DispatchDecision) {
+        if self.decisions.len() >= DECISION_RING_CAP {
+            self.decisions.pop_front();
+        }
+
+        self.decisions.push_back(decision);
+    }
+
+    /// Recent dispatch decisions, most recent first (cloned snapshot for the API).
+    pub fn recent_decisions(&self) -> Vec<DispatchDecision> {
+        self.decisions.iter().rev().cloned().collect()
+    }
+
     /// Assign the best pending job matching `kind` for `peer_id`.
     ///
     /// Each eligible candidate is scored by `policy`.  The job with the
@@ -358,7 +428,9 @@ impl JobTracker {
         policy: &dyn ScoringPolicy,
         instance: &gradient_score::InstanceContext,
     ) -> Option<Assignment> {
-        let worker_scores = self.scores.get(peer_id);
+        // Owned snapshot so recording the decision (a `&mut self` push below)
+        // doesn't collide with this borrow of `self.scores`.
+        let worker_scores = self.scores.get(peer_id).cloned();
 
         let worker_ctx = caps.map(|c| WorkerContext {
             architectures: &c.architectures,
@@ -395,7 +467,7 @@ impl JobTracker {
         };
 
         let score_of = |id: &str, job: &PendingJob| -> f64 {
-            let s = worker_scores.and_then(|ws| ws.get(id));
+            let s = worker_scores.as_ref().and_then(|ws| ws.get(id));
             let closure_size = match job {
                 PendingJob::Build(b) => b.closure_size,
                 PendingJob::Eval(_) => None,
@@ -436,7 +508,7 @@ impl JobTracker {
             policy.score(&ctx, worker_ctx, instance)
         };
 
-        let best = self
+        let mut scored: Vec<(&String, f64)> = self
             .pending
             .iter()
             .filter(|(_, j)| {
@@ -449,25 +521,57 @@ impl JobTracker {
                     && job_eligible_for_caps(j, caps)
             })
             .map(|(id, job)| (id, score_of(id, job)))
-            .max_by(|(id_a, sa), (id_b, sb)| {
-                sa.partial_cmp(sb)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-                    // Tie-break by job_id for determinism.
-                    .then_with(|| id_b.cmp(id_a))
-            });
+            .collect();
+        // Highest score first; tie-break on the smaller job_id for determinism.
+        scored.sort_by(|(id_a, sa), (id_b, sb)| {
+            sb.partial_cmp(sa)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| id_a.cmp(id_b))
+        });
 
         // A negative best total means dispatching now is worse than idling this
         // round (e.g. a build still awaiting candidate scores); the worker waits.
-        let job_id = match best {
-            Some((id, s)) if s >= 0.0 => id.clone(),
-            _ => return None,
-        };
+        let winner = scored.first().filter(|(_, s)| *s >= 0.0).map(|(id, _)| (*id).clone());
+
+        // Snapshot the decision (incl. rejected/negative candidates) for the Live
+        // Jobs "all scores" view before the immutable borrow of `pending` ends.
+        let candidates: Vec<DecisionCandidate> = scored
+            .iter()
+            .take(CANDIDATES_PER_DECISION)
+            .filter_map(|(id, s)| {
+                self.pending.get(*id).map(|job| DecisionCandidate {
+                    job_id: (*id).clone(),
+                    kind: job.kind_disc(),
+                    organization: job.peer_id(),
+                    build_id: job.build_id(),
+                    evaluation_id: job.evaluation_id(),
+                    pname: job.pname(),
+                    score: *s,
+                })
+            })
+            .collect();
+        drop(scored);
+
+        if !candidates.is_empty() {
+            self.push_decision(DispatchDecision {
+                at: gradient_types::now(),
+                worker_id: peer_id.to_owned(),
+                kind: match kind {
+                    JobKind::Flake => 0,
+                    JobKind::Build => 1,
+                },
+                winner: winner.clone(),
+                candidates,
+            });
+        }
+
+        let job_id = winner?;
 
         // Recompute the winner's score with the per-rule breakdown, captured for
         // the dispatched_job row. Owned snapshots so the borrow ends before the
         // mutable assign_pending below.
         let dispatch_record = self.pending.get(&job_id).map(|job| {
-            let s = worker_scores.and_then(|ws| ws.get(job_id.as_str()));
+            let s = worker_scores.as_ref().and_then(|ws| ws.get(job_id.as_str()));
             let closure_size = match job {
                 PendingJob::Build(b) => b.closure_size,
                 PendingJob::Eval(_) => None,
@@ -1080,6 +1184,46 @@ mod tests {
         assert_eq!(assignment.unwrap().job_id, "j1");
         assert_eq!(tracker.pending_count(), 0);
         assert_eq!(tracker.active_count(), 1);
+    }
+
+    #[test]
+    fn records_dispatch_decisions_including_rejected_candidates() {
+        let mut tracker = JobTracker::new();
+        let peer = OrganizationId::now_v7();
+        tracker.add_pending("j1".into(), build_job(peer, vec![]));
+        let p = gradient_score::policy_by_name("simple");
+        let inst = gradient_score::InstanceContext::default();
+
+        // No cached score → negative total → the worker idles, but the rejected
+        // candidate and its negative score are still recorded (#419).
+        assert!(
+            tracker
+                .take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst)
+                .is_none()
+        );
+        let decisions = tracker.recent_decisions();
+        assert_eq!(decisions.len(), 1);
+        assert!(decisions[0].winner.is_none());
+        assert_eq!(decisions[0].candidates.len(), 1);
+        assert_eq!(decisions[0].candidates[0].job_id, "j1");
+        assert!(
+            decisions[0].candidates[0].score < 0.0,
+            "a rejected candidate's negative score must be visible"
+        );
+
+        // Caching a score lets it dispatch; the newer decision records the winner.
+        tracker.record_scores(
+            "w1",
+            vec![CandidateScore { job_id: "j1".into(), missing_count: 0, missing_nar_size: 0 }],
+        );
+        assert!(
+            tracker
+                .take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst)
+                .is_some()
+        );
+        let decisions = tracker.recent_decisions();
+        assert_eq!(decisions.len(), 2, "most recent first");
+        assert_eq!(decisions[0].winner.as_deref(), Some("j1"));
     }
 
     #[test]

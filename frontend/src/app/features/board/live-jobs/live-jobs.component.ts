@@ -9,11 +9,21 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterModule } from '@angular/router';
 import { Subscription } from 'rxjs';
-import { BoardService, DispatchedJobSummary, PendingJobSummary } from '@core/services/board.service';
+import { BoardService, DispatchedJobSummary, DispatchDecisionView, PendingJobSummary } from '@core/services/board.service';
 import { BoardLiveService } from '@core/services/board-live.service';
 
 type KindFilter = 'all' | 'eval' | 'build';
 type StatusFilter = 'all' | 'pending' | 'dispatched';
+type ScoreScope = 'current' | 'all';
+
+interface DecisionRow {
+  at: string;
+  worker_id: string;
+  kind: number;
+  pname: string | null;
+  score: number;
+  won: boolean;
+}
 
 @Component({
   selector: 'app-board-live-jobs',
@@ -34,6 +44,12 @@ type StatusFilter = 'all' | 'pending' | 'dispatched';
       </div>
 
       <div class="filters">
+        <label>Scores
+          <select [ngModel]="scoreScope()" (ngModelChange)="setScoreScope($event)">
+            <option value="current">dispatched</option>
+            <option value="all">incl. rejected</option>
+          </select>
+        </label>
         <label>Type
           <select [ngModel]="kindFilter()" (ngModelChange)="kindFilter.set($event)">
             <option value="all">all</option>
@@ -56,25 +72,47 @@ type StatusFilter = 'all' | 'pending' | 'dispatched';
         </label>
       </div>
 
-      <table class="jobs">
-        <thead>
-          <tr><th>Kind</th><th>Worker</th><th>Derivation</th><th>Score</th><th>Dispatched</th><th></th></tr>
-        </thead>
-        <tbody>
-          @for (j of filteredJobs(); track j.id) {
-            <tr [class.live]="isLive(j)" [class.clickable]="canInspect(j)" (click)="inspect(j)">
-              <td>{{ j.kind === 1 ? 'build' : 'eval' }}</td>
-              <td class="mono">{{ j.worker_id }}</td>
-              <td class="mono">{{ j.pname ?? '-' }}</td>
-              <td>{{ j.score | number: '1.1-1' }}</td>
-              <td>{{ j.dispatched_at | date: 'HH:mm:ss' }}</td>
-              <td>{{ canInspect(j) ? '›' : '' }}</td>
-            </tr>
-          } @empty {
-            <tr><td colspan="6" class="muted">No matching dispatched jobs.</td></tr>
-          }
-        </tbody>
-      </table>
+      @if (scoreScope() === 'current') {
+        <table class="jobs">
+          <thead>
+            <tr><th>Kind</th><th>Worker</th><th>Derivation</th><th>Score</th><th>Dispatched</th><th></th></tr>
+          </thead>
+          <tbody>
+            @for (j of filteredJobs(); track j.id) {
+              <tr [class.live]="isLive(j)" [class.clickable]="canInspect(j)" (click)="inspect(j)">
+                <td>{{ j.kind === 1 ? 'build' : 'eval' }}</td>
+                <td class="mono">{{ j.worker_id }}</td>
+                <td class="mono">{{ j.pname ?? '-' }}</td>
+                <td>{{ j.score | number: '1.1-1' }}</td>
+                <td>{{ j.dispatched_at | date: 'HH:mm:ss' }}</td>
+                <td>{{ canInspect(j) ? '›' : '' }}</td>
+              </tr>
+            } @empty {
+              <tr><td colspan="6" class="muted">No matching dispatched jobs.</td></tr>
+            }
+          </tbody>
+        </table>
+      } @else {
+        <table class="jobs">
+          <thead>
+            <tr><th>Outcome</th><th>Kind</th><th>Worker</th><th>Derivation</th><th>Score</th><th>When</th></tr>
+          </thead>
+          <tbody>
+            @for (r of decisionRows(); track $index) {
+              <tr [class.negative]="r.score < 0">
+                <td>{{ r.won ? 'dispatched' : 'passed over' }}</td>
+                <td>{{ r.kind === 1 ? 'build' : 'eval' }}</td>
+                <td class="mono">{{ r.worker_id }}</td>
+                <td class="mono">{{ r.pname ?? '-' }}</td>
+                <td>{{ r.score | number: '1.1-1' }}</td>
+                <td>{{ r.at | date: 'HH:mm:ss' }}</td>
+              </tr>
+            } @empty {
+              <tr><td colspan="6" class="muted">No recent decisions (superuser-only).</td></tr>
+            }
+          </tbody>
+        </table>
+      }
     }
 
     @if (view() === 'pending') {
@@ -113,6 +151,7 @@ type StatusFilter = 'all' | 'pending' | 'dispatched';
       tbody tr.clickable { cursor: pointer; }
       tbody tr.clickable:hover { background: #2d333b; }
       tbody tr.live { opacity: 0.7; font-style: italic; }
+      tbody tr.negative td { color: #f0883e; }
       .mono { font-family: monospace; }
       .view-toggle { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
       .view-toggle button { background: #21262d; color: #abb0b4; border: 1px solid #2d333b; border-radius: 6px; padding: 0.3rem 0.8rem; cursor: pointer; }
@@ -144,6 +183,9 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
   scoreMin = signal<number | null>(null);
   scoreMax = signal<number | null>(null);
 
+  scoreScope = signal<ScoreScope>('current');
+  decisions = signal<DispatchDecisionView[]>([]);
+
   constructor() {
     this.restoreState();
     effect(() => {
@@ -153,6 +195,7 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
         statusFilter: this.statusFilter(),
         scoreMin: this.scoreMin(),
         scoreMax: this.scoreMax(),
+        scoreScope: this.scoreScope(),
       };
       try {
         sessionStorage.setItem(BoardLiveJobsComponent.STATE_KEY, JSON.stringify(state));
@@ -179,9 +222,37 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
     });
   });
 
+  /// Recent decisions flattened to one row per candidate (incl. rejected and
+  /// negative scores), honoring the type/score filters above.
+  decisionRows = computed<DecisionRow[]>(() => {
+    const kind = this.kindFilter();
+    const min = this.scoreMin();
+    const max = this.scoreMax();
+    const rows: DecisionRow[] = [];
+    for (const d of this.decisions()) {
+      for (const c of d.candidates) {
+        if (kind === 'eval' && c.kind !== 0) continue;
+        if (kind === 'build' && c.kind !== 1) continue;
+        if (min !== null && c.score < min) continue;
+        if (max !== null && c.score > max) continue;
+        rows.push({
+          at: d.at,
+          worker_id: d.worker_id,
+          kind: c.kind,
+          pname: c.pname,
+          score: c.score,
+          won: d.winner === c.job_id,
+        });
+      }
+    }
+
+    return rows;
+  });
+
   ngOnInit(): void {
     this.loadDispatched();
     if (this.view() === 'pending') this.loadPending();
+    if (this.scoreScope() === 'all') this.loadDecisions();
     this.sub = this.live.connect().subscribe({
       next: (ev) => {
         if (ev.type === 'job_dispatched' && ev.organization) {
@@ -218,6 +289,18 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
     if (v === 'pending') this.loadPending();
   }
 
+  setScoreScope(scope: ScoreScope): void {
+    this.scoreScope.set(scope);
+    if (scope === 'all') this.loadDecisions();
+  }
+
+  private loadDecisions(): void {
+    this.board.getDispatchDecisions().subscribe({
+      next: (d) => this.decisions.set(d),
+      error: () => this.decisions.set([]),
+    });
+  }
+
   private loadDispatched(): void {
     this.board.getDispatchedJobs().subscribe((r) => {
       this.jobs.set(r.jobs);
@@ -246,6 +329,7 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
       if (s.statusFilter) this.statusFilter.set(s.statusFilter);
       this.scoreMin.set(s.scoreMin ?? null);
       this.scoreMax.set(s.scoreMax ?? null);
+      if (s.scoreScope) this.scoreScope.set(s.scoreScope);
     } catch {
       /* ignore malformed state */
     }

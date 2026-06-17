@@ -73,6 +73,11 @@ A wildcard (`*`/`#`) legitimately spans attrs that aren't buildable derivations,
 - `backend/gradient-worker/src/executor/eval.rs`: `explicit_attr_set_keeps_only_wildcard_free_includes` asserts only wildcard-free, non-exclusion patterns count as explicit (quoted dots collapse to the discovered path form).
 - `backend/gradient-score/src/rules/fair_share.rs`: `idle_capacity_lifts_penalty` asserts a busy org is rationed when `idle_workers == 0` but not penalized when a worker is idle.
 
+The scheduler also keeps a bounded ring of recent dispatch decisions - every scored candidate, including the rejected/negative ones the dispatcher passed over - exposed at `GET /board/jobs/decisions` (superuser-only) and surfaced by a Live Jobs "incl. rejected" dropdown so operators can see all scores while tuning rules.
+
+- `backend/gradient-scheduler/src/jobs.rs`: `records_dispatch_decisions_including_rejected_candidates` asserts a worker that idles on a negative best score still records the decision with the rejected candidate and its negative score, and a later dispatch records a decision naming the winner.
+- `frontend/src/app/features/board/live-jobs/live-jobs.component.spec.ts`: the decision-scores spec asserts the "incl. rejected" scope flattens decisions to candidate rows, marking the winner and showing negative-scored, passed-over candidates.
+
 ## Bulk evaluation abort + dispatch race
 
 Aborting an evaluation now parks it as `Waiting` with `WaitingReason::Aborting` before touching its builds, then aborts all in-flight builds in a handful of set-based statements instead of one round-trip per build. The dispatcher's queue finder skips `Waiting` evaluations, so it stops handing out the aborting eval's builds; any build that already escaped to a worker is aborted when it reports started.
