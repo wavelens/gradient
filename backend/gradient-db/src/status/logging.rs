@@ -112,6 +112,45 @@ pub async fn record_phase_event(
     }
 }
 
+/// Batch-record the same phase transition for many subjects, one multi-row
+/// insert per chunk. Used by bulk status writes (e.g. evaluation abort) instead
+/// of one spawned [`record_phase_event`] per subject. Best-effort.
+pub async fn record_phase_events(
+    db: &impl ConnectionTrait,
+    subject_kind: i16,
+    subject_ids: &[uuid::Uuid],
+    phase: i16,
+    at: chrono::NaiveDateTime,
+) {
+    // Stay well under Postgres' 65535-bind-parameter cap (6 columns per row).
+    const INSERT_CHUNK: usize = 8192;
+    let rows: Vec<_> = subject_ids
+        .iter()
+        .map(|&subject_id| {
+            gradient_entity::phase_event::Model {
+                id: gradient_entity::ids::PhaseEventId::now_v7(),
+                subject_kind,
+                subject_id,
+                phase,
+                at,
+                worker_id: None,
+                ..Default::default()
+            }
+            .into_active_model()
+        })
+        .collect();
+
+    for chunk in rows.chunks(INSERT_CHUNK) {
+        if let Err(e) = gradient_entity::phase_event::Entity::insert_many(chunk.to_vec())
+            .exec(db)
+            .await
+        {
+            warn!(error = %e, "failed to record phase_events batch");
+            return;
+        }
+    }
+}
+
 /// Inserts a single `evaluation_message` row, propagating any DB error.
 pub async fn insert_evaluation_message<C: ConnectionTrait>(
     db: &C,

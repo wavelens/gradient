@@ -741,7 +741,10 @@ impl<'a> BuildStateHandler<'a> {
             for eval in evals {
                 let reason = eval.waiting_reason.as_ref().and_then(WaitingReason::from_json);
                 if eval.status == EvaluationStatus::Waiting
-                    && reason == Some(WaitingReason::Draining)
+                    && matches!(
+                        reason,
+                        Some(WaitingReason::Draining) | Some(WaitingReason::Aborting)
+                    )
                 {
                     continue;
                 }
@@ -770,8 +773,8 @@ impl<'a> BuildStateHandler<'a> {
             let reason = eval.waiting_reason.as_ref().and_then(WaitingReason::from_json);
 
             // Approval, no-cache and storage-full parks are owned by webhook +
-            // cache hooks. The reconciler must not unpark them just because
-            // workers showed up.
+            // cache hooks; an Aborting park is owned by the abort path. The
+            // reconciler must not unpark any of them just because workers showed up.
             if eval.status == EvaluationStatus::Waiting
                 && reason.as_ref().is_some_and(|r| {
                     matches!(
@@ -779,6 +782,7 @@ impl<'a> BuildStateHandler<'a> {
                         WaitingReason::Approval { .. }
                             | WaitingReason::NoCache
                             | WaitingReason::CacheStorageFull
+                            | WaitingReason::Aborting
                     )
                 })
             {

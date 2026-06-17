@@ -66,6 +66,10 @@ pub enum WaitingReason {
     /// The instance is draining: scheduling is paused and this evaluation is
     /// parked until draining is disabled or the server restarts.
     Draining,
+    /// The evaluation is being aborted: it is parked first so the dispatcher
+    /// stops handing out its builds, then its builds are aborted and the eval
+    /// transitions to `Aborted`. The reconciler never unparks this reason.
+    Aborting,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -174,6 +178,14 @@ mod tests {
         let r = WaitingReason::Draining;
         let v = r.to_json();
         assert_eq!(v["kind"], "draining");
+        assert_eq!(WaitingReason::from_json(&v).unwrap(), r);
+    }
+
+    #[test]
+    fn aborting_round_trip() {
+        let r = WaitingReason::Aborting;
+        let v = r.to_json();
+        assert_eq!(v["kind"], "aborting");
         assert_eq!(WaitingReason::from_json(&v).unwrap(), r);
     }
 
