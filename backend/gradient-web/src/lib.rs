@@ -348,6 +348,12 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             "/build-requests/{session}/dispatch",
             post(build_requests::dispatch::post_dispatch),
         )
+        .route(
+            "/build-requests/source",
+            post(build_requests::source::post_source).layer(DefaultBodyLimit::max(
+                gradient_types::constants::MAX_BUILD_REQUEST_SIZE,
+            )),
+        )
         .route("/caches", get(caches::get).put(caches::put))
         .route("/caches/available", get(caches::get_cache_name_available))
         .route(
