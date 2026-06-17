@@ -21,8 +21,8 @@ use gradient_forge::ParsedPullRequestReviewEvent;
 use gradient_scheduler::Scheduler;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DbBackend, EntityTrait, FromQueryResult, IntoActiveModel,
-    QueryFilter, Statement, Value,
+    ActiveModelTrait, ColumnTrait, Condition, DbBackend, EntityTrait, FromQueryResult,
+    IntoActiveModel, QueryFilter, Statement, Value,
 };
 use serde::Deserialize;
 use std::sync::Arc;
@@ -102,28 +102,38 @@ async fn clear_installation_id(state: &Arc<ServerState>, installation_id: i64) {
 }
 
 async fn store_installation_id(state: &Arc<ServerState>, payload: &GitHubInstallationPayload) {
-    let github_login = &payload.installation.account.login;
-    if let Ok(Some(org)) = EOrganization::find()
-        .filter(COrganization::Name.eq(github_login.as_str()))
-        .one(&state.web_db)
+    use std::collections::HashSet;
+
+    let github_login = payload.installation.account.login.as_str();
+    let installation_id = payload.installation.id;
+
+    // Bind the installation to every org that already tracks a github.com repo
+    // under the installing account; the org name need not match the GitHub
+    // login. A `repository_selection: all` install carries no repo list, so the
+    // account login is the only signal we have to find the owning orgs.
+    let owner_org_ids: HashSet<OrganizationId> = EProject::find()
+        .filter(CProject::Repository.contains("github.com"))
+        .all(&state.web_db)
         .await
-    {
-        let installation_id = payload.installation.id;
-        let org_id = org.id;
-        let creator = org.created_by;
-        let mut active = org.into_active_model();
-        active.github_installation_id = Set(Some(installation_id));
-        if let Err(e) = active.update(&state.web_db).await {
-            warn!(error = %e, installation_id, org_name = %github_login, "Failed to store github_installation_id");
-            return;
-        }
-        info!(installation_id, org_name = %github_login, "GitHub App installed on organization");
-        if let Err(e) =
-            gradient_ci::ensure_github_app_integrations(&state.web_db, org_id, creator).await
-        {
-            warn!(error = %e, %org_id, "Failed to materialise GitHub App integration rows");
-        }
-    } else {
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|p| project_owner_matches(&p.repository, github_login))
+        .map(|p| p.organization)
+        .collect();
+
+    // Plus any org named exactly after the account, covering an org that is
+    // named after the GitHub account but tracks no project yet.
+    let orgs = EOrganization::find()
+        .filter(
+            Condition::any()
+                .add(COrganization::Name.eq(github_login))
+                .add(COrganization::Id.is_in(owner_org_ids)),
+        )
+        .all(&state.web_db)
+        .await
+        .unwrap_or_default();
+
+    if orgs.is_empty() {
         let sender_login = payload
             .sender
             .as_ref()
@@ -132,10 +142,39 @@ async fn store_installation_id(state: &Arc<ServerState>, payload: &GitHubInstall
         warn!(
             github_login = %github_login,
             sender = %sender_login,
-            installation_id = payload.installation.id,
+            installation_id,
             "GitHub App installed but no matching Gradient organization found"
         );
+
+        return;
     }
+
+    for org in orgs {
+        let org_id = org.id;
+        let creator = org.created_by;
+        let mut active = org.into_active_model();
+        active.github_installation_id = Set(Some(installation_id));
+        if let Err(e) = active.update(&state.web_db).await {
+            warn!(error = %e, installation_id, %org_id, "Failed to store github_installation_id");
+            continue;
+        }
+
+        info!(installation_id, %org_id, github_login = %github_login, "GitHub App installed on organization");
+        if let Err(e) =
+            gradient_ci::ensure_github_app_integrations(&state.web_db, org_id, creator).await
+        {
+            warn!(error = %e, %org_id, "Failed to materialise GitHub App integration rows");
+        }
+    }
+}
+
+/// True when `repo_url` is a github.com repository whose owner equals `login`
+/// (case-insensitive). Lets the App-install hook bind the installation to every
+/// org already tracking a repo under the installing account, without requiring
+/// the org name to match the GitHub login.
+fn project_owner_matches(repo_url: &str, login: &str) -> bool {
+    repo_url.to_ascii_lowercase().contains("github.com")
+        && parse_owner_repo(repo_url).is_some_and(|(owner, _)| owner.eq_ignore_ascii_case(login))
 }
 
 // ── GitHub App: resolve installation + repository URL → integrations ───────
@@ -1717,8 +1756,23 @@ mod tests {
     use super::super::WebhookTriggerOutcome;
     use super::{
         GradientCommand, PullRequestApprovalContext, gate_decision, glob_match_pattern,
-        glob_matches, normalize_repo_url, parse_gradient_command,
+        glob_matches, normalize_repo_url, parse_gradient_command, project_owner_matches,
     };
+
+    #[test]
+    fn install_binds_github_repo_owner_case_insensitively() {
+        assert!(project_owner_matches("https://github.com/acme/widgets.git", "acme"));
+        assert!(project_owner_matches("https://github.com/Acme/widgets", "acme"));
+        assert!(project_owner_matches("git@github.com:acme/widgets.git", "acme"));
+        assert!(project_owner_matches("git+https://github.com/acme/widgets", "ACME"));
+    }
+
+    #[test]
+    fn install_skips_other_owner_or_non_github_host() {
+        assert!(!project_owner_matches("https://github.com/other/widgets", "acme"));
+        assert!(!project_owner_matches("https://gitea.example.com/acme/widgets", "acme"));
+        assert!(!project_owner_matches("https://gitlab.com/acme/widgets", "acme"));
+    }
 
     fn fork_ctx() -> PullRequestApprovalContext {
         PullRequestApprovalContext {

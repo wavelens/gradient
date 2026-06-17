@@ -2,6 +2,16 @@
 
 This page tracks notable tests added to Gradient and where they live.
 
+## GitHub App installation org-binding
+
+`backend/gradient-web/src/endpoints/forge_hooks/trigger.rs`:
+`install_binds_github_repo_owner_case_insensitively` and
+`install_skips_other_owner_or_non_github_host` cover `project_owner_matches`, the
+predicate that binds an `installation.created` webhook to every org tracking a
+`github.com/<account>/...` repo. Previously the installation only bound to an org
+whose name equalled the GitHub login, so an `installation.created` for an account
+with a differently-named org left `github_installation_id` unset.
+
 ## Minor frontend issues (#401)
 
 `backend/gradient-web/src/endpoints/projects/auto_attach.rs`: `host_parsing_covers_url_shapes`,
