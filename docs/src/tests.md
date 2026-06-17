@@ -77,6 +77,7 @@ The scheduler also keeps a bounded ring of recent dispatch decisions - every sco
 
 - `backend/gradient-scheduler/src/jobs.rs`: `records_dispatch_decisions_including_rejected_candidates` asserts a worker that idles on a negative best score still records the decision with the rejected candidate and its negative score, and a later dispatch records a decision naming the winner.
 - `frontend/src/app/features/board/live-jobs/live-jobs.component.spec.ts`: the decision-scores spec asserts the "incl. rejected" scope flattens decisions to candidate rows, marking the winner and showing negative-scored, passed-over candidates.
+- `backend/gradient-web/tests/board_decisions.rs`: `dispatch_decisions_rejects_non_superuser` and `dispatch_decisions_superuser_returns_empty_ring` guard the routing-tier fix - the handler needs `Extension<MUser>`, so the route must sit on the authenticated tier; on the optional-auth tier it returned `500` for every caller and the "incl. rejected" table stayed empty.
 
 ## Bulk evaluation abort + dispatch race
 

@@ -6086,6 +6086,8 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/DispatchDecision'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '403':
           description: Caller is not a superuser
 

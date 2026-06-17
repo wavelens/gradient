@@ -220,6 +220,12 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             "/board/expensive/top-orgs",
             get(board::get_top_orgs_by_buildtime),
         )
+        // Superuser-only: needs MUser, so it lives on the authenticated tier
+        // (the optional-auth tier only provides MaybeUser).
+        .route(
+            "/board/jobs/decisions",
+            get(board::get_dispatch_decisions),
+        )
         .route(
             "/orgs/{organization}",
             patch(orgs::patch_organization).delete(orgs::delete_organization),
@@ -558,7 +564,6 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             get(projects::get_entry_point_metrics),
         )
         .route("/board/jobs/dispatched", get(board::get_dispatched_jobs))
-        .route("/board/jobs/decisions", get(board::get_dispatch_decisions))
         .route("/board/jobs/pending", get(board::get_pending_jobs))
         .route("/board/jobs/expensive", get(board::get_expensive_jobs))
         .route(
