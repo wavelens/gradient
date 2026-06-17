@@ -21,6 +21,12 @@ pub struct BuildSession {
     pub missing: Vec<String>,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct BlobsResponse {
+    pub uploaded: usize,
+    pub remaining: usize,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct DispatchRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -34,6 +40,7 @@ pub struct DispatchResponse {
     pub evaluation: String,
     pub project: String,
     pub commit: String,
+    pub cache: Option<String>,
 }
 
 pub struct BuildRequestsApi<'a>(pub(crate) &'a Client);
@@ -59,13 +66,44 @@ impl BuildRequestsApi<'_> {
         &self,
         session: &str,
         form: reqwest::multipart::Form,
-    ) -> Result<String, ConnectorError> {
+    ) -> Result<BlobsResponse, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
             self.0.token(),
             Method::POST,
             &format!("build-requests/{session}/blobs"),
+            true,
+        )?
+        .multipart(form);
+        http::decode(req.send().await?).await
+    }
+
+    pub async fn upload_source_nar(
+        &self,
+        organization: &str,
+        target: Option<&str>,
+        system: Option<&str>,
+        nar_bytes: Vec<u8>,
+    ) -> Result<DispatchResponse, ConnectorError> {
+        let mut form = reqwest::multipart::Form::new().part(
+            "nar",
+            reqwest::multipart::Part::bytes(nar_bytes).file_name("source.nar"),
+        );
+        if let Some(t) = target {
+            form = form.text("target", t.to_owned());
+        }
+
+        if let Some(s) = system {
+            form = form.text("system", s.to_owned());
+        }
+
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::POST,
+            &format!("build-requests/source?organization={organization}"),
             true,
         )?
         .multipart(form);
