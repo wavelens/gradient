@@ -19,7 +19,7 @@ use crate::github_app::verify_github_signature;
 use crate::provider::ForgeProvider;
 use crate::reporter::{CiReporter, GithubReporter};
 use crate::webhook::{
-    ParsedPullRequestEvent, ParsedPushEvent, ParsedReleaseEvent, WebhookEventKind,
+    ParsedPullRequestEvent, ParsedPushEvent, ParsedReleaseEvent, PushOutcome, WebhookEventKind,
 };
 
 #[derive(Debug)]
@@ -69,7 +69,7 @@ impl ForgeProvider for GithubProvider {
         WebhookEventKind::Unknown("github".into())
     }
 
-    fn parse_push_event(&self, body: &[u8]) -> Option<ParsedPushEvent> {
+    fn parse_push_event(&self, body: &[u8]) -> Option<PushOutcome> {
         ParsedPushEvent::from_github(body)
     }
 

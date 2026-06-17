@@ -3389,6 +3389,40 @@ Run with: `cargo test -p gradient-sources --lib git::tests::git_transport_url`
 - `git_transport_url_passes_through_bare_schemes_and_scp` - `https://`, `git://`,
   and `git@host:path` are returned verbatim.
 
+## Gitea test webhook rejected as malformed (#428)
+
+Gitea's "Test Delivery" button sends a push event with an all-zero `after` SHA
+(the same shape a real branch/tag deletion has). `decode_push_commit` returns
+`None` for that, and the endpoint conflated it with a genuinely unparseable
+payload, answering `400 malformed webhook payload` - which makes the forge mark
+the webhook as failing. Push parsing now returns a `PushOutcome`: `None` only for
+unparseable JSON (still `400`), `Ignored` for a well-formed but non-buildable
+delivery (all-zero SHA), and `Build` for a real push. The endpoint maps `Ignored`
+to a `200` empty `WebhookResponse` (`event: "push"`, no queued/skipped).
+
+### gradient-forge
+
+Run with: `cargo test -p gradient-forge --lib webhook`
+
+- `gitea_test_webhook_zero_sha_is_ignored_not_malformed` - the exact issue
+  payload parses to `Some(PushOutcome::Ignored)`, not `None`.
+- `github_branch_deletion_zero_sha_is_ignored` - a real branch deletion is also
+  a no-op, not an error.
+- `push_with_unparseable_json_is_malformed` - non-JSON and `{}` still yield
+  `None` (the `400` path).
+- `github_push_extracts_commit_subject_and_author`,
+  `github_push_without_head_commit_has_no_message`,
+  `gitlab_push_picks_commit_matching_after` - real pushes still parse to
+  `PushOutcome::Build` (updated for the new return type).
+
+### gradient-web
+
+Run with: `cargo test -p gradient-web --test forge_hooks`
+
+- `forge_webhook_test_ping_zero_sha_is_ok_noop` - posting the all-zero Gitea
+  push to `/hooks/gitea/{org}/{name}` (valid signature) returns `200` with an
+  empty `push` response and touches no trigger/project rows.
+
 ## Source-IP allowlist (#282)
 
 ### Backend

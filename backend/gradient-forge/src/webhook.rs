@@ -358,6 +358,15 @@ pub struct ParsedPushEvent {
     pub is_tag: bool,
 }
 
+/// Outcome of parsing a push webhook payload. Separates a buildable push from a
+/// well-formed delivery with nothing to build - a branch/tag deletion or a forge
+/// "test" webhook, both of which carry an all-zero `after` SHA - so the endpoint
+/// answers the latter with a 200 no-op rather than rejecting it as malformed.
+pub enum PushOutcome {
+    Build(ParsedPushEvent),
+    Ignored,
+}
+
 /// Pull-request event normalised across forges. `commit_hash` is the PR head SHA.
 pub struct ParsedPullRequestEvent {
     pub commit_hash: Vec<u8>,
@@ -497,7 +506,7 @@ fn gitlab_project_urls(project: &GitLabProject) -> Vec<String> {
 // ── ParsedPushEvent impl ───────────────────────────────────────────────────
 
 impl ParsedPushEvent {
-    pub fn from_github(body: &[u8]) -> Option<Self> {
+    pub fn from_github(body: &[u8]) -> Option<PushOutcome> {
         let payload: GitHubPushPayload = match serde_json::from_slice(body) {
             Ok(p) => p,
             Err(e) => {
@@ -505,19 +514,21 @@ impl ParsedPushEvent {
                 return None;
             }
         };
-        let pc = decode_push_commit(&payload.git_ref, &payload.after, "github")?;
+        let Some(pc) = decode_push_commit(&payload.git_ref, &payload.after, "github") else {
+            return Some(PushOutcome::Ignored);
+        };
         let head = payload.head_commit.as_ref();
-        Some(Self {
+        Some(PushOutcome::Build(Self {
             commit_hash: pc.hash,
             repository_urls: vec![payload.repository.clone_url, payload.repository.ssh_url],
             commit_message: head.and_then(commit_subject),
             author_name: head.and_then(|c| c.author.as_ref()).and_then(|a| a.name.clone()),
             ref_name: pc.ref_name,
             is_tag: pc.is_tag,
-        })
+        }))
     }
 
-    pub fn from_gitea(body: &[u8]) -> Option<Self> {
+    pub fn from_gitea(body: &[u8]) -> Option<PushOutcome> {
         let payload: GiteaPushPayload = match serde_json::from_slice(body) {
             Ok(p) => p,
             Err(e) => {
@@ -525,24 +536,26 @@ impl ParsedPushEvent {
                 return None;
             }
         };
-        let pc = decode_push_commit(&payload.git_ref, &payload.after, "gitea")?;
+        let Some(pc) = decode_push_commit(&payload.git_ref, &payload.after, "gitea") else {
+            return Some(PushOutcome::Ignored);
+        };
         let mut urls = vec![payload.repository.clone_url];
         if let Some(ssh) = payload.repository.ssh_url {
             urls.push(ssh);
         }
 
         let head = payload.head_commit.as_ref();
-        Some(Self {
+        Some(PushOutcome::Build(Self {
             commit_hash: pc.hash,
             repository_urls: urls,
             commit_message: head.and_then(commit_subject),
             author_name: head.and_then(|c| c.author.as_ref()).and_then(|a| a.name.clone()),
             ref_name: pc.ref_name,
             is_tag: pc.is_tag,
-        })
+        }))
     }
 
-    pub fn from_gitlab(body: &[u8]) -> Option<Self> {
+    pub fn from_gitlab(body: &[u8]) -> Option<PushOutcome> {
         let payload: GitLabPushPayload = match serde_json::from_slice(body) {
             Ok(p) => p,
             Err(e) => {
@@ -550,7 +563,9 @@ impl ParsedPushEvent {
                 return None;
             }
         };
-        let pc = decode_push_commit(&payload.git_ref, &payload.after, "gitlab")?;
+        let Some(pc) = decode_push_commit(&payload.git_ref, &payload.after, "gitlab") else {
+            return Some(PushOutcome::Ignored);
+        };
         let mut urls = vec![payload.project.http_url];
         if let Some(ssh) = payload.project.ssh_url {
             urls.push(ssh);
@@ -561,14 +576,14 @@ impl ParsedPushEvent {
             .iter()
             .find(|c| c.id.as_deref() == Some(payload.after.as_str()))
             .or_else(|| payload.commits.last());
-        Some(Self {
+        Some(PushOutcome::Build(Self {
             commit_hash: pc.hash,
             repository_urls: urls,
             commit_message: head.and_then(commit_subject),
             author_name: head.and_then(|c| c.author.as_ref()).and_then(|a| a.name.clone()),
             ref_name: pc.ref_name,
             is_tag: pc.is_tag,
-        })
+        }))
     }
 }
 
@@ -878,6 +893,14 @@ mod tests {
 
     const VALID_SHA: &str = "abcdef0123456789abcdef0123456789abcdef01";
     const ZERO_SHA: &str = "0000000000000000000000000000000000000000";
+
+    #[track_caller]
+    fn build(outcome: Option<PushOutcome>) -> ParsedPushEvent {
+        match outcome {
+            Some(PushOutcome::Build(ev)) => ev,
+            _ => panic!("expected a buildable push"),
+        }
+    }
 
     // ── push helpers ──────────────────────────────────────────────────────
 
@@ -1395,7 +1418,7 @@ mod tests {
                 "head_commit": {{ "id": "{VALID_SHA}", "message": "feat: add thing\n\nlong body", "author": {{ "name": "Octo Cat" }} }}
             }}"#
         );
-        let ev = ParsedPushEvent::from_github(body.as_bytes()).unwrap();
+        let ev = build(ParsedPushEvent::from_github(body.as_bytes()));
         assert_eq!(ev.commit_message.as_deref(), Some("feat: add thing"));
         assert_eq!(ev.author_name.as_deref(), Some("Octo Cat"));
     }
@@ -1409,7 +1432,7 @@ mod tests {
                 "repository": {{ "clone_url": "https://github.com/org/repo.git", "ssh_url": "git@github.com:org/repo.git" }}
             }}"#
         );
-        let ev = ParsedPushEvent::from_github(body.as_bytes()).unwrap();
+        let ev = build(ParsedPushEvent::from_github(body.as_bytes()));
         assert_eq!(ev.commit_message, None);
         assert_eq!(ev.author_name, None);
     }
@@ -1427,8 +1450,49 @@ mod tests {
                 ]
             }}"#
         );
-        let ev = ParsedPushEvent::from_gitlab(body.as_bytes()).unwrap();
+        let ev = build(ParsedPushEvent::from_gitlab(body.as_bytes()));
         assert_eq!(ev.commit_message.as_deref(), Some("fix: the bug"));
         assert_eq!(ev.author_name.as_deref(), Some("Dev"));
+    }
+
+    #[test]
+    fn gitea_test_webhook_zero_sha_is_ignored_not_malformed() {
+        let body = format!(
+            r#"{{
+                "ref": "refs/heads/master",
+                "before": "{ZERO_SHA}",
+                "after": "{ZERO_SHA}",
+                "commits": [
+                    {{ "id": "{ZERO_SHA}", "message": "This is a fake commit", "verification": null, "added": null, "removed": null, "modified": null }}
+                ],
+                "head_commit": {{ "id": "{ZERO_SHA}", "message": "This is a fake commit", "verification": null }},
+                "repository": {{ "clone_url": "https://gitea.example.com/user/repo.git", "ssh_url": "git@gitea.example.com:user/repo.git" }}
+            }}"#
+        );
+        assert!(matches!(
+            ParsedPushEvent::from_gitea(body.as_bytes()),
+            Some(PushOutcome::Ignored)
+        ));
+    }
+
+    #[test]
+    fn push_with_unparseable_json_is_malformed() {
+        assert!(ParsedPushEvent::from_gitea(b"not json").is_none());
+        assert!(ParsedPushEvent::from_github(b"{}").is_none());
+    }
+
+    #[test]
+    fn github_branch_deletion_zero_sha_is_ignored() {
+        let body = format!(
+            r#"{{
+                "ref": "refs/heads/feature",
+                "after": "{ZERO_SHA}",
+                "repository": {{ "clone_url": "https://github.com/org/repo.git", "ssh_url": "git@github.com:org/repo.git" }}
+            }}"#
+        );
+        assert!(matches!(
+            ParsedPushEvent::from_github(body.as_bytes()),
+            Some(PushOutcome::Ignored)
+        ));
     }
 }

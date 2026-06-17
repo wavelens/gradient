@@ -5826,7 +5826,9 @@ paths:
 
         **Handled events:**
         - `push` / `pull_request` / `release` - trigger an evaluation on any project whose
-          repository URL matches the matching trigger.
+          repository URL matches the matching trigger. A `push` carrying an
+          all-zero `after` SHA (a branch/tag deletion or a forge "test" delivery)
+          is accepted as a `200` no-op rather than rejected.
         - `check_run` - the "Approve and Run" action clears a fork-PR approval gate.
         - `issue_comment` - `/gradient run` / `/gradient approve` maintainer commands.
         - `pull_request_review` - a maintainer's approving review clears a fork-PR approval gate.
@@ -5869,7 +5871,7 @@ paths:
                       message:
                         $ref: '#/components/schemas/WebhookResponse'
         '400':
-          description: Malformed payload or unsupported forge
+          description: Unparseable JSON payload or unsupported forge
         '401':
           description: Invalid webhook signature
         '404':
@@ -5919,6 +5921,9 @@ paths:
         `project_integration.inbound_integration` points at this row and whose
         repository URL matches the webhook payload's clone URL.
 
+        A push carrying an all-zero `after` SHA (a branch/tag deletion or a
+        forge "test" delivery) is accepted as a `200` no-op rather than rejected.
+
         This endpoint is unauthenticated (verified via forge-specific signature).
       operationId: forgeWebhook
       requestBody:
@@ -5941,7 +5946,7 @@ paths:
                       message:
                         $ref: '#/components/schemas/WebhookResponse'
         '400':
-          description: Malformed payload or unsupported forge
+          description: Unparseable JSON payload or unsupported forge
         '401':
           description: Invalid webhook signature
         '404':

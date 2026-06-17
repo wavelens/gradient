@@ -15,7 +15,7 @@ use std::sync::Arc;
 use gradient_types::ForgeType;
 use crate::reporter::CiReporter;
 use crate::webhook::{
-    ParsedPullRequestEvent, ParsedPushEvent, ParsedReleaseEvent, WebhookEventKind,
+    ParsedPullRequestEvent, ParsedReleaseEvent, PushOutcome, WebhookEventKind,
 };
 
 pub trait ForgeProvider: Send + Sync + std::fmt::Debug {
@@ -57,7 +57,7 @@ pub trait ForgeProvider: Send + Sync + std::fmt::Debug {
     /// Map a raw forge event string onto the shared [`WebhookEventKind`].
     fn classify_event(&self, event: &str) -> WebhookEventKind;
 
-    fn parse_push_event(&self, body: &[u8]) -> Option<ParsedPushEvent>;
+    fn parse_push_event(&self, body: &[u8]) -> Option<PushOutcome>;
     fn parse_pull_request_event(&self, body: &[u8]) -> Option<ParsedPullRequestEvent>;
     fn parse_release_event(&self, body: &[u8]) -> Option<ParsedReleaseEvent>;
 }
