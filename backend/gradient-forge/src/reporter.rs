@@ -283,6 +283,15 @@ pub trait CiReporter: Send + Sync + std::fmt::Debug + 'static {
     ) -> Result<()> {
         Ok(())
     }
+
+    /// Non-mutating credential + connectivity probe behind the Actions "Test"
+    /// button. Confirms this reporter's token / App installation can reach
+    /// `owner/repo` without writing any status or check run. The default impl
+    /// reads the repository's default branch - an authenticated GET every real
+    /// reporter implements and that any status/PR token can perform.
+    async fn verify(&self, owner: &str, repo: &str) -> Result<()> {
+        self.default_branch(owner, repo).await.map(|_| ())
+    }
 }
 
 // ── NoopCiReporter ────────────────────────────────────────────────────────────
@@ -2360,6 +2369,56 @@ mod tests {
             url,
             "https://gitea.example.com/api/v1/repos/octo/demo/issues/42/comments"
         );
+    }
+
+    // ── verify (Test button) probe ───────────────────────────────────────────
+
+    #[derive(Debug, Default)]
+    struct ProbeReporter {
+        reported: std::sync::atomic::AtomicBool,
+        branch_reads: std::sync::atomic::AtomicUsize,
+        unreachable: bool,
+    }
+
+    #[async_trait]
+    impl CiReporter for ProbeReporter {
+        async fn report(&self, _report: &CiReport) -> Result<Option<i64>> {
+            self.reported
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            Ok(None)
+        }
+
+        async fn default_branch(&self, _owner: &str, _repo: &str) -> Result<String> {
+            self.branch_reads
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if self.unreachable {
+                anyhow::bail!("forge unreachable");
+            }
+
+            Ok("main".into())
+        }
+    }
+
+    #[tokio::test]
+    async fn verify_reads_repo_without_reporting() {
+        use std::sync::atomic::Ordering::SeqCst;
+
+        let ok = ProbeReporter::default();
+        ok.verify("acme", "widgets")
+            .await
+            .expect("verify passes when the repo is reachable");
+        assert_eq!(ok.branch_reads.load(SeqCst), 1);
+        assert!(
+            !ok.reported.load(SeqCst),
+            "verify must never post a status to the forge"
+        );
+
+        let down = ProbeReporter {
+            unreachable: true,
+            ..Default::default()
+        };
+        let err = down.verify("acme", "widgets").await.unwrap_err();
+        assert!(err.to_string().contains("forge unreachable"));
     }
 
     #[test]

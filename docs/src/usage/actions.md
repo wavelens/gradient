@@ -97,6 +97,8 @@ A run that targets a wildcard other than the project default - e.g. `/gradient r
 
 The integration must be `kind: outbound`. The forge type determines the API call format (Gitea, GitLab, GitHub App).
 
+The **Test** button does not post a synthetic status (a forge rejects a status against a placeholder commit); it runs a non-mutating connectivity check that confirms the integration's credentials can reach the project repository. The same applies to **Open PR**.
+
 ## Open PR
 
 Opens (or updates) a pull request that bumps the project's flake inputs, driven by a native `flake.lock` updater. Unlike the other actions it does not react to a project's ordinary runs: it fires on a verify-gate event (default `build.completed`) but only for `input_update` evaluations.

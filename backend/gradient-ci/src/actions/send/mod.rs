@@ -16,4 +16,4 @@ pub(crate) use forge_status::execute_forge_status_report;
 pub(crate) use mail::execute_send_mail;
 pub(crate) use open_pr::execute_open_pr;
 pub(crate) use web_request::execute_send_web_request;
-pub use forge_status::reporter_for_project;
+pub use forge_status::{reporter_for_project, verify_forge_action};
