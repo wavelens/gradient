@@ -571,17 +571,16 @@ in {
             trusted out of the box.
           '';
           type = lib.types.listOf lib.types.str;
-          default = [ "127.0.0.1/32" "::1/128" ];
+          default = [ "127.0.0.1/8" "::1/128" ];
         };
 
         localIps = lib.mkOption {
           description = ''
             CIDR allowlist whose resolved client IPs receive a cache's
-            `local_priority` (when set and non-zero). Defaults to the
-            RFC1918 10/8 block.
+            `local_priority` (when set and non-zero).
           '';
           type = lib.types.listOf lib.types.str;
-          default = [ "10.0.0.0/8" ];
+          default = [ "192.168.0.0/16" "172.16.0.0/12" "100.64.0.0/10" "10.0.0.0/8" "fc00::/7" ];
         };
 
         logLevel = lib.mkOption {
