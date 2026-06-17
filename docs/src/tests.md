@@ -4319,3 +4319,30 @@ NixOS VM (`nix/tests/gradient/open-pr`):
   and one tracked input, the worker bumps the input and verifies the candidate
   lock, and a PR is opened on the (test) forge; a re-run with no upstream change
   produces an empty patch and opens no second PR.
+
+## Gradient build end-to-end + nix fast paths (#422)
+
+Fixes two blocking bugs in `gradient build` (the CLI decoded a successful blob
+upload as an error; the scheduler git-cloned the materialised
+`/nix/store/<hash>-source`) and adds the `nix`-feature source NAR upload and
+post-build `result`.
+
+- `backend/gradient-storage/src/source_nar.rs::tests::from_bytes_matches_dir` -
+  `source_nar_from_bytes` computes the same store path/hashes as
+  `materialise_source_nar` for the same NAR, so the CLI and server agree on the
+  source store path.
+- `backend/gradient-scheduler/src/dispatch.rs::eval_source_tests` -
+  `cached_source_dispatches_without_fetch` dispatches a `/nix/store/...`
+  repository as `FlakeSource::Cached` with `[EvaluateFlake, EvaluateDerivations]`
+  and the source in `required_paths`; `repository_source_keeps_fetch` leaves a
+  git URL on the `FlakeSource::Repository` + `FetchFlake` path.
+- `backend/gradient-web/tests/build_requests_source.rs` -
+  `source_upload_creates_queued_eval` (multipart NAR → Queued eval, `cache` null)
+  and `source_upload_missing_nar_is_400`.
+- `backend/gradient-web/tests/build_requests_dispatch.rs` - the happy paths now
+  assert the `DispatchResponse.cache` field.
+- `cli/connector/tests/build_requests_api.rs` - `upload_blobs_decodes_counts`
+  (decodes `{uploaded,remaining}` instead of erroring on a 200) and
+  `upload_source_nar_returns_dispatch`.
+- The `nix copy`/`result` substitution and the staged NAR pack are daemon/`nix`
+  dependent and covered end-to-end by CI.
