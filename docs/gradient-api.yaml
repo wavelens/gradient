@@ -3267,6 +3267,64 @@ paths:
         '410':
           description: Session expired.
 
+  /build-requests/source:
+    post:
+      tags: [build-requests]
+      summary: Upload a pre-packed source NAR and queue an evaluation
+      description: |-
+        One-shot alternative to the manifest/blob flow for clients built with
+        the `nix` feature. The client NAR-packs the git-tracked source itself
+        and uploads it here; the server computes the `/nix/store/<hash>-source`
+        path, signs it, lazily creates the per-org `build-request` project, and
+        queues an evaluation. Bounded by the same per-request size limit as blob
+        upload.
+      operationId: postBuildRequestSource
+      parameters:
+        - name: organization
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Organization name.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [nar]
+              properties:
+                nar:
+                  type: string
+                  format: binary
+                  description: The packed source NAR.
+                target:
+                  type: string
+                  description: Eval target attribute path (defaults to the project wildcard).
+                system:
+                  type: string
+                  description: Target system.
+      responses:
+        '200':
+          description: Evaluation queued
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/DispatchResponse'
+        '400':
+          description: Missing or empty `nar` field.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   # ── Builds ───────────────────────────────────────────────────────────────────
 
   /builds/{build}:
@@ -8591,6 +8649,13 @@ components:
           description: |-
             Synthetic commit row pointing at the materialised
             `/nix/store/<hash>-source` path. `hash` is a 20-byte zero placeholder.
+        cache:
+          type: string
+          nullable: true
+          description: |-
+            Name of the org cache the build output is signed into, for the
+            client to substitute from (`<server>/cache/<cache>`). `null` when
+            the organization has no cache.
 
     # ── Builds ────────────────────────────────────────────────────────────────
 

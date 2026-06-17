@@ -152,6 +152,7 @@ gradient build                          # eval the project's wildcard target
 gradient build checks.x86_64-linux.foo  # eval a specific attribute path
 gradient build --system x86_64-linux    # override target system (default: org preference)
 gradient build -b                       # dispatch and print the evaluation UUID, then exit
+gradient build --no-link                # skip producing a result symlink/folder
 ```
 
 Requirements and limits:
@@ -163,6 +164,18 @@ Requirements and limits:
   pass `-b`/`--background` to print only the evaluation UUID and return
   immediately. Pair it with [`gradient watch`](#watching-an-evaluation) to
   follow the build later: `eval=$(gradient build -b); gradient watch "$eval"`.
+
+After a foreground build completes, the CLI produces a `result` for the primary
+output (use `--no-link` to skip it):
+
+- A CLI built with the `nix` feature substitutes every output from the org cache
+  into the local Nix store via `nix copy` and creates a single GC-rooted `result`
+  symlink to the primary output (like `nix build`). It also packs the source NAR
+  locally and uploads it in one shot (`POST /build-requests/source`), skipping the
+  per-file blob manifest.
+- A CLI without the `nix` feature downloads the primary entry point's build
+  products into a `result/` folder (only declared `hydra-build-products` are
+  included).
 
 ### Watching an evaluation
 
