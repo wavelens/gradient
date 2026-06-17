@@ -49,7 +49,7 @@ use worker_pool::WorkerPool;
 type EdgeReadinessMap = Arc<RwLock<HashMap<EvaluationId, EdgeReadiness>>>;
 
 pub use gradient_types::BoardEvent;
-pub use jobs::PendingJobInfo;
+pub use jobs::{DecisionCandidate, DispatchDecision, PendingJobInfo};
 pub use worker_pool::WorkerInfo;
 
 #[cfg(test)]
@@ -151,5 +151,9 @@ impl Scheduler {
 
     pub async fn pending_jobs_snapshot(&self) -> Vec<jobs::PendingJobInfo> {
         self.job_tracker.read().await.pending_snapshot()
+    }
+
+    pub async fn recent_decisions(&self) -> Vec<jobs::DispatchDecision> {
+        self.job_tracker.read().await.recent_decisions()
     }
 }

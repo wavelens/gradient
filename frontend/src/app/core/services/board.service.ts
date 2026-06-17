@@ -40,6 +40,24 @@ export interface PendingJobsResponse {
   other_pending: number;
 }
 
+export interface DecisionCandidateView {
+  job_id: string;
+  kind: number;
+  organization: string;
+  build_id: string | null;
+  evaluation_id: string;
+  pname: string | null;
+  score: number;
+}
+
+export interface DispatchDecisionView {
+  at: string;
+  worker_id: string;
+  kind: number;
+  winner: string | null;
+  candidates: DecisionCandidateView[];
+}
+
 export interface GradientCapabilities {
   core: boolean; federate: boolean; fetch: boolean; eval: boolean; build: boolean; cache: boolean;
 }
@@ -309,6 +327,12 @@ export class BoardService {
 
   getPendingJobs(): Observable<PendingJobsResponse> {
     return this.api.get<PendingJobsResponse>('board/jobs/pending');
+  }
+
+  /// Recent dispatch decisions with every candidate's score, including the
+  /// rejected/negative ones the dispatcher passed over (superuser-only).
+  getDispatchDecisions(): Observable<DispatchDecisionView[]> {
+    return this.api.get<DispatchDecisionView[]>('board/jobs/decisions');
   }
 
   getJob(id: string): Observable<DispatchedJobDetail> {

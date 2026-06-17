@@ -98,6 +98,59 @@ describe('BoardLiveJobsComponent - dispatched pname column', () => {
   });
 });
 
+describe('BoardLiveJobsComponent - decision scores (#419)', () => {
+  beforeEach(() => sessionStorage.clear());
+
+  function setupDecisions(): ComponentFixture<BoardLiveJobsComponent> {
+    TestBed.configureTestingModule({
+      imports: [BoardLiveJobsComponent],
+      providers: [
+        provideRouter([]),
+        {
+          provide: BoardService,
+          useValue: {
+            getDispatchedJobs: () => of({ jobs: [], other_running: 0 }),
+            getPendingJobs: () => of({ jobs: [], other_pending: 0 }),
+            getDispatchDecisions: () =>
+              of([
+                {
+                  at: '2026-06-08T00:00:00Z',
+                  worker_id: 'w1',
+                  kind: 1,
+                  winner: 'j1',
+                  candidates: [
+                    { job_id: 'j1', kind: 1, organization: 'o1', build_id: 'b1', evaluation_id: 'e1', pname: 'win', score: 12 },
+                    { job_id: 'j2', kind: 1, organization: 'o2', build_id: 'b2', evaluation_id: 'e2', pname: 'loser', score: -8 },
+                  ],
+                },
+              ]),
+          },
+        },
+        { provide: BoardLiveService, useValue: { connect: () => EMPTY } },
+      ],
+    });
+    const fixture = TestBed.createComponent(BoardLiveJobsComponent);
+    fixture.detectChanges();
+    return fixture;
+  }
+
+  it('surfaces rejected/negative candidate scores when scope is "incl. rejected"', () => {
+    const fixture = setupDecisions();
+    const cmp = fixture.componentInstance;
+    cmp.setScoreScope('all');
+    fixture.detectChanges();
+
+    const rows = cmp.decisionRows();
+    expect(rows.length).toBe(2);
+    expect(rows.some((r) => r.score < 0 && r.pname === 'loser' && !r.won)).toBe(true);
+    expect(rows.some((r) => r.pname === 'win' && r.won)).toBe(true);
+
+    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(text).toContain('passed over');
+    expect(text).toContain('-8');
+  });
+});
+
 describe('BoardLiveJobsComponent - pending view toggle', () => {
   beforeEach(() => sessionStorage.clear());
 
