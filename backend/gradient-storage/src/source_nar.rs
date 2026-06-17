@@ -29,7 +29,7 @@ pub struct SourceNar {
     pub nar_hash_nix32: String,
 }
 
-pub async fn materialise_source_nar(staging_dir: &Path) -> Result<SourceNar> {
+async fn nar_bytes_from_dir(staging_dir: &Path) -> Result<Vec<u8>> {
     let mut stream = NarByteStream::new(staging_dir.to_path_buf());
     let mut nar_bytes: Vec<u8> = Vec::new();
     while let Some(chunk) = stream.next().await {
@@ -37,6 +37,17 @@ pub async fn materialise_source_nar(staging_dir: &Path) -> Result<SourceNar> {
         nar_bytes.extend_from_slice(&chunk);
     }
 
+    Ok(nar_bytes)
+}
+
+pub async fn materialise_source_nar(staging_dir: &Path) -> Result<SourceNar> {
+    source_nar_from_bytes(nar_bytes_from_dir(staging_dir).await?).await
+}
+
+/// Compute the `/nix/store/<hash>-source` path and metadata from a NAR packed
+/// elsewhere (e.g. the `nix`-feature CLI), keeping the server authoritative on
+/// the store path.
+pub async fn source_nar_from_bytes(nar_bytes: Vec<u8>) -> Result<SourceNar> {
     let nar_size = nar_bytes.len() as u64;
     let raw_hash = Sha256::digest(&nar_bytes);
 
@@ -90,6 +101,20 @@ mod tests {
             .expect("second call");
         assert_eq!(a.store_path, b.store_path);
         assert_eq!(a.nar_hash_nix32, b.nar_hash_nix32);
+    }
+
+    #[tokio::test]
+    async fn from_bytes_matches_dir() {
+        let dir = make_staging_dir();
+        let from_dir = materialise_source_nar(dir.path()).await.unwrap();
+        let from_bytes = source_nar_from_bytes(from_dir.nar_bytes.clone())
+            .await
+            .unwrap();
+        assert_eq!(from_dir.store_path, from_bytes.store_path);
+        assert_eq!(from_dir.store_hash, from_bytes.store_hash);
+        assert_eq!(from_dir.nar_hash_nix32, from_bytes.nar_hash_nix32);
+        assert_eq!(from_dir.nar_hash_sri, from_bytes.nar_hash_sri);
+        assert_eq!(from_dir.nar_size, from_bytes.nar_size);
     }
 
     #[tokio::test]
