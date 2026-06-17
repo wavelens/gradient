@@ -11,6 +11,7 @@ mod git_protocol;
 mod https;
 mod ssh;
 
+use super::url::git_transport_url;
 use crate::SourceError;
 use git_protocol::ls_remote_head_git_protocol;
 use https::ls_remote_head_no_creds;
@@ -34,6 +35,7 @@ pub(super) fn ls_remote_head(
     public_key: Option<&str>,
     branch: Option<&str>,
 ) -> Result<Vec<u8>, SourceError> {
+    let url = git_transport_url(url);
     match (private_key, public_key) {
         (Some(priv_key), Some(pub_key)) => ls_remote_head_ssh(url, priv_key, pub_key, branch),
         _ if url.starts_with("git://") => ls_remote_head_git_protocol(url, branch),
