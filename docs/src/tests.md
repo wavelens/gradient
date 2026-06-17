@@ -61,9 +61,9 @@ a banner when draining, and the button click calls `AdminService.setDraining(tru
 
 ## Worker CPU/RAM saturation penalty
 
-`backend/gradient-score/src/rules/resource.rs` - `ResourceSaturationRule` applies `-1000` to a real build dispatched to a worker whose live CPU usage is `>= 90%` or whose free RAM is `<= 10%` of total, plus another `-1000` when the build's historical peak RAM x1.1 exceeds the worker's free RAM. Both stay below the `WaitTimeRule` cap so anti-starvation can still win eventually.
+`backend/gradient-score/src/rules/resource.rs` - `ResourceSaturationRule` applies `-1000` to a real build dispatched to a worker whose live CPU usage is `>= 80%` (`>= 90%` for substitute-only `builtin` fetches) or whose free RAM is `<= 10%` of total, plus another `-1000` when the build's historical peak RAM x1.1 exceeds the worker's free RAM. Both stay below the `WaitTimeRule` cap so anti-starvation can still win eventually.
 - `saturation_penalizes_real_build_on_hot_cpu_or_ram_only` - a non-`builtin` build scores `-1000` on a CPU-hot or RAM-hot worker and `0` on an idle one.
-- `saturation_exempts_builtin_builds_and_evals_and_no_metrics` - `builtin`-architecture builds, eval jobs, and workers reporting no metrics all score `0` regardless of saturation.
+- `saturation_is_lenient_for_builtin_and_exempts_evals_and_no_metrics` - at `85%` CPU (between the two thresholds) a `builtin` fetch scores `0` while a real build scores `-1000`; eval jobs and workers reporting no metrics score `0` regardless of saturation.
 - `ram_prediction_exceeding_free_penalizes_and_stacks_with_saturation` - a build whose predicted peak RAM x1.1 exceeds free RAM scores `-1000`, `0` when it fits, and `-2000` when the worker is also saturated.
 
 ## Worker shadows base worker of same id (#407)

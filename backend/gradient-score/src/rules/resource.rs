@@ -56,7 +56,8 @@ impl ScoreRule for ResourceFitRule {
 
 /// Hard penalty for dispatching real work to a worker whose CPU or RAM is
 /// already saturated. Substitute-only `builtin` jobs fetch rather than build, so
-/// they never load the worker and are exempt.
+/// they load the worker less and get a more lenient CPU threshold, but a
+/// RAM-starved worker can still fail a fetch, so RAM saturation still applies.
 #[derive(Debug)]
 pub struct ResourceSaturationRule {
     pub penalty: f64,
@@ -87,8 +88,8 @@ impl ScoreRule for ResourceSaturationRule {
     ) -> f64 {
         let Some(m) = worker.metrics else { return 0.0 };
 
-        // Only a real build loads the worker. `builtin` is a substitute-only job
-        // (fetch, no build); evals have no architecture and their own rules.
+        // `builtin` is a substitute-only fetch (lighter CPU load); evals have no
+        // architecture and their own rules.
         let Some(b) = job.job.build() else { return 0.0 };
         let cpu_saturated_pct = if b.architecture == "builtin" {
             self.cpu_saturated_pct_builtin
@@ -120,7 +121,7 @@ impl ScoreRule for ResourceSaturationRule {
     }
 
     fn description(&self) -> &'static str {
-        "Strongly penalizes sending a real build to a worker whose CPU or RAM is already saturated, or whose free RAM cannot hold the build's historical peak RAM plus headroom; substitute-only builtin builds are exempt."
+        "Strongly penalizes sending a real build to a worker whose CPU or RAM is already saturated, or whose free RAM cannot hold the build's historical peak RAM plus headroom; substitute-only builtin fetches get a more lenient CPU threshold but are still RAM-aware."
     }
 }
 
@@ -289,22 +290,31 @@ mod tests {
     }
 
     #[test]
-    fn saturation_exempts_builtin_builds_and_evals_and_no_metrics() {
+    fn saturation_is_lenient_for_builtin_and_exempts_evals_and_no_metrics() {
         let rule = ResourceSaturationRule::default();
+
+        // CPU between the real-build (80%) and builtin (90%) thresholds, RAM roomy:
+        // the lighter builtin fetch is spared, a real build is penalized.
+        let warm = WorkerMetricsView {
+            cpu_usage_pct: 85.0,
+            ram_total_mb: 16_000,
+            ram_free_mb: 8_000,
+            ..Default::default()
+        };
+        assert_eq!(rule.score(&ctx(&builtin_job()), &worker_with(warm), &InstanceContext::default()), 0.0);
+        let real = job_with_history(HistoryPrediction::default());
+        assert_eq!(rule.score(&ctx(&real), &worker_with(warm), &InstanceContext::default()), -1000.0);
+
+        // Evals (no architecture) and no-metrics workers are fully exempt even on a hot worker.
         let hot = WorkerMetricsView {
             cpu_usage_pct: 99.0,
             ram_total_mb: 16_000,
             ram_free_mb: 100,
             ..Default::default()
         };
-
-        let builtin = builtin_job();
-        assert_eq!(rule.score(&ctx(&builtin), &worker_with(hot), &InstanceContext::default()), 0.0);
-
         let eval = eval_job_with_history(HistoryPrediction::default());
         assert_eq!(rule.score(&ctx(&eval), &worker_with(hot), &InstanceContext::default()), 0.0);
 
-        let real = job_with_history(HistoryPrediction::default());
         let no_metrics =
             WorkerContext { architectures: &[], system_features: &[], fetch: false, metrics: None };
         assert_eq!(rule.score(&ctx(&real), &no_metrics, &InstanceContext::default()), 0.0);
