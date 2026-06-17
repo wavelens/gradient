@@ -7,9 +7,32 @@
 mod fixtures;
 
 use super::pktline::read_ref_from_pktlines;
-use super::url::{parse_git_protocol_url, parse_nix_git_url};
+use super::url::{git_transport_url, parse_git_protocol_url, parse_nix_git_url};
 use crate::SourceError;
 use fixtures::{FAKE_SHA, FLUSH, ref_line, ref_line_with_caps};
+
+// ── git_transport_url ────────────────────────────────────────────────────
+
+#[test]
+fn git_transport_url_strips_git_plus_https() {
+    assert_eq!(
+        git_transport_url("git+https://git.example.com/org/repo..git"),
+        "https://git.example.com/org/repo..git"
+    );
+}
+
+#[test]
+fn git_transport_url_strips_git_plus_http_and_ssh() {
+    assert_eq!(git_transport_url("git+http://h/r"), "http://h/r");
+    assert_eq!(git_transport_url("git+ssh://git@h/r"), "ssh://git@h/r");
+}
+
+#[test]
+fn git_transport_url_passes_through_bare_schemes_and_scp() {
+    assert_eq!(git_transport_url("https://h/r"), "https://h/r");
+    assert_eq!(git_transport_url("git://h/r"), "git://h/r");
+    assert_eq!(git_transport_url("git@github.com:u/r.git"), "git@github.com:u/r.git");
+}
 
 // ── parse_nix_git_url ────────────────────────────────────────────────────
 

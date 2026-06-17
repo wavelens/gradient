@@ -3364,6 +3364,26 @@ Run with: `pnpm --dir frontend exec ng test --watch=false`
   retries'` - calling `dismissError()` resets `errorMessage()` to `null` and the
   banner disappears.
 
+## Flake `git+` scheme breaks repository polling (#427)
+
+A repository URL stored in its nix flake form (`git+https://host/org/repo.git`)
+passes validation but failed evaluation with `Git command failed: invalid
+argument port`. libgit2 registers no `git+https`/`git+http` transport, so it
+misroutes such URLs to SSH, whose scheme has no default port, and the connect
+aborts. The libgit2 polling paths (`ls_remote_head`, `commit_info`) now strip the
+`git+` prefix via `git::url::git_transport_url` before handing the URL to
+libgit2, mirroring what `parse_nix_git_url` already does for the SSH prefetch
+path. Bare schemes and SCP-style remotes pass through unchanged.
+
+Run with: `cargo test -p gradient-sources --lib git::tests::git_transport_url`
+
+- `git_transport_url_strips_git_plus_https` - `git+https://…/repo..git` →
+  `https://…/repo..git` (the exact URL from the issue).
+- `git_transport_url_strips_git_plus_http_and_ssh` - `git+http://` and
+  `git+ssh://` lose the prefix too.
+- `git_transport_url_passes_through_bare_schemes_and_scp` - `https://`, `git://`,
+  and `git@host:path` are returned verbatim.
+
 ## Source-IP allowlist (#282)
 
 ### Backend
