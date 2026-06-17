@@ -33,6 +33,7 @@ fn build(
         status,
         via: None,
         substitutable,
+        substituted: false,
         attempt: 0,
         timeout_secs: None,
         max_silent_secs: None,

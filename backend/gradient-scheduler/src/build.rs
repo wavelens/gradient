@@ -66,6 +66,21 @@ pub(crate) fn decide_failure_outcome(
     }
 }
 
+/// Terminal success status for a build whose job completed. `Substituted` when
+/// the daemon found the outputs already valid and ran no build (recorded on
+/// `build.substituted`), else `Completed`. Decided at `JobCompleted`, after the
+/// worker has pushed the output NARs, so a build never reaches a dispatch-ready
+/// terminal state while its bytes are still absent from the cache - the #399
+/// regression where a dependent dispatched into that window and failed
+/// `InputsUnavailable`.
+pub(crate) fn terminal_success_status(outputs_already_valid: bool) -> BuildStatus {
+    if outputs_already_valid {
+        BuildStatus::Substituted
+    } else {
+        BuildStatus::Completed
+    }
+}
+
 /// Best-effort mapping from the worker's failure classification to a stored
 /// `build_attempt.reason`. `Transient` has no single cause, so it stays `None`.
 fn attempt_reason(kind: BuildFailureKind) -> Option<AttemptFailureReason> {
@@ -191,11 +206,21 @@ impl<'a> BuildStateHandler<'a> {
 
         info!(%build_id, output_count = outputs.len(), "build outputs recorded");
 
-        // The daemon found the outputs already valid - no build ran. Mark the
-        // build `Substituted` here so the later `JobCompleted` finalizes it as
-        // such instead of `Completed` (issue #303).
+        // The daemon found the outputs already valid - no build ran. Record that
+        // on the build but do NOT move it terminal here: the worker has not yet
+        // pushed the output NARs (`compress_and_push_paths` runs at end of the
+        // job, before `JobCompleted`). Flipping to `Substituted` now would make
+        // the build dispatch-ready while its bytes are still absent from the
+        // cache, so a dependent dispatched into that window fails
+        // `InputsUnavailable` (#399). `handle_build_job_completed` finalizes the
+        // terminal status from this flag, after the push (#303).
         if substituted {
-            update_build_status(&self.state.db(), build, BuildStatus::Substituted).await;
+            let mut active = build.into_active_model();
+            active.substituted = Set(true);
+            active.updated_at = Set(gradient_types::now());
+            if let Err(e) = active.update(&self.state.worker_db).await {
+                warn!(%build_id, error = %e, "failed to record build as substituted");
+            }
         }
 
         Ok(())
@@ -216,14 +241,12 @@ impl<'a> BuildStateHandler<'a> {
         let derivation_id = build.derivation;
         let was_external_cached = build.substitutable;
 
-        // `handle_build_output` already moved the build to `Substituted` when the
-        // outputs were found already valid; preserve that terminal state instead
-        // of overwriting it with `Completed`.
-        let terminal = if build.status == BuildStatus::Substituted {
-            BuildStatus::Substituted
-        } else {
-            BuildStatus::Completed
-        };
+        // The worker has finished pushing this job's output NARs by the time
+        // `JobCompleted` arrives, so it is now safe to make the build
+        // dispatch-ready. `Substituted` when the daemon found the outputs
+        // already valid (recorded on `build.substituted` by
+        // `handle_build_output`), else `Completed`.
+        let terminal = terminal_success_status(build.substituted);
         let leader = update_build_status(&self.state.db(), build, terminal).await;
         self.propagate_to_followers(&leader).await?;
 
@@ -1352,6 +1375,14 @@ mod retry_tests {
         );
         assert_eq!(store_path_hash("not-a-store-path"), None);
         assert_eq!(store_path_hash("/nix/store/"), None);
+    }
+
+    #[test]
+    fn terminal_status_is_substituted_only_when_outputs_were_already_valid() {
+        use super::terminal_success_status;
+        use gradient_entity::build::BuildStatus;
+        assert_eq!(terminal_success_status(true), BuildStatus::Substituted);
+        assert_eq!(terminal_success_status(false), BuildStatus::Completed);
     }
 }
 

@@ -810,6 +810,8 @@ The server pre-computes `required_paths` from the evaluation's `derivation_depen
 
 If any derivation in the chain fails, the worker skips the rest and reports `JobFailed` - the server cascades `DependencyFailed` to downstream builds.
 
+A `BuildOutput` update records each build's outputs but does **not** make the build terminal: the worker pushes the output NARs (`Compressing` / `NarUploaded`) only after the whole job's build loop, just before `JobCompleted`. The server therefore moves a build to its terminal success status (`Completed`, or `Substituted` when the daemon found the outputs already valid and ran no build) only on `JobCompleted`, after the bytes are in the cache. If it flipped to a terminal state on `BuildOutput`, a dependent could be dispatched (the dispatch gate treats `Completed`/`Substituted` as input-available) and prefetch the not-yet-uploaded output, failing `InputsUnavailable` - the regression incremental mid-eval dispatch (#392/#399) turned into a frequent eval failure. The "already valid" hint rides on the `BuildOutput`'s `substituted` flag, is persisted on `build.substituted`, and is read back at completion to pick `Substituted` vs `Completed`.
+
 ---
 
 ## Messages

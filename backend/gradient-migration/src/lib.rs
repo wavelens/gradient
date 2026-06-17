@@ -155,6 +155,7 @@ mod m20260615_000005_create_organization_base_worker;
 mod m20260616_000001_add_kind_to_evaluation;
 mod m20260616_000002_create_evaluation_input_update;
 mod m20260616_000003_create_open_pr_state;
+mod m20260617_000001_add_substituted_to_build;
 
 pub struct Migrator;
 
@@ -311,6 +312,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260616_000001_add_kind_to_evaluation::Migration),
             Box::new(m20260616_000002_create_evaluation_input_update::Migration),
             Box::new(m20260616_000003_create_open_pr_state::Migration),
+            Box::new(m20260617_000001_add_substituted_to_build::Migration),
         ]
     }
 }

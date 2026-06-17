@@ -760,21 +760,26 @@ async fn build_completed_last_build_completes_eval() {
     assert!(result.is_ok());
 }
 
-/// A build already moved to `Substituted` by `handle_build_output` keeps that
-/// terminal status on completion instead of being overwritten with `Completed`.
+/// A `Building` build whose outputs were found already valid (the `substituted`
+/// flag was recorded by `handle_build_output`) finalizes as `Substituted` at job
+/// completion, after the worker has pushed its NARs - not `Completed`, and never
+/// terminal before the push (#399/#303).
 #[tokio::test]
-async fn build_completed_preserves_substituted_status() {
+async fn build_completed_finalizes_substituted_from_flag() {
     let eval_id = EvaluationId::now_v7();
     let drv_id = DerivationId::now_v7();
     let build_id = BuildId::now_v7();
 
-    let build = make_build(build_id, eval_id, drv_id, BuildStatus::Substituted);
+    let mut build = make_build(build_id, eval_id, drv_id, BuildStatus::Building);
+    build.substituted = true;
+    let build_substituted = make_build(build_id, eval_id, drv_id, BuildStatus::Substituted);
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        // 1. find_by_id(build) → Substituted (already terminal)
+        // 1. find_by_id(build) → Building, substituted flag set
         .append_query_results([vec![build]])
-        // update_build_status sees from == to and skips the UPDATE entirely.
-        // 2. propagate_to_followers: find via=leader.id → empty
+        // 2. update_build_status → Substituted (UPDATE...RETURNING)
+        .append_query_results([vec![build_substituted]])
+        // 2a. propagate_to_followers: find via=leader.id → empty
         .append_query_results([Vec::<MBuild>::new()])
         // 3. find active builds → empty
         .append_query_results([Vec::<MBuild>::new()])
@@ -1333,6 +1338,63 @@ async fn build_output_updates_derivation_output() {
     let job = make_build_job(build_id, eval_id, org_id);
 
     let result = build_handler::handle_build_output(&state, &job, build_id, outputs, None, false).await;
+    assert!(result.is_ok());
+}
+
+/// `substituted = true` (the daemon found outputs already valid) records the
+/// flag on the build but leaves it in `Building`: it must NOT become terminal /
+/// dispatch-ready here, because the worker has not yet pushed the output NARs
+/// (#399). The terminal status is decided later at `handle_build_job_completed`.
+#[tokio::test]
+async fn build_output_substituted_records_flag_without_terminal_transition() {
+    let eval_id = EvaluationId::now_v7();
+    let drv_id = DerivationId::now_v7();
+    let build_id = BuildId::now_v7();
+    let drv_out_id = DerivationOutputId::now_v7();
+    let org_id = OrganizationId::now_v7();
+
+    let build = make_build(build_id, eval_id, drv_id, BuildStatus::Building);
+    let drv_out = make_drv_output(
+        drv_out_id,
+        drv_id,
+        "out",
+        "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-out",
+    );
+    let build_flagged = {
+        let mut b = make_build(build_id, eval_id, drv_id, BuildStatus::Building);
+        b.substituted = true;
+        b
+    };
+
+    let outputs = vec![BuildOutput {
+        name: "out".into(),
+        store_path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-out".into(),
+        hash: "aaaa".into(),
+        nar_size: None,
+        nar_hash: None,
+        products: vec![],
+    }];
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        // 1. find_by_id(build) → Building
+        .append_query_results([vec![build]])
+        // 2. find derivation_output row
+        .append_query_results([vec![drv_out.clone()]])
+        // 3. update derivation_output (UPDATE...RETURNING)
+        .append_query_results([vec![drv_out]])
+        // 4. delete_many build_product rows → exec
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 0,
+        }])
+        // 5. set build.substituted = true (UPDATE...RETURNING); status stays Building.
+        .append_query_results([vec![build_flagged]])
+        .into_connection();
+
+    let state = make_state(db);
+    let job = make_build_job(build_id, eval_id, org_id);
+
+    let result = build_handler::handle_build_output(&state, &job, build_id, outputs, None, true).await;
     assert!(result.is_ok());
 }
 

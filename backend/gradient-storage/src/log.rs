@@ -253,11 +253,12 @@ impl LogStorage for FileLogStorage {
     }
 }
 
-/// Log storage that keeps a local copy for fast appends and uploads the final
-/// log to S3-compatible object storage when the build reaches a terminal state.
-///
-/// Reads always try the local file first; if missing they fall back to S3.
-/// `delete` removes both copies.
+/// Log storage that appends the live log to a local file (S3 has no efficient
+/// append) and ships the finalized log to S3-compatible object storage as
+/// compressed chunks. The local live-log file is dropped on finalize and chunks
+/// are written only to S3, so an S3 backend keeps no build logs on local disk at
+/// rest. Reads serve the live local file while a build runs, then fall back to
+/// the S3 chunks.
 pub struct S3LogStorage {
     local: FileLogStorage,
     object_store: Arc<dyn ObjectStore>,
@@ -385,8 +386,10 @@ impl LogStorage for S3LogStorage {
         index: u32,
         bytes: &'a [u8],
     ) -> BoxFuture<'a, Result<()>> {
+        // S3-only at rest: chunks are not mirrored to local disk, so an S3
+        // backend never accumulates finalized build logs locally. Reads fetch
+        // them back from S3.
         Box::pin(async move {
-            self.local.write_chunk(build_id, index, bytes).await?;
             self.object_store
                 .put(
                     &self.chunk_object_path(build_id, index),
@@ -453,6 +456,25 @@ mod chunk_tests {
         assert_eq!(storage.read_chunk(id, 1).await.unwrap(), b"world");
         storage.delete_chunks(id).await.unwrap();
         assert!(storage.read_chunk(id, 0).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn s3_chunks_are_not_cached_on_local_disk() {
+        use object_store::memory::InMemory;
+
+        let dir = tempfile::tempdir().unwrap();
+        let local = FileLogStorage::new(dir.path()).await.unwrap();
+        let s3 = S3LogStorage::new(local, Arc::new(InMemory::new()), "");
+        let id = BuildId::new("019e884e-6430-7d83-86a1-3d0e6d8814fe".parse().unwrap());
+
+        s3.write_chunk(id, 0, b"hello").await.unwrap();
+
+        // Readable from S3, but never mirrored to the local cache.
+        assert_eq!(s3.read_chunk(id, 0).await.unwrap(), b"hello");
+        assert!(
+            s3.local.read_chunk(id, 0).await.is_err(),
+            "S3 backend must not write chunks to local disk"
+        );
     }
 }
 

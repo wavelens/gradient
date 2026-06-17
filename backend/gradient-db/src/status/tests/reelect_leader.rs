@@ -19,6 +19,7 @@ fn build(id: BuildId, drv: DerivationId, via: Option<BuildId>, status: BuildStat
         status,
         via,
         substitutable: false,
+        substituted: false,
         attempt: 0,
         timeout_secs: None,
         max_silent_secs: None,

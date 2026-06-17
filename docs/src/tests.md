@@ -2,6 +2,14 @@
 
 This page tracks notable tests added to Gradient and where they live.
 
+## S3 build logs are not cached on local disk
+
+`backend/gradient-storage/src/log.rs`: `s3_chunks_are_not_cached_on_local_disk`
+asserts `S3LogStorage::write_chunk` writes finalized log chunks only to the
+object store, not to the local file store, so an S3 backend keeps no build logs
+on local disk at rest (the live log still appends locally during a build and is
+dropped on finalize). Reads fall back to S3.
+
 ## Evaluation GC keeps failed/aborted NARs and defers during active runs
 
 `backend/gradient-db/src/gc.rs`: `skips_gc_while_an_evaluation_is_active`,
@@ -2341,24 +2349,38 @@ Tests (`cargo test -p scheduler --tests substitut`):
   eval completes without dispatching a build. Confirms the hash-based
   fallback in `compute_truly_substituted`.
 
-## Substituted at build time - outputs already valid on the worker (#303)
+## Substituted at build time - outputs already valid on the worker (#303, #399)
 
 When the daemon reports a build's outputs as already valid (empty
-`built_outputs`), no build actually ran. The worker now sets the
-`substituted` flag on its `BuildOutput` job update; `handle_build_output`
-moves the build to `Substituted`, and `handle_build_job_completed`
-preserves that terminal status instead of overwriting it with `Completed`.
-This is distinct from eval-time `compute_truly_substituted` (above), which
-covers outputs already cached before evaluation.
+`built_outputs`), no build actually ran. The worker sets the `substituted`
+flag on its `BuildOutput` job update. `handle_build_output` records that flag
+on `build.substituted` but leaves the build in `Building`: it must not become
+terminal here, because the worker pushes the output NARs only at the end of
+the job (just before `JobCompleted`). Flipping to `Substituted` on
+`BuildOutput` made the build dispatch-ready while its bytes were still absent
+from the cache, so a dependent dispatched into that window (the incremental
+mid-eval dispatcher, #392/#399) failed `InputsUnavailable`.
+`handle_build_job_completed` reads the flag and finalises the terminal status
+(`Substituted` vs `Completed`) after the push. This is distinct from eval-time
+`compute_truly_substituted` (above), which covers outputs already cached
+before evaluation.
 
 Tests:
 
+- `terminal_status_is_substituted_only_when_outputs_were_already_valid`
+  (`scheduler`) - `terminal_success_status(true)` is `Substituted`,
+  `(false)` is `Completed`; the single source of truth for the completion
+  status, decided from the persisted flag.
 - `build_sm_building_to_substituted` (`core`) - the `Building → Substituted`
   transition is permitted by the state machine.
-- `build_completed_preserves_substituted_status` (`scheduler`) - a build
-  already moved to `Substituted` keeps that status on `JobCompleted`; the
-  `from == to` transition skips the build UPDATE and the evaluation still
-  finalises as `Completed`.
+- `build_output_substituted_records_flag_without_terminal_transition`
+  (`scheduler`) - `handle_build_output` with `substituted = true` writes
+  `build.substituted` and leaves the build in `Building`; it does not run the
+  terminal status transition.
+- `build_completed_finalizes_substituted_from_flag` (`scheduler`) - a
+  `Building` build whose `substituted` flag is set finalises as `Substituted`
+  on `JobCompleted` (an actual `Building → Substituted` UPDATE), and the
+  evaluation finalises as `Completed`.
 
 ## Scheduler policy - anti-starvation cap (#112)
 

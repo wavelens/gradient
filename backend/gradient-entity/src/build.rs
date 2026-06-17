@@ -100,6 +100,11 @@ pub struct Model {
     pub status: BuildStatus,
     pub via: Option<BuildId>,
     pub substitutable: bool,
+    /// The realised output required no build: the daemon found it already valid
+    /// (or it was substituted). Recorded when outputs are reported and used at
+    /// job completion to finalize the build as `Substituted` rather than
+    /// `Completed`.
+    pub substituted: bool,
     pub attempt: i32,
     pub timeout_secs: Option<i64>,
     pub max_silent_secs: Option<i64>,
