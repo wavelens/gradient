@@ -21,8 +21,8 @@ use gradient_forge::ParsedPullRequestReviewEvent;
 use gradient_scheduler::Scheduler;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, DbBackend, EntityTrait, FromQueryResult,
-    IntoActiveModel, QueryFilter, Statement, Value,
+    ActiveModelTrait, ColumnTrait, DbBackend, EntityTrait, FromQueryResult, IntoActiveModel,
+    QueryFilter, Statement, Value,
 };
 use serde::Deserialize;
 use std::sync::Arc;
@@ -48,6 +48,23 @@ pub(super) struct GitHubInstallationPayload {
     pub action: String,
     pub installation: GitHubInstallation,
     pub sender: Option<GitHubSender>,
+    #[serde(default)]
+    pub repositories: Vec<GitHubRepoRef>,
+    #[serde(default)]
+    pub repositories_added: Vec<GitHubRepoRef>,
+}
+
+impl GitHubInstallationPayload {
+    /// Repositories the installation grants access to, as lowercased
+    /// `owner/repo` full names. Drawn from `installation` (`repositories`) and
+    /// `installation_repositories` (`repositories_added`) payloads alike.
+    fn installed_full_names(&self) -> std::collections::HashSet<String> {
+        self.repositories
+            .iter()
+            .chain(self.repositories_added.iter())
+            .map(|r| r.full_name.to_ascii_lowercase())
+            .collect()
+    }
 }
 
 #[derive(Deserialize)]
@@ -59,6 +76,11 @@ pub(super) struct GitHubInstallation {
 #[derive(Deserialize)]
 pub(super) struct GitHubAccount {
     pub login: String,
+}
+
+#[derive(Deserialize)]
+pub(super) struct GitHubRepoRef {
+    pub full_name: String,
 }
 
 #[derive(Deserialize)]
@@ -106,48 +128,48 @@ async fn store_installation_id(state: &Arc<ServerState>, payload: &GitHubInstall
 
     let github_login = payload.installation.account.login.as_str();
     let installation_id = payload.installation.id;
+    let installed = payload.installed_full_names();
 
-    // Bind the installation to every org that already tracks a github.com repo
-    // under the installing account; the org name need not match the GitHub
-    // login. A `repository_selection: all` install carries no repo list, so the
-    // account login is the only signal we have to find the owning orgs.
+    if installed.is_empty() {
+        debug!(installation_id, github_login, "GitHub App install carried no repository list; nothing to bind");
+        return;
+    }
+
+    // Bind to every org owning a project whose repository URL resolves to one of
+    // the installed repos. Matching is purely on the parsed `owner/repo` of the
+    // stored URL, so flake shorthand (`github:owner/repo`) and every clone-URL
+    // form match; neither the org name nor the project name need correspond.
     let owner_org_ids: HashSet<OrganizationId> = EProject::find()
-        .filter(CProject::Repository.contains("github.com"))
+        .filter(CProject::Repository.contains("github"))
         .all(&state.web_db)
         .await
         .unwrap_or_default()
         .into_iter()
-        .filter(|p| project_owner_matches(&p.repository, github_login))
+        .filter(|p| github_full_name(&p.repository).is_some_and(|n| installed.contains(&n)))
         .map(|p| p.organization)
         .collect();
 
-    // Plus any org named exactly after the account, covering an org that is
-    // named after the GitHub account but tracks no project yet.
-    let orgs = EOrganization::find()
-        .filter(
-            Condition::any()
-                .add(COrganization::Name.eq(github_login))
-                .add(COrganization::Id.is_in(owner_org_ids)),
-        )
-        .all(&state.web_db)
-        .await
-        .unwrap_or_default();
-
-    if orgs.is_empty() {
+    if owner_org_ids.is_empty() {
         let sender_login = payload
             .sender
             .as_ref()
             .map(|s| s.login.as_str())
             .unwrap_or("unknown");
         warn!(
-            github_login = %github_login,
+            github_login,
             sender = %sender_login,
             installation_id,
-            "GitHub App installed but no matching Gradient organization found"
+            "GitHub App installed but no Gradient project tracks an installed repository"
         );
 
         return;
     }
+
+    let orgs = EOrganization::find()
+        .filter(COrganization::Id.is_in(owner_org_ids))
+        .all(&state.web_db)
+        .await
+        .unwrap_or_default();
 
     for org in orgs {
         let org_id = org.id;
@@ -168,13 +190,19 @@ async fn store_installation_id(state: &Arc<ServerState>, payload: &GitHubInstall
     }
 }
 
-/// True when `repo_url` is a github.com repository whose owner equals `login`
-/// (case-insensitive). Lets the App-install hook bind the installation to every
-/// org already tracking a repo under the installing account, without requiring
-/// the org name to match the GitHub login.
-fn project_owner_matches(repo_url: &str, login: &str) -> bool {
-    repo_url.to_ascii_lowercase().contains("github.com")
-        && parse_owner_repo(repo_url).is_some_and(|(owner, _)| owner.eq_ignore_ascii_case(login))
+/// Lowercased `owner/repo` for a github.com repository, or `None` for a
+/// non-github URL. Recognizes https, SCP-style SSH, and the Nix flake shorthand
+/// (`github:owner/repo`) so a project's stored URL can be matched against the
+/// `full_name`s carried by a GitHub App installation payload.
+fn github_full_name(repo_url: &str) -> Option<String> {
+    let lower = repo_url.to_ascii_lowercase();
+    let is_github =
+        lower.contains("github.com") || lower.starts_with("github:") || lower.starts_with("git+github:");
+    if !is_github {
+        return None;
+    }
+
+    parse_owner_repo(repo_url).map(|(owner, repo)| format!("{owner}/{repo}").to_ascii_lowercase())
 }
 
 // ── GitHub App: resolve installation + repository URL → integrations ───────
@@ -1755,23 +1783,55 @@ async fn active_project_ids_for_integration(
 mod tests {
     use super::super::WebhookTriggerOutcome;
     use super::{
-        GradientCommand, PullRequestApprovalContext, gate_decision, glob_match_pattern,
-        glob_matches, normalize_repo_url, parse_gradient_command, project_owner_matches,
+        GitHubInstallationPayload, GradientCommand, PullRequestApprovalContext, gate_decision,
+        github_full_name, glob_match_pattern, glob_matches, normalize_repo_url,
+        parse_gradient_command,
     };
 
     #[test]
-    fn install_binds_github_repo_owner_case_insensitively() {
-        assert!(project_owner_matches("https://github.com/acme/widgets.git", "acme"));
-        assert!(project_owner_matches("https://github.com/Acme/widgets", "acme"));
-        assert!(project_owner_matches("git@github.com:acme/widgets.git", "acme"));
-        assert!(project_owner_matches("git+https://github.com/acme/widgets", "ACME"));
+    fn github_full_name_parses_every_url_form() {
+        for url in [
+            "https://github.com/NuschtOS/search.git",
+            "https://github.com/NuschtOS/search",
+            "git+https://github.com/NuschtOS/search",
+            "git@github.com:NuschtOS/search.git",
+            "github:NuschtOS/search",
+            "git+github:NuschtOS/search",
+        ] {
+            assert_eq!(github_full_name(url).as_deref(), Some("nuschtos/search"), "{url}");
+        }
     }
 
     #[test]
-    fn install_skips_other_owner_or_non_github_host() {
-        assert!(!project_owner_matches("https://github.com/other/widgets", "acme"));
-        assert!(!project_owner_matches("https://gitea.example.com/acme/widgets", "acme"));
-        assert!(!project_owner_matches("https://gitlab.com/acme/widgets", "acme"));
+    fn github_full_name_rejects_non_github_hosts() {
+        assert_eq!(github_full_name("https://gitlab.com/NuschtOS/search"), None);
+        assert_eq!(github_full_name("https://gitea.example.com/acme/widgets"), None);
+    }
+
+    #[test]
+    fn installation_payload_collects_full_names_from_both_arrays() {
+        let created: GitHubInstallationPayload = serde_json::from_value(serde_json::json!({
+            "action": "created",
+            "installation": { "id": 1, "account": { "login": "NuschtOS" } },
+            "sender": { "login": "tester" },
+            "repositories": [
+                { "full_name": "NuschtOS/search" },
+                { "full_name": "NuschtOS/nixos-modules" },
+            ],
+        }))
+        .unwrap();
+        let names = created.installed_full_names();
+        assert!(names.contains("nuschtos/search"));
+        assert!(names.contains("nuschtos/nixos-modules"));
+
+        let added: GitHubInstallationPayload = serde_json::from_value(serde_json::json!({
+            "action": "added",
+            "installation": { "id": 1, "account": { "login": "NuschtOS" } },
+            "sender": { "login": "tester" },
+            "repositories_added": [ { "full_name": "NuschtOS/ixx" } ],
+        }))
+        .unwrap();
+        assert!(added.installed_full_names().contains("nuschtos/ixx"));
     }
 
     fn fork_ctx() -> PullRequestApprovalContext {

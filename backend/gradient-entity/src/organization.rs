@@ -32,7 +32,8 @@ pub struct Model {
     /// reporting, webhook routing, etc. all gate on this being `Some`.
     ///
     /// Populated by:
-    /// - the `installation` webhook (org-name match against the GitHub login),
+    /// - the `installation` webhook (matching the payload's repositories against
+    ///   each org's project repository URLs),
     /// - the state-driven provisioner (`StateOrganization.github_installation_id`),
     /// - direct DB writes during recovery.
     ///

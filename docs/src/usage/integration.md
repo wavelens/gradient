@@ -81,14 +81,15 @@ Gradient server. There are three roles to consider:
 2. **Organization admin** - once the server has the App configured, install the
    App on the organization's GitHub account.
 3. **GitHub repository owner** - installing the App fires the `installation`
-   webhook; Gradient stores the installation id on every organization that
-   already tracks a `github.com/<account>/...` repository under the installing
-   account (the org name need not match the GitHub login), plus any org named
-   exactly after the account, and seeds the `github-app` inbound + outbound
-   integration rows. Subsequent
-   push / pull-request deliveries route to the corresponding Gradient
-   organization, and projects can link to the outbound row to enable status
-   reporting.
+   webhook, which carries the list of granted repositories. Gradient stores the
+   installation id on every organization owning a project whose repository URL
+   resolves to one of those repositories, and seeds the `github-app` inbound +
+   outbound integration rows. Matching is purely on the repository URL: the
+   organization name and the Gradient project name need not match GitHub, and
+   the flake shorthand (`github:owner/repo`) is recognized alongside the https
+   and SSH clone URLs. Subsequent push / pull-request deliveries route to the
+   corresponding Gradient organization, and projects can link to the outbound
+   row to enable status reporting.
 
 Webhook deliveries are signed with the App's webhook secret and verified
 server-side. Build statuses are reported back via the App's installation token.

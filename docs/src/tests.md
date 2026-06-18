@@ -23,12 +23,15 @@ they held) and could race an in-flight run.
 ## GitHub App installation org-binding
 
 `backend/gradient-web/src/endpoints/forge_hooks/trigger.rs`:
-`install_binds_github_repo_owner_case_insensitively` and
-`install_skips_other_owner_or_non_github_host` cover `project_owner_matches`, the
-predicate that binds an `installation.created` webhook to every org tracking a
-`github.com/<account>/...` repo. Previously the installation only bound to an org
-whose name equalled the GitHub login, so an `installation.created` for an account
-with a differently-named org left `github_installation_id` unset.
+`github_full_name_parses_every_url_form`, `github_full_name_rejects_non_github_hosts`,
+and `installation_payload_collects_full_names_from_both_arrays` cover the binding
+of an `installation` / `installation_repositories` webhook to every org owning a
+project whose repository URL resolves to one of the payload's repositories. The
+match is purely on the parsed `owner/repo`, so the flake shorthand
+(`github:owner/repo`) binds the same as the https / SSH clone URLs; previously the
+matcher keyed off a literal `github.com` substring and an org-name equals login
+fallback, so a `github:`-form project (and any org not named after the account)
+left `github_installation_id` unset.
 
 ## Minor frontend issues (#401)
 
@@ -139,6 +142,17 @@ dispatch that batch's builds. Driving the walk with a `RecordingJobReporter`, th
 test asserts every reported (non-substituted) derivation was covered by an earlier
 `push_drv_closure`, so a build worker never prefetches a source the cache does not
 yet hold ("required input path missing").
+
+Promotion must also respect inputs that **already failed** mid-evaluation: a
+`Created` build whose dependency is terminally failed is promoted to
+`DependencyFailed`, not `Queued`, or it would sit `Queued` forever (the dispatch
+gate never clears it - its dep is not `Completed`/`Substituted`) and stall the
+eval. `created_builds_with_failed_dependency` (an EXISTS antijoin mirroring the
+dispatch gate, inverted to failures) feeds the pure `promotion_target` decision,
+applied at both the per-batch (`promote_ready_builds`) and end-of-eval promotion
+loops. `eval::promotion_tests::promotion_target_is_dependency_failed_when_a_dep_already_failed`
+covers the decision; the reverse timing (a dep failing after its dependent is
+already promoted) stays covered by `cascade_dependency_failed`.
 
 ## PostgreSQL minimum-version guard (#387)
 
@@ -828,6 +842,14 @@ Backend (`cargo test -p gradient-worker -p gradient-scheduler --tests`):
   (the bucket lost an object the DB still claims), while 403/429/5xx stay
   retryable transport errors. The server never sees this since it only signs
   the URL, so the worker is the one that triggers the self-heal.
+- `proto::nar_import::tests::presigned_retryable_statuses_are_timeout_rate_limit_and_5xx` -
+  `presigned_status_is_retryable` returns true for 408/429/5xx and false for
+  400/403/404/410. `download_by_url` now bounds presigned downloads to
+  `PREFETCH_CONCURRENCY` and retries each one (`download_one_presigned`,
+  `PRESIGNED_DOWNLOAD_MAX_ATTEMPTS` with exponential backoff) on transport
+  errors and retryable statuses, so a flaky object store (`tls handshake eof`
+  under unbounded concurrent connections) no longer fails the whole build's
+  prefetch. 404/410 still surface immediately as `MissingInputs`.
 
 The purge path itself (`gradient_db::demote_cached_output`) deletes the
 `cached_path` row (its `cached_path_signature` rows cascade; the
