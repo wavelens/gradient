@@ -1089,7 +1089,6 @@ impl<'a> DispatchContext<'a> {
             .collect();
         let known = match self.scheduler.peer_id_for_job(&job_id).await {
             Some(org_id) => {
-                use gradient_entity::build::BuildStatus;
                 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
                 // First: find derivations that exist for this org.
@@ -1103,28 +1102,31 @@ impl<'a> DispatchContext<'a> {
                 if candidates.is_empty() {
                     vec![]
                 } else {
-                    // Second: keep only those that have a Completed or Substituted build.
-                    // A derivation exists in the DB but has only Failed builds should
-                    // NOT be pruned - the worker must retry it.
+                    // Second: prune only derivations whose full output set is
+                    // recorded AND every output is in our cache. Pruning on build
+                    // status alone (a `Substituted` build is a belief, not a
+                    // stored NAR) stranded output-less / not-yet-cached
+                    // derivations as permanent `InputsUnavailable` dead-ends: the
+                    // BFS re-records the pruned node with no outputs every eval,
+                    // so its output path is never buildable or fetchable.
                     let drv_ids: Vec<DerivationId> = candidates.iter().map(|d| d.id).collect();
-                    let built: std::collections::HashSet<DerivationId> = EBuild::find()
-                        .filter(CBuild::Derivation.is_in(drv_ids))
-                        .filter(
-                            CBuild::Status
-                                .is_in(vec![BuildStatus::Completed, BuildStatus::Substituted]),
-                        )
+                    let mut output_counts: HashMap<DerivationId, (usize, usize)> = HashMap::new();
+                    for o in EDerivationOutput::find()
+                        .filter(CDerivationOutput::Derivation.is_in(drv_ids))
                         .all(&self.state.worker_db)
                         .await
                         .unwrap_or_default()
-                        .into_iter()
-                        .map(|b| b.derivation)
-                        .collect();
+                    {
+                        let entry = output_counts.entry(o.derivation).or_insert((0, 0));
+                        entry.0 += 1;
+                        if !o.is_cached {
+                            entry.1 += 1;
+                        }
+                    }
 
-                    candidates
-                        .into_iter()
-                        .filter(|d| built.contains(&d.id))
-                        .map(|d| d.store_path())
-                        .collect()
+                    let candidates: Vec<(DerivationId, String)> =
+                        candidates.into_iter().map(|d| (d.id, d.store_path())).collect();
+                    prunable_known_derivations(candidates, &output_counts)
                 }
             }
             None => {
@@ -1139,6 +1141,58 @@ impl<'a> DispatchContext<'a> {
         )
         .await
         .is_ok()
+    }
+}
+
+/// Decide which `(derivation_id, store_path)` candidates the eval BFS may prune.
+///
+/// A derivation is safe to prune (skip subtree traversal) only when the server
+/// holds its complete output set AND every output is in our cache, per
+/// `output_counts: id -> (total_outputs, uncached_outputs)`. An output-less or
+/// not-yet-cached derivation must keep being walked so its outputs get recorded
+/// and a build is scheduled - otherwise it is stranded as a permanent
+/// `InputsUnavailable` dead-end.
+fn prunable_known_derivations(
+    candidates: Vec<(DerivationId, String)>,
+    output_counts: &HashMap<DerivationId, (usize, usize)>,
+) -> Vec<String> {
+    candidates
+        .into_iter()
+        .filter(|(id, _)| {
+            let (total, uncached) = output_counts.get(id).copied().unwrap_or((0, 0));
+            total > 0 && uncached == 0
+        })
+        .map(|(_, store_path)| store_path)
+        .collect()
+}
+
+#[cfg(test)]
+mod prunable_known_derivations_tests {
+    use super::prunable_known_derivations;
+    use gradient_types::ids::DerivationId;
+    use std::collections::HashMap;
+
+    #[test]
+    fn prunes_only_fully_recorded_and_cached_derivations() {
+        let cached = DerivationId::now_v7();
+        let uncached = DerivationId::now_v7();
+        let output_less = DerivationId::now_v7();
+        let unknown = DerivationId::now_v7();
+
+        let candidates = vec![
+            (cached, "/nix/store/aaa-cached".to_string()),
+            (uncached, "/nix/store/bbb-uncached".to_string()),
+            (output_less, "/nix/store/ccc-output-less".to_string()),
+            (unknown, "/nix/store/ddd-unknown".to_string()),
+        ];
+        let mut counts = HashMap::new();
+        counts.insert(cached, (2usize, 0usize)); // 2 outputs, all cached
+        counts.insert(uncached, (1usize, 1usize)); // 1 output, not cached
+        counts.insert(output_less, (0usize, 0usize)); // recorded drv, no outputs
+        // `unknown` absent from the map entirely.
+
+        let prunable = prunable_known_derivations(candidates, &counts);
+        assert_eq!(prunable, vec!["/nix/store/aaa-cached".to_string()]);
     }
 }
 
