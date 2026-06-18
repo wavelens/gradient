@@ -156,6 +156,10 @@ impl LogStorage for FileLogStorage {
                 .open(&path)
                 .await?;
             file.write_all(text.as_bytes()).await?;
+            // tokio buffers writes and submits the syscall to a blocking task;
+            // without flushing, the in-flight write is detached on drop and a
+            // read-after-write races it, observing an empty file.
+            file.flush().await?;
             Ok(())
         })
     }
