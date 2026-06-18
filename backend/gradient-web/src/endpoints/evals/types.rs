@@ -53,8 +53,13 @@ pub struct EvaluationResponse {
     pub previous: Option<EvaluationId>,
     pub next: Option<EvaluationId>,
     pub created_at: chrono::NaiveDateTime,
+    pub updated_at: chrono::NaiveDateTime,
     pub error_count: u64,
     pub warning_count: u64,
+    /// Concatenated text of the evaluation's error-level messages, or `null`
+    /// when there are none. Lets clients surface the failure reason without a
+    /// second round-trip to the messages endpoint.
+    pub error: Option<String>,
     pub entry_points: Vec<EntryPointBrief>,
     /// `null` for manually-triggered evaluations (Web UI / API), populated for
     /// evaluations that fired from a project trigger (polling, schedule,
