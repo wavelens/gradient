@@ -586,8 +586,9 @@ in {
         logLevel = lib.mkOption {
           default = { };
           description = ''
-            Log levels. `default` is the global level; `cache`, `web` and
-            `proto` override per component (null inherits from `default`).
+            Log levels. `default` is the global level; `cache`, `web`,
+            `proto` and `scheduler` override per component (null inherits from
+            `default`). `RUST_LOG` still overrides everything at runtime.
           '';
 
           type = lib.types.submodule {
@@ -612,6 +613,12 @@ in {
 
               proto = lib.mkOption {
                 description = "Log level for the protocol layer. Null inherits from default";
+                type = lib.types.nullOr logLevelType;
+                default = null;
+              };
+
+              scheduler = lib.mkOption {
+                description = "Log level for the scheduler. Null inherits from default";
                 type = lib.types.nullOr logLevelType;
                 default = null;
               };
@@ -869,7 +876,6 @@ in {
         GRADIENT_TRUSTED_PROXIES = builtins.concatStringsSep "," cfg.settings.trustedProxies;
         GRADIENT_STATE_FILE = "%d/gradient_state";
         GRADIENT_CREDENTIALS_DIR = "%d";
-        RUST_LOG = cfg.settings.logLevel.default;
       } // lib.optionalAttrs (cfg.settings.sentryDsn != null) {
         GRADIENT_SENTRY_DSN = cfg.settings.sentryDsn;
       } // lib.optionalAttrs (cfg.settings.logLevel.cache != null) {
@@ -878,6 +884,8 @@ in {
         GRADIENT_WEB_LOG_LEVEL = cfg.settings.logLevel.web;
       } // lib.optionalAttrs (cfg.settings.logLevel.proto != null) {
         GRADIENT_PROTO_LOG_LEVEL = cfg.settings.logLevel.proto;
+      } // lib.optionalAttrs (cfg.settings.logLevel.scheduler != null) {
+        GRADIENT_SCHEDULER_LOG_LEVEL = cfg.settings.logLevel.scheduler;
       } // lib.optionalAttrs cfg.oidc.enable {
         GRADIENT_OIDC_CLIENT_ID = cfg.oidc.clientId;
         GRADIENT_OIDC_CLIENT_SECRET_FILE = "%d/gradient_oidc_client_secret";

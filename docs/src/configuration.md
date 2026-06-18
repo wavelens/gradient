@@ -61,10 +61,11 @@ openssl rand -base64 48 > /run/secrets/gradient-crypt
 | `settings.evalCacheSweepIntervalSecs` | `3600` | Interval in seconds between eval-cache eviction sweeps. (`GRADIENT_EVAL_CACHE_SWEEP_INTERVAL_SECS`) |
 | `settings.maxRequestSize` | `2097152` (2 MiB) | Max HTTP request body in bytes for most endpoints (caps webhook/JSON payloads to prevent OOM). The build-request blob endpoint uses a fixed 20 MiB cap. |
 | `settings.maxNarUploadSize` | `536870912` (512 MiB) | Max body in bytes for `POST /caches/{cache}/nars`; overrides the general `maxRequestSize` cap for NAR uploads. (`GRADIENT_MAX_NAR_UPLOAD_SIZE`) |
-| `settings.logLevel.default` | `info` | Log level: `trace` `debug` `info` `warn` `error` |
-| `settings.logLevel.cache` | null | Cache log level override (null inherits default) |
-| `settings.logLevel.web` | null | Web log level override (null inherits default) |
-| `settings.logLevel.proto` | null | Proto log level override (null inherits default) |
+| `settings.logLevel.default` | `info` | Log level: `trace` `debug` `info` `warn` `error`. Targets `gradient_*`; dependency noise (`hyper`, `sqlx`, …) is pinned to `warn`. `RUST_LOG` overrides everything. |
+| `settings.logLevel.cache` | null | `gradient_cache` log level override (null inherits default) |
+| `settings.logLevel.web` | null | `gradient_web` log level override (null inherits default) |
+| `settings.logLevel.proto` | null | `gradient_proto` log level override (null inherits default) |
+| `settings.logLevel.scheduler` | null | `gradient_scheduler` log level override (null inherits default) |
 | `settings.enableRegistration` | `true` | Allow new user self-registration |
 | `settings.deleteState` | `true` | Remove entities no longer in `state` (see below) |
 | `settings.cacheTtlHours` | `336` | TTL in hours for cached NARs not fetched recently (0 = disabled) |
