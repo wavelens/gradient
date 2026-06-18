@@ -394,6 +394,11 @@ where
     use std::io::Read;
     use std::os::unix::io::FromRawFd;
 
+    // SAFETY (all libc calls below): this runs on the eval-worker's single
+    // thread; every fd (`2`, `saved`, `pipefd[*]`) is valid by construction and
+    // failures are best-effort - on error we just skip warning capture.
+    // `pipefd[0]` is handed to `File::from_raw_fd` exactly once, taking ownership.
+
     // Duplicate the current stderr so we can restore it later.
     let saved = unsafe { libc::dup(2) };
     if saved < 0 {

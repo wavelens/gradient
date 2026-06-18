@@ -70,6 +70,19 @@ pub struct OutputArtefacts {
     pub products: Vec<ProductArtefact>,
 }
 
+impl OutputArtefacts {
+    /// Absolute `/nix/store/...` path for feeding `nix` commands. The API
+    /// returns the prefix-free base form; reconstruct the prefix here, tolerating
+    /// an already-prefixed value during the transition.
+    pub fn full_store_path(&self) -> String {
+        if self.store_path.starts_with("/nix/store/") {
+            self.store_path.clone()
+        } else {
+            format!("/nix/store/{}", self.store_path)
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ProductArtefact {
     pub id: String,

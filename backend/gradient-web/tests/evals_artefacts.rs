@@ -294,10 +294,7 @@ fn returns_full_tree_grouped_by_entry_point_and_output() {
 
         let ep = &entry_points[0];
         assert_eq!(ep["attr"], "checks.x86_64-linux.foo");
-        assert_eq!(
-            ep["derivation"],
-            format!("/nix/store/{}-hello-2.12.1.drv", HASH)
-        );
+        assert_eq!(ep["derivation"], format!("{}-hello-2.12.1.drv", HASH));
         assert_eq!(ep["build_id"], build_id().to_string());
 
         let outputs = ep["outputs"].as_array().unwrap();
@@ -305,7 +302,7 @@ fn returns_full_tree_grouped_by_entry_point_and_output() {
         assert_eq!(outputs[0]["name"], "lib");
         assert_eq!(
             outputs[0]["store_path"],
-            format!("/nix/store/{}-hello-2.12.1-lib", HASH)
+            format!("{}-hello-2.12.1-lib", HASH)
         );
         assert_eq!(outputs[0]["products"].as_array().unwrap().len(), 1);
         assert_eq!(outputs[0]["products"][0]["id"], product_c_id().to_string());

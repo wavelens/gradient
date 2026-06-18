@@ -4517,3 +4517,29 @@ page with its score breakdown, served from the in-memory decision ring.
 - The memory-first `GET /board/jobs/{id}` resolution (ring before DB) and the
   frontend's clickable rows + "Passed over"/"Scored" labelling are exercised
   end-to-end by the board E2E rather than a unit test.
+
+## StorePath object + prefix-free API & server log levels (#416, #438)
+
+- `backend/gradient-entity/src/store_path.rs::tests` - `StorePath` parses both
+  full (`/nix/store/<hash>-<name>`) and bare base forms, round-trips
+  `base()`/`full()`, detects `.drv` derivations, serde-serialises to the
+  prefix-free base form (deserialising either form), and rejects malformed input.
+- `backend/gradient-web/tests/evals_artefacts.rs` and
+  `evaluation_builds_via.rs` - the public API now returns prefix-free store paths
+  (`<hash>-<name>[.drv]`) for `derivation`, output `store_path`, and the build
+  `name`.
+- `backend/gradient-web/tests/narinfo.rs` + `caches/narinfo.rs` - the Nix
+  binary-cache protocol responses (`StorePath:`/`References:`/`Deriver:`,
+  `nix-cache-info` `StoreDir`) keep the `/nix/store/` prefix, reconstructed from
+  the `cached_path` `hash`+`package` columns after the redundant `store_path`
+  column was dropped.
+- `backend/gradient-scheduler/src/views.rs::tests` - `DerivationRef.drv_path` in
+  the dispatch-decision ring is normalised to the prefix-free base form.
+- `backend/src/main.rs::tests` - `build_filter_directive` targets the renamed
+  `gradient_*` crates (`gradient_web`/`gradient_cache`/`gradient_proto`/
+  `gradient_scheduler`), bakes in dependency-noise suppression, and no longer
+  emits the dead `builder=` target. Fixes #438.
+- The migration (`m20260619_000001_drop_cached_path_store_path`), the CLI's
+  `OutputArtefacts::full_store_path` reconstruction for `nix copy`/`nix-store
+  --realise`, and the worker FFI paths are covered by CI rather than local unit
+  tests.

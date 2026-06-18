@@ -179,7 +179,7 @@ pub async fn get_artefacts(
                         })
                         .collect();
                     OutputArtefacts {
-                        store_path: get_path_from_derivation_output(o.clone()),
+                        store_path: get_path_from_derivation_output(o.clone()).base(),
                         name: o.name,
                         products,
                     }
@@ -187,7 +187,7 @@ pub async fn get_artefacts(
                 .collect();
             Some(EntryPointArtefacts {
                 attr: ep.eval,
-                derivation: drv.store_path(),
+                derivation: drv.drv_path(),
                 build_id: build.id,
                 outputs,
             })

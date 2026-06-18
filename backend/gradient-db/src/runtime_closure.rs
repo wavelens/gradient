@@ -100,7 +100,6 @@ mod tests {
     fn cp(hash: &str, nar_size: i64, references: &str) -> cached_path::Model {
         cached_path::Model {
             id: CachedPathId::now_v7(),
-            store_path: format!("/nix/store/{hash}-foo"),
             hash: hash.into(),
             package: "foo".into(),
             file_hash: Some("sha256:dummy".into()),

@@ -67,7 +67,7 @@ pub async fn get_build(
 
     let mut outputs = HashMap::new();
     for output in derivation_outputs {
-        let path = get_path_from_derivation_output(output.clone());
+        let path = get_path_from_derivation_output(output.clone()).base();
         outputs.insert(output.name, path);
     }
 
@@ -77,7 +77,7 @@ pub async fn get_build(
         id: build.id,
         evaluation: build.evaluation,
         status: build.status.for_api(),
-        derivation_path: derivation.store_path(),
+        derivation_path: derivation.drv_path(),
         architecture: derivation.architecture,
         worker,
         via: build.via,

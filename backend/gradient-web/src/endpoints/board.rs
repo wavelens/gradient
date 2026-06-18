@@ -1054,7 +1054,11 @@ fn to_graph_node(n: flake_output_node::Model) -> FlakeGraphNode {
         name: n.name,
         kind: n.kind,
         is_derivation: n.is_derivation,
-        drv_path: n.drv_path,
+        drv_path: n.drv_path.map(|p| {
+            gradient_entity::StorePath::parse(&p)
+                .map(|sp| sp.base())
+                .unwrap_or(p)
+        }),
     }
 }
 
@@ -1113,6 +1117,6 @@ mod tests {
         assert_eq!(node.name, "hello");
         assert_eq!(node.kind, "derivation");
         assert!(node.is_derivation);
-        assert_eq!(node.drv_path.as_deref(), Some("/nix/store/abc-hello.drv"));
+        assert_eq!(node.drv_path.as_deref(), Some("abc-hello.drv"));
     }
 }

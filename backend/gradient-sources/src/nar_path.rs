@@ -54,8 +54,8 @@ pub fn get_hash_from_path(path: String) -> Result<(String, String), SourceError>
     Ok((hash, package))
 }
 
-pub fn get_path_from_derivation_output(output: MDerivationOutput) -> String {
-    format!("/nix/store/{}-{}", output.hash, output.package)
+pub fn get_path_from_derivation_output(output: MDerivationOutput) -> StorePath {
+    StorePath::from_parts(output.hash, output.package)
 }
 
 /// Parses a bare `<hash>-<name>.drv` (no `/nix/store/` prefix) into its hash

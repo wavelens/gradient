@@ -7956,7 +7956,7 @@ components:
       properties:
         id: { type: string, format: uuid }
         build_id: { type: string, format: uuid }
-        derivation_path: { type: string }
+        derivation_path: { type: string, description: "Prefix-free `.drv` store path (`<hash>-<name>.drv`, no `/nix/store/`)" }
         eval:
           type: string
           description: Nix attribute path of the entry point
@@ -8496,7 +8496,7 @@ components:
           format: uuid
         name:
           type: string
-          description: Full derivation store path
+          description: Prefix-free `.drv` store path (`<hash>-<name>.drv`, no `/nix/store/`)
         status:
           type: string
           description: Build status string (e.g. `"Queued"`, `"Building"`, `"Completed"`, `"Substituted"`)
@@ -8533,8 +8533,8 @@ components:
           description: Attribute path (e.g. `checks.x86_64-linux.foo`)
         derivation:
           type: string
-          description: Full `.drv` store path
-          example: "/nix/store/abc123-hello-2.12.1.drv"
+          description: Prefix-free `.drv` store path (`<hash>-<name>.drv`, no `/nix/store/`)
+          example: "abc123-hello-2.12.1.drv"
         build_id:
           type: string
           format: uuid
@@ -8553,8 +8553,8 @@ components:
           description: Output name (e.g. `out`, `lib`, `dev`)
         store_path:
           type: string
-          description: Full output store path
-          example: "/nix/store/abc123-hello-2.12.1"
+          description: Prefix-free output store path (`<hash>-<name>`, no `/nix/store/`)
+          example: "abc123-hello-2.12.1"
         products:
           type: array
           items:
@@ -8740,8 +8740,8 @@ components:
           $ref: '#/components/schemas/BuildStatus'
         derivation_path:
           type: string
-          description: Full Nix store path of the `.drv` file
-          example: "/nix/store/abc123-hello-2.12.1.drv"
+          description: Prefix-free `.drv` store path (`<hash>-<name>.drv`, no `/nix/store/`)
+          example: "abc123-hello-2.12.1.drv"
         architecture:
           $ref: '#/components/schemas/Architecture'
         worker:
@@ -8768,7 +8768,7 @@ components:
           additionalProperties:
             type: string
           description: |-
-            Map of output name → Nix store path (e.g. `{"out": "/nix/store/xyz-hello-2.12.1"}`)
+            Map of output name → prefix-free store path (e.g. `{"out": "xyz-hello-2.12.1"}`)
         created_at:
           type: string
           format: date-time
@@ -8791,8 +8791,8 @@ components:
           example: hello-2.12.1
         path:
           type: string
-          description: Full Nix store path of the `.drv`
-          example: "/nix/store/abc123-hello-2.12.1.drv"
+          description: Prefix-free `.drv` store path (`<hash>-<name>.drv`, no `/nix/store/`)
+          example: "abc123-hello-2.12.1.drv"
         status:
           type: string
           description: Build status string
@@ -8917,7 +8917,7 @@ components:
           example: hello-2.12.1
         path:
           type: string
-          description: Full Nix store path
+          description: Prefix-free store path (`<hash>-<name>`, no `/nix/store/`)
         nar_size:
           type: integer
           format: int64
@@ -9011,7 +9011,7 @@ components:
         drv_path:
           type: string
           nullable: true
-          description: Derivation `.drv` store path when the node is a derivation
+          description: Prefix-free `.drv` store path (`<hash>-<name>.drv`) when the node is a derivation
 
     BuildProduct:
       type: object
@@ -9162,6 +9162,7 @@ components:
           description: Store-path hash (the part before the first `-` in `/nix/store/<hash>-<name>`)
         store_path:
           type: string
+          description: Prefix-free store path (`<hash>-<name>`, no `/nix/store/`)
         package:
           type: string
         nar_size:
@@ -9188,6 +9189,7 @@ components:
           type: string
         store_path:
           type: string
+          description: Prefix-free store path (`<hash>-<name>`, no `/nix/store/`)
         package:
           type: string
         nar_size:

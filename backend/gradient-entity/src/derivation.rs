@@ -29,16 +29,21 @@ pub struct Model {
 }
 
 impl Model {
-    /// Canonical `<hash>-<name>.drv` form (no `/nix/store/` prefix), matching
-    /// the wire shape used by workers and the cache narinfo `References:`
-    /// convention.
-    pub fn drv_path(&self) -> String {
-        format!("{}-{}.drv", self.hash, self.name)
+    /// This derivation as a [`StorePath`](crate::StorePath) (`name` keeps `.drv`).
+    pub fn as_store_path(&self) -> crate::StorePath {
+        crate::StorePath::from_parts(self.hash.clone(), format!("{}.drv", self.name))
     }
 
-    /// Full `/nix/store/<hash>-<name>.drv` path for display + dispatch.
+    /// Canonical `<hash>-<name>.drv` base form (no `/nix/store/` prefix),
+    /// matching the wire shape used by workers and the cache narinfo
+    /// `References:` convention.
+    pub fn drv_path(&self) -> String {
+        self.as_store_path().base()
+    }
+
+    /// Full `/nix/store/<hash>-<name>.drv` path for dispatch + worker store ops.
     pub fn store_path(&self) -> String {
-        format!("/nix/store/{}-{}.drv", self.hash, self.name)
+        self.as_store_path().full()
     }
 }
 

@@ -243,7 +243,7 @@ fn follower_build_is_replaced_with_leader_row() {
             "expected leader's updated_at, got {}",
             item["updated_at"]
         );
-        assert_eq!(item["name"], DRV_PATH);
+        assert_eq!(item["name"], DRV_PATH.trim_start_matches("/nix/store/"));
         assert_eq!(body["message"]["total"], 1);
         assert_eq!(body["message"]["active_count"], 1);
     });

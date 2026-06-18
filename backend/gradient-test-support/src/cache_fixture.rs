@@ -113,7 +113,6 @@ pub async fn public_cache_with_narinfo() -> Arc<ServerState> {
 
     let cached_path_row = gradient_entity::cached_path::Model {
         id: cached_path_id(),
-        store_path: format!("/nix/store/{}-hello", FIXTURE_PATH_HASH),
         hash: FIXTURE_PATH_HASH.into(),
         package: "hello".into(),
         file_hash: Some(
@@ -528,7 +527,6 @@ pub async fn private_cache_with_nar() -> Arc<ServerState> {
 fn cached_path_row_fixture() -> gradient_entity::cached_path::Model {
     gradient_entity::cached_path::Model {
         id: cached_path_id(),
-        store_path: format!("/nix/store/{}-hello", FIXTURE_PATH_HASH),
         hash: FIXTURE_PATH_HASH.into(),
         package: "hello".into(),
         file_hash: Some(

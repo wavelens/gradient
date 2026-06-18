@@ -125,7 +125,6 @@ async fn narinfo_served_from_db_inner() {
     // The cached_path row carrying the NAR metadata written by the worker.
     let cached_path_row = gradient_entity::cached_path::Model {
         id: cached_path_id(),
-        store_path: format!("/nix/store/{}-hello", FIXTURE_HASH),
         hash: FIXTURE_HASH.into(),
         package: "hello".into(),
         file_hash: Some(
@@ -283,7 +282,6 @@ async fn narinfo_unsigned_inner() {
 
     let cached_path_row = gradient_entity::cached_path::Model {
         id: cached_path_id(),
-        store_path: format!("/nix/store/{}-hello", FIXTURE_HASH),
         hash: FIXTURE_HASH.into(),
         package: "hello".into(),
         file_hash: Some(

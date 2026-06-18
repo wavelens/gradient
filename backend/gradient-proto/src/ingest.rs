@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_entity::StorePath;
 use gradient_util::nix_hash::{is_nix32_hash, normalize_nar_hash};
 use gradient_storage::nar::NarStore;
 use gradient_types::ids::{CacheId, CachedPathId, CachedPathSignatureId, OrganizationId};
@@ -40,14 +41,13 @@ pub struct IngestOutcome {
     pub created: bool,
 }
 
-fn parse_store_hash(store_path: &str) -> anyhow::Result<(&str, &str)> {
-    let hash_name = store_path.strip_prefix("/nix/store/").unwrap_or(store_path);
-    let hash = hash_name.split('-').next().unwrap_or("");
-    let package = hash_name.find('-').map(|i| &hash_name[i + 1..]).unwrap_or("");
-    if !is_nix32_hash(hash) {
+fn parse_store_path(store_path: &str) -> anyhow::Result<StorePath> {
+    let sp = StorePath::parse(store_path).map_err(|e| anyhow::anyhow!("{e}"))?;
+    if !is_nix32_hash(sp.hash()) {
         anyhow::bail!("malformed store path: {}", store_path);
     }
-    Ok((hash, package))
+
+    Ok(sp)
 }
 
 pub async fn ingest_nar<C: ConnectionTrait>(
@@ -57,10 +57,10 @@ pub async fn ingest_nar<C: ConnectionTrait>(
     input: IngestInput<'_>,
     targets: SignTargets,
 ) -> anyhow::Result<IngestOutcome> {
-    let (hash, package) = parse_store_hash(input.store_path)?;
+    let sp = parse_store_path(input.store_path)?;
     // NAR written first; DB failure leaves an unreferenced blob - GC reclaims it.
-    nar_storage.put(hash, nar_bytes).await?;
-    upsert_and_sign(db, hash, package, input, targets).await
+    nar_storage.put(sp.hash(), nar_bytes).await?;
+    upsert_and_sign(db, sp.hash(), sp.name(), input, targets).await
 }
 
 pub async fn ingest_metadata_only<C: ConnectionTrait>(
@@ -68,8 +68,8 @@ pub async fn ingest_metadata_only<C: ConnectionTrait>(
     input: IngestInput<'_>,
     targets: SignTargets,
 ) -> anyhow::Result<IngestOutcome> {
-    let (hash, package) = parse_store_hash(input.store_path)?;
-    upsert_and_sign(db, hash, package, input, targets).await
+    let sp = parse_store_path(input.store_path)?;
+    upsert_and_sign(db, sp.hash(), sp.name(), input, targets).await
 }
 
 async fn upsert_and_sign<C: ConnectionTrait>(
@@ -110,7 +110,6 @@ async fn upsert_and_sign<C: ConnectionTrait>(
         None => {
             let am = MCachedPath {
                 id: CachedPathId::now_v7(),
-                store_path: input.store_path.to_owned(),
                 hash: hash.to_owned(),
                 package: package.to_owned(),
                 file_hash: Some(normalize_nar_hash(input.file_hash)),
@@ -212,10 +211,9 @@ mod tests {
             deriver: None,
         }
     }
-    fn returned_cached_path(store_path: &str, hash: &str) -> gradient_entity::cached_path::Model {
+    fn returned_cached_path(hash: &str) -> gradient_entity::cached_path::Model {
         gradient_entity::cached_path::Model {
             id: CachedPathId::new(Uuid::now_v7()),
-            store_path: store_path.to_string(),
             hash: hash.to_string(),
             package: "hello-2.12".to_string(),
             file_hash: Some("sha256:abc".to_string()),
@@ -248,7 +246,7 @@ mod tests {
         let hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
-            .append_query_results([vec![returned_cached_path(sp, hash)]])
+            .append_query_results([vec![returned_cached_path(hash)]])
             .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
             .into_connection();
         let store = temp_store();

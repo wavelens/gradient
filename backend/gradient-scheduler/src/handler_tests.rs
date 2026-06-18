@@ -129,7 +129,6 @@ fn make_drv_output(
 fn make_fully_cached_path(id: CachedPathId, store_path: &str) -> gradient_entity::cached_path::Model {
     gradient_entity::cached_path::Model {
         id,
-        store_path: store_path.to_string(),
         hash: store_path
             .strip_prefix("/nix/store/")
             .and_then(|s| s.split('-').next())

@@ -59,6 +59,9 @@ impl SecretString {
 
 impl Drop for SecretString {
     fn drop(&mut self) {
+        // SAFETY: in Drop we hold the only reference to `self.0`; the `String`
+        // buffer is `len` initialized bytes, so one exclusive `&mut [u8]` over
+        // it is sound, and the contents are never read again afterwards.
         zeroize_slice(unsafe {
             std::slice::from_raw_parts_mut(self.0.as_ptr() as *mut u8, self.0.len())
         });
@@ -136,6 +139,8 @@ impl From<Vec<u8>> for SecretBytes {
 /// about to be dropped).
 fn zeroize_slice(s: &mut [u8]) {
     for byte in s.iter_mut() {
+        // SAFETY: `byte` is a valid, aligned, exclusively-borrowed `&mut u8`, so
+        // a one-byte volatile write through it is sound.
         unsafe { std::ptr::write_volatile(byte, 0) };
     }
     // Compiler fence: prevent reordering of the volatile stores with
@@ -150,6 +155,8 @@ fn mlock_slice(s: &[u8]) {
     }
     #[cfg(unix)]
     {
+        // SAFETY: `s` is a non-empty initialized slice; `mlock` only touches the
+        // page range `[ptr, ptr+len)` and returns an error code we handle below.
         let ret = unsafe { libc::mlock(s.as_ptr() as *const libc::c_void, s.len()) };
         if ret != 0 {
             let err = std::io::Error::last_os_error();
@@ -168,6 +175,8 @@ fn munlock_slice(s: &[u8]) {
         return;
     }
     #[cfg(unix)]
+    // SAFETY: `s` is a non-empty initialized slice; `munlock` only operates on
+    // the page range `[ptr, ptr+len)`. A failure is benign (pages stay locked).
     unsafe {
         libc::munlock(s.as_ptr() as *const libc::c_void, s.len());
     }

@@ -585,7 +585,7 @@ impl BuildDispatchMaps {
                 for o in outputs {
                     let cache_info = cache_info_by_hash.get(&o.hash).cloned();
                     paths.push(RequiredPath {
-                        path: get_path_from_derivation_output(o.clone()),
+                        path: get_path_from_derivation_output(o.clone()).full(),
                         cache_info,
                     });
                 }

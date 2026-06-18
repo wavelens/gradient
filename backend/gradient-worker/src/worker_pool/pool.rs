@@ -58,6 +58,9 @@ impl EvalWorker {
         // calls `setStackSize(64 * 1024 * 1024)` in `initNix`; we use the C
         // API directly and inherit the default 8 MiB, which is too small for
         // some flakes.
+        // SAFETY: `pre_exec` runs in the forked child before `exec`, so its body
+        // must be async-signal-safe; it only builds an `rlimit` and calls
+        // `setrlimit`, both of which are signal-safe.
         #[cfg(unix)]
         unsafe {
             command.pre_exec(|| {

@@ -5,6 +5,9 @@
  */
 
 pub mod ids;
+pub mod store_path;
+
+pub use store_path::{STORE_DIR, StorePath};
 
 pub mod admin_task;
 pub mod api;

@@ -93,7 +93,7 @@ async fn process_graph_wave(
             nodes.push(DependencyNode {
                 id: build.id,
                 name: drv.name.clone(),
-                path: drv.store_path(),
+                path: drv.drv_path(),
                 status: format!("{:?}", build.status),
                 created_at: build.created_at,
                 updated_at: build.updated_at,
@@ -191,7 +191,7 @@ pub async fn get_build_dependencies(
                 nodes.push(DependencyNode {
                     id: b.id,
                     name: drv.name.clone(),
-                    path: drv.store_path(),
+                    path: drv.drv_path(),
                     status: format!("{:?}", b.status),
                     created_at: b.created_at,
                     updated_at: b.updated_at,
