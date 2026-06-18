@@ -18,6 +18,7 @@ import { OrganizationsService } from '@core/services/organizations.service';
 import { AuthService } from '@core/services/auth.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { EmptyStateComponent } from '@shared/components/empty-state/empty-state.component';
+import { slugify } from '@shared/text';
 import { Organization } from '@core/models';
 
 @Component({
@@ -123,7 +124,7 @@ export class OrganizationListComponent implements OnInit, OnDestroy {
 
   onOrgDisplayNameChange(value: string): void {
     if (!this.orgNameEditedByUser) {
-      const slug = this.toSlug(value);
+      const slug = slugify(value);
       this.newOrg.name = slug;
       this.onOrgNameChange(slug);
     }
@@ -131,13 +132,6 @@ export class OrganizationListComponent implements OnInit, OnDestroy {
 
   onOrgNameUserInput(): void {
     this.orgNameEditedByUser = true;
-  }
-
-  private toSlug(text: string): string {
-    return text
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '');
   }
 
   onOrgNameChange(name: string): void {
