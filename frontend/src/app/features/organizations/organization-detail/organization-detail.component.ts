@@ -20,6 +20,7 @@ import { ProjectsService } from '@core/services/projects.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { EmptyStateComponent } from '@shared/components/empty-state/empty-state.component';
 import { LabelHelpComponent } from '@shared/components/form';
+import { slugify } from '@shared/text';
 import { Organization, Project, EvaluationStatus } from '@core/models';
 
 const RESERVED_PROJECT_NAMES = ['build-request'];
@@ -117,7 +118,7 @@ export class OrganizationDetailComponent implements OnInit, OnDestroy {
 
   onProjectDisplayNameChange(value: string): void {
     if (!this.projectNameEditedByUser) {
-      const slug = this.toSlug(value);
+      const slug = slugify(value);
       this.newProject.name = slug;
       this.onProjectNameChange(slug);
     }
@@ -125,13 +126,6 @@ export class OrganizationDetailComponent implements OnInit, OnDestroy {
 
   onProjectNameUserInput(): void {
     this.projectNameEditedByUser = true;
-  }
-
-  private toSlug(text: string): string {
-    return text
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '');
   }
 
   onProjectNameChange(name: string): void {
