@@ -829,12 +829,14 @@ pub async fn handle_eval_job_completed(
         .await
         .unwrap_or_default();
     let queued_now = created.len();
-    let failed_dep = created_builds_with_failed_dependency(state, evaluation_id)
-        .await
-        .unwrap_or_default();
-    for build in created {
-        let target = promotion_target(build.id, &failed_dep);
-        update_build_status(&state.db(), build, target).await;
+    if !created.is_empty() {
+        let failed_dep = created_builds_with_failed_dependency(state, evaluation_id)
+            .await
+            .unwrap_or_default();
+        for build in created {
+            let target = promotion_target(build.id, &failed_dep);
+            update_build_status(&state.db(), build, target).await;
+        }
     }
 
     if let Some(eval) = EEvaluation::find_by_id(evaluation_id)
@@ -1070,12 +1072,14 @@ async fn promote_ready_builds(
     .context("promote_ready_builds: query builds")?;
 
     let n = created.len();
-    let failed_dep = created_builds_with_failed_dependency(state, evaluation_id)
-        .await
-        .unwrap_or_default();
-    for build in created {
-        let target = promotion_target(build.id, &failed_dep);
-        update_build_status(&state.db(), build, target).await;
+    if !created.is_empty() {
+        let failed_dep = created_builds_with_failed_dependency(state, evaluation_id)
+            .await
+            .unwrap_or_default();
+        for build in created {
+            let target = promotion_target(build.id, &failed_dep);
+            update_build_status(&state.db(), build, target).await;
+        }
     }
 
     Ok(n)
