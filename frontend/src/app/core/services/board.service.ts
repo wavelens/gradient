@@ -41,6 +41,7 @@ export interface PendingJobsResponse {
 }
 
 export interface DecisionCandidateView {
+  id: string;
   job_id: string;
   kind: number;
   organization: string;
@@ -48,6 +49,7 @@ export interface DecisionCandidateView {
   evaluation_id: string;
   pname: string | null;
   score: number;
+  won: boolean;
 }
 
 export interface DispatchDecisionView {
@@ -139,6 +141,7 @@ export interface DispatchedJobDetail extends DispatchedJobSummary {
     reason: number | null;
     created_at: string;
   }[];
+  passed_over: boolean;
 }
 
 export interface BoardWorker {

@@ -156,4 +156,11 @@ impl Scheduler {
     pub async fn recent_decisions(&self) -> Vec<jobs::DispatchDecision> {
         self.job_tracker.read().await.recent_decisions()
     }
+
+    pub async fn candidate_detail(
+        &self,
+        id: gradient_types::ids::DispatchedJobId,
+    ) -> Option<jobs::CandidateDetail> {
+        self.job_tracker.read().await.candidate_detail(id)
+    }
 }

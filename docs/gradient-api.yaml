@@ -10215,6 +10215,9 @@ components:
           type: array
           description: All build attempts for the same build, ordered by creation time ascending.
           items: { $ref: '#/components/schemas/AttemptSummary' }
+        passed_over:
+          type: boolean
+          description: True when this detail is an in-memory candidate the dispatcher scored but passed over (never persisted); the UI labels it "Passed over".
 
     AttemptSummary:
       type: object
@@ -10256,6 +10259,10 @@ components:
       type: object
       description: One scored candidate weighed in a dispatch decision.
       properties:
+        id:
+          type: string
+          format: uuid
+          description: Ephemeral id navigable via GET /board/jobs/{id} to this candidate's score-breakdown detail, served from the in-memory decision ring.
         job_id: { type: string }
         kind: { type: integer }
         organization: { type: string, format: uuid }
@@ -10263,6 +10270,7 @@ components:
         evaluation_id: { type: string, format: uuid }
         pname: { type: string, nullable: true }
         score: { type: number }
+        won: { type: boolean, description: Whether this candidate won the decision and was dispatched. }
 
     DispatchDecision:
       type: object

@@ -41,7 +41,7 @@ interface RuleRow {
       <header class="head">
         <div>
           <span class="kind" [class.build]="j.kind === 1">{{ j.kind === 1 ? 'build' : 'eval' }}</span>
-          <h1>Dispatched job</h1>
+          <h1>{{ j.passed_over ? 'Passed over' : 'Dispatched job' }}</h1>
         </div>
         <div class="total">
           <span class="label">Total score</span>
@@ -60,7 +60,7 @@ interface RuleRow {
       <section class="timeline">
         <div class="step"><span class="label">Queued</span><span>{{ j.queued_at | date: 'medium' }}</span></div>
         <div class="step"><span class="label">Wait</span><span class="hl">{{ waitLabel() }}</span></div>
-        <div class="step"><span class="label">Dispatched</span><span>{{ j.dispatched_at | date: 'medium' }}</span></div>
+        <div class="step"><span class="label">{{ j.passed_over ? 'Scored' : 'Dispatched' }}</span><span>{{ j.dispatched_at | date: 'medium' }}</span></div>
         <div class="step"><span class="label">Current State</span><span class="hl">{{ currentState() }}</span></div>
       </section>
 

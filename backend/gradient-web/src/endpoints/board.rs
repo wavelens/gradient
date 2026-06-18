@@ -164,6 +164,9 @@ pub async fn get_dispatched_jobs(
 
 #[derive(Serialize)]
 pub struct DecisionCandidateView {
+    /// Ephemeral id navigable via `GET /board/jobs/{id}` to this candidate's
+    /// score-breakdown detail, served from the in-memory decision ring.
+    pub id: Uuid,
     pub job_id: String,
     pub kind: i16,
     pub organization: Uuid,
@@ -171,6 +174,7 @@ pub struct DecisionCandidateView {
     pub evaluation_id: Uuid,
     pub pname: Option<String>,
     pub score: f64,
+    pub won: bool,
 }
 
 #[derive(Serialize)]
@@ -204,6 +208,7 @@ pub async fn get_dispatch_decisions(
                 .candidates
                 .into_iter()
                 .map(|c| DecisionCandidateView {
+                    id: c.id.into(),
                     job_id: c.job_id,
                     kind: c.kind,
                     organization: c.organization.into(),
@@ -211,6 +216,7 @@ pub async fn get_dispatch_decisions(
                     evaluation_id: c.evaluation_id.into(),
                     pname: c.pname,
                     score: c.score,
+                    won: c.won,
                 })
                 .collect(),
         })
@@ -248,14 +254,55 @@ pub struct DispatchedJobDetail {
     pub instance_context: serde_json::Value,
     pub candidates: Option<serde_json::Value>,
     pub previous_attempts: Vec<AttemptSummary>,
+    /// True when this detail is an in-memory candidate the dispatcher scored but
+    /// passed over (never written to `dispatched_job`). The UI labels it as such.
+    pub passed_over: bool,
 }
 
 pub async fn get_dispatched_job(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Extension(scheduler): Extension<Arc<Scheduler>>,
     Path(id): Path<Uuid>,
 ) -> WebResult<Json<BaseResponse<DispatchedJobDetail>>> {
     let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
+
+    // In-memory candidates (rejected and winning alike) carry an ephemeral id;
+    // look there first, then fall back to the persisted `dispatched_job` row.
+    if let Some(c) = scheduler.candidate_detail(DispatchedJobId::from(id)).await {
+        if !scope.allows(&Uuid::from(c.organization)) {
+            return Err(WebError::not_found("Job"));
+        }
+
+        let organization_name = gradient_entity::organization::Entity::find_by_id(c.organization)
+            .one(&state.web_db)
+            .await?
+            .map(|o| o.name)
+            .unwrap_or_default();
+
+        return Ok(ok_json(DispatchedJobDetail {
+            id: c.id.into(),
+            kind: c.kind,
+            organization: c.organization.into(),
+            organization_name,
+            worker_id: c.worker_id,
+            score: c.score,
+            queued_at: c.queued_at.and_utc().to_rfc3339(),
+            dispatched_at: c.scored_at.and_utc().to_rfc3339(),
+            finished_at: None,
+            build_id: c.build_id.map(Into::into),
+            evaluation_id: c.evaluation_id.into(),
+            pname: c.pname,
+            score_breakdown: c.score_breakdown,
+            worker_context: c.worker_context,
+            job_context: c.job_context,
+            instance_context: c.instance_context,
+            candidates: None,
+            previous_attempts: Vec::new(),
+            passed_over: !c.won,
+        }));
+    }
+
     let j = gradient_entity::dispatched_job::Entity::find_by_id(DispatchedJobId::from(id))
         .one(&state.web_db)
         .await?
@@ -331,6 +378,7 @@ pub async fn get_dispatched_job(
         instance_context: j.instance_context.unwrap_or(serde_json::Value::Null),
         candidates: if scope.is_all() { j.candidates } else { None },
         previous_attempts,
+        passed_over: false,
     }))
 }
 
