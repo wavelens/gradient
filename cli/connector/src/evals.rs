@@ -12,10 +12,14 @@ pub struct EvaluationResponse {
     pub commit: String,
     pub wildcard: String,
     pub status: String,
+    #[serde(default)]
     pub previous: Option<String>,
+    #[serde(default)]
     pub next: Option<String>,
     pub created_at: String,
+    #[serde(default)]
     pub updated_at: String,
+    #[serde(default)]
     pub error: Option<String>,
 }
 
@@ -166,5 +170,54 @@ impl EvalsApi<'_> {
             true,
         )?;
         http::decode(req.send().await?).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EvaluationResponse;
+
+    // Regression for #435: a build-request eval omits `updated_at`/`error`,
+    // which used to make `gradient watch`/`build` report "Unknown evaluation".
+    #[test]
+    fn deserializes_eval_without_updated_at_or_error() {
+        let body = r#"{
+            "id":"019ed787-8325-7441-9343-118e6285488e",
+            "project":"019ed787-8321-7703-ab8d-e79cc2da3d88",
+            "project_name":"build-request",
+            "repository":"/nix/store/abc-source",
+            "commit":"0000000000000000000000000000000000000000",
+            "wildcard":".#dig",
+            "status":"Queued",
+            "previous":null,
+            "next":null,
+            "created_at":"2026-06-17T21:40:42.917745",
+            "error_count":0,
+            "warning_count":0,
+            "entry_points":[]
+        }"#;
+        let eval: EvaluationResponse = serde_json::from_str(body).expect("decode");
+        assert_eq!(eval.status, "Queued");
+        assert!(eval.updated_at.is_empty());
+        assert!(eval.error.is_none());
+    }
+
+    #[test]
+    fn deserializes_eval_with_error_message() {
+        let body = r#"{
+            "id":"019ed787-8325-7441-9343-118e6285488e",
+            "repository":"/nix/store/abc-source",
+            "commit":"0000",
+            "wildcard":".#dig",
+            "status":"Failed",
+            "created_at":"2026-06-17T21:40:42.917745",
+            "updated_at":"2026-06-17T21:42:42.917745",
+            "error_count":1,
+            "warning_count":0,
+            "error":"prefetch import failed",
+            "entry_points":[]
+        }"#;
+        let eval: EvaluationResponse = serde_json::from_str(body).expect("decode");
+        assert_eq!(eval.error.as_deref(), Some("prefetch import failed"));
     }
 }

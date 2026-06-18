@@ -8,7 +8,7 @@ use crate::config::*;
 use crate::input::client_from_config;
 use crate::output::{Output, to_exit_kind};
 use connector::build_requests::DispatchResponse;
-use connector::evals::{ArtefactTree, EntryPointArtefacts};
+use connector::evals::{ArtefactTree, EntryPointArtefacts, EvaluationResponse};
 use futures::StreamExt;
 use futures::pin_mut;
 #[cfg(not(feature = "nix"))]
@@ -146,9 +146,18 @@ pub async fn handle_build(
         return;
     }
 
-    let status = wait_for_terminal(&client, &dispatch.evaluation, out).await;
+    let eval = wait_for_terminal(&client, &dispatch.evaluation, out).await;
+    let status = eval.as_ref().map(|e| e.status.clone()).unwrap_or_default();
     if status != "Completed" {
         if !quiet {
+            if let Some(err) = eval
+                .as_ref()
+                .and_then(|e| e.error.as_deref())
+                .filter(|s| !s.is_empty())
+            {
+                out.human(format!("Evaluation error: {err}"));
+            }
+
             out.human(format!(
                 "Build did not complete (status: {status}); skipping result."
             ));
@@ -322,17 +331,22 @@ async fn dispatch_via_manifest(
 }
 
 /// Poll the evaluation until it reaches a terminal status, returning it.
-async fn wait_for_terminal(client: &connector::Client, eval_id: &str, out: Output) -> String {
+/// `None` means the poll failed (already reported to `out`).
+async fn wait_for_terminal(
+    client: &connector::Client,
+    eval_id: &str,
+    out: Output,
+) -> Option<EvaluationResponse> {
     loop {
         match client.evals().get(eval_id).await {
             Ok(e) => {
                 if matches!(e.status.as_str(), "Completed" | "Failed" | "Aborted") {
-                    return e.status;
+                    return Some(e);
                 }
             }
             Err(e) => {
                 out.progress(format!("Status poll failed: {}", e));
-                return String::new();
+                return None;
             }
         }
 

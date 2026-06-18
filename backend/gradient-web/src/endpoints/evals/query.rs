@@ -50,6 +50,19 @@ pub async fn get_evaluation(
         .iter()
         .filter(|m| m.level == gradient_entity::evaluation_message::MessageLevel::Warning)
         .count() as u64;
+    let mut error_messages: Vec<&gradient_entity::evaluation_message::Model> = all_messages
+        .iter()
+        .filter(|m| m.level == gradient_entity::evaluation_message::MessageLevel::Error)
+        .collect();
+    error_messages.sort_by_key(|m| m.created_at);
+
+    let error = (!error_messages.is_empty()).then(|| {
+        error_messages
+            .iter()
+            .map(|m| m.message.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    });
 
     // Load entry points with their build statuses.
     let ep_rows = EEntryPoint::find()
@@ -134,8 +147,10 @@ pub async fn get_evaluation(
             previous: evaluation.previous,
             next: evaluation.next,
             created_at: evaluation.created_at,
+            updated_at: evaluation.updated_at,
             error_count,
             warning_count,
+            error,
             entry_points,
             trigger,
             triggered_by,

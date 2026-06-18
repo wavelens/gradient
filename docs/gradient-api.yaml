@@ -8293,6 +8293,10 @@ components:
         warning_count:
           type: integer
           description: Number of warning-level messages recorded during evaluation
+        error:
+          type: string
+          nullable: true
+          description: Concatenated text of the evaluation's error-level messages, or null when there are none.
         created_at:
           type: string
           format: date-time
