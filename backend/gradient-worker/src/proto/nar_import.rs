@@ -57,6 +57,15 @@ const HTTP_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(600);
 /// and we don't want to swamp the AddToStoreNar queue.
 const PREFETCH_CONCURRENCY: usize = 8;
 
+/// Attempts for a single presigned S3 download before giving up. The cache's
+/// object store can flake at the transport layer (TLS handshake resets,
+/// connection drops) under concurrent load; retrying a few times turns a
+/// transient edge failure into a successful fetch instead of a failed build.
+const PRESIGNED_DOWNLOAD_MAX_ATTEMPTS: u32 = 4;
+
+/// Base backoff before the first presigned-download retry; doubled each attempt.
+const PRESIGNED_RETRY_BASE: Duration = Duration::from_millis(500);
+
 /// Required input store paths the gradient cache could not serve. Carried as a
 /// typed error so the executor classifies the failure as
 /// `BuildFailureKind::InputsUnavailable` and forwards the paths to the server,
@@ -82,6 +91,75 @@ impl std::error::Error for MissingInputs {}
 /// transport error: 404 Not Found / 410 Gone.
 fn presigned_status_is_missing(status: u16) -> bool {
     matches!(status, 404 | 410)
+}
+
+/// True when a presigned download's HTTP status is worth retrying: request
+/// timeout, rate limiting, or any 5xx (the object store is briefly unhealthy,
+/// not the object missing). 404/410 are handled as missing; other 4xx are
+/// terminal client errors.
+fn presigned_status_is_retryable(status: u16) -> bool {
+    matches!(status, 408 | 429) || status >= 500
+}
+
+/// One presigned download's outcome: the store path, and `Some((bytes, meta))`
+/// when fetched or `None` when the object is a genuine 404/410 miss.
+type PresignedFetch = (String, Option<(Vec<u8>, CachedPath)>);
+
+/// Download one presigned NAR with bounded retries. `Ok((path, Some((bytes,
+/// cp))))` fetched it; `Ok((path, None))` is a genuine 404/410 miss (the row
+/// claims the NAR but the bucket lost it - the `InputsUnavailable` self-heal
+/// demotes and rebuilds it, #410). Transport errors and retryable statuses are
+/// retried with exponential backoff before surfacing as a transient `Err`.
+async fn download_one_presigned(
+    http: &reqwest::Client,
+    cp: CachedPath,
+) -> Result<PresignedFetch> {
+    let url = cp.url.clone().expect("by_url entries have a URL");
+    let path = cp.path.clone();
+    let mut backoff = PRESIGNED_RETRY_BASE;
+
+    for attempt in 1..=PRESIGNED_DOWNLOAD_MAX_ATTEMPTS {
+        let attempt_err = match http.get(&url).timeout(HTTP_DOWNLOAD_TIMEOUT).send().await {
+            Ok(resp) => {
+                let status = resp.status().as_u16();
+                if presigned_status_is_missing(status) {
+                    warn!(
+                        %path,
+                        status,
+                        "presigned NAR missing: cached_path claims this object but the bucket \
+                         returned {status}; treating as a missing input (self-heal demotes it)"
+                    );
+                    return Ok((path, None));
+                }
+                if presigned_status_is_retryable(status) {
+                    anyhow::anyhow!("HTTP {status} from {url}")
+                } else {
+                    let resp = resp
+                        .error_for_status()
+                        .with_context(|| format!("HTTP {url} returned non-2xx"))?;
+                    let bytes = resp
+                        .bytes()
+                        .await
+                        .with_context(|| format!("read body of {url}"))?
+                        .to_vec();
+                    return Ok((path, Some((bytes, cp))));
+                }
+            }
+            Err(e) => anyhow::Error::new(e).context(format!("HTTP GET {url} (path {path})")),
+        };
+
+        if attempt < PRESIGNED_DOWNLOAD_MAX_ATTEMPTS {
+            warn!(%path, attempt, error = %attempt_err, "presigned download failed; retrying");
+            tokio::time::sleep(backoff).await;
+            backoff *= 2;
+        } else {
+            return Err(attempt_err.context(format!(
+                "presigned download for {path} failed after {PRESIGNED_DOWNLOAD_MAX_ATTEMPTS} attempts"
+            )));
+        }
+    }
+
+    unreachable!("loop returns on the final attempt")
 }
 
 /// How the closure walker treats `.drv` content seeds.
@@ -335,40 +413,22 @@ impl<'a> InputPrefetcher<'a> {
 
         let http = crate::http::client();
 
-        let mut futs = by_url
-            .into_iter()
-            .map(|cp| async move {
-                let url = cp.url.clone().expect("by_url entries have a URL");
-                let resp = http
-                    .get(&url)
-                    .timeout(HTTP_DOWNLOAD_TIMEOUT)
-                    .send()
-                    .await
-                    .with_context(|| format!("HTTP GET {} (path {})", url, cp.path))?;
-                // A 404/410 means the cache's DB row claims the NAR but the
-                // object is gone from the bucket. The server only signs the URL
-                // and never sees this, so surface it as a missing input and let
-                // the InputsUnavailable self-heal demote + rebuild it (#410).
-                if presigned_status_is_missing(resp.status().as_u16()) {
-                    return Ok((cp.path.clone(), None));
-                }
-
-                let resp = resp
-                    .error_for_status()
-                    .with_context(|| format!("HTTP {} returned non-2xx", url))?;
-                let bytes = resp
-                    .bytes()
-                    .await
-                    .with_context(|| format!("read body of {}", url))?
-                    .to_vec();
-                Ok::<_, anyhow::Error>((cp.path.clone(), Some((bytes, cp))))
-            })
-            .collect::<FuturesUnordered<_>>();
+        // Bound concurrency: firing every download at once opens a TLS
+        // connection per path, which is what tips a flaky object store into
+        // `tls handshake eof`. Cap it at the same width as the import pipeline.
+        let outcomes: Vec<Result<PresignedFetch>> =
+            futures::stream::iter(by_url.into_iter().map(|cp| {
+                let http = http.clone();
+                async move { download_one_presigned(&http, cp).await }
+            }))
+            .buffer_unordered(PREFETCH_CONCURRENCY)
+            .collect()
+            .await;
 
         let mut results = Vec::new();
         let mut missing = Vec::new();
-        while let Some(r) = futs.next().await {
-            let (path, fetched) = r.context("presigned NAR download failed")?;
+        for outcome in outcomes {
+            let (path, fetched) = outcome.context("presigned NAR download failed")?;
             match fetched {
                 Some((bytes, cp)) => results.push((path, bytes, cp)),
                 None => missing.push(path),
@@ -1543,6 +1603,18 @@ mod tests {
                 !presigned_status_is_missing(retryable),
                 "status {retryable} must stay retryable, not a missing input"
             );
+        }
+    }
+
+    #[test]
+    fn presigned_retryable_statuses_are_timeout_rate_limit_and_5xx() {
+        for s in [408, 429, 500, 502, 503, 504] {
+            assert!(presigned_status_is_retryable(s), "status {s} must retry");
+        }
+        // Genuine misses and terminal client errors must NOT retry: 404/410 are
+        // handled as missing inputs, 403/400 are terminal.
+        for s in [400, 403, 404, 410] {
+            assert!(!presigned_status_is_retryable(s), "status {s} must not retry");
         }
     }
 }
