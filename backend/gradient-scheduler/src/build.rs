@@ -585,6 +585,25 @@ impl<'a> BuildStateHandler<'a> {
                 continue;
             };
 
+            // Diagnostic: record why the worker found this input unfetchable
+            // even though dispatch treated its producer as done. `fully_cached`
+            // true means the DB claimed a complete NAR (stale cached_path / lost
+            // object); the producer statuses show whether it was trusted
+            // `Substituted` or really `Completed`.
+            match gradient_db::diagnose_missing_input(db, evaluation_id, hash).await {
+                Ok(d) => warn!(
+                    %path,
+                    hash,
+                    cached_path_present = d.cached_path_present,
+                    fully_cached = d.fully_cached,
+                    outputs_cached = d.outputs_cached,
+                    outputs_total = d.outputs_total,
+                    producer_statuses = ?d.producer_build_statuses,
+                    "missing input: cache/build state at failure"
+                ),
+                Err(e) => warn!(%path, error = %e, "missing input: diagnosis query failed"),
+            }
+
             match gradient_db::demote_cached_output(db, hash).await {
                 Ok(drvs) if !drvs.is_empty() => purged += 1,
                 Ok(_) => unrecoverable.push(path),

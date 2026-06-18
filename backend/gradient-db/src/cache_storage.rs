@@ -155,6 +155,62 @@ pub async fn org_caches_all_full<C: ConnectionTrait>(
     Ok(true)
 }
 
+/// Why an input the worker reported missing was nonetheless treated as
+/// available. Captured by the scheduler's missing-input self-heal so the cause
+/// (stale `cached_path` whose object was GC'd or never uploaded, vs a producer
+/// trusted `Substituted`/`Completed` while its NAR was never cached) is visible
+/// at `warn` without raising the global log level.
+#[derive(Debug, Default)]
+pub struct MissingInputDiagnosis {
+    /// A `cached_path` row exists for this output hash.
+    pub cached_path_present: bool,
+    /// That row claims a fully-uploaded NAR (`file_hash IS NOT NULL`).
+    pub fully_cached: bool,
+    /// `derivation_output` rows for this hash, and how many are `is_cached`.
+    pub outputs_total: usize,
+    pub outputs_cached: usize,
+    /// Statuses of builds in this evaluation that produce the output.
+    pub producer_build_statuses: Vec<gradient_entity::build::BuildStatus>,
+}
+
+/// Snapshot the cache/build state of a missing input `hash` within an
+/// evaluation, for diagnostic logging by the missing-input self-heal.
+pub async fn diagnose_missing_input<C: ConnectionTrait>(
+    db: &C,
+    evaluation_id: gradient_types::ids::EvaluationId,
+    hash: &str,
+) -> Result<MissingInputDiagnosis, sea_orm::DbErr> {
+    use gradient_entity::build::{Column as CB, Entity as EB};
+    use gradient_entity::cached_path::{Column as CCP, Entity as ECP};
+    use gradient_entity::derivation_output::{Column as CDO, Entity as EDO};
+
+    let cached_path = ECP::find().filter(CCP::Hash.eq(hash)).one(db).await?;
+    let outputs = EDO::find().filter(CDO::Hash.eq(hash)).all(db).await?;
+    let outputs_cached = outputs.iter().filter(|o| o.is_cached).count();
+    let producer_drvs: Vec<DerivationId> = outputs.iter().map(|o| o.derivation).collect();
+
+    let producer_build_statuses = if producer_drvs.is_empty() {
+        Vec::new()
+    } else {
+        EB::find()
+            .filter(CB::Evaluation.eq(evaluation_id))
+            .filter(CB::Derivation.is_in(producer_drvs))
+            .all(db)
+            .await?
+            .into_iter()
+            .map(|b| b.status)
+            .collect()
+    };
+
+    Ok(MissingInputDiagnosis {
+        cached_path_present: cached_path.is_some(),
+        fully_cached: cached_path.map(|c| c.is_fully_cached()).unwrap_or(false),
+        outputs_total: outputs.len(),
+        outputs_cached,
+        producer_build_statuses,
+    })
+}
+
 /// Purge a cached output proven unfetchable, so the next evaluation rebuilds it
 /// from scratch as if it had never been cached. Clears `is_cached` /
 /// `cached_path` on every `derivation_output` with this store-path `hash`, then
