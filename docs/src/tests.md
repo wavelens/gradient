@@ -4484,3 +4484,23 @@ post-build `result`.
   `upload_source_nar_returns_dispatch`.
 - The `nix copy`/`result` substitution and the staged NAR pack are daemon/`nix`
   dependent and covered end-to-end by CI.
+
+## Slug umlauts, source NAR compression, CLI eval surfacing & fetch-by-SHA (#431, #435, #430)
+
+- `frontend/src/app/shared/text/slug.spec.ts` - `slugify` transliterates umlauts
+  (`NüschtOS` → `nuschtos`), expands `ß`→`ss`, strips other Latin diacritics, and
+  keeps the lowercase/hyphen/trim behaviour. Fixes #431 (`NüschtOS` → `n-schtos`).
+- `backend/gradient-storage/src/source_nar.rs::tests::compressed_bytes_round_trip_to_nar`
+  - the stored `compressed_bytes` zstd-decompress back to the raw NAR, and
+  `file_size`/`file_hash_sri` describe the compressed object. Fixes #435 "Zstd
+  decompress failed: Unknown frame descriptor" (source NAR was stored
+  uncompressed while the worker import expects `.nar.zst`).
+- `cli/connector/src/evals.rs::tests` - `deserializes_eval_without_updated_at_or_error`
+  and `deserializes_eval_with_error_message`: the CLI tolerates a server eval
+  payload that omits `updated_at`/`error` (the decode failure behind `gradient
+  watch` "Unknown evaluation" / `build` "api error (200)") and surfaces the
+  populated `error`.
+- #430 (fetch-by-SHA fallback for a commit not reachable from the cloned refs)
+  needs a live git transport, so it is covered by CI/manual rather than a unit
+  test; the worker now fetches the commit by SHA before failing with a clearer
+  "not reachable (force-pushed, GC'd, or a fork PR ref)" message.
