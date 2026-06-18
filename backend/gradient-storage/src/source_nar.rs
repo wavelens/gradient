@@ -20,6 +20,10 @@ use harmonia_store_path::{StoreDir, StorePathName};
 use harmonia_utils_hash::{Algorithm, Hash, HashFormat as _, Sha256};
 use std::path::Path;
 
+/// zstd level for the stored source NAR; matches the worker's `NarPush`
+/// compression so every object under `nars/` is encoded the same way.
+const SOURCE_NAR_ZSTD_LEVEL: i32 = 6;
+
 pub struct SourceNar {
     pub store_path: String,
     pub store_hash: String,
@@ -27,6 +31,11 @@ pub struct SourceNar {
     pub nar_size: u64,
     pub nar_hash_sri: String,
     pub nar_hash_nix32: String,
+    /// zstd-compressed NAR as persisted in `NarStore` (which stores `.nar.zst`).
+    pub compressed_bytes: Vec<u8>,
+    /// Size and SHA-256 of `compressed_bytes`, i.e. the narinfo `FileSize`/`FileHash`.
+    pub file_size: u64,
+    pub file_hash_sri: String,
 }
 
 async fn nar_bytes_from_dir(staging_dir: &Path) -> Result<Vec<u8>> {
@@ -66,6 +75,11 @@ pub async fn source_nar_from_bytes(nar_bytes: Vec<u8>) -> Result<SourceNar> {
     let store_hash = store_path_obj.hash().to_string();
     let store_path = format!("/nix/store/{store_hash}-source");
 
+    let compressed_bytes = zstd::encode_all(std::io::Cursor::new(&nar_bytes), SOURCE_NAR_ZSTD_LEVEL)
+        .context("failed to zstd-compress source NAR")?;
+    let file_size = compressed_bytes.len() as u64;
+    let file_hash_sri = Sha256::digest(&compressed_bytes).as_sri().to_string();
+
     Ok(SourceNar {
         store_path,
         store_hash,
@@ -73,6 +87,9 @@ pub async fn source_nar_from_bytes(nar_bytes: Vec<u8>) -> Result<SourceNar> {
         nar_size,
         nar_hash_sri,
         nar_hash_nix32,
+        compressed_bytes,
+        file_size,
+        file_hash_sri,
     })
 }
 
@@ -115,6 +132,23 @@ mod tests {
         assert_eq!(from_dir.nar_hash_nix32, from_bytes.nar_hash_nix32);
         assert_eq!(from_dir.nar_hash_sri, from_bytes.nar_hash_sri);
         assert_eq!(from_dir.nar_size, from_bytes.nar_size);
+    }
+
+    #[tokio::test]
+    async fn compressed_bytes_round_trip_to_nar() {
+        let dir = make_staging_dir();
+        let nar = materialise_source_nar(dir.path()).await.unwrap();
+
+        assert_ne!(
+            nar.compressed_bytes, nar.nar_bytes,
+            "stored bytes must be compressed, not the raw NAR"
+        );
+        let decompressed = zstd::decode_all(std::io::Cursor::new(&nar.compressed_bytes)).unwrap();
+        assert_eq!(decompressed, nar.nar_bytes);
+
+        assert_eq!(nar.file_size, nar.compressed_bytes.len() as u64);
+        let expected_file_hash = Sha256::digest(&nar.compressed_bytes).as_sri().to_string();
+        assert_eq!(nar.file_hash_sri, expected_file_hash);
     }
 
     #[tokio::test]
