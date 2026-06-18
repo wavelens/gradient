@@ -411,9 +411,10 @@ async fn query_path_info(
     Ok(Vec::new())
 }
 
-fn clone_and_checkout(url: &str, commit: &str, ssh_key: Option<&str>) -> Result<String> {
-    let temp_dir = std::env::temp_dir().join(format!("gradient-fetch-{}", uuid::Uuid::now_v7()));
-
+/// `FetchOptions` that accept the remote certificate and authenticate with the
+/// SSH key when one is given. Returned by value so the same auth can serve both
+/// the initial clone and a fallback fetch-by-SHA.
+fn fetch_options_with_auth(ssh_key: Option<&str>) -> git2::FetchOptions<'static> {
     let mut callbacks = RemoteCallbacks::new();
     callbacks.certificate_check(|cert, _valid| Ok(gradient_sources::accept_cert(cert)));
 
@@ -426,18 +427,41 @@ fn clone_and_checkout(url: &str, commit: &str, ssh_key: Option<&str>) -> Result<
 
     let mut fo = git2::FetchOptions::new();
     fo.remote_callbacks(callbacks);
+    fo
+}
+
+fn clone_and_checkout(url: &str, commit: &str, ssh_key: Option<&str>) -> Result<String> {
+    let temp_dir = std::env::temp_dir().join(format!("gradient-fetch-{}", uuid::Uuid::now_v7()));
 
     let repo = git2::build::RepoBuilder::new()
-        .fetch_options(fo)
+        .fetch_options(fetch_options_with_auth(ssh_key))
         .clone(url, &temp_dir)
         .with_context(|| format!("failed to clone {url}"))?;
 
     let oid =
         git2::Oid::from_str(commit).with_context(|| format!("invalid commit SHA: {commit}"))?;
 
-    let git_commit = repo
-        .find_commit(oid)
-        .with_context(|| format!("commit {commit} not found in {url}"))?;
+    let git_commit = match repo.find_commit(oid) {
+        Ok(c) => c,
+        Err(_) => {
+            // A default clone only brings down commits reachable from the
+            // remote's advertised branch refs; a fork-PR head or a
+            // force-pushed commit can be absent. Fetch it directly by SHA and
+            // retry before giving up.
+            repo.find_remote("origin")
+                .context("failed to find origin remote")?
+                .fetch(&[commit], Some(&mut fetch_options_with_auth(ssh_key)), None)
+                .with_context(|| {
+                    format!(
+                        "commit {commit} not reachable in {url} (force-pushed, GC'd, or a fork PR ref)"
+                    )
+                })?;
+
+            repo.find_commit(oid).with_context(|| {
+                format!("commit {commit} still not found in {url} after fetching it directly")
+            })?
+        }
+    };
 
     let tree = git_commit.tree().context("failed to get commit tree")?;
 
