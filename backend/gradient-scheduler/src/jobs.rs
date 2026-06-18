@@ -8,7 +8,9 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use gradient_types::ids::{BuildId, CommitId, EvaluationId, OrganizationId, ProjectId};
+use gradient_types::ids::{
+    BuildId, CommitId, DispatchedJobId, EvaluationId, OrganizationId, ProjectId,
+};
 use gradient_types::proto::{
     BuildJob, CandidateScore, FlakeJob, FlakeSource, FlakeTask, Job, JobCandidate, JobKind,
     RequiredPath,
@@ -258,6 +260,14 @@ pub struct DispatchRecord {
     pub build_context: serde_json::Value,
 }
 
+/// Per-candidate scoring result computed once and reused for both the decision
+/// ring and (for the winner) the persisted `dispatched_job` record.
+struct ScoredCandidate {
+    total: f64,
+    score_breakdown: serde_json::Value,
+    job_context: serde_json::Value,
+}
+
 /// Returns true when the worker can execute `job`: a flake job that fetches
 /// from a repository (carries `FetchFlake`) needs the `fetch` capability; a
 /// build job needs matching architecture/features. If `caps` is `None`,
@@ -305,6 +315,10 @@ pub struct PendingJobInfo {
 /// Jobs "all scores" view can surface negative scores for rule tuning (#419).
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct DecisionCandidate {
+    /// Ephemeral id used to serve this candidate's detail from the in-memory ring
+    /// via `GET /board/jobs/{id}` - never persisted, so it co-exists with the
+    /// `dispatched_job` UUID namespace without collision.
+    pub id: DispatchedJobId,
     pub job_id: String,
     pub kind: i16,
     pub organization: OrganizationId,
@@ -312,6 +326,13 @@ pub struct DecisionCandidate {
     pub evaluation_id: EvaluationId,
     pub pname: Option<String>,
     pub score: f64,
+    pub won: bool,
+    pub queued_at: chrono::NaiveDateTime,
+    /// Per-rule contributions and the per-candidate job context captured at
+    /// decision time, so the detail page renders a score breakdown even for a
+    /// candidate that was passed over and never reached `dispatched_job`.
+    pub score_breakdown: serde_json::Value,
+    pub job_context: serde_json::Value,
 }
 
 /// A recorded dispatch decision: the candidates a worker was scored against and
@@ -322,7 +343,32 @@ pub struct DispatchDecision {
     pub worker_id: String,
     pub kind: i16,
     pub winner: Option<String>,
+    /// Worker and instance context are identical for every candidate in one
+    /// decision, so they are stored once here rather than per candidate.
+    pub worker_context: serde_json::Value,
+    pub instance_context: serde_json::Value,
     pub candidates: Vec<DecisionCandidate>,
+}
+
+/// Owned snapshot reconstructing one candidate's job detail from the decision
+/// ring, served by `GET /board/jobs/{id}` when the id is an ephemeral candidate.
+#[derive(Debug, Clone)]
+pub struct CandidateDetail {
+    pub id: DispatchedJobId,
+    pub kind: i16,
+    pub organization: OrganizationId,
+    pub build_id: Option<BuildId>,
+    pub evaluation_id: EvaluationId,
+    pub pname: Option<String>,
+    pub score: f64,
+    pub won: bool,
+    pub worker_id: String,
+    pub scored_at: chrono::NaiveDateTime,
+    pub queued_at: chrono::NaiveDateTime,
+    pub score_breakdown: serde_json::Value,
+    pub worker_context: serde_json::Value,
+    pub job_context: serde_json::Value,
+    pub instance_context: serde_json::Value,
 }
 
 /// How many dispatch decisions to retain, and how many candidates per decision.
@@ -411,6 +457,34 @@ impl JobTracker {
         self.decisions.iter().rev().cloned().collect()
     }
 
+    /// Reconstruct a candidate's job detail from the ring by its ephemeral id,
+    /// most-recent decision first. `None` once the decision has been evicted.
+    pub fn candidate_detail(&self, id: DispatchedJobId) -> Option<CandidateDetail> {
+        for d in self.decisions.iter().rev() {
+            if let Some(c) = d.candidates.iter().find(|c| c.id == id) {
+                return Some(CandidateDetail {
+                    id: c.id,
+                    kind: c.kind,
+                    organization: c.organization,
+                    build_id: c.build_id,
+                    evaluation_id: c.evaluation_id,
+                    pname: c.pname.clone(),
+                    score: c.score,
+                    won: c.won,
+                    worker_id: d.worker_id.clone(),
+                    scored_at: d.at,
+                    queued_at: c.queued_at,
+                    score_breakdown: c.score_breakdown.clone(),
+                    worker_context: d.worker_context.clone(),
+                    job_context: c.job_context.clone(),
+                    instance_context: d.instance_context.clone(),
+                });
+            }
+        }
+
+        None
+    }
+
     /// Assign the best pending job matching `kind` for `peer_id`.
     ///
     /// Each eligible candidate is scored by `policy`.  The job with the
@@ -466,7 +540,11 @@ impl JobTracker {
             (total_work > 0.0).then(|| (org_work.get(&peer).copied().unwrap_or(0.0) / total_work) as f32)
         };
 
-        let score_of = |id: &str, job: &PendingJob| -> f64 {
+        // Per-candidate detailed score, computed once and reused for both the
+        // decision ring and the winner's persisted record. `score_detailed` is
+        // the same rule loop as `score` plus a small per-rule map, so capturing
+        // every candidate's breakdown is essentially free.
+        let score_of = |id: &str, job: &PendingJob| -> ScoredCandidate {
             let s = worker_scores.as_ref().and_then(|ws| ws.get(id));
             let closure_size = match job {
                 PendingJob::Build(b) => b.closure_size,
@@ -505,10 +583,17 @@ impl JobTracker {
                 org_work_share: org_work_share(job.peer_id()),
                 rescore_count: job.rescore_count(),
             };
-            policy.score(&ctx, worker_ctx, instance)
+            let breakdown = policy.score_detailed(&ctx, worker_ctx, instance);
+            ScoredCandidate {
+                total: breakdown.total,
+                score_breakdown: serde_json::to_value(&breakdown)
+                    .unwrap_or(serde_json::Value::Null),
+                job_context: serde_json::to_value(crate::views::JobContextView::new(&ctx, job))
+                    .unwrap_or(serde_json::Value::Null),
+            }
         };
 
-        let mut scored: Vec<(&String, f64)> = self
+        let mut scored: Vec<(&String, ScoredCandidate)> = self
             .pending
             .iter()
             .filter(|(_, j)| {
@@ -523,33 +608,56 @@ impl JobTracker {
             .map(|(id, job)| (id, score_of(id, job)))
             .collect();
         // Highest score first; tie-break on the smaller job_id for determinism.
-        scored.sort_by(|(id_a, sa), (id_b, sb)| {
-            sb.partial_cmp(sa)
+        scored.sort_by(|(id_a, a), (id_b, b)| {
+            b.total
+                .partial_cmp(&a.total)
                 .unwrap_or(std::cmp::Ordering::Equal)
                 .then_with(|| id_a.cmp(id_b))
         });
 
         // A negative best total means dispatching now is worse than idling this
         // round (e.g. a build still awaiting candidate scores); the worker waits.
-        let winner = scored.first().filter(|(_, s)| *s >= 0.0).map(|(id, _)| (*id).clone());
+        let winner = scored.first().filter(|(_, sc)| sc.total >= 0.0).map(|(id, _)| (*id).clone());
+
+        // Worker and instance context are identical for every candidate, so they
+        // are computed once and shared across the decision and the winner record.
+        let worker_context = serde_json::to_value(crate::views::WorkerContextView::new(
+            worker_ctx,
+            caps.map(|c| c.capabilities.clone()).unwrap_or_default(),
+        ))
+        .unwrap_or(serde_json::Value::Null);
+        let instance_context =
+            serde_json::to_value(instance).unwrap_or(serde_json::Value::Null);
 
         // Snapshot the decision (incl. rejected/negative candidates) for the Live
         // Jobs "all scores" view before the immutable borrow of `pending` ends.
         let candidates: Vec<DecisionCandidate> = scored
             .iter()
             .take(CANDIDATES_PER_DECISION)
-            .filter_map(|(id, s)| {
+            .filter_map(|(id, sc)| {
                 self.pending.get(*id).map(|job| DecisionCandidate {
+                    id: DispatchedJobId::now_v7(),
                     job_id: (*id).clone(),
                     kind: job.kind_disc(),
                     organization: job.peer_id(),
                     build_id: job.build_id(),
                     evaluation_id: job.evaluation_id(),
                     pname: job.pname(),
-                    score: *s,
+                    score: sc.total,
+                    won: winner.as_deref() == Some(id.as_str()),
+                    queued_at: job.queued_at(),
+                    score_breakdown: sc.score_breakdown.clone(),
+                    job_context: sc.job_context.clone(),
                 })
             })
             .collect();
+
+        // The winner's detailed snapshot, cloned out before the `scored`/`pending`
+        // borrows end so the owned record can outlive them.
+        let winner_detail = scored
+            .first()
+            .filter(|(_, sc)| sc.total >= 0.0)
+            .map(|(_, sc)| (sc.total, sc.score_breakdown.clone(), sc.job_context.clone()));
         drop(scored);
 
         if !candidates.is_empty() {
@@ -561,55 +669,19 @@ impl JobTracker {
                     JobKind::Build => 1,
                 },
                 winner: winner.clone(),
+                worker_context: worker_context.clone(),
+                instance_context: instance_context.clone(),
                 candidates,
             });
         }
 
         let job_id = winner?;
+        let (winner_score, winner_breakdown, winner_job_context) =
+            winner_detail.expect("a winner implies its scored detail exists");
 
-        // Recompute the winner's score with the per-rule breakdown, captured for
-        // the dispatched_job row. Owned snapshots so the borrow ends before the
-        // mutable assign_pending below.
+        // Reuse the winner's already-computed breakdown/context for the
+        // `dispatched_job` record; only build-specific fields are derived here.
         let dispatch_record = self.pending.get(&job_id).map(|job| {
-            let s = worker_scores.as_ref().and_then(|ws| ws.get(job_id.as_str()));
-            let closure_size = match job {
-                PendingJob::Build(b) => b.closure_size,
-                PendingJob::Eval(_) => None,
-            };
-            let history = match job {
-                PendingJob::Build(b) => b.history,
-                PendingJob::Eval(_) => gradient_score::HistoryPrediction::default(),
-            };
-            let closure = move || closure_size;
-            let history_provider = move || history;
-            let scored = match job {
-                PendingJob::Eval(e) => ScoredJob::new_eval(
-                    job_id.as_str(),
-                    job.peer_id(),
-                    e.job.tasks.contains(&FlakeTask::FetchFlake),
-                    e.history,
-                ),
-                PendingJob::Build(b) => ScoredJob::new_build(
-                    job_id.as_str(),
-                    job.peer_id(),
-                    b.architecture.as_str(),
-                    b.prefer_local_build,
-                    b.is_fixed_output,
-                    None,
-                    LazyProviders { closure_size: &closure, history: &history_provider },
-                ),
-            };
-            let ctx = JobContext {
-                job: &scored,
-                missing_count: s.map(|s| s.missing_count),
-                missing_nar_size: s.map(|s| s.missing_nar_size),
-                dependency_count: job.dependency_count(),
-                queued_at: job.queued_at(),
-                ready_at: job.ready_at(),
-                org_work_share: org_work_share(job.peer_id()),
-                rescore_count: job.rescore_count(),
-            };
-            let breakdown = policy.score_detailed(&ctx, worker_ctx, instance);
             let (kind_disc, build_id, project) = match job {
                 PendingJob::Build(b) => (1i16, Some(b.build_id), None),
                 PendingJob::Eval(e) => (0i16, None, e.project_id),
@@ -620,20 +692,13 @@ impl JobTracker {
                 evaluation_id: job.evaluation_id(),
                 organization: job.peer_id(),
                 project,
-                score: breakdown.total,
+                score: winner_score,
                 queued_at: job.queued_at(),
-                ready_at: ctx.ready_at,
-                score_breakdown: serde_json::to_value(&breakdown)
-                    .unwrap_or(serde_json::Value::Null),
-                worker_context: serde_json::to_value(crate::views::WorkerContextView::new(
-                    worker_ctx,
-                    caps.map(|c| c.capabilities.clone()).unwrap_or_default(),
-                ))
-                .unwrap_or(serde_json::Value::Null),
-                job_context: serde_json::to_value(crate::views::JobContextView::new(&ctx, job))
-                    .unwrap_or(serde_json::Value::Null),
-                instance_context: serde_json::to_value(instance)
-                    .unwrap_or(serde_json::Value::Null),
+                ready_at: job.ready_at(),
+                score_breakdown: winner_breakdown,
+                worker_context,
+                job_context: winner_job_context,
+                instance_context,
                 substitute: matches!(job, PendingJob::Build(b) if b.substitute),
                 build_context: match job {
                     PendingJob::Build(b) => serde_json::json!({
@@ -1224,6 +1289,37 @@ mod tests {
         let decisions = tracker.recent_decisions();
         assert_eq!(decisions.len(), 2, "most recent first");
         assert_eq!(decisions[0].winner.as_deref(), Some("j1"));
+    }
+
+    #[test]
+    fn candidates_carry_ephemeral_id_and_breakdown_for_detail_lookup() {
+        let mut tracker = JobTracker::new();
+        let peer = OrganizationId::now_v7();
+        tracker.add_pending("j1".into(), build_job(peer, vec![]));
+        let p = gradient_score::policy_by_name("simple");
+        let inst = gradient_score::InstanceContext::default();
+
+        tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst);
+
+        let decisions = tracker.recent_decisions();
+        let cand = &decisions[0].candidates[0];
+        assert!(!cand.won, "an uncached candidate is passed over, not dispatched");
+        assert!(
+            cand.score_breakdown.get("rules").is_some(),
+            "candidate must carry its per-rule breakdown for the detail page"
+        );
+
+        // The ephemeral id resolves to a reconstructed detail served from RAM.
+        let detail = tracker
+            .candidate_detail(cand.id)
+            .expect("ephemeral id resolves to a candidate detail");
+        assert_eq!(detail.id, cand.id);
+        assert_eq!(detail.worker_id, "w1");
+        assert!(!detail.won);
+        assert!(detail.worker_context.is_object());
+
+        // An unknown id resolves to nothing rather than erroring.
+        assert!(tracker.candidate_detail(DispatchedJobId::now_v7()).is_none());
     }
 
     #[test]

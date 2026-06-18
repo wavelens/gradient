@@ -4504,3 +4504,16 @@ post-build `result`.
   needs a live git transport, so it is covered by CI/manual rather than a unit
   test; the worker now fetches the commit by SHA before failing with a clearer
   "not reachable (force-pushed, GC'd, or a fork PR ref)" message.
+
+## Clickable rejected jobs on the Live Jobs board
+
+Lets a passed-over candidate in the "incl. rejected" view open the job detail
+page with its score breakdown, served from the in-memory decision ring.
+
+- `backend/gradient-scheduler/src/jobs.rs::tests::candidates_carry_ephemeral_id_and_breakdown_for_detail_lookup`
+  - every scored candidate gets an ephemeral id and per-rule `score_breakdown`;
+  `JobTracker::candidate_detail(id)` reconstructs the detail (worker/instance
+  context shared per decision) and returns `None` for an unknown id.
+- The memory-first `GET /board/jobs/{id}` resolution (ring before DB) and the
+  frontend's clickable rows + "Passed over"/"Scored" labelling are exercised
+  end-to-end by the board E2E rather than a unit test.

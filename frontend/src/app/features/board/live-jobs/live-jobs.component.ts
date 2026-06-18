@@ -17,6 +17,7 @@ type StatusFilter = 'all' | 'pending' | 'dispatched';
 type ScoreScope = 'current' | 'all';
 
 interface DecisionRow {
+  id: string;
   at: string;
   worker_id: string;
   kind: number;
@@ -95,20 +96,21 @@ interface DecisionRow {
       } @else {
         <table class="jobs">
           <thead>
-            <tr><th>Outcome</th><th>Kind</th><th>Worker</th><th>Derivation</th><th>Score</th><th>When</th></tr>
+            <tr><th>Outcome</th><th>Kind</th><th>Worker</th><th>Derivation</th><th>Score</th><th>When</th><th></th></tr>
           </thead>
           <tbody>
-            @for (r of decisionRows(); track $index) {
-              <tr [class.negative]="r.score < 0">
+            @for (r of decisionRows(); track r.id) {
+              <tr [class.negative]="r.score < 0" class="clickable" (click)="inspectDecision(r)">
                 <td>{{ r.won ? 'dispatched' : 'passed over' }}</td>
                 <td>{{ r.kind === 1 ? 'build' : 'eval' }}</td>
                 <td class="mono">{{ r.worker_id }}</td>
                 <td class="mono">{{ r.pname ?? '-' }}</td>
                 <td>{{ r.score | number: '1.1-1' }}</td>
                 <td>{{ r.at | date: 'HH:mm:ss' }}</td>
+                <td>›</td>
               </tr>
             } @empty {
-              <tr><td colspan="6" class="muted">No recent decisions (superuser-only).</td></tr>
+              <tr><td colspan="7" class="muted">No recent decisions (superuser-only).</td></tr>
             }
           </tbody>
         </table>
@@ -236,12 +238,13 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
         if (min !== null && c.score < min) continue;
         if (max !== null && c.score > max) continue;
         rows.push({
+          id: c.id,
           at: d.at,
           worker_id: d.worker_id,
           kind: c.kind,
           pname: c.pname,
           score: c.score,
-          won: d.winner === c.job_id,
+          won: c.won,
         });
       }
     }
@@ -353,5 +356,9 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
   inspect(j: DispatchedJobSummary): void {
     if (this.isLive(j)) return;
     this.router.navigate(['/board/jobs', j.id]);
+  }
+
+  inspectDecision(r: DecisionRow): void {
+    this.router.navigate(['/board/jobs', r.id]);
   }
 }
