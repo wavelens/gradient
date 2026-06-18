@@ -819,7 +819,9 @@ pub async fn handle_eval_job_completed(
 
     // The worker is done sending batches, so the evaluation's build set is
     // now final. Promote every `Created` build to `Queued` so the dispatcher
-    // can pick them up, then move the evaluation into `Building`.
+    // can pick them up - except those whose inputs already failed, which go
+    // straight to `DependencyFailed` instead of stalling `Queued`. Then move
+    // the evaluation into `Building`.
     let created = EBuild::find()
         .filter(CBuild::Evaluation.eq(evaluation_id))
         .filter(CBuild::Status.eq(BuildStatus::Created))
@@ -827,8 +829,12 @@ pub async fn handle_eval_job_completed(
         .await
         .unwrap_or_default();
     let queued_now = created.len();
+    let failed_dep = created_builds_with_failed_dependency(state, evaluation_id)
+        .await
+        .unwrap_or_default();
     for build in created {
-        update_build_status(&state.db(), build, BuildStatus::Queued).await;
+        let target = promotion_target(build.id, &failed_dep);
+        update_build_status(&state.db(), build, target).await;
     }
 
     if let Some(eval) = EEvaluation::find_by_id(evaluation_id)
@@ -948,6 +954,72 @@ pub async fn flush_deferred_deps(
     Ok(())
 }
 
+/// `Created` build IDs in `evaluation_id` that already have a dependency build
+/// in a terminal-failure state. Promotion must mark these `DependencyFailed`
+/// rather than `Queued`: a build whose input already failed can never become
+/// buildable (the dispatch gate requires every dep `Completed`/`Substituted`),
+/// so it would otherwise sit `Queued` forever and stall the evaluation. The
+/// EXISTS antijoin mirrors the dispatch gate's dependency check, inverted to
+/// failures. The reverse timing - a dep failing after its dependent is already
+/// promoted - is handled by `cascade_dependency_failed`.
+async fn created_builds_with_failed_dependency(
+    state: &Arc<ServerState>,
+    evaluation_id: EvaluationId,
+) -> Result<std::collections::HashSet<BuildId>> {
+    use sea_orm::ConnectionTrait;
+
+    let sql = sea_orm::Statement::from_sql_and_values(
+        sea_orm::DbBackend::Postgres,
+        r#"
+        SELECT b.id
+        FROM build b
+        WHERE b.evaluation = $1
+          AND b.status = $2
+          AND EXISTS (
+              SELECT 1
+              FROM derivation_dependency dd
+              JOIN build db ON db.evaluation = b.evaluation
+                           AND db.derivation = dd.dependency
+              WHERE dd.derivation = b.derivation
+                AND db.status IN ($3, $4, $5, $6)
+          )
+        "#,
+        [
+            evaluation_id.into_inner().into(),
+            i32::from(BuildStatus::Created).into(),
+            i32::from(BuildStatus::FailedPermanent).into(),
+            i32::from(BuildStatus::FailedTimeout).into(),
+            i32::from(BuildStatus::DependencyFailed).into(),
+            i32::from(BuildStatus::Aborted).into(),
+        ],
+    );
+
+    let rows = state
+        .worker_db
+        .query_all(sql)
+        .await
+        .context("created_builds_with_failed_dependency: query")?;
+
+    Ok(rows
+        .iter()
+        .filter_map(|r| r.try_get::<uuid::Uuid>("", "id").ok())
+        .map(BuildId::from)
+        .collect())
+}
+
+/// Status a `Created` build should transition to on promotion: `DependencyFailed`
+/// when one of its inputs has already failed, else `Queued`.
+fn promotion_target(
+    build_id: BuildId,
+    failed_dependency_builds: &std::collections::HashSet<BuildId>,
+) -> BuildStatus {
+    if failed_dependency_builds.contains(&build_id) {
+        BuildStatus::DependencyFailed
+    } else {
+        BuildStatus::Queued
+    }
+}
+
 /// Promote every `Created` build in `evaluation_id` whose derivation is one of
 /// `ready_paths` to `Queued`. Mirrors the bulk-promote loop in
 /// [`handle_eval_job_completed`], scoped to one batch's ready set. Returns the
@@ -998,8 +1070,12 @@ async fn promote_ready_builds(
     .context("promote_ready_builds: query builds")?;
 
     let n = created.len();
+    let failed_dep = created_builds_with_failed_dependency(state, evaluation_id)
+        .await
+        .unwrap_or_default();
     for build in created {
-        update_build_status(&state.db(), build, BuildStatus::Queued).await;
+        let target = promotion_target(build.id, &failed_dep);
+        update_build_status(&state.db(), build, target).await;
     }
 
     Ok(n)
@@ -1055,4 +1131,22 @@ pub async fn handle_eval_job_failed(
         .await;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod promotion_tests {
+    use super::promotion_target;
+    use gradient_entity::build::BuildStatus;
+    use gradient_types::ids::BuildId;
+    use std::collections::HashSet;
+
+    #[test]
+    fn promotion_target_is_dependency_failed_when_a_dep_already_failed() {
+        let blocked = BuildId::now_v7();
+        let ready = BuildId::now_v7();
+        let failed: HashSet<BuildId> = [blocked].into_iter().collect();
+
+        assert_eq!(promotion_target(blocked, &failed), BuildStatus::DependencyFailed);
+        assert_eq!(promotion_target(ready, &failed), BuildStatus::Queued);
+    }
 }
