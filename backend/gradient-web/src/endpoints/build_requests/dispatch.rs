@@ -144,7 +144,7 @@ pub(super) async fn finalize_build_request(
 
     state
         .nar_storage
-        .put(&nar.store_hash, nar.nar_bytes.clone())
+        .put(&nar.store_hash, nar.compressed_bytes.clone())
         .await
         .map_err(|e| WebError::internal(format!("Failed to store source NAR: {}", e)))?;
 
@@ -263,16 +263,17 @@ async fn ensure_cached_path<C: ConnectionTrait>(
         return Ok(existing);
     }
 
-    let normalised_hash = normalize_nar_hash(&nar.nar_hash_sri);
+    let nar_hash = normalize_nar_hash(&nar.nar_hash_sri);
+    let file_hash = normalize_nar_hash(&nar.file_hash_sri);
     let row = MCachedPath {
         id: CachedPathId::now_v7(),
         store_path: nar.store_path.clone(),
         hash: nar.store_hash.clone(),
         package: "source".to_string(),
-        file_hash: Some(normalised_hash.clone()),
-        file_size: Some(nar.nar_size as i64),
+        file_hash: Some(file_hash),
+        file_size: Some(nar.file_size as i64),
         nar_size: Some(nar.nar_size as i64),
-        nar_hash: Some(normalised_hash),
+        nar_hash: Some(nar_hash),
         created_at: now(),
         ..Default::default()
     }
