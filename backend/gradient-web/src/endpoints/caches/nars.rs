@@ -169,8 +169,8 @@ pub async fn list(
     let limit_idx = values.len() + 1;
     let offset_idx = values.len() + 2;
     let select_sql = format!(
-        "SELECT cp.hash, cp.store_path, cp.package, cp.nar_size, cp.file_size, \
-                cp.created_at, cps.last_fetched_at \
+        "SELECT cp.hash, cp.hash || '-' || cp.package AS store_path, cp.package, \
+                cp.nar_size, cp.file_size, cp.created_at, cps.last_fetched_at \
          FROM cached_path_signature cps \
          JOIN cached_path cp ON cp.id = cps.cached_path \
          WHERE {where_sql} \
@@ -221,9 +221,10 @@ pub async fn show(
         .one(&state.web_db)
         .await?
         .or_not_found("Signature")?;
+    let store_path = cp.as_store_path().base();
     Ok(ok_json(NarDetail {
         hash: cp.hash,
-        store_path: cp.store_path,
+        store_path,
         package: cp.package,
         nar_size: cp.nar_size,
         file_size: cp.file_size,
@@ -359,7 +360,7 @@ pub async fn delete(
             "cache_id": cache.id.to_string(),
             "cache_name": cache.name,
             "hash": hash,
-            "store_path": cp.store_path,
+            "store_path": cp.store_path(),
             "ref_counted_others": outcome.ref_counted_others,
         })),
     )

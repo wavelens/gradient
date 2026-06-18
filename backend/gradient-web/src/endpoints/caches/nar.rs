@@ -179,7 +179,6 @@ mod tests {
     fn cached_path_row() -> gradient_entity::cached_path::Model {
         gradient_entity::cached_path::Model {
             id: gradient_types::ids::CachedPathId::now_v7(),
-            store_path: format!("/nix/store/{STORE_HASH}-hello.drv"),
             hash: STORE_HASH.to_string(),
             package: "hello.drv".to_string(),
             file_hash: Some(format!("sha256:{FILE_HASH_NIX32}")),

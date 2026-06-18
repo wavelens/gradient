@@ -319,7 +319,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
     nameText.textContent = node.name.length > 22 ? node.name.slice(0, 20) + '…' : node.name;
     g.appendChild(nameText);
 
-    // Derivation filename (strip /nix/store/hash- prefix)  [text index 1]
+    // Derivation name (strip the leading <hash>- from the base path)  [text index 1]
     const filename = node.path.split('/').pop() ?? '';
     const dashIdx = filename.indexOf('-');
     const drvName = dashIdx >= 0 ? filename.slice(dashIdx + 1) : filename;

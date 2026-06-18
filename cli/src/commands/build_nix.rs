@@ -86,12 +86,13 @@ pub async fn link_result(
 
     for ep in &tree.entry_points {
         for output in &ep.outputs {
+            let store_path = output.full_store_path();
             let status = tokio::process::Command::new("nix")
-                .args(["copy", "--from", &cache_url, "--no-check-sigs", &output.store_path])
+                .args(["copy", "--from", &cache_url, "--no-check-sigs", &store_path])
                 .status()
                 .await;
             if !matches!(status, Ok(s) if s.success()) {
-                out.progress(format!("warning: nix copy failed for {}", output.store_path));
+                out.progress(format!("warning: nix copy failed for {store_path}"));
             }
         }
     }
@@ -110,12 +111,13 @@ pub async fn link_result(
         return;
     };
 
+    let realise_path = out_path.full_store_path();
     let status = tokio::process::Command::new("nix-store")
-        .args(["--realise", &out_path.store_path, "--add-root", "result", "--indirect"])
+        .args(["--realise", &realise_path, "--add-root", "result", "--indirect"])
         .status()
         .await;
     match status {
-        Ok(s) if s.success() => out.human(format!("result -> {}", out_path.store_path)),
+        Ok(s) if s.success() => out.human(format!("result -> {realise_path}")),
         _ => out.progress("warning: could not create result symlink"),
     }
 }

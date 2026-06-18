@@ -207,7 +207,7 @@ async fn get_nar_by_hash_inner(
         .signature
         .or_not_found("Signature not yet computed")?;
 
-    let path = get_path_from_derivation_output(build_output.clone());
+    let path = get_path_from_derivation_output(build_output.clone()).full();
 
     // All metadata comes from the cached_path row written by the worker
     // when it uploaded the NAR.  No daemon probe is needed.
@@ -332,7 +332,7 @@ async fn get_nar_by_cached_path(
     let file_hash_nix32 = strip_hash_algo(&normalize_nar_hash(&file_hash)).to_string();
 
     Ok(NixPathInfo {
-        store_path: cached_path_row.store_path.clone(),
+        store_path: cached_path_row.store_path(),
         url: format!("nar/{}.nar.zst", file_hash_nix32),
         compression: "zstd".to_string(),
         file_hash,

@@ -79,7 +79,6 @@ fn project_row(id: ProjectId) -> gradient_entity::project::Model {
 fn cached_path_row(hash: &str) -> gradient_entity::cached_path::Model {
     gradient_entity::cached_path::Model {
         id: CachedPathId::now_v7(),
-        store_path: format!("/nix/store/{}-source", hash),
         hash: hash.into(),
         package: "source".into(),
         file_hash: Some(format!("sha256:{}", hash)),

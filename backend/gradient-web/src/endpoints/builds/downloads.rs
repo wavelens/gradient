@@ -122,7 +122,7 @@ async fn find_and_serve_file(
             .iter()
             .find(|o| o.id == product.derivation_output);
         let output_root = match output {
-            Some(o) => get_path_from_derivation_output(o.clone()),
+            Some(o) => get_path_from_derivation_output(o.clone()).full(),
             None => {
                 tracing::warn!(%build_id, %filename, "build_product references unknown output");
                 continue;

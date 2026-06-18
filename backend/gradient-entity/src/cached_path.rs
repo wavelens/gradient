@@ -21,8 +21,6 @@ use crate::ids::CachedPathId;
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: CachedPathId,
-    /// Full store path, e.g. `/nix/store/abc123-source`.
-    pub store_path: String,
     /// The 32-char hash portion of the store path (unique, used for narinfo lookups).
     #[sea_orm(unique)]
     pub hash: String,
@@ -51,6 +49,17 @@ pub enum Relation {}
 impl ActiveModelBehavior for ActiveModel {}
 
 impl Model {
+    /// This cached path as a [`StorePath`](crate::StorePath), rebuilt from the
+    /// stored `hash` + `package` columns.
+    pub fn as_store_path(&self) -> crate::StorePath {
+        crate::StorePath::from_parts(self.hash.clone(), self.package.clone())
+    }
+
+    /// Full `/nix/store/<hash>-<package>` path for the binary-cache protocol.
+    pub fn store_path(&self) -> String {
+        self.as_store_path().full()
+    }
+
     /// Returns `true` when the NAR has been fully uploaded and recorded.
     ///
     /// A `cached_path` row is created eagerly when the path is first seen, but

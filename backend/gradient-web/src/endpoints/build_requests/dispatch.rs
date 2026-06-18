@@ -267,7 +267,6 @@ async fn ensure_cached_path<C: ConnectionTrait>(
     let file_hash = normalize_nar_hash(&nar.file_hash_sri);
     let row = MCachedPath {
         id: CachedPathId::now_v7(),
-        store_path: nar.store_path.clone(),
         hash: nar.store_hash.clone(),
         package: "source".to_string(),
         file_hash: Some(file_hash),

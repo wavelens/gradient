@@ -1232,7 +1232,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   }
 
   buildDisplayName(path: string): string {
-    // /nix/store/hash-name-version.drv → name-version (strip hash prefix only)
+    // <hash>-name-version.drv → name-version (strip leading hash, drop .drv)
     const filename = path.split('/').pop() ?? path;
     return filename.replace(/^[^-]+-/, '').replace(/\.drv$/, '');
   }

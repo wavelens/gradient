@@ -593,7 +593,6 @@ mod tests {
         let nar_storage = NarStore::local(tmp.path().to_str().unwrap()).unwrap();
         let zombie_row = gradient_entity::cached_path::Model {
             id: zombie_id,
-            store_path: format!("/nix/store/{}-zombie", zombie_hash),
             hash: zombie_hash.into(),
             package: "zombie".into(),
             file_hash: Some(

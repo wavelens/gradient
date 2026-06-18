@@ -572,7 +572,7 @@ impl EntryPointRelatedData {
             summaries.push(EntryPointSummary {
                 id: ep.id,
                 build_id: build.id,
-                derivation_path: drv.store_path(),
+                derivation_path: drv.drv_path(),
                 eval: ep.eval.clone(),
                 build_status: build.status.for_api(),
                 has_artefacts: *self.has_products.get(&build.derivation).unwrap_or(&false),
@@ -646,7 +646,7 @@ async fn serve_hydra_artifact(
             .iter()
             .find(|o| o.id == product.derivation_output);
         let output_root = match output {
-            Some(o) => get_path_from_derivation_output(o.clone()),
+            Some(o) => get_path_from_derivation_output(o.clone()).full(),
             None => {
                 tracing::warn!(%filename, "build_product references unknown output");
                 continue;

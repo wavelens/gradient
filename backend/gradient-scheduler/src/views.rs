@@ -131,7 +131,9 @@ impl JobContextView {
                         .iter()
                         .map(|t| DerivationRef {
                             build_id: t.build_id.clone(),
-                            drv_path: t.drv_path.clone(),
+                            drv_path: gradient_types::StorePath::parse(&t.drv_path)
+                                .map(|sp| sp.base())
+                                .unwrap_or_else(|_| t.drv_path.clone()),
                             pname: b.pname.clone(),
                         })
                         .collect(),
@@ -205,6 +207,7 @@ mod tests {
         let derivations = view.derivations.expect("build derivations");
         assert_eq!(derivations.len(), 1);
         assert_eq!(derivations[0].build_id, "b1");
+        assert_eq!(derivations[0].drv_path, "aaa.drv");
         let history = view.history.expect("build history");
         assert_eq!(history.samples, 7);
     }

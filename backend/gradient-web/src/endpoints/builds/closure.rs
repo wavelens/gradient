@@ -91,7 +91,7 @@ pub async fn build_closure_graph<C: sea_orm::ConnectionTrait>(
             nar_size: size_by_drv.get(&d.id).copied(),
             id: d.id.to_string(),
             name: d.name.clone(),
-            path: d.store_path(),
+            path: d.drv_path(),
         })
         .collect();
     // Largest first so a downstream cap keeps the biggest contributors.
@@ -190,7 +190,7 @@ pub async fn build_runtime_closure_graph<C: sea_orm::ConnectionTrait>(
         .map(|r| ClosureNode {
             id: r.hash.clone(),
             name: r.package.clone(),
-            path: r.store_path.clone(),
+            path: r.as_store_path().base(),
             nar_size: r.nar_size,
         })
         .collect();
@@ -363,7 +363,6 @@ mod tests {
     fn cached(hash: &str, nar_size: i64, references: &str) -> gradient_entity::cached_path::Model {
         gradient_entity::cached_path::Model {
             id: CachedPathId::now_v7(),
-            store_path: format!("/nix/store/{hash}-foo"),
             hash: hash.into(),
             package: "foo".into(),
             file_hash: Some("sha256:dummy".into()),

@@ -125,10 +125,11 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
         let Some(cp) = cached_paths.get(&row.cached_path) else {
             continue;
         };
+        let store_path = cp.store_path();
 
         if skipped.contains(&row.cached_path) {
             debug!(
-                store_path = %cp.store_path,
+                store_path = %store_path,
                 cache = %cache.id,
                 "sign sweep: skipping (project sign_cache=false)"
             );
@@ -150,16 +151,16 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
         let nar_hash_nix32 = normalize_nar_hash(nar_hash);
 
         let sig_bytes =
-            signer.sign_narinfo_raw(&cp.store_path, &nar_hash_nix32, nar_size as u64, &refs);
+            signer.sign_narinfo_raw(&store_path, &nar_hash_nix32, nar_size as u64, &refs);
 
         let mut am = row.into_active_model();
         am.signature = Set(Some(sig_bytes));
         if let Err(e) = am.update(&state.worker_db).await {
-            warn!(store_path = %cp.store_path, cache = %cache.id, error = %e, "sign sweep: failed to persist signature");
+            warn!(store_path = %store_path, cache = %cache.id, error = %e, "sign sweep: failed to persist signature");
             continue;
         }
 
-        debug!(cache_name = %cache.name, store_path = %cp.store_path, "sign sweep: signed");
+        debug!(cache_name = %cache.name, store_path = %store_path, "sign sweep: signed");
         touched_caches.insert(cache.id);
         signed += 1;
     }

@@ -287,7 +287,6 @@ mod tests {
     fn cached_row(id: CachedPathId, hash: &str, nar_size: i64) -> cached_path::Model {
         cached_path::Model {
             id,
-            store_path: format!("/nix/store/{hash}-foo"),
             hash: hash.into(),
             package: "foo".into(),
             file_hash: Some("sha256:dummy".into()),

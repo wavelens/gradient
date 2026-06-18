@@ -312,7 +312,7 @@ pub async fn get_evaluation_builds(
 
         page.push(BuildItem {
             id: b.id,
-            name: drv.store_path(),
+            name: drv.drv_path(),
             status: format!("{:?}", b.status.for_api()),
             has_artefacts: has_artefacts.contains(&b.derivation),
             updated_at: b.updated_at,

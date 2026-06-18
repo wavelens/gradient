@@ -81,7 +81,14 @@ pub fn lock_flake_with_ssh_key(
 }
 
 /// Walks the entire FFI initialization → lock → cleanup sequence.
+///
+/// # Safety
+/// Must be called with `FLAKE_LOCK_LOCK` held: the Nix C API is process-global
+/// and not re-entrant. Every raw pointer below is null-checked before use and
+/// freed on each exit path.
 unsafe fn lock_flake_inner(flake_dir: &Path) -> Result<(), FlakeLockError> {
+    // SAFETY: see the function contract - serialized by the lock, pointers
+    // null-checked and freed per exit path.
     unsafe {
         let ctx = nix_c_context_create();
         if ctx.is_null() {
@@ -221,6 +228,9 @@ unsafe fn lock_flake_inner(flake_dir: &Path) -> Result<(), FlakeLockError> {
 
 /// Convert a non-OK error code into a [`FlakeLockError::Nix`] with the
 /// human-readable Nix error message attached.
+///
+/// # Safety
+/// `ctx` must be a live `nix_c_context` (only read when `err` is non-OK).
 unsafe fn check(
     ctx: *mut nix_c_context,
     err: nix_err,
@@ -229,12 +239,17 @@ unsafe fn check(
     if err == nix_err_NIX_OK {
         Ok(())
     } else {
+        // SAFETY: `ctx` is a live context per this function's contract.
         Err(unsafe { nix_error(ctx, op) })
     }
 }
 
+/// # Safety
+/// `ctx` must be a live `nix_c_context`.
 unsafe fn nix_error(ctx: *mut nix_c_context, op: &str) -> FlakeLockError {
     let mut msg: Option<String> = None;
+    // SAFETY: `ctx` is live; the callback only writes into `msg`, which outlives
+    // the call and is passed as the matching `*mut Option<String>` user-data.
     unsafe {
         nix_err_info_msg(
             ptr::null_mut(),
@@ -253,8 +268,11 @@ extern "C" fn collect_string_cb(start: *const c_char, n: c_uint, user_data: *mut
     if start.is_null() || user_data.is_null() {
         return;
     }
+    // SAFETY: Nix guarantees `start` points to `n` valid bytes (non-null checked).
     let bytes = unsafe { std::slice::from_raw_parts(start.cast::<u8>(), n as usize) };
     let s = String::from_utf8_lossy(bytes).into_owned();
     let out = user_data.cast::<Option<String>>();
+    // SAFETY: `user_data` is the `*mut Option<String>` we handed to
+    // `nix_err_info_msg`, non-null (checked) and written from a single thread.
     unsafe { *out = Some(s) };
 }
