@@ -466,7 +466,7 @@ pub async fn get_expensive_jobs(
             return Ok(ok_json(vec![]));
         }
 
-        clauses.push(format!("d.organization IN ({list})"));
+        clauses.push(format!("pr.organization IN ({list})"));
     }
 
     let window = params.window_days.unwrap_or(30).max(1);
@@ -483,11 +483,13 @@ pub async fn get_expensive_jobs(
     }
 
     let sql = format!(
-        "SELECT b.id, d.organization, d.name, \
+        "SELECT b.id, pr.organization, d.name, \
          EXTRACT(EPOCH FROM (ba.build_finished_at - ba.build_started_at))::bigint * 1000 AS build_time_ms, \
          dj.worker_id AS worker \
          FROM build b \
          JOIN derivation d ON d.id = b.derivation \
+         JOIN evaluation ev ON ev.id = b.evaluation \
+         JOIN project pr ON pr.id = ev.project \
          JOIN LATERAL ( \
            SELECT ba2.build_started_at, ba2.build_finished_at, ba2.dispatched_job \
            FROM build_attempt ba2 WHERE ba2.build = b.id \
@@ -690,11 +692,12 @@ pub async fn get_top_orgs_by_buildtime(
     require_superuser(&user)?;
     let window = params.window_days.unwrap_or(30).max(1);
     let sql = format!(
-        "SELECT d.organization, \
+        "SELECT pr.organization, \
          sum(EXTRACT(EPOCH FROM (ba.build_finished_at - ba.build_started_at))::bigint * 1000)::bigint AS total, \
          count(*)::bigint AS cnt \
          FROM build b \
-         JOIN derivation d ON d.id = b.derivation \
+         JOIN evaluation ev ON ev.id = b.evaluation \
+         JOIN project pr ON pr.id = ev.project \
          JOIN LATERAL ( \
            SELECT ba2.build_started_at, ba2.build_finished_at \
            FROM build_attempt ba2 WHERE ba2.build = b.id \
@@ -703,7 +706,7 @@ pub async fn get_top_orgs_by_buildtime(
          WHERE b.status = 3 \
            AND ba.build_started_at IS NOT NULL AND ba.build_finished_at IS NOT NULL \
            AND ba.build_finished_at >= (now() AT TIME ZONE 'UTC') - interval '{window} days' \
-         GROUP BY d.organization ORDER BY total DESC LIMIT 15"
+         GROUP BY pr.organization ORDER BY total DESC LIMIT 15"
     );
 
     let rows = state
@@ -761,13 +764,11 @@ pub async fn get_expensive_by_resource(
     };
 
     let mut clauses = vec![not_null.to_string()];
-    if let Some(list) = scope.org_in_list() {
-        if list.is_empty() {
-            return Ok(ok_json(vec![]));
-        }
-
-        clauses.push(format!("d.organization IN ({list})"));
-    }
+    let org_filter = match scope.org_in_list() {
+        Some(list) if list.is_empty() => return Ok(ok_json(vec![])),
+        Some(list) => format!(" AND pr.organization IN ({list})"),
+        None => String::new(),
+    };
 
     let window = params.window_days.unwrap_or(30).max(1);
     clauses.push(format!(
@@ -782,9 +783,20 @@ pub async fn get_expensive_by_resource(
         );
     }
 
+    // Derivations are global, so attribute each metric row to one producing org
+    // (an in-scope one when scoped) via the build -> evaluation -> project chain.
     let sql = format!(
-        "SELECT dm.derivation, d.organization, d.name, {value_expr} AS value, dm.worker_id \
-         FROM derivation_metric dm JOIN derivation d ON d.id = dm.derivation \
+        "SELECT dm.derivation, pro.organization, d.name, {value_expr} AS value, dm.worker_id \
+         FROM derivation_metric dm \
+         JOIN derivation d ON d.id = dm.derivation \
+         JOIN LATERAL ( \
+           SELECT pr.organization \
+           FROM build b \
+           JOIN evaluation ev ON ev.id = b.evaluation \
+           JOIN project pr ON pr.id = ev.project \
+           WHERE b.derivation = dm.derivation{org_filter} \
+           LIMIT 1 \
+         ) pro ON true \
          WHERE {} ORDER BY value DESC LIMIT 20",
         clauses.join(" AND ")
     );

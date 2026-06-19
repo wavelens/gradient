@@ -17,10 +17,8 @@ use gradient_sources::get_path_from_derivation_output;
 use gradient_types::*;
 use gradient_core::ServerState;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, PaginatorTrait,
-    QueryFilter, TransactionTrait,
+    ColumnTrait, Condition, EntityTrait, PaginatorTrait, QueryFilter, TransactionTrait,
 };
 use std::sync::Arc;
 use tracing::error;
@@ -160,31 +158,9 @@ async fn get_nar_by_hash_inner(
         None => return get_nar_by_cached_path(state, cache, hash).await,
     };
 
-    // Verify the derivation belongs to an org that subscribes to this cache.
-    let derivation = EDerivation::find_by_id(build_output.derivation)
-        .one(&state.web_db)
-        .await
-        .map_err(WebError::from)?
-        .or_not_found("Path")?;
-
-    let organization_id = derivation.organization;
-
-    let subscribed = EOrganizationCache::find()
-        .filter(
-            Condition::all()
-                .add(COrganizationCache::Organization.eq(organization_id))
-                .add(COrganizationCache::Cache.eq(cache.id)),
-        )
-        .one(&state.web_db)
-        .await
-        .map_err(WebError::from)?
-        .is_some();
-
-    if !subscribed {
-        return Err(WebError::not_found("Path"));
-    }
-
-    // Look up signature via cached_path → cached_path_signature for this cache.
+    // Access gate: the `cached_path_signature` row for this cache proves the
+    // caller-authorised cache also holds the path (derivations are global, so
+    // there is no per-org ownership to check). Same rule as get_nar_by_cached_path.
     let cached_path_row = ECachedPath::find()
         .filter(CCachedPath::Hash.eq(hash.clone()))
         .one(&state.web_db)
@@ -344,55 +320,6 @@ async fn get_nar_by_cached_path(
         sig,
         ca: cached_path_row.ca.clone(),
     })
-}
-
-pub(super) async fn cleanup_nars_for_orgs(state: Arc<ServerState>, org_ids: Vec<OrganizationId>) {
-    cleanup_nars_for_orgs_inner(&state, org_ids).await
-}
-
-async fn cleanup_nars_for_orgs_inner(state: &Arc<ServerState>, org_ids: Vec<OrganizationId>) {
-    for org_id in org_ids {
-        let remaining = EOrganizationCache::find()
-            .filter(COrganizationCache::Organization.eq(org_id))
-            .one(&state.web_db)
-            .await
-            .unwrap_or(None);
-
-        if remaining.is_some() {
-            continue;
-        }
-
-        let derivation_ids: Vec<DerivationId> = EDerivation::find()
-            .filter(CDerivation::Organization.eq(org_id))
-            .all(&state.web_db)
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .map(|d| d.id)
-            .collect();
-
-        let outputs = EDerivationOutput::find()
-            .filter(
-                Condition::all()
-                    .add(CDerivationOutput::Derivation.is_in(derivation_ids))
-                    .add(CDerivationOutput::IsCached.eq(true)),
-            )
-            .all(&state.web_db)
-            .await
-            .unwrap_or_default();
-
-        for output in outputs {
-            if let Err(e) = state.nar_storage.delete(&output.hash).await {
-                error!(error = %e, hash = %output.hash, "Failed to remove NAR from storage");
-            }
-
-            let mut active = output.into_active_model();
-            active.is_cached = Set(false);
-            if let Err(e) = active.update(&state.web_db).await {
-                error!(error = %e, "Failed to update derivation_output is_cached flag");
-            }
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------

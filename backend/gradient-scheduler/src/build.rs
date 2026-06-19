@@ -1477,7 +1477,6 @@ mod waiting_reason_tests {
     fn drv(id: DerivationId, arch: &str) -> MDerivation {
         gradient_entity::derivation::Model {
             id,
-            organization: OrganizationId::nil(),
             hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
             name: "x".into(),
             architecture: arch.into(),

@@ -181,7 +181,7 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
     Ok(())
 }
 
-/// For every derivation owned by an organization subscribed to `cache_id`
+/// For every derivation built by an organization subscribed to `cache_id`
 /// whose outputs are all cached and whose dependency closure is already
 /// recorded, insert a `cache_derivation` row. Idempotent.
 async fn record_newly_completed_derivations(
@@ -200,15 +200,15 @@ async fn record_newly_completed_derivations(
         return Ok(());
     }
 
-    let drvs = EDerivation::find()
-        .filter(CDerivation::Organization.is_in(org_ids))
-        .all(&state.worker_db)
-        .await?;
+    let mut drv_ids: HashSet<DerivationId> = HashSet::new();
+    for org_id in org_ids {
+        drv_ids.extend(gradient_db::derivation_ids_for_org(&state.worker_db, org_id).await?);
+    }
 
     let now = gradient_types::now();
-    for drv in drvs {
-        if let Err(e) = try_record_cache_derivation(state, cache_id, drv.id, now).await {
-            warn!(cache = %cache_id, drv = %drv.id, error = %e, "try_record_cache_derivation failed");
+    for drv_id in drv_ids {
+        if let Err(e) = try_record_cache_derivation(state, cache_id, drv_id, now).await {
+            warn!(cache = %cache_id, drv = %drv_id, error = %e, "try_record_cache_derivation failed");
         }
     }
     Ok(())

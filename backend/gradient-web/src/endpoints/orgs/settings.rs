@@ -205,7 +205,7 @@ pub async fn post_organization_subscribe_cache(
 }
 
 /// Insert null-signature placeholders for every `cached_path` reachable
-/// from a derivation owned by `org_id`, for `cache_id`. Idempotent -
+/// from a derivation the org has built, for `cache_id`. Idempotent -
 /// existing rows are skipped. Best-effort: errors are logged, not
 /// propagated.
 async fn enqueue_backfill_signatures(
@@ -213,12 +213,8 @@ async fn enqueue_backfill_signatures(
     org_id: OrganizationId,
     cache_id: CacheId,
 ) {
-    let drv_ids: Vec<DerivationId> = match EDerivation::find()
-        .filter(CDerivation::Organization.eq(org_id))
-        .all(&state.web_db)
-        .await
-    {
-        Ok(rows) => rows.into_iter().map(|d| d.id).collect(),
+    let drv_ids = match gradient_db::derivation_ids_for_org(&state.web_db, org_id).await {
+        Ok(ids) => ids,
         Err(e) => {
             tracing::warn!(%org_id, error = %e, "backfill: failed to load derivations");
             return;

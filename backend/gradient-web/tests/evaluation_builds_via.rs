@@ -122,7 +122,6 @@ fn evaluation_row(id: EvaluationId) -> gradient_entity::evaluation::Model {
 fn derivation_row() -> gradient_entity::derivation::Model {
     gradient_entity::derivation::Model {
         id: derivation_id(),
-        organization: org_id(),
         hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
         name: "hello-2.12.1".into(),
         architecture: "x86_64-linux".into(),

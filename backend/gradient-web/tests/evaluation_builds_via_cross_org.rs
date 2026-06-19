@@ -43,6 +43,7 @@ use gradient_web::create_router;
 
 // ── Stable UUIDs ──────────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 fn leader_org_id() -> OrganizationId {
     OrganizationId::new(Uuid::parse_str("50000000-0000-0000-0000-000000000001").unwrap())
 }
@@ -154,7 +155,6 @@ fn leader_build_row() -> gradient_entity::build::Model {
 fn leader_derivation_row() -> gradient_entity::derivation::Model {
     gradient_entity::derivation::Model {
         id: leader_drv_id(),
-        organization: leader_org_id(),
         hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
         name: "hello-2.12.1".into(),
         architecture: "x86_64-linux".into(),

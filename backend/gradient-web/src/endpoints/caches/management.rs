@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::helpers::cleanup_nars_for_orgs;
 use crate::access::{CacheAccess, Caller, load_cache};
 use crate::audit::{RequestInfo, events, record as audit_record};
 use crate::authorization::{MaybeApiKey, MaybeUser};
@@ -449,11 +448,6 @@ pub async fn delete_cache(
         })),
     )
     .await;
-
-    let state_bg = Arc::clone(&state);
-    state.shutdown.spawn(async move {
-        cleanup_nars_for_orgs(state_bg, subscribing_orgs).await;
-    });
 
     Ok(ok_json("Cache deleted".to_string()))
 }

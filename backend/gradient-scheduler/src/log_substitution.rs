@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use gradient_entity::build::{BuildStatus, Column as CBuild, Entity as EBuild};
-use gradient_entity::derivation::Entity as EDerivation;
+use gradient_entity::evaluation::Entity as EEvaluation;
 use futures::StreamExt;
 use gradient_core::ServerState;
 use gradient_types::ids::{BuildId, DerivationId};
@@ -40,8 +40,8 @@ pub async fn substitute_log(
     drv_path: String,
     allow_upstream_fetch: bool,
 ) -> Result<()> {
-    match EBuild::find_by_id(build_id).one(&state.worker_db).await {
-        Ok(Some(_)) => {}
+    let build = match EBuild::find_by_id(build_id).one(&state.worker_db).await {
+        Ok(Some(b)) => b,
         Ok(None) => {
             debug!(%build_id, "substitute_log: build not found");
             return Ok(());
@@ -65,31 +65,31 @@ pub async fn substitute_log(
         return Ok(());
     }
 
-    let derivation = match EDerivation::find_by_id(derivation_id)
+    let org_id = match EEvaluation::find_by_id(build.evaluation)
         .one(&state.worker_db)
         .await
     {
-        Ok(Some(d)) => d,
+        Ok(Some(eval)) => match crate::dispatch::organization_id_for_eval(&state, &eval).await {
+            Some(org) => org,
+            None => return Ok(()),
+        },
         Ok(None) => {
-            debug!(%build_id, %derivation_id, "substitute_log: derivation row not found");
+            debug!(%build_id, "substitute_log: evaluation row not found");
             return Ok(());
         }
         Err(e) => {
-            warn!(%build_id, error = %e, "substitute_log: derivation lookup failed");
+            warn!(%build_id, error = %e, "substitute_log: evaluation lookup failed");
             return Ok(());
         }
     };
 
-    let upstream_urls =
-        match gradient_db::upstream_urls_for_org(&state.worker_db, derivation.organization)
-            .await
-        {
-            Ok(urls) => urls,
-            Err(e) => {
-                warn!(%build_id, error = %e, "substitute_log: upstream URL lookup failed");
-                return Ok(());
-            }
-        };
+    let upstream_urls = match gradient_db::upstream_urls_for_org(&state.worker_db, org_id).await {
+        Ok(urls) => urls,
+        Err(e) => {
+            warn!(%build_id, error = %e, "substitute_log: upstream URL lookup failed");
+            return Ok(());
+        }
+    };
 
     if upstream_urls.is_empty() {
         debug!(%build_id, "substitute_log: no upstream URLs configured");
@@ -374,21 +374,18 @@ mod tests {
         server
     }
 
-    fn make_derivation(
-        drv_id: DerivationId,
-        org: OrganizationId,
-        drv_path: String,
-    ) -> gradient_entity::derivation::Model {
-        let stripped = gradient_exec::strip_nix_store_prefix(&drv_path);
-        let (hash, name) = gradient_sources::parse_drv_hash_name(&stripped)
-            .unwrap_or_else(|_| ("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(), "x".into()));
-        gradient_entity::derivation::Model {
-            id: drv_id,
+    // substitute_log resolves the org via the build's evaluation -> project, so
+    // the upstream tests mock those two lookups instead of the derivation.
+    fn make_eval_with_project() -> gradient_entity::evaluation::Model {
+        gradient_entity::evaluation::Model {
+            project: Some(gradient_types::ids::ProjectId::now_v7()),
+            ..Default::default()
+        }
+    }
+
+    fn make_project_for_org(org: OrganizationId) -> gradient_entity::project::Model {
+        gradient_entity::project::Model {
             organization: org,
-            hash,
-            name,
-            architecture: "x86_64-linux".to_string(),
-            created_at: gradient_types::now(),
             ..Default::default()
         }
     }
@@ -405,13 +402,15 @@ mod tests {
 
         let build = make_build(build_id, drv_id, BuildStatus::Created, true);
         let attempt = make_attempt(build_id, None);
-        let derivation = make_derivation(drv_id, org, drv_path.clone());
+        let evaluation = make_eval_with_project();
+        let project = make_project_for_org(org);
 
         let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
             .append_query_results([vec![build.clone()]])
             .append_query_results([vec![attempt.clone()]])
             .append_query_results([Vec::<build::Model>::new()])
-            .append_query_results([vec![derivation]]);
+            .append_query_results([vec![evaluation]])
+            .append_query_results([vec![project]]);
         let db = seed_upstream_urls(db, org, &[&upstream.uri()]);
         let db = db
             .append_query_results([vec![attempt.clone()]])
@@ -446,13 +445,15 @@ mod tests {
 
         let build = make_build(build_id, drv_id, BuildStatus::Created, true);
         let attempt = make_attempt(build_id, None);
-        let derivation = make_derivation(drv_id, org, drv_path.clone());
+        let evaluation = make_eval_with_project();
+        let project = make_project_for_org(org);
 
         let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
             .append_query_results([vec![build.clone()]])
             .append_query_results([vec![attempt.clone()]])
             .append_query_results([Vec::<build::Model>::new()])
-            .append_query_results([vec![derivation]]);
+            .append_query_results([vec![evaluation]])
+            .append_query_results([vec![project]]);
         let db = seed_upstream_urls(db, org, &[&u404.uri(), &u200.uri()]);
         let db = db
             .append_query_results([vec![attempt.clone()]])
@@ -485,13 +486,15 @@ mod tests {
         let u404b = make_upstream_with_log(drv_basename, "", 404).await;
 
         let build = make_build(build_id, drv_id, BuildStatus::Created, true);
-        let derivation = make_derivation(drv_id, org, drv_path.clone());
+        let evaluation = make_eval_with_project();
+        let project = make_project_for_org(org);
 
         let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
             .append_query_results([vec![build.clone()]])
             .append_query_results([Vec::<build::Model>::new()])
             .append_query_results([Vec::<build::Model>::new()])
-            .append_query_results([vec![derivation]]);
+            .append_query_results([vec![evaluation]])
+            .append_query_results([vec![project]]);
         let db = seed_upstream_urls(db, org, &[&u404a.uri(), &u404b.uri()]).into_connection();
 
         let (state, storage) = test_state_with_recording_storage(db);
@@ -514,13 +517,15 @@ mod tests {
 
         let build = make_build(build_id, drv_id, BuildStatus::Created, true);
         let attempt = make_attempt(build_id, None);
-        let derivation = make_derivation(drv_id, org, drv_path.clone());
+        let evaluation = make_eval_with_project();
+        let project = make_project_for_org(org);
 
         let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
             .append_query_results([vec![build.clone()]])
             .append_query_results([vec![attempt.clone()]])
             .append_query_results([Vec::<build::Model>::new()])
-            .append_query_results([vec![derivation]]);
+            .append_query_results([vec![evaluation]])
+            .append_query_results([vec![project]]);
         let db = seed_upstream_urls(db, org, &[&upstream.uri()]);
         let db = db
             .append_query_results([vec![attempt.clone()]])
@@ -553,13 +558,15 @@ mod tests {
         let upstream = make_upstream_with_log(drv_basename, "", 200).await;
 
         let build = make_build(build_id, drv_id, BuildStatus::Created, true);
-        let derivation = make_derivation(drv_id, org, drv_path.clone());
+        let evaluation = make_eval_with_project();
+        let project = make_project_for_org(org);
 
         let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
             .append_query_results([vec![build.clone()]])
             .append_query_results([Vec::<build::Model>::new()])
             .append_query_results([Vec::<build::Model>::new()])
-            .append_query_results([vec![derivation]]);
+            .append_query_results([vec![evaluation]])
+            .append_query_results([vec![project]]);
         let db = seed_upstream_urls(db, org, &[&upstream.uri()]).into_connection();
 
         let (state, storage) = test_state_with_recording_storage(db);

@@ -265,7 +265,7 @@ pub async fn get_board_durations_heatmap(
             return Ok(ok_json(DurationsHeatmap { times: vec![], bands: vec![] }));
         }
 
-        clauses.push(format!("d.organization IN ({list})"));
+        clauses.push(format!("pr.organization IN ({list})"));
     }
 
     let sql = format!(
@@ -273,7 +273,9 @@ pub async fn get_board_durations_heatmap(
                 width_bucket((extract(epoch from (ba.build_finished_at - ba.build_started_at)) * 1000)::bigint, \
                              ARRAY[10000,30000,60000,180000,600000,1800000]::bigint[]) AS band, \
                 count(*)::bigint AS c \
-         FROM build b JOIN derivation d ON d.id = b.derivation \
+         FROM build b \
+         JOIN evaluation ev ON ev.id = b.evaluation \
+         JOIN project pr ON pr.id = ev.project \
          JOIN LATERAL ( \
            SELECT ba2.build_started_at, ba2.build_finished_at \
            FROM build_attempt ba2 WHERE ba2.build = b.id \
