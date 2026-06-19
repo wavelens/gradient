@@ -41,10 +41,12 @@ impl MigrationTrait for Migration {
         let b = db.get_database_backend();
         let exec = |sql: String| Statement::from_string(b, sql);
 
+        // Postgres has ordering operators for uuid but no min() aggregate, so
+        // first_value over an ordered window yields the surviving (lowest) id.
         db.execute(exec(
             "CREATE TEMP TABLE derivation_dedup AS \
              SELECT id AS old_id, \
-                    min(id) OVER (PARTITION BY hash, name) AS keep_id \
+                    first_value(id) OVER (PARTITION BY hash, name ORDER BY id) AS keep_id \
              FROM derivation"
                 .into(),
         ))
