@@ -786,7 +786,9 @@ impl JobTracker {
         to_requeue
     }
 
-    pub fn worker_disconnected(&mut self, peer_id: &str) -> Vec<String> {
+    /// Move all of `peer_id`'s active jobs back to pending and return the
+    /// requeued jobs so the caller can reset their DB rows for re-dispatch.
+    pub fn worker_disconnected(&mut self, peer_id: &str) -> Vec<PendingJob> {
         self.scores.remove(peer_id);
         let orphaned: Vec<String> = self
             .active
@@ -794,12 +796,14 @@ impl JobTracker {
             .filter(|(_, (w, _))| w == peer_id)
             .map(|(id, _)| id.clone())
             .collect();
+        let mut requeued = Vec::with_capacity(orphaned.len());
         for job_id in &orphaned {
             if let Some((_, job)) = self.active.remove(job_id) {
+                requeued.push(job.clone());
                 self.pending.insert(job_id.clone(), job);
             }
         }
-        orphaned
+        requeued
     }
 
     pub fn contains_job(&self, job_id: &str) -> bool {

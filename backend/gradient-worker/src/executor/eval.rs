@@ -597,7 +597,7 @@ impl<'a> ClosureWalker<'a> {
             // BEFORE reporting it, so once #392 promotes and dispatches these
             // builds mid-eval their sources are already in the cache.
             if self.batch.len() >= EVAL_BATCH_SIZE {
-                updater.push_drv_closure(&self.produced_drvs).await;
+                updater.push_drv_closure(&self.produced_drvs).await?;
                 self.produced_drvs.clear();
                 mark_substituted(&mut self.batch, updater).await;
                 debug!(
@@ -811,7 +811,7 @@ pub async fn evaluate_derivations_with(
 
     // Push the trailing batch's closure before its report, same as the mid-walk
     // flushes, so the last builds' sources are cached before dispatch.
-    updater.push_drv_closure(&remaining_drvs).await;
+    updater.push_drv_closure(&remaining_drvs).await?;
     mark_substituted(&mut remaining, updater).await;
     debug!(
         count = remaining.len(),

@@ -247,11 +247,17 @@ impl Scheduler {
     pub async fn unregister_worker(&self, peer_id: &str) {
         self.close_worker_connection(peer_id).await;
         let orphaned = self.worker_pool.write().await.unregister(peer_id);
-        let tracker_orphaned = self.job_tracker.write().await.worker_disconnected(peer_id);
-        let total = orphaned.len() + tracker_orphaned.len();
+        let requeued = self.job_tracker.write().await.worker_disconnected(peer_id);
+        let total = orphaned.len() + requeued.len();
         if total > 0 {
             info!(%peer_id, orphaned_jobs = total, "worker disconnected; jobs re-queued");
         }
+
+        // The in-memory requeue above leaves the DB rows in a non-terminal
+        // status (`Building` / mid-eval) that the dispatcher never re-selects;
+        // reset them so the orphaned work actually retries.
+        build::requeue_orphaned_jobs(&self.state, &requeued).await;
+
         let _ = self
             .state
             .board_events

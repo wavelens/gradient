@@ -1005,14 +1005,14 @@ impl<'a> DispatchContext<'a> {
                 Err(e) => {
                     let reason = format!("failed to read staged NAR: {e}");
                     error!(peer_id = %self.peer_id, %job_id, %store_path, error = %e, "read staged NAR failed");
-                    self.abort_job(&job_id, reason).await;
+                    self.fail_build_transient(&job_id, reason).await;
                     return;
                 }
             };
             if let Err(e) = self.state.nar_storage.put(hash, buf).await {
                 let reason = format!("failed to write NAR to storage: {e}");
                 error!(peer_id = %self.peer_id, %job_id, %store_path, error = %e, "nar_storage.put failed");
-                self.abort_job(&job_id, reason).await;
+                self.fail_build_transient(&job_id, reason).await;
                 return;
             }
             nar.finish(&store_path).await;
@@ -1052,6 +1052,28 @@ impl<'a> DispatchContext<'a> {
             },
         )
         .await;
+    }
+
+    /// A transient server-side NAR storage failure (staged-read or
+    /// `nar_storage` write). Stop the worker and mark the build
+    /// `FailedTransient` directly so the dispatcher re-queues it - a bare
+    /// `abort_job` would be reported by the worker as a permanent failure and
+    /// never retry. The connection is untouched; only this build fails.
+    async fn fail_build_transient(&mut self, job_id: &str, reason: String) {
+        self.abort_job(job_id, reason.clone()).await;
+        if let Err(e) = self
+            .scheduler
+            .handle_job_failed(
+                self.peer_id,
+                job_id,
+                &reason,
+                gradient_types::proto::BuildFailureKind::Transient,
+                &[],
+            )
+            .await
+        {
+            error!(peer_id = %self.peer_id, %job_id, error = %e, "fail_build_transient: handle_job_failed failed");
+        }
     }
 
     // ── Cache queries ─────────────────────────────────────────────────────────

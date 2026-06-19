@@ -7,8 +7,9 @@
 //! Dump store paths to NAR and compress with zstd before upload.
 //!
 //! Uses `harmonia-file-nar`'s `NarByteStream` for pure-Rust NAR packing (no `nix nar`
-//! subprocess). The compressed data is pushed to the server in 64 KiB chunks via
-//! [`ClientMessage::NarPush`] - delegated to [`crate::proto::nar::push_direct`].
+//! subprocess). When the cache is S3-backed the worker uploads the compressed
+//! NAR straight to object storage via a presigned PUT URL; otherwise it falls
+//! back to chunked [`ClientMessage::NarPush`] over the WebSocket.
 //!
 //! The worker always compresses before upload; the server never sees or
 //! writes an uncompressed NAR.
@@ -20,11 +21,12 @@ use tracing::debug;
 use crate::executor::check_abort;
 use crate::nix::store::LocalNixStore;
 use crate::proto::job::JobUpdater;
-use crate::proto::nar;
 
-/// Compress every path in `store_paths` into a zstd NAR and push it to the
-/// server via direct WebSocket transfer. Used for fetched flake inputs,
-/// evaluated `.drv` files, and built outputs.
+/// Compress every path in `store_paths` into a zstd NAR and upload it to the
+/// cache. The worker first asks the server (`CacheQuery {Push}`) how each path
+/// should be uploaded: a presigned S3 PUT straight to object storage when the
+/// cache is S3-backed, else a direct WebSocket `NarPush`. Used for built
+/// outputs so multi-GB NARs never relay through the server connection.
 ///
 /// `abort` is checked before each path. When the server signals `AbortJob`
 /// (e.g. the session NAR upload buffer was exceeded) the loop bails with an
@@ -41,17 +43,11 @@ pub async fn compress_and_push_paths(
 
     updater.report_compressing()?;
 
-    for store_path in store_paths {
+    let entries = super::query_fetched_paths(updater, store_paths.to_vec()).await;
+    for cp in &entries {
         check_abort(abort)?;
-        nar::push_direct(
-            &updater.job_id.clone(),
-            store_path,
-            &updater.writer,
-            &updater.nar_recv,
-            Some(store),
-        )
-        .await?;
-        debug!(store_path, "compressed and pushed NAR");
+        super::upload_one_nar(updater, cp, store).await?;
+        debug!(store_path = %cp.path, "compressed and pushed NAR");
     }
 
     Ok(())

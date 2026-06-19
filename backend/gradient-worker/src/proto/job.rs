@@ -476,12 +476,12 @@ impl JobReporter for JobUpdater {
         })
     }
 
-    async fn push_drv_closure(&mut self, drv_paths: &[String]) {
+    async fn push_drv_closure(&mut self, drv_paths: &[String]) -> Result<()> {
         let Some(store) = self.store.clone() else {
-            return;
+            return Ok(());
         };
 
-        crate::executor::push_drv_closure(drv_paths, self, &store).await;
+        crate::executor::push_drv_closure(drv_paths, self, &store).await
     }
 
     async fn report_building(&mut self, build_id: String) -> Result<()> {

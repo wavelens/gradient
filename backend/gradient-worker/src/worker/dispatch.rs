@@ -134,6 +134,14 @@ pub(super) async fn run_dispatch_loop(
         }
     }
 
+    // The connection is gone; any job still running is detached from this loop
+    // and can never report its result over the dead writer. Abort them so they
+    // stop instead of double-executing after we reconnect - the server
+    // re-queues the orphaned jobs on its side.
+    for (_job_id, abort_tx) in abort_senders.drain() {
+        let _ = abort_tx.send(true);
+    }
+
     Ok(draining)
 }
 
