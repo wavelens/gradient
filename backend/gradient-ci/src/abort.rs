@@ -19,9 +19,7 @@ use gradient_types::*;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QuerySelect,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use std::collections::HashSet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,12 +60,12 @@ async fn abort_eval_anchors<C: ConnectionTrait>(
     eval_id: EvaluationId,
 ) -> Result<Vec<DerivationBuildId>, sea_orm::DbErr> {
     let anchor_ids: Vec<DerivationBuildId> = EBuildJob::find()
-        .select_only()
-        .column(CBuildJob::DerivationBuild)
         .filter(CBuildJob::Evaluation.eq(eval_id))
-        .into_tuple::<DerivationBuildId>()
         .all(db)
-        .await?;
+        .await?
+        .into_iter()
+        .map(|j| j.derivation_build)
+        .collect();
     if anchor_ids.is_empty() {
         return Ok(Vec::new());
     }
