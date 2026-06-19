@@ -29,6 +29,7 @@ pub mod cached_path_signature;
 pub mod cli_device_authorization;
 pub mod commit;
 pub mod derivation;
+pub mod derivation_build;
 pub mod derivation_closure;
 pub mod derivation_dependency;
 pub mod derivation_feature;
