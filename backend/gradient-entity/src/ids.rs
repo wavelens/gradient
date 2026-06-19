@@ -102,6 +102,7 @@ id_newtype!(DerivationDependencyId);
 id_newtype!(DerivationMetricId);
 id_newtype!(DerivationFeatureId);
 id_newtype!(DerivationOutputId);
+id_newtype!(DerivationBuildId);
 id_newtype!(DerivationOutputSignatureId);
 id_newtype!(EntryPointId);
 id_newtype!(EntryPointDepCountId);
