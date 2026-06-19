@@ -274,6 +274,11 @@ impl<'a> EvalResultProcessor<'a> {
             }
         }
 
+        // Leaf anchors (no dependency edges) are buildable immediately.
+        if let Err(e) = gradient_db::promote_leaves(&self.state.worker_db).await {
+            error!(error = %e, "promote_leaves failed");
+        }
+
         Ok(())
     }
 
