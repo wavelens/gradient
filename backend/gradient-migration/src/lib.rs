@@ -157,6 +157,7 @@ mod m20260616_000002_create_evaluation_input_update;
 mod m20260616_000003_create_open_pr_state;
 mod m20260617_000001_add_substituted_to_build;
 mod m20260619_000001_drop_cached_path_store_path;
+mod m20260619_010000_globalize_derivation;
 
 pub struct Migrator;
 
@@ -315,6 +316,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260616_000003_create_open_pr_state::Migration),
             Box::new(m20260617_000001_add_substituted_to_build::Migration),
             Box::new(m20260619_000001_drop_cached_path_store_path::Migration),
+            Box::new(m20260619_010000_globalize_derivation::Migration),
         ]
     }
 }
