@@ -37,8 +37,8 @@ pub type EApi = api::Entity;
 pub type EAuditLog = audit_log::Entity;
 pub type EBaseWorker = base_worker::Entity;
 pub type ABaseWorker = base_worker::ActiveModel;
-pub type EBuild = build::Entity;
 pub type EBuildAttempt = build_attempt::Entity;
+pub type EBuildJob = build_job::Entity;
 pub type EBuildProduct = build_product::Entity;
 pub type EBuildRequestBlob = build_request_blob::Entity;
 pub type ECache = cache::Entity;
@@ -88,8 +88,8 @@ pub type EWorkerRegistration = worker_registration::Entity;
 pub type MAdminTask = admin_task::Model;
 pub type MApi = api::Model;
 pub type MAuditLog = audit_log::Model;
-pub type MBuild = build::Model;
 pub type MBuildAttempt = build_attempt::Model;
+pub type MBuildJob = build_job::Model;
 pub type MBuildProduct = build_product::Model;
 pub type MBuildRequestBlob = build_request_blob::Model;
 pub type MCache = cache::Model;
@@ -140,7 +140,7 @@ pub type MWorkerRegistration = worker_registration::Model;
 pub type AAdminTask = admin_task::ActiveModel;
 pub type AApi = api::ActiveModel;
 pub type AAuditLog = audit_log::ActiveModel;
-pub type ABuild = build::ActiveModel;
+pub type ABuildJob = build_job::ActiveModel;
 pub type ABuildProduct = build_product::ActiveModel;
 pub type ABuildRequestBlob = build_request_blob::ActiveModel;
 pub type ACache = cache::ActiveModel;
@@ -191,8 +191,8 @@ pub type AWorkerRegistration = worker_registration::ActiveModel;
 pub type CAdminTask = admin_task::Column;
 pub type CApi = api::Column;
 pub type CAuditLog = audit_log::Column;
-pub type CBuild = build::Column;
 pub type CBuildAttempt = build_attempt::Column;
+pub type CBuildJob = build_job::Column;
 pub type CBuildProduct = build_product::Column;
 pub type CBuildRequestBlob = build_request_blob::Column;
 pub type CCache = cache::Column;
@@ -243,12 +243,3 @@ pub type CWorkerRegistration = worker_registration::Column;
 // caller needs a relation type, prefer `gradient_entity::api::Relation`.
 pub use admin_task::{AdminTaskKind, AdminTaskStatus};
 pub use evaluation_message::MessageLevel;
-
-/// Convenience bundle for code that needs the attempt fields (`MBuild`) and
-/// the spec fields (`MDerivation`) together. Produced by joining `build` on
-/// `derivation` at query time.
-#[derive(Debug, Clone)]
-pub struct BuildWithDerivation {
-    pub build: MBuild,
-    pub derivation: MDerivation,
-}

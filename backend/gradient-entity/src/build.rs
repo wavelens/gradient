@@ -4,12 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use chrono::NaiveDateTime;
+//! Build status enum, shared by the global `derivation_build` anchor and the
+//! per-eval `build_job`. The `build` table itself was removed; identity now
+//! lives in `derivation_build` (global, build-once) + `build_job` (per-eval).
+
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
-
-use crate::ids::{BuildId, DerivationId, EvaluationId};
 
 #[repr(i32)]
 #[derive(
@@ -89,50 +90,6 @@ impl BuildStatus {
         )
     }
 }
-
-#[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
-#[sea_orm(table_name = "build")]
-pub struct Model {
-    #[sea_orm(primary_key)]
-    pub id: BuildId,
-    pub evaluation: EvaluationId,
-    pub derivation: DerivationId,
-    pub status: BuildStatus,
-    pub via: Option<BuildId>,
-    pub substitutable: bool,
-    /// The realised output required no build: the daemon found it already valid
-    /// (or it was substituted). Recorded when outputs are reported and used at
-    /// job completion to finalize the build as `Substituted` rather than
-    /// `Completed`.
-    pub substituted: bool,
-    pub attempt: i32,
-    pub timeout_secs: Option<i64>,
-    pub max_silent_secs: Option<i64>,
-    pub prefer_local_build: bool,
-    pub created_at: NaiveDateTime,
-    pub updated_at: NaiveDateTime,
-    pub queued_at: Option<NaiveDateTime>,
-    pub ready_at: Option<NaiveDateTime>,
-    pub dispatched_at: Option<NaiveDateTime>,
-}
-
-#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {
-    #[sea_orm(
-        belongs_to = "super::evaluation::Entity",
-        from = "Column::Evaluation",
-        to = "super::evaluation::Column::Id"
-    )]
-    Evaluation,
-    #[sea_orm(
-        belongs_to = "super::derivation::Entity",
-        from = "Column::Derivation",
-        to = "super::derivation::Column::Id"
-    )]
-    Derivation,
-}
-
-impl ActiveModelBehavior for ActiveModel {}
 
 #[cfg(test)]
 mod tests {

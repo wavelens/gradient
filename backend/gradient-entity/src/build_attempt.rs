@@ -9,7 +9,7 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{BuildAttemptId, BuildId, DispatchedJobId};
+use crate::ids::{BuildAttemptId, BuildJobId, DerivationBuildId, DispatchedJobId};
 
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, DeriveActiveEnum, EnumIter,
@@ -57,13 +57,13 @@ pub enum AttemptFailureReason {
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: BuildAttemptId,
-    pub build: BuildId,
+    pub build_job: BuildJobId,
+    pub derivation_build: DerivationBuildId,
     pub dispatched_job: DispatchedJobId,
     pub substitute: bool,
     pub outcome: AttemptOutcome,
     pub reason: Option<AttemptFailureReason>,
     pub failure_message: Option<String>,
-    pub log_id: Option<BuildId>,
     pub build_context: Json,
     pub build_started_at: Option<NaiveDateTime>,
     pub build_finished_at: Option<NaiveDateTime>,
@@ -82,11 +82,19 @@ impl Model {
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
     #[sea_orm(
-        belongs_to = "super::build::Entity",
-        from = "Column::Build",
-        to = "super::build::Column::Id"
+        belongs_to = "super::build_job::Entity",
+        from = "Column::BuildJob",
+        to = "super::build_job::Column::Id",
+        on_delete = "Cascade"
     )]
-    Build,
+    BuildJob,
+    #[sea_orm(
+        belongs_to = "super::derivation_build::Entity",
+        from = "Column::DerivationBuild",
+        to = "super::derivation_build::Column::Id",
+        on_delete = "Cascade"
+    )]
+    DerivationBuild,
     #[sea_orm(
         belongs_to = "super::dispatched_job::Entity",
         from = "Column::DispatchedJob",

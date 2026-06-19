@@ -15,6 +15,7 @@ pub mod audit_log;
 pub mod base_worker;
 pub mod build;
 pub mod build_attempt;
+pub mod build_job;
 pub mod build_log_chunk;
 pub mod build_product;
 pub mod build_request_blob;
@@ -88,13 +89,6 @@ mod model_default_tests {
     }
 
     #[test]
-    fn build_default_has_initial_status() {
-        let m = build::Model::default();
-        assert_eq!(m.status, build::BuildStatus::Created);
-        assert!(!m.substitutable);
-    }
-
-    #[test]
     fn evaluation_default_has_initial_status() {
         let m = evaluation::Model::default();
         assert_eq!(m.status, evaluation::EvaluationStatus::Queued);
@@ -162,13 +156,6 @@ mod model_default_tests {
         assert_eq!(m.count, 0);
         assert_eq!(m.sum, 0.0);
         assert!(m.histogram.is_none());
-    }
-
-    #[test]
-    fn build_default_has_null_phase_timestamps() {
-        let m = build::Model::default();
-        assert!(m.ready_at.is_none());
-        assert!(m.dispatched_at.is_none());
     }
 
     #[test]
