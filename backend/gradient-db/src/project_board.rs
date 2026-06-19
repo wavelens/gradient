@@ -35,9 +35,10 @@ pub async fn build_status_counts_by_evaluation<C: ConnectionTrait>(
             .collect::<Vec<_>>()
             .join(",");
         let sql = format!(
-            "SELECT evaluation, status, COUNT(*) AS cnt \
-             FROM build WHERE evaluation IN ({ids}) \
-             GROUP BY evaluation, status"
+            "SELECT bj.evaluation AS evaluation, db.status AS status, COUNT(*) AS cnt \
+             FROM build_job bj JOIN derivation_build db ON db.id = bj.derivation_build \
+             WHERE bj.evaluation IN ({ids}) \
+             GROUP BY bj.evaluation, db.status"
         );
         EvalStatusCountRow::find_by_statement(Statement::from_string(DbBackend::Postgres, sql))
             .all(db)
@@ -116,7 +117,9 @@ pub async fn project_queue_summary<C: ConnectionTrait>(
     // BuildStatus building: Building=2. queued: Created=0, Queued=1, FailedTransient=8.
     let sql = format!(
         "SELECT b.status AS status, COUNT(*) AS cnt \
-         FROM build b JOIN evaluation e ON e.id = b.evaluation \
+         FROM build_job bj \
+         JOIN evaluation e ON e.id = bj.evaluation \
+         JOIN derivation_build b ON b.id = bj.derivation_build \
          WHERE e.project = '{project}' AND e.status NOT IN (5,6,7) \
            AND b.status IN (0,1,2,8) \
          GROUP BY b.status"
@@ -174,12 +177,13 @@ pub async fn entry_point_dep_counts<C: ConnectionTrait>(
             SELECT c.ep, dd.dependency \
             FROM closure c \
             JOIN derivation_dependency dd ON dd.derivation = c.drv \
-            JOIN build b ON b.derivation = dd.dependency AND b.evaluation = '{eval}' \
+            JOIN build_job bj ON bj.derivation = dd.dependency AND bj.evaluation = '{eval}' \
          ) \
          SELECT c.ep AS entry_point, b.status AS status, COUNT(*) AS cnt \
          FROM closure c \
          JOIN seeds s ON s.ep = c.ep \
-         JOIN build b ON b.derivation = c.drv AND b.evaluation = '{eval}' \
+         JOIN build_job bj ON bj.derivation = c.drv AND bj.evaluation = '{eval}' \
+         JOIN derivation_build b ON b.id = bj.derivation_build \
          WHERE c.drv <> s.root_drv \
          GROUP BY c.ep, b.status"
     );

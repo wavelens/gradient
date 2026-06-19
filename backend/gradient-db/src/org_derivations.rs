@@ -6,7 +6,7 @@
 
 //! Derivations an organization has built. Replaces the dropped per-org
 //! `derivation.organization` scoping now that derivations are a global graph:
-//! ownership is derived through the org's projects -> evaluations -> builds.
+//! ownership is derived through the org's projects -> evaluations -> build_jobs.
 
 use crate::fetch_in_chunks;
 use gradient_types::*;
@@ -44,11 +44,11 @@ pub async fn derivation_ids_for_org<C: ConnectionTrait>(
     }
 
     let drv_ids = fetch_in_chunks(&eval_ids, |chunk| async move {
-        EBuild::find()
+        EBuildJob::find()
             .select_only()
-            .column(CBuild::Derivation)
+            .column(CBuildJob::Derivation)
             .distinct()
-            .filter(CBuild::Evaluation.is_in(chunk))
+            .filter(CBuildJob::Evaluation.is_in(chunk))
             .into_tuple::<DerivationId>()
             .all(db)
             .await

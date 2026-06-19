@@ -4,28 +4,35 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+//! Attempt helpers, keyed on the global `derivation_build` anchor (the actual
+//! build work). Each attempt is attributed to one `build_job` (the eval that
+//! drove the dispatch) and owns its log under its own id.
+
 use chrono::NaiveDateTime;
 use gradient_entity::build_attempt::{
     AttemptFailureReason, AttemptOutcome, Column, Entity, Model,
 };
-use gradient_entity::ids::{BuildAttemptId, BuildId, DispatchedJobId};
+use gradient_entity::ids::{BuildAttemptId, BuildJobId, DerivationBuildId, DispatchedJobId};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
     QueryFilter, QueryOrder,
 };
 
-/// Open a new attempt row for `build` under `dispatched_job`.
+/// Open a new attempt for an anchor (`derivation_build`), attributed to
+/// `build_job`, under `dispatched_job`.
 pub async fn open_attempt<C: ConnectionTrait>(
     db: &C,
-    build: BuildId,
+    build_job: BuildJobId,
+    derivation_build: DerivationBuildId,
     dispatched_job: DispatchedJobId,
     substitute: bool,
     build_context: serde_json::Value,
 ) -> Result<Model, DbErr> {
     Model {
         id: BuildAttemptId::now_v7(),
-        build,
+        build_job,
+        derivation_build,
         dispatched_job,
         substitute,
         outcome: AttemptOutcome::Running,
@@ -38,64 +45,64 @@ pub async fn open_attempt<C: ConnectionTrait>(
     .await
 }
 
-/// Count `SubstituteUnavailable` attempts per build, for the given build ids.
-/// Builds with zero misses are absent from the map. Used by the scheduler to
+/// Count `SubstituteUnavailable` attempts per anchor, for the given anchor ids.
+/// Anchors with zero misses are absent from the map. Used by the scheduler to
 /// escalate a substitutable build to a real arch-bound build after repeated
 /// substitute misses.
 pub async fn substitute_miss_counts<C: ConnectionTrait>(
     db: &C,
-    builds: &[BuildId],
-) -> Result<std::collections::HashMap<BuildId, i64>, DbErr> {
-    let mut counts: std::collections::HashMap<BuildId, i64> = std::collections::HashMap::new();
-    if builds.is_empty() {
+    anchors: &[DerivationBuildId],
+) -> Result<std::collections::HashMap<DerivationBuildId, i64>, DbErr> {
+    let mut counts: std::collections::HashMap<DerivationBuildId, i64> =
+        std::collections::HashMap::new();
+    if anchors.is_empty() {
         return Ok(counts);
     }
 
-    let rows = crate::fetch_in_chunks(builds, |chunk| async move {
+    let rows = crate::fetch_in_chunks(anchors, |chunk| async move {
         Entity::find()
-            .filter(Column::Build.is_in(chunk))
+            .filter(Column::DerivationBuild.is_in(chunk))
             .filter(Column::Reason.eq(AttemptFailureReason::SubstituteUnavailable))
             .all(db)
             .await
     })
     .await?;
     for r in rows {
-        *counts.entry(r.build).or_default() += 1;
+        *counts.entry(r.derivation_build).or_default() += 1;
     }
 
     Ok(counts)
 }
 
-/// Most recent attempt for a build (by created_at desc), if any.
+/// Most recent attempt for an anchor (by created_at desc), if any.
 pub async fn latest_attempt<C: ConnectionTrait>(
     db: &C,
-    build: BuildId,
+    derivation_build: DerivationBuildId,
 ) -> Result<Option<Model>, DbErr> {
     Entity::find()
-        .filter(Column::Build.eq(build))
+        .filter(Column::DerivationBuild.eq(derivation_build))
         .order_by_desc(Column::CreatedAt)
         .one(db)
         .await
 }
 
-/// Most recent attempt for each build, fetched in one `DISTINCT ON` query per
-/// chunk. Replaces per-build [`latest_attempt`] loops, which turned a build
-/// list into an N+1 (~one round-trip per row).
+/// Most recent attempt for each anchor, fetched in one `DISTINCT ON` query per
+/// chunk. Replaces per-anchor [`latest_attempt`] loops.
 pub async fn latest_attempts<C: ConnectionTrait>(
     db: &C,
-    builds: &[BuildId],
-) -> Result<std::collections::HashMap<BuildId, Model>, DbErr> {
+    anchors: &[DerivationBuildId],
+) -> Result<std::collections::HashMap<DerivationBuildId, Model>, DbErr> {
     use sea_orm::{DbBackend, Statement};
 
-    let rows = crate::fetch_in_chunks(builds, |chunk| async move {
+    let rows = crate::fetch_in_chunks(anchors, |chunk| async move {
         let in_list = chunk
             .iter()
             .map(|id| format!("'{}'", id.into_inner()))
             .collect::<Vec<_>>()
             .join(",");
         let sql = format!(
-            "SELECT DISTINCT ON (build) * FROM build_attempt \
-             WHERE build IN ({in_list}) ORDER BY build, created_at DESC"
+            "SELECT DISTINCT ON (derivation_build) * FROM build_attempt \
+             WHERE derivation_build IN ({in_list}) ORDER BY derivation_build, created_at DESC"
         );
         Entity::find()
             .from_raw_sql(Statement::from_string(DbBackend::Postgres, sql))
@@ -104,27 +111,24 @@ pub async fn latest_attempts<C: ConnectionTrait>(
     })
     .await?;
 
-    Ok(rows.into_iter().map(|a| (a.build, a)).collect())
+    Ok(rows.into_iter().map(|a| (a.derivation_build, a)).collect())
 }
 
-/// The log id to read/finalize for a build: its latest attempt's `log_id`,
-/// falling back to the build id (mirrors the old `build.log_id.unwrap_or(id)`).
-pub async fn latest_attempt_log_id<C: ConnectionTrait>(
+/// The log key to read/finalize for an anchor: its latest attempt's id. Returns
+/// `None` when the anchor never produced an attempt (never dispatched).
+pub async fn latest_attempt_id<C: ConnectionTrait>(
     db: &C,
-    build: BuildId,
-) -> Result<BuildId, DbErr> {
-    Ok(latest_attempt(db, build)
-        .await?
-        .and_then(|a| a.log_id)
-        .unwrap_or(build))
+    derivation_build: DerivationBuildId,
+) -> Result<Option<BuildAttemptId>, DbErr> {
+    Ok(latest_attempt(db, derivation_build).await?.map(|a| a.id))
 }
 
-/// The worker that ran the build's latest attempt (via its dispatched_job).
+/// The worker that ran the anchor's latest attempt (via its dispatched_job).
 pub async fn latest_attempt_worker<C: ConnectionTrait>(
     db: &C,
-    build: BuildId,
+    derivation_build: DerivationBuildId,
 ) -> Result<Option<String>, DbErr> {
-    let Some(att) = latest_attempt(db, build).await? else {
+    let Some(att) = latest_attempt(db, derivation_build).await? else {
         return Ok(None);
     };
 
@@ -135,13 +139,13 @@ pub async fn latest_attempt_worker<C: ConnectionTrait>(
     Ok(job.map(|j| j.worker_id))
 }
 
-/// Stamp `build_started_at` on the latest attempt when its build enters Building.
+/// Stamp `build_started_at` on the latest attempt when its anchor enters Building.
 pub async fn stamp_attempt_started<C: ConnectionTrait>(
     db: &C,
-    build: BuildId,
+    derivation_build: DerivationBuildId,
     now: NaiveDateTime,
 ) -> Result<(), DbErr> {
-    if let Some(att) = latest_attempt(db, build).await?
+    if let Some(att) = latest_attempt(db, derivation_build).await?
         && att.build_started_at.is_none()
     {
         let mut a = att.into_active_model();
@@ -152,15 +156,15 @@ pub async fn stamp_attempt_started<C: ConnectionTrait>(
     Ok(())
 }
 
-/// Record a terminal failure on the build's latest attempt: set `outcome` +
+/// Record a terminal failure on the anchor's latest attempt: set `outcome` +
 /// `reason`, stamping `build_finished_at` if not already set.
 pub async fn fail_latest_attempt<C: ConnectionTrait>(
     db: &C,
-    build: BuildId,
+    derivation_build: DerivationBuildId,
     outcome: AttemptOutcome,
     reason: Option<AttemptFailureReason>,
 ) -> Result<(), DbErr> {
-    if let Some(att) = latest_attempt(db, build).await? {
+    if let Some(att) = latest_attempt(db, derivation_build).await? {
         let mut a = att.clone().into_active_model();
         a.outcome = Set(outcome);
         a.reason = Set(reason);
@@ -177,10 +181,10 @@ pub async fn fail_latest_attempt<C: ConnectionTrait>(
 /// Stamp `build_finished_at` on the latest attempt for any terminal status incl. Substituted.
 pub async fn stamp_attempt_finished<C: ConnectionTrait>(
     db: &C,
-    build: BuildId,
+    derivation_build: DerivationBuildId,
     now: NaiveDateTime,
 ) -> Result<(), DbErr> {
-    if let Some(att) = latest_attempt(db, build).await?
+    if let Some(att) = latest_attempt(db, derivation_build).await?
         && att.build_finished_at.is_none()
     {
         let mut a = att.into_active_model();

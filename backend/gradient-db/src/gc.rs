@@ -10,7 +10,7 @@ use gradient_entity::evaluation::EvaluationStatus;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, IntoActiveModel,
-    QueryFilter, QueryOrder, Statement,
+    QueryFilter, QueryOrder, QuerySelect, Statement,
 };
 use tracing::{info, warn};
 use uuid::Uuid;
@@ -82,33 +82,31 @@ pub async fn gc_project_evaluations(
     }
 
     for eval in &to_delete {
-        let builds = EBuild::find()
-            .filter(CBuild::Evaluation.eq(eval.id))
+        // Remove the log of every attempt attributed to this eval's build_jobs
+        // (logs are keyed by attempt id). DB rows cascade with the eval; NAR
+        // files and GC roots are owned by `derivation_output` / `cache_derivation`
+        // and are cleaned up by the derivation GC pass.
+        let job_ids: Vec<gradient_types::ids::BuildJobId> = EBuildJob::find()
+            .select_only()
+            .column(CBuildJob::Id)
+            .filter(CBuildJob::Evaluation.eq(eval.id))
+            .into_tuple::<gradient_types::ids::BuildJobId>()
             .all(&ctx.worker_db)
             .await
-            .context("GC: failed to query builds")?;
+            .context("GC: failed to query build_jobs")?;
 
-        for build in &builds {
-            // Remove every attempt's log from all backing stores (local + S3),
-            // falling back to the build id for never-dispatched builds. NAR
-            // files and GC roots are owned by `derivation_output` /
-            // `cache_derivation` and are cleaned up by the derivation GC pass.
-            let attempts = gradient_entity::build_attempt::Entity::find()
-                .filter(gradient_entity::build_attempt::Column::Build.eq(build.id))
+        let attempts = crate::fetch_in_chunks(&job_ids, |chunk| async move {
+            gradient_entity::build_attempt::Entity::find()
+                .filter(gradient_entity::build_attempt::Column::BuildJob.is_in(chunk))
                 .all(&ctx.worker_db)
                 .await
-                .context("GC: failed to query build attempts")?;
+        })
+        .await
+        .context("GC: failed to query build attempts")?;
 
-            let log_ids: Vec<BuildId> = if attempts.is_empty() {
-                vec![build.id]
-            } else {
-                attempts.iter().filter_map(|a| a.log_id).collect()
-            };
-
-            for log_id in log_ids {
-                if let Err(e) = ctx.storage.log_storage.delete(log_id).await {
-                    warn!(error = %e, build_id = %log_id, "GC: failed to remove build log");
-                }
+        for att in &attempts {
+            if let Err(e) = ctx.storage.log_storage.delete(att.id).await {
+                warn!(error = %e, attempt_id = %att.id, "GC: failed to remove build log");
             }
         }
 
@@ -162,9 +160,9 @@ fn evaluations_to_gc(statuses: &[EvaluationStatus], keep: usize) -> Vec<usize> {
     (keep..statuses.len()).collect()
 }
 
-/// Derivation GC pass: deletes `derivation` rows that have no remaining `build`
-/// rows pointing at them and whose grace period has expired. The grace lets
-/// rapid re-evaluations reuse recent derivations without re-inserting.
+/// Derivation GC pass: deletes `derivation` rows no surviving evaluation needs
+/// (no `build_job` references them) and whose grace period has expired. The
+/// grace lets rapid re-evaluations reuse recent derivations without re-inserting.
 ///
 /// NAR deletion is keyed by the orphan-only output hashes - a hash referenced
 /// by any *non-orphan* `derivation_output` (typical for FOD source tarballs
@@ -185,8 +183,8 @@ pub async fn gc_orphan_derivations(ctx: &DbContext, grace_hours: i64) -> Result<
             DatabaseBackend::Postgres,
             r#"SELECT d.id
                FROM derivation d
-               LEFT JOIN build b ON b.derivation = d.id
-               WHERE b.id IS NULL
+               LEFT JOIN build_job bj ON bj.derivation = d.id
+               WHERE bj.id IS NULL
                  AND d.created_at < $1"#,
             [sea_orm::Value::ChronoDateTime(Some(Box::new(cutoff)))],
         ))

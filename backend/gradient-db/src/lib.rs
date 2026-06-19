@@ -6,7 +6,6 @@
 
 pub mod admin_tasks;
 pub mod base_workers;
-pub mod build;
 pub mod build_attempt;
 pub mod cache_reach;
 pub mod cache_storage;
@@ -28,6 +27,7 @@ pub mod promotion;
 pub mod permissions;
 pub mod pool;
 pub mod project_board;
+pub mod reachability;
 pub mod recovery;
 pub mod retention;
 pub mod rollup;
@@ -36,7 +36,6 @@ pub mod state_machine;
 pub mod status;
 pub mod status_reactor;
 
-pub use self::build::builds_with_satisfied_deps;
 pub use self::build_attempt::*;
 pub use self::cache_reach::*;
 pub use self::cache_storage::{
@@ -58,7 +57,11 @@ pub use self::draining::{park_active_evals, unpark_draining_evals};
 pub use self::gc::*;
 pub use self::org_cache::org_has_writable_cache;
 pub use self::org_derivations::derivation_ids_for_org;
-pub use self::promotion::{promote_dependents, promote_leaves};
+pub use self::promotion::{cascade_dependency_failed, promote_dependents, promote_leaves};
+pub use self::reachability::{
+    build_jobs_for_derivation, derivation_is_reachable, eval_anchor_statuses,
+    evals_referencing_derivation,
+};
 pub use self::org_workers::org_has_eval_capable_worker_registration;
 pub use self::pool::{WebDb, WorkerDb};
 pub use self::project_board::*;

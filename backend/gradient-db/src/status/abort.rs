@@ -5,13 +5,12 @@
  */
 
 use super::evaluation_status::update_evaluation_status;
-use super::leader_election::reelect_leader;
 use super::logging::{PHASE_SUBJECT_BUILD, finalize_build_log, record_phase_events};
 use crate::dep_closure::reconcile_eval_dep_counts;
 use crate::state_machine::EvalStateMachine;
 use crate::{DbContext, fetch_in_chunks, for_each_chunk};
 use gradient_entity::build::BuildStatus;
-use gradient_entity::build_attempt::{Column as CAttempt, Entity as EAttempt};
+use gradient_entity::build_attempt::{AttemptOutcome, Column as CAttempt, Entity as EAttempt};
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
 use sea_orm::sea_query::Expr;
@@ -19,56 +18,31 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
 use std::collections::HashSet;
 use tracing::error;
 
-/// Abort an evaluation's in-flight builds in bulk. Aborting an evaluation with
-/// tens of thousands of builds used to walk them one at a time (a follower
-/// lookup, a row update, and several spawned side-effects per build), so the
-/// request blocked for the whole closure. This resolves the whole set with a
-/// handful of set-based statements: one follower-leader query, one status
-/// update, one attempt stamp, and one dependency-count reconcile.
+/// Abort an evaluation's in-flight builds. Anchors are global, so this only
+/// aborts the anchors this evaluation needs that no other live evaluation also
+/// needs; anchors still wanted elsewhere keep running for those evaluations.
 pub async fn abort_evaluation(ctx: &DbContext, evaluation: MEvaluation) {
     if EvalStateMachine::is_terminal(&evaluation.status) {
         return;
     }
 
-    // Park the evaluation before touching its builds: the dispatcher's queue
-    // finder skips Waiting evaluations, so this stops new builds being handed
-    // to workers while we abort. Direct update (no status-change side effects);
-    // the terminal transition to Aborted below fires those.
+    // Park the evaluation first: the dispatcher skips Waiting evaluations, so
+    // this stops new work being handed out while we abort. The terminal
+    // transition to Aborted below carries the user-facing side effects.
     gate_evaluation_aborting(ctx, evaluation.id).await;
 
-    let builds = match EBuild::find()
-        .filter(CBuild::Evaluation.eq(evaluation.id))
-        .filter(CBuild::Status.is_in([
-            BuildStatus::Created,
-            BuildStatus::Queued,
-            BuildStatus::Building,
-        ]))
-        .all(&ctx.worker_db)
-        .await
-    {
-        Ok(builds) => builds,
-        Err(e) => {
-            error!(error = %e, evaluation_id = %evaluation.id, "Failed to query builds for evaluation abort");
-            return;
-        }
-    };
-
-    if !builds.is_empty() {
-        abort_builds(ctx, &evaluation, builds).await;
+    if let Err(e) = abort_eval_anchors(ctx, &evaluation).await {
+        error!(error = %e, evaluation_id = %evaluation.id, "Failed to abort evaluation anchors");
     }
 
     update_evaluation_status(ctx, evaluation, EvaluationStatus::Aborted).await;
 }
 
-/// Park the evaluation as `Waiting` with the `Aborting` reason so the dispatcher
-/// stops handing out its builds. A direct filtered update: the eventual
-/// transition to `Aborted` carries the user-facing status-change side effects.
+/// Park the evaluation as `Waiting` with the `Aborting` reason via a direct
+/// filtered update; the eventual transition to `Aborted` carries the side effects.
 async fn gate_evaluation_aborting(ctx: &DbContext, evaluation_id: EvaluationId) {
     let res = EEvaluation::update_many()
-        .col_expr(
-            CEvaluation::Status,
-            Expr::value(EvaluationStatus::Waiting),
-        )
+        .col_expr(CEvaluation::Status, Expr::value(EvaluationStatus::Waiting))
         .col_expr(
             CEvaluation::WaitingReason,
             Expr::value(WaitingReason::Aborting.to_json()),
@@ -88,64 +62,80 @@ async fn gate_evaluation_aborting(ctx: &DbContext, evaluation_id: EvaluationId) 
     }
 }
 
-async fn abort_builds(ctx: &DbContext, evaluation: &MEvaluation, builds: Vec<MBuild>) {
-    let build_ids: Vec<BuildId> = builds.iter().map(|b| b.id).collect();
-    let leaders = leader_ids_with_followers(ctx, &build_ids).await;
-    let plan = partition_for_abort(builds, &leaders);
-
-    // Hand leadership off so followers in other, non-aborted evaluations still
-    // get a result. Always a small set, so a per-build call is fine.
-    for leader in &plan.reelect {
-        if let Err(e) = reelect_leader(ctx, leader).await {
-            error!(error = %e, build_id = %leader.id, "Failed to re-elect leader on abort");
-        }
+async fn abort_eval_anchors(
+    ctx: &DbContext,
+    evaluation: &MEvaluation,
+) -> Result<(), sea_orm::DbErr> {
+    let anchor_ids: Vec<DerivationBuildId> = EBuildJob::find()
+        .select_only()
+        .column(CBuildJob::DerivationBuild)
+        .filter(CBuildJob::Evaluation.eq(evaluation.id))
+        .into_tuple::<DerivationBuildId>()
+        .all(&ctx.worker_db)
+        .await?;
+    if anchor_ids.is_empty() {
+        return Ok(());
     }
 
-    let abort_ids = plan.abort_ids();
-    if abort_ids.is_empty() {
-        return;
+    let active = fetch_in_chunks(&anchor_ids, |chunk| async move {
+        EDerivationBuild::find()
+            .filter(CDerivationBuild::Id.is_in(chunk))
+            .filter(CDerivationBuild::Status.is_in([
+                BuildStatus::Created,
+                BuildStatus::Queued,
+                BuildStatus::Building,
+            ]))
+            .all(&ctx.worker_db)
+            .await
+    })
+    .await?;
+    if active.is_empty() {
+        return Ok(());
     }
 
+    let active_ids: Vec<DerivationBuildId> = active.iter().map(|a| a.id).collect();
+    let shared = shared_anchor_ids(ctx, evaluation.id, &active_ids).await?;
+
+    let to_abort: Vec<&MDerivationBuild> =
+        active.iter().filter(|a| !shared.contains(&a.id)).collect();
+    if to_abort.is_empty() {
+        return Ok(());
+    }
+
+    let abort_ids: Vec<DerivationBuildId> = to_abort.iter().map(|a| a.id).collect();
+    let building_ids: Vec<DerivationBuildId> = to_abort
+        .iter()
+        .filter(|a| a.status == BuildStatus::Building)
+        .map(|a| a.id)
+        .collect();
     let now = gradient_types::now();
 
-    // Mark Aborted and detach followers from their (external) leader in one pass.
-    if let Err(e) = for_each_chunk(&abort_ids, |chunk| async move {
-        EBuild::update_many()
-            .col_expr(CBuild::Status, Expr::value(BuildStatus::Aborted))
-            .col_expr(CBuild::Via, Expr::value(Option::<BuildId>::None))
-            .col_expr(CBuild::UpdatedAt, Expr::value(now))
-            .filter(CBuild::Id.is_in(chunk))
+    for_each_chunk(&abort_ids, |chunk| async move {
+        EDerivationBuild::update_many()
+            .col_expr(CDerivationBuild::Status, Expr::value(BuildStatus::Aborted))
+            .col_expr(CDerivationBuild::UpdatedAt, Expr::value(now))
+            .filter(CDerivationBuild::Id.is_in(chunk))
             .exec(&ctx.worker_db)
             .await
     })
-    .await
-    {
-        error!(error = %e, evaluation_id = %evaluation.id, "Failed to bulk-abort builds");
-        return;
-    }
+    .await?;
 
-    // Only executing builds have an open attempt to stamp finished.
-    let building_ids = plan.building_ids();
-    if !building_ids.is_empty()
-        && let Err(e) = for_each_chunk(&building_ids, |chunk| async move {
+    if !building_ids.is_empty() {
+        for_each_chunk(&building_ids, |chunk| async move {
             EAttempt::update_many()
+                .col_expr(CAttempt::Outcome, Expr::value(AttemptOutcome::Aborted))
                 .col_expr(CAttempt::BuildFinishedAt, Expr::value(Some(now)))
-                .filter(CAttempt::Build.is_in(chunk))
+                .filter(CAttempt::DerivationBuild.is_in(chunk))
                 .filter(CAttempt::BuildFinishedAt.is_null())
                 .exec(&ctx.worker_db)
                 .await
         })
-        .await
-    {
-        error!(error = %e, evaluation_id = %evaluation.id, "Failed to stamp aborted attempts");
+        .await?;
     }
 
-    // One reconcile replaces the per-build dep-count delta (#383).
-    if let Err(e) = reconcile_eval_dep_counts(&ctx.worker_db, evaluation.id).await {
-        error!(error = %e, evaluation_id = %evaluation.id, "Failed to reconcile dep counts after abort");
-    }
+    reconcile_eval_dep_counts(&ctx.worker_db, evaluation.id).await?;
 
-    let pe_ids: Vec<uuid::Uuid> = abort_ids.iter().map(|&id| id.into_inner()).collect();
+    let pe_ids: Vec<uuid::Uuid> = abort_ids.iter().map(|id| id.into_inner()).collect();
     record_phase_events(
         &ctx.worker_db,
         PHASE_SUBJECT_BUILD,
@@ -157,42 +147,64 @@ async fn abort_builds(ctx: &DbContext, evaluation: &MEvaluation, builds: Vec<MBu
 
     finalize_aborted_logs(ctx, &building_ids).await;
 
-    // One coarse ping; live subscribers refetch their own scope.
     let _ = ctx
         .board_events
         .send(gradient_types::BoardEvent::EvaluationProgress {
             project: evaluation.project.map(|p| p.into_inner()),
             evaluation_id: evaluation.id.into_inner(),
         });
+
+    Ok(())
 }
 
-/// The ids of this evaluation's builds that other builds follow (the `via`
-/// targets). One query replaces the former per-leader follower lookup.
-async fn leader_ids_with_followers(ctx: &DbContext, build_ids: &[BuildId]) -> HashSet<BuildId> {
-    let rows = fetch_in_chunks(build_ids, |chunk| async move {
-        EBuild::find()
-            .select_only()
-            .column(CBuild::Via)
-            .distinct()
-            .filter(CBuild::Via.is_in(chunk))
-            .into_tuple::<Option<BuildId>>()
+/// Of `anchor_ids`, those a non-terminal evaluation other than `this_eval` still
+/// needs (via its own `build_job`). Those anchors must keep running.
+async fn shared_anchor_ids(
+    ctx: &DbContext,
+    this_eval: EvaluationId,
+    anchor_ids: &[DerivationBuildId],
+) -> Result<HashSet<DerivationBuildId>, sea_orm::DbErr> {
+    let other_jobs = fetch_in_chunks(anchor_ids, |chunk| async move {
+        EBuildJob::find()
+            .filter(CBuildJob::DerivationBuild.is_in(chunk))
+            .filter(CBuildJob::Evaluation.ne(this_eval))
             .all(&ctx.worker_db)
             .await
     })
-    .await;
-
-    match rows {
-        Ok(rows) => rows.into_iter().flatten().collect(),
-        Err(e) => {
-            error!(error = %e, "Failed to query build followers for abort");
-            HashSet::new()
-        }
+    .await?;
+    if other_jobs.is_empty() {
+        return Ok(HashSet::new());
     }
+
+    let other_eval_ids: Vec<EvaluationId> = other_jobs
+        .iter()
+        .map(|j| j.evaluation)
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    let evals = fetch_in_chunks(&other_eval_ids, |chunk| async move {
+        EEvaluation::find()
+            .filter(CEvaluation::Id.is_in(chunk))
+            .all(&ctx.worker_db)
+            .await
+    })
+    .await?;
+    let live: HashSet<EvaluationId> = evals
+        .into_iter()
+        .filter(|e| !EvalStateMachine::is_terminal(&e.status))
+        .map(|e| e.id)
+        .collect();
+
+    Ok(other_jobs
+        .into_iter()
+        .filter(|j| live.contains(&j.evaluation))
+        .map(|j| j.derivation_build)
+        .collect())
 }
 
-/// Compress the build log of each executing build that was aborted. Spawned so
-/// log I/O never blocks the abort; Created/Queued builds never produced a log.
-async fn finalize_aborted_logs(ctx: &DbContext, building_ids: &[BuildId]) {
+/// Compress the log of each executing anchor that was aborted. Spawned so log
+/// I/O never blocks the abort; Created/Queued anchors never produced a log.
+async fn finalize_aborted_logs(ctx: &DbContext, building_ids: &[DerivationBuildId]) {
     if building_ids.is_empty() {
         return;
     }
@@ -200,120 +212,13 @@ async fn finalize_aborted_logs(ctx: &DbContext, building_ids: &[BuildId]) {
     let attempts = crate::build_attempt::latest_attempts(&ctx.worker_db, building_ids)
         .await
         .unwrap_or_default();
-    for &build_id in building_ids {
-        let log_id = attempts
-            .get(&build_id)
-            .and_then(|a| a.log_id)
-            .unwrap_or(build_id);
-        let log_ctx = ctx.clone();
-        ctx.shutdown.spawn(async move {
-            finalize_build_log(&log_ctx, log_id).await;
-        });
-    }
-}
-
-/// What to do with each in-flight build when its evaluation is aborted.
-struct AbortPlan {
-    /// Leaders with followers that are still Queued/Created: hand leadership off
-    /// before aborting. Always small.
-    reelect: Vec<MBuild>,
-    /// Every build to mark Aborted (followers, plain builds, and the re-elected
-    /// leaders). Building leaders with followers are excluded so they keep
-    /// running for dependent evaluations.
-    abort: Vec<MBuild>,
-}
-
-impl AbortPlan {
-    fn abort_ids(&self) -> Vec<BuildId> {
-        self.abort.iter().map(|b| b.id).collect()
-    }
-
-    fn building_ids(&self) -> Vec<BuildId> {
-        self.abort
-            .iter()
-            .filter(|b| b.status == BuildStatus::Building)
-            .map(|b| b.id)
-            .collect()
-    }
-}
-
-fn partition_for_abort(builds: Vec<MBuild>, leaders_with_followers: &HashSet<BuildId>) -> AbortPlan {
-    let mut reelect = Vec::new();
-    let mut abort = Vec::new();
-
-    for build in builds {
-        if build.via.is_some() {
-            abort.push(build);
-            continue;
+    for &anchor_id in building_ids {
+        if let Some(att) = attempts.get(&anchor_id) {
+            let attempt_id = att.id;
+            let log_ctx = ctx.clone();
+            ctx.shutdown.spawn(async move {
+                finalize_build_log(&log_ctx, attempt_id).await;
+            });
         }
-
-        if leaders_with_followers.contains(&build.id) {
-            match build.status {
-                BuildStatus::Building => continue,
-                BuildStatus::Queued | BuildStatus::Created => {
-                    reelect.push(build.clone());
-                    abort.push(build);
-                }
-                _ => abort.push(build),
-            }
-        } else {
-            abort.push(build);
-        }
-    }
-
-    AbortPlan { reelect, abort }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use gradient_types::ids::{BuildId, DerivationId, EvaluationId};
-
-    fn build(status: BuildStatus, via: Option<BuildId>) -> MBuild {
-        MBuild {
-            id: BuildId::now_v7(),
-            evaluation: EvaluationId::now_v7(),
-            derivation: DerivationId::now_v7(),
-            status,
-            via,
-            ..Default::default()
-        }
-    }
-
-    #[test]
-    fn partition_skips_busy_leaders_reelects_idle_leaders_and_aborts_the_rest() {
-        let plain = build(BuildStatus::Queued, None);
-        let follower = build(BuildStatus::Building, Some(BuildId::now_v7()));
-        let idle_leader = build(BuildStatus::Queued, None);
-        let busy_leader = build(BuildStatus::Building, None);
-
-        let leaders: HashSet<BuildId> = [idle_leader.id, busy_leader.id].into_iter().collect();
-        let plan = partition_for_abort(
-            vec![
-                plain.clone(),
-                follower.clone(),
-                idle_leader.clone(),
-                busy_leader.clone(),
-            ],
-            &leaders,
-        );
-
-        let abort_ids: HashSet<BuildId> = plan.abort_ids().into_iter().collect();
-        assert!(abort_ids.contains(&plain.id));
-        assert!(abort_ids.contains(&follower.id));
-        assert!(abort_ids.contains(&idle_leader.id));
-        assert!(
-            !abort_ids.contains(&busy_leader.id),
-            "a running leader with followers must keep running"
-        );
-
-        assert_eq!(plan.reelect.len(), 1);
-        assert_eq!(plan.reelect[0].id, idle_leader.id);
-
-        assert_eq!(
-            plan.building_ids(),
-            vec![follower.id],
-            "only executing aborted builds need attempt/log finalization"
-        );
     }
 }
