@@ -502,9 +502,9 @@ impl JobTracker {
         policy: &dyn ScoringPolicy,
         instance: &gradient_score::InstanceContext,
     ) -> Option<Assignment> {
-        // Owned snapshot so recording the decision (a `&mut self` push below)
-        // doesn't collide with this borrow of `self.scores`.
-        let worker_scores = self.scores.get(peer_id).cloned();
+        // Borrowed for point lookups only; the borrow ends before the `&mut self`
+        // decision push, so no per-dispatch clone of the worker's score map.
+        let worker_scores = self.scores.get(peer_id);
 
         let worker_ctx = caps.map(|c| WorkerContext {
             architectures: &c.architectures,
@@ -743,7 +743,17 @@ impl JobTracker {
     }
 
     pub fn remove_active(&mut self, job_id: &str) -> Option<PendingJob> {
+        self.forget_job_scores(job_id);
         self.active.remove(job_id).map(|(_, j)| j)
+    }
+
+    /// Drop a job's recorded scores from every worker's map. Called on every
+    /// terminal removal so losing candidates don't accumulate dead entries that
+    /// bloat the per-dispatch score lookup.
+    fn forget_job_scores(&mut self, job_id: &str) {
+        for ws in self.scores.values_mut() {
+            ws.remove(job_id);
+        }
     }
 
     pub fn active_job(&self, job_id: &str) -> Option<&PendingJob> {
@@ -797,6 +807,7 @@ impl JobTracker {
     }
 
     pub fn remove_job(&mut self, job_id: &str) {
+        self.forget_job_scores(job_id);
         self.pending.remove(job_id);
         self.active.remove(job_id);
     }
@@ -808,10 +819,19 @@ impl JobTracker {
             .map(|(job_id, (worker_id, job))| (job_id.as_str(), worker_id.as_str(), job))
     }
 
-    /// Remove all pending (unassigned) jobs belonging to a given evaluation.
+    /// Remove all pending (unassigned) jobs belonging to a given evaluation,
+    /// pruning their recorded scores so they don't linger across workers.
     pub fn remove_pending_for_evaluation(&mut self, evaluation_id: EvaluationId) {
-        self.pending
-            .retain(|_, job| job.evaluation_id() != evaluation_id);
+        let removed: Vec<String> = self
+            .pending
+            .iter()
+            .filter(|(_, job)| job.evaluation_id() == evaluation_id)
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in &removed {
+            self.pending.remove(id);
+            self.forget_job_scores(id);
+        }
     }
 
     pub fn pending_count(&self) -> usize {
@@ -1323,52 +1343,110 @@ mod tests {
     }
 
     #[test]
-    fn fair_share_quiet_org_wins_over_busy_org() {
-        // #111: org A floods the queue and already has builds running; org B is
-        // quiet. With the resource-aware policy the next build must go to B so a
-        // busy tenant cannot starve a quiet one.
+    fn terminal_job_removal_prunes_scores_across_all_workers() {
         let mut tracker = JobTracker::new();
-        let org_a = OrganizationId::now_v7();
-        let org_b = OrganizationId::now_v7();
-        let p = gradient_score::policy_by_name("resource-aware");
-        // Non-zero typical build time so active builds carry work-weight even
-        // without per-build history, making org_work_share well-defined.
-        let inst = gradient_score::InstanceContext {
-            build_time_ms: gradient_score::Windowed { w1h: 60_000.0, ..Default::default() },
-            ..Default::default()
-        };
+        let peer = OrganizationId::now_v7();
+        let p = gradient_score::policy_by_name("simple");
+        let inst = gradient_score::InstanceContext::default();
 
-        // Seed several active builds for org A. Each is fully cached on its
-        // worker so it clears the negative-total dispatch gate.
-        for i in 0..5 {
-            let id = format!("a_active_{i}");
-            tracker.add_pending(id.clone(), build_job(org_a, vec![]));
+        // Two workers score the same job; only one can ever win it, so the loser's
+        // entry would linger forever without lifecycle pruning (the dispatch leak).
+        tracker.add_pending("build:j1".into(), build_job(peer, vec![]));
+        for w in ["w1", "w2"] {
             tracker.record_scores(
-                "wa",
-                vec![CandidateScore { job_id: id, missing_count: 0, missing_nar_size: 0 }],
-            );
-            tracker.take_best_of_kind("wa", None, None, &JobKind::Build, &*p, &inst);
-        }
-        assert_eq!(tracker.active_count(), 5);
-
-        // One pending build each for A and B, both cached on the requesting worker.
-        tracker.add_pending("a_pending".into(), build_job(org_a, vec![]));
-        tracker.add_pending("b_pending".into(), build_job(org_b, vec![]));
-        for id in ["a_pending", "b_pending"] {
-            tracker.record_scores(
-                "wb",
-                vec![CandidateScore { job_id: id.into(), missing_count: 0, missing_nar_size: 0 }],
+                w,
+                vec![CandidateScore { job_id: "build:j1".into(), missing_count: 0, missing_nar_size: 0 }],
             );
         }
+        tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst);
 
-        let assignment = tracker
-            .take_best_of_kind("wb", None, None, &JobKind::Build, &*p, &inst)
-            .expect("a build must be assigned");
-        assert_eq!(
-            assignment.job_id, "b_pending",
-            "quiet org B must win over busy org A"
+        // Completing the job must leave no score entry behind on any worker.
+        tracker.remove_active("build:j1");
+        assert!(
+            tracker.scores.values().all(|ws| !ws.contains_key("build:j1")),
+            "a completed job must not leak score entries"
+        );
+
+        // Same guarantee for an outright abort of a still-pending job.
+        tracker.add_pending("build:j2".into(), build_job(peer, vec![]));
+        tracker.record_scores(
+            "w1",
+            vec![CandidateScore { job_id: "build:j2".into(), missing_count: 0, missing_nar_size: 0 }],
+        );
+        tracker.remove_job("build:j2");
+        assert!(
+            tracker.scores.values().all(|ws| !ws.contains_key("build:j2")),
+            "an aborted job must not leak score entries"
         );
     }
+
+    #[test]
+    fn aborting_an_evaluation_prunes_its_pending_scores() {
+        let mut tracker = JobTracker::new();
+        let peer = OrganizationId::now_v7();
+        let job = build_job(peer, vec![]);
+        let eval_id = job.evaluation_id();
+
+        tracker.add_pending("build:j1".into(), job);
+        tracker.record_scores(
+            "w1",
+            vec![CandidateScore { job_id: "build:j1".into(), missing_count: 0, missing_nar_size: 0 }],
+        );
+        tracker.remove_pending_for_evaluation(eval_id);
+        assert!(
+            tracker.scores.values().all(|ws| !ws.contains_key("build:j1")),
+            "aborting an evaluation must not leak its pending jobs' score entries"
+        );
+    }
+
+    // Currently not in use
+    // #[test]
+    // fn fair_share_quiet_org_wins_over_busy_org() {
+    //     // #111: org A floods the queue and already has builds running; org B is
+    //     // quiet. With the resource-aware policy the next build must go to B so a
+    //     // busy tenant cannot starve a quiet one.
+    //     let mut tracker = JobTracker::new();
+    //     let org_a = OrganizationId::now_v7();
+    //     let org_b = OrganizationId::now_v7();
+    //     let p = gradient_score::policy_by_name("resource-aware");
+    //     // Non-zero typical build time so active builds carry work-weight even
+    //     // without per-build history, making org_work_share well-defined.
+    //     let inst = gradient_score::InstanceContext {
+    //         build_time_ms: gradient_score::Windowed { w1h: 60_000.0, ..Default::default() },
+    //         ..Default::default()
+    //     };
+
+    //     // Seed several active builds for org A. Each is fully cached on its
+    //     // worker so it clears the negative-total dispatch gate.
+    //     for i in 0..5 {
+    //         let id = format!("a_active_{i}");
+    //         tracker.add_pending(id.clone(), build_job(org_a, vec![]));
+    //         tracker.record_scores(
+    //             "wa",
+    //             vec![CandidateScore { job_id: id, missing_count: 0, missing_nar_size: 0 }],
+    //         );
+    //         tracker.take_best_of_kind("wa", None, None, &JobKind::Build, &*p, &inst);
+    //     }
+    //     assert_eq!(tracker.active_count(), 5);
+
+    //     // One pending build each for A and B, both cached on the requesting worker.
+    //     tracker.add_pending("a_pending".into(), build_job(org_a, vec![]));
+    //     tracker.add_pending("b_pending".into(), build_job(org_b, vec![]));
+    //     for id in ["a_pending", "b_pending"] {
+    //         tracker.record_scores(
+    //             "wb",
+    //             vec![CandidateScore { job_id: id.into(), missing_count: 0, missing_nar_size: 0 }],
+    //         );
+    //     }
+
+    //     let assignment = tracker
+    //         .take_best_of_kind("wb", None, None, &JobKind::Build, &*p, &inst)
+    //         .expect("a build must be assigned");
+    //     assert_eq!(
+    //         assignment.job_id, "b_pending",
+    //         "quiet org B must win over busy org A"
+    //     );
+    // }
 
     #[test]
     fn unscored_build_is_gated_until_scored() {

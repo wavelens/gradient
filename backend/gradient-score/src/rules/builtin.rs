@@ -80,12 +80,13 @@ impl ScoreRule for MissingNarSizeRule {
 
 #[derive(Debug)]
 pub struct BuiltinDeprioritizeRule {
-    pub penalty: f64,
+    pub bonus: f64,
+    pub archless_bonus: f64,
 }
 
 impl Default for BuiltinDeprioritizeRule {
     fn default() -> Self {
-        Self { penalty: 50.0 }
+        Self { bonus: 50.0, archless_bonus: 100.0 }
     }
 }
 
@@ -93,20 +94,25 @@ impl ScoreRule for BuiltinDeprioritizeRule {
     fn score(
         &self,
         job: &JobContext<'_>,
-        _worker: &WorkerContext<'_>,
+        worker: &WorkerContext<'_>,
         _instance: &InstanceContext,
     ) -> f64 {
-        if let Some(b) = job.job.build()
-            && b.architecture == "builtin"
-        {
-            return -self.penalty;
+        let Some(b) = job.job.build() else {
+            return 0.0;
+        };
+
+        // A builtin yields its slot (0) on a real-build-capable worker, but an
+        // arch-less worker can only run builtins/fetches, so lift it strongly to
+        // keep it from sitting idle. Real compilation jobs earn the default bonus.
+        if b.architecture == "builtin" {
+            return if worker.architectures.is_empty() { self.archless_bonus } else { 0.0 };
         }
 
-        0.0
+        self.bonus
     }
 
     fn description(&self) -> &'static str {
-        "Penalizes Nix builtin derivations (fetchers and the like) so they yield worker slots to real compilation jobs."
+        "Rewards real compilation jobs over Nix builtin derivations so builtins yield worker slots, and lifts jobs on architecture-less workers so those workers are not left idle."
     }
 }
 
@@ -340,18 +346,37 @@ mod tests {
     }
 
     #[test]
-    fn builtin_deprioritize_penalises_builtin() {
+    fn builtin_rule_rewards_real_zeroes_builtin_and_lifts_archless_worker() {
         let rule = BuiltinDeprioritizeRule::default();
         let real = build_job("x86_64-linux");
         let builtin = build_job("builtin");
         let archs = vec!["x86_64-linux".to_string()];
         let w = worker(&archs, false);
+        let no_archs: Vec<String> = vec![];
+        let archless = worker(&no_archs, false);
+        let inst = InstanceContext::default();
         let now = gradient_types::now();
 
         let c_real = JobContext { job: &real, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0 };
         let c_builtin = JobContext { job: &builtin, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0 };
 
-        assert!(rule.score(&c_real, &w, &InstanceContext::default()) > rule.score(&c_builtin, &w, &InstanceContext::default()));
+        assert_eq!(rule.score(&c_real, &w, &inst), 50.0, "a real build gets the default bonus");
+        assert_eq!(rule.score(&c_real, &archless, &inst), 50.0, "the arch-less lift is builtin-only");
+        assert_eq!(rule.score(&c_builtin, &w, &inst), 0.0, "a builtin yields its slot to real work");
+        assert_eq!(rule.score(&c_builtin, &archless, &inst), 100.0, "a builtin on an arch-less worker is lifted so it isn't starved");
+    }
+
+    #[test]
+    fn builtin_rule_ignores_evals() {
+        let rule = BuiltinDeprioritizeRule::default();
+        let eval = eval_job(false);
+        let no_archs: Vec<String> = vec![];
+        let archless = worker(&no_archs, false);
+        let now = gradient_types::now();
+
+        let c_eval = JobContext { job: &eval, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0 };
+
+        assert_eq!(rule.score(&c_eval, &archless, &InstanceContext::default()), 0.0);
     }
 
     #[test]

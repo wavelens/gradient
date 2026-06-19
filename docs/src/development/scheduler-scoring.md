@@ -50,10 +50,14 @@ Each rule is one of two classes:
   saturation taken from the instance window (e.g. `MissingNarSizeRule` caps at
   500, `MissingPathsRule` at 200, `DependencyCountRule` at 50, `WaitTimeRule`
   scaled by the instance average wait). Soft rules never push a job below zero.
-- **Disqualifier** - may go negative (`RescoreWaitRule`, `FairShareRule`,
-  `BuiltinDeprioritizeRule`, `ReserveFetchWorkersRule`). `ResourceFitRule` is
-  mixed: its RAM-overshoot side is a disqualifier; its CPU-affinity side is a
-  soft bonus.
+- **Disqualifier** - may go negative (`RescoreWaitRule`,
+  `ReserveFetchWorkersRule`). `ResourceFitRule` is mixed: its RAM-overshoot side
+  is a disqualifier; its CPU-affinity side is a soft bonus.
+
+`FairShareRule` is currently disabled in `resource_aware_rules`: its idle gate
+counted zero-occupancy workers rather than spare build capacity, so multi-slot
+workers below their limits were treated as saturated and the penalty fired
+spuriously.
 
 `take_best_of_kind` will not dispatch a candidate whose **total** score is
 negative - the worker idles that round and the job is retried next cycle. This
@@ -88,7 +92,7 @@ count - so a few long builds and many short ones are balanced fairly.
 | `DependencyCountRule` | soft | `[0,50]` bonus per dependency for build jobs (unblocks more downstream work first). |
 | `WaitTimeRule` | soft | Bonus growing with `ready_at` wait, scaled by the instance average wait, for anti-starvation. |
 | `RescoreWaitRule` | disqualifier | `-1000` for a build with no reported `missing_nar_size`, until `rescore_count` hits 4; never penalizes eval. |
-| `BuiltinDeprioritizeRule` | disqualifier | Penalty for `builtin`-architecture build jobs. |
+| `BuiltinDeprioritizeRule` | soft | `+50` bonus for real-architecture build jobs, `0` for `builtin` builds so they yield their slot, and `+100` for a `builtin` build on a worker reporting no architectures so that arch-less worker is not left idle. |
 | `ReserveFetchWorkersRule` | disqualifier | Penalty when a fetch-capable worker is offered a cached-eval job, relaxed as idle capacity grows. |
 
 ## `resource-aware` policy rules
@@ -100,7 +104,7 @@ Adds the following on top of the `simple` rule set:
 | `ResourceFitRule` | soft + disqualifier | Penalty scaling with predicted-RAM overshoot of free RAM (amplified by past/instance OOM rate); bonus for CPU-heavy jobs on higher-CPU-score workers. Now also applies to **evaluation** jobs (previously builds-only), using a per-project p95 of historical eval peak-RSS so heavy evals route to big-RAM workers. No-op without history samples or worker metrics. |
 | `ResourceSaturationRule` | disqualifier | `-1000` when the worker's live CPU usage is `>= 90%` or free RAM is `<= 10%` of total, plus another `-1000` when the build's historical peak RAM x1.1 exceeds the worker's free RAM (likely OOM); the two stack (up to `-2000`). Keeps real builds off overloaded or too-small workers. Exempts `builtin`-architecture (substitute-only) builds and evals; no-op without worker metrics, and the RAM-fit check needs history samples. |
 | `PreferLocalBuildRule` | soft | Bonus for `preferLocalBuild` derivations on a worker that already holds (most of) the closure, decaying with missing paths. |
-| `FairShareRule` | disqualifier | Penalty proportional to the org's share of in-flight work (duration-weighted; prefer-local at half), so a quiet org is served promptly when a busy org floods the queue. |
+| `FairShareRule` | disqualifier (disabled) | Penalty proportional to the org's share of in-flight work (duration-weighted; prefer-local at half), so a quiet org is served promptly when a busy org floods the queue. Currently disabled - see the idle-gate note above. |
 | `NetworkAffinityRule` | soft | Bonus for fixed-output derivations on faster-network workers, scaling to a reference speed then capping. No-op for non-FOD jobs or without a network metric. |
 | `DiskAffinityRule` | soft | Bonus for disk-heavy jobs on faster-disk workers, scaling to a reference speed then capping. No-op below the disk-heavy threshold or without a disk metric. |
 

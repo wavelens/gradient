@@ -932,14 +932,14 @@ contribution, the lazy `ScoringCtx` providers, and the composed `default` /
 |------|---------------|
 | `missing_paths_scored_zero_wins_over_unscored` / `missing_paths_fewer_missing_wins` | `MissingPathsRule`: known availability beats unknown; fewer missing paths score higher |
 | `missing_nar_size_smaller_wins` | `MissingNarSizeRule`: smaller fetch volume scores higher |
-| `builtin_deprioritize_penalises_builtin` | `BuiltinDeprioritizeRule`: `builtin`-arch builds penalised |
+| `builtin_rule_rewards_real_zeroes_builtin_and_lifts_archless_worker` / `builtin_rule_ignores_evals` | `BuiltinDeprioritizeRule`: real builds `+50`, `builtin` builds `0`, a `builtin` build on an arch-less worker `+100`; evals score `0` |
 | `dependency_count_more_deps_wins` / `dependency_count_zero_deps_zero_score` | `DependencyCountRule`: more deps score higher; zero deps score zero |
 | `wait_time_longer_wait_scores_higher_but_capped` | `WaitTimeRule`: bonus grows with wait, capped at one hour |
 | `reserve_rule_penalizes_fetch_worker_for_cached_eval_only` | `ReserveFetchWorkersRule`: only fetch-worker + cached-eval combo penalised |
 | `ram_overshoot_is_negative_and_scales_with_overshoot` / `higher_oom_rate_is_more_negative_for_same_overshoot` | `ResourceFitRule`: RAM overshoot penalty scales with overshoot and past OOM rate |
 | `cpu_heavy_on_strong_worker_is_positive_and_capped` / `no_samples_is_zero` / `no_metrics_is_zero` | `ResourceFitRule`: CPU-heavy bonus capped; no-op without history samples or worker metrics |
 | `local_worker_with_full_cache_gets_full_bonus` / `more_missing_paths_lowers_bonus_floored_at_zero` / `unknown_missing_count_is_zero` / `not_prefer_local_is_zero_regardless_of_missing_count` | `PreferLocalBuildRule`: full bonus on cached local worker, decays to a floor of 0, no-op without `preferLocalBuild` |
-| `busier_org_scores_more_negative` / `zero_share_and_none_score_zero` / `fair_share_overrides_wait_gradient` | `FairShareRule`: busier org penalised; fair-share dominates the wait-time gradient |
+| `busier_org_scores_more_negative` / `zero_share_and_none_score_zero` / `fair_share_overrides_wait_gradient` | `FairShareRule` (currently disabled in policy): busier org penalised; fair-share dominates the wait-time gradient |
 | `network_rule_prefers_fast_net_for_fod` / `network_rule_zero_for_non_fod` / `network_rule_zero_without_metric` | `NetworkAffinityRule`: FODs prefer faster-network workers; no-op for non-FOD or missing metric |
 | `disk_rule_prefers_fast_disk_for_heavy_build` / `disk_rule_zero_for_light_build` / `disk_rule_zero_without_history` | `DiskAffinityRule`: disk-heavy jobs prefer faster-disk workers; no-op below threshold or without history |
 | `resource_aware_prefers_fast_net_for_fod` | Composed `resource-aware` policy steers a FOD to the faster-network worker |
