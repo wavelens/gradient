@@ -14,7 +14,7 @@ use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::evaluation_message::MessageLevel;
 use gradient_db::{
-    find_active_leaders, record_evaluation_message, update_build_status, update_evaluation_status,
+    record_evaluation_message, update_build_status, update_evaluation_status,
     update_evaluation_status_with_error,
 };
 use gradient_exec::strip_nix_store_prefix;
@@ -137,13 +137,12 @@ impl DerivationInsertBatch {
 
 /// Processes a single batch of derivations discovered during evaluation.
 ///
-/// Holds the context shared by every step: server state, evaluation identity,
-/// and the owning organisation. Created once in [`handle_eval_result`] and
-/// passed through each pipeline stage.
+/// Holds the context shared by every step: server state and evaluation
+/// identity. Created once in [`handle_eval_result`] and passed through each
+/// pipeline stage.
 struct EvalResultProcessor<'a> {
     state: &'a Arc<ServerState>,
     evaluation_id: EvaluationId,
-    organization_id: OrganizationId,
     evaluation: MEvaluation,
 }
 
@@ -151,13 +150,11 @@ impl<'a> EvalResultProcessor<'a> {
     fn new(
         state: &'a Arc<ServerState>,
         evaluation_id: EvaluationId,
-        organization_id: OrganizationId,
         evaluation: MEvaluation,
     ) -> Self {
         Self {
             state,
             evaluation_id,
-            organization_id,
             evaluation,
         }
     }
@@ -201,13 +198,16 @@ impl<'a> EvalResultProcessor<'a> {
     /// scheduling and is ignored here, so a stale or lying `cached_path`
     /// row can never make us skip a build whose bytes aren't actually
     /// retrievable.
-    async fn insert_build_rows(
+    /// Upsert the global `derivation_build` anchor for each discovered
+    /// derivation. Build-once: `ON CONFLICT (derivation) DO NOTHING` leaves any
+    /// existing anchor (from a prior eval) untouched, so a derivation builds at
+    /// most once across all evaluations. No per-eval build rows, no `via`.
+    async fn resolve_anchors(
         &self,
         derivations: &[DiscoveredDerivation],
         drv_path_to_id: &HashMap<String, DerivationId>,
     ) -> Result<()> {
         let now = gradient_types::now();
-        let mut builds: Vec<ABuild> = Vec::new();
 
         let all_drv_ids: Vec<DerivationId> = derivations
             .iter()
@@ -218,53 +218,26 @@ impl<'a> EvalResultProcessor<'a> {
 
         let truly_substituted = self.compute_truly_substituted(&all_drv_ids).await?;
 
-        let buildable_drv_ids: Vec<DerivationId> = all_drv_ids
-            .iter()
-            .copied()
-            .filter(|id| !truly_substituted.contains(id))
-            .collect();
-
-        let leader_for_drv = find_active_leaders(
-            &self.state.worker_db,
-            self.organization_id,
-            &buildable_drv_ids,
-        )
-        .await
-        .unwrap_or_else(|e| {
-            error!(error = %e, "failed to query active leaders");
-            HashMap::new()
-        });
-
-        let mut spawn_inputs: Vec<(BuildId, DerivationId, String)> = Vec::new();
+        let mut anchors: Vec<ADerivationBuild> = Vec::new();
+        let mut seen: std::collections::HashSet<DerivationId> = std::collections::HashSet::new();
         for d in derivations {
             let Some(&drv_id) = drv_path_to_id.get(&d.drv_path) else {
                 continue;
             };
-            let (status, substitutable) = if truly_substituted.contains(&drv_id) {
-                (BuildStatus::Substituted, false)
-            } else if d.substituted {
-                (BuildStatus::Created, true)
-            } else {
-                (BuildStatus::Created, false)
-            };
-
-            let via = if matches!(status, BuildStatus::Substituted) {
-                None
-            } else {
-                leader_for_drv.get(&drv_id).copied()
-            };
-
-            let build_id = BuildId::now_v7();
-            if matches!(status, BuildStatus::Substituted) {
-                spawn_inputs.push((build_id, drv_id, d.drv_path.clone()));
+            if !seen.insert(drv_id) {
+                continue;
             }
 
-            builds.push(MBuild {
-                id: build_id,
-                evaluation: self.evaluation_id,
+            let (status, substitutable) = if truly_substituted.contains(&drv_id) {
+                (BuildStatus::Substituted, false)
+            } else {
+                (BuildStatus::Created, d.substituted)
+            };
+
+            anchors.push(MDerivationBuild {
+                id: DerivationBuildId::now_v7(),
                 derivation: drv_id,
                 status,
-                via,
                 substitutable,
                 substituted: matches!(status, BuildStatus::Substituted),
                 timeout_secs: d.timeout_secs.map(|v| v as i64),
@@ -272,42 +245,33 @@ impl<'a> EvalResultProcessor<'a> {
                 prefer_local_build: d.prefer_local_build,
                 created_at: now,
                 updated_at: now,
-                queued_at: matches!(status, BuildStatus::Queued).then_some(now),
                 ..Default::default()
             }.into_active_model());
         }
 
-        if !builds.is_empty() {
-            for chunk in builds.chunks(BATCH_SIZE) {
-                if let Err(e) = EBuild::insert_many(chunk.to_vec())
-                    .exec(&self.state.worker_db)
-                    .await
-                {
-                    error!(error = %e, "failed to insert builds");
-                    update_evaluation_status_with_error(
-                        &self.state.db(),
-                        self.evaluation.clone(),
-                        EvaluationStatus::Failed,
-                        format!("failed to insert builds: {}", e),
-                        Some("db-insert".to_string()),
-                    )
-                    .await;
-                    return Err(e.into());
-                }
-            }
-        }
-
-        for (build_id, drv_id, drv_path) in spawn_inputs {
-            let state = Arc::clone(self.state);
-            tokio::spawn(async move {
-                if let Err(e) = crate::log_substitution::substitute_log(
-                    state, build_id, drv_id, drv_path, false,
+        for chunk in anchors.chunks(BATCH_SIZE) {
+            let res = EDerivationBuild::insert_many(chunk.to_vec())
+                .on_conflict(
+                    sea_orm::sea_query::OnConflict::column(CDerivationBuild::Derivation)
+                        .do_nothing()
+                        .to_owned(),
                 )
-                .await
-                {
-                    tracing::warn!(%build_id, error = %e, "substitute_log spawn failed");
-                }
-            });
+                .exec(&self.state.worker_db)
+                .await;
+            if let Err(e) = res
+                && !matches!(e, sea_orm::DbErr::RecordNotInserted)
+            {
+                error!(error = %e, "failed to upsert derivation_build anchors");
+                update_evaluation_status_with_error(
+                    &self.state.db(),
+                    self.evaluation.clone(),
+                    EvaluationStatus::Failed,
+                    format!("failed to upsert anchors: {}", e),
+                    Some("db-insert".to_string()),
+                )
+                .await;
+                return Err(e.into());
+            }
         }
 
         Ok(())
@@ -713,7 +677,6 @@ pub async fn handle_eval_result(
     }
 
     let evaluation_id = job.evaluation_id;
-    let organization_id = job.peer_id;
 
     let current = EEvaluation::find_by_id(evaluation_id)
         .one(&state.worker_db)
@@ -737,7 +700,7 @@ pub async fn handle_eval_result(
         "processing eval result from worker",
     );
 
-    let proc = EvalResultProcessor::new(state, evaluation_id, organization_id, evaluation);
+    let proc = EvalResultProcessor::new(state, evaluation_id, evaluation);
 
     let existing = proc.load_existing_derivations(&derivations).await?;
     let batch = DerivationInsertBatch::prepare(&derivations, &existing);
@@ -749,7 +712,7 @@ pub async fn handle_eval_result(
     // have rows, with any stragglers flushed by `flush_deferred_deps` at
     // `handle_eval_job_completed`.
 
-    proc.insert_build_rows(&derivations, &drv_path_to_id)
+    proc.resolve_anchors(&derivations, &drv_path_to_id)
         .await?;
 
     proc.add_system_features(&derivations, &drv_path_to_id)
