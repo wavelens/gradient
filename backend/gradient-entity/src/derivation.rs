@@ -8,14 +8,13 @@ use chrono::NaiveDateTime;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{DerivationId, OrganizationId};
+use crate::ids::DerivationId;
 
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "derivation")]
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: DerivationId,
-    pub organization: OrganizationId,
     pub hash: String,
     pub name: String,
     pub architecture: super::server::Architecture,
@@ -48,13 +47,6 @@ impl Model {
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {
-    #[sea_orm(
-        belongs_to = "super::organization::Entity",
-        from = "Column::Organization",
-        to = "super::organization::Column::Id"
-    )]
-    Organization,
-}
+pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
