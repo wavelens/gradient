@@ -136,7 +136,7 @@ const STALE_CACHED_NARS_SELECT: &str = r#"SELECT cd.id, cd.cache, cd.derivation
                WHERE cd.last_fetched_at IS NOT NULL
                  AND cd.last_fetched_at < NOW() AT TIME ZONE 'UTC' - ($1 * INTERVAL '1 hour')
                  AND NOT EXISTS (
-                     SELECT 1 FROM build b
+                     SELECT 1 FROM derivation_build b
                      WHERE b.derivation = cd.derivation
                        AND b.status NOT IN ($2, $3, $4, $5)
                  )
@@ -339,11 +339,12 @@ async fn purge_zombie_cached_paths(
 /// Returns the set of NAR-storage hashes that must NOT be garbage-collected by
 /// the orphan-files pass. A hash is kept when either:
 ///
-/// 1. it belongs to a `derivation_output` whose `derivation` has at least one
-///    `build` row whose status is not a terminal failure (`Failed`, `Aborted`,
-///    `DependencyFailed`). This covers Substituted, Completed, and any
-///    in-flight build (Created/Queued/Building) - including the upload race
-///    window where the NAR is on disk before `is_cached=true` is flipped.
+/// 1. it belongs to a `derivation_output` whose `derivation` has a
+///    `derivation_build` anchor whose status is not a terminal failure
+///    (`Failed`, `Aborted`, `DependencyFailed`). This covers Substituted,
+///    Completed, and any in-flight build (Created/Queued/Building) - including
+///    the upload race window where the NAR is on disk before `is_cached=true`
+///    is flipped.
 /// 2. it belongs to a `cached_path` row with `file_hash IS NOT NULL` -
 ///    typically `.drv` files that have no `derivation_output` of their own.
 ///
@@ -359,7 +360,7 @@ async fn active_hashes(state: &Arc<ServerState>) -> Result<HashSet<String>> {
             r#"
             SELECT DISTINCT dout.hash AS hash
             FROM derivation_output dout
-            JOIN build b ON b.derivation = dout.derivation
+            JOIN derivation_build b ON b.derivation = dout.derivation
             WHERE b.status NOT IN ($1, $2, $3, $4)
             UNION
             SELECT cp.hash AS hash

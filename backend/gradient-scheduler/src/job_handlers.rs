@@ -305,43 +305,43 @@ impl Scheduler {
     }
 
     pub async fn handle_build_status_update(&self, build_id_str: &str, worker_id: &str) {
-        let build_id = match build_id_str.parse::<BuildId>() {
+        let derivation_build = match build_id_str.parse::<DerivationBuildId>() {
             Ok(id) => id,
             Err(_) => {
-                warn!(%build_id_str, "invalid build_id in Building update");
+                warn!(%build_id_str, "invalid derivation_build in Building update");
                 return;
             }
         };
 
-        match EBuild::find_by_id(build_id)
+        match EDerivationBuild::find_by_id(derivation_build)
             .one(&self.state.worker_db)
             .await
         {
-            Ok(Some(build)) => {
-                // Backstop for the dispatch/abort race: a build dispatched by an
+            Ok(Some(anchor)) => {
+                // Backstop for the dispatch/abort race: an anchor dispatched by an
                 // in-flight pass just before its evaluation was aborted reports
                 // started here. Its status is already Aborted, so tell the worker
                 // to stop instead of letting it build to completion.
-                if build.status == BuildStatus::Aborted {
-                    let job_id = format!("build:{build_id}");
+                if anchor.status == BuildStatus::Aborted {
+                    let job_id = format!("build:{derivation_build}");
                     self.worker_pool.read().await.send_abort(
                         worker_id,
                         job_id,
                         "evaluation aborted".to_owned(),
                     );
-                    info!(%build_id, %worker_id, "aborting build that started after its evaluation was aborted");
+                    info!(%derivation_build, %worker_id, "aborting build that started after its evaluation was aborted");
                     return;
                 }
 
-                gradient_db::update_build_status(
+                gradient_db::update_derivation_build_status(
                     &self.state.db(),
-                    build,
+                    anchor,
                     BuildStatus::Building,
                 )
                 .await;
             }
-            Ok(None) => warn!(%build_id, "build not found for Building status update"),
-            Err(e) => warn!(error = %e, %build_id, "failed to fetch build for status update"),
+            Ok(None) => warn!(%derivation_build, "anchor not found for Building status update"),
+            Err(e) => warn!(error = %e, %derivation_build, "failed to fetch anchor for status update"),
         }
     }
 
@@ -405,9 +405,9 @@ impl Scheduler {
         metrics: Option<BuildMetrics>,
         substituted: bool,
     ) -> Result<()> {
-        let build_id: BuildId = build_id_str
+        let derivation_build: DerivationBuildId = build_id_str
             .parse()
-            .map_err(|_| anyhow::anyhow!("invalid build_id: {}", build_id_str))?;
+            .map_err(|_| anyhow::anyhow!("invalid derivation_build: {}", build_id_str))?;
 
         let job = {
             let tracker = self.job_tracker.read().await;
@@ -420,7 +420,7 @@ impl Scheduler {
                 }
             }
         };
-        build::handle_build_output(&self.state, &job, build_id, outputs, metrics, substituted).await
+        build::handle_build_output(&self.state, &job, derivation_build, outputs, metrics, substituted).await
     }
 
     // ── Job completion ────────────────────────────────────────────────────────
@@ -480,7 +480,7 @@ impl Scheduler {
                 r
             }
             Some(PendingJob::Build(j)) => {
-                let r = build::handle_build_job_completed(&self.state, j.build_id).await;
+                let r = build::handle_build_job_completed(&self.state, j.derivation_build).await;
                 if worker_idle {
                     self.kick_dispatch();
                 }
@@ -510,7 +510,7 @@ impl Scheduler {
                 eval::handle_eval_job_failed(&self.state, j.evaluation_id, error).await
             }
             Some(PendingJob::Build(j)) => {
-                build::handle_build_job_failed(&self.state, j.build_id, error, kind, missing_paths)
+                build::handle_build_job_failed(&self.state, j.derivation_build, error, kind, missing_paths)
                     .await
             }
             None => {
@@ -550,20 +550,25 @@ impl Scheduler {
             }
         };
 
-        let build_id: BuildId = match build_id_str.and_then(|s| s.parse::<BuildId>().ok()) {
+        let derivation_build: DerivationBuildId = match build_id_str.and_then(|s| s.parse::<DerivationBuildId>().ok()) {
             Some(id) => id,
             None => {
-                warn!(%job_id, task_index, bytes = bytes_len, "log chunk dropped: build_task index out of range or build_id unparseable");
+                warn!(%job_id, task_index, bytes = bytes_len, "log chunk dropped: build_task index out of range or derivation_build unparseable");
                 return Ok(());
             }
         };
 
-        let log_id = gradient_db::latest_attempt_log_id(&self.state.worker_db, build_id)
-            .await
-            .unwrap_or(build_id);
+        let Some(attempt_id) =
+            gradient_db::latest_attempt_id(&self.state.worker_db, derivation_build)
+                .await
+                .unwrap_or(None)
+        else {
+            debug!(%derivation_build, bytes = bytes_len, "log chunk dropped: no open attempt for anchor");
+            return Ok(());
+        };
 
-        debug!(%build_id, %log_id, bytes = bytes_len, "appending build log");
-        self.state.log_storage.append(log_id, text).await
+        debug!(%derivation_build, %attempt_id, bytes = bytes_len, "appending build log");
+        self.state.log_storage.append(attempt_id, text).await
     }
 
     // ── Abort ─────────────────────────────────────────────────────────────────
@@ -744,7 +749,7 @@ impl Scheduler {
                     worker_id: peer_id.to_owned(),
                     kind: record.kind,
                     score: record.score,
-                    build_id: record.build_id.map(Into::into),
+                    build_id: record.derivation_build.map(Into::into),
                     evaluation_id: record.evaluation_id.into(),
                 });
                 let state = Arc::clone(&self.state);
@@ -758,8 +763,9 @@ impl Scheduler {
     }
 }
 
-/// Persist a `dispatched_job` row and stamp `build.dispatched_at`. Best-effort:
-/// failures are logged so instrumentation can't break dispatch.
+/// Persist a `dispatched_job` row, open the `build_attempt`, and stamp the
+/// anchor's `dispatched_at`. Best-effort: failures are logged so instrumentation
+/// can't break dispatch.
 async fn persist_dispatched_job(state: &Arc<ServerState>, worker_id: &str, rec: DispatchRecord) {
     let now = now();
     let dispatched_job_id = gradient_entity::ids::DispatchedJobId::now_v7();
@@ -790,10 +796,18 @@ async fn persist_dispatched_job(state: &Arc<ServerState>, worker_id: &str, rec: 
         warn!(error = %e, "failed to insert dispatched_job");
     }
 
-    if let Some(build_id) = rec.build_id
+    let Some(derivation_build) = rec.derivation_build else {
+        return;
+    };
+
+    // Find/create the build_job attributing this anchor to the driving eval,
+    // then open the attempt keyed on (build_job, anchor).
+    if let Some(build_job) =
+        find_or_create_build_job(state, rec.evaluation_id, derivation_build).await
         && let Err(e) = gradient_db::open_attempt(
             &state.worker_db,
-            build_id,
+            build_job,
+            derivation_build,
             dispatched_job_id,
             rec.substitute,
             rec.build_context.clone(),
@@ -803,17 +817,90 @@ async fn persist_dispatched_job(state: &Arc<ServerState>, worker_id: &str, rec: 
         warn!(error = %e, "failed to open build_attempt");
     }
 
-    if let Some(build_id) = rec.build_id
-        && let Err(e) = gradient_entity::build::Entity::update_many()
-            .col_expr(
-                gradient_entity::build::Column::DispatchedAt,
-                sea_orm::sea_query::Expr::value(now),
-            )
-            .filter(gradient_entity::build::Column::Id.eq(build_id))
-            .filter(gradient_entity::build::Column::DispatchedAt.is_null())
-            .exec(&state.worker_db)
-            .await
+    if let Err(e) = gradient_entity::derivation_build::Entity::update_many()
+        .col_expr(
+            gradient_entity::derivation_build::Column::DispatchedAt,
+            sea_orm::sea_query::Expr::value(now),
+        )
+        .filter(gradient_entity::derivation_build::Column::Id.eq(derivation_build))
+        .filter(gradient_entity::derivation_build::Column::DispatchedAt.is_null())
+        .exec(&state.worker_db)
+        .await
     {
-        warn!(error = %e, %build_id, "failed to stamp build dispatched_at");
+        warn!(error = %e, %derivation_build, "failed to stamp anchor dispatched_at");
+    }
+}
+
+/// The `build_job` for `(evaluation, anchor.derivation)`. `resolve_anchors`
+/// normally pre-creates it at eval time; this upserts then selects so dispatch
+/// stays correct for any anchor whose build_job is missing.
+async fn find_or_create_build_job(
+    state: &Arc<ServerState>,
+    evaluation: EvaluationId,
+    derivation_build: DerivationBuildId,
+) -> Option<gradient_entity::ids::BuildJobId> {
+    let anchor = match EDerivationBuild::find_by_id(derivation_build)
+        .one(&state.worker_db)
+        .await
+    {
+        Ok(Some(a)) => a,
+        Ok(None) => {
+            warn!(%derivation_build, "anchor missing while opening build_attempt");
+            return None;
+        }
+        Err(e) => {
+            warn!(error = %e, %derivation_build, "anchor lookup failed while opening build_attempt");
+            return None;
+        }
+    };
+
+    let existing = EBuildJob::find()
+        .filter(CBuildJob::Evaluation.eq(evaluation))
+        .filter(CBuildJob::Derivation.eq(anchor.derivation))
+        .one(&state.worker_db)
+        .await;
+    match existing {
+        Ok(Some(j)) => return Some(j.id),
+        Ok(None) => {}
+        Err(e) => warn!(error = %e, "build_job lookup failed"),
+    }
+
+    let row = gradient_entity::build_job::Model {
+        id: gradient_entity::ids::BuildJobId::now_v7(),
+        evaluation,
+        derivation: anchor.derivation,
+        derivation_build,
+        score: 0.0,
+        score_breakdown: serde_json::Value::Null,
+        created_at: now(),
+    }
+    .into_active_model();
+    match gradient_entity::build_job::Entity::insert(row)
+        .on_conflict(
+            sea_orm::sea_query::OnConflict::columns([
+                CBuildJob::Evaluation,
+                CBuildJob::Derivation,
+            ])
+            .do_nothing()
+            .to_owned(),
+        )
+        .exec_without_returning(&state.worker_db)
+        .await
+    {
+        Ok(_) => {}
+        Err(e) => warn!(error = %e, "build_job upsert failed"),
+    }
+
+    match EBuildJob::find()
+        .filter(CBuildJob::Evaluation.eq(evaluation))
+        .filter(CBuildJob::Derivation.eq(anchor.derivation))
+        .one(&state.worker_db)
+        .await
+    {
+        Ok(j) => j.map(|j| j.id),
+        Err(e) => {
+            warn!(error = %e, "build_job re-select failed");
+            None
+        }
     }
 }

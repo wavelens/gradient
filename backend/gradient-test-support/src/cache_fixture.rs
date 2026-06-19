@@ -280,12 +280,12 @@ pub async fn public_cache_with_nar() -> Arc<ServerState> {
     state
 }
 
-fn build_id() -> BuildId {
-    BuildId::new(Uuid::parse_str("10000000-0000-0000-0000-000000000008").unwrap())
+fn anchor_id() -> DerivationBuildId {
+    DerivationBuildId::new(Uuid::parse_str("10000000-0000-0000-0000-000000000008").unwrap())
 }
 
-fn eval_id() -> EvaluationId {
-    EvaluationId::new(Uuid::parse_str("10000000-0000-0000-0000-000000000009").unwrap())
+fn attempt_id() -> BuildAttemptId {
+    BuildAttemptId::new(Uuid::parse_str("10000000-0000-0000-0000-000000000011").unwrap())
 }
 
 fn cache_derivation_id() -> CacheDerivationId {
@@ -333,14 +333,22 @@ fn cache_derivation_row() -> gradient_entity::cache_derivation::Model {
     }
 }
 
-fn build_row(status: gradient_entity::build::BuildStatus) -> gradient_entity::build::Model {
-    gradient_entity::build::Model {
-        id: build_id(),
-        evaluation: eval_id(),
+fn anchor_row(status: gradient_entity::build::BuildStatus) -> gradient_entity::derivation_build::Model {
+    gradient_entity::derivation_build::Model {
+        id: anchor_id(),
         derivation: deriv_id(),
         status,
         created_at: test_date(),
         updated_at: test_date(),
+        ..Default::default()
+    }
+}
+
+fn attempt_row() -> gradient_entity::build_attempt::Model {
+    gradient_entity::build_attempt::Model {
+        id: attempt_id(),
+        derivation_build: anchor_id(),
+        created_at: test_date(),
         ..Default::default()
     }
 }
@@ -380,14 +388,14 @@ pub async fn cache_with_completed_build_in_cache() -> (Arc<ServerState>, String)
     let log_body = "build output line 1\nbuild output line 2\n".to_string();
 
     let log_storage = Arc::new(InMemoryLogStorage::new());
-    log_storage.seed(build_id(), log_body.clone());
+    log_storage.seed(attempt_id(), log_body.clone());
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![cache_row()]])
         .append_query_results([vec![derivation_row()]])
         .append_query_results([vec![cache_derivation_row()]])
-        .append_query_results([vec![build_row(gradient_entity::build::BuildStatus::Completed)]])
-        .append_query_results([Vec::<gradient_entity::build_attempt::Model>::new()])
+        .append_query_results([vec![anchor_row(gradient_entity::build::BuildStatus::Completed)]])
+        .append_query_results([vec![attempt_row()]])
         .into_connection();
 
     (make_state(db, log_storage), log_body)
@@ -411,7 +419,7 @@ pub async fn cache_with_failed_build_only() -> Arc<ServerState> {
         .append_query_results([vec![cache_row()]])
         .append_query_results([vec![derivation_row()]])
         .append_query_results([vec![cache_derivation_row()]])
-        .append_query_results([Vec::<gradient_entity::build::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::derivation_build::Model>::new()])
         .into_connection();
 
     make_state(db, Arc::new(NoopLogStorage))
@@ -461,20 +469,20 @@ pub async fn cache_with_unknown_derivation() -> Arc<ServerState> {
     make_state(db, Arc::new(NoopLogStorage))
 }
 
-/// Public cache + two completed builds for the same derivation, where only
-/// the newer build's log is seeded. The mock DB returns the newer build row
-/// (aligned with `.order_by_desc(CreatedAt).one()`). Returns `(state, expected_log)`.
+/// Public cache + a completed anchor whose latest attempt's log is seeded; the
+/// endpoint serves that attempt via `latest_attempt_id`. Returns
+/// `(state, expected_log)`.
 pub async fn cache_with_two_completed_builds() -> (Arc<ServerState>, String) {
     let newer_log = "newer build log\n".to_string();
     let log_storage = Arc::new(InMemoryLogStorage::new());
-    log_storage.seed(build_id(), newer_log.clone());
+    log_storage.seed(attempt_id(), newer_log.clone());
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![cache_row()]])
         .append_query_results([vec![derivation_row()]])
         .append_query_results([vec![cache_derivation_row()]])
-        .append_query_results([vec![build_row(gradient_entity::build::BuildStatus::Completed)]])
-        .append_query_results([Vec::<gradient_entity::build_attempt::Model>::new()])
+        .append_query_results([vec![anchor_row(gradient_entity::build::BuildStatus::Completed)]])
+        .append_query_results([vec![attempt_row()]])
         .into_connection();
 
     (make_state(db, log_storage), newer_log)

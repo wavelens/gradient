@@ -162,30 +162,21 @@ async fn pass_logs(state: Arc<ServerState>, report: &mut DeepGcReport) -> Result
         return Ok(());
     }
 
-    let referenced: HashSet<BuildId> = {
-        let by_log = gradient_entity::build_attempt::Entity::find()
-            .filter(gradient_entity::build_attempt::Column::LogId.is_in(on_disk.clone()))
-            .all(&state.worker_db)
-            .await
-            .context("query build_attempts by log_id")?
-            .into_iter()
-            .filter_map(|a| a.log_id)
-            .collect::<HashSet<_>>();
-        let by_id = EBuild::find()
-            .filter(CBuild::Id.is_in(on_disk.clone()))
-            .all(&state.worker_db)
-            .await
-            .context("query builds by id")?
-            .into_iter()
-            .map(|b| b.id)
-            .collect::<HashSet<_>>();
-        by_log.into_iter().chain(by_id).collect()
-    };
+    // A log key is the owning attempt's own id; it is orphan when no
+    // `build_attempt` row carries that id.
+    let referenced: HashSet<BuildAttemptId> = EBuildAttempt::find()
+        .filter(CBuildAttempt::Id.is_in(on_disk.clone()))
+        .all(&state.worker_db)
+        .await
+        .context("query build_attempts by id")?
+        .into_iter()
+        .map(|a| a.id)
+        .collect();
 
-    for build_id in on_disk {
-        if !referenced.contains(&build_id) {
-            if let Err(e) = state.log_storage.delete(build_id).await {
-                warn!(error = %e, %build_id, "deep_gc: failed to delete orphan log");
+    for attempt_id in on_disk {
+        if !referenced.contains(&attempt_id) {
+            if let Err(e) = state.log_storage.delete(attempt_id).await {
+                warn!(error = %e, %attempt_id, "deep_gc: failed to delete orphan log");
             } else {
                 report.orphan_logs_removed += 1;
             }
@@ -298,15 +289,12 @@ mod tests {
         let nar_dir = tmp.path().join("nars");
         std::fs::create_dir_all(&nar_dir).unwrap();
         let log: Arc<dyn LogStorage> = Arc::new(FileLogStorage::new(tmp.path()).await.unwrap());
-        let bid = BuildId::now_v7();
-        log.append(bid, "orphan").await.unwrap();
+        let attempt_id = BuildAttemptId::now_v7();
+        log.append(attempt_id, "orphan").await.unwrap();
 
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results::<gradient_entity::build::Model, _, _>(
-                [Vec::<gradient_entity::build::Model>::new()],
-            )
-            .append_query_results::<gradient_entity::build::Model, _, _>(
-                [Vec::<gradient_entity::build::Model>::new()],
+            .append_query_results::<gradient_entity::build_attempt::Model, _, _>(
+                [Vec::<gradient_entity::build_attempt::Model>::new()],
             )
             .into_connection();
         let nar = NarStore::local(tmp.path().to_str().unwrap()).unwrap();

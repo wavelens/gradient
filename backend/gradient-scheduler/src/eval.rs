@@ -264,6 +264,59 @@ impl<'a> EvalResultProcessor<'a> {
             }
         }
 
+        // Per-eval build_job rows: one per (evaluation, derivation), linking the
+        // eval to the shared anchor. These are the per-eval "builds" the UI and
+        // CI reactor see; the anchor holds the actual build state.
+        let db = &self.state.worker_db;
+        let anchor_by_drv: HashMap<DerivationId, DerivationBuildId> =
+            gradient_db::fetch_in_chunks(&all_drv_ids, |chunk| async move {
+                EDerivationBuild::find()
+                    .filter(CDerivationBuild::Derivation.is_in(chunk))
+                    .all(db)
+                    .await
+            })
+            .await?
+            .into_iter()
+            .map(|a| (a.derivation, a.id))
+            .collect();
+
+        let mut jobs: Vec<ABuildJob> = Vec::new();
+        for &drv_id in &all_drv_ids {
+            if let Some(&anchor_id) = anchor_by_drv.get(&drv_id) {
+                jobs.push(
+                    MBuildJob {
+                        id: gradient_types::ids::BuildJobId::now_v7(),
+                        evaluation: self.evaluation_id,
+                        derivation: drv_id,
+                        derivation_build: anchor_id,
+                        score: 0.0,
+                        score_breakdown: serde_json::json!({}),
+                        created_at: now,
+                    }
+                    .into_active_model(),
+                );
+            }
+        }
+
+        for chunk in jobs.chunks(BATCH_SIZE) {
+            let res = EBuildJob::insert_many(chunk.to_vec())
+                .on_conflict(
+                    sea_orm::sea_query::OnConflict::columns([
+                        CBuildJob::Evaluation,
+                        CBuildJob::Derivation,
+                    ])
+                    .do_nothing()
+                    .to_owned(),
+                )
+                .exec(&self.state.worker_db)
+                .await;
+            if let Err(e) = res
+                && !matches!(e, sea_orm::DbErr::RecordNotInserted)
+            {
+                error!(error = %e, "failed to upsert build_job rows");
+            }
+        }
+
         // Leaf anchors (no dependency edges) are buildable immediately.
         if let Err(e) = gradient_db::promote_leaves(&self.state.worker_db).await {
             error!(error = %e, "promote_leaves failed");
@@ -283,17 +336,37 @@ impl<'a> EvalResultProcessor<'a> {
     pub(crate) async fn dispatch_substituted_events(&self) -> Result<(), sea_orm::DbErr> {
         use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
-        let substituted = gradient_entity::build::Entity::find()
-            .filter(gradient_entity::build::Column::Evaluation.eq(self.evaluation_id))
-            .filter(gradient_entity::build::Column::Status.eq(BuildStatus::Substituted))
+        let jobs = EBuildJob::find()
+            .filter(CBuildJob::Evaluation.eq(self.evaluation_id))
             .all(&self.state.worker_db)
             .await?;
+        if jobs.is_empty() {
+            return Ok(());
+        }
 
-        for build in substituted {
-            self.state
-                .reactor
-                .on_build_terminal(&self.state.db(), build, BuildStatus::Substituted)
-                .await;
+        let db = &self.state.worker_db;
+        let anchor_ids: Vec<DerivationBuildId> = jobs.iter().map(|j| j.derivation_build).collect();
+        let substituted: std::collections::HashSet<DerivationBuildId> =
+            gradient_db::fetch_in_chunks(&anchor_ids, |chunk| async move {
+                EDerivationBuild::find()
+                    .filter(CDerivationBuild::Id.is_in(chunk))
+                    .filter(CDerivationBuild::Status.eq(BuildStatus::Substituted))
+                    .all(db)
+                    .await
+            })
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|a| a.id)
+            .collect();
+
+        for job in jobs {
+            if substituted.contains(&job.derivation_build) {
+                self.state
+                    .reactor
+                    .on_build_terminal(&self.state.db(), job, BuildStatus::Substituted)
+                    .await;
+            }
         }
         Ok(())
     }
@@ -429,29 +502,18 @@ impl<'a> EvalResultProcessor<'a> {
     ) {
         let now = gradient_types::now();
 
-        // Build a lookup: derivation_uuid → build_uuid for this evaluation.
-        let eval_builds = EBuild::find()
-            .filter(CBuild::Evaluation.eq(self.evaluation_id))
-            .all(&self.state.worker_db)
-            .await
-            .unwrap_or_default();
-        let drv_id_to_build: HashMap<DerivationId, BuildId> =
-            eval_builds.iter().map(|b| (b.derivation, b.id)).collect();
-
         let mut active_entry_points: Vec<AEntryPoint> = Vec::new();
 
         for d in derivations {
             if d.attr.is_empty() {
                 continue;
             }
-            if let Some(&drv_id) = drv_path_to_id.get(&d.drv_path)
-                && let Some(&build_id) = drv_id_to_build.get(&drv_id)
-            {
+            if let Some(&drv_id) = drv_path_to_id.get(&d.drv_path) {
                 active_entry_points.push(MEntryPoint {
                     id: EntryPointId::now_v7(),
                     project: project_id,
                     evaluation: self.evaluation_id,
-                    build: build_id,
+                    derivation: drv_id,
                     eval: d.attr.clone(),
                     created_at: now,
                     ..Default::default()

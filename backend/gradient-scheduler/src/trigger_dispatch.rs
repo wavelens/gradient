@@ -253,11 +253,11 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
             Ok(ApplyOutcome::Created {
                 evaluation: eval,
                 aborted_evaluation,
-                aborted_builds,
+                aborted_anchors,
             }) => {
                 if let Some(aborted_id) = aborted_evaluation {
                     scheduler
-                        .cancel_evaluation_jobs(aborted_id, &aborted_builds)
+                        .cancel_evaluation_jobs(aborted_id, &aborted_anchors)
                         .await;
                 }
                 info!(project = %project.name, trigger_id = %trig.id, evaluation_id = %eval.id, "trigger created evaluation");

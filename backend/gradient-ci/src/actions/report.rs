@@ -10,7 +10,7 @@ use crate::{parse_owner_repo, reporting};
 use gradient_forge::reporter::{CiReport, CiStatus};
 use gradient_types::input::vec_to_hex;
 use gradient_types::{
-    BuildId, CEntryPoint, EBuild, ECommit, EEntryPoint, EEvaluation, EOrganization, EProject,
+    BuildJobId, CEntryPoint, EBuildJob, ECommit, EEntryPoint, EEvaluation, EOrganization, EProject,
     EvaluationId,
 };
 use anyhow::{Context, Result, anyhow};
@@ -99,23 +99,23 @@ pub(super) async fn build_ci_report_from_payload(
     // `build_id` takes precedence over `evaluation_id` even when both are
     // present: the build-status dispatch (CiStatusReactor::on_build_terminal)
     // emits a payload carrying BOTH so downstream actions can correlate the
-    // build to its eval, but the forge reporter must load the build so it
-    // can pick the per-build check context. Falling back to the
+    // build_job to its eval, but the forge reporter must load the build_job so
+    // it can pick the per-build check context. Falling back to the
     // evaluation-only path here would land every build event on the
     // Evaluation check.
-    let (evaluation, build) = if let Some(bid) = s("build_id") {
-        let build_id: BuildId = bid.parse().map_err(|_| anyhow!("invalid build_id"))?;
-        let build = EBuild::find_by_id(build_id)
+    let (evaluation, build_job) = if let Some(bid) = s("build_id") {
+        let build_job_id: BuildJobId = bid.parse().map_err(|_| anyhow!("invalid build_id"))?;
+        let build_job = EBuildJob::find_by_id(build_job_id)
             .one(&ctx.db.worker_db)
             .await
-            .context("loading build")?
-            .ok_or_else(|| anyhow!("build {} not found", build_id))?;
-        let evaluation = EEvaluation::find_by_id(build.evaluation)
+            .context("loading build_job")?
+            .ok_or_else(|| anyhow!("build_job {} not found", build_job_id))?;
+        let evaluation = EEvaluation::find_by_id(build_job.evaluation)
             .one(&ctx.db.worker_db)
             .await
             .context("loading evaluation")?
-            .ok_or_else(|| anyhow!("evaluation {} not found", build.evaluation))?;
-        (evaluation, Some(build))
+            .ok_or_else(|| anyhow!("evaluation {} not found", build_job.evaluation))?;
+        (evaluation, Some(build_job))
     } else if let Some(eid) = s("evaluation_id") {
         let evaluation_id: EvaluationId =
             eid.parse().map_err(|_| anyhow!("invalid evaluation_id"))?;
@@ -155,9 +155,10 @@ pub(super) async fn build_ci_report_from_payload(
     let (owner, repo) = parse_owner_repo(&project.repository)
         .ok_or_else(|| anyhow!("could not parse owner/repo from {}", project.repository))?;
 
-    let entry_points = match &build {
+    let entry_points = match &build_job {
         Some(b) => EEntryPoint::find()
-            .filter(CEntryPoint::Build.eq(b.id))
+            .filter(CEntryPoint::Derivation.eq(b.derivation))
+            .filter(CEntryPoint::Evaluation.eq(b.evaluation))
             .all(&ctx.db.worker_db)
             .await
             .context("loading entry points")?,

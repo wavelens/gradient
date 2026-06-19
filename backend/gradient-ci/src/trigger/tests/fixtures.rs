@@ -40,23 +40,20 @@ pub fn make_eval(id: EvaluationId, status: EvaluationStatus) -> evaluation::Mode
     }
 }
 
-pub fn make_build(
-    id: BuildId,
-    eval_id: EvaluationId,
-    status: BuildStatus,
-) -> gradient_entity::build::Model {
-    make_build_drv(id, eval_id, DerivationId::now_v7(), status)
+pub fn make_entry_point(eval_id: EvaluationId, derivation: DerivationId) -> MEntryPoint {
+    MEntryPoint {
+        id: EntryPointId::now_v7(),
+        project: ProjectId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap()),
+        evaluation: eval_id,
+        derivation,
+        eval: "default".into(),
+        ..Default::default()
+    }
 }
 
-pub fn make_build_drv(
-    id: BuildId,
-    eval_id: EvaluationId,
-    derivation: DerivationId,
-    status: BuildStatus,
-) -> gradient_entity::build::Model {
-    gradient_entity::build::Model {
-        id,
-        evaluation: eval_id,
+pub fn make_anchor(derivation: DerivationId, status: BuildStatus) -> MDerivationBuild {
+    MDerivationBuild {
+        id: DerivationBuildId::now_v7(),
         derivation,
         status,
         ..Default::default()

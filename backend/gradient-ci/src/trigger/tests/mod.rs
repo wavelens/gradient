@@ -6,10 +6,9 @@
 
 mod fixtures;
 
-use super::restart::restart_build_status;
 use super::*;
 use gradient_types::*;
-use fixtures::{make_build, make_build_drv, make_eval, make_project};
+use fixtures::{make_anchor, make_entry_point, make_eval, make_project};
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::{self, EvaluationStatus};
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
@@ -126,40 +125,6 @@ async fn trigger_each_active_status_blocks() {
     }
 }
 
-// ── restart_build_status ─────────────────────────────────────────────────
-
-#[test]
-fn restart_status_cached_stays_substituted() {
-    assert_eq!(
-        restart_build_status(BuildStatus::Completed),
-        BuildStatus::Substituted,
-    );
-    assert_eq!(
-        restart_build_status(BuildStatus::Substituted),
-        BuildStatus::Substituted,
-    );
-}
-
-#[test]
-fn restart_status_others_become_queued() {
-    for s in [
-        BuildStatus::Queued,
-        BuildStatus::Building,
-        BuildStatus::FailedPermanent,
-        BuildStatus::FailedTransient,
-        BuildStatus::FailedTimeout,
-        BuildStatus::Aborted,
-        BuildStatus::Created,
-        BuildStatus::DependencyFailed,
-    ] {
-        assert_eq!(
-            restart_build_status(s),
-            BuildStatus::Queued,
-            "{s:?} should be re-queued"
-        );
-    }
-}
-
 #[tokio::test]
 async fn trigger_terminal_does_not_block() {
     let project = make_project();
@@ -236,12 +201,11 @@ async fn trigger_records_trigger_id() {
 
 // ── trigger_restart_builds ───────────────────────────────────────────────
 
-/// Regression for the "evaluations stuck in Building forever" symptom:
-/// when every previous build is `Completed`/`Substituted`,
-/// `restart_build_status` maps them all to `Substituted` (terminal) and
-/// no build job is ever dispatched. The new evaluation must therefore
-/// start in `Completed`, not `Building`, otherwise nothing fires
-/// `check_evaluation_done` and the row is stuck.
+/// Regression for the "evaluations stuck in Building forever" symptom: when
+/// every entry-point anchor is already terminal-success there is nothing to
+/// rebuild, so the new evaluation must start in `Completed` rather than
+/// `Building`, otherwise nothing fires `check_evaluation_done` and the row is
+/// stuck.
 #[tokio::test]
 async fn restart_with_all_cached_inserts_completed_eval() {
     let project = make_project();
@@ -249,10 +213,15 @@ async fn restart_with_all_cached_inserts_completed_eval() {
     let prev_eval = make_eval(prev_eval_id, EvaluationStatus::Completed);
     let new_eval_id = EvaluationId::now_v7();
 
-    let prev_builds = vec![
-        make_build(BuildId::now_v7(), prev_eval_id, BuildStatus::Completed),
-        make_build(BuildId::now_v7(), prev_eval_id, BuildStatus::Substituted),
-        make_build(BuildId::now_v7(), prev_eval_id, BuildStatus::Completed),
+    let drv_a = DerivationId::now_v7();
+    let drv_b = DerivationId::now_v7();
+    let prev_entry_points = vec![
+        make_entry_point(prev_eval_id, drv_a),
+        make_entry_point(prev_eval_id, drv_b),
+    ];
+    let anchors = vec![
+        make_anchor(drv_a, BuildStatus::Completed),
+        make_anchor(drv_b, BuildStatus::Substituted),
     ];
 
     let inserted_eval = {
@@ -266,33 +235,20 @@ async fn restart_with_all_cached_inserts_completed_eval() {
         .append_query_results([Vec::<evaluation::Model>::new()])
         // 2. find prev_eval
         .append_query_results([vec![prev_eval]])
-        // 3. load prev_builds (all terminal)
-        .append_query_results([prev_builds])
-        // 4. INSERT new evaluation → returns the row with status=Completed
+        // 3. load prev entry points
+        .append_query_results([prev_entry_points])
+        // 4. load anchors for the entry-point derivations (all terminal-success)
+        .append_query_results([anchors])
+        // 5. INSERT new evaluation: returns the row with status=Completed
         .append_query_results([vec![inserted_eval]])
-        // snapshot flake input overrides (none)
+        // 6. snapshot flake input overrides (none)
         .append_query_results([Vec::<gradient_entity::project_flake_input_override::Model>::new()])
-        // 5. INSERT 3 builds (each returns the inserted row; we don't read back)
-        .append_query_results([vec![make_build(
-            BuildId::now_v7(),
-            new_eval_id,
-            BuildStatus::Substituted,
-        )]])
-        .append_query_results([vec![make_build(
-            BuildId::now_v7(),
-            new_eval_id,
-            BuildStatus::Substituted,
-        )]])
-        .append_query_results([vec![make_build(
-            BuildId::now_v7(),
-            new_eval_id,
-            BuildStatus::Substituted,
-        )]])
-        // 6. SELECT entry points: none
-        .append_query_results([Vec::<gradient_entity::entry_point::Model>::new()])
-        // 7. SELECT project for update read-back
+        // 7. copy entry points: two INSERTs
+        .append_query_results([vec![make_entry_point(new_eval_id, drv_a)]])
+        .append_query_results([vec![make_entry_point(new_eval_id, drv_b)]])
+        // 8. SELECT project for update read-back
         .append_query_results([vec![project.clone()]])
-        // 8. UPDATE project
+        // 9. UPDATE project
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
@@ -308,9 +264,8 @@ async fn restart_with_all_cached_inserts_completed_eval() {
     );
 }
 
-/// When at least one previous build maps to `Queued`, the new eval must
-/// start in `Building` so the dispatcher picks it up and the eventual
-/// `check_evaluation_done` flips it to its terminal state.
+/// When at least one entry-point anchor is not terminal-success, the new eval
+/// must start in `Building` so the dispatcher re-resolves and re-runs it.
 #[tokio::test]
 async fn restart_with_one_failed_inserts_building_eval() {
     let project = make_project();
@@ -318,9 +273,15 @@ async fn restart_with_one_failed_inserts_building_eval() {
     let prev_eval = make_eval(prev_eval_id, EvaluationStatus::Failed);
     let new_eval_id = EvaluationId::now_v7();
 
-    let prev_builds = vec![
-        make_build(BuildId::now_v7(), prev_eval_id, BuildStatus::Completed),
-        make_build(BuildId::now_v7(), prev_eval_id, BuildStatus::FailedPermanent),
+    let drv_a = DerivationId::now_v7();
+    let drv_b = DerivationId::now_v7();
+    let prev_entry_points = vec![
+        make_entry_point(prev_eval_id, drv_a),
+        make_entry_point(prev_eval_id, drv_b),
+    ];
+    let anchors = vec![
+        make_anchor(drv_a, BuildStatus::Completed),
+        make_anchor(drv_b, BuildStatus::FailedPermanent),
     ];
 
     let inserted_eval = {
@@ -332,26 +293,12 @@ async fn restart_with_one_failed_inserts_building_eval() {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([Vec::<evaluation::Model>::new()])
         .append_query_results([vec![prev_eval]])
-        .append_query_results([prev_builds])
+        .append_query_results([prev_entry_points])
+        .append_query_results([anchors])
         .append_query_results([vec![inserted_eval]])
-        // snapshot flake input overrides (none)
         .append_query_results([Vec::<gradient_entity::project_flake_input_override::Model>::new()])
-        // find_active_leaders for the one Queued drv → no in-flight leader.
-        //   same-org pass: empty
-        //   cross-org pass: empty derivation lookup short-circuits
-        .append_query_results([Vec::<gradient_entity::build::Model>::new()])
-        .append_query_results([Vec::<gradient_entity::derivation::Model>::new()])
-        .append_query_results([vec![make_build(
-            BuildId::now_v7(),
-            new_eval_id,
-            BuildStatus::Substituted,
-        )]])
-        .append_query_results([vec![make_build(
-            BuildId::now_v7(),
-            new_eval_id,
-            BuildStatus::Queued,
-        )]])
-        .append_query_results([Vec::<gradient_entity::entry_point::Model>::new()])
+        .append_query_results([vec![make_entry_point(new_eval_id, drv_a)]])
+        .append_query_results([vec![make_entry_point(new_eval_id, drv_b)]])
         .append_query_results([vec![project.clone()]])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
@@ -362,97 +309,4 @@ async fn restart_with_one_failed_inserts_building_eval() {
     let result = trigger_restart_builds(&db, &project).await;
     assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
     assert_eq!(result.unwrap().status, EvaluationStatus::Building);
-}
-
-/// Restarting must honour the cross-evaluation `via` dedup: if another
-/// evaluation (typically a different project in the same organisation)
-/// is currently building one of the drvs being restarted, the new build
-/// row follows that leader instead of racing it. Regression for the
-/// "rerun failed builds" path bypassing `find_active_leaders`.
-#[tokio::test]
-async fn restart_sets_via_when_leader_active_elsewhere() {
-    let project = make_project();
-    let prev_eval_id = EvaluationId::now_v7();
-    let prev_eval = make_eval(prev_eval_id, EvaluationStatus::Failed);
-    let new_eval_id = EvaluationId::now_v7();
-
-    let shared_drv = DerivationId::now_v7();
-    let prev_build = make_build_drv(
-        BuildId::now_v7(),
-        prev_eval_id,
-        shared_drv,
-        BuildStatus::FailedPermanent,
-    );
-
-    // Leader currently Building under a different evaluation.
-    let other_eval_id = EvaluationId::now_v7();
-    let leader = make_build_drv(
-        BuildId::now_v7(),
-        other_eval_id,
-        shared_drv,
-        BuildStatus::Building,
-    );
-    let leader_id = leader.id;
-
-    let inserted_eval = {
-        let mut e = make_eval(new_eval_id, EvaluationStatus::Building);
-        e.previous = Some(prev_eval_id);
-        e
-    };
-
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
-        .append_query_results([Vec::<evaluation::Model>::new()])
-        .append_query_results([vec![prev_eval]])
-        .append_query_results([vec![prev_build]])
-        .append_query_results([vec![inserted_eval]])
-        // snapshot flake input overrides (none)
-        .append_query_results([Vec::<gradient_entity::project_flake_input_override::Model>::new()])
-        // find_active_leaders for [shared_drv] → returns the in-flight leader.
-        .append_query_results([vec![leader]])
-        // INSERT new build (with via=leader_id).
-        .append_query_results([vec![{
-            let mut b = make_build_drv(
-                BuildId::now_v7(),
-                new_eval_id,
-                shared_drv,
-                BuildStatus::Queued,
-            );
-            b.via = Some(leader_id);
-            b
-        }]])
-        .append_query_results([Vec::<gradient_entity::entry_point::Model>::new()])
-        .append_query_results([vec![project.clone()]])
-        .append_exec_results([MockExecResult {
-            last_insert_id: 0,
-            rows_affected: 1,
-        }])
-        .into_connection();
-
-    let result = trigger_restart_builds(&db, &project).await;
-    assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
-
-    // Verify the INSERT carried via=leader_id by inspecting the executed
-    // statements. MockDatabase records every statement; the build insert
-    // is the only one whose SQL mentions the `via` column.
-    let logs = db.into_transaction_log();
-    let build_insert = logs
-        .iter()
-        .flat_map(|t| t.statements())
-        .find(|s| {
-            let sql = s.sql.to_lowercase();
-            sql.contains("insert into") && sql.contains("\"build\"") && sql.contains("\"via\"")
-        })
-        .expect("expected an INSERT INTO build statement");
-    let values: Vec<String> = build_insert
-        .values
-        .as_ref()
-        .map(|v| v.0.iter().map(|val| format!("{:?}", val)).collect())
-        .unwrap_or_default();
-    let joined = values.join(", ");
-    assert!(
-        joined.contains(&leader_id.into_inner().to_string()),
-        "expected build INSERT to carry via={} (leader id), got values: {}",
-        leader_id,
-        joined,
-    );
 }
