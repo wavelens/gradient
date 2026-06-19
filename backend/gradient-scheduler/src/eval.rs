@@ -14,8 +14,7 @@ use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::evaluation_message::MessageLevel;
 use gradient_db::{
-    record_evaluation_message, update_build_status, update_evaluation_status,
-    update_evaluation_status_with_error,
+    record_evaluation_message, update_evaluation_status, update_evaluation_status_with_error,
 };
 use gradient_exec::strip_nix_store_prefix;
 use gradient_sources::{get_hash_from_path, parse_drv_hash_name};
@@ -189,15 +188,6 @@ impl<'a> EvalResultProcessor<'a> {
         .context("query existing derivations")
     }
 
-    /// Insert `ABuild` rows for each newly-discovered derivation.
-    ///
-    /// `Substituted` status is decided server-side from the actual cache
-    /// state - a drv is Substituted iff *every* `derivation_output` row for
-    /// it links to a `cached_path` whose `file_hash IS NOT NULL`. The
-    /// worker's `substituted` flag is treated as a hint for its own
-    /// scheduling and is ignored here, so a stale or lying `cached_path`
-    /// row can never make us skip a build whose bytes aren't actually
-    /// retrievable.
     /// Upsert the global `derivation_build` anchor for each discovered
     /// derivation. Build-once: `ON CONFLICT (derivation) DO NOTHING` leaves any
     /// existing anchor (from a prior eval) untouched, so a derivation builds at
@@ -498,169 +488,6 @@ impl<'a> EvalResultProcessor<'a> {
     }
 }
 
-// ── Substituted-closure expansion ────────────────────────────────────────────
-
-/// Walk the transitive dependency closure of every `Substituted` build in
-/// `evaluation_id` and insert `Substituted` build rows for any reachable
-/// derivation that does not yet have a build row in this evaluation.
-///
-/// Called in [`handle_eval_job_completed`] after `flush_deferred_deps` has
-/// written all dependency edges, so the full graph is available.  This
-/// ensures:
-/// * The dependency-gating SQL in `dispatch_ready_builds` sees build rows for
-///   every dep of every queued build, even when large subtrees were pruned by
-///   the BFS known-derivation optimisation.
-/// * The evaluation's build list in the UI reflects the complete dep tree.
-async fn expand_substituted_closure(
-    state: &Arc<ServerState>,
-    evaluation_id: EvaluationId,
-) -> Result<()> {
-    use sea_orm::ConnectionTrait;
-
-    // Recursive CTE: seed = direct deps of substituted builds in this eval;
-    // recurse through derivation_dependency until the closure is exhausted.
-    // The outer SELECT filters to derivations without a build row yet, and
-    // tags each result with the kind of seed it descends from:
-    //  - 'sub' - reached from a `Substituted` (status=7) build. The Nix
-    //    invariant says its closure is in our cache too, but that can be false
-    //    when the cache was populated unevenly (#410), so we verify each drv's
-    //    own outputs are actually cached before trusting it (the `cached` flag
-    //    below). A 'sub' drv that is NOT cached is treated like 'ext'.
-    //  - 'ext' (or uncached 'sub') - inserted `Created + substitutable = true`
-    //    so the worker substitute-attempts it; a miss reports
-    //    `SubstituteUnavailable`, which re-queues and escalates to a real build.
-    //
-    // When a drv is reachable via both kinds of seed simultaneously, prefer
-    // 'sub' (already retrievable from our cache).
-    let find_sql = sea_orm::Statement::from_sql_and_values(
-        sea_orm::DbBackend::Postgres,
-        r#"
-        WITH RECURSIVE sub_closure(drv_id, kind) AS (
-            SELECT DISTINCT dd.dependency,
-                CASE WHEN b.status = 7 THEN 'sub' ELSE 'ext' END
-            FROM build b
-            JOIN derivation_dependency dd ON dd.derivation = b.derivation
-            WHERE b.evaluation = $1
-              AND (b.status = 7 OR b.substitutable = TRUE)
-            UNION
-            SELECT dd2.dependency, sc.kind
-            FROM derivation_dependency dd2
-            JOIN sub_closure sc ON sc.drv_id = dd2.derivation
-        )
-        SELECT sc.drv_id, MIN(sc.kind) AS kind,
-            (EXISTS (SELECT 1 FROM derivation_output o WHERE o.derivation = sc.drv_id)
-             AND NOT EXISTS (
-                 SELECT 1 FROM derivation_output o
-                 WHERE o.derivation = sc.drv_id AND o.is_cached = false
-             )) AS cached
-        FROM sub_closure sc
-        WHERE NOT EXISTS (
-            SELECT 1 FROM build WHERE derivation = sc.drv_id AND evaluation = $1
-        )
-        GROUP BY sc.drv_id
-        "#,
-        [evaluation_id.into_inner().into()],
-    );
-
-    let rows = state
-        .worker_db
-        .query_all(find_sql)
-        .await
-        .context("expand_substituted_closure: query")?;
-    if rows.is_empty() {
-        return Ok(());
-    }
-
-    let now = gradient_types::now();
-    let mut builds: Vec<ABuild> = Vec::with_capacity(rows.len());
-    let mut spawn_inputs: Vec<(BuildId, DerivationId)> = Vec::new();
-    for row in &rows {
-        let Ok(drv_id_uuid) = row.try_get::<uuid::Uuid>("", "drv_id") else {
-            continue;
-        };
-        let drv_id: DerivationId = drv_id_uuid.into();
-        let Ok(kind) = row.try_get::<String>("", "kind") else {
-            continue;
-        };
-        let cached = row.try_get::<bool>("", "cached").unwrap_or(false);
-        let (status, substitutable) = if kind == "sub" && cached {
-            (BuildStatus::Substituted, false)
-        } else {
-            // 'ext', or a 'sub' dep whose output is not actually in our cache:
-            // dispatch as a substitute attempt so it self-heals (substitute or
-            // escalate-to-build) instead of being falsely trusted (#410).
-            (BuildStatus::Created, true)
-        };
-        let build_id = BuildId::now_v7();
-        if matches!(status, BuildStatus::Substituted) {
-            spawn_inputs.push((build_id, drv_id));
-        }
-        builds.push(MBuild {
-            id: build_id,
-            evaluation: evaluation_id,
-            derivation: drv_id,
-            status,
-            substitutable,
-            substituted: matches!(status, BuildStatus::Substituted),
-            created_at: now,
-            updated_at: now,
-            queued_at: matches!(status, BuildStatus::Queued).then_some(now),
-            ..Default::default()
-        }.into_active_model());
-    }
-
-    let count = builds.len();
-    for chunk in builds.chunks(BATCH_SIZE) {
-        if let Err(e) = EBuild::insert_many(chunk.to_vec())
-            .exec(&state.worker_db)
-            .await
-        {
-            error!(error = %e, %evaluation_id, "expand_substituted_closure: failed to insert builds");
-        }
-    }
-
-    if !spawn_inputs.is_empty() {
-        let drv_ids: Vec<DerivationId> = spawn_inputs.iter().map(|(_, d)| *d).collect();
-        let db = &state.worker_db;
-        let paths = match gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
-            EDerivation::find()
-                .filter(CDerivation::Id.is_in(chunk))
-                .all(db)
-                .await
-        })
-        .await
-        {
-            Ok(rows) => rows
-                .into_iter()
-                .map(|d| (d.id, d.drv_path()))
-                .collect::<std::collections::HashMap<_, _>>(),
-            Err(e) => {
-                error!(%evaluation_id, error = %e, "expand_substituted_closure: drv path lookup failed");
-                std::collections::HashMap::new()
-            }
-        };
-
-        for (build_id, drv_id) in spawn_inputs {
-            let Some(drv_path) = paths.get(&drv_id).cloned() else {
-                continue;
-            };
-            let state = Arc::clone(state);
-            tokio::spawn(async move {
-                if let Err(e) = crate::log_substitution::substitute_log(
-                    state, build_id, drv_id, drv_path, false,
-                )
-                .await
-                {
-                    tracing::warn!(%build_id, error = %e, "substitute_log spawn failed");
-                }
-            });
-        }
-    }
-
-    info!(%evaluation_id, count, "substituted closure expanded");
-    Ok(())
-}
-
 // ── Public handlers ───────────────────────────────────────────────────────────
 
 pub async fn handle_eval_result(
@@ -713,9 +540,8 @@ pub async fn handle_eval_result(
 
     // Dependency edges are NOT created here. The BFS walks roots→leaves, so
     // batch N may contain derivation A whose dep B lands in batch N+1. Edges are
-    // written incrementally by `write_edges_and_promote` once both endpoints
-    // have rows, with any stragglers flushed by `flush_deferred_deps` at
-    // `handle_eval_job_completed`.
+    // accumulated per eval and flushed by `flush_deferred_deps` once the stream
+    // completes (`handle_eval_job_completed`), when every endpoint has a row.
 
     proc.resolve_anchors(&derivations, &drv_path_to_id)
         .await?;
@@ -764,42 +590,14 @@ pub async fn handle_eval_job_completed(
     state: &Arc<ServerState>,
     evaluation_id: EvaluationId,
 ) -> Result<()> {
-    // Expand the transitive dependency closure of all Substituted builds so
-    // the full dep tree has build rows. This runs before Created→Queued
-    // promotion so the dispatch SQL's dep-gating sees a complete picture.
-    if let Err(e) = expand_substituted_closure(state, evaluation_id).await {
-        error!(error = %e, %evaluation_id, "expand_substituted_closure failed (non-fatal)");
-    }
-
     // The build graph is now complete: materialise each entry point's closure
-    // and seed the per-entry-point dependency counts before any build
-    // transitions, so promotion and dispatch maintain them incrementally (#383).
+    // and seed the per-entry-point dependency counts (#383).
     if let Err(e) = gradient_db::seed_entry_point_dep_counts(&state.worker_db, evaluation_id).await {
         error!(error = %e, %evaluation_id, "seed_entry_point_dep_counts failed (non-fatal)");
     }
 
-    // The worker is done sending batches, so the evaluation's build set is
-    // now final. Promote every `Created` build to `Queued` so the dispatcher
-    // can pick them up - except those whose inputs already failed, which go
-    // straight to `DependencyFailed` instead of stalling `Queued`. Then move
-    // the evaluation into `Building`.
-    let created = EBuild::find()
-        .filter(CBuild::Evaluation.eq(evaluation_id))
-        .filter(CBuild::Status.eq(BuildStatus::Created))
-        .all(&state.worker_db)
-        .await
-        .unwrap_or_default();
-    let queued_now = created.len();
-    if !created.is_empty() {
-        let failed_dep = created_builds_with_failed_dependency(state, evaluation_id)
-            .await
-            .unwrap_or_default();
-        for build in created {
-            let target = promotion_target(build.id, &failed_dep);
-            update_build_status(&state.db(), build, target).await;
-        }
-    }
-
+    // Promotion is graph-driven (gradient_db::promotion), independent of eval
+    // completion, so finishing the stream just advances the eval to Building.
     if let Some(eval) = EEvaluation::find_by_id(evaluation_id)
         .one(&state.worker_db)
         .await?
@@ -808,11 +606,7 @@ pub async fn handle_eval_job_completed(
             EvaluationStatus::EvaluatingFlake | EvaluationStatus::EvaluatingDerivation
         )
     {
-        info!(
-            %evaluation_id,
-            queued = queued_now,
-            "eval job complete; promoting evaluation to Building"
-        );
+        info!(%evaluation_id, "eval job complete; promoting evaluation to Building");
         update_evaluation_status(&state.db(), eval, EvaluationStatus::Building).await;
     }
 
@@ -822,9 +616,9 @@ pub async fn handle_eval_job_completed(
 }
 
 /// Resolve `(drv_path, Vec<dep_drv_path>)` pairs to `(derivation_uuid,
-/// dep_uuid)` edges and insert them (conflict-do-nothing). Called per-batch from
-/// [`write_edges_and_promote`] for edge-complete sources, and once at
-/// `handle_eval_job_completed` to flush any stragglers.
+/// dep_uuid)` edges and insert them (conflict-do-nothing). Called once at
+/// `handle_eval_job_completed` with the evaluation's accumulated edges, when
+/// every endpoint derivation has a row.
 pub async fn flush_deferred_deps(
     state: &Arc<ServerState>,
     evaluation_id: EvaluationId,
@@ -915,159 +709,6 @@ pub async fn flush_deferred_deps(
     Ok(())
 }
 
-/// `Created` build IDs in `evaluation_id` that already have a dependency build
-/// in a terminal-failure state. Promotion must mark these `DependencyFailed`
-/// rather than `Queued`: a build whose input already failed can never become
-/// buildable (the dispatch gate requires every dep `Completed`/`Substituted`),
-/// so it would otherwise sit `Queued` forever and stall the evaluation. The
-/// EXISTS antijoin mirrors the dispatch gate's dependency check, inverted to
-/// failures. The reverse timing - a dep failing after its dependent is already
-/// promoted - is handled by `cascade_dependency_failed`.
-async fn created_builds_with_failed_dependency(
-    state: &Arc<ServerState>,
-    evaluation_id: EvaluationId,
-) -> Result<std::collections::HashSet<BuildId>> {
-    use sea_orm::ConnectionTrait;
-
-    let sql = sea_orm::Statement::from_sql_and_values(
-        sea_orm::DbBackend::Postgres,
-        r#"
-        SELECT b.id
-        FROM build b
-        WHERE b.evaluation = $1
-          AND b.status = $2
-          AND EXISTS (
-              SELECT 1
-              FROM derivation_dependency dd
-              JOIN build db ON db.evaluation = b.evaluation
-                           AND db.derivation = dd.dependency
-              WHERE dd.derivation = b.derivation
-                AND db.status IN ($3, $4, $5, $6)
-          )
-        "#,
-        [
-            evaluation_id.into_inner().into(),
-            i32::from(BuildStatus::Created).into(),
-            i32::from(BuildStatus::FailedPermanent).into(),
-            i32::from(BuildStatus::FailedTimeout).into(),
-            i32::from(BuildStatus::DependencyFailed).into(),
-            i32::from(BuildStatus::Aborted).into(),
-        ],
-    );
-
-    let rows = state
-        .worker_db
-        .query_all(sql)
-        .await
-        .context("created_builds_with_failed_dependency: query")?;
-
-    Ok(rows
-        .iter()
-        .filter_map(|r| r.try_get::<uuid::Uuid>("", "id").ok())
-        .map(BuildId::from)
-        .collect())
-}
-
-/// Status a `Created` build should transition to on promotion: `DependencyFailed`
-/// when one of its inputs has already failed, else `Queued`.
-fn promotion_target(
-    build_id: BuildId,
-    failed_dependency_builds: &std::collections::HashSet<BuildId>,
-) -> BuildStatus {
-    if failed_dependency_builds.contains(&build_id) {
-        BuildStatus::DependencyFailed
-    } else {
-        BuildStatus::Queued
-    }
-}
-
-/// Promote every `Created` build in `evaluation_id` whose derivation is one of
-/// `ready_paths` to `Queued`. Mirrors the bulk-promote loop in
-/// [`handle_eval_job_completed`], scoped to one batch's ready set. Returns the
-/// count promoted.
-async fn promote_ready_builds(
-    state: &Arc<ServerState>,
-    evaluation_id: EvaluationId,
-    ready_paths: &[String],
-) -> Result<usize> {
-    if ready_paths.is_empty() {
-        return Ok(0);
-    }
-
-    let hashes: Vec<String> = ready_paths
-        .iter()
-        .filter_map(|p| parse_drv_hash_name(p).ok().map(|(h, _)| h))
-        .collect::<std::collections::HashSet<_>>()
-        .into_iter()
-        .collect();
-
-    let db = &state.worker_db;
-    let drv_ids: Vec<DerivationId> = gradient_db::fetch_in_chunks(&hashes, |chunk| async move {
-        EDerivation::find()
-            .filter(CDerivation::Hash.is_in(chunk))
-            .all(db)
-            .await
-    })
-    .await
-    .context("promote_ready_builds: query derivations")?
-    .into_iter()
-    .map(|d| d.id)
-    .collect();
-    if drv_ids.is_empty() {
-        return Ok(0);
-    }
-
-    let created: Vec<MBuild> = gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
-        EBuild::find()
-            .filter(CBuild::Evaluation.eq(evaluation_id))
-            .filter(CBuild::Derivation.is_in(chunk))
-            .filter(CBuild::Status.eq(BuildStatus::Created))
-            .all(db)
-            .await
-    })
-    .await
-    .context("promote_ready_builds: query builds")?;
-
-    let n = created.len();
-    if !created.is_empty() {
-        let failed_dep = created_builds_with_failed_dependency(state, evaluation_id)
-            .await
-            .unwrap_or_default();
-        for build in created {
-            let target = promotion_target(build.id, &failed_dep);
-            update_build_status(&state.db(), build, target).await;
-        }
-    }
-
-    Ok(n)
-}
-
-/// Per-batch incremental promotion (#392). Given the derivations that became
-/// edge-complete this batch (`ready` = `(drv_path, dependencies)`), write their
-/// dependency edges (reusing [`flush_deferred_deps`]) and promote their builds
-/// `Created → Queued`. Returns the number of builds promoted.
-pub async fn write_edges_and_promote(
-    state: &Arc<ServerState>,
-    evaluation_id: EvaluationId,
-    ready: Vec<(String, Vec<String>)>,
-) -> Result<usize> {
-    if ready.is_empty() {
-        return Ok(0);
-    }
-
-    let edges: Vec<(String, Vec<String>)> = ready
-        .iter()
-        .filter(|(_, deps)| !deps.is_empty())
-        .cloned()
-        .collect();
-    if !edges.is_empty() {
-        flush_deferred_deps(state, evaluation_id, edges).await?;
-    }
-
-    let promote: Vec<String> = ready.into_iter().map(|(p, _)| p).collect();
-    promote_ready_builds(state, evaluation_id, &promote).await
-}
-
 pub async fn handle_eval_job_failed(
     state: &Arc<ServerState>,
     evaluation_id: EvaluationId,
@@ -1091,22 +732,4 @@ pub async fn handle_eval_job_failed(
         .await;
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod promotion_tests {
-    use super::promotion_target;
-    use gradient_entity::build::BuildStatus;
-    use gradient_types::ids::BuildId;
-    use std::collections::HashSet;
-
-    #[test]
-    fn promotion_target_is_dependency_failed_when_a_dep_already_failed() {
-        let blocked = BuildId::now_v7();
-        let ready = BuildId::now_v7();
-        let failed: HashSet<BuildId> = [blocked].into_iter().collect();
-
-        assert_eq!(promotion_target(blocked, &failed), BuildStatus::DependencyFailed);
-        assert_eq!(promotion_target(ready, &failed), BuildStatus::Queued);
-    }
 }
