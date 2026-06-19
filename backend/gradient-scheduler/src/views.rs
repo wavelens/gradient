@@ -164,7 +164,7 @@ mod tests {
             job: BuildJob {
                 builds: vec![BuildTask {
                     build_id: "b1".into(),
-                    drv_path: "/nix/store/aaa.drv".into(),
+                    drv_path: "/nix/store/aaa-curl.drv".into(),
                     external_cached: false,
                     timeout_secs: None,
                     max_silent_secs: None,
@@ -207,7 +207,7 @@ mod tests {
         let derivations = view.derivations.expect("build derivations");
         assert_eq!(derivations.len(), 1);
         assert_eq!(derivations[0].build_id, "b1");
-        assert_eq!(derivations[0].drv_path, "aaa.drv");
+        assert_eq!(derivations[0].drv_path, "aaa-curl.drv");
         let history = view.history.expect("build history");
         assert_eq!(history.samples, 7);
     }
