@@ -100,10 +100,14 @@ pub async fn cascade_dependency_failed<C: ConnectionTrait>(
     Ok(affected)
 }
 
-/// Promote leaf anchors (no dependency edges) `Created -> Queued`. Called after
-/// each resolve batch so source / fixed-output derivations become buildable
-/// immediately. Returns the number promoted.
-pub async fn promote_leaves<C: ConnectionTrait>(db: &C) -> Result<u64, DbErr> {
+/// Promote every `Created` anchor whose dependency anchors are all terminal-
+/// success (`Completed`/`Substituted`) to `Queued`. Run once an evaluation's
+/// full dependency graph is written (edges are deferred to stream completion):
+/// this seeds the graph from its leaves and from anchors whose deps were already
+/// cached/substituted at resolve time (for which no completion event ever
+/// fires). Subsequent completions cascade via [`promote_dependents`]. Returns
+/// the number promoted.
+pub async fn promote_ready<C: ConnectionTrait>(db: &C) -> Result<u64, DbErr> {
     let affected = db
         .execute(Statement::from_string(
             DatabaseBackend::Postgres,
@@ -113,8 +117,10 @@ pub async fn promote_leaves<C: ConnectionTrait>(db: &C) -> Result<u64, DbErr> {
                 updated_at = (now() AT TIME ZONE 'UTC')
             WHERE status = 0
               AND NOT EXISTS (
-                SELECT 1 FROM derivation_dependency dd
-                WHERE dd.derivation = derivation_build.derivation)
+                SELECT 1 FROM derivation_dependency e
+                LEFT JOIN derivation_build dep ON dep.derivation = e.dependency
+                WHERE e.derivation = derivation_build.derivation
+                  AND (dep.status IS NULL OR dep.status NOT IN (3, 7)))
             "#
             .to_string(),
         ))
