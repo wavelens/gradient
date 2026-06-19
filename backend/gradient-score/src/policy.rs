@@ -11,7 +11,7 @@ use crate::rules::builtin::{
     ReserveFetchWorkersRule, RescoreWaitRule, WaitTimeRule,
 };
 use crate::rules::{
-    DiskAffinityRule, FairShareRule, NetworkAffinityRule, PreferLocalBuildRule, ResourceFitRule,
+    DiskAffinityRule, NetworkAffinityRule, PreferLocalBuildRule, ResourceFitRule,
     ResourceSaturationRule,
 };
 
@@ -104,7 +104,8 @@ pub fn resource_aware_rules() -> Vec<Box<dyn ScoreRule>> {
     rules.push(Box::new(ResourceFitRule::default()));
     rules.push(Box::new(ResourceSaturationRule::default()));
     rules.push(Box::new(PreferLocalBuildRule::default()));
-    rules.push(Box::new(FairShareRule::default()));
+    // FairShareRule disabled: idle gate counts zero-occupancy not spare capacity, over-penalizing.
+    // rules.push(Box::new(FairShareRule::default()));
     rules.push(Box::new(NetworkAffinityRule::default()));
     rules.push(Box::new(DiskAffinityRule::default()));
     rules
