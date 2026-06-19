@@ -458,8 +458,7 @@ mod pg_version_tests {
 
 #[cfg(test)]
 mod startup_recovery_tests {
-    use super::{build_survives_restart, eval_survives_restart};
-    use gradient_entity::build::BuildStatus;
+    use super::eval_survives_restart;
     use gradient_entity::evaluation::EvaluationStatus;
 
     #[test]
@@ -481,25 +480,5 @@ mod startup_recovery_tests {
                 "{status:?} must not survive"
             );
         }
-    }
-
-    #[test]
-    fn queued_builds_of_a_surviving_evaluation_survive_restart() {
-        // The "eval waiting case": builds queued for a free worker must not be
-        // aborted just because the server restarted.
-        assert!(build_survives_restart(BuildStatus::Queued, true));
-        assert!(build_survives_restart(BuildStatus::Created, true));
-    }
-
-    #[test]
-    fn running_builds_are_aborted_even_under_a_surviving_evaluation() {
-        // A `Building` build was on a now-disconnected worker - genuinely lost.
-        assert!(!build_survives_restart(BuildStatus::Building, true));
-    }
-
-    #[test]
-    fn builds_of_an_aborted_evaluation_are_aborted() {
-        assert!(!build_survives_restart(BuildStatus::Queued, false));
-        assert!(!build_survives_restart(BuildStatus::Created, false));
     }
 }

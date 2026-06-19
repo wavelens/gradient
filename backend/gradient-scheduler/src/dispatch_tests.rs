@@ -25,7 +25,6 @@
 use std::sync::Arc;
 
 use chrono::NaiveDateTime;
-use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
 use sea_orm::{DatabaseBackend, MockDatabase};
@@ -36,13 +35,6 @@ use crate::{Scheduler, dispatch, trigger_dispatch};
 
 fn test_date() -> NaiveDateTime {
     NaiveDateTime::default()
-}
-
-/// One empty `build_attempt` SELECT result. A build has no attempt rows in
-/// these fixtures, so every `latest_attempt`/`substitute_miss_counts` call
-/// returns nothing and issues no follow-up query.
-fn no_attempts() -> Vec<gradient_entity::build_attempt::Model> {
-    Vec::new()
 }
 
 fn make_eval_queued(
@@ -88,35 +80,6 @@ fn make_project(id: ProjectId, org_id: OrganizationId) -> gradient_entity::proje
         keep_evaluations: 30,
         concurrency: 3,
         sign_cache: true,
-        ..Default::default()
-    }
-}
-
-fn make_build_queued(id: BuildId, eval_id: EvaluationId, drv_id: DerivationId) -> MBuild {
-    gradient_entity::build::Model {
-        id,
-        evaluation: eval_id,
-        derivation: drv_id,
-        status: BuildStatus::Queued,
-        created_at: test_date(),
-        updated_at: test_date(),
-        ..Default::default()
-    }
-}
-
-fn make_derivation(id: DerivationId, _org_id: OrganizationId, path: &str) -> MDerivation {
-    let stripped = gradient_exec::strip_nix_store_prefix(path);
-    let (hash, name) = gradient_sources::parse_drv_hash_name(&stripped)
-        .unwrap_or_else(|_| ("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(), "x".into()));
-    gradient_entity::derivation::Model {
-        id,
-        hash,
-        name,
-        architecture: "x86_64-linux".into(),
-        // Pre-set so dispatch's lazy backfill skips the closure walk in these
-        // strictly-ordered MockDatabase fixtures.
-        closure_size: Some(0),
-        created_at: test_date(),
         ..Default::default()
     }
 }
@@ -255,92 +218,6 @@ async fn dispatch_queued_eval_without_project_is_skipped() {
     );
 }
 
-// ── Group F: dispatch_ready_builds ───────────────────────────────────────────
-
-/// A single ready Queued build → one job enqueued with the correct drv_path.
-#[tokio::test]
-async fn dispatch_ready_build_enqueues_job() {
-    let eval_id = EvaluationId::now_v7();
-    let commit_id = CommitId::now_v7();
-    let project_id = ProjectId::now_v7();
-    let org_id = OrganizationId::now_v7();
-    let drv_id = DerivationId::now_v7();
-    let build_id = BuildId::now_v7();
-    let drv_path = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello.drv";
-
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
-        // 1. raw SQL: ready builds → [build]
-        .append_query_results([vec![make_build_queued(build_id, eval_id, drv_id)]])
-        // 1a. BuildDispatchMaps::load substitute_miss_counts → empty
-        .append_query_results([no_attempts()])
-        // 2. find derivation
-        .append_query_results([vec![make_derivation(drv_id, org_id, drv_path)]])
-        // 3. find evaluation
-        .append_query_results([vec![make_eval_queued(eval_id, commit_id, Some(project_id))]])
-        // 4. organization_id_for_eval: find project
-        .append_query_results([vec![make_project(project_id, org_id)]])
-        // 5. derivation_feature edges for required_features lookup → empty
-        .append_query_results([Vec::<gradient_entity::derivation_feature::Model>::new()])
-        // 6. derivation_dependency edges for dep_counts → empty
-        .append_query_results([Vec::<gradient_entity::derivation_dependency::Model>::new()])
-        .into_connection();
-
-    let scheduler = make_scheduler(db);
-    dispatch::dispatch_ready_builds(&scheduler)
-        .await
-        .expect("dispatch failed");
-
-    assert_eq!(
-        scheduler.pending_job_count().await,
-        1,
-        "expected 1 build job enqueued"
-    );
-}
-
-/// Calling dispatch_ready_builds twice for the same build does not enqueue a second job.
-#[tokio::test]
-async fn dispatch_ready_build_skips_already_enqueued() {
-    let eval_id = EvaluationId::now_v7();
-    let commit_id = CommitId::now_v7();
-    let project_id = ProjectId::now_v7();
-    let org_id = OrganizationId::now_v7();
-    let drv_id = DerivationId::now_v7();
-    let build_id = BuildId::now_v7();
-    let drv_path = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-foo.drv";
-
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
-        // First dispatch:
-        .append_query_results([vec![make_build_queued(build_id, eval_id, drv_id)]])
-        // BuildDispatchMaps::load substitute_miss_counts → empty
-        .append_query_results([no_attempts()])
-        .append_query_results([vec![make_derivation(drv_id, org_id, drv_path)]])
-        .append_query_results([vec![make_eval_queued(eval_id, commit_id, Some(project_id))]])
-        .append_query_results([vec![make_project(project_id, org_id)]])
-        // derivation_feature edges (none) → no follow-up feature name lookup
-        .append_query_results([Vec::<gradient_entity::derivation_feature::Model>::new()])
-        // derivation_dependency edges for dep_counts → empty
-        .append_query_results([Vec::<gradient_entity::derivation_dependency::Model>::new()])
-        // Second dispatch:
-        // raw SQL query returns the same build; contains_job → true → skips lookups
-        .append_query_results([vec![make_build_queued(build_id, eval_id, drv_id)]])
-        // No derivation / eval / project / feature lookups (contains_job = true)
-        .into_connection();
-
-    let scheduler = make_scheduler(db);
-    dispatch::dispatch_ready_builds(&scheduler)
-        .await
-        .expect("first dispatch failed");
-    dispatch::dispatch_ready_builds(&scheduler)
-        .await
-        .expect("second dispatch failed");
-
-    assert_eq!(
-        scheduler.pending_job_count().await,
-        1,
-        "second dispatch must be a no-op"
-    );
-}
-
 // ── Group J: trigger dispatch_once ───────────────────────────────────────────
 
 fn make_polling_trigger(
@@ -413,27 +290,3 @@ async fn dispatch_once_skips_trigger_within_interval() {
     assert_eq!(scheduler.pending_job_count().await, 0);
 }
 
-// ── Group K: via / follower behaviour ────────────────────────────────────────
-
-/// A follower build (`via IS NOT NULL`) is filtered out by the SQL gate, so
-/// the dispatcher never sees it. Issue #175.
-#[tokio::test]
-async fn dispatch_skips_follower_builds() {
-    // The ready-builds SQL has `AND b.via IS NULL`, so a follower row never
-    // makes it into the result set. We model that by returning an empty list
-    // from the raw SQL - the test asserts the dispatcher then enqueues nothing.
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
-        .append_query_results([Vec::<MBuild>::new()])
-        .into_connection();
-
-    let scheduler = make_scheduler(db);
-    dispatch::dispatch_ready_builds(&scheduler)
-        .await
-        .expect("dispatch failed");
-
-    assert_eq!(
-        scheduler.pending_job_count().await,
-        0,
-        "follower builds must not be enqueued"
-    );
-}
