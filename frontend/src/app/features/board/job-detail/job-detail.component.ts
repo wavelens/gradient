@@ -258,9 +258,6 @@ interface RuleRow {
           <div><span class="label">Status</span><span class="mono">{{ b.status }}</span></div>
           <div><span class="label">Architecture</span><span class="mono">{{ b.architecture }}</span></div>
           <div><span class="label">Worker</span><span class="mono">{{ b.worker ?? '-' }}</span></div>
-          @if (b.via) {
-            <div><span class="label">Via</span><span class="mono">{{ b.via }}</span></div>
-          }
           <div class="span2"><span class="label">Derivation</span><span class="mono">{{ b.derivation_path }}</span></div>
           <div><span class="label">Created</span><span>{{ b.created_at | date: 'medium' }}</span></div>
           <div><span class="label">Updated</span><span>{{ b.updated_at | date: 'medium' }}</span></div>

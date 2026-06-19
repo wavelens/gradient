@@ -2900,13 +2900,11 @@ paths:
         then by display name. Supports optional `limit` and `offset` query parameters
         for pagination.
 
-        Follower builds - those with a non-null `via` pointing at a leader build
-        in another evaluation that's doing the actual work - are returned as the
-        **leader's row**, not the follower's stand-in. The frontend should treat
-        each item's `id` as the canonical build id (used for log, downloads, and
-        dependency graph endpoints); for follower placements that id will resolve
-        to the leader's evaluation. The leader is always in the same organization
-        as the evaluation being queried.
+        Each item is a per-evaluation `build_job`; its `id` is used for log,
+        downloads, and dependency-graph endpoints. The build *state* (status,
+        timing, log) comes from the global `derivation_build` anchor shared by
+        every evaluation that needs the same derivation, so a derivation is
+        built once and the outcome is reused across evaluations and organizations.
       operationId: listEvaluationBuilds
       parameters:
         - name: limit
@@ -3340,7 +3338,7 @@ paths:
       description: |-
         Returns full build details including status, derivation path, architecture, assigned server, and output store paths.
 
-        **Access:** Accessible to members of the build's organization. Additionally, when this build is the leader of a follower build in a cache-connected organization, members of that follower organization are granted read access. See `docs/src/scheduler.md#cross-cache-deduplication`.
+        **Access:** Accessible to members of any organization whose evaluation references this derivation (the build-once anchor is shared across organizations via cache reachability). See `docs/src/scheduler.md#shared-build-anchors`.
       operationId: getBuild
       responses:
         '200':
@@ -3372,7 +3370,7 @@ paths:
         own, so the log of the most recent prior build of the same derivation is
         returned instead. The chunk/lines endpoints fall back the same way.
 
-        **Access:** Accessible to members of the build's organization. Additionally, when this build is the leader of a follower build in a cache-connected organization, members of that follower organization are granted read access. See `docs/src/scheduler.md#cross-cache-deduplication`.
+        **Access:** Accessible to members of any organization whose evaluation references this derivation (the build-once anchor is shared across organizations via cache reachability). See `docs/src/scheduler.md#shared-build-anchors`.
       operationId: getBuildLog
       responses:
         '200':
@@ -3564,7 +3562,7 @@ paths:
         capped at 500 nodes. Each edge `source → target` means `source` must be built
         before `target`.
 
-        **Access:** Accessible to members of the build's organization. Additionally, when this build is the leader of a follower build in a cache-connected organization, members of that follower organization are granted read access. See `docs/src/scheduler.md#cross-cache-deduplication`.
+        **Access:** Accessible to members of any organization whose evaluation references this derivation (the build-once anchor is shared across organizations via cache reachability). See `docs/src/scheduler.md#shared-build-anchors`.
       operationId: getBuildGraph
       responses:
         '200':
@@ -3684,7 +3682,7 @@ paths:
 
         Accessible without authentication when the owning organisation is public.
 
-        **Access:** Accessible to members of the build's organization. Additionally, when this build is the leader of a follower build in a cache-connected organization, members of that follower organization are granted read access. See `docs/src/scheduler.md#cross-cache-deduplication`.
+        **Access:** Accessible to members of any organization whose evaluation references this derivation (the build-once anchor is shared across organizations via cache reachability). See `docs/src/scheduler.md#shared-build-anchors`.
       operationId: getBuildDownloads
       responses:
         '200':
@@ -8737,6 +8735,11 @@ components:
         id:
           type: string
           format: uuid
+          description: |-
+            Per-evaluation build identity (`build_job` id). The build *state*
+            (status, worker, log) comes from the global `derivation_build`
+            anchor shared by every evaluation that needs this derivation, so a
+            derivation is built exactly once and the result is reused.
         evaluation:
           type: string
           format: uuid
@@ -8753,20 +8756,9 @@ components:
           nullable: true
           description: |-
             Worker identity (the `worker_id` string the worker sent in
-            `InitConnection`) that executed this build. `null` if the
+            `InitConnection`) that executed this build's anchor. `null` if the
             build has not yet reached a worker (still queued, aborted
-            before dispatch, or a pre-migration row).
-        via:
-          type: string
-          format: uuid
-          nullable: true
-          description: |-
-            When set, this build is a *follower* of another build (same
-            derivation, different evaluation) whose terminal status will be
-            copied here. The scheduler does not dispatch builds with `via`
-            set; this avoids two workers racing for the Nix store lock on the
-            same output path when multiple projects build the same package.
-            See issue #175.
+            before dispatch, or never dispatched in this evaluation).
         output:
           type: object
           additionalProperties:
