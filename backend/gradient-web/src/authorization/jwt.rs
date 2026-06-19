@@ -31,12 +31,15 @@ pub struct Cliams {
     pub jti: SessionId,
 }
 
-/// Claims for short-lived (1 h) per-build download tokens.
+/// Claims for short-lived (1 h) per-build download tokens. Scoped to a
+/// `derivation` (outputs are resolved through it) and the originating
+/// `evaluation` for access attribution.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct DownloadClaims {
     pub exp: usize,
     pub iat: usize,
-    pub build_id: BuildId,
+    pub derivation: DerivationId,
+    pub evaluation: EvaluationId,
 }
 
 pub(super) fn token_from_cookie(req: &axum::extract::Request) -> Option<String> {
@@ -208,12 +211,13 @@ async fn decode_api_key(
 
 pub fn encode_download_token(
     state: State<Arc<ServerState>>,
-    build_id: BuildId,
+    derivation: DerivationId,
+    evaluation: EvaluationId,
 ) -> Result<String, StatusCode> {
     let now = Utc::now();
     let exp = (now + Duration::hours(1)).timestamp() as usize;
     let iat = now.timestamp() as usize;
-    let claim = DownloadClaims { iat, exp, build_id };
+    let claim = DownloadClaims { iat, exp, derivation, evaluation };
     encode(
         &Header::default(),
         &claim,

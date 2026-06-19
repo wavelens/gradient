@@ -16,7 +16,7 @@ pub struct MakeEvaluationRequest {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct BuildItem {
-    pub id: BuildId,
+    pub id: BuildJobId,
     pub name: String,
     pub status: String,
     pub has_artefacts: bool,

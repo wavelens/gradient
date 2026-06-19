@@ -134,11 +134,11 @@ pub async fn build_live_ws(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path(build_id): Path<BuildId>,
+    Path(build_id): Path<BuildJobId>,
     ws: WebSocketUpgrade,
 ) -> WebResult<Response> {
     let ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
-    let eval_id = ctx.build.evaluation.into_inner();
+    let eval_id = ctx.build_job.evaluation.into_inner();
     let rx = state.board_events.subscribe();
     Ok(ws.on_upgrade(move |socket| live_stream(socket, rx, move |ev| eval_frame(ev, eval_id))))
 }

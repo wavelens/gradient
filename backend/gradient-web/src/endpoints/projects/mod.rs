@@ -65,7 +65,8 @@ pub struct ProjectResponse {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct EntryPointSummary {
     pub id: EntryPointId,
-    pub build_id: BuildId,
+    /// Per-eval build identity (`build_job` id) for this entry point's derivation.
+    pub build_id: BuildJobId,
     pub derivation_path: String,
     pub eval: String,
     pub build_status: gradient_entity::build::BuildStatus,

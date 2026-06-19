@@ -604,11 +604,11 @@ where
             Ok(ApplyOutcome::Created {
                 evaluation: eval,
                 aborted_evaluation,
-                aborted_builds,
+                aborted_anchors,
             }) => {
                 if let Some(aborted_id) = aborted_evaluation {
                     scheduler
-                        .cancel_evaluation_jobs(aborted_id, &aborted_builds)
+                        .cancel_evaluation_jobs(aborted_id, &aborted_anchors)
                         .await;
                 }
                 info!(

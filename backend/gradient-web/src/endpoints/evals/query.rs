@@ -21,6 +21,7 @@ use super::types::{
     BuildItem, BuildsQuery, EntryPointBrief, EvaluationMessageResponse, EvaluationResponse,
     EvaluationTriggerSummary, PaginatedBuilds,
 };
+use gradient_entity::build::BuildStatus;
 use gradient_types::triggers::TriggerType;
 
 pub async fn get_evaluation(
@@ -64,7 +65,7 @@ pub async fn get_evaluation(
             .join("\n")
     });
 
-    // Load entry points with their build statuses.
+    // Load entry points with their anchor build statuses (keyed by derivation).
     let ep_rows = EEntryPoint::find()
         .filter(CEntryPoint::Evaluation.eq(evaluation.id))
         .all(&state.web_db)
@@ -72,19 +73,20 @@ pub async fn get_evaluation(
     let entry_points = if ep_rows.is_empty() {
         vec![]
     } else {
-        let build_ids: Vec<BuildId> = ep_rows.iter().map(|ep| ep.build).collect();
-        let builds: std::collections::HashMap<BuildId, gradient_entity::build::BuildStatus> = EBuild::find()
-            .filter(CBuild::Id.is_in(build_ids))
-            .all(&state.web_db)
-            .await?
-            .into_iter()
-            .map(|b| (b.id, b.status))
-            .collect();
+        let drv_ids: Vec<DerivationId> = ep_rows.iter().map(|ep| ep.derivation).collect();
+        let status_by_drv: HashMap<DerivationId, gradient_entity::build::BuildStatus> =
+            EDerivationBuild::find()
+                .filter(CDerivationBuild::Derivation.is_in(drv_ids))
+                .all(&state.web_db)
+                .await?
+                .into_iter()
+                .map(|a| (a.derivation, a.status))
+                .collect();
         ep_rows
             .into_iter()
             .map(|ep| {
-                let build_status = builds
-                    .get(&ep.build)
+                let build_status = status_by_drv
+                    .get(&ep.derivation)
                     .cloned()
                     .unwrap_or(gradient_entity::build::BuildStatus::Queued)
                     .for_api();
@@ -188,91 +190,72 @@ pub async fn get_evaluation_builds(
     let ctx = EvalAccessContext::load(&state, evaluation_id, &maybe_user, api_key.as_ref()).await?;
     let evaluation = ctx.evaluation;
 
-    let raw_builds = EBuild::find()
-        .filter(CBuild::Evaluation.eq(evaluation.id))
+    // One build_job per (eval, derivation); the shared anchor carries the status.
+    let jobs = EBuildJob::find()
+        .filter(CBuildJob::Evaluation.eq(evaluation.id))
         .all(&state.web_db)
         .await?;
 
-    // Followers (`via IS NOT NULL`) are stand-ins for a leader build in another
-    // evaluation that's doing the actual work. The follower's own `status`,
-    // `updated_at`, `build_time_ms` and even `id` are uninteresting until the
-    // leader finishes - surface the leader's row in this list instead so the
-    // frontend renders the live build and log endpoints resolve to the right
-    // build id. Same-org invariant (see `gradient_entity::build::Model::via`) means no
-    // cross-org leak.
-    let leader_ids: Vec<BuildId> = raw_builds
+    let anchor_ids: Vec<DerivationBuildId> = jobs
         .iter()
-        .filter_map(|b| b.via)
+        .map(|j| j.derivation_build)
         .collect::<HashSet<_>>()
         .into_iter()
         .collect();
-    let mut leaders: HashMap<BuildId, MBuild> = HashMap::new();
-    for chunk in leader_ids.chunks(IS_IN_CHUNK) {
-        let rows = EBuild::find()
-            .filter(CBuild::Id.is_in(chunk.to_vec()))
+    let mut anchors: HashMap<DerivationBuildId, MDerivationBuild> = HashMap::new();
+    for chunk in anchor_ids.chunks(IS_IN_CHUNK) {
+        for row in EDerivationBuild::find()
+            .filter(CDerivationBuild::Id.is_in(chunk.to_vec()))
             .all(&state.web_db)
-            .await?;
-        for row in rows {
-            leaders.insert(row.id, row);
+            .await?
+        {
+            anchors.insert(row.id, row);
         }
     }
-    // Multiple followers can share one leader; after substituting leaders for
-    // followers the same leader row would appear several times. Dedup by id so
-    // the sidebar never renders a build twice (issue #303).
-    let mut seen_ids: HashSet<BuildId> = HashSet::new();
-    let builds: Vec<MBuild> = raw_builds
-        .into_iter()
-        .map(|b| match b.via.and_then(|id| leaders.get(&id)) {
-            Some(leader) => leader.clone(),
-            None => b,
-        })
-        .filter(|b| seen_ids.insert(b.id))
-        .collect();
 
-    // Distinct derivations referenced by builds. Deduping cuts the IN-list down
-    // by the leader/follower factor (often 2–10x in large evals).
-    let drv_ids: Vec<DerivationId> = builds
+    let drv_ids: Vec<DerivationId> = jobs
         .iter()
-        .map(|b| b.derivation)
+        .map(|j| j.derivation)
         .collect::<HashSet<_>>()
         .into_iter()
         .collect();
-
     let mut derivations: HashMap<DerivationId, MDerivation> = HashMap::new();
     for chunk in drv_ids.chunks(IS_IN_CHUNK) {
-        let rows = EDerivation::find()
+        for row in EDerivation::find()
             .filter(CDerivation::Id.is_in(chunk.to_vec()))
             .all(&state.web_db)
-            .await?;
-        for row in rows {
+            .await?
+        {
             derivations.insert(row.id, row);
         }
     }
 
-    // Sort by status (Building → Queued → Failed → Aborted/DependencyFailed →
+    // Sort by status (Building -> Queued -> Failed -> Aborted/DependencyFailed ->
     // Completed/Substituted), then by derivation name. Mirrors the client-side
     // ordering in `evaluation-log.component.ts::buildStatusOrder`.
-    let mut sorted: Vec<(u32, &str, &MBuild)> = builds
+    let mut sorted: Vec<(u32, &str, &MBuildJob, BuildStatus)> = jobs
         .iter()
-        .filter_map(|b| {
-            let drv = derivations.get(&b.derivation)?;
-            Some((status_rank(b.status.for_api()), drv.name.as_str(), b))
+        .filter_map(|j| {
+            let drv = derivations.get(&j.derivation)?;
+            let status = anchors.get(&j.derivation_build)?.status.for_api();
+            Some((status_rank(status), drv.name.as_str(), j, status))
         })
         .collect();
     sorted.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(b.1)));
 
     let total = sorted.len();
-    let active_count = sorted.iter().filter(|(rank, _, _)| *rank < 4).count();
+    let active_count = sorted.iter().filter(|(rank, _, _, _)| *rank < 4).count();
 
     let offset = query.offset.unwrap_or(0).min(total);
     let limit = query.limit.unwrap_or(total.saturating_sub(offset));
-    let page_slice: Vec<&(u32, &str, &MBuild)> = sorted.iter().skip(offset).take(limit).collect();
+    let page_slice: Vec<&(u32, &str, &MBuildJob, BuildStatus)> =
+        sorted.iter().skip(offset).take(limit).collect();
 
     // Hydrate `has_artefacts` only for the page. Bounded by `limit`, so the
     // `IN` clause is safe regardless of evaluation size.
     let page_drv_ids: Vec<DerivationId> = page_slice
         .iter()
-        .map(|(_, _, b)| b.derivation)
+        .map(|(_, _, j, _)| j.derivation)
         .collect::<HashSet<_>>()
         .into_iter()
         .collect();
@@ -298,24 +281,26 @@ pub async fn get_evaluation_builds(
         }
     }
 
-    // Batch the latest-attempt lookup for the whole page; a per-build query here
-    // is an N+1 that made large build lists take ~10s (#391).
-    let page_build_ids: Vec<BuildId> = page_slice.iter().map(|(_, _, b)| b.id).collect();
-    let attempts = gradient_db::latest_attempts(&state.web_db, &page_build_ids).await?;
+    // Batch the latest-attempt lookup for the whole page (keyed by anchor); a
+    // per-build query here is an N+1 that made large build lists take ~10s (#391).
+    let page_anchor_ids: Vec<DerivationBuildId> =
+        page_slice.iter().map(|(_, _, j, _)| j.derivation_build).collect();
+    let attempts = gradient_db::latest_attempts(&state.web_db, &page_anchor_ids).await?;
 
     let mut page = Vec::with_capacity(page_slice.len());
-    for (_, _, b) in &page_slice {
+    for (_, _, j, status) in &page_slice {
         let drv = derivations
-            .get(&b.derivation)
+            .get(&j.derivation)
             .expect("derivation hydrated above");
-        let build_time_ms = attempts.get(&b.id).and_then(|a| a.duration_ms());
+        let anchor = anchors.get(&j.derivation_build).expect("anchor hydrated above");
+        let build_time_ms = attempts.get(&j.derivation_build).and_then(|a| a.duration_ms());
 
         page.push(BuildItem {
-            id: b.id,
+            id: j.id,
             name: drv.drv_path(),
-            status: format!("{:?}", b.status.for_api()),
-            has_artefacts: has_artefacts.contains(&b.derivation),
-            updated_at: b.updated_at,
+            status: format!("{:?}", status),
+            has_artefacts: has_artefacts.contains(&j.derivation),
+            updated_at: anchor.updated_at,
             build_time_ms,
         });
     }

@@ -73,39 +73,24 @@ pub async fn get_project_metrics(
     for evaluation in evaluations {
         let eval_time_ms = (evaluation.updated_at - evaluation.created_at).num_milliseconds();
 
-        let builds = EBuild::find()
-            .filter(CBuild::Evaluation.eq(evaluation.id))
+        // Sum build time over every anchor this eval needs (one per build_job).
+        let anchor_ids: Vec<DerivationBuildId> = EBuildJob::find()
+            .filter(CBuildJob::Evaluation.eq(evaluation.id))
             .all(&state.web_db)
-            .await?;
-        let mut build_time_total_ms: i64 = 0;
-        for b in &builds {
-            if let Some(ms) = gradient_db::latest_attempt(&state.web_db, b.id)
-                .await
-                .ok()
-                .flatten()
-                .and_then(|a| a.duration_ms())
-            {
-                build_time_total_ms += ms;
-            }
-        }
+            .await?
+            .into_iter()
+            .map(|j| j.derivation_build)
+            .collect();
+        let attempts = gradient_db::latest_attempts(&state.web_db, &anchor_ids).await?;
+        let build_time_total_ms: i64 = attempts.values().filter_map(|a| a.duration_ms()).sum();
 
-        // Resolve entry-point builds for this evaluation.
-        let ep_build_ids: Vec<BuildId> = EEntryPoint::find()
+        // Resolve entry-point derivations for this evaluation.
+        let ep_drv_ids: Vec<DerivationId> = EEntryPoint::find()
             .filter(CEntryPoint::Evaluation.eq(evaluation.id))
             .all(&state.web_db)
             .await?
             .into_iter()
-            .map(|ep| ep.build)
-            .collect();
-
-        let db = &state.web_db;
-        let ep_drv_ids: Vec<DerivationId> =
-            gradient_db::fetch_in_chunks(&ep_build_ids, |chunk| async move {
-                EBuild::find().filter(CBuild::Id.is_in(chunk)).all(db).await
-            })
-            .await?
-            .into_iter()
-            .map(|b| b.derivation)
+            .map(|ep| ep.derivation)
             .collect();
 
         let entry_point_count = ep_drv_ids.len() as i64;
@@ -151,7 +136,8 @@ pub struct EntryPointMetricsQuery {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct EntryPointMetricPoint {
     pub evaluation_id: EvaluationId,
-    pub build_id: BuildId,
+    /// Per-eval build identity (`build_job` id) for this entry point's derivation.
+    pub build_id: BuildJobId,
     pub created_at: chrono::NaiveDateTime,
     pub build_status: gradient_entity::build::BuildStatus,
     pub build_time_ms: Option<i64>,
@@ -211,32 +197,44 @@ pub async fn get_entry_point_metrics(
             continue;
         };
 
-        let Some(build) = EBuild::find_by_id(ep.build).one(&state.web_db).await? else {
+        let Some(anchor) = EDerivationBuild::find()
+            .filter(CDerivationBuild::Derivation.eq(ep.derivation))
+            .one(&state.web_db)
+            .await?
+        else {
+            continue;
+        };
+        let Some(build_job) = EBuildJob::find()
+            .filter(CBuildJob::Evaluation.eq(ep.evaluation))
+            .filter(CBuildJob::Derivation.eq(ep.derivation))
+            .one(&state.web_db)
+            .await?
+        else {
             continue;
         };
 
-        let build_time_ms = gradient_db::latest_attempt(&state.web_db, build.id)
+        let build_time_ms = gradient_db::latest_attempt(&state.web_db, anchor.id)
             .await
             .ok()
             .flatten()
             .and_then(|a| a.duration_ms());
 
-        let closure = derivation_closure_reachable(&state.web_db, vec![build.derivation]).await?;
+        let closure = derivation_closure_reachable(&state.web_db, vec![ep.derivation]).await?;
         let dependencies_count = (closure.len() as i64).saturating_sub(1);
 
-        let output_size_bytes = sum_output_sizes(&state.web_db, vec![build.derivation]).await?;
+        let output_size_bytes = sum_output_sizes(&state.web_db, vec![ep.derivation]).await?;
         let closure_size_bytes =
             sum_output_sizes(&state.web_db, closure.into_iter().collect()).await?;
 
-        let seeds = output_hashes_for_drvs(&state.web_db, &[build.derivation]).await?;
+        let seeds = output_hashes_for_drvs(&state.web_db, &[ep.derivation]).await?;
         let runtime = runtime_closure_size(&state.web_db, &seeds).await?;
         let runtime_closure_size_bytes = (runtime > 0).then_some(runtime);
 
         points.push(EntryPointMetricPoint {
             evaluation_id: evaluation.id,
-            build_id: build.id,
+            build_id: build_job.id,
             created_at: evaluation.created_at,
-            build_status: build.status.for_api(),
+            build_status: anchor.status.for_api(),
             build_time_ms,
             output_size_bytes,
             closure_size_bytes,

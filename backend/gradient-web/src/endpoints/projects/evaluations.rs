@@ -433,29 +433,24 @@ pub async fn get_project_entry_points(
 
 /// All DB data needed to render a list of [`EntryPointSummary`] records.
 ///
-/// Loaded in one pass via `load` to avoid per-entry-point round-trips.
+/// Loaded in one pass via `load` to avoid per-entry-point round-trips. Keyed on
+/// the entry point's derivation; the shared `derivation_build` anchor carries
+/// status and the per-eval `build_job` carries the public build id.
 struct EntryPointRelatedData {
-    builds: HashMap<BuildId, MBuild>,
+    anchors: HashMap<DerivationId, MDerivationBuild>,
+    build_jobs: HashMap<DerivationId, BuildJobId>,
     derivations: HashMap<DerivationId, MDerivation>,
     has_products: HashMap<DerivationId, bool>,
-    build_time_ms: HashMap<BuildId, Option<i64>>,
+    build_time_ms: HashMap<DerivationId, Option<i64>>,
     deps: HashMap<EntryPointId, BuildStatusCounts>,
 }
 
 impl EntryPointRelatedData {
     async fn load(state: &Arc<ServerState>, entry_points: &[MEntryPoint]) -> WebResult<Self> {
         let db = &state.web_db;
-        let build_ids: Vec<BuildId> = entry_points.iter().map(|ep| ep.build).collect();
-        let builds: HashMap<BuildId, MBuild> =
-            gradient_db::fetch_in_chunks(&build_ids, |chunk| async move {
-                EBuild::find().filter(CBuild::Id.is_in(chunk)).all(db).await
-            })
-            .await?
-            .into_iter()
-            .map(|b| (b.id, b))
-            .collect();
+        let eval_id = entry_points[0].evaluation;
+        let drv_ids: Vec<DerivationId> = entry_points.iter().map(|ep| ep.derivation).collect();
 
-        let drv_ids: Vec<DerivationId> = builds.values().map(|b| b.derivation).collect();
         let derivations: HashMap<DerivationId, MDerivation> =
             gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
                 EDerivation::find().filter(CDerivation::Id.is_in(chunk)).all(db).await
@@ -465,10 +460,32 @@ impl EntryPointRelatedData {
             .map(|d| (d.id, d))
             .collect();
 
-        let completed_drv_ids: Vec<DerivationId> = builds
+        let anchors: HashMap<DerivationId, MDerivationBuild> =
+            gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
+                EDerivationBuild::find().filter(CDerivationBuild::Derivation.is_in(chunk)).all(db).await
+            })
+            .await?
+            .into_iter()
+            .map(|a| (a.derivation, a))
+            .collect();
+
+        let build_jobs: HashMap<DerivationId, BuildJobId> =
+            gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
+                EBuildJob::find()
+                    .filter(CBuildJob::Evaluation.eq(eval_id))
+                    .filter(CBuildJob::Derivation.is_in(chunk))
+                    .all(db)
+                    .await
+            })
+            .await?
+            .into_iter()
+            .map(|j| (j.derivation, j.id))
+            .collect();
+
+        let completed_drv_ids: Vec<DerivationId> = anchors
             .values()
-            .filter(|b| b.status == BuildStatus::Completed || b.status == BuildStatus::Substituted)
-            .map(|b| b.derivation)
+            .filter(|a| a.status == BuildStatus::Completed || a.status == BuildStatus::Substituted)
+            .map(|a| a.derivation)
             .collect();
 
         // Determine which derivations have at least one build_product by looking
@@ -503,13 +520,14 @@ impl EntryPointRelatedData {
             m
         };
 
-        // Latest attempt per build, batched into one DISTINCT ON query.
-        let build_time_ms: HashMap<BuildId, Option<i64>> = {
-            let ids: Vec<BuildId> = entry_points.iter().map(|ep| ep.build).collect();
-            gradient_db::latest_attempts(db, &ids)
-                .await?
-                .into_iter()
-                .map(|(b, a)| (b, a.duration_ms()))
+        // Latest attempt per anchor, batched into one DISTINCT ON query, then
+        // re-keyed by derivation for the summary lookup.
+        let build_time_ms: HashMap<DerivationId, Option<i64>> = {
+            let anchor_ids: Vec<DerivationBuildId> = anchors.values().map(|a| a.id).collect();
+            let by_anchor = gradient_db::latest_attempts(db, &anchor_ids).await?;
+            anchors
+                .iter()
+                .filter_map(|(drv, a)| by_anchor.get(&a.id).map(|att| (*drv, att.duration_ms())))
                 .collect()
         };
 
@@ -521,7 +539,6 @@ impl EntryPointRelatedData {
         let entry_point_ids: Vec<EntryPointId> = entry_points.iter().map(|ep| ep.id).collect();
         let mut raw = gradient_db::load_entry_point_dep_counts(db, &entry_point_ids).await?;
         if raw.is_empty() {
-            let eval_id = entry_points[0].evaluation;
             match gradient_db::reconcile_eval_dep_counts(db, eval_id).await {
                 Ok(()) => {
                     raw = gradient_db::load_entry_point_dep_counts(db, &entry_point_ids).await?;
@@ -531,10 +548,7 @@ impl EntryPointRelatedData {
                         "dep-count backfill failed; using live closure CTE");
                     let seeds: Vec<(EntryPointId, uuid::Uuid)> = entry_points
                         .iter()
-                        .filter_map(|ep| {
-                            let build = builds.get(&ep.build)?;
-                            Some((ep.id, build.derivation.into_inner()))
-                        })
+                        .map(|ep| (ep.id, ep.derivation.into_inner()))
                         .collect();
                     raw = gradient_db::entry_point_dep_counts(db, eval_id, &seeds).await?;
                 }
@@ -552,7 +566,8 @@ impl EntryPointRelatedData {
             .collect();
 
         Ok(Self {
-            builds,
+            anchors,
+            build_jobs,
             derivations,
             has_products,
             build_time_ms,
@@ -563,21 +578,27 @@ impl EntryPointRelatedData {
     fn build_summaries(&self, entry_points: &[MEntryPoint]) -> Vec<EntryPointSummary> {
         let mut summaries = Vec::new();
         for ep in entry_points {
-            let Some(build) = self.builds.get(&ep.build) else {
+            let Some(&build_id) = self.build_jobs.get(&ep.derivation) else {
                 continue;
             };
-            let Some(drv) = self.derivations.get(&build.derivation) else {
+            let Some(drv) = self.derivations.get(&ep.derivation) else {
                 continue;
             };
+            let build_status = self
+                .anchors
+                .get(&ep.derivation)
+                .map(|a| a.status)
+                .unwrap_or(BuildStatus::Queued)
+                .for_api();
             summaries.push(EntryPointSummary {
                 id: ep.id,
-                build_id: build.id,
+                build_id,
                 derivation_path: drv.drv_path(),
                 eval: ep.eval.clone(),
-                build_status: build.status.for_api(),
-                has_artefacts: *self.has_products.get(&build.derivation).unwrap_or(&false),
+                build_status,
+                has_artefacts: *self.has_products.get(&ep.derivation).unwrap_or(&false),
                 architecture: drv.architecture.clone(),
-                build_time_ms: self.build_time_ms.get(&build.id).copied().flatten(),
+                build_time_ms: self.build_time_ms.get(&ep.derivation).copied().flatten(),
                 deps: self.deps.get(&ep.id).copied().unwrap_or_default(),
                 deps_total: drv.dep_closure_count,
                 created_at: ep.created_at,
@@ -802,18 +823,19 @@ pub async fn get_entry_point_download(
         .await?
         .or_not_found("Entry point")?;
 
-    let build = EBuild::find_by_id(ep.build)
+    let anchor = EDerivationBuild::find()
+        .filter(CDerivationBuild::Derivation.eq(ep.derivation))
         .one(&state.web_db)
         .await?
         .or_not_found("Build")?;
 
-    if build.status != BuildStatus::Completed && build.status != BuildStatus::Substituted {
+    if anchor.status != BuildStatus::Completed && anchor.status != BuildStatus::Substituted {
         return Err(WebError::not_found("File"));
     }
 
     // Walk derivation outputs, locate the file via hydra-build-products.
     let build_outputs = EDerivationOutput::find()
-        .filter(CDerivationOutput::Derivation.eq(build.derivation))
+        .filter(CDerivationOutput::Derivation.eq(ep.derivation))
         .all(&state.web_db)
         .await?;
 

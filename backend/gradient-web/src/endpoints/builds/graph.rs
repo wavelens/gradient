@@ -9,6 +9,7 @@ use crate::error::WebResult;
 use crate::helpers::{OptionExt, ok_json};
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
+use gradient_entity::build::BuildStatus;
 use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::EntityTrait;
@@ -23,7 +24,7 @@ use super::BuildAccessContext;
 
 pub(super) async fn authorize_build_opt(
     state: &Arc<ServerState>,
-    build_id: BuildId,
+    build_id: BuildJobId,
     maybe_user: &Option<MUser>,
     api_key: Option<&ApiKeyContext>,
 ) -> WebResult<()> {
@@ -32,9 +33,53 @@ pub(super) async fn authorize_build_opt(
         .map(|_| ())
 }
 
+/// A build_job paired with its anchor's status, for one node in the graph.
+struct JobNode {
+    job: MBuildJob,
+    status: BuildStatus,
+}
+
+/// Load the eval's build_jobs for `derivations`, each paired with its anchor's
+/// status. Drives the node + edge mapping (a dep derivation resolves to the
+/// build_job the same eval holds for it).
+async fn job_nodes_for_derivations(
+    state: &Arc<ServerState>,
+    evaluation_id: EvaluationId,
+    derivations: &[DerivationId],
+) -> WebResult<HashMap<DerivationId, JobNode>> {
+    if derivations.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let jobs = EBuildJob::find()
+        .filter(CBuildJob::Evaluation.eq(evaluation_id))
+        .filter(CBuildJob::Derivation.is_in(derivations.to_vec()))
+        .all(&state.web_db)
+        .await?;
+    let anchor_ids: Vec<DerivationBuildId> = jobs.iter().map(|j| j.derivation_build).collect();
+    let status_by_anchor: HashMap<DerivationBuildId, BuildStatus> = EDerivationBuild::find()
+        .filter(CDerivationBuild::Id.is_in(anchor_ids))
+        .all(&state.web_db)
+        .await?
+        .into_iter()
+        .map(|a| (a.id, a.status))
+        .collect();
+
+    Ok(jobs
+        .into_iter()
+        .map(|job| {
+            let status = status_by_anchor
+                .get(&job.derivation_build)
+                .copied()
+                .unwrap_or(BuildStatus::Queued);
+            (job.derivation, JobNode { job, status })
+        })
+        .collect())
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct DependencyNode {
-    pub id: BuildId,
+    pub id: BuildJobId,
     pub name: String,
     pub path: String,
     pub status: String,
@@ -44,13 +89,13 @@ pub struct DependencyNode {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct DependencyEdge {
-    pub source: BuildId,
-    pub target: BuildId,
+    pub source: BuildJobId,
+    pub target: BuildJobId,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct BuildGraph {
-    pub root: BuildId,
+    pub root: BuildJobId,
     pub nodes: Vec<DependencyNode>,
     pub edges: Vec<DependencyEdge>,
 }
@@ -61,24 +106,33 @@ pub struct BuildGraph {
 struct GraphWaveResult {
     nodes: Vec<DependencyNode>,
     edges: Vec<DependencyEdge>,
-    /// Build IDs not yet visited, to be queued for the next wave.
-    next_wave: Vec<BuildId>,
+    /// Build job IDs not yet visited, to be queued for the next wave.
+    next_wave: Vec<BuildJobId>,
 }
 
-/// Process one BFS wave: fetch builds+derivations for `batch`, resolve
+/// Process one BFS wave: fetch build_jobs + derivations for `batch`, resolve
 /// dependency edges, and collect unvisited dependents for the next wave.
 async fn process_graph_wave(
     state: &Arc<ServerState>,
-    batch: &[BuildId],
+    batch: &[BuildJobId],
     evaluation_id: EvaluationId,
-    visited: &mut HashSet<BuildId>,
+    visited: &mut HashSet<BuildJobId>,
 ) -> WebResult<GraphWaveResult> {
-    let builds = EBuild::find()
-        .filter(CBuild::Id.is_in(batch.to_vec()))
+    let jobs = EBuildJob::find()
+        .filter(CBuildJob::Id.is_in(batch.to_vec()))
         .all(&state.web_db)
         .await?;
 
-    let drv_ids: Vec<DerivationId> = builds.iter().map(|b| b.derivation).collect();
+    let anchor_ids: Vec<DerivationBuildId> = jobs.iter().map(|j| j.derivation_build).collect();
+    let status_by_anchor: HashMap<DerivationBuildId, BuildStatus> = EDerivationBuild::find()
+        .filter(CDerivationBuild::Id.is_in(anchor_ids))
+        .all(&state.web_db)
+        .await?
+        .into_iter()
+        .map(|a| (a.id, a.status))
+        .collect();
+
+    let drv_ids: Vec<DerivationId> = jobs.iter().map(|j| j.derivation).collect();
     let drv_by_id: HashMap<DerivationId, MDerivation> = EDerivation::find()
         .filter(CDerivation::Id.is_in(drv_ids.clone()))
         .all(&state.web_db)
@@ -88,15 +142,16 @@ async fn process_graph_wave(
         .collect();
 
     let mut nodes: Vec<DependencyNode> = Vec::new();
-    for build in &builds {
-        if let Some(drv) = drv_by_id.get(&build.derivation) {
+    for job in &jobs {
+        if let Some(drv) = drv_by_id.get(&job.derivation) {
+            let status = status_by_anchor.get(&job.derivation_build).copied().unwrap_or(BuildStatus::Queued);
             nodes.push(DependencyNode {
-                id: build.id,
+                id: job.id,
                 name: drv.name.clone(),
                 path: drv.drv_path(),
-                status: format!("{:?}", build.status),
-                created_at: build.created_at,
-                updated_at: build.updated_at,
+                status: format!("{:?}", status),
+                created_at: job.created_at,
+                updated_at: job.created_at,
             });
         }
     }
@@ -115,33 +170,28 @@ async fn process_graph_wave(
     }
 
     let dep_drv_ids: Vec<DerivationId> = dep_rows.iter().map(|e| e.dependency).collect();
-    let build_by_drv: HashMap<DerivationId, BuildId> = EBuild::find()
-        .filter(CBuild::Evaluation.eq(evaluation_id))
-        .filter(CBuild::Derivation.is_in(dep_drv_ids))
-        .all(&state.web_db)
-        .await?
-        .iter()
-        .map(|b| (b.derivation, b.id))
-        .collect();
+    let dep_jobs = job_nodes_for_derivations(state, evaluation_id, &dep_drv_ids).await?;
+    let job_by_drv: HashMap<DerivationId, BuildJobId> =
+        dep_jobs.iter().map(|(drv, jn)| (*drv, jn.job.id)).collect();
 
-    let parent_build_by_drv: HashMap<DerivationId, BuildId> =
-        builds.iter().map(|b| (b.derivation, b.id)).collect();
+    let parent_job_by_drv: HashMap<DerivationId, BuildJobId> =
+        jobs.iter().map(|j| (j.derivation, j.id)).collect();
 
     let mut edges: Vec<DependencyEdge> = Vec::new();
-    let mut next_wave: Vec<BuildId> = Vec::new();
+    let mut next_wave: Vec<BuildJobId> = Vec::new();
     for edge in dep_rows {
-        let Some(&parent_build_id) = parent_build_by_drv.get(&edge.derivation) else {
+        let Some(&parent_job_id) = parent_job_by_drv.get(&edge.derivation) else {
             continue;
         };
-        let Some(&dep_build_id) = build_by_drv.get(&edge.dependency) else {
+        let Some(&dep_job_id) = job_by_drv.get(&edge.dependency) else {
             continue;
         };
         edges.push(DependencyEdge {
-            source: dep_build_id,
-            target: parent_build_id,
+            source: dep_job_id,
+            target: parent_job_id,
         });
-        if visited.insert(dep_build_id) {
-            next_wave.push(dep_build_id);
+        if visited.insert(dep_job_id) {
+            next_wave.push(dep_job_id);
         }
     }
 
@@ -157,17 +207,17 @@ pub async fn get_build_dependencies(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path(build_id): Path<BuildId>,
+    Path(build_id): Path<BuildJobId>,
 ) -> WebResult<Json<BaseResponse<Vec<DependencyNode>>>> {
     authorize_build_opt(&state, build_id, &maybe_user, api_key.as_ref()).await?;
 
-    let build = EBuild::find_by_id(build_id)
+    let build_job = EBuildJob::find_by_id(build_id)
         .one(&state.web_db)
         .await?
         .or_not_found("Build")?;
 
     let dep_edges = EDerivationDependency::find()
-        .filter(CDerivationDependency::Derivation.eq(build.derivation))
+        .filter(CDerivationDependency::Derivation.eq(build_job.derivation))
         .all(&state.web_db)
         .await?;
 
@@ -175,26 +225,22 @@ pub async fn get_build_dependencies(
 
     let mut nodes: Vec<DependencyNode> = Vec::new();
     if !dep_drv_ids.is_empty() {
-        let dep_builds = EBuild::find()
-            .filter(CBuild::Evaluation.eq(build.evaluation))
-            .filter(CBuild::Derivation.is_in(dep_drv_ids.clone()))
-            .all(&state.web_db)
-            .await?;
+        let dep_jobs = job_nodes_for_derivations(&state, build_job.evaluation, &dep_drv_ids).await?;
         let dep_drvs = EDerivation::find()
             .filter(CDerivation::Id.is_in(dep_drv_ids))
             .all(&state.web_db)
             .await?;
         let drv_by_id: HashMap<DerivationId, MDerivation> =
             dep_drvs.into_iter().map(|d| (d.id, d)).collect();
-        for b in dep_builds {
-            if let Some(drv) = drv_by_id.get(&b.derivation) {
+        for (drv_id, jn) in dep_jobs {
+            if let Some(drv) = drv_by_id.get(&drv_id) {
                 nodes.push(DependencyNode {
-                    id: b.id,
+                    id: jn.job.id,
                     name: drv.name.clone(),
                     path: drv.drv_path(),
-                    status: format!("{:?}", b.status),
-                    created_at: b.created_at,
-                    updated_at: b.updated_at,
+                    status: format!("{:?}", jn.status),
+                    created_at: jn.job.created_at,
+                    updated_at: jn.job.created_at,
                 });
             }
         }
@@ -208,20 +254,20 @@ pub async fn get_build_graph(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path(build_id): Path<BuildId>,
+    Path(build_id): Path<BuildJobId>,
 ) -> WebResult<Json<BaseResponse<BuildGraph>>> {
     authorize_build_opt(&state, build_id, &maybe_user, api_key.as_ref()).await?;
 
-    let root_build = EBuild::find_by_id(build_id)
+    let root_build = EBuildJob::find_by_id(build_id)
         .one(&state.web_db)
         .await?
         .or_not_found("Build")?;
     let evaluation_id = root_build.evaluation;
 
-    let mut visited_builds: HashSet<BuildId> = HashSet::new();
+    let mut visited_builds: HashSet<BuildJobId> = HashSet::new();
     let mut nodes: Vec<DependencyNode> = Vec::new();
     let mut edges: Vec<DependencyEdge> = Vec::new();
-    let mut queue: VecDeque<Vec<BuildId>> = VecDeque::new();
+    let mut queue: VecDeque<Vec<BuildJobId>> = VecDeque::new();
 
     visited_builds.insert(build_id);
     queue.push_back(vec![build_id]);

@@ -14,7 +14,7 @@ use gradient_entity::build::BuildStatus;
 use gradient_sources::parse_drv_hash_name;
 use gradient_types::*;
 use gradient_core::ServerState;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
 
 pub async fn log(
@@ -49,18 +49,19 @@ pub async fn log(
         return Err(WebError::not_found("Log"));
     }
 
-    let Some(build) = EBuild::find()
-        .filter(CBuild::Derivation.eq(derivation_row.id))
-        .filter(CBuild::Status.eq(BuildStatus::Completed))
-        .order_by_desc(CBuild::CreatedAt)
+    let Some(anchor) = EDerivationBuild::find()
+        .filter(CDerivationBuild::Derivation.eq(derivation_row.id))
+        .filter(CDerivationBuild::Status.eq(BuildStatus::Completed))
         .one(&state.web_db)
         .await?
     else {
         return Err(WebError::not_found("Log"));
     };
 
-    let log_key = gradient_db::latest_attempt_log_id(&state.web_db, build.id).await?;
-    let body = state.log_storage.read(log_key).await.unwrap_or_default();
+    let body = match gradient_db::latest_attempt_id(&state.web_db, anchor.id).await? {
+        Some(key) => state.log_storage.read(key).await.unwrap_or_default(),
+        None => String::new(),
+    };
 
     Response::builder()
         .header(

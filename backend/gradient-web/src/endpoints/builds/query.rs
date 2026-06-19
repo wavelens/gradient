@@ -22,7 +22,8 @@ use super::BuildAccessContext;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct BuildWithOutputs {
-    pub id: BuildId,
+    /// Per-eval build identity (`build_job` id).
+    pub id: BuildJobId,
     pub evaluation: EvaluationId,
     pub status: gradient_entity::build::BuildStatus,
     pub derivation_path: String,
@@ -30,10 +31,6 @@ pub struct BuildWithOutputs {
     /// Worker identity (the `worker_id` string from `InitConnection`) that
     /// executed this build. `None` if the build never reached a worker.
     pub worker: Option<String>,
-    /// When set, this build is a follower of another build (same derivation,
-    /// different evaluation) whose terminal status will be copied here. The
-    /// scheduler does not dispatch builds with `via` set.
-    pub via: Option<BuildId>,
     pub output: HashMap<String, String>,
     pub created_at: chrono::NaiveDateTime,
     pub updated_at: chrono::NaiveDateTime,
@@ -43,17 +40,18 @@ pub async fn get_build(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path(build_id): Path<BuildId>,
+    Path(build_id): Path<BuildJobId>,
 ) -> WebResult<Json<BaseResponse<BuildWithOutputs>>> {
     let ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
-    let build = ctx.build;
+    let build_job = ctx.build_job;
+    let anchor = ctx.anchor;
 
-    let derivation = EDerivation::find_by_id(build.derivation)
+    let derivation = EDerivation::find_by_id(build_job.derivation)
         .one(&state.web_db)
         .await?
         .ok_or_else(|| {
             tracing::warn!(
-                derivation_id = %build.derivation,
+                derivation_id = %build_job.derivation,
                 %build_id,
                 "Derivation not found for build"
             );
@@ -71,19 +69,18 @@ pub async fn get_build(
         outputs.insert(output.name, path);
     }
 
-    let worker = latest_attempt_worker(&state.web_db, build.id).await.ok().flatten();
+    let worker = latest_attempt_worker(&state.web_db, anchor.id).await.ok().flatten();
 
     let build_with_outputs = BuildWithOutputs {
-        id: build.id,
-        evaluation: build.evaluation,
-        status: build.status.for_api(),
+        id: build_job.id,
+        evaluation: build_job.evaluation,
+        status: anchor.status.for_api(),
         derivation_path: derivation.drv_path(),
         architecture: derivation.architecture,
         worker,
-        via: build.via,
         output: outputs,
-        created_at: build.created_at,
-        updated_at: build.updated_at,
+        created_at: build_job.created_at,
+        updated_at: anchor.updated_at,
     };
 
     Ok(ok_json(build_with_outputs))

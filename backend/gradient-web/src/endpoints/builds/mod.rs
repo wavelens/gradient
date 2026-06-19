@@ -32,44 +32,57 @@ use crate::access::is_org_member;
 use crate::authorization::ApiKeyContext;
 use crate::error::{WebError, WebResult};
 use crate::helpers::OptionExt;
-use gradient_db::latest_attempt_log_id;
-use gradient_entity::build::BuildStatus;
+use gradient_db::latest_attempt_id;
 use gradient_types::*;
 use gradient_core::ServerState;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
 
-/// Resolved access context for a build.
+/// Resolved access context for a per-eval build (`build_job`).
 ///
-/// Walks up build → evaluation → project → organization and enforces the
-/// access check. Returns `not_found("Build")` on any failure so callers
-/// cannot distinguish missing from forbidden.
+/// The public build identity is the `build_job` id; build state lives on the
+/// shared `derivation_build` anchor. Walks build_job -> evaluation -> project ->
+/// organization and enforces the access check. Returns `not_found("Build")` on
+/// any failure so callers cannot distinguish missing from forbidden.
 pub(super) struct BuildAccessContext {
-    pub build: MBuild,
+    pub build_job: MBuildJob,
+    pub anchor: MDerivationBuild,
     pub organization: MOrganization,
 }
 
 impl BuildAccessContext {
-    /// Load build + organization without enforcing an access check.
+    /// Load build_job + anchor + organization without enforcing an access check.
     ///
     /// Use this when access is gated by custom logic (e.g. download tokens).
     pub(super) async fn load_unguarded(
         state: &Arc<ServerState>,
-        build_id: BuildId,
+        build_job_id: BuildJobId,
     ) -> WebResult<Self> {
-        let build = EBuild::find_by_id(build_id)
+        let build_job = EBuildJob::find_by_id(build_job_id)
             .one(&state.web_db)
             .await?
             .or_not_found("Build")?;
 
-        let evaluation = EEvaluation::find_by_id(build.evaluation)
+        let anchor = EDerivationBuild::find_by_id(build_job.derivation_build)
             .one(&state.web_db)
             .await?
             .ok_or_else(|| {
                 tracing::warn!(
-                    evaluation_id = %build.evaluation,
-                    %build_id,
-                    "Evaluation not found for build",
+                    anchor_id = %build_job.derivation_build,
+                    build_job_id = %build_job_id,
+                    "DerivationBuild anchor not found for build_job",
+                );
+                WebError::data_inconsistency("Build")
+            })?;
+
+        let evaluation = EEvaluation::find_by_id(build_job.evaluation)
+            .one(&state.web_db)
+            .await?
+            .ok_or_else(|| {
+                tracing::warn!(
+                    evaluation_id = %build_job.evaluation,
+                    build_job_id = %build_job_id,
+                    "Evaluation not found for build_job",
                 );
                 WebError::data_inconsistency("Build")
             })?;
@@ -100,23 +113,24 @@ impl BuildAccessContext {
             })?;
 
         Ok(Self {
-            build,
+            build_job,
+            anchor,
             organization,
         })
     }
 
-    /// Load build + organization and enforce public/member access.
+    /// Load build_job + organization and enforce public/member access.
     ///
     /// Returns `not_found("Build")` when the build does not exist, the
-    /// organization is private, and `maybe_user` is neither a direct member
-    /// nor a member of any follower-org that points at this build via `via`.
+    /// organization is private, and `maybe_user` is neither a direct member nor
+    /// a member of another org whose evaluations also reference the derivation.
     pub(super) async fn load(
         state: &Arc<ServerState>,
-        build_id: BuildId,
+        build_job_id: BuildJobId,
         maybe_user: &Option<MUser>,
         api_key: Option<&ApiKeyContext>,
     ) -> WebResult<Self> {
-        let ctx = Self::load_unguarded(state, build_id).await?;
+        let ctx = Self::load_unguarded(state, build_job_id).await?;
 
         let direct_access = if ctx.organization.public {
             true
@@ -131,7 +145,7 @@ impl BuildAccessContext {
         }
 
         if let Some(user) = maybe_user
-            && follower_orgs_accessible(state, user, api_key, build_id).await?
+            && reachable_orgs_accessible(state, user, api_key, ctx.build_job.derivation).await?
         {
             return Ok(ctx);
         }
@@ -140,25 +154,23 @@ impl BuildAccessContext {
     }
 }
 
-async fn follower_orgs_accessible(
+/// True when `user` belongs to any org whose evaluations also reference
+/// `derivation` (a `build_job` exists for it in that org). The derivation is
+/// global and content-addressed, so any org that built it may read its log.
+async fn reachable_orgs_accessible(
     state: &Arc<ServerState>,
     user: &MUser,
     api_key: Option<&ApiKeyContext>,
-    leader_build_id: BuildId,
+    derivation: DerivationId,
 ) -> WebResult<bool> {
-    let follower_builds: Vec<MBuild> = EBuild::find()
-        .filter(CBuild::Via.eq(leader_build_id))
-        .all(&state.web_db)
-        .await?;
-    if follower_builds.is_empty() {
+    let jobs = gradient_db::build_jobs_for_derivation(&state.web_db, derivation).await?;
+    if jobs.is_empty() {
         return Ok(false);
     }
 
-    let follower_eval_ids: Vec<EvaluationId> =
-        follower_builds.into_iter().map(|b| b.evaluation).collect();
-
+    let eval_ids: Vec<EvaluationId> = jobs.into_iter().map(|j| j.evaluation).collect();
     let evals = EEvaluation::find()
-        .filter(CEvaluation::Id.is_in(follower_eval_ids))
+        .filter(CEvaluation::Id.is_in(eval_ids))
         .all(&state.web_db)
         .await?;
 
@@ -180,47 +192,12 @@ async fn follower_orgs_accessible(
     Ok(false)
 }
 
-/// The build whose stored log should be served for `build`.
-///
-/// A `Substituted` (or cache-completed) build produces no log of its own, so
-/// fall back to the most recent prior build of the same derivation that has one
-/// - the build that originally produced those outputs.
-pub(super) async fn effective_log_id(state: &Arc<ServerState>, build: &MBuild) -> BuildId {
-    let own = latest_attempt_log_id(&state.web_db, build.id)
-        .await
-        .unwrap_or(build.id);
-    if log_has_content(state, own).await {
-        return own;
-    }
-    if matches!(build.status, BuildStatus::Substituted | BuildStatus::Completed) {
-        let siblings = EBuild::find()
-            .filter(CBuild::Derivation.eq(build.derivation))
-            .filter(CBuild::Id.ne(build.id))
-            .filter(CBuild::Status.is_in([BuildStatus::Completed, BuildStatus::Substituted]))
-            .order_by_desc(CBuild::CreatedAt)
-            .limit(8)
-            .all(&state.web_db)
-            .await
-            .unwrap_or_default();
-        for sib in siblings {
-            let key = latest_attempt_log_id(&state.web_db, sib.id)
-                .await
-                .unwrap_or(sib.id);
-            if log_has_content(state, key).await {
-                return key;
-            }
-        }
-    }
-    own
-}
-
-/// A log exists either as finalized zstd chunks or an in-progress inline blob.
-async fn log_has_content(state: &Arc<ServerState>, log_key: BuildId) -> bool {
-    let has_chunk = gradient_entity::build_log_chunk::Entity::find()
-        .filter(gradient_entity::build_log_chunk::Column::Build.eq(log_key))
-        .one(&state.web_db)
-        .await
-        .map(|r| r.is_some())
-        .unwrap_or(false);
-    has_chunk || matches!(state.log_storage.read(log_key).await, Ok(b) if !b.is_empty())
+/// The attempt id whose stored log should be served for an anchor: its latest
+/// attempt. Substituted/cache-completed anchors may never have produced an
+/// attempt, in which case there is no log to read.
+pub(super) async fn effective_log_id(
+    state: &Arc<ServerState>,
+    anchor: &MDerivationBuild,
+) -> Option<BuildAttemptId> {
+    latest_attempt_id(&state.web_db, anchor.id).await.ok().flatten()
 }
