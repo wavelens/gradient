@@ -79,21 +79,20 @@ async fn query_fetched_paths(updater: &mut JobUpdater, all_paths: Vec<String>) -
 /// every store path needed to interpret a produced `.drv` is in the cache
 /// before this eval job's `JobCompleted` reaches the server.
 ///
-/// Errors during closure expansion or individual NAR pushes are logged but
-/// not fatal - operators see them in the worker log, and downstream builds
-/// surface the missing path through their existing prefetch error path.
+/// A failed closure upload fails the evaluation (propagated to the caller),
+/// so a downstream build never starts against a source the cache is missing.
 pub(crate) async fn push_drv_closure(
     drv_paths: &[String],
     updater: &mut JobUpdater,
     store: &LocalNixStore,
-) {
+) -> Result<()> {
     if drv_paths.is_empty() {
-        return;
+        return Ok(());
     }
 
     let closure = store.collect_runtime_closure(drv_paths).await;
     if closure.is_empty() {
-        return;
+        return Ok(());
     }
     tracing::debug!(
         seeds = drv_paths.len(),
@@ -104,26 +103,33 @@ pub(crate) async fn push_drv_closure(
     let paths: Vec<String> = closure.into_iter().collect();
     let cache_entries = query_fetched_paths(updater, paths).await;
     for cp in &cache_entries {
-        push_one_fetched_nar(updater, cp, store).await;
+        upload_one_nar(updater, cp, store).await?;
     }
+
+    Ok(())
 }
 
-/// Upload one fetched input path's NAR to the cache - either via a presigned
-/// PUT URL (S3) or via the chunked WS `NarPush` fallback (local storage).
-///
-/// Errors are logged and swallowed; a failed push for a source path is not
-/// fatal - the build proceeds and fails cleanly if the daemon truly needs it.
-async fn push_one_fetched_nar(updater: &mut JobUpdater, cp: &CachedPath, store: &LocalNixStore) {
+/// Upload one path's NAR using the method the server advertised in its
+/// `CacheQuery {Push}` response: a presigned S3 PUT straight to object storage
+/// when available, else the chunked WS `NarPush` fallback (local stores).
+/// Already-cached paths are skipped. Errors are returned so the caller decides
+/// whether they are fatal.
+pub(crate) async fn upload_one_nar(
+    updater: &JobUpdater,
+    cp: &CachedPath,
+    store: &LocalNixStore,
+) -> Result<()> {
     match cp.as_info() {
         CachedPathInfo::Cached { .. } => {
-            tracing::debug!(store_path = %cp.path, "skipping NAR push - already cached");
+            tracing::debug!(store_path = %cp.path, "skipping NAR upload - already cached");
+            Ok(())
         }
         CachedPathInfo::Uncached {
             path,
             upload_url: Some(url),
         } => {
             tracing::debug!(store_path = %path, "uploading NAR via presigned PUT URL");
-            if let Err(e) = nar::upload_presigned(
+            nar::upload_presigned(
                 &updater.job_id,
                 path,
                 url,
@@ -133,20 +139,12 @@ async fn push_one_fetched_nar(updater: &mut JobUpdater, cp: &CachedPath, store: 
                 Some(store),
             )
             .await
-            {
-                tracing::warn!(store_path = %path, error = %e, "presigned NAR upload failed; continuing");
-            }
         }
         CachedPathInfo::Uncached {
             path,
             upload_url: None,
         } => {
-            if let Err(e) =
-                nar::push_direct(&updater.job_id, path, &updater.writer, &updater.nar_recv, Some(store))
-                    .await
-            {
-                tracing::warn!(store_path = %path, error = %e, "failed to push NAR for fetched input; continuing");
-            }
+            nar::push_direct(&updater.job_id, path, &updater.writer, &updater.nar_recv, Some(store)).await
         }
     }
 }
@@ -241,7 +239,7 @@ impl JobExecutor {
                     let cache_entries =
                         query_fetched_paths(updater, outcome.archived_paths.clone()).await;
                     for cp in &cache_entries {
-                        push_one_fetched_nar(updater, cp, &self.store).await;
+                        upload_one_nar(updater, cp, &self.store).await?;
                     }
 
                     updater.report_fetch_result(outcome.flake_source.clone())?;

@@ -206,10 +206,11 @@ impl JobReporter for RecordingJobReporter {
         Ok(())
     }
 
-    async fn push_drv_closure(&mut self, drv_paths: &[String]) {
+    async fn push_drv_closure(&mut self, drv_paths: &[String]) -> Result<()> {
         self.events.push(ReportedEvent::DrvClosurePush {
             drv_paths: drv_paths.to_vec(),
         });
+        Ok(())
     }
 
     async fn report_building(&mut self, build_id: String) -> Result<()> {

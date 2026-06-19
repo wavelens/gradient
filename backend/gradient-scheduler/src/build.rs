@@ -25,7 +25,7 @@ use sea_orm::{
 };
 use tracing::{error, info, warn};
 
-use super::jobs::PendingBuildJob;
+use super::jobs::{PendingBuildJob, PendingJob};
 use crate::dispatch_mode::{arch_available, decide_dispatch_mode, BuildDispatchMode};
 use gradient_types::BuildOutputMetadata;
 use gradient_types::proto::BuildFailureKind;
@@ -1041,6 +1041,50 @@ async fn persist_waiting_reason(
 
     if let Err(e) = res {
         warn!(error = %e, %evaluation_id, "failed to persist waiting_reason");
+    }
+}
+
+/// Re-queue the in-flight jobs orphaned by a worker disconnect so they
+/// re-dispatch instead of lingering in a non-terminal DB status. Builds move
+/// `Building -> Queued`; evaluations (which the state machine only lets reach
+/// `Queued` via `Waiting`) park to `Waiting` so the reconciler that runs right
+/// after recovers them to `Queued` once an eval-capable worker is free.
+pub async fn requeue_orphaned_jobs(state: &Arc<ServerState>, orphaned: &[PendingJob]) {
+    for job in orphaned {
+        if let Some(build_id) = job.build_id() {
+            match EBuild::find_by_id(build_id).one(&state.worker_db).await {
+                Ok(Some(build)) if build.status == BuildStatus::Building => {
+                    update_build_status(&state.db(), build, BuildStatus::Queued).await;
+                }
+                Ok(_) => {}
+                Err(e) => warn!(error = %e, %build_id, "requeue orphaned build: load failed"),
+            }
+
+            continue;
+        }
+
+        let evaluation_id = job.evaluation_id();
+        match EEvaluation::find_by_id(evaluation_id).one(&state.worker_db).await {
+            Ok(Some(eval))
+                if matches!(
+                    eval.status,
+                    EvaluationStatus::Fetching
+                        | EvaluationStatus::EvaluatingFlake
+                        | EvaluationStatus::EvaluatingDerivation
+                ) =>
+            {
+                persist_waiting_reason(
+                    state,
+                    eval.id,
+                    &eval.waiting_reason,
+                    Some(&WaitingReason::eval_workers(EvalCapability::Eval, 0)),
+                )
+                .await;
+                update_evaluation_status(&state.db(), eval, EvaluationStatus::Waiting).await;
+            }
+            Ok(_) => {}
+            Err(e) => warn!(error = %e, %evaluation_id, "requeue orphaned eval: load failed"),
+        }
     }
 }
 
