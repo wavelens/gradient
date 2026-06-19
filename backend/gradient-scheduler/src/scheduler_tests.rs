@@ -333,7 +333,7 @@ async fn record_eval_message_inserts_for_active_build_job() {
 
     let eval_id = EvaluationId::now_v7();
     let peer = OrganizationId::now_v7();
-    let build_id = BuildId::now_v7();
+    let build_id = DerivationBuildId::now_v7();
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_exec_results([MockExecResult {
@@ -348,7 +348,7 @@ async fn record_eval_message_inserts_for_active_build_job() {
         .enqueue_build_job(
             "jbuild".into(),
             PendingBuildJob {
-                build_id,
+                derivation_build: build_id,
                 evaluation_id: eval_id,
                 peer_id: peer,
                 job: BuildJob {
@@ -476,8 +476,8 @@ async fn cancel_evaluation_jobs_drops_eval_and_build_jobs() {
     let scheduler = test_scheduler();
     let peer = OrganizationId::now_v7();
     let eval_id = EvaluationId::now_v7();
-    let build_id_a = BuildId::now_v7();
-    let build_id_b = BuildId::now_v7();
+    let build_id_a = DerivationBuildId::now_v7();
+    let build_id_b = DerivationBuildId::now_v7();
 
     scheduler
         .enqueue_eval_job(
@@ -516,7 +516,7 @@ async fn cancel_evaluation_jobs_drops_eval_and_build_jobs() {
             .enqueue_build_job(
                 job_id,
                 PendingBuildJob {
-                    build_id,
+                    derivation_build: build_id,
                     evaluation_id: eval_id,
                     peer_id: peer,
                     job: BuildJob {
