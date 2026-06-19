@@ -9,7 +9,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use gradient_types::ids::{
-    BuildId, CommitId, DispatchedJobId, EvaluationId, OrganizationId, ProjectId,
+    CommitId, DerivationBuildId, DispatchedJobId, EvaluationId, OrganizationId, ProjectId,
 };
 use gradient_types::proto::{
     BuildJob, CandidateScore, FlakeJob, FlakeSource, FlakeTask, Job, JobCandidate, JobKind,
@@ -54,7 +54,9 @@ impl PendingEvalJob {
 
 #[derive(Debug, Clone)]
 pub struct PendingBuildJob {
-    pub build_id: BuildId,
+    /// Global build-once anchor (`derivation_build`) this job builds. Round-trips
+    /// through the worker as the opaque `BuildTask.build_id` string.
+    pub derivation_build: DerivationBuildId,
     pub evaluation_id: EvaluationId,
     /// Peer (org/cache/proxy) that owns this job.
     pub peer_id: OrganizationId,
@@ -182,9 +184,9 @@ impl PendingJob {
         }
     }
 
-    pub fn build_id(&self) -> Option<BuildId> {
+    pub fn derivation_build(&self) -> Option<DerivationBuildId> {
         match self {
-            PendingJob::Build(j) => Some(j.build_id),
+            PendingJob::Build(j) => Some(j.derivation_build),
             PendingJob::Eval(_) => None,
         }
     }
@@ -245,7 +247,7 @@ pub struct Assignment {
 /// Owned snapshot of a dispatch decision for the `dispatched_job` table.
 pub struct DispatchRecord {
     pub kind: i16,
-    pub build_id: Option<BuildId>,
+    pub derivation_build: Option<DerivationBuildId>,
     pub evaluation_id: EvaluationId,
     pub organization: OrganizationId,
     pub project: Option<ProjectId>,
@@ -303,7 +305,7 @@ pub struct WorkerJobScore {
 pub struct PendingJobInfo {
     pub kind: i16,
     pub evaluation_id: EvaluationId,
-    pub build_id: Option<BuildId>,
+    pub derivation_build: Option<DerivationBuildId>,
     pub organization: OrganizationId,
     pub queued_at: chrono::NaiveDateTime,
     pub dependency_count: u32,
@@ -322,7 +324,7 @@ pub struct DecisionCandidate {
     pub job_id: String,
     pub kind: i16,
     pub organization: OrganizationId,
-    pub build_id: Option<BuildId>,
+    pub derivation_build: Option<DerivationBuildId>,
     pub evaluation_id: EvaluationId,
     pub pname: Option<String>,
     pub score: f64,
@@ -357,7 +359,7 @@ pub struct CandidateDetail {
     pub id: DispatchedJobId,
     pub kind: i16,
     pub organization: OrganizationId,
-    pub build_id: Option<BuildId>,
+    pub derivation_build: Option<DerivationBuildId>,
     pub evaluation_id: EvaluationId,
     pub pname: Option<String>,
     pub score: f64,
@@ -466,7 +468,7 @@ impl JobTracker {
                     id: c.id,
                     kind: c.kind,
                     organization: c.organization,
-                    build_id: c.build_id,
+                    derivation_build: c.derivation_build,
                     evaluation_id: c.evaluation_id,
                     pname: c.pname.clone(),
                     score: c.score,
@@ -640,7 +642,7 @@ impl JobTracker {
                     job_id: (*id).clone(),
                     kind: job.kind_disc(),
                     organization: job.peer_id(),
-                    build_id: job.build_id(),
+                    derivation_build: job.derivation_build(),
                     evaluation_id: job.evaluation_id(),
                     pname: job.pname(),
                     score: sc.total,
@@ -682,13 +684,13 @@ impl JobTracker {
         // Reuse the winner's already-computed breakdown/context for the
         // `dispatched_job` record; only build-specific fields are derived here.
         let dispatch_record = self.pending.get(&job_id).map(|job| {
-            let (kind_disc, build_id, project) = match job {
-                PendingJob::Build(b) => (1i16, Some(b.build_id), None),
+            let (kind_disc, derivation_build, project) = match job {
+                PendingJob::Build(b) => (1i16, Some(b.derivation_build), None),
                 PendingJob::Eval(e) => (0i16, None, e.project_id),
             };
             DispatchRecord {
                 kind: kind_disc,
-                build_id,
+                derivation_build,
                 evaluation_id: job.evaluation_id(),
                 organization: job.peer_id(),
                 project,
@@ -846,14 +848,14 @@ impl JobTracker {
         self.pending
             .values()
             .map(|job| {
-                let (kind, build_id, pname) = match job {
-                    PendingJob::Build(b) => (1i16, Some(b.build_id), b.pname.clone()),
+                let (kind, derivation_build, pname) = match job {
+                    PendingJob::Build(b) => (1i16, Some(b.derivation_build), b.pname.clone()),
                     PendingJob::Eval(_) => (0i16, None, None),
                 };
                 PendingJobInfo {
                     kind,
                     evaluation_id: job.evaluation_id(),
-                    build_id,
+                    derivation_build,
                     organization: job.peer_id(),
                     queued_at: job.queued_at(),
                     dependency_count: job.dependency_count(),
@@ -968,13 +970,14 @@ mod tests {
         architecture: &str,
         required_features: Vec<String>,
     ) -> PendingJob {
+        let derivation_build = DerivationBuildId::now_v7();
         PendingJob::Build(PendingBuildJob {
-            build_id: BuildId::now_v7(),
+            derivation_build,
             evaluation_id: EvaluationId::now_v7(),
             peer_id: peer,
             job: BuildJob {
                 builds: vec![BuildTask {
-                    build_id: BuildId::now_v7().to_string(),
+                    build_id: derivation_build.to_string(),
                     drv_path: "/nix/store/abc.drv".into(),
                     external_cached: false,
                     timeout_secs: None,
@@ -1730,7 +1733,7 @@ mod tests {
         assert_eq!(snap.len(), 1);
         assert_eq!(snap[0].kind, 0);
         assert_eq!(snap[0].organization, org);
-        assert!(snap[0].build_id.is_none());
+        assert!(snap[0].derivation_build.is_none());
     }
 
     #[test]

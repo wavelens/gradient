@@ -9,7 +9,7 @@
 //! Three loops run concurrently:
 //! - `trigger_dispatch::trigger_dispatch_loop`: fires polling/time triggers → creates evaluations
 //! - `eval_dispatch_loop`: finds `Queued` evaluations → enqueues `FlakeJob`s
-//! - `build_dispatch_loop`: finds ready `Queued` builds → enqueues `BuildJob`s
+//! - `build_dispatch_loop`: finds ready `Queued` `derivation_build` anchors → enqueues `BuildJob`s
 //!
 //! The eval/build loops are idempotent: re-enqueueing the same job_id overwrites
 //! the existing entry in the `JobTracker` without harm.
@@ -344,7 +344,7 @@ async fn build_dispatch_loop(scheduler: Arc<Scheduler>) {
     }
 }
 
-/// Move `FailedTransient` builds whose backoff window has elapsed back to
+/// Move `FailedTransient` anchors whose backoff window has elapsed back to
 /// `Queued` so the ready-builds pass can dispatch them again.
 pub(crate) async fn requeue_transient_failures(scheduler: &Scheduler) -> anyhow::Result<()> {
     use crate::build::retry_backoff_elapsed;
@@ -352,13 +352,13 @@ pub(crate) async fn requeue_transient_failures(scheduler: &Scheduler) -> anyhow:
     let base = state.config.eval.build_retry_backoff_secs;
     let now = gradient_types::now();
 
-    let transient = EBuild::find()
-        .filter(CBuild::Status.eq(BuildStatus::FailedTransient))
+    let transient = EDerivationBuild::find()
+        .filter(CDerivationBuild::Status.eq(BuildStatus::FailedTransient))
         .all(&state.worker_db)
         .await?;
-    for build in transient {
-        if retry_backoff_elapsed(build.attempt, build.updated_at, now, base) {
-            gradient_db::update_build_status(&state.db(), build, BuildStatus::Queued)
+    for anchor in transient {
+        if retry_backoff_elapsed(anchor.attempt, anchor.updated_at, now, base) {
+            gradient_db::update_derivation_build_status(&state.db(), anchor, BuildStatus::Queued)
                 .await;
         }
     }
@@ -391,8 +391,11 @@ struct BuildDispatchMaps {
     /// derivation_id → historical resource prediction (default when the
     /// derivation has no `pname` or no matching history).
     histories: HashMap<DerivationId, gradient_score::HistoryPrediction>,
-    /// build_id → consecutive `SubstituteUnavailable` miss count. Absent ⇒ 0.
-    substitute_misses: HashMap<BuildId, i64>,
+    /// derivation_build → consecutive `SubstituteUnavailable` miss count. Absent ⇒ 0.
+    substitute_misses: HashMap<DerivationBuildId, i64>,
+    /// derivation_build → the evaluation driving this anchor's dispatch (used for
+    /// peer routing and `build_job` attribution on win). Prefers a non-terminal eval.
+    driving_eval: HashMap<DerivationBuildId, EvaluationId>,
     substitute_miss_escalation_threshold: i64,
     connected_architectures: HashSet<String>,
     build_retry_backoff_secs: u64,
@@ -404,26 +407,40 @@ impl BuildDispatchMaps {
     /// Issue one IN-list query per table and build all lookup maps.
     async fn load(
         state: &Arc<ServerState>,
-        builds: &[MBuild],
+        anchors: &[MDerivationBuild],
         uses_history: bool,
         connected_architectures: HashSet<String>,
     ) -> anyhow::Result<Self> {
         let default_timeout_secs = nonzero(state.config.eval.build_default_timeout_secs);
         let default_max_silent_secs = nonzero(state.config.eval.build_default_max_silent_secs);
 
-        let drv_ids: Vec<DerivationId> = builds.iter().map(|b| b.derivation).collect();
-        let build_ids: Vec<BuildId> = builds.iter().map(|b| b.id).collect();
-        let eval_ids: Vec<EvaluationId> = builds
-            .iter()
-            .map(|b| b.evaluation)
+        let drv_ids: Vec<DerivationId> = anchors.iter().map(|a| a.derivation).collect();
+        let anchor_ids: Vec<DerivationBuildId> = anchors.iter().map(|a| a.id).collect();
+
+        let db = &state.worker_db;
+        let substitute_misses = gradient_db::substitute_miss_counts(db, &anchor_ids)
+            .await
+            .unwrap_or_default();
+
+        // Resolve the eval driving each anchor's dispatch: any referencing
+        // build_job, preferring one whose evaluation is not terminal. The driving
+        // eval is the job's peer-routing source and the build_job attributed on win.
+        let mut driving_eval: HashMap<DerivationBuildId, EvaluationId> = HashMap::new();
+        let mut jobs_by_anchor: HashMap<DerivationBuildId, Vec<EvaluationId>> = HashMap::new();
+        for anchor in anchors {
+            let jobs = gradient_db::build_jobs_for_derivation(db, anchor.derivation)
+                .await
+                .unwrap_or_default();
+            jobs_by_anchor.insert(anchor.id, jobs.iter().map(|j| j.evaluation).collect());
+        }
+
+        let eval_ids: Vec<EvaluationId> = jobs_by_anchor
+            .values()
+            .flatten()
+            .copied()
             .collect::<std::collections::HashSet<_>>()
             .into_iter()
             .collect();
-
-        let db = &state.worker_db;
-        let substitute_misses = gradient_db::substitute_miss_counts(db, &build_ids)
-            .await
-            .unwrap_or_default();
 
         let derivations: HashMap<DerivationId, MDerivation> = gradient_db::fetch_in_chunks(
             &drv_ids,
@@ -442,6 +459,22 @@ impl BuildDispatchMaps {
         .into_iter()
         .map(|e| (e.id, e))
         .collect();
+
+        // Pick the driving eval per anchor: prefer one whose evaluation is not
+        // terminal so dispatch attributes the build to a live eval.
+        for (anchor_id, eval_list) in &jobs_by_anchor {
+            let chosen = eval_list
+                .iter()
+                .find(|e| {
+                    evaluations
+                        .get(*e)
+                        .is_some_and(|ev| !eval_is_terminal(ev.status))
+                })
+                .or_else(|| eval_list.first());
+            if let Some(e) = chosen {
+                driving_eval.insert(*anchor_id, *e);
+            }
+        }
 
         // peer_id resolution: every evaluation must belong to a project.
         let project_ids: Vec<ProjectId> = evaluations
@@ -652,6 +685,7 @@ impl BuildDispatchMaps {
             closure_sizes,
             histories,
             substitute_misses,
+            driving_eval,
             substitute_miss_escalation_threshold: state
                 .config
                 .eval
@@ -682,27 +716,31 @@ impl BuildDispatchMaps {
             .unwrap_or_default()
     }
 
-    /// Assemble a `(job_id, PendingBuildJob)` pair for `build`, or `None` if
+    /// Assemble a `(job_id, PendingBuildJob)` pair for `anchor`, or `None` if
     /// any required map lookup fails (logged as errors at call site).
-    fn make_pending_job(&self, build: &MBuild) -> Option<(String, PendingBuildJob)> {
-        let derivation = self.derivations.get(&build.derivation).or_else(|| {
-            error!(build_id = %build.id, "derivation not found for build");
+    fn make_pending_job(&self, anchor: &MDerivationBuild) -> Option<(String, PendingBuildJob)> {
+        let derivation = self.derivations.get(&anchor.derivation).or_else(|| {
+            error!(derivation_build = %anchor.id, "derivation not found for anchor");
             None
         })?;
-        let eval = self.evaluations.get(&build.evaluation).or_else(|| {
-            error!(build_id = %build.id, "evaluation not found for build");
+        let eval_id = self.driving_eval.get(&anchor.id).copied().or_else(|| {
+            error!(derivation_build = %anchor.id, "no driving evaluation for anchor");
+            None
+        })?;
+        let eval = self.evaluations.get(&eval_id).or_else(|| {
+            error!(derivation_build = %anchor.id, "driving evaluation row not found");
             None
         })?;
         let peer_id = self.resolve_peer_id(eval).or_else(|| {
-            error!(build_id = %build.id, "could not resolve peer_id for build");
+            error!(derivation_build = %anchor.id, "could not resolve peer_id for anchor");
             None
         })?;
 
-        let job_id = format!("build:{}", build.id);
-        let miss_count = self.substitute_misses.get(&build.id).copied().unwrap_or(0);
+        let job_id = format!("build:{}", anchor.id);
+        let miss_count = self.substitute_misses.get(&anchor.id).copied().unwrap_or(0);
         let arch_has_worker = arch_available(&self.connected_architectures, &derivation.architecture);
         let mode = decide_dispatch_mode(
-            build.substitutable,
+            anchor.substitutable,
             miss_count,
             self.substitute_miss_escalation_threshold,
             arch_has_worker,
@@ -711,12 +749,12 @@ impl BuildDispatchMaps {
         if mode == BuildDispatchMode::SubstituteStalled
             && !crate::build::retry_backoff_elapsed(
                 miss_count as i32,
-                build.updated_at,
+                anchor.updated_at,
                 now(),
                 self.build_retry_backoff_secs,
             )
         {
-            debug!(build_id = %build.id, "substitute stalled (no arch worker); backing off re-probe");
+            debug!(derivation_build = %anchor.id, "substitute stalled (no arch worker); backing off re-probe");
             return None;
         }
 
@@ -724,46 +762,44 @@ impl BuildDispatchMaps {
             mode,
             BuildDispatchMode::SubstituteBuiltin | BuildDispatchMode::SubstituteStalled
         );
-        // Placeholder; the real value is set per-assignment in
-        // `job_handlers::apply_sign_flag` based on the receiving worker's
-        // `sign` capability.
+        // The worker round-trips this anchor uuid as the opaque BuildTask.build_id.
         let build_job = BuildJob {
             builds: vec![BuildTask {
-                build_id: build.id.to_string(),
+                build_id: anchor.id.to_string(),
                 drv_path: derivation.store_path(),
                 external_cached: substitute,
-                timeout_secs: resolve_limit(build.timeout_secs, self.default_timeout_secs),
-                max_silent_secs: resolve_limit(build.max_silent_secs, self.default_max_silent_secs),
+                timeout_secs: resolve_limit(anchor.timeout_secs, self.default_timeout_secs),
+                max_silent_secs: resolve_limit(anchor.max_silent_secs, self.default_max_silent_secs),
             }],
         };
         let (architecture, required_features) = if substitute {
             ("builtin".to_string(), Vec::new())
         } else {
-            (derivation.architecture.clone(), self.required_features(build.derivation))
+            (derivation.architecture.clone(), self.required_features(anchor.derivation))
         };
 
         let pending = PendingBuildJob {
-            build_id: build.id,
-            evaluation_id: build.evaluation,
+            derivation_build: anchor.id,
+            evaluation_id: eval_id,
             peer_id,
             job: build_job,
             required_paths: self
                 .direct_inputs
-                .get(&build.derivation)
+                .get(&anchor.derivation)
                 .cloned()
                 .unwrap_or_default(),
             architecture,
             required_features,
-            dependency_count: self.dep_counts.get(&build.derivation).copied().unwrap_or(0),
-            closure_size: self.closure_sizes.get(&build.derivation).copied().flatten(),
+            dependency_count: self.dep_counts.get(&anchor.derivation).copied().unwrap_or(0),
+            closure_size: self.closure_sizes.get(&anchor.derivation).copied().flatten(),
             prefer_local_build: derivation.prefer_local_build,
             is_fixed_output: derivation.is_fixed_output,
             history: self
                 .histories
-                .get(&build.derivation)
+                .get(&anchor.derivation)
                 .copied()
                 .unwrap_or_default(),
-            queued_at: build.updated_at,
+            queued_at: anchor.updated_at,
             ready_at: now(),
             rescore_count: 0,
             pname: derivation.pname.clone(),
@@ -774,6 +810,14 @@ impl BuildDispatchMaps {
     }
 }
 
+/// Whether an evaluation has reached a terminal status (won't drive new builds).
+fn eval_is_terminal(status: EvaluationStatus) -> bool {
+    matches!(
+        status,
+        EvaluationStatus::Completed | EvaluationStatus::Failed | EvaluationStatus::Aborted
+    )
+}
+
 pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Result<()> {
     if scheduler.draining.load(Ordering::Relaxed) {
         return Ok(());
@@ -781,89 +825,77 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
 
     let state = &scheduler.state;
 
-    // Ready builds: status = Queued, owning evaluation not parked (Waiting), and
-    // every dependency build is Completed or Substituted. The Waiting guard keeps
-    // an aborting evaluation's builds from being dispatched while it is torn down.
-    // Ordered by dependency count desc (integration builds first), then by age.
-    // Driven off the `idx-build-ready-queue` partial index for the outer
-    // filter, and the `idx-build-evaluation-derivation` composite for the
-    // double-`NOT EXISTS` antijoin (`for every dep edge, a Completed or
-    // Substituted build exists in the same evaluation`).
-    let builds_sql = sea_orm::Statement::from_string(
+    // Ready anchors: a global `derivation_build` is Queued and every dependency
+    // anchor over `derivation_dependency` is terminal-success (Completed or
+    // Substituted). Promotion already maintains this invariant, but the antijoin
+    // keeps dispatch correct even if an anchor is hand-queued. Ordered by
+    // dependency count desc (integration builds first), then by age.
+    let anchors_sql = sea_orm::Statement::from_string(
         sea_orm::DbBackend::Postgres,
         format!(
             r#"
-            SELECT b.*
-            FROM public.build b
-            WHERE b.status = {queued}
-              AND b.via IS NULL
-              AND NOT EXISTS (
-                  SELECT 1
-                  FROM public.evaluation e
-                  WHERE e.id = b.evaluation
-                    AND e.status = {waiting}
-              )
+            SELECT db.*
+            FROM public.derivation_build db
+            WHERE db.status = {queued}
               AND NOT EXISTS (
                   SELECT 1
                   FROM public.derivation_dependency dep_edge
-                  WHERE dep_edge.derivation = b.derivation
+                  WHERE dep_edge.derivation = db.derivation
                     AND NOT EXISTS (
                         SELECT 1
-                        FROM public.build dep_build
-                        WHERE dep_build.evaluation = b.evaluation
-                          AND dep_build.derivation = dep_edge.dependency
-                          AND dep_build.status IN ({completed}, {substituted})
+                        FROM public.derivation_build dep_db
+                        WHERE dep_db.derivation = dep_edge.dependency
+                          AND dep_db.status IN ({completed}, {substituted})
                     )
               )
             ORDER BY
                 (SELECT count(*)
                    FROM public.derivation_dependency dd
-                  WHERE dd.derivation = b.derivation) DESC,
-                b.updated_at ASC
+                  WHERE dd.derivation = db.derivation) DESC,
+                db.updated_at ASC
         "#,
             queued = i32::from(BuildStatus::Queued),
             completed = i32::from(BuildStatus::Completed),
             substituted = i32::from(BuildStatus::Substituted),
-            waiting = i32::from(EvaluationStatus::Waiting),
         ),
     );
 
     let started = std::time::Instant::now();
-    let builds = EBuild::find()
-        .from_raw_sql(builds_sql)
+    let anchors = EDerivationBuild::find()
+        .from_raw_sql(anchors_sql)
         .all(&state.worker_db)
         .await?;
-    if builds.is_empty() {
+    if anchors.is_empty() {
         return Ok(());
     }
 
-    // Filter out builds already in the in-memory tracker - one lock acquisition
-    // for the whole pass instead of per-build.
-    let new_builds: Vec<MBuild> = {
+    // Filter out anchors already in the in-memory tracker - one lock acquisition
+    // for the whole pass instead of per-anchor.
+    let new_anchors: Vec<MDerivationBuild> = {
         let tracker = scheduler.job_tracker.read().await;
-        builds
+        anchors
             .into_iter()
-            .filter(|b| !tracker.contains_job(&format!("build:{}", b.id)))
+            .filter(|a| !tracker.contains_job(&format!("build:{}", a.id)))
             .collect()
     };
-    if new_builds.is_empty() {
+    if new_anchors.is_empty() {
         return Ok(());
     }
 
-    // Stamp ready_at the first time a build becomes dispatchable (deps satisfied).
-    let ready_ids: Vec<_> = new_builds.iter().map(|b| b.id).collect();
+    // Stamp ready_at the first time an anchor becomes dispatchable (deps satisfied).
+    let ready_ids: Vec<_> = new_anchors.iter().map(|a| a.id).collect();
     let db = &state.worker_db;
     if let Err(e) = gradient_db::for_each_chunk(&ready_ids, |chunk| async move {
-        EBuild::update_many()
-            .col_expr(CBuild::ReadyAt, sea_orm::sea_query::Expr::value(now()))
-            .filter(CBuild::Id.is_in(chunk))
-            .filter(CBuild::ReadyAt.is_null())
+        EDerivationBuild::update_many()
+            .col_expr(CDerivationBuild::ReadyAt, sea_orm::sea_query::Expr::value(now()))
+            .filter(CDerivationBuild::Id.is_in(chunk))
+            .filter(CDerivationBuild::ReadyAt.is_null())
             .exec(db)
             .await
     })
     .await
     {
-        error!(error = %e, "failed to stamp build ready_at");
+        error!(error = %e, "failed to stamp anchor ready_at");
     }
 
     let connected_architectures: HashSet<String> = scheduler
@@ -877,15 +909,15 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
 
     let maps = BuildDispatchMaps::load(
         state,
-        &new_builds,
+        &new_anchors,
         scheduler.policy.uses_history(),
         connected_architectures,
     )
     .await?;
 
     let mut enqueued = 0usize;
-    for build in new_builds {
-        let Some((job_id, pending)) = maps.make_pending_job(&build) else {
+    for anchor in new_anchors {
+        let Some((job_id, pending)) = maps.make_pending_job(&anchor) else {
             continue;
         };
         scheduler.enqueue_build_job(job_id, pending).await;

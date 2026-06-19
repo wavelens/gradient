@@ -10,37 +10,37 @@ use std::sync::Mutex;
 use anyhow::Result;
 use futures::future::BoxFuture;
 use gradient_storage::LogStorage;
-use gradient_types::ids::BuildId;
+use gradient_types::ids::BuildAttemptId;
 
 /// Minimal no-op log storage for tests.
 #[derive(Debug, Default)]
 pub struct NoopLogStorage;
 
 impl LogStorage for NoopLogStorage {
-    fn append<'a>(&'a self, _build_id: BuildId, _text: &'a str) -> BoxFuture<'a, Result<()>> {
+    fn append<'a>(&'a self, _build_id: BuildAttemptId, _text: &'a str) -> BoxFuture<'a, Result<()>> {
         Box::pin(async { Ok(()) })
     }
-    fn read<'a>(&'a self, _build_id: BuildId) -> BoxFuture<'a, Result<String>> {
+    fn read<'a>(&'a self, _build_id: BuildAttemptId) -> BoxFuture<'a, Result<String>> {
         Box::pin(async { Ok(String::new()) })
     }
-    fn delete<'a>(&'a self, _build_id: BuildId) -> BoxFuture<'a, Result<()>> {
+    fn delete<'a>(&'a self, _build_id: BuildAttemptId) -> BoxFuture<'a, Result<()>> {
         Box::pin(async { Ok(()) })
     }
-    fn list_logs<'a>(&'a self) -> BoxFuture<'a, Result<Vec<BuildId>>> {
+    fn list_logs<'a>(&'a self) -> BoxFuture<'a, Result<Vec<BuildAttemptId>>> {
         Box::pin(async { Ok(Vec::new()) })
     }
     fn write_chunk<'a>(
         &'a self,
-        _build_id: BuildId,
+        _build_id: BuildAttemptId,
         _index: u32,
         _bytes: &'a [u8],
     ) -> BoxFuture<'a, Result<()>> {
         Box::pin(async { Ok(()) })
     }
-    fn read_chunk<'a>(&'a self, _build_id: BuildId, _index: u32) -> BoxFuture<'a, Result<Vec<u8>>> {
+    fn read_chunk<'a>(&'a self, _build_id: BuildAttemptId, _index: u32) -> BoxFuture<'a, Result<Vec<u8>>> {
         Box::pin(async { anyhow::bail!("no chunk") })
     }
-    fn delete_chunks<'a>(&'a self, _build_id: BuildId) -> BoxFuture<'a, Result<()>> {
+    fn delete_chunks<'a>(&'a self, _build_id: BuildAttemptId) -> BoxFuture<'a, Result<()>> {
         Box::pin(async { Ok(()) })
     }
 }
@@ -52,7 +52,7 @@ impl LogStorage for NoopLogStorage {
 /// the on-disk semantics of [`gradient_storage::FileLogStorage`]).
 #[derive(Debug, Default)]
 pub struct RecordingLogStorage {
-    entries: Mutex<Vec<(BuildId, String)>>,
+    entries: Mutex<Vec<(BuildAttemptId, String)>>,
 }
 
 impl RecordingLogStorage {
@@ -61,13 +61,13 @@ impl RecordingLogStorage {
     }
 
     /// Returns a clone of every recorded `(build_id, text)` append.
-    pub fn entries(&self) -> Vec<(BuildId, String)> {
+    pub fn entries(&self) -> Vec<(BuildAttemptId, String)> {
         self.entries.lock().expect("recording log mutex").clone()
     }
 }
 
 impl LogStorage for RecordingLogStorage {
-    fn append<'a>(&'a self, build_id: BuildId, text: &'a str) -> BoxFuture<'a, Result<()>> {
+    fn append<'a>(&'a self, build_id: BuildAttemptId, text: &'a str) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             self.entries
                 .lock()
@@ -77,7 +77,7 @@ impl LogStorage for RecordingLogStorage {
         })
     }
 
-    fn read<'a>(&'a self, build_id: BuildId) -> BoxFuture<'a, Result<String>> {
+    fn read<'a>(&'a self, build_id: BuildAttemptId) -> BoxFuture<'a, Result<String>> {
         Box::pin(async move {
             let entries = self.entries.lock().expect("recording log mutex");
             Ok(entries
@@ -88,7 +88,7 @@ impl LogStorage for RecordingLogStorage {
         })
     }
 
-    fn delete<'a>(&'a self, build_id: BuildId) -> BoxFuture<'a, Result<()>> {
+    fn delete<'a>(&'a self, build_id: BuildAttemptId) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             self.entries
                 .lock()
@@ -98,11 +98,11 @@ impl LogStorage for RecordingLogStorage {
         })
     }
 
-    fn list_logs<'a>(&'a self) -> BoxFuture<'a, Result<Vec<BuildId>>> {
+    fn list_logs<'a>(&'a self) -> BoxFuture<'a, Result<Vec<BuildAttemptId>>> {
         Box::pin(async move {
             use std::collections::HashSet;
             let entries = self.entries.lock().expect("recording log mutex");
-            let mut seen: HashSet<BuildId> = HashSet::new();
+            let mut seen: HashSet<BuildAttemptId> = HashSet::new();
             let mut out = Vec::new();
             for (b, _) in entries.iter() {
                 if seen.insert(*b) {
@@ -115,16 +115,16 @@ impl LogStorage for RecordingLogStorage {
 
     fn write_chunk<'a>(
         &'a self,
-        _build_id: BuildId,
+        _build_id: BuildAttemptId,
         _index: u32,
         _bytes: &'a [u8],
     ) -> BoxFuture<'a, Result<()>> {
         Box::pin(async { Ok(()) })
     }
-    fn read_chunk<'a>(&'a self, _build_id: BuildId, _index: u32) -> BoxFuture<'a, Result<Vec<u8>>> {
+    fn read_chunk<'a>(&'a self, _build_id: BuildAttemptId, _index: u32) -> BoxFuture<'a, Result<Vec<u8>>> {
         Box::pin(async { anyhow::bail!("no chunk") })
     }
-    fn delete_chunks<'a>(&'a self, _build_id: BuildId) -> BoxFuture<'a, Result<()>> {
+    fn delete_chunks<'a>(&'a self, _build_id: BuildAttemptId) -> BoxFuture<'a, Result<()>> {
         Box::pin(async { Ok(()) })
     }
 }
@@ -133,8 +133,8 @@ impl LogStorage for RecordingLogStorage {
 /// return deterministic content without going through `append`.
 #[derive(Debug, Default)]
 pub struct InMemoryLogStorage {
-    store: Mutex<HashMap<BuildId, String>>,
-    chunks: Mutex<HashMap<(BuildId, u32), Vec<u8>>>,
+    store: Mutex<HashMap<BuildAttemptId, String>>,
+    chunks: Mutex<HashMap<(BuildAttemptId, u32), Vec<u8>>>,
 }
 
 impl InMemoryLogStorage {
@@ -142,7 +142,7 @@ impl InMemoryLogStorage {
         Self::default()
     }
 
-    pub fn seed(&self, build_id: BuildId, text: impl Into<String>) {
+    pub fn seed(&self, build_id: BuildAttemptId, text: impl Into<String>) {
         self.store
             .lock()
             .expect("in-memory log mutex")
@@ -151,7 +151,7 @@ impl InMemoryLogStorage {
 }
 
 impl LogStorage for InMemoryLogStorage {
-    fn append<'a>(&'a self, build_id: BuildId, text: &'a str) -> BoxFuture<'a, Result<()>> {
+    fn append<'a>(&'a self, build_id: BuildAttemptId, text: &'a str) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             self.store
                 .lock()
@@ -163,7 +163,7 @@ impl LogStorage for InMemoryLogStorage {
         })
     }
 
-    fn read<'a>(&'a self, build_id: BuildId) -> BoxFuture<'a, Result<String>> {
+    fn read<'a>(&'a self, build_id: BuildAttemptId) -> BoxFuture<'a, Result<String>> {
         Box::pin(async move {
             Ok(self
                 .store
@@ -175,7 +175,7 @@ impl LogStorage for InMemoryLogStorage {
         })
     }
 
-    fn delete<'a>(&'a self, build_id: BuildId) -> BoxFuture<'a, Result<()>> {
+    fn delete<'a>(&'a self, build_id: BuildAttemptId) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             self.store
                 .lock()
@@ -185,7 +185,7 @@ impl LogStorage for InMemoryLogStorage {
         })
     }
 
-    fn list_logs<'a>(&'a self) -> BoxFuture<'a, Result<Vec<BuildId>>> {
+    fn list_logs<'a>(&'a self) -> BoxFuture<'a, Result<Vec<BuildAttemptId>>> {
         Box::pin(async move {
             Ok(self
                 .store
@@ -199,7 +199,7 @@ impl LogStorage for InMemoryLogStorage {
 
     fn write_chunk<'a>(
         &'a self,
-        build_id: BuildId,
+        build_id: BuildAttemptId,
         index: u32,
         bytes: &'a [u8],
     ) -> BoxFuture<'a, Result<()>> {
@@ -212,7 +212,7 @@ impl LogStorage for InMemoryLogStorage {
         })
     }
 
-    fn read_chunk<'a>(&'a self, build_id: BuildId, index: u32) -> BoxFuture<'a, Result<Vec<u8>>> {
+    fn read_chunk<'a>(&'a self, build_id: BuildAttemptId, index: u32) -> BoxFuture<'a, Result<Vec<u8>>> {
         Box::pin(async move {
             self.chunks
                 .lock()
@@ -223,7 +223,7 @@ impl LogStorage for InMemoryLogStorage {
         })
     }
 
-    fn delete_chunks<'a>(&'a self, build_id: BuildId) -> BoxFuture<'a, Result<()>> {
+    fn delete_chunks<'a>(&'a self, build_id: BuildAttemptId) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             self.chunks
                 .lock()

@@ -303,7 +303,7 @@ async fn load_producing_project_flags(
             SELECT do_.hash AS hash, p.sign_cache AS sign_cache
             FROM derivation_output do_
             JOIN derivation d   ON d.id = do_.derivation
-            JOIN build b        ON b.derivation = d.id
+            JOIN build_job b    ON b.derivation = d.id
             JOIN evaluation e   ON e.id = b.evaluation
             JOIN project p      ON p.id = e.project
             WHERE do_.hash = ANY($1)

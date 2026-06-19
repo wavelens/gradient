@@ -122,11 +122,15 @@ impl Scheduler {
     /// tracker. Workers that have already been assigned will finish or time out
     /// normally; the DB-side abort (via `gradient_ci::abort_evaluation`) is the
     /// caller's responsibility.
-    pub async fn cancel_evaluation_jobs(&self, eval_id: EvaluationId, build_ids: &[BuildId]) {
+    pub async fn cancel_evaluation_jobs(
+        &self,
+        eval_id: EvaluationId,
+        anchor_ids: &[DerivationBuildId],
+    ) {
         let mut tracker = self.job_tracker.write().await;
         tracker.remove_job(&format!("eval:{eval_id}"));
-        for bid in build_ids {
-            tracker.remove_job(&format!("build:{bid}"));
+        for id in anchor_ids {
+            tracker.remove_job(&format!("build:{id}"));
         }
 
         self.eval_edges.write().await.remove(&eval_id);

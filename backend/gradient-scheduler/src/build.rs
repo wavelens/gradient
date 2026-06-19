@@ -15,8 +15,8 @@ use gradient_entity::build::BuildStatus;
 use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_db::{
-    collect_transitive_dependents, fail_latest_attempt, update_build_status,
-    update_evaluation_status,
+    cascade_dependency_failed, eval_anchor_statuses, fail_latest_attempt,
+    update_derivation_build_status, update_evaluation_status,
 };
 use gradient_types::*;
 use gradient_core::ServerState;
@@ -129,23 +129,24 @@ impl<'a> BuildStateHandler<'a> {
     pub async fn handle_build_output(
         &self,
         _job: &PendingBuildJob,
-        build_id: BuildId,
+        derivation_build: DerivationBuildId,
         outputs: Vec<BuildOutput>,
         metrics: Option<BuildMetrics>,
         substituted: bool,
     ) -> Result<()> {
-        let build = EBuild::find_by_id(build_id)
+        let anchor = EDerivationBuild::find_by_id(derivation_build)
             .one(&self.state.worker_db)
             .await
-            .context("fetch build")?
-            .with_context(|| format!("build {} not found", build_id))?;
+            .context("fetch derivation_build")?
+            .with_context(|| format!("derivation_build {} not found", derivation_build))?;
 
-        let derivation_id = build.derivation;
+        let build_id = anchor.id;
+        let derivation_id = anchor.derivation;
 
         // Per-build metrics: a multi-build job yields one `BuildOutput` per
-        // build, so this records exactly one `derivation_metric` row per build.
+        // build, so this records exactly one `derivation_metric` row per anchor.
         if let Some(metrics) = metrics {
-            self.record_metrics(&build, derivation_id, &metrics)
+            self.record_metrics(&anchor, derivation_id, &metrics)
                 .await;
         }
 
@@ -207,52 +208,50 @@ impl<'a> BuildStateHandler<'a> {
         info!(%build_id, output_count = outputs.len(), "build outputs recorded");
 
         // The daemon found the outputs already valid - no build ran. Record that
-        // on the build but do NOT move it terminal here: the worker has not yet
+        // on the anchor but do NOT move it terminal here: the worker has not yet
         // pushed the output NARs (`compress_and_push_paths` runs at end of the
         // job, before `JobCompleted`). Flipping to `Substituted` now would make
-        // the build dispatch-ready while its bytes are still absent from the
+        // the anchor dispatch-ready while its bytes are still absent from the
         // cache, so a dependent dispatched into that window fails
         // `InputsUnavailable` (#399). `handle_build_job_completed` finalizes the
         // terminal status from this flag, after the push (#303).
         if substituted {
-            let mut active = build.into_active_model();
+            let mut active = anchor.into_active_model();
             active.substituted = Set(true);
             active.updated_at = Set(gradient_types::now());
             if let Err(e) = active.update(&self.state.worker_db).await {
-                warn!(%build_id, error = %e, "failed to record build as substituted");
+                warn!(%build_id, error = %e, "failed to record anchor as substituted");
             }
         }
 
         Ok(())
     }
 
-    pub async fn handle_build_job_completed(&self, build_id: BuildId) -> Result<()> {
-        let build = match EBuild::find_by_id(build_id)
+    pub async fn handle_build_job_completed(&self, derivation_build: DerivationBuildId) -> Result<()> {
+        let anchor = match EDerivationBuild::find_by_id(derivation_build)
             .one(&self.state.worker_db)
             .await?
         {
-            Some(b) => b,
+            Some(a) => a,
             None => {
-                warn!(%build_id, "build not found on job_completed");
+                warn!(%derivation_build, "anchor not found on job_completed");
                 return Ok(());
             }
         };
-        let evaluation_id = build.evaluation;
-        let derivation_id = build.derivation;
-        let was_external_cached = build.substitutable;
+        let derivation_id = anchor.derivation;
+        let was_external_cached = anchor.substitutable;
 
         // The worker has finished pushing this job's output NARs by the time
-        // `JobCompleted` arrives, so it is now safe to make the build
+        // `JobCompleted` arrives, so it is now safe to make the anchor
         // dispatch-ready. `Substituted` when the daemon found the outputs
-        // already valid (recorded on `build.substituted` by
-        // `handle_build_output`), else `Completed`.
-        let terminal = terminal_success_status(build.substituted);
-        let leader = update_build_status(&self.state.db(), build, terminal).await;
-        self.propagate_to_followers(&leader).await?;
+        // already valid (recorded on the anchor by `handle_build_output`), else
+        // `Completed`. `update_derivation_build_status` promotes dependents and
+        // fans the reactor/eval-done signal across referencing evals.
+        let terminal = terminal_success_status(anchor.substituted);
+        update_derivation_build_status(&self.state.db(), anchor, terminal).await;
 
         if was_external_cached {
             let state = Arc::clone(self.state);
-            let leader_id = leader.id;
             tokio::spawn(async move {
                 let drv_path = match EDerivation::find_by_id(derivation_id)
                     .one(&state.worker_db)
@@ -260,36 +259,36 @@ impl<'a> BuildStateHandler<'a> {
                 {
                     Ok(Some(d)) => d.drv_path(),
                     Ok(None) => {
-                        warn!(%leader_id, %derivation_id, "substitute_log: derivation row missing");
+                        warn!(%derivation_build, %derivation_id, "substitute_log: derivation row missing");
                         return;
                     }
                     Err(e) => {
-                        warn!(%leader_id, error = %e, "substitute_log: derivation lookup failed");
+                        warn!(%derivation_build, error = %e, "substitute_log: derivation lookup failed");
                         return;
                     }
                 };
                 if let Err(e) = crate::log_substitution::substitute_log(
                     state,
-                    leader_id,
+                    derivation_build,
                     derivation_id,
                     drv_path,
                     true,
                 )
                 .await
                 {
-                    warn!(%leader_id, error = %e, "substitute_log spawn failed");
+                    warn!(%derivation_build, error = %e, "substitute_log spawn failed");
                 }
             });
         }
 
-        self.check_evaluation_done(evaluation_id).await
+        self.check_referencing_evals_done(derivation_id).await
     }
 
     /// Insert a `derivation_metric` history row from a build's worker metrics.
     /// Called once per build from the `BuildOutput` handler.
     async fn record_metrics(
         &self,
-        build: &MBuild,
+        anchor: &MDerivationBuild,
         derivation_id: DerivationId,
         metrics: &BuildMetrics,
     ) {
@@ -321,7 +320,7 @@ impl<'a> BuildStateHandler<'a> {
             peak_network_mbps: metrics.peak_network_mbps.map(|v| v as f64),
             oom_killed: metrics.oom_killed,
             build_time_ms: metrics.build_time_ms.map(|v| v as i64),
-            worker_id: gradient_db::latest_attempt_worker(&self.state.worker_db, build.id)
+            worker_id: gradient_db::latest_attempt_worker(&self.state.worker_db, anchor.id)
                 .await
                 .ok()
                 .flatten()
@@ -337,18 +336,18 @@ impl<'a> BuildStateHandler<'a> {
 
     pub async fn handle_build_job_failed(
         &self,
-        build_id: BuildId,
+        derivation_build: DerivationBuildId,
         error: &str,
         kind: BuildFailureKind,
         missing_paths: &[String],
     ) -> Result<()> {
-        let build = match EBuild::find_by_id(build_id)
+        let anchor = match EDerivationBuild::find_by_id(derivation_build)
             .one(&self.state.worker_db)
             .await?
         {
-            Some(b) => b,
+            Some(a) => a,
             None => {
-                warn!(%build_id, "build not found on job_failed");
+                warn!(%derivation_build, "anchor not found on job_failed");
                 return Ok(());
             }
         };
@@ -357,207 +356,87 @@ impl<'a> BuildStateHandler<'a> {
         // frontend's log viewer renders it. Without this, pre-`nix build`
         // aborts (prefetch-time errors, daemon connection failures, etc.)
         // produce a Failed badge with an empty log - useless for diagnosis.
-        let log_id = gradient_db::latest_attempt_log_id(&self.state.worker_db, build.id)
-            .await
-            .unwrap_or(build.id);
-        if let Err(e) = self
-            .state
-            .log_storage
-            .append(log_id, &format!("\n=== build failed: {error} ===\n"))
-            .await
+        if let Some(attempt_id) =
+            gradient_db::latest_attempt_id(&self.state.worker_db, anchor.id)
+                .await
+                .ok()
+                .flatten()
+            && let Err(e) = self
+                .state
+                .log_storage
+                .append(attempt_id, &format!("\n=== build failed: {error} ===\n"))
+                .await
         {
-            warn!(%build_id, error = %e, "failed to append worker error to build log");
+            warn!(%derivation_build, error = %e, "failed to append worker error to build log");
         }
 
-        let evaluation_id = build.evaluation;
-        let derivation_id = build.derivation;
-        let attempt = build.attempt;
+        let derivation_id = anchor.derivation;
+        let attempt = anchor.attempt;
         let max_attempts = self.state.config.eval.build_max_attempts;
 
         if let Err(e) = fail_latest_attempt(
             &self.state.worker_db,
-            build_id,
+            derivation_build,
             AttemptOutcome::Failed,
             attempt_reason(kind),
         )
         .await
         {
-            warn!(%build_id, error = %e, "failed to record attempt failure reason");
+            warn!(%derivation_build, error = %e, "failed to record attempt failure reason");
         }
 
         // Self-heal: a required input was reported absent from the cache while
-        // its producer was marked done/substituted. Demote those outputs and
-        // re-queue their producers before this build is marked terminal, so the
-        // next evaluation finds them genuinely cached.
+        // its producer was marked done/substituted. Purge those stale outputs so
+        // the next evaluation rebuilds them; this anchor stays terminal here.
         if matches!(kind, BuildFailureKind::InputsUnavailable)
             && !missing_paths.is_empty()
             && let Err(e) = self
-                .reconcile_missing_inputs(evaluation_id, missing_paths)
+                .reconcile_missing_inputs(derivation_id, missing_paths)
                 .await
         {
-            warn!(%build_id, error = %e, "failed to reconcile missing inputs");
+            warn!(%derivation_build, error = %e, "failed to reconcile missing inputs");
         }
 
         match decide_failure_outcome(kind, attempt, max_attempts) {
             FailureOutcome::Retry => {
-                let mut active: ABuild = build.clone().into_active_model();
+                let mut active: ADerivationBuild = anchor.clone().into_active_model();
                 active.attempt = Set(attempt + 1);
                 if let Err(e) = active.update(&self.state.worker_db).await {
-                    error!(%build_id, error = %e, "failed to bump build attempt");
+                    error!(%derivation_build, error = %e, "failed to bump anchor attempt");
                 }
-                let reloaded = EBuild::find_by_id(build_id)
+                let reloaded = EDerivationBuild::find_by_id(derivation_build)
                     .one(&self.state.worker_db)
                     .await?
-                    .unwrap_or(build);
-                update_build_status(&self.state.db(), reloaded, BuildStatus::FailedTransient)
+                    .unwrap_or(anchor);
+                update_derivation_build_status(&self.state.db(), reloaded, BuildStatus::FailedTransient)
                     .await;
-                info!(%build_id, attempt = attempt + 1, "transient build failure; scheduled for retry");
+                info!(%derivation_build, attempt = attempt + 1, "transient build failure; scheduled for retry");
                 return Ok(());
             }
             FailureOutcome::Requeue => {
                 // Substitute miss: back to the queue without an `attempt` bump
                 // or a permanent mark. Dispatch escalates to a real build once
-                // the substitute-miss count crosses the threshold. Followers and
-                // dependents are untouched - nothing failed.
-                update_build_status(&self.state.db(), build, BuildStatus::Queued).await;
-                info!(%build_id, "substitute unavailable; re-queued for re-dispatch/escalation");
+                // the substitute-miss count crosses the threshold. Dependents are
+                // untouched - nothing failed.
+                update_derivation_build_status(&self.state.db(), anchor, BuildStatus::Queued).await;
+                info!(%derivation_build, "substitute unavailable; re-queued for re-dispatch/escalation");
                 return Ok(());
             }
             FailureOutcome::Permanent => {
-                let leader =
-                    update_build_status(&self.state.db(), build, BuildStatus::FailedPermanent)
-                        .await;
-                self.propagate_to_followers(&leader).await?;
+                update_derivation_build_status(&self.state.db(), anchor, BuildStatus::FailedPermanent)
+                    .await;
             }
             FailureOutcome::Timeout => {
-                let leader =
-                    update_build_status(&self.state.db(), build, BuildStatus::FailedTimeout)
-                        .await;
-                self.propagate_to_followers(&leader).await?;
+                update_derivation_build_status(&self.state.db(), anchor, BuildStatus::FailedTimeout)
+                    .await;
             }
         }
-        self.cascade_dependency_failed(evaluation_id, derivation_id)
-            .await?;
-        self.check_evaluation_done(evaluation_id).await
-    }
 
-    /// Resolve the fate of every build held behind `leader` via `via = leader.id`.
-    ///
-    /// On leader SUCCESS (`Completed`/`Substituted`) the followers are RELEASED
-    /// back to the queue (`status = Queued`, `via = None`) so they are
-    /// re-dispatched: nix transparently substitutes the leader's now-cached
-    /// output and each follower registers its own artefacts + `build_attempt`.
-    ///
-    /// On leader FAILURE (`FailedPermanent`/`FailedTimeout`/`DependencyFailed`)
-    /// the failure is propagated onto each follower and its dependents are
-    /// cascaded, exactly as before.
-    ///
-    /// `Aborted` is not propagated - when a leader is aborted (its eval was
-    /// cancelled), callers re-elect a new leader from the followers instead.
-    async fn propagate_to_followers(&self, leader: &MBuild) -> Result<()> {
-        let is_success = matches!(
-            leader.status,
-            BuildStatus::Completed | BuildStatus::Substituted
-        );
-        let is_failure = matches!(
-            leader.status,
-            BuildStatus::FailedPermanent
-                | BuildStatus::FailedTimeout
-                | BuildStatus::DependencyFailed
-        );
-        if !is_success && !is_failure {
-            return Ok(());
-        }
-
-        let followers = EBuild::find()
-            .filter(CBuild::Via.eq(leader.id))
-            .all(&self.state.worker_db)
-            .await
-            .context("fetch followers")?;
-        if followers.is_empty() {
-            return Ok(());
-        }
-
-        if is_success {
-            for follower in followers {
-                self.force_requeue(follower).await;
-            }
-
-            return Ok(());
-        }
-
-        for follower in followers {
-            let evaluation_id = follower.evaluation;
-            let derivation_id = follower.derivation;
-            let mut active: ABuild = follower.clone().into_active_model();
-            active.via = Set(None);
-            if let Err(e) = active.update(&self.state.worker_db).await {
-                error!(error = %e, follower_id = %follower.id, "failed to clear follower via");
-                continue;
-            }
-
-            let Some(reloaded) = EBuild::find_by_id(follower.id)
-                .one(&self.state.worker_db)
-                .await?
-            else {
-                continue;
-            };
-            update_build_status(&self.state.db(), reloaded, leader.status).await;
-
-            if matches!(
-                leader.status,
-                BuildStatus::FailedPermanent
-                    | BuildStatus::FailedTimeout
-                    | BuildStatus::DependencyFailed
-            ) {
-                self.cascade_dependency_failed(evaluation_id, derivation_id)
-                    .await?;
-            }
-            self.check_evaluation_done(evaluation_id).await?;
-        }
-
-        Ok(())
-    }
-
-    /// Force a build back to `Queued`, bypassing the state machine (which
-    /// forbids leaving a terminal state) and maintaining the entry-point
-    /// dep-closure counts directly (#383). Used to release followers on leader
-    /// success and to re-queue producers of inputs the cache could not serve.
-    async fn force_requeue(&self, build: MBuild) {
-        let build_id = build.id;
-        let (old_status, evaluation, derivation, has_queued_at) = (
-            build.status,
-            build.evaluation,
-            build.derivation,
-            build.queued_at.is_some(),
-        );
-        let now = gradient_types::now();
-        let mut active: ABuild = build.into_active_model();
-        active.status = Set(BuildStatus::Queued);
-        active.via = Set(None);
-        active.updated_at = Set(now);
-        if !has_queued_at {
-            active.queued_at = Set(Some(now));
-        }
-
-        if let Err(e) = active.update(&self.state.worker_db).await {
-            error!(error = %e, %build_id, "failed to re-queue build");
-            return;
-        }
-
-        if old_status != BuildStatus::Queued {
-            let state = Arc::clone(self.state);
-            self.state.shutdown.spawn(async move {
-                let _ = gradient_db::apply_dep_count_delta(
-                    &state.worker_db,
-                    evaluation,
-                    derivation,
-                    i32::from(old_status),
-                    i32::from(BuildStatus::Queued),
-                )
-                .await;
-            });
-        }
+        // `update_derivation_build_status` already cascades dependency failure on
+        // a terminal-failure transition; this is a belt-and-braces global cascade
+        // over the same graph, idempotent on already-failed anchors.
+        cascade_dependency_failed(&self.state.worker_db, derivation_id).await?;
+        self.check_referencing_evals_done(derivation_id).await
     }
 
     /// Self-heal for `BuildFailureKind::InputsUnavailable`. A build attempt
@@ -574,7 +453,7 @@ impl<'a> BuildStateHandler<'a> {
     /// otherwise-silent dead-end is diagnosable.
     async fn reconcile_missing_inputs(
         &self,
-        evaluation_id: EvaluationId,
+        failed_derivation: DerivationId,
         missing_paths: &[String],
     ) -> Result<()> {
         let db = &self.state.worker_db;
@@ -589,8 +468,9 @@ impl<'a> BuildStateHandler<'a> {
             // even though dispatch treated its producer as done. `fully_cached`
             // true means the DB claimed a complete NAR (stale cached_path / lost
             // object); the producer statuses show whether it was trusted
-            // `Substituted` or really `Completed`.
-            match gradient_db::diagnose_missing_input(db, evaluation_id, hash).await {
+            // `Substituted` or really `Completed`. The eval arg is unused by the
+            // global diagnosis query.
+            match gradient_db::diagnose_missing_input(db, EvaluationId::now_v7(), hash).await {
                 Ok(d) => warn!(
                     %path,
                     hash,
@@ -613,7 +493,7 @@ impl<'a> BuildStateHandler<'a> {
 
         if !unrecoverable.is_empty() {
             warn!(
-                %evaluation_id,
+                %failed_derivation,
                 count = unrecoverable.len(),
                 sample = ?unrecoverable.iter().take(5).collect::<Vec<_>>(),
                 "reconcile: missing inputs have no producing derivation; cannot rebuild \
@@ -622,7 +502,7 @@ impl<'a> BuildStateHandler<'a> {
         }
 
         info!(
-            %evaluation_id,
+            %failed_derivation,
             purged,
             unrecoverable = unrecoverable.len(),
             paths = missing_paths.len(),
@@ -631,63 +511,40 @@ impl<'a> BuildStateHandler<'a> {
         Ok(())
     }
 
-    async fn cascade_dependency_failed(
-        &self,
-        evaluation_id: EvaluationId,
-        failed_derivation_id: DerivationId,
-    ) -> Result<()> {
-        let mut closure =
-            collect_transitive_dependents(&self.state.worker_db, failed_derivation_id).await?;
-        // The failed derivation itself was already marked Failed by the caller;
-        // only its dependents need DependencyFailed.
-        closure.remove(&failed_derivation_id);
-        if closure.is_empty() {
-            return Ok(());
+    /// After an anchor reaches a terminal status, sweep every evaluation that
+    /// references the derivation (via `build_job`) and finalize the ones whose
+    /// whole anchor set is now resolved.
+    async fn check_referencing_evals_done(&self, derivation: DerivationId) -> Result<()> {
+        let evals =
+            gradient_db::evals_referencing_derivation(&self.state.worker_db, derivation).await?;
+        for evaluation_id in evals {
+            self.check_evaluation_done(evaluation_id).await?;
         }
 
-        let closure_ids: Vec<DerivationId> = closure.into_iter().collect();
-        let db = &self.state.worker_db;
-        let cascaded_builds = gradient_db::fetch_in_chunks(&closure_ids, |chunk| async move {
-            EBuild::find()
-                .filter(CBuild::Evaluation.eq(evaluation_id))
-                .filter(CBuild::Status.is_in(vec![
-                    BuildStatus::Created,
-                    BuildStatus::Queued,
-                    BuildStatus::FailedTransient,
-                ]))
-                .filter(CBuild::Derivation.is_in(chunk))
-                .all(db)
-                .await
-        })
-        .await
-        .context("fetch builds for cascade")?;
-
-        for build in cascaded_builds {
-            update_build_status(&self.state.db(), build, BuildStatus::DependencyFailed).await;
-        }
         Ok(())
     }
 
-    /// Transitions the evaluation to its final state if all builds are done.
+    /// Transitions the evaluation to its final state if all its anchors are done.
     ///
-    /// Returns early if any build is still active (Created/Queued/Building) or if
-    /// the evaluation is not in `Building` state. Otherwise sets `Failed` when at
-    /// least one build is a terminal failure (FailedPermanent, FailedTimeout, or
-    /// DependencyFailed), else `Completed`.
+    /// Graph-derived via `eval_anchor_statuses`: returns early while any anchor is
+    /// still active (Created/Queued/Building/FailedTransient) or the evaluation is
+    /// not `Building`. Otherwise `Failed` when any anchor is a terminal failure or
+    /// the eval has an error message, else `Completed`.
     pub(crate) async fn check_evaluation_done(&self, evaluation_id: EvaluationId) -> Result<()> {
-        let active = EBuild::find()
-            .filter(CBuild::Evaluation.eq(evaluation_id))
-            .filter(CBuild::Status.is_in(vec![
-                BuildStatus::Created,
-                BuildStatus::Queued,
-                BuildStatus::Building,
-                BuildStatus::FailedTransient,
-            ]))
-            .all(&self.state.worker_db)
+        let statuses = eval_anchor_statuses(&self.state.worker_db, evaluation_id)
             .await
-            .context("fetch active builds")?;
+            .context("fetch eval anchor statuses")?;
 
-        if !active.is_empty() {
+        let any_active = statuses.iter().any(|s| {
+            matches!(
+                s,
+                BuildStatus::Created
+                    | BuildStatus::Queued
+                    | BuildStatus::Building
+                    | BuildStatus::FailedTransient
+            )
+        });
+        if any_active {
             return Ok(());
         }
 
@@ -702,16 +559,14 @@ impl<'a> BuildStateHandler<'a> {
             return Ok(());
         }
 
-        let failed_builds = EBuild::find()
-            .filter(CBuild::Evaluation.eq(evaluation_id))
-            .filter(CBuild::Status.is_in(vec![
-                BuildStatus::FailedPermanent,
-                BuildStatus::FailedTimeout,
-                BuildStatus::DependencyFailed,
-            ]))
-            .all(&self.state.worker_db)
-            .await
-            .context("fetch failed builds")?;
+        let any_failed = statuses.iter().any(|s| {
+            matches!(
+                s,
+                BuildStatus::FailedPermanent
+                    | BuildStatus::FailedTimeout
+                    | BuildStatus::DependencyFailed
+            )
+        });
 
         // Also treat error-level evaluation messages (nix eval errors, attr
         // resolution failures) as a failure signal - the evaluation was only
@@ -723,7 +578,7 @@ impl<'a> BuildStateHandler<'a> {
             .await
             .context("fetch eval error messages")?;
 
-        let target = if failed_builds.is_empty() && eval_error_messages.is_empty() {
+        let target = if !any_failed && eval_error_messages.is_empty() {
             EvaluationStatus::Completed
         } else {
             EvaluationStatus::Failed
@@ -731,7 +586,7 @@ impl<'a> BuildStateHandler<'a> {
         info!(
             %evaluation_id,
             ?target,
-            failed_builds = failed_builds.len(),
+            any_failed,
             eval_errors = eval_error_messages.len(),
             "evaluation finished"
         );
@@ -903,43 +758,70 @@ impl<'a> BuildStateHandler<'a> {
     }
 
     /// Build-phase reconciliation for one evaluation: decide `Building` vs
-    /// `Waiting` from whether the connected pool can satisfy any pending build.
-    /// Returns `None` when the eval has no pending builds (nothing to decide).
+    /// `Waiting` from whether the connected pool can satisfy any of the eval's
+    /// pending anchors. Returns `None` when the eval has no pending anchor
+    /// (nothing to decide).
     async fn build_phase_decision(
         &self,
         evaluation_id: EvaluationId,
         worker_caps: &[(Vec<String>, Vec<String>)],
     ) -> Result<Option<(EvaluationStatus, Option<WaitingReason>)>> {
-        let pending_builds = EBuild::find()
-            .filter(CBuild::Evaluation.eq(evaluation_id))
-            .filter(CBuild::Status.is_in(vec![
-                BuildStatus::Created,
-                BuildStatus::Queued,
-                BuildStatus::Building,
-                BuildStatus::FailedTransient,
-            ]))
-            .all(&self.state.worker_db)
-            .await
-            .context("fetch pending builds")?;
-        if pending_builds.is_empty() {
+        let pending = self.eval_pending_anchors(evaluation_id).await?;
+        if pending.is_empty() {
             return Ok(None);
         }
 
         let arches: std::collections::HashSet<String> =
             worker_caps.iter().flat_map(|(a, _)| a.iter().cloned()).collect();
-        let checker = BuildabilityChecker::load(self.state, &pending_builds, arches).await?;
-        let target = if checker.any_buildable(&pending_builds, worker_caps) {
+        let checker = BuildabilityChecker::load(self.state, &pending, arches).await?;
+        let target = if checker.any_buildable(&pending, worker_caps) {
             EvaluationStatus::Building
         } else {
             EvaluationStatus::Waiting
         };
         let reason = if matches!(target, EvaluationStatus::Waiting) {
-            Some(checker.compute_waiting_reason(&pending_builds, worker_caps))
+            Some(checker.compute_waiting_reason(&pending, worker_caps))
         } else {
             None
         };
 
         Ok(Some((target, reason)))
+    }
+
+    /// The non-terminal `derivation_build` anchors an evaluation still needs:
+    /// the anchors of its `build_job`s in Created/Queued/Building/FailedTransient.
+    async fn eval_pending_anchors(
+        &self,
+        evaluation_id: EvaluationId,
+    ) -> Result<Vec<MDerivationBuild>> {
+        use sea_orm::QuerySelect;
+        let db = &self.state.worker_db;
+        let anchor_ids: Vec<DerivationBuildId> = EBuildJob::find()
+            .select_only()
+            .column(CBuildJob::DerivationBuild)
+            .filter(CBuildJob::Evaluation.eq(evaluation_id))
+            .into_tuple::<DerivationBuildId>()
+            .all(db)
+            .await
+            .context("fetch eval build_job anchors")?;
+        if anchor_ids.is_empty() {
+            return Ok(vec![]);
+        }
+
+        gradient_db::fetch_in_chunks(&anchor_ids, |chunk| async move {
+            EDerivationBuild::find()
+                .filter(CDerivationBuild::Id.is_in(chunk))
+                .filter(CDerivationBuild::Status.is_in(vec![
+                    BuildStatus::Created,
+                    BuildStatus::Queued,
+                    BuildStatus::Building,
+                    BuildStatus::FailedTransient,
+                ]))
+                .all(db)
+                .await
+        })
+        .await
+        .context("fetch pending anchors")
     }
 }
 
@@ -1045,19 +927,19 @@ async fn persist_waiting_reason(
 }
 
 /// Re-queue the in-flight jobs orphaned by a worker disconnect so they
-/// re-dispatch instead of lingering in a non-terminal DB status. Builds move
+/// re-dispatch instead of lingering in a non-terminal DB status. Anchors move
 /// `Building -> Queued`; evaluations (which the state machine only lets reach
 /// `Queued` via `Waiting`) park to `Waiting` so the reconciler that runs right
 /// after recovers them to `Queued` once an eval-capable worker is free.
 pub async fn requeue_orphaned_jobs(state: &Arc<ServerState>, orphaned: &[PendingJob]) {
     for job in orphaned {
-        if let Some(build_id) = job.build_id() {
-            match EBuild::find_by_id(build_id).one(&state.worker_db).await {
-                Ok(Some(build)) if build.status == BuildStatus::Building => {
-                    update_build_status(&state.db(), build, BuildStatus::Queued).await;
+        if let Some(derivation_build) = job.derivation_build() {
+            match EDerivationBuild::find_by_id(derivation_build).one(&state.worker_db).await {
+                Ok(Some(anchor)) if anchor.status == BuildStatus::Building => {
+                    update_derivation_build_status(&state.db(), anchor, BuildStatus::Queued).await;
                 }
                 Ok(_) => {}
-                Err(e) => warn!(error = %e, %build_id, "requeue orphaned build: load failed"),
+                Err(e) => warn!(error = %e, %derivation_build, "requeue orphaned build: load failed"),
             }
 
             continue;
@@ -1095,34 +977,34 @@ pub async fn requeue_orphaned_jobs(state: &Arc<ServerState>, orphaned: &[Pending
 pub async fn handle_build_output(
     state: &Arc<ServerState>,
     job: &PendingBuildJob,
-    build_id: BuildId,
+    derivation_build: DerivationBuildId,
     outputs: Vec<BuildOutput>,
     metrics: Option<BuildMetrics>,
     substituted: bool,
 ) -> Result<()> {
     BuildStateHandler::new(state)
-        .handle_build_output(job, build_id, outputs, metrics, substituted)
+        .handle_build_output(job, derivation_build, outputs, metrics, substituted)
         .await
 }
 
 pub async fn handle_build_job_completed(
     state: &Arc<ServerState>,
-    build_id: BuildId,
+    derivation_build: DerivationBuildId,
 ) -> Result<()> {
     BuildStateHandler::new(state)
-        .handle_build_job_completed(build_id)
+        .handle_build_job_completed(derivation_build)
         .await
 }
 
 pub async fn handle_build_job_failed(
     state: &Arc<ServerState>,
-    build_id: BuildId,
+    derivation_build: DerivationBuildId,
     error: &str,
     kind: BuildFailureKind,
     missing_paths: &[String],
 ) -> Result<()> {
     BuildStateHandler::new(state)
-        .handle_build_job_failed(build_id, error, kind, missing_paths)
+        .handle_build_job_failed(derivation_build, error, kind, missing_paths)
         .await
 }
 
@@ -1151,45 +1033,41 @@ pub async fn reconcile_waiting_state(
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-/// Pre-loaded derivation and feature data for a set of pending builds.
+/// Pre-loaded derivation and feature data for a set of pending anchors.
 ///
 /// Used by [`BuildStateHandler::reconcile_waiting_state`] to determine whether
-/// any pending build can be satisfied by the current worker pool without
+/// any pending anchor can be satisfied by the current worker pool without
 /// re-querying the DB per evaluation.
 struct BuildabilityChecker {
     drv_by_id: HashMap<DerivationId, MDerivation>,
-    /// build_id → `SubstituteUnavailable` miss count. A substitutable build is
-    /// only treated as buildable-anywhere while it is below the escalation
-    /// threshold; past it, it is checked against real arch/features like any
-    /// other build (so the parker can park it when no arch worker exists).
-    substitute_misses: HashMap<BuildId, i64>,
+    /// derivation_build → `SubstituteUnavailable` miss count. A substitutable
+    /// anchor is only treated as buildable-anywhere while it is below the
+    /// escalation threshold; past it, it is checked against real arch/features
+    /// like any other anchor (so the parker can park it when no arch worker exists).
+    substitute_misses: HashMap<DerivationBuildId, i64>,
     substitute_miss_escalation_threshold: i64,
     /// Maps derivation ID → list of required feature IDs.
     features_by_drv: HashMap<DerivationId, Vec<FeatureId>>,
     feature_name: HashMap<FeatureId, String>,
     connected_architectures: std::collections::HashSet<String>,
-    deps_satisfied: std::collections::HashSet<BuildId>,
 }
 
 impl BuildabilityChecker {
     /// Query the DB for all derivations, required features, and substitute-miss
-    /// counts referenced by `builds`, returning a checker ready to call
+    /// counts referenced by `anchors`, returning a checker ready to call
     /// [`any_buildable`].
     ///
     /// [`any_buildable`]: BuildabilityChecker::any_buildable
     async fn load(
         state: &Arc<ServerState>,
-        builds: &[MBuild],
+        anchors: &[MDerivationBuild],
         connected_architectures: std::collections::HashSet<String>,
     ) -> Result<Self> {
         let db = &state.worker_db;
-        let drv_ids: Vec<DerivationId> = builds.iter().map(|b| b.derivation).collect();
-        let build_ids: Vec<BuildId> = builds.iter().map(|b| b.id).collect();
-        let deps_satisfied = gradient_db::builds_with_satisfied_deps(db, &build_ids)
-            .await
-            .unwrap_or_default();
+        let drv_ids: Vec<DerivationId> = anchors.iter().map(|a| a.derivation).collect();
+        let anchor_ids: Vec<DerivationBuildId> = anchors.iter().map(|a| a.id).collect();
         // A count-query failure → 0 misses → substitute-mode, same as the dispatch side.
-        let substitute_misses = gradient_db::substitute_miss_counts(db, &build_ids)
+        let substitute_misses = gradient_db::substitute_miss_counts(db, &anchor_ids)
             .await
             .unwrap_or_default();
 
@@ -1236,25 +1114,29 @@ impl BuildabilityChecker {
             features_by_drv,
             feature_name,
             connected_architectures,
-            deps_satisfied,
         })
     }
 
-    fn any_buildable(&self, builds: &[MBuild], worker_caps: &[(Vec<String>, Vec<String>)]) -> bool {
-        builds.iter().any(|b| {
-            if b.status == BuildStatus::Building {
+    /// Whether any pending anchor can run on the connected pool. A `Queued` or
+    /// `Building` anchor already has all dependency anchors terminal-success
+    /// (the promotion invariant), so it is dispatchable; a `Created` anchor is
+    /// still blocked on deps. Substitutable anchors run anywhere until they
+    /// exhaust the miss budget.
+    fn any_buildable(&self, anchors: &[MDerivationBuild], worker_caps: &[(Vec<String>, Vec<String>)]) -> bool {
+        anchors.iter().any(|a| {
+            if a.status == BuildStatus::Building {
                 return true;
             }
-            if !self.deps_satisfied.contains(&b.id) {
+            if a.status != BuildStatus::Queued {
                 return false;
             }
-            let Some(drv) = self.drv_by_id.get(&b.derivation) else {
+            let Some(drv) = self.drv_by_id.get(&a.derivation) else {
                 return false;
             };
-            let miss = self.substitute_misses.get(&b.id).copied().unwrap_or(0);
+            let miss = self.substitute_misses.get(&a.id).copied().unwrap_or(0);
             let arch_has_worker = arch_available(&self.connected_architectures, &drv.architecture);
             match decide_dispatch_mode(
-                b.substitutable,
+                a.substitutable,
                 miss,
                 self.substitute_miss_escalation_threshold,
                 arch_has_worker,
@@ -1262,7 +1144,7 @@ impl BuildabilityChecker {
                 BuildDispatchMode::SubstituteBuiltin => true,
                 BuildDispatchMode::SubstituteStalled => false,
                 BuildDispatchMode::RealArch => {
-                    let required: Vec<&str> = self.required_features_for(&b.derivation);
+                    let required: Vec<&str> = self.required_features_for(&a.derivation);
                     worker_caps.iter().any(|(arch, feats)| {
                         let arch_ok = drv.architecture == "builtin"
                             || arch.iter().any(|a| a == &drv.architecture);
@@ -1290,33 +1172,33 @@ impl BuildabilityChecker {
     }
 
     /// Group every unsatisfiable `(architecture, required_features)` combo and
-    /// the number of pending builds it covers. Used for the API
+    /// the number of pending anchors it covers. Used for the API
     /// `waiting_reason` payload so the UI can explain *why* nothing is
     /// dispatching.
     fn compute_waiting_reason(
         &self,
-        builds: &[MBuild],
+        anchors: &[MDerivationBuild],
         worker_caps: &[(Vec<String>, Vec<String>)],
     ) -> WaitingReason {
         let mut grouped: BTreeMap<(String, Vec<String>), u32> = BTreeMap::new();
-        for b in builds {
-            let miss = self.substitute_misses.get(&b.id).copied().unwrap_or(0);
+        for a in anchors {
+            let miss = self.substitute_misses.get(&a.id).copied().unwrap_or(0);
             let arch_has_worker = self
                 .drv_by_id
-                .get(&b.derivation)
+                .get(&a.derivation)
                 .map(|d| arch_available(&self.connected_architectures, &d.architecture))
                 .unwrap_or(false);
             if matches!(
-                decide_dispatch_mode(b.substitutable, miss, self.substitute_miss_escalation_threshold, arch_has_worker),
+                decide_dispatch_mode(a.substitutable, miss, self.substitute_miss_escalation_threshold, arch_has_worker),
                 BuildDispatchMode::SubstituteBuiltin
             ) {
                 continue;
             }
-            let Some(drv) = self.drv_by_id.get(&b.derivation) else {
+            let Some(drv) = self.drv_by_id.get(&a.derivation) else {
                 continue;
             };
             let required_owned: Vec<String> = self
-                .required_features_for(&b.derivation)
+                .required_features_for(&a.derivation)
                 .into_iter()
                 .map(str::to_owned)
                 .collect();
@@ -1485,10 +1367,9 @@ mod waiting_reason_tests {
         }
     }
 
-    fn build_for(drv_id: DerivationId, eval_id: EvaluationId) -> MBuild {
-        gradient_entity::build::Model {
-            id: BuildId::now_v7(),
-            evaluation: eval_id,
+    fn build_for(drv_id: DerivationId, _eval_id: EvaluationId) -> MDerivationBuild {
+        gradient_entity::derivation_build::Model {
+            id: DerivationBuildId::now_v7(),
             derivation: drv_id,
             status: BuildStatus::Queued,
             ..Default::default()
@@ -1513,7 +1394,6 @@ mod waiting_reason_tests {
             features_by_drv,
             feature_name,
             connected_architectures: std::collections::HashSet::new(),
-            deps_satisfied: std::collections::HashSet::new(),
         }
     }
 
@@ -1685,10 +1565,9 @@ mod waiting_reason_tests {
         assert!(unmet.is_empty());
     }
 
-    fn substitutable_build(drv_id: DerivationId, eval_id: EvaluationId) -> MBuild {
-        gradient_entity::build::Model {
-            id: BuildId::now_v7(),
-            evaluation: eval_id,
+    fn substitutable_build(drv_id: DerivationId, _eval_id: EvaluationId) -> MDerivationBuild {
+        gradient_entity::derivation_build::Model {
+            id: DerivationBuildId::now_v7(),
             derivation: drv_id,
             status: BuildStatus::Queued,
             substitutable: true,
@@ -1703,7 +1582,6 @@ mod waiting_reason_tests {
         let build = substitutable_build(d.id, eval_id);
         let mut checker = checker_with(vec![d], vec![]);
         checker.substitute_misses.insert(build.id, 1);
-        checker.deps_satisfied.insert(build.id);
 
         let caps: Vec<(Vec<String>, Vec<String>)> = vec![(vec!["x86_64-linux".into()], vec![])];
         let builds = [build];
@@ -1720,7 +1598,6 @@ mod waiting_reason_tests {
         let build = substitutable_build(d.id, eval_id);
         let mut checker = checker_with(vec![d], vec![]);
         checker.substitute_misses.insert(build.id, 2);
-        checker.deps_satisfied.insert(build.id);
 
         // No aarch64 worker: the escalated build is no longer buildable-anywhere
         // and surfaces as an unmet aarch64 requirement so the parker can park it.
@@ -1741,7 +1618,6 @@ mod waiting_reason_tests {
         b.substitutable = true;
         let mut checker = checker_with(vec![d.clone()], vec![]);
         checker.substitute_misses.insert(b.id, 2);
-        checker.deps_satisfied.insert(b.id);
         checker.connected_architectures.insert("x86_64-linux".into());
         let caps = vec![(vec!["x86_64-linux".to_string()], vec![])];
         assert!(!checker.any_buildable(&[b.clone()], &caps));
@@ -1752,10 +1628,13 @@ mod waiting_reason_tests {
     }
 
     #[test]
-    fn dependency_blocked_build_is_not_buildable() {
+    fn dependency_blocked_anchor_is_not_buildable() {
+        // A `Created` anchor still has unsatisfied dependency anchors, so it is
+        // not dispatchable even when a matching worker is connected.
         let eval_id = EvaluationId::now_v7();
         let d = drv(DerivationId::now_v7(), "x86_64-linux");
-        let b = build_for(d.id, eval_id);
+        let mut b = build_for(d.id, eval_id);
+        b.status = BuildStatus::Created;
         let mut checker = checker_with(vec![d], vec![]);
         checker.connected_architectures.insert("x86_64-linux".into());
         let caps = vec![(vec!["x86_64-linux".to_string()], vec![])];
@@ -1768,8 +1647,7 @@ mod waiting_reason_tests {
         let d = drv(DerivationId::now_v7(), "i686-linux");
         let mut b = build_for(d.id, eval_id);
         b.substitutable = true;
-        let mut checker = checker_with(vec![d], vec![]);
-        checker.deps_satisfied.insert(b.id);
+        let checker = checker_with(vec![d], vec![]);
         let caps = vec![(vec!["x86_64-linux".to_string()], vec![])];
         assert!(checker.any_buildable(&[b], &caps));
     }

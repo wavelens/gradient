@@ -56,7 +56,7 @@ impl CiStatusReactor {
 
 #[async_trait]
 impl StatusReactor for CiStatusReactor {
-    async fn on_build_terminal(&self, db: &DbContext, build: MBuild, status: BuildStatus) {
+    async fn on_build_terminal(&self, db: &DbContext, build_job: MBuildJob, status: BuildStatus) {
         let event = match status {
             BuildStatus::Queued => "build.queued",
             BuildStatus::Building => "build.started",
@@ -70,17 +70,17 @@ impl StatusReactor for CiStatusReactor {
 
         let ctx = self.ci_context(db);
 
-        let evaluation = match EEvaluation::find_by_id(build.evaluation)
+        let evaluation = match EEvaluation::find_by_id(build_job.evaluation)
             .one(&ctx.db.worker_db)
             .await
         {
             Ok(Some(e)) => e,
             Ok(None) => {
-                warn!(evaluation_id = %build.evaluation, "Evaluation not found for action dispatch");
+                warn!(evaluation_id = %build_job.evaluation, "Evaluation not found for action dispatch");
                 return;
             }
             Err(e) => {
-                error!(error = %e, evaluation_id = %build.evaluation, "DB error looking up evaluation for action dispatch");
+                error!(error = %e, evaluation_id = %build_job.evaluation, "DB error looking up evaluation for action dispatch");
                 return;
             }
         };
@@ -90,7 +90,7 @@ impl StatusReactor for CiStatusReactor {
             None => return,
         };
 
-        let derivation_path = EDerivation::find_by_id(build.derivation)
+        let derivation_path = EDerivation::find_by_id(build_job.derivation)
             .one(&ctx.db.worker_db)
             .await
             .ok()
@@ -98,8 +98,8 @@ impl StatusReactor for CiStatusReactor {
             .map(|d| d.store_path());
 
         let payload = serde_json::json!({
-            "build_id": build.id,
-            "evaluation_id": build.evaluation,
+            "build_id": build_job.id,
+            "evaluation_id": build_job.evaluation,
             "derivation_path": derivation_path,
             "status": event,
             "evaluation_kind": eval_kind_str(evaluation.kind),

@@ -15,7 +15,7 @@ use sea_orm::ConnectionTrait;
 pub(super) struct ConcurrencyDecision {
     pub concurrent_flag: bool,
     pub aborted_evaluation: Option<EvaluationId>,
-    pub aborted_builds: Vec<BuildId>,
+    pub aborted_anchors: Vec<DerivationBuildId>,
 }
 
 /// Applies the project's concurrency policy against `in_flight`. Returns `None`
@@ -31,14 +31,14 @@ pub(super) async fn resolve_concurrency<C: ConnectionTrait>(
         ConcurrencyPolicy::try_from(project.concurrency).unwrap_or(ConcurrencyPolicy::SoftAbort);
 
     let mut aborted_evaluation: Option<EvaluationId> = None;
-    let mut aborted_builds: Vec<BuildId> = Vec::new();
+    let mut aborted_anchors: Vec<DerivationBuildId> = Vec::new();
     let concurrent_flag = matches!(concurrency, ConcurrencyPolicy::All);
 
     if !concurrent_flag && let Some(running) = in_flight {
         match concurrency {
             ConcurrencyPolicy::Skip => return Ok(None),
             ConcurrencyPolicy::HardAbort => {
-                aborted_builds = abort_evaluation(db, running.id, AbortKind::Hard).await?;
+                aborted_anchors = abort_evaluation(db, running.id, AbortKind::Hard).await?;
                 aborted_evaluation = Some(running.id);
             }
             ConcurrencyPolicy::SoftAbort => {
@@ -53,6 +53,6 @@ pub(super) async fn resolve_concurrency<C: ConnectionTrait>(
     Ok(Some(ConcurrencyDecision {
         concurrent_flag,
         aborted_evaluation,
-        aborted_builds,
+        aborted_anchors,
     }))
 }

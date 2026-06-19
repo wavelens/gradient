@@ -31,9 +31,9 @@ pub enum ApplyOutcome {
         /// The caller is responsible for calling `Scheduler::cancel_evaluation_jobs`
         /// for that eval to purge its in-memory `JobTracker` entries.
         aborted_evaluation: Option<EvaluationId>,
-        /// Build IDs marked `Aborted` by a `HardAbort` policy. Empty for
-        /// `SoftAbort` (builds keep running) and the no-abort path.
-        aborted_builds: Vec<BuildId>,
+        /// `derivation_build` anchors marked `Aborted` by a `HardAbort` policy.
+        /// Empty for `SoftAbort` (builds keep running) and the no-abort path.
+        aborted_anchors: Vec<DerivationBuildId>,
     },
     SkippedSameCommit,
     SkippedConcurrency,
@@ -152,7 +152,7 @@ pub async fn apply_trigger<C: ConnectionTrait>(
     Ok(ApplyOutcome::Created {
         evaluation: eval,
         aborted_evaluation: decision.aborted_evaluation,
-        aborted_builds: decision.aborted_builds,
+        aborted_anchors: decision.aborted_anchors,
     })
 }
 

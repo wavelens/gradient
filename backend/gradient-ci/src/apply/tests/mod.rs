@@ -231,7 +231,7 @@ async fn all_concurrency_creates_evaluation_alongside_running() {
     let ApplyOutcome::Created {
         evaluation,
         aborted_evaluation,
-        aborted_builds,
+        aborted_anchors,
     } = res
     else {
         panic!("expected Created, got {res:?}");
@@ -239,7 +239,7 @@ async fn all_concurrency_creates_evaluation_alongside_running() {
     assert_eq!(evaluation.id, new_eval_id);
     assert!(evaluation.concurrent, "new eval must carry concurrent=true");
     assert_eq!(aborted_evaluation, None);
-    assert!(aborted_builds.is_empty());
+    assert!(aborted_anchors.is_empty());
 }
 
 #[tokio::test]
@@ -336,12 +336,18 @@ async fn hard_abort_populates_aborted_fields() {
         CommitId::nil(),
         EvaluationStatus::Building,
     );
-    let active_build_id = BuildId::now_v7();
-    let active_build = gradient_entity::build::Model {
-        id: active_build_id,
-        evaluation: running_eval_id,
+    let active_anchor_id = DerivationBuildId::now_v7();
+    let active_anchor = gradient_entity::derivation_build::Model {
+        id: active_anchor_id,
         derivation: DerivationId::nil(),
         status: gradient_entity::build::BuildStatus::Building,
+        ..Default::default()
+    };
+    let active_job = gradient_entity::build_job::Model {
+        id: BuildJobId::now_v7(),
+        evaluation: running_eval_id,
+        derivation: DerivationId::nil(),
+        derivation_build: active_anchor_id,
         ..Default::default()
     };
     let new_eval_id = EvaluationId::now_v7();
@@ -363,11 +369,15 @@ async fn hard_abort_populates_aborted_fields() {
             last_insert_id: 0,
             rows_affected: 1,
         }])
-        // abort_evaluation: builds list
-        .append_query_results([vec![active_build.clone()]])
-        // abort_evaluation: active build refetch
-        .append_query_results([vec![active_build.clone()]])
-        // abort_evaluation: active build exec
+        // abort_evaluation: build_job anchor ids for the eval
+        .append_query_results([vec![active_job.clone()]])
+        // abort_evaluation: active anchors (Building)
+        .append_query_results([vec![active_anchor.clone()]])
+        // abort_evaluation: shared lookup - no other eval references the anchor
+        .append_query_results([Vec::<gradient_entity::build_job::Model>::new()])
+        // abort_evaluation: anchor refetch for update
+        .append_query_results([vec![active_anchor.clone()]])
+        // abort_evaluation: anchor exec
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
@@ -404,14 +414,14 @@ async fn hard_abort_populates_aborted_fields() {
     let ApplyOutcome::Created {
         evaluation,
         aborted_evaluation,
-        aborted_builds,
+        aborted_anchors,
     } = res
     else {
         panic!("expected Created, got {res:?}");
     };
     assert_eq!(evaluation.id, new_eval_id);
     assert_eq!(aborted_evaluation, Some(running_eval_id));
-    assert_eq!(aborted_builds, vec![active_build_id]);
+    assert_eq!(aborted_anchors, vec![active_anchor_id]);
 }
 
 /// When the PR webhook layer flags a freshly-created evaluation as needing

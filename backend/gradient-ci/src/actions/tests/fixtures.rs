@@ -45,31 +45,31 @@ pub fn make_ctx() -> crate::CiContext {
     impl LogStorage for NoopLog {
         fn append<'a>(
             &'a self,
-            _: gradient_entity::ids::BuildId,
+            _: gradient_entity::ids::BuildAttemptId,
             _: &'a str,
         ) -> BoxFuture<'a, anyhow::Result<()>> {
             Box::pin(async { Ok(()) })
         }
         fn read<'a>(
             &'a self,
-            _: gradient_entity::ids::BuildId,
+            _: gradient_entity::ids::BuildAttemptId,
         ) -> BoxFuture<'a, anyhow::Result<String>> {
             Box::pin(async { Ok(String::new()) })
         }
         fn delete<'a>(
             &'a self,
-            _: gradient_entity::ids::BuildId,
+            _: gradient_entity::ids::BuildAttemptId,
         ) -> BoxFuture<'a, anyhow::Result<()>> {
             Box::pin(async { Ok(()) })
         }
         fn list_logs<'a>(
             &'a self,
-        ) -> BoxFuture<'a, anyhow::Result<Vec<gradient_entity::ids::BuildId>>> {
+        ) -> BoxFuture<'a, anyhow::Result<Vec<gradient_entity::ids::BuildAttemptId>>> {
             Box::pin(async { Ok(Vec::new()) })
         }
         fn write_chunk<'a>(
             &'a self,
-            _: gradient_entity::ids::BuildId,
+            _: gradient_entity::ids::BuildAttemptId,
             _: u32,
             _: &'a [u8],
         ) -> BoxFuture<'a, anyhow::Result<()>> {
@@ -77,14 +77,14 @@ pub fn make_ctx() -> crate::CiContext {
         }
         fn read_chunk<'a>(
             &'a self,
-            _: gradient_entity::ids::BuildId,
+            _: gradient_entity::ids::BuildAttemptId,
             _: u32,
         ) -> BoxFuture<'a, anyhow::Result<Vec<u8>>> {
             Box::pin(async { anyhow::bail!("no chunk") })
         }
         fn delete_chunks<'a>(
             &'a self,
-            _: gradient_entity::ids::BuildId,
+            _: gradient_entity::ids::BuildAttemptId,
         ) -> BoxFuture<'a, anyhow::Result<()>> {
             Box::pin(async { Ok(()) })
         }
