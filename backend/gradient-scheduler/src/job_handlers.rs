@@ -379,26 +379,20 @@ impl Scheduler {
             }
         }
 
-        // #392: record this batch in the eval's readiness tracker (a pure,
-        // in-memory step) before inserting rows, then insert rows, then write
-        // the now-complete edges and promote their builds to Queued. The BFS
-        // walks roots→leaves, so a batch may reference a dep whose row lands
-        // later; the tracker reports a source only once all its deps have rows.
-        // The map lock is held only for the in-memory observe so other evals
-        // aren't blocked on this eval's DB work.
-        let eval_id = job.evaluation_id;
-        let ready = {
-            let mut trackers = self.edge_readiness.write().await;
-            trackers.entry(eval_id).or_default().observe(&derivations)
-        };
+        // Accumulate this batch's dependency edges; they are flushed to
+        // `derivation_dependency` once the eval stream completes (every endpoint
+        // then has a row). Promotion is graph-driven, not tied to this map.
+        {
+            let mut acc = self.eval_edges.write().await;
+            let entry = acc.entry(job.evaluation_id).or_default();
+            for d in &derivations {
+                if !d.dependencies.is_empty() {
+                    entry.push((d.drv_path.clone(), d.dependencies.clone()));
+                }
+            }
+        }
 
         eval::handle_eval_result(&self.state, &job, derivations, warnings, errors).await?;
-
-        match eval::write_edges_and_promote(&self.state, eval_id, ready).await {
-            Ok(n) if n > 0 => self.kick_dispatch(),
-            Ok(_) => {}
-            Err(e) => error!(error = %e, %eval_id, "write_edges_and_promote failed"),
-        }
 
         Ok(())
     }
@@ -464,18 +458,17 @@ impl Scheduler {
                     };
                 }
 
-                // Drain any edges the incremental path never resolved (a dep
-                // whose row never landed) and flush them before final promotion
-                // so the dispatch SQL's dep-gating sees the full graph.
-                let deferred = self
-                    .edge_readiness
+                // The stream is done, so every endpoint derivation now has a
+                // row: flush the accumulated dependency edges so the graph is
+                // complete for promotion + dispatch.
+                let edges = self
+                    .eval_edges
                     .write()
                     .await
                     .remove(&j.evaluation_id)
-                    .map(|mut t| t.drain_pending())
                     .unwrap_or_default();
                 if let Err(e) =
-                    eval::flush_deferred_deps(&self.state, j.evaluation_id, deferred).await
+                    eval::flush_deferred_deps(&self.state, j.evaluation_id, edges).await
                 {
                     error!(error = %e, evaluation_id = %j.evaluation_id, "flush_deferred_deps failed");
                 }
@@ -513,7 +506,7 @@ impl Scheduler {
         let job = self.job_tracker.write().await.remove_active(job_id);
         match job {
             Some(PendingJob::Eval(j)) => {
-                self.edge_readiness.write().await.remove(&j.evaluation_id);
+                self.eval_edges.write().await.remove(&j.evaluation_id);
                 eval::handle_eval_job_failed(&self.state, j.evaluation_id, error).await
             }
             Some(PendingJob::Build(j)) => {
