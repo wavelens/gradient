@@ -204,6 +204,83 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn hard_abort_keeps_anchors_shared_with_a_running_eval() {
+        // E1 is aborted; anchor A is also needed by E2, which is still Building.
+        // A must NOT be aborted - it keeps building for E2.
+        let eval = make_eval(EvaluationStatus::Building);
+        let other_eval = make_eval(EvaluationStatus::Building);
+        let shared_anchor = make_anchor(BuildStatus::Building);
+        let job_e1 = make_job(eval.id, shared_anchor.id);
+        let job_e2 = make_job(other_eval.id, shared_anchor.id);
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            // initial eval fetch
+            .append_query_results([vec![eval.clone()]])
+            // eval update read-back
+            .append_query_results([vec![eval.clone()]])
+            // eval exec
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            // build_job rows for E1 -> anchor A
+            .append_query_results([vec![job_e1.clone()]])
+            // active anchors (A is Building)
+            .append_query_results([vec![shared_anchor.clone()]])
+            // shared lookup: E2 also has a build_job for A
+            .append_query_results([vec![job_e2.clone()]])
+            // live-eval lookup: E2 is still Building (active)
+            .append_query_results([vec![other_eval.clone()]])
+            .into_connection();
+        let ids = abort_evaluation(&db, eval.id, AbortKind::Hard)
+            .await
+            .unwrap();
+        assert!(
+            ids.is_empty(),
+            "an anchor still needed by a running evaluation must not be aborted"
+        );
+    }
+
+    #[tokio::test]
+    async fn hard_abort_marks_anchors_shared_only_with_a_terminal_eval() {
+        // Anchor A is referenced by E2 too, but E2 already Completed - so A is no
+        // longer needed elsewhere and must be aborted with E1.
+        let eval = make_eval(EvaluationStatus::Building);
+        let done_eval = make_eval(EvaluationStatus::Completed);
+        let anchor = make_anchor(BuildStatus::Building);
+        let anchor_id = anchor.id;
+        let job_e1 = make_job(eval.id, anchor.id);
+        let job_done = make_job(done_eval.id, anchor.id);
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![eval.clone()]])
+            .append_query_results([vec![eval.clone()]])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            .append_query_results([vec![job_e1.clone()]])
+            .append_query_results([vec![anchor.clone()]])
+            // shared lookup: only the Completed eval also references A
+            .append_query_results([vec![job_done.clone()]])
+            // live-eval lookup: E2 is Completed (not active) -> A is not shared
+            .append_query_results([vec![done_eval.clone()]])
+            // anchor refetch for update
+            .append_query_results([vec![anchor.clone()]])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            .into_connection();
+        let ids = abort_evaluation(&db, eval.id, AbortKind::Hard)
+            .await
+            .unwrap();
+        assert_eq!(
+            ids,
+            vec![anchor_id],
+            "an anchor shared only with a terminal eval must be aborted"
+        );
+    }
+
+    #[tokio::test]
     async fn hard_abort_marks_unshared_active_anchors() {
         let eval = make_eval(EvaluationStatus::Building);
         let active_anchor = make_anchor(BuildStatus::Building);
