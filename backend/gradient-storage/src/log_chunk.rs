@@ -10,7 +10,7 @@
 
 use super::sgr::SgrState;
 use crate::log::LogStorage;
-use gradient_types::ids::BuildId;
+use gradient_types::ids::BuildAttemptId;
 use anyhow::Result;
 
 /// One uncompressed chunk plus the metadata persisted in `build_log_chunk`.
@@ -83,7 +83,7 @@ pub struct StoredChunkDesc {
 /// Existing chunks for `log_key` are removed first so re-finalize is idempotent.
 pub async fn compress_and_store_chunks(
     storage: &dyn LogStorage,
-    log_key: BuildId,
+    log_key: BuildAttemptId,
     log: &str,
     target_bytes: usize,
 ) -> Result<Vec<StoredChunkDesc>> {
@@ -148,10 +148,10 @@ mod tests {
     #[tokio::test]
     async fn finalize_writes_compressed_chunks_and_descs() {
         use crate::log::{FileLogStorage, LogStorage};
-        use gradient_types::ids::BuildId;
+        use gradient_types::ids::BuildAttemptId;
         let dir = tempfile::tempdir().unwrap();
         let storage = FileLogStorage::new(dir.path()).await.unwrap();
-        let id = BuildId::new(uuid::Uuid::new_v4());
+        let id = BuildAttemptId::new(uuid::Uuid::new_v4());
         let log = "line one\nline two\nline three\n";
         let descs = super::compress_and_store_chunks(&storage, id, log, 12)
             .await

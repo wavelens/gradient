@@ -43,11 +43,11 @@ pub async fn recover_interrupted_work<C: ConnectionTrait>(
         .await?;
     report.attempts_aborted = res.rows_affected;
 
-    // 2. Re-queue builds that were mid-flight (Building → Queued).
-    let res = EBuild::update_many()
-        .col_expr(CBuild::Status, Expr::value(BuildStatus::Queued))
-        .col_expr(CBuild::UpdatedAt, Expr::value(now))
-        .filter(CBuild::Status.eq(BuildStatus::Building))
+    // 2. Re-queue anchors that were mid-flight (Building → Queued).
+    let res = EDerivationBuild::update_many()
+        .col_expr(CDerivationBuild::Status, Expr::value(BuildStatus::Queued))
+        .col_expr(CDerivationBuild::UpdatedAt, Expr::value(now))
+        .filter(CDerivationBuild::Status.eq(BuildStatus::Building))
         .exec(conn)
         .await?;
     report.builds_requeued = res.rows_affected;

@@ -14,11 +14,14 @@ use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 
 use super::DbContext;
-use gradient_types::{MBuild, MEvaluation};
+use gradient_types::{MBuildJob, MEvaluation};
 
 #[async_trait]
 pub trait StatusReactor: Send + Sync + std::fmt::Debug {
-    async fn on_build_terminal(&self, ctx: &DbContext, build: MBuild, status: BuildStatus);
+    /// Called once per referencing eval's `build_job` when its anchor reaches a
+    /// terminal status. The `build_job` carries the eval + derivation needed to
+    /// post per-target CI status.
+    async fn on_build_terminal(&self, ctx: &DbContext, build_job: MBuildJob, status: BuildStatus);
     async fn on_eval_terminal(
         &self,
         ctx: &DbContext,
@@ -33,6 +36,6 @@ pub struct NoReactor;
 
 #[async_trait]
 impl StatusReactor for NoReactor {
-    async fn on_build_terminal(&self, _: &DbContext, _: MBuild, _: BuildStatus) {}
+    async fn on_build_terminal(&self, _: &DbContext, _: MBuildJob, _: BuildStatus) {}
     async fn on_eval_terminal(&self, _: &DbContext, _: MEvaluation, _: EvaluationStatus) {}
 }

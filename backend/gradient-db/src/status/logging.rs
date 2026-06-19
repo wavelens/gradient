@@ -11,7 +11,7 @@ use tracing::{error, warn};
 
 /// Compress a finalized build log into zstd chunks, persist the chunk index,
 /// and drop the inline copy. Best-effort: failures are logged, never propagated.
-pub async fn finalize_build_log(ctx: &DbContext, log_id: gradient_entity::ids::BuildId) {
+pub async fn finalize_build_log(ctx: &DbContext, log_id: gradient_entity::ids::BuildAttemptId) {
     let log_text = ctx
         .storage
         .log_storage
@@ -47,12 +47,12 @@ pub async fn finalize_build_log(ctx: &DbContext, log_id: gradient_entity::ids::B
 /// Replace the `build_log_chunk` rows for `log_id` with `descs` (idempotent).
 async fn replace_log_chunk_index(
     db: &impl ConnectionTrait,
-    log_id: gradient_entity::ids::BuildId,
+    log_id: gradient_entity::ids::BuildAttemptId,
     descs: &[gradient_storage::log_chunk::StoredChunkDesc],
 ) -> Result<(), sea_orm::DbErr> {
     use gradient_entity::build_log_chunk::{ActiveModel, Column, Entity, Model};
     Entity::delete_many()
-        .filter(Column::Build.eq(log_id))
+        .filter(Column::BuildAttempt.eq(log_id))
         .exec(db)
         .await?;
     if descs.is_empty() {
@@ -64,7 +64,7 @@ async fn replace_log_chunk_index(
         .map(|(i, d)| {
             Model {
                 id: gradient_entity::ids::BuildLogChunkId::now_v7(),
-                build: log_id,
+                build_attempt: log_id,
                 chunk_index: i as i32,
                 byte_start: d.byte_start as i64,
                 byte_len: d.byte_len as i32,

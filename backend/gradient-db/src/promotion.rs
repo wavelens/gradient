@@ -69,6 +69,37 @@ pub async fn promote_dependents<C: ConnectionTrait>(
     Ok(failed + queued)
 }
 
+/// Recursively mark every dependent of `failed_derivation` `DependencyFailed`.
+/// Walks the global `derivation_dependency` graph upward: any non-terminal
+/// anchor (`Created`/`Queued`/`FailedTransient`) reachable from the failure can
+/// never build, so it is failed in one recursive statement. Returns rows changed.
+pub async fn cascade_dependency_failed<C: ConnectionTrait>(
+    db: &C,
+    failed_derivation: DerivationId,
+) -> Result<u64, DbErr> {
+    let affected = db
+        .execute(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            r#"
+            WITH RECURSIVE dependents AS (
+                SELECT $1::uuid AS derivation
+                UNION
+                SELECT dd.derivation FROM derivation_dependency dd
+                JOIN dependents dt ON dd.dependency = dt.derivation
+            )
+            UPDATE derivation_build AS db
+            SET status = 6, updated_at = (now() AT TIME ZONE 'UTC')
+            WHERE db.status IN (0, 1, 8)
+              AND db.derivation IN (SELECT derivation FROM dependents WHERE derivation <> $1)
+            "#,
+            [Value::Uuid(Some(Box::new(failed_derivation.into_inner())))],
+        ))
+        .await?
+        .rows_affected();
+
+    Ok(affected)
+}
+
 /// Promote leaf anchors (no dependency edges) `Created -> Queued`. Called after
 /// each resolve batch so source / fixed-output derivations become buildable
 /// immediately. Returns the number promoted.

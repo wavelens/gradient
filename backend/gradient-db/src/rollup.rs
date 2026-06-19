@@ -19,8 +19,8 @@ use tracing::{debug, warn};
 
 use super::DbContext;
 
-/// A simple count metric over the `build` table, attributed to the owning org
-/// via the build's `evaluation` -> `project` join.
+/// A simple count metric over the global `derivation_build` anchor, attributed
+/// to an owning org once per referencing `build_job` (its eval -> project join).
 struct BuildCount {
     name: &'static str,
     time_col: &'static str,
@@ -204,8 +204,9 @@ fn build_count_sql(m: &BuildCount) -> String {
                 jsonb_build_object('org', pr.organization::text), \
                 hashtextextended(pr.organization::text, 0), \
                 count(*)::bigint, 0, 0, 0, 0, NULL \
-         FROM build b \
-         JOIN evaluation ev ON ev.id = b.evaluation \
+         FROM build_job bj \
+         JOIN derivation_build b ON b.id = bj.derivation_build \
+         JOIN evaluation ev ON ev.id = bj.evaluation \
          JOIN project pr ON pr.id = ev.project \
          WHERE b.{col} IS NOT NULL \
            AND b.{col} >= (now() AT TIME ZONE 'UTC') - interval '{window}' \
@@ -232,8 +233,9 @@ fn build_duration_sql(m: &BuildDuration) -> String {
                 jsonb_build_object('org', pr.organization::text), \
                 hashtextextended(pr.organization::text, 0), \
                 count(*)::bigint, sum({ms}), min({ms}), max({ms}), sum(power({ms}, 2)), NULL \
-         FROM build b \
-         JOIN evaluation ev ON ev.id = b.evaluation \
+         FROM build_job bj \
+         JOIN derivation_build b ON b.id = bj.derivation_build \
+         JOIN evaluation ev ON ev.id = bj.evaluation \
          JOIN project pr ON pr.id = ev.project \
          WHERE b.{end} IS NOT NULL AND b.{start} IS NOT NULL \
            AND b.{end} >= (now() AT TIME ZONE 'UTC') - interval '{window}' \
@@ -263,12 +265,13 @@ fn build_duration_attempt_sql() -> String {
                 jsonb_build_object('org', pr.organization::text), \
                 hashtextextended(pr.organization::text, 0), \
                 count(*)::bigint, sum({ms}), min({ms}), max({ms}), sum(power({ms}, 2)), NULL \
-         FROM build b \
-         JOIN evaluation ev ON ev.id = b.evaluation \
+         FROM build_job bj \
+         JOIN derivation_build b ON b.id = bj.derivation_build \
+         JOIN evaluation ev ON ev.id = bj.evaluation \
          JOIN project pr ON pr.id = ev.project \
          JOIN LATERAL ( \
              SELECT ba2.build_started_at, ba2.build_finished_at \
-             FROM build_attempt ba2 WHERE ba2.build = b.id \
+             FROM build_attempt ba2 WHERE ba2.derivation_build = b.id \
              ORDER BY ba2.created_at DESC LIMIT 1 \
          ) ba ON TRUE \
          WHERE ba.build_finished_at IS NOT NULL AND ba.build_started_at IS NOT NULL \

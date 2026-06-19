@@ -44,12 +44,7 @@ pub async fn materialize_entry_point_closures<C: ConnectionTrait>(
         return Ok(());
     }
 
-    let build_ids: Vec<_> = entry_points.iter().map(|ep| ep.build).collect();
-    let builds = fetch_in_chunks(&build_ids, |chunk| async move {
-        EBuild::find().filter(CBuild::Id.is_in(chunk)).all(db).await
-    })
-    .await?;
-    let root_ids: Vec<DerivationId> = builds.iter().map(|b| b.derivation).collect();
+    let root_ids: Vec<DerivationId> = entry_points.iter().map(|ep| ep.derivation).collect();
 
     let roots = fetch_in_chunks(&root_ids, |chunk| async move {
         EDerivation::find().filter(CDerivation::Id.is_in(chunk)).all(db).await
@@ -128,9 +123,8 @@ pub async fn init_entry_point_dep_counts<C: ConnectionTrait>(
             "INSERT INTO entry_point_dep_count (id, entry_point, status, count) \
              SELECT uuidv7(), ep.id, b.status, COUNT(*) \
              FROM entry_point ep \
-             JOIN build rb ON rb.id = ep.build \
-             JOIN derivation_closure dc ON dc.root_derivation = rb.derivation \
-             JOIN build b ON b.derivation = dc.dep_derivation AND b.evaluation = '{eval}' \
+             JOIN derivation_closure dc ON dc.root_derivation = ep.derivation \
+             JOIN derivation_build b ON b.derivation = dc.dep_derivation \
              WHERE ep.evaluation = '{eval}' \
              GROUP BY ep.id, b.status"
         ),
@@ -187,23 +181,21 @@ pub async fn reconcile_inflight_dep_counts<C: ConnectionTrait>(db: &C) -> Result
     Ok(())
 }
 
-/// Move one unit from `old_status` to `new_status` for every entry point in
-/// `evaluation` whose closure contains `dep_derivation`. Called from
-/// `update_build_status` on each transition. A no-op for evaluations without a
-/// materialised closure (e.g. historical evals), so it is always safe to call.
+/// Move one unit from `old_status` to `new_status` for every entry point (in
+/// any evaluation) whose closure contains `dep_derivation`. The anchor is
+/// global, so a single transition fans across all referencing entry points.
+/// Called from `update_derivation_build_status` on each transition; a no-op for
+/// entry points without a materialised closure, so it is always safe to call.
 pub async fn apply_dep_count_delta<C: ConnectionTrait>(
     db: &C,
-    evaluation: EvaluationId,
     dep_derivation: DerivationId,
     old_status: i32,
     new_status: i32,
 ) -> Result<(), DbErr> {
-    let eval = evaluation.into_inner();
     let dep = dep_derivation.into_inner();
     let affected = "FROM entry_point ep \
-         JOIN build rb ON rb.id = ep.build \
-         JOIN derivation_closure dc ON dc.root_derivation = rb.derivation";
-    let predicate = format!("ep.evaluation = '{eval}' AND dc.dep_derivation = '{dep}'");
+         JOIN derivation_closure dc ON dc.root_derivation = ep.derivation";
+    let predicate = format!("dc.dep_derivation = '{dep}'");
 
     db.execute(Statement::from_string(
         DbBackend::Postgres,

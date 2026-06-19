@@ -177,11 +177,11 @@ pub struct MissingInputDiagnosis {
 /// evaluation, for diagnostic logging by the missing-input self-heal.
 pub async fn diagnose_missing_input<C: ConnectionTrait>(
     db: &C,
-    evaluation_id: gradient_types::ids::EvaluationId,
+    _evaluation_id: gradient_types::ids::EvaluationId,
     hash: &str,
 ) -> Result<MissingInputDiagnosis, sea_orm::DbErr> {
-    use gradient_entity::build::{Column as CB, Entity as EB};
     use gradient_entity::cached_path::{Column as CCP, Entity as ECP};
+    use gradient_entity::derivation_build::{Column as CDB, Entity as EDB};
     use gradient_entity::derivation_output::{Column as CDO, Entity as EDO};
 
     let cached_path = ECP::find().filter(CCP::Hash.eq(hash)).one(db).await?;
@@ -189,12 +189,13 @@ pub async fn diagnose_missing_input<C: ConnectionTrait>(
     let outputs_cached = outputs.iter().filter(|o| o.is_cached).count();
     let producer_drvs: Vec<DerivationId> = outputs.iter().map(|o| o.derivation).collect();
 
+    // Anchors are global; the producer's build status is the same regardless of
+    // the querying evaluation.
     let producer_build_statuses = if producer_drvs.is_empty() {
         Vec::new()
     } else {
-        EB::find()
-            .filter(CB::Evaluation.eq(evaluation_id))
-            .filter(CB::Derivation.is_in(producer_drvs))
+        EDB::find()
+            .filter(CDB::Derivation.is_in(producer_drvs))
             .all(db)
             .await?
             .into_iter()

@@ -167,46 +167,17 @@ fn eval_survives_restart(status: EvaluationStatus) -> bool {
     matches!(status, EvaluationStatus::Queued | EvaluationStatus::Waiting)
 }
 
-/// A build survives a restart only if it had not started running
-/// (`Created`/`Queued`) *and* its evaluation survives too. A `Building` build
-/// was on a lost worker; a queued build under an aborted evaluation goes with
-/// it.
-fn build_survives_restart(status: BuildStatus, eval_survives: bool) -> bool {
-    eval_survives && matches!(status, BuildStatus::Created | BuildStatus::Queued)
-}
-
 async fn update_db(db: &DatabaseConnection) -> Result<(), DbErr> {
-    // Recover work interrupted by the restart. Only abort what was genuinely
-    // lost (mid-fetch/eval/build evaluations, mid-compile builds); leave
-    // queued/waiting evaluations and their not-yet-dispatched builds so the
-    // scheduler re-offers them on its next tick.
-    let surviving_eval_ids: Vec<EvaluationId> = EEvaluation::find()
-        .filter(CEvaluation::Status.is_in(EvaluationStatus::ACTIVE))
-        .all(db)
-        .await?
-        .into_iter()
-        .filter(|e| eval_survives_restart(e.status))
-        .map(|e| e.id)
-        .collect();
-
-    let builds = EBuild::find()
-        .filter(CBuild::Status.is_in([
-            BuildStatus::Created,
-            BuildStatus::Queued,
-            BuildStatus::Building,
-        ]))
-        .all(db)
+    // Recover work interrupted by the restart. Anchors are global, so a build
+    // that was mid-compile on a now-lost worker is simply re-queued for the
+    // scheduler to re-dispatch (its orphaned attempt is closed by recovery);
+    // queued/waiting evaluations are left for the dispatcher to re-offer.
+    EDerivationBuild::update_many()
+        .col_expr(CDerivationBuild::Status, sea_orm::sea_query::Expr::value(BuildStatus::Queued))
+        .col_expr(CDerivationBuild::UpdatedAt, sea_orm::sea_query::Expr::value(now()))
+        .filter(CDerivationBuild::Status.eq(BuildStatus::Building))
+        .exec(db)
         .await?;
-
-    for build in builds {
-        if build_survives_restart(build.status, surviving_eval_ids.contains(&build.evaluation)) {
-            continue;
-        }
-        let mut abuild: ABuild = build.into();
-        abuild.status = Set(BuildStatus::Aborted);
-        abuild.via = Set(None);
-        abuild.update(db).await?;
-    }
 
     let evaluations = EEvaluation::find()
         .filter(CEvaluation::Status.is_in(EvaluationStatus::ACTIVE))
