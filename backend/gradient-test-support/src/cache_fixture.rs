@@ -45,10 +45,6 @@ fn cached_path_sig_id() -> CachedPathSignatureId {
     CachedPathSignatureId::new(Uuid::parse_str("10000000-0000-0000-0000-000000000006").unwrap())
 }
 
-fn org_cache_id() -> OrganizationCacheId {
-    OrganizationCacheId::new(Uuid::parse_str("10000000-0000-0000-0000-000000000007").unwrap())
-}
-
 fn test_date() -> chrono::NaiveDateTime {
     chrono::NaiveDate::from_ymd_opt(2026, 1, 1)
         .unwrap()
@@ -94,22 +90,6 @@ pub async fn public_cache_with_narinfo() -> Arc<ServerState> {
         ..Default::default()
     };
 
-    let deriv_row = gradient_entity::derivation::Model {
-        id: deriv_id(),
-        hash: FIXTURE_PATH_HASH.into(),
-        name: "hello".into(),
-        architecture: "x86_64-linux".into(),
-        created_at: test_date(),
-        ..Default::default()
-    };
-
-    let org_cache_row = gradient_entity::organization_cache::Model {
-        id: org_cache_id(),
-        organization: org_id(),
-        cache: cache_id(),
-        mode: gradient_entity::organization_cache::CacheSubscriptionMode::ReadWrite,
-    };
-
     let cached_path_row = gradient_entity::cached_path::Model {
         id: cached_path_id(),
         hash: FIXTURE_PATH_HASH.into(),
@@ -138,8 +118,6 @@ pub async fn public_cache_with_narinfo() -> Arc<ServerState> {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![cache_row]])
         .append_query_results([vec![drv_output_row]])
-        .append_query_results([vec![deriv_row]])
-        .append_query_results([vec![org_cache_row]])
         .append_query_results([vec![cached_path_row]])
         .append_query_results([vec![cached_path_sig_row]])
         .into_connection();
