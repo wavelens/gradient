@@ -8,7 +8,7 @@ use chrono::NaiveDateTime;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{BuildId, EntryPointId, EvaluationId, ProjectId};
+use crate::ids::{DerivationId, EntryPointId, EvaluationId, ProjectId};
 
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "entry_point")]
@@ -17,7 +17,7 @@ pub struct Model {
     pub id: EntryPointId,
     pub project: ProjectId,
     pub evaluation: EvaluationId,
-    pub build: BuildId,
+    pub derivation: DerivationId,
     pub eval: String,
     pub created_at: NaiveDateTime,
     pub repo_check_id: Option<i64>,
@@ -38,11 +38,11 @@ pub enum Relation {
     )]
     Evaluation,
     #[sea_orm(
-        belongs_to = "super::build::Entity",
-        from = "Column::Build",
-        to = "super::build::Column::Id"
+        belongs_to = "super::derivation::Entity",
+        from = "Column::Derivation",
+        to = "super::derivation::Column::Id"
     )]
-    Build,
+    Derivation,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

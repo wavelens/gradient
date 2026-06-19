@@ -135,6 +135,7 @@ id_newtype!(WorkerRegistrationId);
 id_newtype!(CliDeviceAuthorizationId);
 id_newtype!(AcknowledgedDerivationId);
 id_newtype!(BuildAttemptId);
+id_newtype!(BuildJobId);
 id_newtype!(DispatchedJobId);
 id_newtype!(MetricRollupId);
 id_newtype!(PhaseEventId);
