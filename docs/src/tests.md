@@ -4553,3 +4553,33 @@ page with its score breakdown, served from the in-memory decision ring.
   `OutputArtefacts::full_store_path` reconstruction for `nix copy`/`nix-store
   --realise`, and the worker FFI paths are covered by CI rather than local unit
   tests.
+
+## Direct-to-object-store NAR upload + storage/disconnect retry
+
+Stops relaying multi-GB build-output NARs through the server (which buffered each
+whole NAR and did one blocking PUT inline on the connection, freezing the worker
+session on slow object storage).
+
+- `backend/gradient-worker/src/executor/compress.rs::compress_and_push_paths` now
+  routes build outputs through `CacheQuery { Push }` + the shared
+  `executor::upload_one_nar`: a presigned S3 PUT straight to object storage when
+  S3-backed, falling back to direct `NarPush` only for local stores. A failed
+  upload propagates as a transient `BuildError`, so the build is re-dispatched.
+- `backend/gradient-worker/src/executor/mod.rs` - eval-time pushes (the `.drv`
+  closure and fetched flake inputs) now propagate upload failures via
+  `JobReporter::push_drv_closure` returning `Result`; a failed push fails the
+  evaluation with the error instead of being silently swallowed. The
+  `job_reporter` fake mirrors the new signature.
+- `backend/gradient-proto/src/handler/dispatch.rs::fail_build_transient` - a
+  server-side staged-read / size-mismatch / `nar_storage.put` failure (local
+  stores) stops the worker and marks the build `FailedTransient` so it retries,
+  without dropping the WebSocket (the dispatch loop keeps running, so the
+  worker's other in-flight jobs survive).
+- `backend/gradient-scheduler/src/jobs.rs::worker_disconnected` now returns the
+  requeued `PendingJob`s; `worker_lifecycle::unregister_worker` calls
+  `build::requeue_orphaned_jobs` to reset the DB rows of a disconnected worker's
+  in-flight jobs (`Building -> Queued`; mid-eval -> `Waiting`, recovered by the
+  reconciler) so they re-dispatch instead of stranding. Covered by the existing
+  in-memory `test_worker_disconnected_requeues` / `test_worker_disconnect_requeues_jobs`;
+  the DB reset and the worker-side orphan-task cancellation are covered by CI E2E
+  rather than the MockDatabase unit harness.
