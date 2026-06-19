@@ -122,47 +122,35 @@ The scheduler also keeps a bounded ring of recent dispatch decisions - every sco
 
 ## Bulk evaluation abort + dispatch race
 
-Aborting an evaluation now parks it as `Waiting` with `WaitingReason::Aborting` before touching its builds, then aborts all in-flight builds in a handful of set-based statements instead of one round-trip per build. The dispatcher's queue finder skips `Waiting` evaluations, so it stops handing out the aborting eval's builds; any build that already escaped to a worker is aborted when it reports started.
+Aborting an evaluation parks it as `Waiting` with `WaitingReason::Aborting` before touching its builds, then aborts the eval's in-flight `derivation_build` anchors in a handful of set-based statements. Because anchors are global, an anchor is aborted only when no other non-terminal evaluation still needs it (a `build_job` in another live eval keeps it running); the dispatcher's queue finder skips `Waiting` evaluations meanwhile.
 
 - `backend/gradient-types/src/waiting_reason.rs`: `aborting_round_trip` asserts `WaitingReason::Aborting` serialises to `kind: "aborting"` and decodes back.
-- `backend/gradient-db/src/status/abort.rs`: `partition_skips_busy_leaders_reelects_idle_leaders_and_aborts_the_rest` asserts the abort partition keeps a running leader with followers alive, re-elects an idle leader with followers, aborts followers and plain builds, and reports only executing builds as needing attempt/log finalization.
+- The anchor-abort SQL (set-based, shared-anchor guarded) is verified by E2E CI, not a MockDatabase sequence test.
 
 ## Worker shadows base worker of same id (#407)
 
 `backend/gradient-web/src/endpoints/orgs/workers.rs` - `registration_shadows_base_worker_of_same_id` asserts `unshadowed_base_workers` drops a base worker whose `worker_id` matches one of the org's normal registrations, so `GET /orgs/{org}/workers` lists the conflicting worker only once (as the org registration). `delete_org_worker` deletes the registration first, so the normal worker is removed even when a base worker shares its id, and the `409` base-worker guard fires only when no registration exists.
 
-## Incremental Created → Queued promotion (#392)
+## Global derivation build identity (build-once anchors)
 
-`backend/gradient-scheduler/src/edge_readiness.rs` unit-tests the pure
-`EdgeReadiness` tracker that decides when a derivation's full direct-dependency
-edge set is in the DB so its build can be queued mid-evaluation: leaves promote
-in the same batch, a parent promotes only once its last dependency row appears
-(in any discovery order), a diamond graph reports each node exactly once with the
-complete edge set, re-observing a seen derivation is a no-op, and unresolved
-sources drain at eval end. The DB wiring (`write_edges_and_promote`) reuses the
-proven `flush_deferred_deps` query and the `update_build_status` promotion loop,
-so it is covered by the existing `handle_eval_job_completed` handler tests plus
-E2E CI rather than a new MockDatabase sequence.
+A derivation is built exactly once across all evaluations and organisations.
+State lives on a `derivation_build` anchor (1:1 with the content-addressed
+`derivation`, `UNIQUE(derivation)`); each evaluation links to it through a
+per-eval `build_job`, and `Created → Queued` promotion is driven by the global
+`derivation_dependency` graph, fully decoupled from any evaluation's lifecycle
+(this is what fixes builds stuck in `Created` behind a never-completing eval).
 
-`backend/gradient-worker/src/executor/eval.rs` - `pushes_batch_closure_before_reporting_it`
-guards the worker side of the same change. Because #392 dispatches builds
-mid-evaluation, each batch's `.drv` runtime closure (its `input_sources`) must be
-pushed to the cache *before* `report_eval_result` lets the server promote and
-dispatch that batch's builds. Driving the walk with a `RecordingJobReporter`, the
-test asserts every reported (non-substituted) derivation was covered by an earlier
-`push_drv_closure`, so a build worker never prefetches a source the cache does not
-yet hold ("required input path missing").
-
-Promotion must also respect inputs that **already failed** mid-evaluation: a
-`Created` build whose dependency is terminally failed is promoted to
-`DependencyFailed`, not `Queued`, or it would sit `Queued` forever (the dispatch
-gate never clears it - its dep is not `Completed`/`Substituted`) and stall the
-eval. `created_builds_with_failed_dependency` (an EXISTS antijoin mirroring the
-dispatch gate, inverted to failures) feeds the pure `promotion_target` decision,
-applied at both the per-batch (`promote_ready_builds`) and end-of-eval promotion
-loops. `eval::promotion_tests::promotion_target_is_dependency_failed_when_a_dep_already_failed`
-covers the decision; the reverse timing (a dep failing after its dependent is
-already promoted) stays covered by `cascade_dependency_failed`.
+The build-once guarantee is enforced by the DB `UNIQUE(derivation)` constraint
+plus `INSERT ... ON CONFLICT (derivation) DO NOTHING` in
+`scheduler::eval::resolve_anchors`, not by a MockDatabase test (which cannot
+exercise a real `ON CONFLICT`). The promotion SQL
+(`gradient_db::promotion::{promote_dependents, promote_leaves,
+cascade_dependency_failed}`) and the reachability refcount used for access and
+GC (`gradient_db::reachability`) are covered by E2E CI against real PostgreSQL.
+Worker-side, `backend/gradient-worker/src/executor/eval.rs` -
+`pushes_batch_closure_before_reporting_it` still guards that each batch's `.drv`
+runtime closure is pushed to the cache before the server promotes and dispatches
+that batch, so a build never prefetches a source the cache does not yet hold.
 
 ## PostgreSQL minimum-version guard (#387)
 

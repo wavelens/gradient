@@ -1,62 +1,52 @@
 # Scheduler
 
 The Gradient scheduler coordinates build dispatch across connected workers.
-This page covers the cross-cache deduplication feature. For a general
-overview of the scheduler architecture see
+This page covers how builds are shared across evaluations and organisations.
+For a general overview of the scheduler architecture see
 [Architecture](development/architecture.md).
 
-### Cross-cache deduplication
+### Shared build anchors
 
-When a new build is created for `/nix/store/<hash>-foo.drv` and another
-organisation already has an in-flight build for the same path, the new build
-can be linked to it as a follower instead of being scheduled separately.
-The link is admissible whenever the follower's organisation can substitute
-from the leader's writes through the cache graph:
+A derivation is built exactly once, globally. Build state lives on a
+`derivation_build` anchor keyed 1:1 to the content-addressed `derivation`
+(UNIQUE on `derivation`, so the database itself enforces build-once). Every
+evaluation that needs a derivation gets a per-eval `build_job` linking it to
+that anchor; each execution attempt and its log live on `build_attempt` under
+the anchor.
 
-- The leader's organisation has `organization_cache` mode `ReadWrite` or
-  `WriteOnly` on some cache `C_w`.
-- `C_w` is in the upstream closure (over `cache_upstream`) of one of the
-  follower organisation's `ReadWrite`/`ReadOnly` caches.
+When two evaluations - in the same or different organisations - need the same
+derivation, they share the one anchor: whichever is dispatched first builds
+it, and the others observe the result the moment the anchor reaches a
+terminal-success status. There is no leader/follower row and no `via` link;
+sharing is implicit in the global derivation graph.
 
-The closure walk follows only internal `cache_upstream.upstream_cache`
-edges; external (URL-based) upstreams do not host Gradient builds and are
-excluded.
+#### Promotion
 
-#### Leader selection
+An anchor becomes `Queued` (buildable) the moment all of its dependency
+anchors are terminal-success (`Completed`/`Substituted`), independent of any
+evaluation's lifecycle (see `gradient_db::promotion`). This decoupling is what
+keeps builds from getting stuck behind a never-completing evaluation. A failed
+dependency cascades `DependencyFailed` over the global `derivation_dependency`
+graph.
 
-`find_active_leaders` first looks for an in-flight candidate in the same
-organisation. Only when none exists does it run the cross-org pass.
-Cross-org candidates are filtered to `external_cached = false` and ordered
-by status (`Building` > `Queued` > `Created`) then oldest `created_at`.
-
-#### Artefact propagation
-
-Same-org followers share the leader's `derivation` row, so its
-`derivation_output` and `build_product` children are visible automatically.
-Cross-org followers have these rows mirrored onto their own `derivation`
-when the leader completes (see `scheduler::build::propagate_to_followers`
-and the pure helper `build_cross_org_artefact_rows`).
-
-#### Access
+#### Access and GC
 
 Read-only build endpoints (`GET /builds/{id}`, `/log`, `/downloads`,
-`/graph`) accept requests from members of any organisation that holds a
-follower row pointing at the targeted leader.
-
-#### Leader abort
-
-On leader abort, only same-org followers are eligible for promotion to the
-new leader. Cross-org followers are made independent (`via` cleared) so the
-next dispatch cycle picks them up on their own.
+`/graph`) accept requests from members of any organisation whose evaluation
+references the derivation (a `build_job` exists for it in one of that org's
+evaluations). The same reachability refcounts the anchor for garbage
+collection: a derivation with no surviving `build_job` is collected once past
+its grace period.
 
 ### Log substitution from upstream caches
 
 When a derivation's outputs are pulled from an upstream cache rather than
 built locally, Gradient also tries to retrieve the corresponding build log
 from that upstream's `/log/{drv}` endpoint (the same one the Gradient cache
-exposes). If the upstream serves the log, it is stored under the same build
-record so the build's log tab shows it just like a locally-built one. If no
-upstream serves the log, the build is recorded without one.
+exposes). If the upstream serves the log, it is appended to the anchor's
+latest `build_attempt` log so the build's log tab shows it just like a
+locally-built one. If no upstream serves the log, the build is recorded
+without one.
 
 ## Adaptive fetch/eval split
 

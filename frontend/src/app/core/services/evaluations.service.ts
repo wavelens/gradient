@@ -67,7 +67,6 @@ export interface BuildWithOutputs {
   derivation_path: string;
   architecture: string;
   worker: string | null;
-  via: string | null;
   output: Record<string, string>;
   created_at: string;
   updated_at: string;
