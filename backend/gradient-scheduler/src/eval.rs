@@ -317,10 +317,10 @@ impl<'a> EvalResultProcessor<'a> {
             }
         }
 
-        // Leaf anchors (no dependency edges) are buildable immediately.
-        if let Err(e) = gradient_db::promote_leaves(&self.state.worker_db).await {
-            error!(error = %e, "promote_leaves failed");
-        }
+        // Promotion is deferred to stream completion (`handle_eval_job_completed`),
+        // after `flush_deferred_deps` writes the dependency edges. Promoting here
+        // would run before any edge exists and queue every anchor regardless of
+        // its (not-yet-recorded) dependencies.
 
         Ok(())
     }
@@ -656,6 +656,13 @@ pub async fn handle_eval_job_completed(
     // and seed the per-entry-point dependency counts (#383).
     if let Err(e) = gradient_db::seed_entry_point_dep_counts(&state.worker_db, evaluation_id).await {
         error!(error = %e, %evaluation_id, "seed_entry_point_dep_counts failed (non-fatal)");
+    }
+
+    // The dependency graph is now complete (edges flushed). Seed the graph-driven
+    // promotion from its ready frontier: leaves and anchors whose deps were
+    // already cached/substituted. Each subsequent completion cascades upward.
+    if let Err(e) = gradient_db::promote_ready(&state.worker_db).await {
+        error!(error = %e, %evaluation_id, "promote_ready failed");
     }
 
     // Promotion is graph-driven (gradient_db::promotion), independent of eval

@@ -144,7 +144,7 @@ The build-once guarantee is enforced by the DB `UNIQUE(derivation)` constraint
 plus `INSERT ... ON CONFLICT (derivation) DO NOTHING` in
 `scheduler::eval::resolve_anchors`, not by a MockDatabase test (which cannot
 exercise a real `ON CONFLICT`). The promotion SQL
-(`gradient_db::promotion::{promote_dependents, promote_leaves,
+(`gradient_db::promotion::{promote_dependents, promote_ready,
 cascade_dependency_failed}`) and the reachability refcount used for access and
 GC (`gradient_db::reachability`) are covered by E2E CI against real PostgreSQL.
 Worker-side, `backend/gradient-worker/src/executor/eval.rs` -
