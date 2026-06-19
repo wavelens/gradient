@@ -1110,12 +1110,11 @@ impl<'a> DispatchContext<'a> {
             .into_iter()
             .collect();
         let known = match self.scheduler.peer_id_for_job(&job_id).await {
-            Some(org_id) => {
+            Some(_) => {
                 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
-                // First: find derivations that exist for this org.
+                // First: find derivations that exist globally by hash.
                 let candidates = EDerivation::find()
-                    .filter(CDerivation::Organization.eq(org_id))
                     .filter(CDerivation::Hash.is_in(hashes))
                     .all(&self.state.worker_db)
                     .await

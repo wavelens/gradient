@@ -394,7 +394,7 @@ impl Scheduler {
 
         eval::handle_eval_result(&self.state, &job, derivations, warnings, errors).await?;
 
-        match eval::write_edges_and_promote(&self.state, eval_id, job.peer_id, ready).await {
+        match eval::write_edges_and_promote(&self.state, eval_id, ready).await {
             Ok(n) if n > 0 => self.kick_dispatch(),
             Ok(_) => {}
             Err(e) => error!(error = %e, %eval_id, "write_edges_and_promote failed"),
@@ -475,8 +475,7 @@ impl Scheduler {
                     .map(|mut t| t.drain_pending())
                     .unwrap_or_default();
                 if let Err(e) =
-                    eval::flush_deferred_deps(&self.state, j.evaluation_id, j.peer_id, deferred)
-                        .await
+                    eval::flush_deferred_deps(&self.state, j.evaluation_id, deferred).await
                 {
                     error!(error = %e, evaluation_id = %j.evaluation_id, "flush_deferred_deps failed");
                 }

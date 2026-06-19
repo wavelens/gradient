@@ -295,7 +295,6 @@ mod tests {
     fn drv(id: DerivationId, name: &str) -> derivation::Model {
         derivation::Model {
             id,
-            organization: OrganizationId::now_v7(),
             hash: format!("hash{name}"),
             name: name.into(),
             architecture: "x86_64-linux".into(),

@@ -915,7 +915,7 @@ fn resolve_limit(stored: Option<i64>, default: Option<u64>) -> Option<u64> {
     }
 }
 
-async fn organization_id_for_eval(
+pub(crate) async fn organization_id_for_eval(
     state: &Arc<ServerState>,
     eval: &MEvaluation,
 ) -> Option<OrganizationId> {

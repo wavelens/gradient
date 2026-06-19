@@ -39,10 +39,6 @@ fn cached_path_id() -> CachedPathId {
 fn cached_path_sig_id() -> CachedPathSignatureId {
     CachedPathSignatureId::new(Uuid::parse_str("10000000-0000-0000-0000-000000000006").unwrap())
 }
-fn org_cache_id() -> OrganizationCacheId {
-    OrganizationCacheId::new(Uuid::parse_str("10000000-0000-0000-0000-000000000007").unwrap())
-}
-
 fn test_date() -> chrono::NaiveDateTime {
     chrono::NaiveDate::from_ymd_opt(2026, 1, 1)
         .unwrap()
@@ -103,25 +99,6 @@ async fn narinfo_served_from_db_inner() {
         ..Default::default()
     };
 
-    // The parent derivation, owned by org_id().
-    let deriv_row = gradient_entity::derivation::Model {
-        id: deriv_id(),
-        organization: org_id(),
-        hash: FIXTURE_HASH.into(),
-        name: "hello".into(),
-        architecture: "x86_64-linux".into(),
-        created_at: test_date(),
-        ..Default::default()
-    };
-
-    // Subscription row proving org_id() can access cache_id().
-    let org_cache_row = gradient_entity::organization_cache::Model {
-        id: org_cache_id(),
-        organization: org_id(),
-        cache: cache_id(),
-        mode: gradient_entity::organization_cache::CacheSubscriptionMode::ReadWrite,
-    };
-
     // The cached_path row carrying the NAR metadata written by the worker.
     let cached_path_row = gradient_entity::cached_path::Model {
         id: cached_path_id(),
@@ -151,18 +128,16 @@ async fn narinfo_served_from_db_inner() {
         ..Default::default()
     };
 
-    // Query order driven by CacheContext::load + get_nar_by_hash:
+    // Query order driven by CacheContext::load + get_nar_by_hash. Derivations
+    // are global, so access is gated on the cached_path_signature row for this
+    // cache, not a derivation->org subscription check:
     //   0. ECache::find (by name)              → cache_row
     //   1. EDerivationOutput::find (by hash)   → drv_output_row
-    //   2. EDerivation::find_by_id             → deriv_row
-    //   3. EOrganizationCache::find (sub check)→ org_cache_row
-    //   4. ECachedPath::find (by hash)         → cached_path_row
-    //   5. ECachedPathSignature::find          → cached_path_sig_row
+    //   2. ECachedPath::find (by hash)         → cached_path_row
+    //   3. ECachedPathSignature::find          → cached_path_sig_row
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![cache_row]])
         .append_query_results([vec![drv_output_row]])
-        .append_query_results([vec![deriv_row]])
-        .append_query_results([vec![org_cache_row]])
         .append_query_results([vec![cached_path_row]])
         .append_query_results([vec![cached_path_sig_row]])
         .into_connection();
@@ -263,23 +238,6 @@ async fn narinfo_unsigned_inner() {
         ..Default::default()
     };
 
-    let deriv_row = gradient_entity::derivation::Model {
-        id: deriv_id(),
-        organization: org_id(),
-        hash: FIXTURE_HASH.into(),
-        name: "hello".into(),
-        architecture: "x86_64-linux".into(),
-        created_at: test_date(),
-        ..Default::default()
-    };
-
-    let org_cache_row = gradient_entity::organization_cache::Model {
-        id: org_cache_id(),
-        organization: org_id(),
-        cache: cache_id(),
-        mode: gradient_entity::organization_cache::CacheSubscriptionMode::ReadWrite,
-    };
-
     let cached_path_row = gradient_entity::cached_path::Model {
         id: cached_path_id(),
         hash: FIXTURE_HASH.into(),
@@ -307,8 +265,6 @@ async fn narinfo_unsigned_inner() {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![cache_row]])
         .append_query_results([vec![drv_output_row]])
-        .append_query_results([vec![deriv_row]])
-        .append_query_results([vec![org_cache_row]])
         .append_query_results([vec![cached_path_row]])
         .append_query_results([vec![unsigned_sig_row]])
         .into_connection();

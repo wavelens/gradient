@@ -42,11 +42,7 @@ struct DerivationInsertBatch {
 
 impl DerivationInsertBatch {
     /// Build insert rows for derivations not yet in `existing`.
-    fn prepare(
-        organization_id: OrganizationId,
-        derivations: &[DiscoveredDerivation],
-        existing: &[MDerivation],
-    ) -> Self {
+    fn prepare(derivations: &[DiscoveredDerivation], existing: &[MDerivation]) -> Self {
         let mut drv_path_to_id: HashMap<String, DerivationId> =
             existing.iter().map(|d| (d.drv_path(), d.id)).collect();
 
@@ -64,7 +60,6 @@ impl DerivationInsertBatch {
                 .unwrap_or_else(|_| ("unknown".to_owned(), d.drv_path.clone()));
             new_derivations.push(MDerivation {
                 id,
-                organization: organization_id,
                 hash: drv_hash,
                 name: drv_name,
                 architecture: d.architecture.clone(),
@@ -187,10 +182,8 @@ impl<'a> EvalResultProcessor<'a> {
         }
 
         let db = &self.state.worker_db;
-        let org = self.organization_id;
         gradient_db::fetch_in_chunks(&hashes, |chunk| async move {
             EDerivation::find()
-                .filter(CDerivation::Organization.eq(org))
                 .filter(CDerivation::Hash.is_in(chunk))
                 .all(db)
                 .await
@@ -747,7 +740,7 @@ pub async fn handle_eval_result(
     let proc = EvalResultProcessor::new(state, evaluation_id, organization_id, evaluation);
 
     let existing = proc.load_existing_derivations(&derivations).await?;
-    let batch = DerivationInsertBatch::prepare(organization_id, &derivations, &existing);
+    let batch = DerivationInsertBatch::prepare(&derivations, &existing);
     let drv_path_to_id = batch.insert(state, &proc.evaluation).await?;
 
     // Dependency edges are NOT created here. The BFS walks roots→leaves, so
@@ -867,7 +860,6 @@ pub async fn handle_eval_job_completed(
 pub async fn flush_deferred_deps(
     state: &Arc<ServerState>,
     evaluation_id: EvaluationId,
-    organization_id: OrganizationId,
     deferred: Vec<(String, Vec<String>)>,
 ) -> Result<()> {
     if deferred.is_empty() {
@@ -877,7 +869,7 @@ pub async fn flush_deferred_deps(
     // Collect every unique drv_path mentioned (both as source and as dep), and
     // derive the unique hash set we'll filter the DB on. Hashes are
     // content-addressed (32-char nix32) so filtering by hash alone is enough to
-    // pin a row down within an organization.
+    // pin a row down in the global derivation graph.
     let mut all_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
     for (src, deps) in &deferred {
         all_paths.insert(src.clone());
@@ -896,7 +888,6 @@ pub async fn flush_deferred_deps(
     let drv_path_to_id: std::collections::HashMap<String, DerivationId> =
         gradient_db::fetch_in_chunks(&all_hashes, |chunk| async move {
             EDerivation::find()
-                .filter(CDerivation::Organization.eq(organization_id))
                 .filter(CDerivation::Hash.is_in(chunk))
                 .all(db)
                 .await
@@ -1029,7 +1020,6 @@ fn promotion_target(
 async fn promote_ready_builds(
     state: &Arc<ServerState>,
     evaluation_id: EvaluationId,
-    organization_id: OrganizationId,
     ready_paths: &[String],
 ) -> Result<usize> {
     if ready_paths.is_empty() {
@@ -1046,7 +1036,6 @@ async fn promote_ready_builds(
     let db = &state.worker_db;
     let drv_ids: Vec<DerivationId> = gradient_db::fetch_in_chunks(&hashes, |chunk| async move {
         EDerivation::find()
-            .filter(CDerivation::Organization.eq(organization_id))
             .filter(CDerivation::Hash.is_in(chunk))
             .all(db)
             .await
@@ -1092,7 +1081,6 @@ async fn promote_ready_builds(
 pub async fn write_edges_and_promote(
     state: &Arc<ServerState>,
     evaluation_id: EvaluationId,
-    organization_id: OrganizationId,
     ready: Vec<(String, Vec<String>)>,
 ) -> Result<usize> {
     if ready.is_empty() {
@@ -1105,11 +1093,11 @@ pub async fn write_edges_and_promote(
         .cloned()
         .collect();
     if !edges.is_empty() {
-        flush_deferred_deps(state, evaluation_id, organization_id, edges).await?;
+        flush_deferred_deps(state, evaluation_id, edges).await?;
     }
 
     let promote: Vec<String> = ready.into_iter().map(|(p, _)| p).collect();
-    promote_ready_builds(state, evaluation_id, organization_id, &promote).await
+    promote_ready_builds(state, evaluation_id, &promote).await
 }
 
 pub async fn handle_eval_job_failed(

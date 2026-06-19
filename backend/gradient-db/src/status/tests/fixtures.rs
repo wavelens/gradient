@@ -4,19 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_types::{BuildId, CacheId, DerivationId, OrganizationId};
+use gradient_types::{BuildId, DerivationId, OrganizationId};
 use uuid::Uuid;
 
 pub fn org(n: u8) -> OrganizationId {
     let mut bytes = [0u8; 16];
     bytes[15] = n;
     OrganizationId::new(Uuid::from_bytes(bytes))
-}
-
-pub fn cid(n: u8) -> CacheId {
-    let mut bytes = [0u8; 16];
-    bytes[14] = n;
-    CacheId::new(Uuid::from_bytes(bytes))
 }
 
 pub fn did(n: u8) -> DerivationId {

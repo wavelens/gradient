@@ -104,13 +104,12 @@ fn make_build_queued(id: BuildId, eval_id: EvaluationId, drv_id: DerivationId) -
     }
 }
 
-fn make_derivation(id: DerivationId, org_id: OrganizationId, path: &str) -> MDerivation {
+fn make_derivation(id: DerivationId, _org_id: OrganizationId, path: &str) -> MDerivation {
     let stripped = gradient_exec::strip_nix_store_prefix(path);
     let (hash, name) = gradient_sources::parse_drv_hash_name(&stripped)
         .unwrap_or_else(|_| ("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(), "x".into()));
     gradient_entity::derivation::Model {
         id,
-        organization: org_id,
         hash,
         name,
         architecture: "x86_64-linux".into(),

@@ -20,7 +20,7 @@ use tracing::{debug, warn};
 use super::DbContext;
 
 /// A simple count metric over the `build` table, attributed to the owning org
-/// via the `derivation` join.
+/// via the build's `evaluation` -> `project` join.
 struct BuildCount {
     name: &'static str,
     time_col: &'static str,
@@ -201,14 +201,16 @@ fn build_count_sql(m: &BuildCount) -> String {
         "INSERT INTO metric_rollup \
          (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
          SELECT uuidv7(), '{name}', 0, date_trunc('minute', b.{col}), \
-                jsonb_build_object('org', d.organization::text), \
-                hashtextextended(d.organization::text, 0), \
+                jsonb_build_object('org', pr.organization::text), \
+                hashtextextended(pr.organization::text, 0), \
                 count(*)::bigint, 0, 0, 0, 0, NULL \
-         FROM build b JOIN derivation d ON d.id = b.derivation \
+         FROM build b \
+         JOIN evaluation ev ON ev.id = b.evaluation \
+         JOIN project pr ON pr.id = ev.project \
          WHERE b.{col} IS NOT NULL \
            AND b.{col} >= (now() AT TIME ZONE 'UTC') - interval '{window}' \
            AND ({filter}) \
-         GROUP BY date_trunc('minute', b.{col}), d.organization \
+         GROUP BY date_trunc('minute', b.{col}), pr.organization \
          ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
          DO UPDATE SET count = EXCLUDED.count",
         name = m.name,
@@ -227,14 +229,16 @@ fn build_duration_sql(m: &BuildDuration) -> String {
         "INSERT INTO metric_rollup \
          (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
          SELECT uuidv7(), '{name}', 0, date_trunc('minute', b.{end}), \
-                jsonb_build_object('org', d.organization::text), \
-                hashtextextended(d.organization::text, 0), \
+                jsonb_build_object('org', pr.organization::text), \
+                hashtextextended(pr.organization::text, 0), \
                 count(*)::bigint, sum({ms}), min({ms}), max({ms}), sum(power({ms}, 2)), NULL \
-         FROM build b JOIN derivation d ON d.id = b.derivation \
+         FROM build b \
+         JOIN evaluation ev ON ev.id = b.evaluation \
+         JOIN project pr ON pr.id = ev.project \
          WHERE b.{end} IS NOT NULL AND b.{start} IS NOT NULL \
            AND b.{end} >= (now() AT TIME ZONE 'UTC') - interval '{window}' \
            AND ({filter}) \
-         GROUP BY date_trunc('minute', b.{end}), d.organization \
+         GROUP BY date_trunc('minute', b.{end}), pr.organization \
          ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
          DO UPDATE SET count = EXCLUDED.count, sum = EXCLUDED.sum, \
                        min = EXCLUDED.min, max = EXCLUDED.max, sum_sq = EXCLUDED.sum_sq",
@@ -256,10 +260,12 @@ fn build_duration_attempt_sql() -> String {
         "INSERT INTO metric_rollup \
          (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
          SELECT uuidv7(), 'builds.duration_ms', 0, date_trunc('minute', ba.build_finished_at), \
-                jsonb_build_object('org', d.organization::text), \
-                hashtextextended(d.organization::text, 0), \
+                jsonb_build_object('org', pr.organization::text), \
+                hashtextextended(pr.organization::text, 0), \
                 count(*)::bigint, sum({ms}), min({ms}), max({ms}), sum(power({ms}, 2)), NULL \
-         FROM build b JOIN derivation d ON d.id = b.derivation \
+         FROM build b \
+         JOIN evaluation ev ON ev.id = b.evaluation \
+         JOIN project pr ON pr.id = ev.project \
          JOIN LATERAL ( \
              SELECT ba2.build_started_at, ba2.build_finished_at \
              FROM build_attempt ba2 WHERE ba2.build = b.id \
@@ -268,7 +274,7 @@ fn build_duration_attempt_sql() -> String {
          WHERE ba.build_finished_at IS NOT NULL AND ba.build_started_at IS NOT NULL \
            AND ba.build_finished_at >= (now() AT TIME ZONE 'UTC') - interval '{window}' \
            AND b.status = 3 \
-         GROUP BY date_trunc('minute', ba.build_finished_at), d.organization \
+         GROUP BY date_trunc('minute', ba.build_finished_at), pr.organization \
          ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
          DO UPDATE SET count = EXCLUDED.count, sum = EXCLUDED.sum, \
                        min = EXCLUDED.min, max = EXCLUDED.max, sum_sq = EXCLUDED.sum_sq",
@@ -338,5 +344,20 @@ mod tests {
         let sql = build_duration_attempt_sql();
         assert!(sql.contains("build_attempt"));
         assert!(sql.contains("ba.build_started_at") && sql.contains("ba.build_finished_at"));
+    }
+
+    /// Derivations are global; build rollups must attribute org through the
+    /// build's evaluation -> project, never a (now column-less) derivation join.
+    #[test]
+    fn build_rollups_attribute_org_via_project() {
+        let sqls = BUILD_COUNTS
+            .iter()
+            .map(build_count_sql)
+            .chain(BUILD_DURATIONS.iter().map(build_duration_sql))
+            .chain(std::iter::once(build_duration_attempt_sql()));
+        for sql in sqls {
+            assert!(sql.contains("JOIN project pr"), "missing project join: {sql}");
+            assert!(!sql.contains("d.organization"), "stale derivation org: {sql}");
+        }
     }
 }

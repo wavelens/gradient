@@ -4,57 +4,31 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::fixtures::{bid, cid, did, org, run};
 use super::super::find_active_leaders;
+use super::fixtures::{bid, did, org, run};
 use gradient_entity::build::{BuildStatus, Model as MBuild};
-use gradient_entity::cache_upstream::Model as MCacheUpstream;
-use gradient_entity::derivation::Model as MDerivation;
-use gradient_entity::ids::{BuildId, DerivationId, OrganizationCacheId, OrganizationId};
-use gradient_entity::organization_cache::{CacheSubscriptionMode, Model as MOrganizationCache};
+use gradient_entity::ids::{BuildId, DerivationId};
 use sea_orm::{DatabaseBackend, MockDatabase};
 use uuid::Uuid;
 
-fn build(
-    id: BuildId,
-    drv: DerivationId,
-    status: BuildStatus,
-    substitutable: bool,
-    offset_secs: i64,
-) -> MBuild {
-    let t = chrono::NaiveDate::from_ymd_opt(2026, 1, 1)
-        .unwrap()
-        .and_hms_opt(0, 0, 0)
-        .unwrap()
-        + chrono::Duration::seconds(offset_secs);
+fn build(id: BuildId, drv: DerivationId, status: BuildStatus, via: Option<BuildId>) -> MBuild {
     MBuild {
         id,
         evaluation: gradient_entity::ids::EvaluationId::now_v7(),
         derivation: drv,
         status,
-        via: None,
-        substitutable,
+        via,
+        substitutable: false,
         substituted: false,
         attempt: 0,
         timeout_secs: None,
         max_silent_secs: None,
         prefer_local_build: false,
-        created_at: t,
-        updated_at: t,
+        created_at: chrono::NaiveDateTime::default(),
+        updated_at: chrono::NaiveDateTime::default(),
         queued_at: None,
         ready_at: None,
         dispatched_at: None,
-    }
-}
-
-fn drv_row(id: DerivationId, owner: OrganizationId, _path: &str) -> MDerivation {
-    MDerivation {
-        id,
-        organization: owner,
-        hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
-        name: "x".into(),
-        architecture: "x86_64-linux".into(),
-        created_at: chrono::NaiveDateTime::default(),
-        ..Default::default()
     }
 }
 
@@ -63,18 +37,15 @@ fn chunks_large_id_lists_under_postgres_param_cap() {
     run(async {
         // Postgres rejects any statement binding more than 65535 params. A
         // large monorepo restart funnels tens of thousands of derivation ids
-        // through `find_active_leaders`; without chunking the `is_in`
-        // overflows and `/evaluate` 500s ("too many arguments for query").
+        // through `find_active_leaders`; the now-single global lookup chunks
+        // them so the `is_in` never overflows.
         const PG_MAX_PARAMS: usize = 65_535;
         let drv_ids: Vec<DerivationId> = (1..=70_000u128)
             .map(|i| DerivationId::new(Uuid::from_u128(i)))
             .collect();
 
-        // Same-org pass and cross-org derivation lookup both return nothing,
-        // so `drv_hashes` is empty and the function returns early. Empty
-        // result sets satisfy every chunked query regardless of model type.
         let mut db = MockDatabase::new(DatabaseBackend::Postgres);
-        for _ in 0..64 {
+        for _ in 0..4 {
             db = db.append_query_results([Vec::<MBuild>::new()]);
         }
         let db = db.into_connection();
@@ -96,127 +67,63 @@ fn chunks_large_id_lists_under_postgres_param_cap() {
 }
 
 #[test]
-fn cross_org_match_when_no_same_org_candidate() {
+fn single_active_build_is_its_own_leader() {
     run(async {
-        let drv_b = did(2);
-        let drv_a = did(1);
-        let leader_build = bid(10);
-
+        let drv = did(1);
+        let b = bid(10);
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([Vec::<MBuild>::new()])
-            .append_query_results([vec![drv_row(drv_b, org(2), "/nix/store/x.drv")]])
-            .append_query_results([vec![MOrganizationCache {
-                id: OrganizationCacheId::now_v7(),
-                organization: org(2),
-                cache: cid(1),
-                mode: CacheSubscriptionMode::ReadOnly,
-            }]])
-            .append_query_results([Vec::<MCacheUpstream>::new()])
-            .append_query_results([vec![MOrganizationCache {
-                id: OrganizationCacheId::now_v7(),
-                organization: org(1),
-                cache: cid(1),
-                mode: CacheSubscriptionMode::ReadWrite,
-            }]])
-            .append_query_results([vec![drv_row(drv_a, org(1), "/nix/store/x.drv")]])
-            .append_query_results([vec![build(leader_build, drv_a, BuildStatus::Building, false, 0)]])
+            .append_query_results([vec![build(b, drv, BuildStatus::Queued, None)]])
             .into_connection();
 
-        let got = find_active_leaders(&db, org(2), &[drv_b]).await.unwrap();
-        assert_eq!(got.get(&drv_b), Some(&leader_build), "got: {:?}", got);
+        let got = find_active_leaders(&db, org(1), &[drv]).await.unwrap();
+        assert_eq!(got.get(&drv), Some(&b));
     });
 }
 
 #[test]
-fn cross_org_tie_break_most_advanced_then_oldest() {
+fn via_none_build_preferred_over_follower() {
     run(async {
-        let drv_b = did(2);
-        let drv_a = did(1);
-        let drv_c = did(3);
-        let queued_old = bid(20);
-        let building_new = bid(21);
-
+        let drv = did(1);
+        let leader = bid(10);
+        let follower = bid(11);
+        // Follower seen first, then the real (via = None) leader for the same
+        // derivation: the leader must win.
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([Vec::<MBuild>::new()])
-            .append_query_results([vec![drv_row(drv_b, org(2), "/nix/store/x.drv")]])
-            .append_query_results([vec![MOrganizationCache {
-                id: OrganizationCacheId::now_v7(),
-                organization: org(2),
-                cache: cid(1),
-                mode: CacheSubscriptionMode::ReadOnly,
-            }]])
-            .append_query_results([Vec::<MCacheUpstream>::new()])
             .append_query_results([vec![
-                MOrganizationCache {
-                    id: OrganizationCacheId::now_v7(),
-                    organization: org(1),
-                    cache: cid(1),
-                    mode: CacheSubscriptionMode::ReadWrite,
-                },
-                MOrganizationCache {
-                    id: OrganizationCacheId::now_v7(),
-                    organization: org(3),
-                    cache: cid(1),
-                    mode: CacheSubscriptionMode::ReadWrite,
-                },
-            ]])
-            .append_query_results([vec![
-                drv_row(drv_a, org(1), "/nix/store/x.drv"),
-                drv_row(drv_c, org(3), "/nix/store/x.drv"),
-            ]])
-            .append_query_results([vec![
-                build(queued_old, drv_a, BuildStatus::Queued, false, 0),
-                build(building_new, drv_c, BuildStatus::Building, false, 60),
+                build(follower, drv, BuildStatus::Created, Some(leader)),
+                build(leader, drv, BuildStatus::Building, None),
             ]])
             .into_connection();
 
-        let got = find_active_leaders(&db, org(2), &[drv_b]).await.unwrap();
-        assert_eq!(got.get(&drv_b), Some(&building_new), "got: {:?}", got);
+        let got = find_active_leaders(&db, org(1), &[drv]).await.unwrap();
+        assert_eq!(got.get(&drv), Some(&leader));
     });
 }
 
 #[test]
-fn same_org_preferred_over_cross_org() {
+fn lone_follower_resolves_to_its_via_target() {
     run(async {
-        let drv_b = did(2);
-        let same_org_build = bid(30);
-
+        let drv = did(1);
+        let target = bid(99);
+        let follower = bid(11);
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![build(same_org_build, drv_b, BuildStatus::Queued, false, 0)]])
+            .append_query_results([vec![build(follower, drv, BuildStatus::Created, Some(target))]])
             .into_connection();
 
-        let got = find_active_leaders(&db, org(2), &[drv_b]).await.unwrap();
-        assert_eq!(got.get(&drv_b), Some(&same_org_build));
+        let got = find_active_leaders(&db, org(1), &[drv]).await.unwrap();
+        assert_eq!(got.get(&drv), Some(&target));
     });
 }
 
 #[test]
-fn cross_org_external_cached_candidate_skipped() {
+fn derivation_without_active_build_is_omitted() {
     run(async {
-        let drv_b = did(2);
-        let drv_a = did(1);
-
+        let drv = did(1);
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([Vec::<MBuild>::new()])
-            .append_query_results([vec![drv_row(drv_b, org(2), "/nix/store/x.drv")]])
-            .append_query_results([vec![MOrganizationCache {
-                id: OrganizationCacheId::now_v7(),
-                organization: org(2),
-                cache: cid(1),
-                mode: CacheSubscriptionMode::ReadOnly,
-            }]])
-            .append_query_results([Vec::<MCacheUpstream>::new()])
-            .append_query_results([vec![MOrganizationCache {
-                id: OrganizationCacheId::now_v7(),
-                organization: org(1),
-                cache: cid(1),
-                mode: CacheSubscriptionMode::ReadWrite,
-            }]])
-            .append_query_results([vec![drv_row(drv_a, org(1), "/nix/store/x.drv")]])
             .append_query_results([Vec::<MBuild>::new()])
             .into_connection();
 
-        let got = find_active_leaders(&db, org(2), &[drv_b]).await.unwrap();
-        assert!(!got.contains_key(&drv_b), "external_cached must be skipped");
+        let got = find_active_leaders(&db, org(1), &[drv]).await.unwrap();
+        assert!(!got.contains_key(&drv));
     });
 }

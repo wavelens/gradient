@@ -96,7 +96,6 @@ pub async fn public_cache_with_narinfo() -> Arc<ServerState> {
 
     let deriv_row = gradient_entity::derivation::Model {
         id: deriv_id(),
-        organization: org_id(),
         hash: FIXTURE_PATH_HASH.into(),
         name: "hello".into(),
         architecture: "x86_64-linux".into(),
@@ -316,7 +315,6 @@ fn cache_row_with_visibility(public: bool) -> gradient_entity::cache::Model {
 fn derivation_row() -> gradient_entity::derivation::Model {
     gradient_entity::derivation::Model {
         id: deriv_id(),
-        organization: org_id(),
         hash: FIXTURE_PATH_HASH.into(),
         name: "hello".into(),
         architecture: "x86_64-linux".into(),
