@@ -39,7 +39,8 @@ pub struct ArtefactTree {
 pub struct EntryPointArtefacts {
     pub attr: String,
     pub derivation: String,
-    pub build_id: BuildId,
+    /// Per-eval build identity (`build_job` id) for this entry point's derivation.
+    pub build_id: BuildJobId,
     pub outputs: Vec<OutputArtefacts>,
 }
 
@@ -83,30 +84,25 @@ pub async fn get_artefacts(
         }));
     }
 
-    let build_ids: Vec<BuildId> = entry_points
+    let drv_ids: Vec<DerivationId> = entry_points
         .iter()
-        .map(|ep| ep.build)
+        .map(|ep| ep.derivation)
         .collect::<HashSet<_>>()
         .into_iter()
         .collect();
 
-    let mut builds: HashMap<BuildId, MBuild> = HashMap::new();
-    for chunk in build_ids.chunks(IS_IN_CHUNK) {
-        for row in EBuild::find()
-            .filter(CBuild::Id.is_in(chunk.to_vec()))
+    // build_job id per derivation, for this eval (the per-eval build identity).
+    let mut build_job_by_drv: HashMap<DerivationId, BuildJobId> = HashMap::new();
+    for chunk in drv_ids.chunks(IS_IN_CHUNK) {
+        for row in EBuildJob::find()
+            .filter(CBuildJob::Evaluation.eq(evaluation.id))
+            .filter(CBuildJob::Derivation.is_in(chunk.to_vec()))
             .all(&state.web_db)
             .await?
         {
-            builds.insert(row.id, row);
+            build_job_by_drv.insert(row.derivation, row.id);
         }
     }
-
-    let drv_ids: Vec<DerivationId> = builds
-        .values()
-        .map(|b| b.derivation)
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .collect();
 
     let mut derivations: HashMap<DerivationId, MDerivation> = HashMap::new();
     for chunk in drv_ids.chunks(IS_IN_CHUNK) {
@@ -156,8 +152,8 @@ pub async fn get_artefacts(
     let mut tree: Vec<EntryPointArtefacts> = entry_points
         .into_iter()
         .filter_map(|ep| {
-            let build = builds.get(&ep.build)?;
-            let drv = derivations.get(&build.derivation)?;
+            let build_id = *build_job_by_drv.get(&ep.derivation)?;
+            let drv = derivations.get(&ep.derivation)?;
             let outputs = outputs_by_drv
                 .get(&drv.id)
                 .cloned()
@@ -188,7 +184,7 @@ pub async fn get_artefacts(
             Some(EntryPointArtefacts {
                 attr: ep.eval,
                 derivation: drv.drv_path(),
-                build_id: build.id,
+                build_id,
                 outputs,
             })
         })

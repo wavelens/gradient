@@ -85,7 +85,7 @@ pub async fn get_pending_jobs(
                 kind: j.kind,
                 organization: j.organization.into(),
                 evaluation_id: j.evaluation_id.into(),
-                build_id: j.build_id.map(Into::into),
+                build_id: j.derivation_build.map(Into::into),
                 queued_at: j.queued_at.and_utc().to_rfc3339(),
                 dependency_count: j.dependency_count,
                 pname: j.pname.clone(),
@@ -121,17 +121,17 @@ pub async fn get_dispatched_jobs(
                 .ok()
                 .flatten();
 
-            let build_id = attempt.as_ref().map(|a| a.build.into());
+            let build_id = attempt.as_ref().map(|a| a.derivation_build.into());
 
             let pname = match attempt.as_ref() {
                 Some(a) => {
-                    let b = gradient_entity::build::Entity::find_by_id(a.build)
+                    let anchor = EDerivationBuild::find_by_id(a.derivation_build)
                         .one(&state.web_db)
                         .await
                         .ok()
                         .flatten();
-                    match b {
-                        Some(b) => gradient_entity::derivation::Entity::find_by_id(b.derivation)
+                    match anchor {
+                        Some(anchor) => gradient_entity::derivation::Entity::find_by_id(anchor.derivation)
                             .one(&state.web_db)
                             .await
                             .ok()
@@ -212,7 +212,7 @@ pub async fn get_dispatch_decisions(
                     job_id: c.job_id,
                     kind: c.kind,
                     organization: c.organization.into(),
-                    build_id: c.build_id.map(Into::into),
+                    build_id: c.derivation_build.map(Into::into),
                     evaluation_id: c.evaluation_id.into(),
                     pname: c.pname,
                     score: c.score,
@@ -290,7 +290,7 @@ pub async fn get_dispatched_job(
             queued_at: c.queued_at.and_utc().to_rfc3339(),
             dispatched_at: c.scored_at.and_utc().to_rfc3339(),
             finished_at: None,
-            build_id: c.build_id.map(Into::into),
+            build_id: c.derivation_build.map(Into::into),
             evaluation_id: c.evaluation_id.into(),
             pname: c.pname,
             score_breakdown: c.score_breakdown,
@@ -325,14 +325,15 @@ pub async fn get_dispatched_job(
         .ok()
         .flatten();
 
-    let build_id: Option<Uuid> = this_attempt.as_ref().map(|a| a.build.into());
+    let anchor_id: Option<DerivationBuildId> = this_attempt.as_ref().map(|a| a.derivation_build);
+    let build_id: Option<Uuid> = anchor_id.map(Into::into);
 
-    let pname = match build_id {
-        Some(bid) => {
-            let b = gradient_entity::build::Entity::find_by_id(gradient_types::ids::BuildId::from(bid))
+    let pname = match anchor_id {
+        Some(aid) => {
+            let anchor = EDerivationBuild::find_by_id(aid)
                 .one(&state.web_db).await.ok().flatten();
-            match b {
-                Some(b) => gradient_entity::derivation::Entity::find_by_id(b.derivation)
+            match anchor {
+                Some(anchor) => gradient_entity::derivation::Entity::find_by_id(anchor.derivation)
                     .one(&state.web_db).await.ok().flatten().and_then(|d| d.pname),
                 None => None,
             }
@@ -340,9 +341,9 @@ pub async fn get_dispatched_job(
         None => None,
     };
 
-    let previous_attempts = match build_id {
-        Some(bid) => build_attempt::Entity::find()
-            .filter(build_attempt::Column::Build.eq(gradient_types::ids::BuildId::from(bid)))
+    let previous_attempts = match anchor_id {
+        Some(aid) => build_attempt::Entity::find()
+            .filter(build_attempt::Column::DerivationBuild.eq(aid))
             .order_by_asc(build_attempt::Column::CreatedAt)
             .all(&state.web_db)
             .await
@@ -483,16 +484,17 @@ pub async fn get_expensive_jobs(
     }
 
     let sql = format!(
-        "SELECT b.id, pr.organization, d.name, \
+        "SELECT bj.id, pr.organization, d.name, \
          EXTRACT(EPOCH FROM (ba.build_finished_at - ba.build_started_at))::bigint * 1000 AS build_time_ms, \
          dj.worker_id AS worker \
-         FROM build b \
-         JOIN derivation d ON d.id = b.derivation \
-         JOIN evaluation ev ON ev.id = b.evaluation \
+         FROM build_job bj \
+         JOIN derivation_build b ON b.id = bj.derivation_build \
+         JOIN derivation d ON d.id = bj.derivation \
+         JOIN evaluation ev ON ev.id = bj.evaluation \
          JOIN project pr ON pr.id = ev.project \
          JOIN LATERAL ( \
            SELECT ba2.build_started_at, ba2.build_finished_at, ba2.dispatched_job \
-           FROM build_attempt ba2 WHERE ba2.build = b.id \
+           FROM build_attempt ba2 WHERE ba2.derivation_build = b.id \
            ORDER BY ba2.created_at DESC LIMIT 1 \
          ) ba ON true \
          JOIN dispatched_job dj ON dj.id = ba.dispatched_job \
@@ -695,12 +697,13 @@ pub async fn get_top_orgs_by_buildtime(
         "SELECT pr.organization, \
          sum(EXTRACT(EPOCH FROM (ba.build_finished_at - ba.build_started_at))::bigint * 1000)::bigint AS total, \
          count(*)::bigint AS cnt \
-         FROM build b \
-         JOIN evaluation ev ON ev.id = b.evaluation \
+         FROM build_job bj \
+         JOIN derivation_build b ON b.id = bj.derivation_build \
+         JOIN evaluation ev ON ev.id = bj.evaluation \
          JOIN project pr ON pr.id = ev.project \
          JOIN LATERAL ( \
            SELECT ba2.build_started_at, ba2.build_finished_at \
-           FROM build_attempt ba2 WHERE ba2.build = b.id \
+           FROM build_attempt ba2 WHERE ba2.derivation_build = b.id \
            ORDER BY ba2.created_at DESC LIMIT 1 \
          ) ba ON true \
          WHERE b.status = 3 \
@@ -791,10 +794,10 @@ pub async fn get_expensive_by_resource(
          JOIN derivation d ON d.id = dm.derivation \
          JOIN LATERAL ( \
            SELECT pr.organization \
-           FROM build b \
-           JOIN evaluation ev ON ev.id = b.evaluation \
+           FROM build_job bj \
+           JOIN evaluation ev ON ev.id = bj.evaluation \
            JOIN project pr ON pr.id = ev.project \
-           WHERE b.derivation = dm.derivation{org_filter} \
+           WHERE bj.derivation = dm.derivation{org_filter} \
            LIMIT 1 \
          ) pro ON true \
          WHERE {} ORDER BY value DESC LIMIT 20",

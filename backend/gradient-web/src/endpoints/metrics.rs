@@ -430,7 +430,7 @@ pub(crate) async fn collect(
                  ELSE NULL
                END AS label,
                COUNT(*)::bigint AS value
-        FROM build
+        FROM derivation_build
         WHERE status IN (3,4,5,6,7)
         GROUP BY status
 
@@ -444,7 +444,7 @@ pub(crate) async fn collect(
                  ELSE NULL
                END,
                COUNT(*)::bigint
-        FROM build
+        FROM derivation_build
         WHERE status IN (0,1,2)
         GROUP BY status
 

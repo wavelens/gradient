@@ -425,11 +425,11 @@ pub async fn fire_now(
         ApplyOutcome::Created {
             evaluation: eval,
             aborted_evaluation,
-            aborted_builds,
+            aborted_anchors,
         } => {
             if let Some(aborted_id) = aborted_evaluation {
                 scheduler
-                    .cancel_evaluation_jobs(aborted_id, &aborted_builds)
+                    .cancel_evaluation_jobs(aborted_id, &aborted_anchors)
                     .await;
             }
             gradient_ci::actions::dispatch_evaluation_created(&state.ci(), &eval).await;

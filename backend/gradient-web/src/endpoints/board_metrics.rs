@@ -273,12 +273,13 @@ pub async fn get_board_durations_heatmap(
                 width_bucket((extract(epoch from (ba.build_finished_at - ba.build_started_at)) * 1000)::bigint, \
                              ARRAY[10000,30000,60000,180000,600000,1800000]::bigint[]) AS band, \
                 count(*)::bigint AS c \
-         FROM build b \
-         JOIN evaluation ev ON ev.id = b.evaluation \
+         FROM build_job bj \
+         JOIN derivation_build b ON b.id = bj.derivation_build \
+         JOIN evaluation ev ON ev.id = bj.evaluation \
          JOIN project pr ON pr.id = ev.project \
          JOIN LATERAL ( \
            SELECT ba2.build_started_at, ba2.build_finished_at \
-           FROM build_attempt ba2 WHERE ba2.build = b.id \
+           FROM build_attempt ba2 WHERE ba2.derivation_build = b.id \
            ORDER BY ba2.created_at DESC LIMIT 1 \
          ) ba ON true \
          WHERE {} GROUP BY t, band ORDER BY t",

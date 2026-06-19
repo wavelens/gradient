@@ -11,14 +11,50 @@ use async_stream::stream;
 use axum::Extension;
 use axum::extract::{Path, State};
 use axum_streams::StreamBodyAs;
+use gradient_entity::build::BuildStatus;
 use gradient_types::*;
 use gradient_core::ServerState;
-use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::error;
 
 use super::EvalAccessContext;
+
+/// The eval's (anchor, derivation-name) pairs, one per build_job. Anchors carry
+/// status; the name labels each log line.
+async fn eval_anchor_jobs(
+    state: &Arc<ServerState>,
+    evaluation: EvaluationId,
+) -> Result<Vec<(MDerivationBuild, String)>, WebError> {
+    let jobs = EBuildJob::find()
+        .filter(CBuildJob::Evaluation.eq(evaluation))
+        .all(&state.web_db)
+        .await?;
+
+    let anchor_ids: Vec<DerivationBuildId> = jobs.iter().map(|j| j.derivation_build).collect();
+    let anchors: HashMap<DerivationBuildId, MDerivationBuild> = EDerivationBuild::find()
+        .filter(CDerivationBuild::Id.is_in(anchor_ids))
+        .all(&state.web_db)
+        .await?
+        .into_iter()
+        .map(|a| (a.id, a))
+        .collect();
+
+    let mut out = Vec::with_capacity(jobs.len());
+    for job in jobs {
+        let Some(anchor) = anchors.get(&job.derivation_build).cloned() else {
+            continue;
+        };
+        let name = match EDerivation::find_by_id(job.derivation).one(&state.web_db).await {
+            Ok(Some(d)) => d.name,
+            _ => String::new(),
+        };
+        out.push((anchor, name));
+    }
+
+    Ok(out)
+}
 
 pub async fn post_evaluation_builds(
     state: State<Arc<ServerState>>,
@@ -37,35 +73,24 @@ pub async fn post_evaluation_builds(
 
     let evaluation = ctx.evaluation;
 
-    let condition = Condition::all()
-        .add(CBuild::Evaluation.eq(evaluation.id))
-        .add(CBuild::Status.eq(gradient_entity::build::BuildStatus::Building));
-
     let stream = stream! {
-        let mut last_logs: HashMap<BuildId, usize> = HashMap::new();
+        let mut last_logs: HashMap<DerivationBuildId, usize> = HashMap::new();
 
-        let past_builds = match EBuild::find()
-            .filter(CBuild::Evaluation.eq(evaluation.id))
-            .all(&state.web_db)
-            .await
-        {
-            Ok(builds) => builds,
+        let past = match eval_anchor_jobs(&state, evaluation.id).await {
+            Ok(jobs) => jobs,
             Err(e) => {
                 error!(error = %e, "Failed to query past builds");
                 return;
             }
         };
 
-        for build in past_builds {
-            let name = match EDerivation::find_by_id(build.derivation).one(&state.web_db).await {
-                Ok(Some(d)) => d.name,
-                _ => String::new(),
+        for (anchor, name) in past {
+            let log = match gradient_db::latest_attempt_id(&state.web_db, anchor.id).await.unwrap_or(None) {
+                Some(key) => state.log_storage.read(key).await.unwrap_or_default(),
+                None => String::new(),
             };
-            let log_key = gradient_db::latest_attempt_log_id(&state.web_db, build.id).await.unwrap_or(build.id);
-            let log = state.log_storage.read(log_key).await.unwrap_or_default();
-            last_logs.insert(build.id, log.len());
+            last_logs.insert(anchor.id, log.len());
 
-            // TODO: Chunkify past log
             yield log
                 .split("\n")
                 .map(|l| format!("{}> {}", name, l))
@@ -74,38 +99,25 @@ pub async fn post_evaluation_builds(
         }
 
         loop {
-            let builds = match EBuild::find()
-                .filter(condition.clone())
-                .all(&state.web_db)
-                .await {
-                Ok(b) => b,
+            let current = match eval_anchor_jobs(&state, evaluation.id).await {
+                Ok(jobs) => jobs,
                 Err(e) => {
                     error!(error = %e, "Failed to query builds");
                     break;
                 }
             };
 
-            if builds.is_empty() {
-                let all_builds = match EBuild::find()
-                    .filter(
-                        Condition::all()
-                            .add(CBuild::Evaluation.eq(evaluation.id))
-                            .add(
-                                Condition::any()
-                                    .add(CBuild::Status.eq(gradient_entity::build::BuildStatus::Building))
-                                    .add(CBuild::Status.eq(gradient_entity::build::BuildStatus::Queued)),
-                            ),
-                    )
-                    .one(&state.web_db)
-                    .await {
-                    Ok(b) => b,
-                    Err(e) => {
-                        error!(error = %e, "Failed to query all builds");
-                        break;
-                    }
-                };
+            let building: Vec<(MDerivationBuild, String)> = current
+                .iter()
+                .filter(|(a, _)| a.status == BuildStatus::Building)
+                .cloned()
+                .collect();
 
-                if all_builds.is_none() {
+            if building.is_empty() {
+                let any_pending = current
+                    .iter()
+                    .any(|(a, _)| matches!(a.status, BuildStatus::Building | BuildStatus::Queued));
+                if !any_pending {
                     yield "".to_string();
                     break;
                 }
@@ -114,25 +126,23 @@ pub async fn post_evaluation_builds(
                 continue;
             }
 
-            for build in builds {
-                let name = match EDerivation::find_by_id(build.derivation).one(&state.web_db).await {
-                    Ok(Some(d)) => d.name,
-                    _ => String::new(),
+            for (anchor, name) in building {
+                let log = match gradient_db::latest_attempt_id(&state.web_db, anchor.id).await.unwrap_or(None) {
+                    Some(key) => state.log_storage.read(key).await.unwrap_or_default(),
+                    None => String::new(),
                 };
-                let log_key = gradient_db::latest_attempt_log_id(&state.web_db, build.id).await.unwrap_or(build.id);
-                let log = state.log_storage.read(log_key).await.unwrap_or_default();
-                let last_offset = *last_logs.get(&build.id).unwrap_or(&0);
+                let last_offset = *last_logs.get(&anchor.id).unwrap_or(&0);
                 let log_new = log[last_offset..].to_string();
 
                 if !log_new.is_empty() {
-                    last_logs.insert(build.id, log.len());
+                    last_logs.insert(anchor.id, log.len());
                     yield log_new
                         .split("\n")
                         .map(|l| format!("{}> {}", name, l))
                         .collect::<Vec<String>>()
                         .join("\n");
                 } else {
-                    last_logs.entry(build.id).or_insert(0);
+                    last_logs.entry(anchor.id).or_insert(0);
                 }
             }
         }

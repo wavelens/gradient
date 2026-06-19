@@ -24,9 +24,9 @@ use super::BuildAccessContext;
 
 type ChunkRow = gradient_entity::build_log_chunk::Model;
 
-async fn load_chunk_rows(state: &ServerState, log_key: BuildId) -> WebResult<Vec<ChunkRow>> {
+async fn load_chunk_rows(state: &ServerState, log_key: BuildAttemptId) -> WebResult<Vec<ChunkRow>> {
     Ok(gradient_entity::build_log_chunk::Entity::find()
-        .filter(gradient_entity::build_log_chunk::Column::Build.eq(log_key))
+        .filter(gradient_entity::build_log_chunk::Column::BuildAttempt.eq(log_key))
         .order_by_asc(gradient_entity::build_log_chunk::Column::ChunkIndex)
         .all(&state.web_db)
         .await?)
@@ -42,11 +42,13 @@ pub async fn get_build_log_chunks(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path(build_id): Path<BuildId>,
+    Path(build_id): Path<BuildJobId>,
 ) -> WebResult<Json<BaseResponse<LogChunkIndex>>> {
     let ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
-    let log_key = super::effective_log_id(&state, &ctx.build).await;
-    let rows = load_chunk_rows(&state, log_key).await?;
+    let rows = match super::effective_log_id(&state, &ctx.anchor).await {
+        Some(log_key) => load_chunk_rows(&state, log_key).await?,
+        None => vec![],
+    };
 
     let chunks: Vec<LogChunkMeta> = rows
         .iter()
@@ -79,13 +81,15 @@ pub async fn get_build_log_chunk(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path((build_id, index)): Path<(BuildId, u32)>,
+    Path((build_id, index)): Path<(BuildJobId, u32)>,
 ) -> Result<Response, WebError> {
     let ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
-    let log_key = super::effective_log_id(&state, &ctx.build).await;
+    let log_key = super::effective_log_id(&state, &ctx.anchor)
+        .await
+        .ok_or_else(|| WebError::not_found("LogChunk"))?;
 
     let row = gradient_entity::build_log_chunk::Entity::find()
-        .filter(gradient_entity::build_log_chunk::Column::Build.eq(log_key))
+        .filter(gradient_entity::build_log_chunk::Column::BuildAttempt.eq(log_key))
         .filter(gradient_entity::build_log_chunk::Column::ChunkIndex.eq(index as i32))
         .one(&state.web_db)
         .await?
@@ -133,11 +137,13 @@ pub async fn get_build_log_lines(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path(build_id): Path<BuildId>,
+    Path(build_id): Path<BuildJobId>,
     Query(q): Query<LineRangeQuery>,
 ) -> Result<Response, WebError> {
     let ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
-    let log_key = super::effective_log_id(&state, &ctx.build).await;
+    let Some(log_key) = super::effective_log_id(&state, &ctx.anchor).await else {
+        return Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], String::new()).into_response());
+    };
     let rows = load_chunk_rows(&state, log_key).await?;
 
     let (start, end_opt) = parse_line_range(&q)?;
@@ -201,12 +207,14 @@ pub async fn get_build_log_search(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path(build_id): Path<BuildId>,
+    Path(build_id): Path<BuildJobId>,
     Query(query): Query<SearchQuery>,
 ) -> Result<Response, WebError> {
     let ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
-    let log_key = super::effective_log_id(&state, &ctx.build).await;
-    let rows = load_chunk_rows(&state, log_key).await?;
+    let (log_key, rows) = match super::effective_log_id(&state, &ctx.anchor).await {
+        Some(key) => (key, load_chunk_rows(&state, key).await?),
+        None => return Ok(StreamBodyAs::json_nl(futures::stream::empty::<serde_json::Value>()).into_response()),
+    };
     let state = Arc::clone(&state);
 
     let case = query.case;

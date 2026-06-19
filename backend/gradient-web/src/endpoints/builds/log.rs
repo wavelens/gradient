@@ -13,7 +13,6 @@ use axum::http::{HeaderValue, header};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use axum_streams::StreamBodyAs;
-use gradient_db::latest_attempt_log_id;
 use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::EntityTrait;
@@ -26,11 +25,13 @@ pub async fn get_build_log(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path(build_id): Path<BuildId>,
+    Path(build_id): Path<BuildJobId>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
-    let log_key = super::effective_log_id(&state, &ctx.build).await;
-    let log = state.log_storage.read(log_key).await.unwrap_or_default();
+    let log = match super::effective_log_id(&state, &ctx.anchor).await {
+        Some(key) => state.log_storage.read(key).await.unwrap_or_default(),
+        None => String::new(),
+    };
 
     Ok(ok_json(log))
 }
@@ -39,19 +40,18 @@ pub async fn post_build_log(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path(build_id): Path<BuildId>,
+    Path(build_id): Path<BuildJobId>,
 ) -> Result<Response, WebError> {
-    let _ctx = BuildAccessContext::load(&state, build_id, &Some(user), api_key.as_ref()).await?;
+    let ctx = BuildAccessContext::load(&state, build_id, &Some(user), api_key.as_ref()).await?;
+    let anchor_id = ctx.anchor.id;
 
     // Capture current log length so the stream only delivers new content,
     // avoiding duplication of what the client already received via GET.
-    let log_key = latest_attempt_log_id(&state.web_db, build_id).await?;
-    let initial_offset = state
-        .log_storage
-        .read(log_key)
-        .await
-        .unwrap_or_default()
-        .len();
+    let initial_log_key = gradient_db::latest_attempt_id(&state.web_db, anchor_id).await?;
+    let initial_offset = match initial_log_key {
+        Some(key) => state.log_storage.read(key).await.unwrap_or_default().len(),
+        None => 0,
+    };
 
     let stream = stream! {
         use gradient_entity::build::BuildStatus;
@@ -62,19 +62,27 @@ pub async fn post_build_log(
         loop {
             tokio::time::sleep(Duration::from_millis(500)).await;
 
-            let build = match EBuild::find_by_id(build_id).one(&state.web_db).await {
-                Ok(Some(b)) => b,
+            let anchor = match EDerivationBuild::find_by_id(anchor_id).one(&state.web_db).await {
+                Ok(Some(a)) => a,
                 Ok(None) => break,
                 Err(_) => break,
             };
-            let log_key = gradient_db::latest_attempt_log_id(&state.web_db, build_id).await.unwrap_or(build_id);
+            let Some(log_key) = gradient_db::latest_attempt_id(&state.web_db, anchor_id).await.unwrap_or(None) else {
+                if matches!(anchor.status, BuildStatus::Created | BuildStatus::Queued) {
+                    continue;
+                }
+                if !sent_any {
+                    yield String::new();
+                }
+                break;
+            };
 
             // While the build hasn't started executing yet (`Created` /
             // `Queued`), there's nothing to stream - but we must not close
             // the connection either, otherwise a UI that opened the stream
             // before the worker picked the build up would see an empty
             // response and never get the live output. Keep polling.
-            if matches!(build.status, BuildStatus::Created | BuildStatus::Queued) {
+            if matches!(anchor.status, BuildStatus::Created | BuildStatus::Queued) {
                 continue;
             }
 
@@ -94,7 +102,7 @@ pub async fn post_build_log(
             // read (catches the race where lines were appended between our
             // read above and the daemon-side status transition committing)
             // and close the stream.
-            if build.status != BuildStatus::Building {
+            if anchor.status != BuildStatus::Building {
                 let final_log = state.log_storage.read(log_key).await.unwrap_or_default();
                 if final_log.len() > last_offset {
                     let final_chunk = final_log[last_offset..].to_string();

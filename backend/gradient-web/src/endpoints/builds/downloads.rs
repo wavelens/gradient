@@ -48,7 +48,7 @@ fn relative_in_output(full: &str, output_root: &str) -> String {
 /// as the local [`BuildProduct`] type.
 async fn collect_build_products(
     state: &Arc<ServerState>,
-    _build_id: BuildId,
+    _build_id: BuildJobId,
     build_outputs: Vec<MDerivationOutput>,
 ) -> Vec<BuildProduct> {
     let output_ids: Vec<DerivationOutputId> = build_outputs.iter().map(|o| o.id).collect();
@@ -83,7 +83,7 @@ async fn collect_build_products(
 /// Returns `None` when no matching product is found.
 async fn find_and_serve_file(
     state: &Arc<ServerState>,
-    build_id: BuildId,
+    build_id: BuildJobId,
     build_outputs: Vec<MDerivationOutput>,
     filename: &str,
 ) -> WebResult<Option<Response>> {
@@ -216,12 +216,12 @@ pub async fn get_build_downloads(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path(build_id): Path<BuildId>,
+    Path(build_id): Path<BuildJobId>,
 ) -> WebResult<Json<BaseResponse<Vec<BuildProduct>>>> {
     let ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
 
     let build_outputs = EDerivationOutput::find()
-        .filter(CDerivationOutput::Derivation.eq(ctx.build.derivation))
+        .filter(CDerivationOutput::Derivation.eq(ctx.build_job.derivation))
         .all(&state.web_db)
         .await?;
 
@@ -234,12 +234,16 @@ pub async fn get_build_download_token(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path(build_id): Path<BuildId>,
+    Path(build_id): Path<BuildJobId>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    BuildAccessContext::load(&state, build_id, &Some(user), api_key.as_ref()).await?;
+    let ctx = BuildAccessContext::load(&state, build_id, &Some(user), api_key.as_ref()).await?;
 
-    let token = encode_download_token(State(Arc::clone(&state)), build_id)
-        .map_err(|_| WebError::failed_to_generate_token())?;
+    let token = encode_download_token(
+        State(Arc::clone(&state)),
+        ctx.build_job.derivation,
+        ctx.build_job.evaluation,
+    )
+    .map_err(|_| WebError::failed_to_generate_token())?;
 
     Ok(ok_json(token))
 }
@@ -248,7 +252,7 @@ pub async fn get_build_download(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path((build_id, filename)): Path<(BuildId, String)>,
+    Path((build_id, filename)): Path<(BuildJobId, String)>,
     Query(query): Query<DownloadQuery>,
 ) -> Result<Response, WebError> {
     let ctx = BuildAccessContext::load_unguarded(&state, build_id).await?;
@@ -257,7 +261,7 @@ pub async fn get_build_download(
         let claims = decode_download_token(State(Arc::clone(&state)), token_str)
             .await
             .map_err(|_| WebError::unauthorized("Invalid download token"))?;
-        if claims.build_id != build_id {
+        if claims.derivation != ctx.build_job.derivation {
             return Err(WebError::not_found("Build"));
         }
     } else if !ctx.organization.public {
@@ -273,7 +277,7 @@ pub async fn get_build_download(
     }
 
     let build_outputs = EDerivationOutput::find()
-        .filter(CDerivationOutput::Derivation.eq(ctx.build.derivation))
+        .filter(CDerivationOutput::Derivation.eq(ctx.build_job.derivation))
         .all(&state.web_db)
         .await?;
 

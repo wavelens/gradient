@@ -310,10 +310,11 @@ async fn badge_status_for_entry_point(
         return Ok((None, false));
     };
 
-    let build_status = EBuild::find_by_id(ep.build)
+    let build_status = EDerivationBuild::find()
+        .filter(CDerivationBuild::Derivation.eq(ep.derivation))
         .one(&state.web_db)
         .await?
-        .map(|b| b.status);
+        .map(|a| a.status);
 
     let (eval_status, has_failed) = match build_status {
         Some(BuildStatus::Completed) | Some(BuildStatus::Substituted) => {
@@ -348,18 +349,18 @@ async fn badge_status_for_latest_eval(
 
     let has_failed = match &eval {
         Some(e) if e.status == EvaluationStatus::Completed => {
-            let ep_build_ids: Vec<BuildId> = EEntryPoint::find()
+            let ep_drv_ids: Vec<DerivationId> = EEntryPoint::find()
                 .filter(CEntryPoint::Evaluation.eq(e.id))
                 .all(&state.web_db)
                 .await?
                 .into_iter()
-                .map(|ep| ep.build)
+                .map(|ep| ep.derivation)
                 .collect();
 
-            !ep_build_ids.is_empty()
-                && EBuild::find()
-                    .filter(CBuild::Id.is_in(ep_build_ids))
-                    .filter(CBuild::Status.is_in(vec![
+            !ep_drv_ids.is_empty()
+                && EDerivationBuild::find()
+                    .filter(CDerivationBuild::Derivation.is_in(ep_drv_ids))
+                    .filter(CDerivationBuild::Status.is_in(vec![
                         BuildStatus::FailedPermanent,
                         BuildStatus::FailedTimeout,
                     ]))

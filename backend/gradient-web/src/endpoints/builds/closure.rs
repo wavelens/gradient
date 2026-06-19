@@ -132,10 +132,10 @@ pub async fn get_build_closure(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path(build_id): Path<BuildId>,
+    Path(build_id): Path<BuildJobId>,
 ) -> WebResult<Json<BaseResponse<ClosureGraph>>> {
     let ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
-    let graph = build_closure_graph(&state.web_db, vec![ctx.build.derivation]).await?;
+    let graph = build_closure_graph(&state.web_db, vec![ctx.build_job.derivation]).await?;
     Ok(ok_json(graph))
 }
 
@@ -149,25 +149,13 @@ pub async fn get_eval_closure(
     let _ctx =
         EvalAccessContext::load(&state, evaluation_id, &maybe_user, api_key.as_ref()).await?;
 
-    let ep_build_ids: Vec<BuildId> = EEntryPoint::find()
+    let roots: Vec<DerivationId> = EEntryPoint::find()
         .filter(CEntryPoint::Evaluation.eq(evaluation_id))
         .all(&state.web_db)
         .await?
         .into_iter()
-        .map(|ep| ep.build)
+        .map(|ep| ep.derivation)
         .collect();
-
-    let roots: Vec<DerivationId> = if ep_build_ids.is_empty() {
-        vec![]
-    } else {
-        EBuild::find()
-            .filter(CBuild::Id.is_in(ep_build_ids))
-            .all(&state.web_db)
-            .await?
-            .into_iter()
-            .map(|b| b.derivation)
-            .collect()
-    };
 
     let graph = build_closure_graph(&state.web_db, roots).await?;
     Ok(ok_json(graph))
@@ -238,11 +226,11 @@ pub async fn get_build_runtime_closure(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path(build_id): Path<BuildId>,
+    Path(build_id): Path<BuildJobId>,
 ) -> WebResult<Json<BaseResponse<ClosureGraph>>> {
     let ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
     let seeds =
-        gradient_db::output_hashes_for_drvs(&state.web_db, &[ctx.build.derivation]).await?;
+        gradient_db::output_hashes_for_drvs(&state.web_db, &[ctx.build_job.derivation]).await?;
     let graph = build_runtime_closure_graph(&state.web_db, seeds).await?;
     Ok(ok_json(graph))
 }
@@ -257,25 +245,13 @@ pub async fn get_eval_runtime_closure(
     let _ctx =
         EvalAccessContext::load(&state, evaluation_id, &maybe_user, api_key.as_ref()).await?;
 
-    let ep_build_ids: Vec<BuildId> = EEntryPoint::find()
+    let roots: Vec<DerivationId> = EEntryPoint::find()
         .filter(CEntryPoint::Evaluation.eq(evaluation_id))
         .all(&state.web_db)
         .await?
         .into_iter()
-        .map(|ep| ep.build)
+        .map(|ep| ep.derivation)
         .collect();
-
-    let roots: Vec<DerivationId> = if ep_build_ids.is_empty() {
-        vec![]
-    } else {
-        EBuild::find()
-            .filter(CBuild::Id.is_in(ep_build_ids))
-            .all(&state.web_db)
-            .await?
-            .into_iter()
-            .map(|b| b.derivation)
-            .collect()
-    };
 
     let seeds = gradient_db::output_hashes_for_drvs(&state.web_db, &roots).await?;
     let graph = build_runtime_closure_graph(&state.web_db, seeds).await?;
