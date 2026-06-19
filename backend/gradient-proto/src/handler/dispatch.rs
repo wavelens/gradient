@@ -997,7 +997,7 @@ impl<'a> DispatchContext<'a> {
                     "staged NAR size {staged} does not match reported file_size {file_size}"
                 );
                 error!(peer_id = %self.peer_id, %job_id, %store_path, %reason, "NAR upload integrity check failed");
-                self.abort_job(&job_id, reason).await;
+                self.fail_build_transient(&job_id, reason).await;
                 return;
             }
             let buf = match nar.read_staged(&store_path).await {
