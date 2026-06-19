@@ -382,6 +382,9 @@ in {
           server.sleep(10)
           assert_no_server_panic(since_seconds=15)
 
+          print("  DEBUG get_project: " + server.succeed(
+              f'{CURL} -s -w " [HTTP %{{http_code}}]" -H "Authorization: Bearer {token}" {API}/projects/org/project'
+          ))
           eval_id = server.succeed(
               f'{CURL} -sf -H "Authorization: Bearer {token}" '
               f'{API}/projects/org/project | {JQ} -rj ".message.last_evaluation // empty"'
