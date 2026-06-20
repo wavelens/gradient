@@ -343,6 +343,7 @@ pub async fn put_integration(
         endpoint_url,
         access_token: encrypted_token,
         allowed_ips,
+        github_installation: None,
         created_by: user.id,
         created_at: gradient_types::now(),
     }

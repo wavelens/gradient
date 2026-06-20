@@ -21,8 +21,8 @@ use gradient_forge::ParsedPullRequestReviewEvent;
 use gradient_scheduler::Scheduler;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DbBackend, EntityTrait, FromQueryResult, IntoActiveModel,
-    QueryFilter, Statement, Value,
+    ActiveModelTrait, ColumnTrait, DbBackend, EntityTrait, FromQueryResult, QueryFilter,
+    Statement, Value,
 };
 use serde::Deserialize;
 use std::sync::Arc;
@@ -108,18 +108,13 @@ pub(super) async fn handle_github_installation(state: &Arc<ServerState>, body: &
 }
 
 async fn clear_installation_id(state: &Arc<ServerState>, installation_id: i64) {
-    if let Ok(orgs) = EOrganization::find()
-        .filter(COrganization::GithubInstallationId.eq(installation_id))
-        .all(&state.web_db)
+    use gradient_entity::github_installation::{Column as Col, Entity as E};
+    if let Err(e) = E::delete_many()
+        .filter(Col::InstallationId.eq(installation_id))
+        .exec(&state.web_db)
         .await
     {
-        for org in orgs {
-            let mut active = org.into_active_model();
-            active.github_installation_id = Set(None);
-            if let Err(e) = active.update(&state.web_db).await {
-                warn!(error = %e, "Failed to clear github_installation_id");
-            }
-        }
+        warn!(error = %e, installation_id, "Failed to delete github_installation rows");
     }
 }
 
@@ -174,16 +169,26 @@ async fn store_installation_id(state: &Arc<ServerState>, payload: &GitHubInstall
     for org in orgs {
         let org_id = org.id;
         let creator = org.created_by;
-        let mut active = org.into_active_model();
-        active.github_installation_id = Set(Some(installation_id));
-        if let Err(e) = active.update(&state.web_db).await {
-            warn!(error = %e, installation_id, %org_id, "Failed to store github_installation_id");
-            continue;
-        }
+        let inst = match gradient_ci::upsert_github_installation(
+            &state.web_db,
+            org_id,
+            installation_id,
+            Some(github_login),
+            creator,
+        )
+        .await
+        {
+            Ok(id) => id,
+            Err(e) => {
+                warn!(error = %e, installation_id, %org_id, "Failed to upsert github_installation");
+                continue;
+            }
+        };
 
         info!(installation_id, %org_id, github_login = %github_login, "GitHub App installed on organization");
+        let name = gradient_ci::github_integration_name(Some(github_login), installation_id);
         if let Err(e) =
-            gradient_ci::ensure_github_app_integrations(&state.web_db, org_id, creator).await
+            gradient_ci::ensure_github_app_integrations(&state.web_db, org_id, inst, &name, "GitHub", creator).await
         {
             warn!(error = %e, %org_id, "Failed to materialise GitHub App integration rows");
         }
@@ -247,13 +252,15 @@ pub(super) async fn resolve_github_app_targets(
     use crate::ip_allowlist::is_allowed as ip_allowed;
     use std::collections::HashSet;
 
-    let candidate_orgs = EOrganization::find()
-        .filter(COrganization::GithubInstallationId.eq(installation_id))
+    use gradient_entity::github_installation::{Column as GiCol, Entity as EGi};
+
+    let installs = EGi::find()
+        .filter(GiCol::InstallationId.eq(installation_id))
         .all(&state.web_db)
         .await
         .unwrap_or_default();
 
-    if candidate_orgs.is_empty() {
+    if installs.is_empty() {
         return Vec::new();
     }
 
@@ -263,15 +270,16 @@ pub(super) async fn resolve_github_app_targets(
         .collect();
 
     let mut integrations = Vec::new();
-    for org in candidate_orgs {
+    for inst in installs {
+        let org_id = inst.organization;
         let projects = match EProject::find()
-            .filter(CProject::Organization.eq(org.id))
+            .filter(CProject::Organization.eq(org_id))
             .all(&state.web_db)
             .await
         {
             Ok(rows) => rows,
             Err(e) => {
-                warn!(error = %e, org_id = %org.id, "resolve_github_app_targets: project lookup failed");
+                warn!(error = %e, %org_id, "resolve_github_app_targets: project lookup failed");
                 continue;
             }
         };
@@ -282,9 +290,10 @@ pub(super) async fn resolve_github_app_targets(
             continue;
         }
         let integration = EIntegration::find()
-            .filter(CIntegration::Organization.eq(org.id))
+            .filter(CIntegration::Organization.eq(org_id))
             .filter(CIntegration::Kind.eq(i16::from(IntegrationKind::Inbound)))
             .filter(CIntegration::ForgeType.eq(i16::from(gradient_types::ForgeType::GitHub)))
+            .filter(CIntegration::GithubInstallation.eq(inst.id))
             .one(&state.web_db)
             .await
             .ok()
@@ -294,7 +303,7 @@ pub(super) async fn resolve_github_app_targets(
                 let allowlist = i.allowed_ips.clone().unwrap_or_default();
                 if !ip_allowed(client_ip, &allowlist) {
                     warn!(
-                        org_id = %org.id,
+                        %org_id,
                         integration_id = %i.id,
                         %client_ip,
                         "resolve_github_app_targets: source IP not allowed, skipping integration"
@@ -304,7 +313,7 @@ pub(super) async fn resolve_github_app_targets(
                 integrations.push(i.id);
             }
             None => warn!(
-                org_id = %org.id,
+                %org_id,
                 "resolve_github_app_targets: org has matching project but no inbound github integration row"
             ),
         }
