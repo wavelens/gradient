@@ -27,18 +27,6 @@ pub struct Model {
     pub created_by: UserId,
     pub created_at: NaiveDateTime,
     pub managed: bool,
-    /// GitHub App installation ID for this organization. `Some` is the single
-    /// source of truth for "this org uses the GitHub App" - outbound CI status
-    /// reporting, webhook routing, etc. all gate on this being `Some`.
-    ///
-    /// Populated by:
-    /// - the `installation` webhook (matching the payload's repositories against
-    ///   each org's project repository URLs),
-    /// - the state-driven provisioner (`StateOrganization.github_installation_id`),
-    /// - direct DB writes during recovery.
-    ///
-    /// Cleared automatically when GitHub sends `installation.deleted`.
-    pub github_installation_id: Option<i64>,
 }
 
 impl std::fmt::Debug for Model {
@@ -54,7 +42,6 @@ impl std::fmt::Debug for Model {
             .field("hide_build_requests", &self.hide_build_requests)
             .field("created_by", &self.created_by)
             .field("created_at", &self.created_at)
-            .field("github_installation_id", &self.github_installation_id)
             .finish()
     }
 }

@@ -132,7 +132,6 @@ mod tests {
             created_by: gradient_types::ids::UserId::nil(),
             created_at: NaiveDateTime::default(),
             managed: false,
-            github_installation_id: None,
         }
     }
 

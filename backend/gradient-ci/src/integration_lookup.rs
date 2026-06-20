@@ -23,8 +23,6 @@ pub enum IntegrationKind {
     Outbound = 1,
 }
 
-/// Stable name used for the auto-managed `forge_type=github` integration rows.
-pub const GITHUB_APP_INTEGRATION_NAME: &str = "github";
 /// Stable display name shown in dropdowns for the auto-managed GitHub App rows.
 pub const GITHUB_APP_INTEGRATION_DISPLAY_NAME: &str = "GitHub";
 
