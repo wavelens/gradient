@@ -152,7 +152,7 @@ services.gradient.state.organizations.acme = {
 | `description` | `null` | Optional description |
 | `private_key_file` | - | Path to SSH private key (required) |
 | `public` | `false` | Visible to all users |
-| `github_installations` | `[]` | List of GitHub App installations to bind to this org. Each entry provisions a `github-<account>` inbound + outbound integration pair. An empty list leaves webhook-recorded installations untouched on reconciliation. |
+| `github_installations` | `[]` | List of GitHub App installations to bind to this org. Each entry provisions a `github-<account>` inbound + outbound integration pair. |
 | `created_by` | - | Username of creator (required) |
 | `members` | `[]` | Per-org membership list. When non-empty, the list is authoritative (drift removes unlisted memberships, the implicit creator-Admin step is skipped). Empty preserves the legacy behavior. Members referencing not-yet-registered users are skipped silently and backfilled on registration / OIDC first-login |
 

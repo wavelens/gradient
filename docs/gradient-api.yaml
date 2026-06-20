@@ -9569,8 +9569,10 @@ components:
           type: string
           enum: [gitea, forgejo, gitlab]
           description: >-
-            `github` rows cannot be patched (PATCH returns `400`); delete to
-            remove a GitHub installation integration.
+            `github` is intentionally excluded from this enum: github rows are
+            installation-managed and not editable (PATCH returns `400`). The
+            schema itself prevents supplying `forge_type=github` here; delete
+            the row to remove a GitHub installation integration.
         endpoint_url:
           type: string
           nullable: true
