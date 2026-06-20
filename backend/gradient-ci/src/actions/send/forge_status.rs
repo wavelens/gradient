@@ -173,7 +173,8 @@ async fn build_github_app_reporter(
         .context("loading github installation")?
         .ok_or_else(|| anyhow!("github installation {} not found", install_fk))?;
     let installation_id = install.installation_id;
-    let pem = std::fs::read_to_string(&github_app.private_key_file)
+    let pem = tokio::fs::read_to_string(&github_app.private_key_file)
+        .await
         .context("reading github app private key")?;
     let r = GithubAppReporter::new(ctx.http.clone(), "", github_app.app_id, pem, installation_id)?;
     Ok(Some(Arc::new(r)))
