@@ -15,9 +15,9 @@
 //!   `has_secret`/`has_access_token` booleans so non-admin members cannot
 //!   probe credential state.
 
-use gradient_entity::{ids::*, integration, organization_user, role};
+use gradient_entity::{github_installation, ids::*, integration, organization_user, role};
 use gradient_types::SessionId;
-use sea_orm::{DatabaseBackend, MockDatabase};
+use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 use serde_json::Value;
 use gradient_test_support::fixtures::{org, org_id, test_date, user, user_id};
 use gradient_test_support::web::{live_session, make_test_server, make_token};
@@ -54,16 +54,36 @@ fn gitea_inbound_row() -> integration::Model {
     }
 }
 
+fn github_installation_id() -> GithubInstallationId {
+    GithubInstallationId::new(Uuid::parse_str("00000000-0000-0000-0000-0000000000cc").unwrap())
+}
+
+fn github_integration_id() -> IntegrationId {
+    IntegrationId::new(Uuid::parse_str("019e16b2-e958-7652-ad97-67cd7b0fea61").unwrap())
+}
+
 fn github_inbound_row() -> integration::Model {
     integration::Model {
-        id: IntegrationId::new(Uuid::parse_str("019e16b2-e958-7652-ad97-67cd7b0fea61").unwrap()),
+        id: github_integration_id(),
         organization: org_id(),
         name: "github".into(),
         display_name: "GitHub".into(),
         forge_type: 3,
+        github_installation: Some(github_installation_id()),
         created_by: user_id(),
         created_at: test_date(),
         ..Default::default()
+    }
+}
+
+fn github_installation_row() -> github_installation::Model {
+    github_installation::Model {
+        id: github_installation_id(),
+        organization: org_id(),
+        installation_id: 999,
+        account_login: Some("acme-corp".into()),
+        created_by: user_id(),
+        created_at: test_date(),
     }
 }
 
@@ -233,6 +253,47 @@ fn summary_endpoint_rejects_non_member() {
             .await;
 
         res.assert_status_not_found();
+    });
+}
+
+#[test]
+fn delete_github_integration_removes_pair_and_installation() {
+    // Sequence: auth (session x2 + user), org+org_user+role (ManageIntegrations),
+    // SELECT integration (load_integration_in_org), DELETE integrations by fk (exec),
+    // DELETE github_installation by id (exec). MockDatabase commit() is a no-op.
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let session_id = SessionId::now_v7();
+        let token = make_token(session_id);
+        let integration_id = github_integration_id();
+
+        let db = with_org_manage(with_auth(
+            MockDatabase::new(DatabaseBackend::Postgres),
+            session_id,
+        ))
+        .append_query_results([vec![github_inbound_row()]])
+        .append_exec_results([
+            MockExecResult { last_insert_id: 0, rows_affected: 2 },
+            MockExecResult { last_insert_id: 0, rows_affected: 1 },
+        ]);
+
+        let _ = github_installation_row();
+        let server = make_test_server(db.into_connection());
+        let res = server
+            .delete(&format!(
+                "/api/v1/orgs/test-org/integrations/{}",
+                integration_id
+            ))
+            .add_header("authorization", format!("Bearer {}", token))
+            .await;
+
+        res.assert_status_ok();
+        let body: Value = res.json();
+        assert_eq!(body["error"], false);
+        assert_eq!(body["message"], true);
     });
 }
 

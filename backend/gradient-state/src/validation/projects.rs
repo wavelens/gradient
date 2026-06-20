@@ -87,7 +87,7 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
                 );
                 continue;
             };
-            if name.starts_with("github-") {
+            if name == "github" || name.starts_with("github-") {
                 continue;
             }
             let declared_inbound = config.integrations.values().any(|i| {
