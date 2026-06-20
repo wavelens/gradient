@@ -1273,6 +1273,26 @@ slot and the last successful evaluation was deleted.
   is retained.
 - `core::db::gc::tests::keep_zero_deletes_nothing` - `keep = 0` is a no-op.
 
+## Orphan derivation GC - race-safe delete + NAR reclaim
+
+`gc_orphan_derivations` (`backend/gradient-db/src/gc.rs`) reclaims global,
+content-addressed `derivation` rows that no surviving evaluation needs. Because
+a derivation is reused across evaluations, a concurrent eval can re-attach a
+`build_job` to a past-grace orphan between selection and deletion, so the pass
+deletes rows with an in-statement `NOT EXISTS (build_job)`/`NOT EXISTS
+(entry_point)` re-check and `RETURNING`, then reclaims NARs keyed strictly to
+the rows actually deleted. This fixes the `build_job_derivation_fkey` violation
+seen after the globalize-derivation migration and the latent corruption where a
+re-referenced derivation was left pointing at an already-deleted NAR.
+
+- `gc::tests::reclaims_only_hashes_no_survivor_references` - a hash shared by a
+  surviving `derivation_output` (e.g. a fetchurl source tarball) keeps its NAR;
+  only the unshared hash is reclaimed.
+- `gc::tests::reclaims_nothing_when_all_hashes_survive` - every deleted hash
+  still referenced means no NAR is removed.
+- `gc::tests::reclaims_all_when_no_survivors` - no surviving reference means all
+  deleted hashes are reclaimed.
+
 ## Frontend - form primitives & style guide
 
 Reusable form primitives live under

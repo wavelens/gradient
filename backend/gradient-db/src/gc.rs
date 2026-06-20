@@ -160,50 +160,57 @@ fn evaluations_to_gc(statuses: &[EvaluationStatus], keep: usize) -> Vec<usize> {
     (keep..statuses.len()).collect()
 }
 
-/// Derivation GC pass: deletes `derivation` rows no surviving evaluation needs
-/// (no `build_job` references them) and whose grace period has expired. The
-/// grace lets rapid re-evaluations reuse recent derivations without re-inserting.
+/// Derivation GC pass: deletes global `derivation` rows that no surviving
+/// evaluation needs - referenced by neither `build_job` nor `entry_point`, the
+/// only owners whose FK does not cascade - and whose grace period has expired.
+/// The grace lets rapid re-evaluations reuse recent derivations.
 ///
-/// NAR deletion is keyed by the orphan-only output hashes - a hash referenced
-/// by any *non-orphan* `derivation_output` (typical for FOD source tarballs
-/// that many drvs share via `fetchurl`) keeps both its NAR and its
-/// `cached_path` row. For hashes referenced only by orphans, both the NAR
-/// file and the `cached_path` row are removed; `cached_path_signature`
-/// cascades from `cached_path`. The derivation rows are deleted last; FK
-/// cascade cleans up `cache_derivation`, `derivation_output`, dep edges,
-/// and feature edges.
+/// The rows are deleted first, re-checking the orphan predicate inside the
+/// statement: because derivations are global and content-addressed, a
+/// concurrent evaluation can re-attach a `build_job` to a past-grace orphan at
+/// any moment, so a single SELECT-then-delete would race the FK. `RETURNING`
+/// then reports exactly which rows went, and NAR reclaim is keyed strictly to
+/// those - a hash still referenced by any surviving `derivation_output` (FOD
+/// source tarballs shared via `fetchurl`) keeps its NAR and `cached_path` row.
+/// FK cascade cleans up `derivation_output`, `derivation_build`, dep/closure
+/// edges, features, metrics, and `cache_derivation`; `cached_path_signature`
+/// cascades from `cached_path`.
 pub async fn gc_orphan_derivations(ctx: &DbContext, grace_hours: i64) -> Result<()> {
     use std::collections::HashSet;
 
     let cutoff = gradient_types::now() - ChronoDuration::hours(grace_hours.max(0));
+    let db = &ctx.worker_db;
 
-    let rows = ctx
-        .worker_db
+    let rows = db
         .query_all(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             r#"SELECT d.id
                FROM derivation d
                LEFT JOIN build_job bj ON bj.derivation = d.id
+               LEFT JOIN entry_point ep ON ep.derivation = d.id
                WHERE bj.id IS NULL
+                 AND ep.id IS NULL
                  AND d.created_at < $1"#,
             [sea_orm::Value::ChronoDateTime(Some(Box::new(cutoff)))],
         ))
         .await
         .context("Failed to query orphan derivations")?;
 
-    let drv_ids: Vec<DerivationId> = rows
+    let candidate_ids: Vec<DerivationId> = rows
         .iter()
         .filter_map(|r| r.try_get::<Uuid>("", "id").ok().map(DerivationId::new))
         .collect();
 
-    if drv_ids.is_empty() {
+    if candidate_ids.is_empty() {
         return Ok(());
     }
 
-    info!(count = drv_ids.len(), "Running orphan derivation GC");
+    info!(count = candidate_ids.len(), "Running orphan derivation GC");
 
-    let db = &ctx.worker_db;
-    let orphan_outputs = crate::fetch_in_chunks(&drv_ids, |chunk| async move {
+    // Pin candidate output hashes before deletion: a deleted derivation's
+    // `derivation_output` rows cascade away, so the NAR reclaim set is derived
+    // from this snapshot intersected with what actually gets deleted.
+    let candidate_outputs = crate::fetch_in_chunks(&candidate_ids, |chunk| async move {
         EDerivationOutput::find()
             .filter(CDerivationOutput::Derivation.is_in(chunk))
             .all(db)
@@ -212,31 +219,60 @@ pub async fn gc_orphan_derivations(ctx: &DbContext, grace_hours: i64) -> Result<
     .await
     .context("GC: failed to query orphan derivation outputs")?;
 
-    let orphan_hashes: HashSet<String> = orphan_outputs.iter().map(|o| o.hash.clone()).collect();
+    let mut deleted: HashSet<DerivationId> = HashSet::new();
+    for chunk in candidate_ids.chunks(crate::IN_CHUNK_SIZE) {
+        let ids: Vec<Uuid> = chunk.iter().map(|d| d.into_inner()).collect();
+        match db
+            .query_all(Statement::from_sql_and_values(
+                DatabaseBackend::Postgres,
+                r#"DELETE FROM derivation d
+                   WHERE d.id = ANY($1)
+                     AND NOT EXISTS (SELECT 1 FROM build_job bj WHERE bj.derivation = d.id)
+                     AND NOT EXISTS (SELECT 1 FROM entry_point ep WHERE ep.derivation = d.id)
+                   RETURNING d.id"#,
+                [ids.into()],
+            ))
+            .await
+        {
+            Ok(returned) => deleted.extend(
+                returned
+                    .iter()
+                    .filter_map(|r| r.try_get::<Uuid>("", "id").ok().map(DerivationId::new)),
+            ),
+            Err(e) => warn!(error = %e, "GC: orphan derivation delete chunk failed; skipping"),
+        }
+    }
 
-    let still_referenced: HashSet<String> = if orphan_hashes.is_empty() {
+    if deleted.is_empty() {
+        return Ok(());
+    }
+
+    let deleted_hashes: HashSet<String> = candidate_outputs
+        .iter()
+        .filter(|o| deleted.contains(&o.derivation))
+        .map(|o| o.hash.clone())
+        .collect();
+
+    // Post-delete, any surviving `derivation_output` for a deleted hash belongs
+    // to a still-live derivation that shares it, so its NAR must be kept.
+    let still_referenced: HashSet<String> = if deleted_hashes.is_empty() {
         HashSet::new()
     } else {
-        let drv_id_set: HashSet<DerivationId> = drv_ids.iter().copied().collect();
-        let orphan_hash_vec: Vec<String> = orphan_hashes.iter().cloned().collect();
-        crate::fetch_in_chunks(&orphan_hash_vec, |chunk| async move {
+        let hash_vec: Vec<String> = deleted_hashes.iter().cloned().collect();
+        crate::fetch_in_chunks(&hash_vec, |chunk| async move {
             EDerivationOutput::find()
                 .filter(CDerivationOutput::Hash.is_in(chunk))
                 .all(db)
                 .await
         })
         .await
-        .context("GC: failed to query non-orphan references for orphan output hashes")?
+        .context("GC: failed to query surviving references for deleted output hashes")?
         .into_iter()
-        .filter(|o| !drv_id_set.contains(&o.derivation))
         .map(|o| o.hash)
         .collect()
     };
 
-    let to_delete: Vec<String> = orphan_hashes
-        .into_iter()
-        .filter(|h| !still_referenced.contains(h))
-        .collect();
+    let to_delete = reclaimable_hashes(deleted_hashes, &still_referenced);
 
     for hash in &to_delete {
         if let Err(e) = ctx.storage.nar_storage.delete(hash).await {
@@ -256,32 +292,61 @@ pub async fn gc_orphan_derivations(ctx: &DbContext, grace_hours: i64) -> Result<
         warn!(error = %e, "GC: failed to delete cached_path rows for orphan hashes");
     }
 
-    if !to_delete.is_empty() {
-        let _ = ctx
-            .board_events
-            .send(gradient_types::BoardEvent::CacheChanged);
-    }
+    let _ = ctx
+        .board_events
+        .send(gradient_types::BoardEvent::CacheChanged);
 
-    for drv_id in drv_ids {
-        if let Some(d) = EDerivation::find_by_id(drv_id)
-            .one(&ctx.worker_db)
-            .await
-            .context("GC: failed to load derivation")?
-        {
-            let a: ADerivation = d.into_active_model();
-            if let Err(e) = a.delete(&ctx.worker_db).await {
-                warn!(error = %e, drv_id = %drv_id, "GC: failed to delete orphan derivation");
-            }
-        }
-    }
-
+    info!(
+        deleted = deleted.len(),
+        reclaimed_nars = to_delete.len(),
+        "Orphan derivation GC done"
+    );
     Ok(())
+}
+
+/// Of the output hashes belonging to just-deleted derivations, the ones whose
+/// NAR and `cached_path` can be reclaimed: those no surviving
+/// `derivation_output` still references.
+fn reclaimable_hashes(
+    deleted_hashes: std::collections::HashSet<String>,
+    still_referenced: &std::collections::HashSet<String>,
+) -> Vec<String> {
+    deleted_hashes
+        .into_iter()
+        .filter(|h| !still_referenced.contains(h))
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
     use EvaluationStatus::*;
+
+    fn set(items: &[&str]) -> HashSet<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn reclaims_only_hashes_no_survivor_references() {
+        // `shared` is still referenced by a surviving derivation_output (e.g. a
+        // fetchurl source tarball), so only `solo` is reclaimable.
+        let mut got = reclaimable_hashes(set(&["solo", "shared"]), &set(&["shared"]));
+        got.sort();
+        assert_eq!(got, vec!["solo".to_string()]);
+    }
+
+    #[test]
+    fn reclaims_nothing_when_all_hashes_survive() {
+        assert!(reclaimable_hashes(set(&["a", "b"]), &set(&["a", "b"])).is_empty());
+    }
+
+    #[test]
+    fn reclaims_all_when_no_survivors() {
+        let mut got = reclaimable_hashes(set(&["a", "b"]), &set(&[]));
+        got.sort();
+        assert_eq!(got, vec!["a".to_string(), "b".to_string()]);
+    }
 
     #[test]
     fn skips_gc_while_an_evaluation_is_active() {
