@@ -33,6 +33,14 @@ matcher keyed off a literal `github.com` substring and an org-name equals login
 fallback, so a `github:`-form project (and any org not named after the account)
 left the org without a `github_installation` row.
 
+`github_installation.created_at` must be `TIMESTAMP` to match the entity's
+`NaiveDateTime`; the create migration originally typed it `TIMESTAMPTZ`, so every
+read (e.g. `PUT /orgs/{org}/integrations`) failed to decode the column (#449).
+`m20260620_000004` converts the column in place on already-migrated installs
+(conditional on the current type, so it is a no-op once `TIMESTAMP`). Verified by
+E2E CI against real PostgreSQL; sea-orm `MockDatabase` cannot reproduce the
+column-type decode error.
+
 ## Forge action "Test" button connectivity probe
 
 `backend/gradient-forge/src/reporter.rs`: `verify_reads_repo_without_reporting`

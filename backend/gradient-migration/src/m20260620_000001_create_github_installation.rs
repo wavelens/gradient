@@ -22,7 +22,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Alias::new("installation_id")).big_integer().not_null())
                     .col(ColumnDef::new(Alias::new("account_login")).text().null())
                     .col(ColumnDef::new(Alias::new("created_by")).uuid().not_null())
-                    .col(ColumnDef::new(Alias::new("created_at")).timestamp_with_time_zone().not_null())
+                    .col(ColumnDef::new(Alias::new("created_at")).timestamp().not_null())
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk-github_installation-organization")

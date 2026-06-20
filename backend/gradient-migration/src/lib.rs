@@ -163,6 +163,7 @@ mod m20260619_030000_build_job_and_attempt;
 mod m20260620_000001_create_github_installation;
 mod m20260620_000002_backfill_drop_org_installation;
 mod m20260620_000003_index_build_job_derivation;
+mod m20260620_000004_fix_github_installation_created_at_tz;
 
 pub struct Migrator;
 
@@ -327,6 +328,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260620_000001_create_github_installation::Migration),
             Box::new(m20260620_000002_backfill_drop_org_installation::Migration),
             Box::new(m20260620_000003_index_build_job_derivation::Migration),
+            Box::new(m20260620_000004_fix_github_installation_created_at_tz::Migration),
         ]
     }
 }
