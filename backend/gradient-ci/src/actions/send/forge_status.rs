@@ -13,8 +13,8 @@ use crate::integration_lookup::IntegrationKind;
 use gradient_types::ForgeType;
 use gradient_forge::reporter::{CiReporter, GithubAppReporter};
 use gradient_types::{
-    ActionConfig, ActionType, CIntegration, CProjectAction, EIntegration, EOrganization,
-    EProjectAction, EvaluationId, IntegrationId, ProjectId,
+    ActionConfig, ActionType, CIntegration, CProjectAction, EIntegration, EProjectAction,
+    EvaluationId, IntegrationId, ProjectId,
 };
 use anyhow::{Context, Result, anyhow};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
@@ -164,14 +164,15 @@ async fn build_github_app_reporter(
     let Some(github_app) = ctx.db.config.github_app.clone() else {
         return Ok(None);
     };
-    let project_org = EOrganization::find_by_id(integration.organization)
-        .one(&ctx.db.worker_db)
-        .await
-        .context("loading organization for github app")?
-        .ok_or_else(|| anyhow!("integration organization not found"))?;
-    let Some(installation_id) = project_org.github_installation_id else {
+    let Some(install_fk) = integration.github_installation else {
         return Ok(None);
     };
+    let install = gradient_entity::github_installation::Entity::find_by_id(install_fk)
+        .one(&ctx.db.worker_db)
+        .await
+        .context("loading github installation")?
+        .ok_or_else(|| anyhow!("github installation {} not found", install_fk))?;
+    let installation_id = install.installation_id;
     let pem = std::fs::read_to_string(&github_app.private_key_file)
         .context("reading github app private key")?;
     let r = GithubAppReporter::new(ctx.http.clone(), "", github_app.app_id, pem, installation_id)?;
