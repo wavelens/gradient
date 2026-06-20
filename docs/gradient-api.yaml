@@ -4115,9 +4115,9 @@ paths:
         `signing_key_file`, `token_file`, `key_file`, `secret_file`,
         `access_token_file`) is redacted to `null` - the hashed/encrypted
         secrets cannot be recovered and must be filled in by hand. The
-        auto-managed `build-request` project, server-managed GitHub
-        integration rows, and the built-in `Admin`/`Write`/`View` roles are
-        omitted.
+        auto-managed `build-request` project, GitHub integration rows (exported
+        as `github_installations` on the org instead), and the built-in
+        `Admin`/`Write`/`View` roles are omitted.
 
         Requires `superuser`.
       operationId: exportState
@@ -5655,9 +5655,12 @@ paths:
         URL (`/hooks/gitea/...`, `/hooks/forgejo/...`, `/hooks/gitlab/...`).
         The stored `forge_type` is display metadata only for inbound.
 
-        `forge_type: "github"` is rejected with `400`: GitHub integration is
-        provided by the server-wide GitHub App together with the org's
-        `github_installation_id`, not by per-org integration rows.
+        `forge_type: "github"` integrations are creatable by supplying
+        `installation_id`. The server App must be configured (else `400`);
+        the installation id is validated against the App (invalid id returns
+        `400`). An inbound and outbound integration pair is created
+        automatically, named `github-<account>`. Multiple installations per org
+        are supported (one per GitHub account).
       operationId: createOrgIntegration
       requestBody:
         required: true
@@ -5762,9 +5765,8 @@ paths:
         Patch-updates an integration. Omit a field to leave it unchanged.
         Pass an empty string for `secret` or `access_token` to **clear** it.
 
-        `forge_type=github` rows are server-managed (auto-seeded when the
-        GitHub App is installed on the org) and cannot be modified - PATCH
-        rejects them with `400`.
+        `forge_type=github` rows are managed by the App and installation; PATCH
+        rejects them with `400`. Delete the row to remove the integration.
       operationId: patchOrgIntegration
       requestBody:
         required: true
@@ -5798,8 +5800,8 @@ paths:
       description: >-
         Deletes an integration. Any project `project_integration` rows
         referencing it are cleared via `ON DELETE SET NULL`.
-        `forge_type=github` rows are server-managed and cannot be deleted -
-        the endpoint returns `400` for them.
+        `forge_type=github` rows can be deleted; deleting removes the
+        installation binding for that account.
       operationId: deleteOrgIntegration
       responses:
         '200':
@@ -7824,18 +7826,6 @@ components:
         created_at:
           type: string
           format: date-time
-        github_installation_id:
-          type: integer
-          format: int64
-          nullable: true
-          description: >-
-            GitHub App installation ID bound to this org. The presence of this
-            value (non-null) is the single signal that this org uses the GitHub
-            App - outbound CI status reporting and webhook routing both gate on
-            it. Populated automatically by the `installation` webhook (when the
-            GitHub login matches the Gradient org name) and by the state-driven
-            provisioner (`StateOrganization.github_installation_id`); cleared
-            automatically when GitHub sends `installation.deleted`.
         github_app_available:
           type: boolean
           description: >-
@@ -9475,6 +9465,15 @@ components:
             source is allowed. Inbound deliveries from outside the allowlist
             are rejected with `403 forbidden_source_ip` (after signature
             verification succeeds).
+        installation_id:
+          type: integer
+          format: int64
+          nullable: true
+          description: GitHub App installation id. Non-null for `forge_type=github` rows.
+        account_login:
+          type: string
+          nullable: true
+          description: GitHub account login the installation is bound to. Non-null for `forge_type=github` rows.
         created_by:
           type: string
           format: uuid
@@ -9521,11 +9520,17 @@ components:
           enum: [inbound, outbound]
         forge_type:
           type: string
-          enum: [gitea, forgejo, gitlab]
+          enum: [gitea, forgejo, gitlab, github]
           description: >-
-            `github` is intentionally excluded - GitHub integration is
-            provided by the server-wide GitHub App and the org's
-            `github_installation_id`, not by per-integration rows.
+            For `github`: supply `installation_id`; the server App must be
+            configured. An inbound + outbound pair is created automatically.
+        installation_id:
+          type: integer
+          format: int64
+          nullable: true
+          description: >-
+            Required when `forge_type` is `github`. The GitHub App installation
+            id to bind. Validated against the App; invalid ids return `400`.
         secret:
           type: string
           description: >-
@@ -9564,9 +9569,8 @@ components:
           type: string
           enum: [gitea, forgejo, gitlab]
           description: >-
-            `github` is rejected here - GitHub integration is provided by the
-            server-wide GitHub App and the org's `github_installation_id`
-            instead.
+            `github` rows cannot be patched (PATCH returns `400`); delete to
+            remove a GitHub installation integration.
         endpoint_url:
           type: string
           nullable: true

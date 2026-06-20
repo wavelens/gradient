@@ -19,8 +19,8 @@ In the Gradient UI:
       within the organization and kind.
     - **Kind** - *Inbound* (Gradient receives webhooks) or *Outbound*
       (Gradient calls the forge API).
-    - **Forge type** - Gitea / Forgejo / GitLab. (GitHub does not appear here:
-      its inbound + outbound rows are server-managed; see *GitHub App* below.)
+    - **Forge type** - Gitea / Forgejo / GitLab / GitHub. For GitHub, also
+      enter the **Installation ID** (see *GitHub App* below).
 
 Then, depending on the kind:
 
@@ -37,18 +37,18 @@ never returns them again, only a boolean indicating their presence.
 
 ### GitHub App rows
 
-When the GitHub App is installed on an organization, Gradient automatically
-creates two `forge_type=github` integration rows for it: one *inbound* and one
-*outbound*, both named `github`. They appear in the org Integrations list as
-**Server-managed** and cannot be edited or deleted from the UI - their
-credentials come from the server's App config and the org's installation id.
+GitHub integrations are created by entering a GitHub App **Installation ID**
+in the New Integration form (select `forge_type: github`). The server validates
+the id against the configured App and creates an inbound and outbound pair
+automatically, named `github-<account>` (e.g. `github-acme-corp`). Multiple
+installations per org are supported - one per GitHub account.
 
-The integration name `github` is reserved system-wide for these rows; user-created
-integrations cannot use it.
+The install webhook also auto-creates these pairs when the App is installed on
+a GitHub account whose repos match an existing org project.
 
-Reference these rows from project triggers (inbound) and project
-`outbound_integration` (outbound) the same way you'd reference any other
-integration.
+GitHub rows can be **deleted** to remove the binding, but cannot be edited
+(PATCH returns `400`). Reference them from project triggers (inbound) and
+project `outbound_integration` (outbound) like any other integration.
 
 ## 2. Report build status
 
@@ -81,15 +81,16 @@ Gradient server. There are three roles to consider:
 2. **Organization admin** - once the server has the App configured, install the
    App on the organization's GitHub account.
 3. **GitHub repository owner** - installing the App fires the `installation`
-   webhook, which carries the list of granted repositories. Gradient stores the
-   installation id on every organization owning a project whose repository URL
-   resolves to one of those repositories, and seeds the `github-app` inbound +
-   outbound integration rows. Matching is purely on the repository URL: the
-   organization name and the Gradient project name need not match GitHub, and
+   webhook, which carries the list of granted repositories. Gradient writes a
+   `github_installation` row for every org owning a project whose repository URL
+   resolves to one of those repositories, and seeds the `github-<account>`
+   inbound + outbound integration pair. Matching is purely on the repository URL:
+   the organization name and the Gradient project name need not match GitHub, and
    the flake shorthand (`github:owner/repo`) is recognized alongside the https
-   and SSH clone URLs. Subsequent push / pull-request deliveries route to the
-   corresponding Gradient organization, and projects can link to the outbound
-   row to enable status reporting.
+   and SSH clone URLs. Multiple installations per org are supported (one per
+   GitHub account). Subsequent push / pull-request deliveries route to the
+   corresponding integration pair, and projects can link to the outbound row to
+   enable status reporting.
 
 Webhook deliveries are signed with the App's webhook secret and verified
 server-side. Build statuses are reported back via the App's installation token.
