@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use crate::dispatch_mode::{arch_available, decide_dispatch_mode, BuildDispatchMode};
+use crate::dispatch_mode::{anchor_substitutable, arch_available, decide_dispatch_mode, BuildDispatchMode};
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_sources::get_path_from_derivation_output;
@@ -739,8 +739,16 @@ impl BuildDispatchMaps {
         let job_id = format!("build:{}", anchor.id);
         let miss_count = self.substitute_misses.get(&anchor.id).copied().unwrap_or(0);
         let arch_has_worker = arch_available(&self.connected_architectures, &derivation.architecture);
-        let mode = decide_dispatch_mode(
+        // A fixed-output derivation is intrinsically substitutable regardless of
+        // the anchor flag, so anchors created before this was recorded still
+        // substitute instead of rebuilding their fetcher.
+        let substitutable = anchor_substitutable(
             anchor.substitutable,
+            derivation.is_fixed_output,
+            derivation.allow_substitutes,
+        );
+        let mode = decide_dispatch_mode(
+            substitutable,
             miss_count,
             self.substitute_miss_escalation_threshold,
             arch_has_worker,
