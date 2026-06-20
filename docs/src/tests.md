@@ -31,7 +31,7 @@ match is purely on the parsed `owner/repo`, so the flake shorthand
 (`github:owner/repo`) binds the same as the https / SSH clone URLs; previously the
 matcher keyed off a literal `github.com` substring and an org-name equals login
 fallback, so a `github:`-form project (and any org not named after the account)
-left `github_installation_id` unset.
+left the org without a `github_installation` row.
 
 ## Forge action "Test" button connectivity probe
 
@@ -4581,3 +4581,35 @@ session on slow object storage).
   in-memory `test_worker_disconnected_requeues` / `test_worker_disconnect_requeues_jobs`;
   the DB reset and the worker-side orphan-task cancellation are covered by CI E2E
   rather than the MockDatabase unit harness.
+
+## Per-org multi-installation GitHub integration (#436)
+
+GitHub is now a first-class creatable forge integration. The App remains
+server-wide; installations are per-org and multiple (one per GitHub account),
+created via `PUT /orgs/{org}/integrations` with `forge_type=github` and
+`installation_id`, or auto-created by the install webhook.
+
+`backend/gradient-ci/src/integration_lookup.rs` - `name_tests`:
+- `uses_account_login_when_present` - `github_integration_name(Some("Acme-Corp"), 42)` yields `"github-acme-corp"` (lowercased, prefixed).
+- `falls_back_to_installation_id` - `github_integration_name(None, 42)` yields `"github-42"` when no login is available.
+
+`backend/gradient-forge/src/github_app.rs` - `parses_installation_account_login`:
+- `InstallationResponse` deserialises `{"id":42,"account":{"login":"acme-corp"}}` and returns `account.login = "acme-corp"`. Guards the `get_installation` API call that validates an installation id on `PUT`.
+
+`backend/gradient-web/tests/orgs_integrations.rs` - `github_create_without_app_config_is_rejected`:
+- `PUT /orgs/{org}/integrations` with `forge_type=github` returns `400` when the server has no GitHub App configured (`GRADIENT_GITHUB_APP_ID` absent). Guards the "App must be configured" prerequisite before any installation lookup.
+
+`backend/gradient-web/tests/forge_hooks.rs` - reworked GitHub App dispatch tests routing by `github_installation` FK:
+- `github_app_webhook_push_fires_trigger` (Test 10) - a push event dispatched via a `github_installation` row fires the matching project trigger and returns one queued evaluation.
+- `github_app_webhook_installation` (Test 12) - an `installation` event for an org not found in the DB warns and returns `200` with `event="installation"` and empty queued arrays (no crash).
+- `github_app_webhook_multi_org_routes_to_matching_org` (Test 15) - a push event routes only to the org whose project URL matches the push payload; the sibling org with a different repo URL is not queued.
+- `github_app_webhook_no_matching_repo_returns_zero` (Test 16) - a push against a repo URL not tracked by any project returns `projects_scanned=0`.
+
+`backend/gradient-state/src/config.rs` - `deserializes_github_installations_list`:
+- `StateOrganization.github_installations` deserialises from a JSON list with `installation_id` + optional `account_login`, covering the new state provisioning path.
+
+`frontend/src/app/features/organizations/integrations/integrations.component.spec.ts` - `IntegrationsComponent - create github integration`:
+- `createIntegration sends forge_type=github with installation_id` - form submit with `forge_type=github` and a numeric `installation_id` string calls `PUT` with the parsed integer.
+- `createIntegration rejects a non-integer installation_id` - a non-numeric installation id string fails client-side validation without sending a request.
+
+Migration backfill (`m20260620_*_github_installation_table`) and the `github_installation` FK wiring are verified by E2E CI against real PostgreSQL.

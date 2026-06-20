@@ -241,7 +241,7 @@ services.gradient.githubApp = {
 };
 ```
 
-4. Install the App on each GitHub organization. Gradient auto-stores the `installation_id` from the webhook.
+4. Install the App on each GitHub organization. Gradient auto-creates the `github-<account>` integration pair from the install webhook. Alternatively, org admins can create integrations manually via the UI by entering the installation id (one per GitHub account; multiple per org are supported).
 
 5. Once installed, push events automatically trigger evaluations (no polling) and CI statuses are reported using the installation token instead of a per-project PAT.
 

@@ -152,9 +152,31 @@ services.gradient.state.organizations.acme = {
 | `description` | `null` | Optional description |
 | `private_key_file` | - | Path to SSH private key (required) |
 | `public` | `false` | Visible to all users |
-| `github_installation_id` | `null` | GitHub App installation id to bind to this org (look it up on the App's "Install App" page on GitHub). Setting this enables outbound CI status reporting and webhook routing. When `null`, the field is left untouched on update so a webhook-recorded id survives reconciliation |
+| `github_installations` | `[]` | List of GitHub App installations to bind to this org. Each entry provisions a `github-<account>` inbound + outbound integration pair. An empty list leaves webhook-recorded installations untouched on reconciliation. |
 | `created_by` | - | Username of creator (required) |
 | `members` | `[]` | Per-org membership list. When non-empty, the list is authoritative (drift removes unlisted memberships, the implicit creator-Admin step is skipped). Empty preserves the legacy behavior. Members referencing not-yet-registered users are skipped silently and backfilled on registration / OIDC first-login |
+
+### GitHub installations
+
+Declare per-org GitHub App installation bindings:
+
+```nix
+services.gradient.state.organizations.acme = {
+  display_name     = "ACME Corp";
+  private_key_file = "/run/secrets/acme-ssh-key";
+  created_by       = "alice";
+  github_installations = [
+    { installation_id = 12345678; account_login = "acme-corp"; }
+  ];
+};
+```
+
+Each entry provisions a `github-<account>` inbound + outbound integration pair for the org. Multiple entries are supported (one per GitHub account). An absent or empty list leaves any webhook-recorded installations untouched on reconciliation.
+
+| Option | Default | Description |
+|---|---|---|
+| `installation_id` | - | GitHub App installation id (required, integer) |
+| `account_login` | `null` | GitHub account login; used to derive the integration name (`github-<login>`). When null, the name falls back to `github-<installation_id>`. |
 
 ### Organization members
 

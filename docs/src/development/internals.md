@@ -11,7 +11,7 @@ Key functions inside each crate.
 **GitHub App** (`POST /api/v1/hooks/github`):
 - Verifies `X-Hub-Signature-256` against `GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE`.
 - `push` → calls `core::evaluation_trigger::trigger_evaluation` for each matching project.
-- `installation` / `installation_repositories` → stores or clears `organization.github_installation_id`.
+- `installation` / `installation_repositories` → upserts or clears `github_installation` rows and seeds the `github-<account>` integration pair.
 
 **Generic forges** (`POST /api/v1/hooks/{forge}/{org}/{integration_name}`):
 - `{forge}` ∈ `gitea`, `forgejo`, `gitlab`. GitHub deliveries route to the App webhook above.

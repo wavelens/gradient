@@ -148,22 +148,26 @@
         '';
       };
 
-      github_installation_id = mkOption {
-        type = types.nullOr types.int;
-        default = null;
+      github_installations = mkOption {
+        type = types.listOf (types.submodule {
+          options = {
+            installation_id = mkOption {
+              type = types.int;
+              description = "GitHub App installation id (trailing number in the installation URL).";
+            };
+            account_login = mkOption {
+              type = types.nullOr types.str;
+              default = null;
+              description = "GitHub account login; used to name the integration `github-<login>`. Falls back to `github-<installation_id>` when null.";
+            };
+          };
+        });
+        default = [];
         description = ''
-          GitHub App installation id to bind this organization to. Look it up
-          from the App's "Install App" page on github.com - it's the trailing
-          number in the installation URL.
-
-          When set, the state-driven provisioner writes it on every
-          reconciliation (state wins over runtime updates). When `null`, the
-          field is left untouched on update so a webhook-recorded id survives
-          reconciliation, and is initialised to null on create.
-
-          The presence of an installation id is the org-level signal that
-          this org uses the GitHub App; outbound CI status reporting and
-          install-webhook routing both gate on it.
+          GitHub App installations bound to this org. Each entry provisions a
+          `github-<account>` inbound + outbound integration pair. Multiple
+          entries are supported (one per GitHub account). An empty list leaves
+          webhook-recorded installations untouched on reconciliation.
         '';
       };
 
