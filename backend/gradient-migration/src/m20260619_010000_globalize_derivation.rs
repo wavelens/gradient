@@ -31,6 +31,7 @@ const UNIQUE_PAIRS: &[(&str, &str, &str)] = &[
     ("idx-derivation_output-derivation-name", "derivation_output", "derivation, name"),
     ("idx-derivation_dependency-pair", "derivation_dependency", "derivation, dependency"),
     ("idx-derivation_closure-pair", "derivation_closure", "root_derivation, dep_derivation"),
+    ("idx-derivation_feature-pair", "derivation_feature", "derivation, feature"),
     ("idx-cache_derivation-pair", "cache_derivation", "cache, derivation"),
 ];
 

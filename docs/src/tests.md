@@ -152,6 +152,16 @@ Worker-side, `backend/gradient-worker/src/executor/eval.rs` -
 runtime closure is pushed to the cache before the server promotes and dispatches
 that batch, so a build never prefetches a source the cache does not yet hold.
 
+The `m20260619_010000_globalize_derivation` migration collapses duplicate
+`(hash, name)` derivations onto the lowest-id survivor and re-points every FK.
+Every re-pointed junction table that carries a `UNIQUE` index over the
+derivation column - `derivation_output`, `derivation_dependency`,
+`derivation_closure`, `derivation_feature`, `cache_derivation` - must drop that
+index before re-pointing and rebuild it after collapsing the duplicate pairs;
+omitting one (e.g. `derivation_feature (derivation, feature)`) makes the
+re-point `UPDATE` violate the constraint when a duplicate and its survivor share
+a row. Verified by E2E CI applying the migration against real PostgreSQL.
+
 ## PostgreSQL minimum-version guard (#387)
 
 `connect_db` reads `server_version_num` at startup and aborts before running
