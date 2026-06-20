@@ -1203,6 +1203,17 @@ Backend (`cargo test -p scheduler --tests scheduler_tests::job_notify_bump_is_no
   fires for a now-idle worker (serial chain) but not while it is still building
   (e.g. 1 of 8 done).
 
+## Push-mode signature placeholders - param-limit chunking
+
+`ensure_push_signatures` (`backend/gradient-proto/src/handler/cache.rs`) inserts
+one `cached_path_signature` placeholder per (cached_path, org cache) pair when a
+worker connects in Push mode - a cartesian product over the worker's whole
+store. `cached_path_signature` binds 7 columns per row, so the insert is chunked
+at `SIGNATURE_INSERT_BATCH = 8000` rows (56 000 params) to stay under Postgres's
+65 535-parameter-per-statement cap; an unchunked insert failed with "too many
+arguments for query" for large stores. Verified by E2E CI (MockDatabase cannot
+exercise the real param-count error).
+
 ## Cache GC - orphan files keep predicate
 
 `cleanup_orphaned_cache_files` (`backend/cache/src/cacher/cleanup.rs`) is the

@@ -121,24 +121,31 @@ async fn ensure_push_signatures(
         })
         .collect();
 
-    let result = ECachedPathSignature::insert_many(rows)
-        .on_conflict(
-            OnConflict::columns([
-                CCachedPathSignature::CachedPath,
-                CCachedPathSignature::Cache,
-            ])
+    // Postgres binds at most 65535 params per statement; cached_path_signature
+    // binds 7 columns per row, so cap each insert well under that. A worker
+    // reconnecting with a large store times this against every org cache.
+    const SIGNATURE_INSERT_BATCH: usize = 8000;
+
+    for chunk in rows.chunks(SIGNATURE_INSERT_BATCH) {
+        let result = ECachedPathSignature::insert_many(chunk.to_vec())
+            .on_conflict(
+                OnConflict::columns([
+                    CCachedPathSignature::CachedPath,
+                    CCachedPathSignature::Cache,
+                ])
+                .do_nothing()
+                .to_owned(),
+            )
             .do_nothing()
-            .to_owned(),
-        )
-        .do_nothing()
-        .exec(&state.worker_db)
-        .await;
-    if let Err(e) = result {
-        warn!(
-            %org_id,
-            error = %e,
-            "failed to insert cached_path_signature placeholders (Push mode)"
-        );
+            .exec(&state.worker_db)
+            .await;
+        if let Err(e) = result {
+            warn!(
+                %org_id,
+                error = %e,
+                "failed to insert cached_path_signature placeholders (Push mode)"
+            );
+        }
     }
 }
 
