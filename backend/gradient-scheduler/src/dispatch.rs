@@ -391,8 +391,10 @@ struct BuildDispatchMaps {
     /// derivation_id → historical resource prediction (default when the
     /// derivation has no `pname` or no matching history).
     histories: HashMap<DerivationId, gradient_score::HistoryPrediction>,
-    /// derivation_build → consecutive `SubstituteUnavailable` miss count. Absent ⇒ 0.
-    substitute_misses: HashMap<DerivationBuildId, i64>,
+    /// (derivation_build, driving evaluation) → `SubstituteUnavailable` miss count,
+    /// scoped to that evaluation so a new eval retries substitution from zero.
+    /// Absent ⇒ 0.
+    substitute_misses: HashMap<(DerivationBuildId, EvaluationId), i64>,
     /// derivation_build → the evaluation driving this anchor's dispatch (used for
     /// peer routing and `build_job` attribution on win). Prefers a non-terminal eval.
     driving_eval: HashMap<DerivationBuildId, EvaluationId>,
@@ -737,7 +739,11 @@ impl BuildDispatchMaps {
         })?;
 
         let job_id = format!("build:{}", anchor.id);
-        let miss_count = self.substitute_misses.get(&anchor.id).copied().unwrap_or(0);
+        let miss_count = self
+            .substitute_misses
+            .get(&(anchor.id, eval_id))
+            .copied()
+            .unwrap_or(0);
         let arch_has_worker = arch_available(&self.connected_architectures, &derivation.architecture);
         // A fixed-output derivation is intrinsically substitutable regardless of
         // the anchor flag, so anchors created before this was recorded still

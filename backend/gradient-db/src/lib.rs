@@ -57,7 +57,9 @@ pub use self::draining::{park_active_evals, unpark_draining_evals};
 pub use self::gc::*;
 pub use self::org_cache::org_has_writable_cache;
 pub use self::org_derivations::derivation_ids_for_org;
-pub use self::promotion::{cascade_dependency_failed, promote_dependents, promote_ready};
+pub use self::promotion::{
+    cascade_dependency_failed, promote_dependents, promote_ready, requeue_failed_anchors,
+};
 pub use self::reachability::{
     build_jobs_for_derivation, derivation_is_reachable, eval_anchor_statuses,
     evals_referencing_derivation,

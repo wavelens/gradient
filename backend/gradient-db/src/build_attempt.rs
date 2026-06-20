@@ -12,12 +12,15 @@ use chrono::NaiveDateTime;
 use gradient_entity::build_attempt::{
     AttemptFailureReason, AttemptOutcome, Column, Entity, Model,
 };
-use gradient_entity::ids::{BuildAttemptId, BuildJobId, DerivationBuildId, DispatchedJobId};
+use gradient_entity::ids::{
+    BuildAttemptId, BuildJobId, DerivationBuildId, DispatchedJobId, EvaluationId,
+};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
-    QueryFilter, QueryOrder,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseBackend, DbErr, EntityTrait,
+    IntoActiveModel, QueryFilter, QueryOrder, Statement,
 };
+use uuid::Uuid;
 
 /// Open a new attempt for an anchor (`derivation_build`), attributed to
 /// `build_job`, under `dispatched_job`.
@@ -45,30 +48,45 @@ pub async fn open_attempt<C: ConnectionTrait>(
     .await
 }
 
-/// Count `SubstituteUnavailable` attempts per anchor, for the given anchor ids.
-/// Anchors with zero misses are absent from the map. Used by the scheduler to
-/// escalate a substitutable build to a real arch-bound build after repeated
-/// substitute misses.
+/// Count `SubstituteUnavailable` attempts per `(anchor, evaluation)`, for the
+/// given anchor ids. The miss budget is scoped to the driving evaluation (via
+/// the attempt's `build_job`) rather than the anchor's whole history, so a new
+/// evaluation retries substitution from zero instead of inheriting a previous
+/// eval's exhausted budget and escalating straight to a build. Pairs with zero
+/// misses are absent from the map.
 pub async fn substitute_miss_counts<C: ConnectionTrait>(
     db: &C,
     anchors: &[DerivationBuildId],
-) -> Result<std::collections::HashMap<DerivationBuildId, i64>, DbErr> {
-    let mut counts: std::collections::HashMap<DerivationBuildId, i64> =
+) -> Result<std::collections::HashMap<(DerivationBuildId, EvaluationId), i64>, DbErr> {
+    let mut counts: std::collections::HashMap<(DerivationBuildId, EvaluationId), i64> =
         std::collections::HashMap::new();
     if anchors.is_empty() {
         return Ok(counts);
     }
 
-    let rows = crate::fetch_in_chunks(anchors, |chunk| async move {
-        Entity::find()
-            .filter(Column::DerivationBuild.is_in(chunk))
-            .filter(Column::Reason.eq(AttemptFailureReason::SubstituteUnavailable))
-            .all(db)
+    let rows = crate::fetch_in_chunks(anchors, |chunk| {
+        let ids: Vec<Uuid> = chunk.iter().map(|a| a.into_inner()).collect();
+        async move {
+            db.query_all(Statement::from_sql_and_values(
+                DatabaseBackend::Postgres,
+                r#"SELECT ba.derivation_build AS anchor, bj.evaluation AS evaluation,
+                          count(*) AS misses
+                   FROM build_attempt ba
+                   JOIN build_job bj ON bj.id = ba.build_job
+                   WHERE ba.derivation_build = ANY($1) AND ba.reason = $2
+                   GROUP BY ba.derivation_build, bj.evaluation"#,
+                [ids.into(), (AttemptFailureReason::SubstituteUnavailable as i32).into()],
+            ))
             .await
+        }
     })
     .await?;
+
     for r in rows {
-        *counts.entry(r.derivation_build).or_default() += 1;
+        let anchor = DerivationBuildId::new(r.try_get::<Uuid>("", "anchor")?);
+        let evaluation = EvaluationId::new(r.try_get::<Uuid>("", "evaluation")?);
+        let misses = r.try_get::<i64>("", "misses")?;
+        counts.insert((anchor, evaluation), misses);
     }
 
     Ok(counts)

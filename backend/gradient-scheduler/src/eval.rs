@@ -328,6 +328,13 @@ impl<'a> EvalResultProcessor<'a> {
             }
         }
 
+        // A new evaluation retries anchors a previous eval left terminal-failed:
+        // the global anchor's failure is not this eval's verdict (caches/network
+        // may have changed). promote_ready then re-queues the reset Created rows.
+        if let Err(e) = gradient_db::requeue_failed_anchors(db, &all_drv_ids).await {
+            error!(error = %e, "failed to re-queue failed anchors for new eval");
+        }
+
         // Promotion is deferred to stream completion (`handle_eval_job_completed`),
         // after `flush_deferred_deps` writes the dependency edges. Promoting here
         // would run before any edge exists and queue every anchor regardless of

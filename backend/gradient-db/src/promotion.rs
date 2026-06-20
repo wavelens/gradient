@@ -139,3 +139,34 @@ pub async fn promote_ready<C: ConnectionTrait>(db: &C) -> Result<u64, DbErr> {
 
     Ok(affected)
 }
+
+/// Re-queue anchors a previous evaluation left in a terminal-failure state
+/// (`FailedPermanent`/`Aborted`/`DependencyFailed`/`FailedTimeout`) back to
+/// `Created`, for the derivations a new evaluation needs. A new evaluation is a
+/// fresh build intent - the upstream cache, network, or a transient cause may
+/// have changed since the global anchor failed - so it retries rather than
+/// inheriting the stale failure. Build-once success states
+/// (`Completed`/`Substituted`) are never touched. Returns the number re-queued.
+pub async fn requeue_failed_anchors<C: ConnectionTrait>(
+    db: &C,
+    derivations: &[DerivationId],
+) -> Result<u64, DbErr> {
+    let mut total = 0;
+    for chunk in derivations.chunks(crate::IN_CHUNK_SIZE) {
+        let ids: Vec<uuid::Uuid> = chunk.iter().map(|d| d.into_inner()).collect();
+        total += db
+            .execute(Statement::from_sql_and_values(
+                DatabaseBackend::Postgres,
+                r#"
+                UPDATE derivation_build
+                SET status = 0, attempt = 0, updated_at = (now() AT TIME ZONE 'UTC')
+                WHERE derivation = ANY($1) AND status IN (4, 5, 6, 9)
+                "#,
+                [ids.into()],
+            ))
+            .await?
+            .rows_affected();
+    }
+
+    Ok(total)
+}

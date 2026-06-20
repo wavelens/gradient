@@ -1045,6 +1045,21 @@ Backend (`cargo test -p gradient-scheduler --lib dispatch_mode::tests`):
 - `non_substitutable_is_real_arch` / `substitutable_under_threshold_is_builtin` / `escalates_only_when_arch_worker_present` / `stalls_when_budget_spent_and_no_arch_worker` / `arch_available_builtin_always_true` - verify `decide_dispatch_mode` and `arch_available` for the (substitutable, miss_count, threshold, arch_has_worker) combinations.
 - `fods_are_substitutable_even_when_flag_unset` / `non_fods_follow_the_anchor_flag` - `anchor_substitutable` treats a fixed-output derivation (with `allow_substitutes`) as substitutable regardless of the anchor flag, so an FOD is fetched from an upstream cache instead of re-running its fetcher and stranding `FailedPermanent` (#449-followup). Both `resolve_anchors` (creation) and `make_pending_job` (dispatch) route through it, so pre-existing anchors substitute too.
 
+Two retry-scoping changes make a *new* evaluation a fresh build intent against
+the global, build-once anchor (covered E2E in CI; the SQL is not MockDatabase-
+testable):
+- `substitute_miss_counts` (`gradient-db/src/build_attempt.rs`) is keyed by
+  `(anchor, evaluation)` via the attempt's `build_job`, so a new eval starts the
+  substitute-miss budget at zero instead of inheriting a previous eval's
+  exhausted budget and escalating straight to a build. Dispatch and the parker's
+  `BuildabilityChecker` both look up the count for their driving evaluation.
+- `requeue_failed_anchors` (`gradient-db/src/promotion.rs`), called from
+  `resolve_anchors`, resets anchors a previous eval left terminal-failed
+  (`FailedPermanent`/`Aborted`/`DependencyFailed`/`FailedTimeout`) back to
+  `Created` for the new eval's derivations, so a permanent failure is retried
+  rather than poisoning every later eval that needs the derivation. Build-once
+  success (`Completed`/`Substituted`) is never reset.
+
 Backend (`cargo test -p gradient-db --lib build::tests`):
 - `maps_returned_rows_to_id_set` / `empty_input_returns_empty_set` - plumbing tests for `builds_with_satisfied_deps` (the SQL antijoin itself is covered end-to-end in CI).
 

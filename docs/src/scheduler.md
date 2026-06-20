@@ -35,6 +35,15 @@ seeded for every derivation, so without the gate promotion would queue
 derivations no surviving evaluation needs, leaving the dispatcher unable to
 attribute the build to a driving evaluation.
 
+Because the anchor is global and build-once, a new evaluation is treated as a
+fresh build intent: `resolve_anchors` re-queues anchors a previous eval left
+terminal-failed, and the substitute-miss budget is scoped per evaluation. A
+permanent failure (or an exhausted substitute budget) therefore does not poison
+every later evaluation that needs the derivation - the world (upstream cache,
+network) may have changed since it failed. A fixed-output derivation is also
+always substitutable, so it is fetched from an upstream cache rather than
+re-running its (rot-prone) fetcher.
+
 #### Access and GC
 
 Read-only build endpoints (`GET /builds/{id}`, `/log`, `/downloads`,

@@ -773,7 +773,7 @@ impl<'a> BuildStateHandler<'a> {
 
         let arches: std::collections::HashSet<String> =
             worker_caps.iter().flat_map(|(a, _)| a.iter().cloned()).collect();
-        let checker = BuildabilityChecker::load(self.state, &pending, arches).await?;
+        let checker = BuildabilityChecker::load(self.state, &pending, arches, evaluation_id).await?;
         let target = if checker.any_buildable(&pending, worker_caps) {
             EvaluationStatus::Building
         } else {
@@ -1062,14 +1062,20 @@ impl BuildabilityChecker {
         state: &Arc<ServerState>,
         anchors: &[MDerivationBuild],
         connected_architectures: std::collections::HashSet<String>,
+        evaluation_id: EvaluationId,
     ) -> Result<Self> {
         let db = &state.worker_db;
         let drv_ids: Vec<DerivationId> = anchors.iter().map(|a| a.derivation).collect();
         let anchor_ids: Vec<DerivationBuildId> = anchors.iter().map(|a| a.id).collect();
         // A count-query failure → 0 misses → substitute-mode, same as the dispatch side.
+        // Scoped to this evaluation so a fresh eval is not parked on a previous
+        // eval's exhausted substitute budget.
         let substitute_misses = gradient_db::substitute_miss_counts(db, &anchor_ids)
             .await
-            .unwrap_or_default();
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|((anchor, eval), misses)| (eval == evaluation_id).then_some((anchor, misses)))
+            .collect();
 
         let drvs = gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
             EDerivation::find().filter(CDerivation::Id.is_in(chunk)).all(db).await
