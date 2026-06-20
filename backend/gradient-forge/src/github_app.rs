@@ -126,6 +126,51 @@ pub async fn get_installation_token(
     Ok(token_resp.token)
 }
 
+// ── Installation account lookup ───────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct InstallationResponse {
+    account: InstallationAccount,
+}
+
+#[derive(Deserialize)]
+struct InstallationAccount {
+    login: String,
+}
+
+/// Validates that `installation_id` belongs to this App and returns the GitHub
+/// account login it is installed on. Errors (incl. 404) mean the id is not a
+/// valid installation for this App.
+pub async fn get_installation(
+    client: &reqwest::Client,
+    app_id: u64,
+    private_key_pem: &str,
+    installation_id: i64,
+) -> Result<String> {
+    let jwt = generate_jwt(app_id, private_key_pem)?;
+    let url = format!("https://api.github.com/app/installations/{installation_id}");
+    let resp = client
+        .get(&url)
+        .bearer_auth(&jwt)
+        .header("Accept", "application/vnd.github+json")
+        .header("X-GitHub-Api-Version", "2022-11-28")
+        .header("User-Agent", "gradient")
+        .send()
+        .await
+        .context("GitHub get-installation request failed")?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        bail!("GitHub get-installation API returned {status}: {body}");
+    }
+
+    let parsed: InstallationResponse =
+        resp.json().await.context("failed to parse GitHub installation response")?;
+
+    Ok(parsed.account.login)
+}
+
 // ── Webhook signature verification ────────────────────────────────────────
 
 /// Verifies a GitHub webhook signature from the `X-Hub-Signature-256` header.
@@ -448,5 +493,12 @@ iw88K5/oFeMFr7syCSKTPeQD\n\
         let bare = compute_gitea_sig("secret", b"body");
         let sig = format!("sha1={bare}");
         assert!(!verify_github_signature("secret", &sig, b"body"));
+    }
+
+    #[test]
+    fn parses_installation_account_login() {
+        let body = r#"{"id":42,"account":{"login":"acme-corp"}}"#;
+        let parsed: InstallationResponse = serde_json::from_str(body).unwrap();
+        assert_eq!(parsed.account.login, "acme-corp");
     }
 }
