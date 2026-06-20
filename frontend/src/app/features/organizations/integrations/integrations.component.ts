@@ -17,6 +17,7 @@ import { OrganizationsService } from '@core/services/organizations.service';
 import { OrgAccessService } from '@core/services/org-access.service';
 import {
   AccessState,
+  CreateIntegrationRequest,
   ForgeType,
   InboundForge,
   Integration,
@@ -216,13 +217,13 @@ export class IntegrationsComponent implements OnInit {
       }
       this.saving.set(true);
       this.errorMessage.set(null);
-      const body: any = {
+      const body: CreateIntegrationRequest = {
         name: this.formData.name.trim(),
         kind: this.formData.kind,
         forge_type: 'github',
         installation_id: installationId,
+        ...(this.formData.display_name.trim() ? { display_name: this.formData.display_name.trim() } : {}),
       };
-      if (this.formData.display_name.trim()) body.display_name = this.formData.display_name.trim();
       this.integrationsService.createOrgIntegration(this.orgName, body).subscribe({
         next: () => {
           this.saving.set(false);
