@@ -8,7 +8,7 @@ use chrono::NaiveDateTime;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{IntegrationId, OrganizationId, UserId};
+use crate::ids::{GithubInstallationId, IntegrationId, OrganizationId, UserId};
 
 #[derive(Clone, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "integration")]
@@ -32,6 +32,7 @@ pub struct Model {
     /// Source CIDRs allowed for inbound webhooks. `None`/empty = any source.
     #[sea_orm(column_type = "Array(std::sync::Arc::new(ColumnType::Text))", nullable)]
     pub allowed_ips: Option<Vec<String>>,
+    pub github_installation: Option<GithubInstallationId>,
     pub created_by: UserId,
     pub created_at: NaiveDateTime,
 }
@@ -50,6 +51,12 @@ pub enum Relation {
         to = "super::user::Column::Id"
     )]
     CreatedBy,
+    #[sea_orm(
+        belongs_to = "super::github_installation::Entity",
+        from = "Column::GithubInstallation",
+        to = "super::github_installation::Column::Id"
+    )]
+    GithubInstallation,
 }
 
 impl std::fmt::Debug for Model {
@@ -68,6 +75,7 @@ impl std::fmt::Debug for Model {
                 &self.access_token.as_ref().map(|_| "[redacted]"),
             )
             .field("allowed_ips", &self.allowed_ips)
+            .field("github_installation", &self.github_installation)
             .field("created_by", &self.created_by)
             .field("created_at", &self.created_at)
             .finish()

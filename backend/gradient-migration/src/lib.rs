@@ -160,6 +160,7 @@ mod m20260619_000001_drop_cached_path_store_path;
 mod m20260619_010000_globalize_derivation;
 mod m20260619_020000_derivation_build_anchor;
 mod m20260619_030000_build_job_and_attempt;
+mod m20260620_000001_create_github_installation;
 
 pub struct Migrator;
 
@@ -321,6 +322,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260619_010000_globalize_derivation::Migration),
             Box::new(m20260619_020000_derivation_build_anchor::Migration),
             Box::new(m20260619_030000_build_job_and_attempt::Migration),
+            Box::new(m20260620_000001_create_github_installation::Migration),
         ]
     }
 }

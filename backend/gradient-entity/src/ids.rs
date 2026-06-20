@@ -117,6 +117,7 @@ id_newtype!(FlakeOutputNodeId);
 id_newtype!(EvaluationMessageId);
 id_newtype!(FeatureId);
 id_newtype!(FlakeInputOverrideId);
+id_newtype!(GithubInstallationId);
 id_newtype!(IntegrationId);
 id_newtype!(OpenPrStateId);
 id_newtype!(OrganizationId);
