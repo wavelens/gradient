@@ -232,12 +232,10 @@ pub(super) fn normalize_repo_url(url: &str) -> String {
 /// whose org owns a project matching one of the webhook's `repository_urls`.
 ///
 /// A single GitHub App installation can serve multiple Gradient orgs whenever
-/// those orgs each track repositories hosted under the same GitHub account
-/// (you can only install the App once per GitHub account, but each gradient
-/// org gets its own `github_installation_id` pointing at it). Matching purely
-/// on `installation_id` therefore returns one arbitrary org and silently
-/// drops the others - adding the repo-URL gate is what makes multi-org
-/// installations fire the correct subset.
+/// those orgs each track repositories hosted under the same GitHub account.
+/// Orgs bind installations via `github_installation` rows; matching on
+/// `installation_id` alone could return multiple orgs, so the repo-URL gate
+/// selects only those whose projects track an installed repository.
 ///
 /// Returns an empty vec when no org carries this installation, when no
 /// matching project exists, or when an org's inbound GitHub integration row

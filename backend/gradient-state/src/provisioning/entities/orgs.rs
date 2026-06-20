@@ -93,7 +93,6 @@ impl<'a> StateApplicator<'a> {
                     created_by: created_by_id,
                     created_at: now,
                     managed: true,
-                    ..Default::default()
                 }
                 .into_active_model();
 

@@ -181,10 +181,24 @@ fn org_row(name: &str) -> gradient_entity::organization::Model {
     }
 }
 
-fn org_row_with_installation(name: &str, installation_id: i64) -> gradient_entity::organization::Model {
-    let mut row = org_row(name);
-    row.github_installation_id = Some(installation_id);
-    row
+fn github_installation_id() -> gradient_entity::ids::GithubInstallationId {
+    gradient_entity::ids::GithubInstallationId::new(
+        Uuid::parse_str("a0000000-0000-0000-0000-000000000008").unwrap(),
+    )
+}
+
+fn github_installation_row(
+    organization: gradient_types::ids::OrganizationId,
+    installation_id: i64,
+) -> gradient_entity::github_installation::Model {
+    gradient_entity::github_installation::Model {
+        id: github_installation_id(),
+        organization,
+        installation_id,
+        account_login: Some("gh-org".into()),
+        created_by: user_id(),
+        created_at: fixture_date(),
+    }
 }
 
 fn integration_row(secret_ciphertext: &str) -> gradient_entity::integration::Model {
@@ -207,6 +221,7 @@ fn github_integration_row() -> gradient_entity::integration::Model {
         name: "github-app".into(),
         display_name: "GitHub App".into(),
         forge_type: 3, // GitHub
+        github_installation: Some(github_installation_id()),
         created_by: user_id(),
         created_at: fixture_date(),
         ..Default::default()
@@ -944,7 +959,7 @@ async fn github_app_webhook_push_fires_trigger_inner() {
 
     // Mock chain:
     // resolve_github_app_targets:
-    //   1. SELECT orgs by installation_id (.all) → [org row]
+    //   1. SELECT github_installation by installation_id (.all) → [github_installation row]
     //   2. SELECT projects for org (.all) → [project row matching webhook url]
     //   3. SELECT inbound GitHub integration (.one) → integration row
     // fan_out_triggers:
@@ -953,7 +968,7 @@ async fn github_app_webhook_push_fires_trigger_inner() {
     //   6. org_name_for → org row
     //   7+. apply_trigger chain
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        .append_query_results([vec![org_row_with_installation("gh-org", 9999)]])
+        .append_query_results([vec![github_installation_row(org_id(), 9999)]])
         .append_query_results([vec![github_project_row()]])
         .append_query_results([vec![github_integration_row()]])
         .append_query_results([vec![trigger_row(reporter_push_trigger(vec![]))]])
@@ -1045,9 +1060,8 @@ async fn github_app_webhook_installation_inner() {
     let gh_secret = "github-webhook-secret";
     let gh_secret_path = temp_secret_file(gh_secret);
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
-        .append_query_results([Vec::<gradient_entity::organization::Model>::new()])
-        .into_connection();
+    // No repositories in the payload → installed set is empty → early return before any DB query.
+    let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
 
     let state = make_state(db, None, Some(gh_secret_path));
     let router = create_router(state);
@@ -1127,14 +1141,23 @@ async fn github_app_webhook_multi_org_routes_to_matching_org_inner() {
     let gh_secret = "github-webhook-secret";
     let gh_secret_path = temp_secret_file(gh_secret);
 
-    // Two orgs share installation_id=9999. Org A's projects don't match
-    // the webhook's repo URL; org B has the matching project. Only org B's
-    // integration should fire.
+    // Two orgs share installation_id=9999 via separate github_installation rows.
+    // Org A's projects don't match the webhook repo URL; org B has the matching
+    // project. Only org B's integration should fire.
     let org_a_id =
         OrganizationId::new(Uuid::parse_str("a0000000-0000-0000-0000-0000000000aa").unwrap());
-    let mut org_a = org_row_with_installation("org-a", 9999);
-    org_a.id = org_a_id;
-    let org_b = org_row_with_installation("gh-org", 9999);
+    let inst_a_id = gradient_entity::ids::GithubInstallationId::new(
+        Uuid::parse_str("a0000000-0000-0000-0000-0000000000a8").unwrap(),
+    );
+    let inst_a = gradient_entity::github_installation::Model {
+        id: inst_a_id,
+        organization: org_a_id,
+        installation_id: 9999,
+        account_login: Some("org-a".into()),
+        created_by: user_id(),
+        created_at: fixture_date(),
+    };
+    let inst_b = github_installation_row(org_id(), 9999);
 
     let org_a_project = project_row_with(
         ProjectId::new(Uuid::parse_str("a0000000-0000-0000-0000-0000000000ab").unwrap()),
@@ -1146,17 +1169,17 @@ async fn github_app_webhook_multi_org_routes_to_matching_org_inner() {
 
     // Mock chain:
     // resolve_github_app_targets:
-    //   1. orgs.all by installation_id → [org A, org B]
+    //   1. SELECT github_installation by installation_id → [inst_a, inst_b]
     //   2. projects.all for org A → [org_a_project]   (no URL match → skipped)
     //   3. projects.all for org B → [org_b_project]   (URL matches)
-    //   4. integration.one for org B → github_integration_row
+    //   4. integration.one for org B (filtered by inst_b.id) → github_integration_row
     // fan_out_triggers for org B's integration:
     //   5. load_active_triggers → [trigger]
     //   6. EProject::find_by_id → org_b_project
     //   7. org_name_for → org B row
     //   8+. apply_trigger chain
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        .append_query_results([vec![org_a.clone(), org_b.clone()]])
+        .append_query_results([vec![inst_a, inst_b]])
         .append_query_results([vec![org_a_project]])
         .append_query_results([vec![org_b_project.clone()]])
         .append_query_results([vec![github_integration_row()]])
@@ -1212,7 +1235,7 @@ async fn github_app_webhook_no_matching_repo_returns_zero_inner() {
     );
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        .append_query_results([vec![org_row_with_installation("gh-org", 9999)]])
+        .append_query_results([vec![github_installation_row(org_id(), 9999)]])
         .append_query_results([vec![unrelated]])
         .into_connection();
 

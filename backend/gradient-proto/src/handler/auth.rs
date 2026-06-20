@@ -626,7 +626,6 @@ mod tests {
             created_by: gradient_types::ids::UserId::nil(),
             created_at: gradient_types::now(),
             managed: false,
-            github_installation_id: None,
         }
     }
 
