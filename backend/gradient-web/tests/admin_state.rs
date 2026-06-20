@@ -41,7 +41,7 @@ fn with_user(db: MockDatabase, session_id: SessionId, caller: gradient_entity::u
         .append_query_results([vec![caller]])
 }
 
-/// Append the eighteen (all-empty) table reads `export_state` issues, in order.
+/// Append the nineteen (all-empty) table reads `export_state` issues, in order.
 fn with_empty_export(db: MockDatabase) -> MockDatabase {
     db.append_query_results([Vec::<gradient_entity::user::Model>::new()])
         .append_query_results([Vec::<gradient_entity::organization::Model>::new()])
@@ -61,6 +61,7 @@ fn with_empty_export(db: MockDatabase) -> MockDatabase {
         .append_query_results([Vec::<gradient_entity::project_trigger::Model>::new()])
         .append_query_results([Vec::<gradient_entity::project_action::Model>::new()])
         .append_query_results([Vec::<gradient_entity::project_flake_input_override::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::github_installation::Model>::new()])
 }
 
 #[test]
