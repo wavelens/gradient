@@ -48,6 +48,7 @@ pub mod evaluation_message;
 pub mod evaluation_metric;
 pub mod feature;
 pub mod flake_output_node;
+pub mod github_installation;
 pub mod integration;
 pub mod open_pr_state;
 pub mod organization;
