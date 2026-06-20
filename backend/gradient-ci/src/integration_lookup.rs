@@ -4,12 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Resolve named integrations for organizations.
-//!
-//! The `integration` table stores per-org named records of forge integrations.
-//! Outbound reporting is now driven by `ForgeStatusReport` actions that
-//! reference an integration id directly (issue #262); the per-project link
-//! table is gone.
+//! Resolve named forge integrations for organizations.
 
 use gradient_entity::ids::GithubInstallationId;
 use gradient_entity::github_installation;
@@ -157,7 +152,7 @@ mod name_tests {
 #[cfg(test)]
 mod ensure_tests {
     use super::*;
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+    use sea_orm::{DatabaseBackend, MockDatabase};
     use uuid::Uuid;
 
     fn org() -> OrganizationId {
@@ -222,10 +217,6 @@ mod ensure_tests {
             .append_query_results([vec![github_row(IntegrationKind::Inbound)]])
             // Outbound: installation filter → found
             .append_query_results([vec![github_row(IntegrationKind::Outbound)]])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 0,
-            }])
             .into_connection();
 
         ensure_github_app_integrations(
