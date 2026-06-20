@@ -30,7 +30,7 @@ use gradient_types::input::check_index_name;
 use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, TransactionTrait};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -308,7 +308,8 @@ pub async fn put_integration(
                 "GitHub App is not configured on this server; set GRADIENT_GITHUB_APP_* first",
             ));
         };
-        let pem = std::fs::read_to_string(&app.private_key_file)
+        let pem = tokio::fs::read_to_string(&app.private_key_file)
+            .await
             .map_err(|e| WebError::internal(format!("reading github app key: {e}")))?;
         let account = gradient_forge::github_app::get_installation(
             &state.http, app.app_id, &pem, installation_id,
@@ -316,13 +317,14 @@ pub async fn put_integration(
         .await
         .map_err(|e| WebError::bad_request(format!("invalid installation_id: {e}")))?;
 
+        let txn = state.web_db.inner().begin().await?;
         let inst = gradient_ci::upsert_github_installation(
-            &state.web_db, org.id, installation_id, Some(&account), user.id,
+            &txn, org.id, installation_id, Some(&account), user.id,
         )
         .await?;
         let name = gradient_ci::github_integration_name(Some(&account), installation_id);
         gradient_ci::ensure_github_app_integrations(
-            &state.web_db, org.id, inst, &name, "GitHub", user.id,
+            &txn, org.id, inst, &name, "GitHub", user.id,
         )
         .await?;
 
@@ -330,9 +332,10 @@ pub async fn put_integration(
             .filter(CIntegration::Organization.eq(org.id))
             .filter(CIntegration::Kind.eq(i16::from(IntegrationKind::Outbound)))
             .filter(CIntegration::GithubInstallation.eq(inst))
-            .one(&state.web_db)
+            .one(&txn)
             .await?
             .ok_or_else(|| WebError::internal("github integration not created"))?;
+        txn.commit().await?;
 
         return Ok(ok_json(integration_response(&state.web_db, created).await?));
     }
