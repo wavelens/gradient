@@ -16,8 +16,8 @@
 
 use super::{
     StateApiKey, StateCache, StateCacheMemberEntry, StateCacheRoleEntry, StateConfiguration,
-    StateFlakeInputOverride, StateIntegration, StateOrgMemberEntry, StateOrganization,
-    StateProject, StateRole, StateTrigger, StateUpstream, StateUser, StateWorker,
+    StateFlakeInputOverride, StateGithubInstallation, StateIntegration, StateOrgMemberEntry,
+    StateOrganization, StateProject, StateRole, StateTrigger, StateUpstream, StateUser, StateWorker,
 };
 use gradient_ci::IntegrationKind;
 use gradient_types::ForgeType;
@@ -69,6 +69,7 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
     let triggers = gradient_entity::project_trigger::Entity::find().all(db).await?;
     let actions = gradient_entity::project_action::Entity::find().all(db).await?;
     let overrides = gradient_entity::project_flake_input_override::Entity::find().all(db).await?;
+    let github_installs = gradient_entity::github_installation::Entity::find().all(db).await?;
 
     let username = id_name_map(users.iter().map(|u| (u.id, u.username.clone())));
     let org_name = id_name_map(orgs.iter().map(|o| (o.id, o.name.clone())));
@@ -123,7 +124,14 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
                 private_key_file: String::new(),
                 public: o.public,
                 hide_build_requests: o.hide_build_requests,
-                github_installations: vec![],
+                github_installations: github_installs
+                    .iter()
+                    .filter(|gi| gi.organization == o.id)
+                    .map(|gi| StateGithubInstallation {
+                        installation_id: gi.installation_id,
+                        account_login: gi.account_login.clone(),
+                    })
+                    .collect(),
                 created_by: name_or_blank(&username, o.created_by),
                 members,
             },
