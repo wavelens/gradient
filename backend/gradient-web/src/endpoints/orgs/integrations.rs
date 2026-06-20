@@ -334,7 +334,12 @@ pub async fn put_integration(
             .filter(CIntegration::GithubInstallation.eq(inst))
             .one(&txn)
             .await?
-            .ok_or_else(|| WebError::internal("github integration not created"))?;
+            .ok_or_else(|| {
+                WebError::conflict(format!(
+                    "an integration named '{name}' already exists in this organization; \
+                     rename it before binding this installation"
+                ))
+            })?;
         txn.commit().await?;
 
         return Ok(ok_json(integration_response(&state.web_db, created).await?));
@@ -555,9 +560,23 @@ pub async fn delete_integration(
     .await?;
     let integration = load_integration_in_org(&state, org.id, integration_id).await?;
     if integration.forge_type == i16::from(ForgeType::GitHub) {
-        return Err(WebError::bad_request(
-            "GitHub App integrations are managed automatically and cannot be deleted.",
-        ));
+        let txn = state.web_db.inner().begin().await?;
+        match integration.github_installation {
+            Some(fk) => {
+                EIntegration::delete_many()
+                    .filter(CIntegration::GithubInstallation.eq(fk))
+                    .exec(&txn)
+                    .await?;
+                gradient_entity::github_installation::Entity::delete_by_id(fk)
+                    .exec(&txn)
+                    .await?;
+            }
+            None => {
+                integration.into_active_model().delete(&txn).await?;
+            }
+        }
+        txn.commit().await?;
+        return Ok(ok_json(true));
     }
     integration
         .into_active_model()

@@ -12,6 +12,7 @@ use gradient_types::*;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter,
+    sea_query::{Expr, OnConflict},
 };
 use tracing::warn;
 
@@ -46,39 +47,32 @@ pub async fn upsert_github_installation<C: ConnectionTrait>(
     account_login: Option<&str>,
     creator: UserId,
 ) -> Result<GithubInstallationId, sea_orm::DbErr> {
-    use github_installation::{Column as Col, Entity as E};
-
-    if let Some(existing) = E::find()
-        .filter(Col::Organization.eq(org))
-        .filter(Col::InstallationId.eq(installation_id))
-        .one(db)
-        .await?
-    {
-        if let Some(login) = account_login
-            && existing.account_login.as_deref() != Some(login)
-        {
-            let mut active = existing.clone().into_active_model();
-            active.account_login = sea_orm::ActiveValue::Set(Some(login.to_string()));
-            active.update(db).await?;
-        }
-
-        return Ok(existing.id);
-    }
-
     let id = GithubInstallationId::now_v7();
-    github_installation::Model {
-        id,
-        organization: org,
-        installation_id,
-        account_login: account_login.map(|s| s.to_string()),
-        created_by: creator,
-        created_at: chrono::Utc::now().naive_utc(),
-    }
-    .into_active_model()
-    .insert(db)
-    .await?;
+    let model = github_installation::ActiveModel {
+        id: sea_orm::ActiveValue::Set(id),
+        organization: sea_orm::ActiveValue::Set(org),
+        installation_id: sea_orm::ActiveValue::Set(installation_id),
+        account_login: sea_orm::ActiveValue::Set(account_login.map(|s| s.to_string())),
+        created_by: sea_orm::ActiveValue::Set(creator),
+        created_at: sea_orm::ActiveValue::Set(chrono::Utc::now().naive_utc()),
+    };
 
-    Ok(id)
+    let res = github_installation::Entity::insert(model)
+        .on_conflict(
+            OnConflict::columns([
+                github_installation::Column::Organization,
+                github_installation::Column::InstallationId,
+            ])
+            .value(
+                github_installation::Column::AccountLogin,
+                Expr::cust("COALESCE(EXCLUDED.account_login, github_installation.account_login)"),
+            )
+            .to_owned(),
+        )
+        .exec_with_returning(db)
+        .await?;
+
+    Ok(res.id)
 }
 
 pub async fn ensure_github_app_integrations<C: ConnectionTrait>(
