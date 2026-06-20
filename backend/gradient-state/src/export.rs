@@ -123,7 +123,7 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
                 private_key_file: String::new(),
                 public: o.public,
                 hide_build_requests: o.hide_build_requests,
-                github_installation_id: o.github_installation_id,
+                github_installations: vec![],
                 created_by: name_or_blank(&username, o.created_by),
                 members,
             },

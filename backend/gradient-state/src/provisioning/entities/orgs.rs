@@ -75,12 +75,6 @@ impl<'a> StateApplicator<'a> {
                 org.created_by = Set(created_by_id);
                 org.public = Set(state_org.public);
                 org.hide_build_requests = Set(state_org.hide_build_requests);
-                // Only overwrite github_installation_id when state declares
-                // it; otherwise leave the existing value (likely set by the
-                // install webhook) intact.
-                if let Some(id) = state_org.github_installation_id {
-                    org.github_installation_id = Set(Some(id));
-                }
                 org.managed = Set(true);
                 org.update(self.db).await?;
                 tracing::info!(name = %state_org.name, "Updated managed organization");
@@ -99,7 +93,7 @@ impl<'a> StateApplicator<'a> {
                     created_by: created_by_id,
                     created_at: now,
                     managed: true,
-                    github_installation_id: state_org.github_installation_id,
+                    ..Default::default()
                 }
                 .into_active_model();
 
@@ -108,17 +102,30 @@ impl<'a> StateApplicator<'a> {
                 org_id
             };
 
-            // Seed the auto-managed GitHub App integration rows whenever this
-            // org has (or just acquired) an installation id. Idempotent.
-            let installation_known = match organization::Entity::find_by_id(org_id)
-                .one(self.db)
-                .await?
-            {
-                Some(o) => o.github_installation_id.is_some(),
-                None => false,
-            };
-            if installation_known {
-                gradient_ci::ensure_github_app_integrations(self.db, org_id, created_by_id).await?;
+            for e in &state_org.github_installations {
+                let inst = gradient_ci::upsert_github_installation(
+                    self.db,
+                    org_id,
+                    e.installation_id,
+                    e.account_login.as_deref(),
+                    created_by_id,
+                )
+                .await?;
+
+                let name = gradient_ci::github_integration_name(
+                    e.account_login.as_deref(),
+                    e.installation_id,
+                );
+
+                gradient_ci::ensure_github_app_integrations(
+                    self.db,
+                    org_id,
+                    inst,
+                    &name,
+                    "GitHub",
+                    created_by_id,
+                )
+                .await?;
             }
         }
 

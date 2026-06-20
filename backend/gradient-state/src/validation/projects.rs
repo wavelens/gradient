@@ -5,7 +5,6 @@
  */
 
 use super::helpers::{EntityLookup, ErrorCollector};
-use gradient_ci::GITHUB_APP_INTEGRATION_NAME;
 use gradient_types::triggers::TriggerType;
 use std::collections::HashSet;
 
@@ -88,7 +87,7 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
                 );
                 continue;
             };
-            if name == GITHUB_APP_INTEGRATION_NAME {
+            if name.starts_with("github-") {
                 continue;
             }
             let declared_inbound = config.integrations.values().any(|i| {
