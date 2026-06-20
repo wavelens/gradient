@@ -21,6 +21,8 @@ export interface Integration {
   allowed_ips: string[];
   created_by: string;
   created_at: string;
+  installation_id?: number | null;
+  account_login?: string | null;
 }
 
 /** Credential-free integration handle returned by the org-member summary
@@ -42,6 +44,7 @@ export interface CreateIntegrationRequest {
   endpoint_url?: string;
   access_token?: string;
   allowed_ips?: string[];
+  installation_id?: number;
 }
 
 export interface PatchIntegrationRequest {

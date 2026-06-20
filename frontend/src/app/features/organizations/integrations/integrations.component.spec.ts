@@ -30,13 +30,40 @@ const baseIntegration: Integration = {
   created_at: '2026-01-01T00:00:00Z',
 };
 
+const githubOutbound: Integration = {
+  id: 'g1',
+  organization: 'o',
+  name: 'github-app',
+  display_name: 'GitHub App',
+  kind: 'outbound',
+  forge_type: 'github',
+  endpoint_url: null,
+  has_secret: false,
+  has_access_token: false,
+  allowed_ips: [],
+  created_by: 'u',
+  created_at: '2026-01-01T00:00:00Z',
+  installation_id: 99999,
+  account_login: 'acme-org',
+};
+
+const githubInbound: Integration = {
+  ...githubOutbound,
+  id: 'g2',
+  kind: 'inbound',
+};
+
 function activatedRouteStub() {
   return {
     snapshot: { paramMap: convertToParamMap({ org: 'acme' }) },
   } as Partial<ActivatedRoute>;
 }
 
-function setup(access: AccessState, integrations: Integration[]): ComponentFixture<IntegrationsComponent> {
+function setup(
+  access: AccessState,
+  integrations: Integration[],
+  githubAppAvailable = false,
+): ComponentFixture<IntegrationsComponent> {
   TestBed.configureTestingModule({
     imports: [IntegrationsComponent],
     providers: [
@@ -54,7 +81,7 @@ function setup(access: AccessState, integrations: Integration[]): ComponentFixtu
         provide: OrganizationsService,
         useValue: {
           getOrganization: () =>
-            of({ id: 'o', display_name: 'Acme', github_app_available: false }),
+            of({ id: 'o', display_name: 'Acme', github_app_available: githubAppAvailable }),
         },
       },
       { provide: OrgAccessService, useValue: { forOrg: () => Promise.resolve(access) } },
@@ -115,5 +142,121 @@ describe('IntegrationsComponent - access gating', () => {
     expect(newBtn!.disabled).toBe(false);
     expect(findByText(fixture.nativeElement, 'edit')).not.toBeNull();
     expect(findByText(fixture.nativeElement, 'delete')).not.toBeNull();
+  });
+});
+
+describe('IntegrationsComponent - github installations', () => {
+  it('githubInstallations() returns only outbound github rows', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [
+      baseIntegration,
+      githubOutbound,
+      githubInbound,
+    ]);
+    await settled(fixture);
+    const comp = fixture.componentInstance;
+    expect(comp.githubInstallations().length).toBe(1);
+    expect(comp.githubInstallations()[0].id).toBe('g1');
+  });
+
+  it('githubAppInstalled() is false when no github outbound rows exist', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [baseIntegration]);
+    await settled(fixture);
+    expect(fixture.componentInstance.githubAppInstalled()).toBe(false);
+  });
+
+  it('githubAppInstalled() is true when a github outbound row exists', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [githubOutbound]);
+    await settled(fixture);
+    expect(fixture.componentInstance.githubAppInstalled()).toBe(true);
+  });
+
+  it('github rows show Delete but not Edit under full access', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [githubOutbound]);
+    await settled(fixture);
+    expect(findByText(fixture.nativeElement, 'delete')).not.toBeNull();
+    expect(findByText(fixture.nativeElement, 'edit')).toBeNull();
+  });
+});
+
+describe('IntegrationsComponent - create github integration', () => {
+  it('createIntegration sends forge_type=github with installation_id', () => {
+    const createSpy = vi.fn().mockReturnValue(of({}));
+    TestBed.configureTestingModule({
+      imports: [IntegrationsComponent],
+      providers: [
+        provideRouter([]),
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        { provide: ActivatedRoute, useValue: activatedRouteStub() },
+        {
+          provide: IntegrationsService,
+          useValue: {
+            listOrgIntegrations: () => of([]),
+            createOrgIntegration: createSpy,
+          },
+        },
+        {
+          provide: OrganizationsService,
+          useValue: {
+            getOrganization: () => of({ id: 'o', display_name: 'Acme', github_app_available: true }),
+          },
+        },
+        { provide: OrgAccessService, useValue: { forOrg: () => Promise.resolve({ managed: false, canEdit: true, canTrigger: true }) } },
+      ],
+    });
+    const fixture = TestBed.createComponent(IntegrationsComponent);
+    fixture.detectChanges();
+
+    const comp = fixture.componentInstance;
+    comp.formData.name = 'github-app';
+    comp.formData.forge_type = 'github';
+    comp.formData.installation_id = '12345';
+    comp.formData.kind = 'outbound';
+    comp.createIntegration();
+
+    expect(createSpy).toHaveBeenCalledOnce();
+    expect(createSpy).toHaveBeenCalledWith('acme', expect.objectContaining({
+      name: 'github-app',
+      forge_type: 'github',
+      installation_id: 12345,
+    }));
+  });
+
+  it('createIntegration rejects a non-integer installation_id', () => {
+    const createSpy = vi.fn().mockReturnValue(of({}));
+    TestBed.configureTestingModule({
+      imports: [IntegrationsComponent],
+      providers: [
+        provideRouter([]),
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        { provide: ActivatedRoute, useValue: activatedRouteStub() },
+        {
+          provide: IntegrationsService,
+          useValue: {
+            listOrgIntegrations: () => of([]),
+            createOrgIntegration: createSpy,
+          },
+        },
+        {
+          provide: OrganizationsService,
+          useValue: {
+            getOrganization: () => of({ id: 'o', display_name: 'Acme', github_app_available: true }),
+          },
+        },
+        { provide: OrgAccessService, useValue: { forOrg: () => Promise.resolve({ managed: false, canEdit: true, canTrigger: true }) } },
+      ],
+    });
+    const fixture = TestBed.createComponent(IntegrationsComponent);
+    fixture.detectChanges();
+
+    const comp = fixture.componentInstance;
+    comp.formData.name = 'github-app';
+    comp.formData.forge_type = 'github';
+    comp.formData.installation_id = 'not-a-number';
+    comp.createIntegration();
+
+    expect(createSpy).not.toHaveBeenCalled();
+    expect(comp.errorMessage()).toContain('positive integer');
   });
 });

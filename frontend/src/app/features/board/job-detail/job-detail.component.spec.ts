@@ -82,6 +82,7 @@ const DETAIL: DispatchedJobDetail = {
     idle_workers: 2,
   },
   candidates: null,
+  passed_over: false,
   previous_attempts: [],
 };
 
