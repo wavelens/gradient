@@ -7,8 +7,14 @@
 //! Graph-driven `Created -> Queued` promotion over the global
 //! `derivation_dependency` graph. A derivation becomes buildable the moment
 //! all its dependency anchors reach terminal-success - independent of any
-//! evaluation's lifecycle (this replaces eval-completion-bound promotion, the
-//! root cause of builds stuck in `Created`).
+//! single evaluation's completion (this replaces eval-completion-bound
+//! promotion, the root cause of builds stuck in `Created`).
+//!
+//! Promotion is gated on reachability: an anchor is queued only while some
+//! `build_job` references its derivation. The anchor table is global and
+//! `derivation_build` rows are seeded for every derivation, so without this
+//! gate promotion would queue derivations no surviving evaluation needs, which
+//! the dispatcher then cannot attribute to a driving evaluation.
 
 use gradient_types::DerivationId;
 use sea_orm::{ConnectionTrait, DatabaseBackend, DbErr, Statement, Value};
@@ -55,6 +61,8 @@ pub async fn promote_dependents<C: ConnectionTrait>(
             WHERE db.status = 0
               AND db.derivation IN (
                 SELECT dd.derivation FROM derivation_dependency dd WHERE dd.dependency = $1)
+              AND EXISTS (
+                SELECT 1 FROM build_job bj WHERE bj.derivation = db.derivation)
               AND NOT EXISTS (
                 SELECT 1 FROM derivation_dependency e
                 LEFT JOIN derivation_build dep ON dep.derivation = e.dependency
@@ -116,6 +124,8 @@ pub async fn promote_ready<C: ConnectionTrait>(db: &C) -> Result<u64, DbErr> {
             SET status = 1, queued_at = (now() AT TIME ZONE 'UTC'),
                 updated_at = (now() AT TIME ZONE 'UTC')
             WHERE status = 0
+              AND EXISTS (
+                SELECT 1 FROM build_job bj WHERE bj.derivation = derivation_build.derivation)
               AND NOT EXISTS (
                 SELECT 1 FROM derivation_dependency e
                 LEFT JOIN derivation_build dep ON dep.derivation = e.dependency

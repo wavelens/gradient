@@ -825,11 +825,13 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
 
     let state = &scheduler.state;
 
-    // Ready anchors: a global `derivation_build` is Queued and every dependency
-    // anchor over `derivation_dependency` is terminal-success (Completed or
-    // Substituted). Promotion already maintains this invariant, but the antijoin
-    // keeps dispatch correct even if an anchor is hand-queued. Ordered by
-    // dependency count desc (integration builds first), then by age.
+    // Ready anchors: a global `derivation_build` is Queued, some `build_job`
+    // still references its derivation (reachable from a surviving evaluation),
+    // and every dependency anchor over `derivation_dependency` is terminal-
+    // success (Completed or Substituted). The reachability check skips anchors
+    // left Queued after their last referencing eval was torn down, which have
+    // no driving evaluation to attribute the build to. Ordered by dependency
+    // count desc (integration builds first), then by age.
     let anchors_sql = sea_orm::Statement::from_string(
         sea_orm::DbBackend::Postgres,
         format!(
@@ -837,6 +839,9 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
             SELECT db.*
             FROM public.derivation_build db
             WHERE db.status = {queued}
+              AND EXISTS (
+                  SELECT 1 FROM public.build_job bj WHERE bj.derivation = db.derivation
+              )
               AND NOT EXISTS (
                   SELECT 1
                   FROM public.derivation_dependency dep_edge

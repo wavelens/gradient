@@ -137,16 +137,24 @@ A derivation is built exactly once across all evaluations and organisations.
 State lives on a `derivation_build` anchor (1:1 with the content-addressed
 `derivation`, `UNIQUE(derivation)`); each evaluation links to it through a
 per-eval `build_job`, and `Created → Queued` promotion is driven by the global
-`derivation_dependency` graph, fully decoupled from any evaluation's lifecycle
-(this is what fixes builds stuck in `Created` behind a never-completing eval).
+`derivation_dependency` graph, decoupled from any single evaluation's
+completion (this is what fixes builds stuck in `Created` behind a
+never-completing eval). Promotion (`promote_ready`/`promote_dependents`) and
+`dispatch_ready_builds` are gated on reachability - an anchor is queued and
+dispatched only while some `build_job` references its derivation - so the
+per-derivation anchors seeded by `m20260619_020000` are never queued or
+dispatched without a driving evaluation (which previously logged "no driving
+evaluation for anchor"). The probe is backed by the `idx_build_job_derivation`
+index (`m20260620_000003`).
 
 The build-once guarantee is enforced by the DB `UNIQUE(derivation)` constraint
 plus `INSERT ... ON CONFLICT (derivation) DO NOTHING` in
 `scheduler::eval::resolve_anchors`, not by a MockDatabase test (which cannot
 exercise a real `ON CONFLICT`). The promotion SQL
 (`gradient_db::promotion::{promote_dependents, promote_ready,
-cascade_dependency_failed}`) and the reachability refcount used for access and
-GC (`gradient_db::reachability`) are covered by E2E CI against real PostgreSQL.
+cascade_dependency_failed}`), its reachability gate, and the reachability
+refcount used for access and GC (`gradient_db::reachability`) are covered by
+E2E CI against real PostgreSQL.
 Worker-side, `backend/gradient-worker/src/executor/eval.rs` -
 `pushes_batch_closure_before_reporting_it` still guards that each batch's `.drv`
 runtime closure is pushed to the cache before the server promotes and dispatches

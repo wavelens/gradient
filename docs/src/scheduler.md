@@ -24,10 +24,16 @@ sharing is implicit in the global derivation graph.
 
 An anchor becomes `Queued` (buildable) the moment all of its dependency
 anchors are terminal-success (`Completed`/`Substituted`), independent of any
-evaluation's lifecycle (see `gradient_db::promotion`). This decoupling is what
-keeps builds from getting stuck behind a never-completing evaluation. A failed
-dependency cascades `DependencyFailed` over the global `derivation_dependency`
-graph.
+single evaluation's completion (see `gradient_db::promotion`). This decoupling
+is what keeps builds from getting stuck behind a never-completing evaluation. A
+failed dependency cascades `DependencyFailed` over the global
+`derivation_dependency` graph.
+
+Promotion and dispatch are gated on reachability: an anchor is queued and
+dispatched only while some `build_job` references its derivation. Anchors are
+seeded for every derivation, so without the gate promotion would queue
+derivations no surviving evaluation needs, leaving the dispatcher unable to
+attribute the build to a driving evaluation.
 
 #### Access and GC
 
