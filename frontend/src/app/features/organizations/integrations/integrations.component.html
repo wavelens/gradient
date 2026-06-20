@@ -40,7 +40,7 @@
               @if (githubAppInstalled()) {
                 @for (inst of githubInstallations(); track inst.id) {
                   <p class="text-secondary">
-                    <strong>@{{ inst.account_login }}</strong> — installation <code>{{ inst.installation_id }}</code>
+                    <strong>{{ inst.account_login ? '@' + inst.account_login : 'unknown' }}</strong> — installation <code>{{ inst.installation_id ?? 'N/A' }}</code>
                   </p>
                 }
               } @else {
@@ -130,7 +130,7 @@
                   }
                   <div class="form-group">
                     <label>Installation ID</label>
-                    <div class="mono-value">{{ integration.installation_id }}</div>
+                    <div class="mono-value">{{ integration.installation_id ?? 'N/A' }}</div>
                   </div>
                 </div>
               } @else if (integration.kind === 'inbound') {
