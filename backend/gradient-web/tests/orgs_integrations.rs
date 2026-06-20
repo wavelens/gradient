@@ -15,7 +15,7 @@
 //!   `has_secret`/`has_access_token` booleans so non-admin members cannot
 //!   probe credential state.
 
-use gradient_entity::{ids::*, integration, organization_user};
+use gradient_entity::{ids::*, integration, organization_user, role};
 use gradient_types::SessionId;
 use sea_orm::{DatabaseBackend, MockDatabase};
 use serde_json::Value;
@@ -93,6 +93,33 @@ fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
 fn with_org_member(db: MockDatabase) -> MockDatabase {
     db.append_query_results([vec![org()]])
         .append_query_results([vec![member_only_membership()]])
+}
+
+fn admin_membership() -> organization_user::Model {
+    organization_user::Model {
+        id: OrganizationUserId::new(
+            Uuid::parse_str("00000000-0000-0000-0000-0000000000aa").unwrap(),
+        ),
+        organization: org_id(),
+        user: user_id(),
+        role: gradient_types::consts::BASE_ROLE_ADMIN_ID,
+    }
+}
+
+fn admin_role() -> role::Model {
+    role::Model {
+        id: gradient_types::consts::BASE_ROLE_ADMIN_ID,
+        name: "Admin".into(),
+        permission: gradient_db::permissions::admin_mask(),
+        ..Default::default()
+    }
+}
+
+/// `OrgAccess::Require { ManageIntegrations }` sequence: SELECT org, SELECT org_user, SELECT role.
+fn with_org_manage(db: MockDatabase) -> MockDatabase {
+    db.append_query_results([vec![org()]])
+        .append_query_results([vec![admin_membership()]])
+        .append_query_results([vec![admin_role()]])
 }
 
 const SUMMARY_URL: &str = "/api/v1/orgs/test-org/integrations/summary";
@@ -206,5 +233,43 @@ fn summary_endpoint_rejects_non_member() {
             .await;
 
         res.assert_status_not_found();
+    });
+}
+
+#[test]
+fn github_create_without_app_config_is_rejected() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let session_id = SessionId::now_v7();
+        let token = make_token(session_id);
+
+        let db = with_org_manage(with_auth(
+            MockDatabase::new(DatabaseBackend::Postgres),
+            session_id,
+        ));
+
+        let server = make_test_server(db.into_connection());
+        let res = server
+            .put("/api/v1/orgs/test-org/integrations")
+            .add_header("authorization", format!("Bearer {}", token))
+            .json(&serde_json::json!({
+                "name": "my-gh",
+                "kind": "outbound",
+                "forge_type": "github",
+                "installation_id": 42,
+            }))
+            .await;
+
+        res.assert_status_bad_request();
+        let body: Value = res.json();
+        assert_eq!(body["error"], true);
+        assert!(
+            body["message"].as_str().unwrap().contains("not configured"),
+            "expected 'not configured' in error: {}",
+            body["message"]
+        );
     });
 }

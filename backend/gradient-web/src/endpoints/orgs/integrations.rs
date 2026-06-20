@@ -24,7 +24,7 @@ use axum::extract::{Path, State};
 use axum::{Extension, Json};
 
 use gradient_ci::actions::encrypt_secret_with_file;
-use gradient_ci::{GITHUB_APP_INTEGRATION_NAME, IntegrationKind};
+use gradient_ci::IntegrationKind;
 use gradient_types::ForgeType;
 use gradient_types::input::check_index_name;
 use gradient_types::*;
@@ -48,27 +48,44 @@ pub struct IntegrationResponse {
     pub has_secret: bool,
     pub has_access_token: bool,
     pub allowed_ips: Vec<String>,
+    pub installation_id: Option<i64>,
+    pub account_login: Option<String>,
     pub created_by: UserId,
     pub created_at: chrono::NaiveDateTime,
 }
 
-impl From<MIntegration> for IntegrationResponse {
-    fn from(m: MIntegration) -> Self {
-        IntegrationResponse {
-            id: m.id,
-            organization: m.organization,
-            name: m.name,
-            display_name: m.display_name,
-            kind: kind_to_str(m.kind).to_string(),
-            forge_type: forge_to_str(m.forge_type).to_string(),
-            endpoint_url: m.endpoint_url,
-            has_secret: m.secret.is_some(),
-            has_access_token: m.access_token.is_some(),
-            allowed_ips: m.allowed_ips.unwrap_or_default(),
-            created_by: m.created_by,
-            created_at: m.created_at,
-        }
+fn base_from(m: MIntegration) -> IntegrationResponse {
+    IntegrationResponse {
+        id: m.id,
+        organization: m.organization,
+        name: m.name,
+        display_name: m.display_name,
+        kind: kind_to_str(m.kind).to_string(),
+        forge_type: forge_to_str(m.forge_type).to_string(),
+        endpoint_url: m.endpoint_url,
+        has_secret: m.secret.is_some(),
+        has_access_token: m.access_token.is_some(),
+        allowed_ips: m.allowed_ips.unwrap_or_default(),
+        installation_id: None,
+        account_login: None,
+        created_by: m.created_by,
+        created_at: m.created_at,
     }
+}
+
+async fn integration_response(
+    db: &impl sea_orm::ConnectionTrait,
+    m: MIntegration,
+) -> Result<IntegrationResponse, WebError> {
+    let install = match m.github_installation {
+        Some(fk) => gradient_entity::github_installation::Entity::find_by_id(fk).one(db).await?,
+        None => None,
+    };
+    Ok(IntegrationResponse {
+        installation_id: install.as_ref().map(|i| i.installation_id),
+        account_login: install.and_then(|i| i.account_login),
+        ..base_from(m)
+    })
 }
 
 fn normalize_allowed_ips(raw: Option<Vec<String>>) -> Result<Option<Vec<String>>, WebError> {
@@ -108,6 +125,8 @@ pub struct CreateIntegrationRequest {
     /// CIDR strings; only inbound webhooks from these sources are accepted.
     #[serde(default)]
     pub allowed_ips: Option<Vec<String>>,
+    /// Required for `forge_type=github`: the App installation id to bind.
+    pub installation_id: Option<i64>,
 }
 
 /// Credential-free integration handle. Returned by the summaries endpoint
@@ -211,9 +230,12 @@ pub async fn get_integrations(
         .all(&state.web_db)
         .await?;
 
-    Ok(ok_json(
-        rows.into_iter().map(IntegrationResponse::from).collect(),
-    ))
+    let mut out = Vec::with_capacity(rows.len());
+    for row in rows {
+        out.push(integration_response(&state.web_db, row).await?);
+    }
+
+    Ok(ok_json(out))
 }
 
 /// `GET /orgs/{organization}/integrations/summary` - list integrations as
@@ -274,21 +296,48 @@ pub async fn put_integration(
     if check_index_name(&body.name).is_err() {
         return Err(WebError::invalid_name("Integration Name"));
     }
-    if body.name == GITHUB_APP_INTEGRATION_NAME {
-        return Err(WebError::bad_request(format!(
-            "Integration name '{}' is reserved for the auto-managed GitHub App row.",
-            GITHUB_APP_INTEGRATION_NAME
-        )));
+
+    let forge = parse_forge(&body.forge_type)?;
+
+    if matches!(forge, ForgeType::GitHub) {
+        let installation_id = body.installation_id.ok_or_else(|| {
+            WebError::bad_request("forge_type 'github' requires an installation_id")
+        })?;
+        let Some(app) = state.config.github_app.clone() else {
+            return Err(WebError::bad_request(
+                "GitHub App is not configured on this server; set GRADIENT_GITHUB_APP_* first",
+            ));
+        };
+        let pem = std::fs::read_to_string(&app.private_key_file)
+            .map_err(|e| WebError::internal(format!("reading github app key: {e}")))?;
+        let account = gradient_forge::github_app::get_installation(
+            &state.http, app.app_id, &pem, installation_id,
+        )
+        .await
+        .map_err(|e| WebError::bad_request(format!("invalid installation_id: {e}")))?;
+
+        let inst = gradient_ci::upsert_github_installation(
+            &state.web_db, org.id, installation_id, Some(&account), user.id,
+        )
+        .await?;
+        let name = gradient_ci::github_integration_name(Some(&account), installation_id);
+        gradient_ci::ensure_github_app_integrations(
+            &state.web_db, org.id, inst, &name, "GitHub", user.id,
+        )
+        .await?;
+
+        let created = EIntegration::find()
+            .filter(CIntegration::Organization.eq(org.id))
+            .filter(CIntegration::Kind.eq(i16::from(IntegrationKind::Outbound)))
+            .filter(CIntegration::GithubInstallation.eq(inst))
+            .one(&state.web_db)
+            .await?
+            .ok_or_else(|| WebError::internal("github integration not created"))?;
+
+        return Ok(ok_json(integration_response(&state.web_db, created).await?));
     }
 
     let kind = parse_kind(&body.kind)?;
-    let forge = parse_forge(&body.forge_type)?;
-    if matches!(forge, ForgeType::GitHub) {
-        return Err(WebError::bad_request(
-            "GitHub integrations are managed through the server-wide GitHub App; \
-             enable the App on the organization instead of creating an integration row.",
-        ));
-    }
 
     // Name must be unique within (organization, kind).
     let existing = EIntegration::find()
@@ -351,7 +400,7 @@ pub async fn put_integration(
 
     let integration = integration.insert(&state.web_db).await?;
 
-    Ok(ok_json(IntegrationResponse::from(integration)))
+    Ok(ok_json(integration_response(&state.web_db, integration).await?))
 }
 
 /// `GET /orgs/{organization}/integrations/{id}` - fetch a single integration.
@@ -373,7 +422,7 @@ pub async fn get_integration(
     )
     .await?;
     let integration = load_integration_in_org(&state, org.id, integration_id).await?;
-    Ok(ok_json(IntegrationResponse::from(integration)))
+    Ok(ok_json(integration_response(&state.web_db, integration).await?))
 }
 
 /// `PATCH /orgs/{organization}/integrations/{id}` - update an integration.
@@ -408,12 +457,6 @@ pub async fn patch_integration(
     if let Some(name) = body.name {
         if check_index_name(&name).is_err() {
             return Err(WebError::invalid_name("Integration Name"));
-        }
-        if name == GITHUB_APP_INTEGRATION_NAME {
-            return Err(WebError::bad_request(format!(
-                "Integration name '{}' is reserved for the auto-managed GitHub App row.",
-                GITHUB_APP_INTEGRATION_NAME
-            )));
         }
         let clash = EIntegration::find()
             .filter(CIntegration::Organization.eq(org.id))
@@ -486,7 +529,7 @@ pub async fn patch_integration(
 
     let updated = active.update(&state.web_db).await?;
 
-    Ok(ok_json(IntegrationResponse::from(updated)))
+    Ok(ok_json(integration_response(&state.web_db, updated).await?))
 }
 
 /// `DELETE /orgs/{organization}/integrations/{id}` - remove an integration.
